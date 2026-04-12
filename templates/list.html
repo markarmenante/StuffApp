@@ -1,0 +1,318 @@
+{% extends 'base.html' %}
+{% block title %}{{ cat_info.name }} — StuffApp{% endblock %}
+
+{% block content %}
+<!-- Toolbar -->
+<div class="list-toolbar">
+  <span class="list-cat-title">{{ cat_info.name }}</span>
+  <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
+    <div class="search-wrap">
+      <button type="submit" title="Search">🔍</button>
+      <input type="text" name="q" value="{{ q }}" placeholder="Search…" autofocus>
+      {% if q %}<a class="search-clear" href="{{ url_for('list_view', category=category) }}">×</a>{% endif %}
+    </div>
+  </form>
+  <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
+</div>
+
+<!-- List -->
+{% if rows %}
+<div class="item-list">
+  {% for row in rows %}
+  <div class="item-row" data-href="{{ url_for('detail_view', category=category, record_id=row['id']) }}">
+
+    <!-- Thumbnail -->
+    <div class="item-thumb"
+         data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}">
+      {% set img = row[cat_info.image_field] if cat_info.image_field else none %}
+      {% if img and img|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=img) }}" alt="" loading="lazy">
+      {% else %}
+        <span class="no-img">{{ cat_info.icon }}</span>
+      {% endif %}
+    </div>
+
+    <!-- Body -->
+    <div class="item-body">
+
+      {# ── WATCHES ── #}
+      {% if category == 'watches' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['brand'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['metal'] %}<span>{{ row['metal'] }}</span>{% endif %}
+            {% if row['reference'] %}<span><span class="lbl">Ref</span> {{ row['reference'] }}</span>{% endif %}
+          </div>
+          <div class="idr">
+            {% if row['case_num'] %}<span><span class="lbl">s/n</span> {{ row['case_num'] }}</span>{% endif %}
+            {% if row['beat'] %}<span><span class="lbl">vph</span> {{ '{:,}'.format(row['beat']|int) }}</span>{% endif %}
+          </div>
+          {% if row['vendor'] %}<div class="idr"><span>{{ row['vendor'] }}</span></div>{% endif %}
+          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── COINS ── #}
+      {% elif category == 'coins' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['authority'] or row['mint'] or '—' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['metal'] %}<span>{{ row['metal'] }}</span>{% endif %}
+            {% if row['denomination'] %}<span>{{ row['denomination'] }}</span>{% endif %}
+            {% if row['mint'] %}<span>{{ row['mint'] }}</span>{% endif %}
+          </div>
+          {% if row['obv_rev'] %}<div class="idr"><span>{{ row['obv_rev'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['date_1_text'] %}<span>{{ row['date_1_text'] }}{% if row['date_2_text'] %} – {{ row['date_2_text'] }}{% endif %}</span>{% endif %}
+          </div>
+          <div class="idr">
+            {% if row['weight'] %}<span>{{ row['weight'] }} g</span>{% endif %}
+            {% if row['size'] %}<span>{{ row['size'] }} mm</span>{% endif %}
+            {% if row['coin_id'] %}<span class="item-cat-id">{{ row['coin_id'] }}</span>{% endif %}
+          </div>
+        </div>
+
+      {# ── CAMERAS ── #}
+      {% elif category == 'cameras' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="rrow">
+            <span class="ropt"><span class="rdot {{ 'on' if row['digital_film'] == 'Digital' }}"></span> Digital</span>
+            <span class="ropt"><span class="rdot {{ 'on' if row['digital_film'] == 'Film' }}"></span> Film</span>
+            <span class="ropt"><span class="rdot {{ 'on' if row['film_size'] == '35mm' }}"></span> 35mm</span>
+            <span class="ropt"><span class="rdot {{ 'on' if row['film_size'] == '120/220' }}"></span> 120/220</span>
+            <span class="ropt"><span class="rdot {{ 'on' if row['film_size'] == 'Sheet' }}"></span> Sheet</span>
+          </div>
+          {% if row['lens_mount'] %}<div class="idr"><span>{{ row['lens_mount'] }}</span></div>{% endif %}
+          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── LENSES ── #}
+      {% elif category == 'lenses' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['mount'] %}<span>{{ row['mount'] }}</span>{% endif %}
+            {% if row['aperture'] %}<span><span class="lbl">f/</span>{{ row['aperture'] }}</span>{% endif %}
+            {% if row['length'] %}<span>{{ row['length']|int }}mm</span>{% endif %}
+          </div>
+          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── PENS ── #}
+      {% elif category == 'pens' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['type'] %}<span>{{ row['type'] }}</span>{% endif %}
+            {% if row['nib'] %}<span><span class="lbl">Nib</span> {{ row['nib'] }}</span>{% endif %}
+          </div>
+          {% if row['vendor'] %}<div class="idr"><span>{{ row['vendor'] }}</span></div>{% endif %}
+          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── ART ── #}
+      {% elif category == 'art' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['artist'] or '—' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          {% if row['title'] %}<div class="idr"><span>{{ row['title'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['medium'] %}<span>{{ row['medium'] }}</span>{% endif %}
+            {% if row['year'] %}<span>{{ row['year'] }}</span>{% endif %}
+          </div>
+          {% if row['location'] %}<div class="idr"><span>{{ row['location'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── VEHICLES ── #}
+      {% elif category == 'vehicles' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['year'] %}<span>{{ row['year'] }}</span>{% endif %}
+            {% if row['state'] %}<span>{{ row['state'] }}</span>{% endif %}
+          </div>
+          {% if row['vin'] %}<div class="idr"><span><span class="lbl">VIN</span> {{ row['vin'] }}</span></div>{% endif %}
+          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── RECORDINGS ── #}
+      {% elif category == 'recordings' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['artist'] or '—' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          {% if row['title'] %}<div class="idr"><span>{{ row['title'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['type'] %}<span>{{ row['type'] }}</span>{% endif %}
+            {% if row['genre'] %}<span>{{ row['genre'] }}</span>{% endif %}
+            {% if row['year_recorded'] %}<span>{{ row['year_recorded'] }}</span>{% endif %}
+          </div>
+          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── RIFLES ── #}
+      {% elif category == 'rifles' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['caliber'] %}<span>{{ row['caliber'] }}</span>{% endif %}
+            {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
+          </div>
+          {% if row['vendor'] %}<div class="idr"><span>{{ row['vendor'] }}</span></div>{% endif %}
+          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── CREDIT CARDS ── #}
+      {% elif category == 'credit_cards' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['name'] or '—' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          {% if row['number'] %}<div class="idr"><span>{{ row['number'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['expiration'] %}<span><span class="lbl">Exp</span> {{ row['expiration'] }}</span>{% endif %}
+            {% if row['owner'] %}<span>{{ row['owner'] }}</span>{% endif %}
+          </div>
+        </div>
+
+      {# ── PROPERTIES ── #}
+      {% elif category == 'properties' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['name'] or '—' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          {% if row['address'] %}<div class="idr"><span>{{ row['address'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['type'] %}<span>{{ row['type'] }}</span>{% endif %}
+            {% if row['year_built'] %}<span>{{ row['year_built'] }}</span>{% endif %}
+          </div>
+          {% if row['status'] %}<div class="idr"><span>{{ row['status'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── PERSONS ── #}
+      {% elif category == 'persons' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['name'] or '—' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          {% if row['phone'] %}<div class="idr"><span>{{ row['phone'] }}</span></div>{% endif %}
+          {% if row['home_address'] %}<div class="idr"><span>{{ row['home_address'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['birth_date'] %}<span><span class="lbl">DOB</span> {{ row['birth_date'] }}</span>{% endif %}
+            {% if row['blood_type'] %}<span>{{ row['blood_type'] }}</span>{% endif %}
+          </div>
+        </div>
+
+      {# ── FALLBACK ── #}
+      {% else %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row[cat_info.label_field] or '—' }}</span>
+          <span class="item-model">{{ row[cat_info.sublabel_field] or '' }}</span>
+        </div>
+      {% endif %}
+
+    </div><!-- /item-body -->
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="empty-state">
+  <div class="eicon">{{ cat_info.icon }}</div>
+  <h3>No {{ cat_info.name|lower }}{% if q %} matching "{{ q }}"{% endif %}</h3>
+  {% if q %}
+    <p><a href="{{ url_for('list_view', category=category) }}">Clear search</a></p>
+  {% else %}
+    <p><a href="{{ url_for('new_record', category=category) }}">Add your first record</a></p>
+  {% endif %}
+</div>
+{% endif %}
+
+<script>
+(function() {
+  // Prevent browser from opening dropped files
+  document.addEventListener('dragover', function(e) { e.preventDefault(); }, true);
+  document.addEventListener('drop', function(e) { e.preventDefault(); }, true);
+
+  function uploadFile(file, uploadUrl, thumb) {
+    if (!file || !file.type.startsWith('image/')) { alert('Please drop an image file.'); return; }
+    thumb.classList.add('uploading');
+    var fd = new FormData();
+    fd.append('image', file);
+
+    fetch(uploadUrl, { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        thumb.classList.remove('uploading');
+        if (data.url) {
+          var img = thumb.querySelector('img');
+          var noImg = thumb.querySelector('.no-img');
+          if (img) {
+            img.src = data.url;
+          } else {
+            if (noImg) noImg.remove();
+            var newImg = document.createElement('img');
+            newImg.src = data.url;
+            newImg.alt = '';
+            thumb.insertBefore(newImg, thumb.firstChild);
+          }
+        } else {
+          alert('Upload failed: ' + (data.error || 'unknown error'));
+        }
+      })
+      .catch(function() { thumb.classList.remove('uploading'); alert('Upload failed.'); });
+  }
+
+  document.querySelectorAll('.item-row').forEach(function(row) {
+    var thumb = row.querySelector('.item-thumb[data-upload-url]');
+    if (!thumb) return;
+    var uploadUrl = thumb.dataset.uploadUrl;
+    var fileInput = row.querySelector('.row-upload-btn input[type=file]');
+
+    // Click row -> navigate, but not if clicking the upload button
+    row.addEventListener('click', function(e) {
+      if (e.target.closest('.row-upload-btn')) return;
+      window.location = row.dataset.href;
+    });
+
+    // Drag and drop
+    row.addEventListener('dragenter', function(e) { e.preventDefault(); e.stopPropagation(); row.classList.add('drag-over'); });
+    row.addEventListener('dragover', function(e) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; });
+    row.addEventListener('dragleave', function(e) { if (!row.contains(e.relatedTarget)) row.classList.remove('drag-over'); });
+    row.addEventListener('drop', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      row.classList.remove('drag-over');
+      uploadFile(e.dataTransfer.files[0], uploadUrl, thumb);
+    });
+
+    // Click upload button
+    if (!fileInput) return;
+    fileInput.addEventListener('click', function(e) { e.stopPropagation(); });
+    fileInput.addEventListener('change', function() {
+      if (fileInput.files[0]) uploadFile(fileInput.files[0], uploadUrl, thumb);
+    });
+  });
+})();
+</script>
+{% endblock %}

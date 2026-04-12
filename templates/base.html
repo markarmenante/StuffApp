@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}StuffApp{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?t={{ range(100000,999999)|random }}">
+</head>
+<body ondragover="event.preventDefault()" ondrop="event.preventDefault()">
+
+<nav class="top-nav">
+  <!-- left: count + arrows + dot -->
+  <div class="nav-left">
+    <span class="nav-count">{{ result_count if result_count is defined else (counts.get(current_category, '') if counts and current_category else '') }}</span>
+    <span class="nav-icon-btn" title="Toggle view">↔</span>
+    {% if current_category %}
+      {% set dot_on = dot is defined and dot %}
+      {% set dot_url = url_for('list_view', category=current_category) if dot_on else url_for('list_view', category=current_category, dot=1) %}
+      <a href="{{ dot_url }}" class="nav-dot {% if dot_on %}nav-dot-active{% endif %}" title="{{ 'Show all' if dot_on else 'Show unresolved (not Owned / Sold / Gifted)' }}"></a>
+    {% else %}
+      <span class="nav-dot"></span>
+    {% endif %}
+  </div>
+
+  <!-- category icons -->
+  <div class="nav-categories">
+    {% set cat_icons = [
+      ('watches',      '⌚', 'Watches'),
+      ('coins',        '🪙', 'Coins'),
+      ('cameras',      '📷', 'Cameras'),
+      ('lenses',       '🔭', 'Lenses'),
+      ('pens',         '✒️', 'Pens'),
+      ('art',          '🎨', 'Art'),
+      ('vehicles',     '🚗', 'Vehicles'),
+      ('recordings',   '🎵', 'Music'),
+      ('rifles',       '🔫', 'Rifles'),
+      ('credit_cards', '💳', 'Cards'),
+      ('properties',   '🏠', 'Property'),
+      ('persons',      '👤', 'People'),
+    ] %}
+    {% for slug, icon, label in cat_icons %}
+    <a href="{{ url_for('list_view', category=slug) }}"
+       class="nav-item {% if current_category == slug %}active{% endif %}"
+       title="{{ label }}">
+      <span class="icon">{{ icon }}</span>
+      <span class="lbl">{{ label }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  <!-- right: new + search -->
+  <div class="nav-right">
+    {% if current_category %}
+    <a href="{{ url_for('new_record', category=current_category) }}" class="nav-icon-btn" title="New record">＋</a>
+    {% endif %}
+    <span class="nav-icon-btn" title="Search">🔍</span>
+  </div>
+</nav>
+
+<div class="flash-messages">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+    <div class="flash flash-{{ cat }}">
+      {{ msg }}
+      <button class="flash-close" onclick="this.parentElement.remove()">×</button>
+    </div>
+    {% endfor %}
+  {% endwith %}
+</div>
+
+<main class="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /Users/markarmenante/Desktop/StuffApp/templates/detail.html /Users/markarmenante/Desktop/StuffApp/templates/list.html /Users/markarmenante/Desktop/StuffApp/static/css/* /Users/markarmenante/Desktop/StuffApp/app.py)",
+      "mcp__Claude_Preview__preview_start",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(ls /Users/markarmenante/Desktop/StuffApp/*.csv)",
+      "Bash(head -3 /Users/markarmenante/Desktop/StuffApp/*.csv)",
+      "Bash(sqlite3 /Users/markarmenante/Desktop/StuffApp/stuffapp.db \"SELECT id FROM watches LIMIT 3; SELECT '---'; SELECT id FROM coins LIMIT 3;\")",
+      "Bash(sqlite3 /Users/markarmenante/Desktop/StuffApp/stuffapp.db \"SELECT id, brand, model FROM watches LIMIT 2;\")",
+      "Bash(curl -s http://localhost:5001/static/js/app.js)",
+      "Bash(curl -s http://localhost:5001/watches)",
+      "Bash(curl -s http://localhost:5001/static/css/style.css)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5001/watches)"
+    ]
+  }
+}

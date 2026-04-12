@@ -1,0 +1,871 @@
+{% extends 'base.html' %}
+{% block title %}{{ record[cat_info.label_field] if record else 'New' }} — StuffApp{% endblock %}
+
+{% set r = record %}
+{% macro val(field) %}{{ (r[field] if r and r[field] is not none else '') }}{% endmacro %}
+{% macro cell(field, label, colspan=1, rows=1) %}
+<div class="dcell" style="{% if colspan > 1 %}grid-column: span {{ colspan }};{% endif %}">
+  {% set v = val(field) %}
+  {% if rows > 1 %}
+    <textarea name="{{ field }}" {% if is_new and not v %}placeholder="{{ label }}"{% endif %}>{{ v }}</textarea>
+  {% else %}
+    <input type="text" name="{{ field }}" value="{{ v }}" {% if is_new and not v %}placeholder="{{ label }}"{% endif %}>
+  {% endif %}
+  <span class="clabel">{{ label }}</span>
+</div>
+{% endmacro %}
+{% macro numcell(field, label) %}
+<div class="dcell">
+  <input type="number" step="any" name="{{ field }}" value="{{ val(field) }}">
+  <span class="clabel">{{ label }}</span>
+</div>
+{% endmacro %}
+{% macro datecell(field, label) %}
+<div class="dcell">
+  <input type="date" name="{{ field }}" value="{{ val(field) }}">
+  <span class="clabel">{{ label }}</span>
+</div>
+{% endmacro %}
+{% macro selcell(field, label, opts) %}
+<div class="dcell">
+  <select name="{{ field }}">
+    <option value=""></option>
+    {% for o in opts %}<option value="{{ o }}" {{ 'selected' if val(field)==o }}>{{ o }}</option>{% endfor %}
+  </select>
+  <span class="clabel">{{ label }}</span>
+</div>
+{% endmacro %}
+{% macro imgcell(field, label) %}
+<div class="dcell file-cell">
+  <span class="file-cell-name">{{ label }}</span>
+  {% set f = r[field] if r else none %}
+  {% if f and f|is_image %}
+    <img src="{{ url_for('uploaded_file', filename=f) }}" id="prev_{{ field }}">
+  {% else %}
+    <img src="" id="prev_{{ field }}" style="display:none">
+  {% endif %}
+  <label class="file-upload-lbl">
+    {{ 'Replace' if f else 'Upload' }}
+    <input type="file" name="{{ field }}" accept="image/*,application/pdf" onchange="previewFile(this,'prev_{{ field }}')">
+  </label>
+</div>
+{% endmacro %}
+{% macro doccell(field, label) %}
+<div class="dcell file-cell">
+  <span class="file-cell-name">{{ label }}</span>
+  {% set f = r[field] if r else none %}
+  {% if f %}
+    {% if f|is_image %}
+      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank">
+        <img src="{{ url_for('uploaded_file', filename=f) }}" style="max-height:50px">
+      </a>
+    {% else %}
+      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" style="font-size:11px">📄 View</a>
+    {% endif %}
+  {% endif %}
+  <label class="file-upload-lbl">
+    {{ 'Replace' if f else 'Upload' }}
+    <input type="file" name="{{ field }}" accept="image/*,application/pdf">
+  </label>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="detail-page">
+<form method="post"
+      action="{% if is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
+      enctype="multipart/form-data" id="mainForm">
+
+  <!-- Header bar: Brand | < > ← -->
+  <div class="detail-header">
+    <span class="detail-brand">
+      {% if category == 'watches' %}{{ val('brand') or 'New Watch' }}
+      {% elif category == 'coins' %}{{ val('authority') or val('mint') or 'New Coin' }}
+      {% elif category == 'cameras' %}{{ val('make') or 'New Camera' }}
+      {% elif category == 'lenses' %}{{ val('make') or 'New Lens' }}
+      {% elif category == 'pens' %}{{ val('make') or 'New Pen' }}
+      {% elif category == 'art' %}{{ val('artist') or 'New Artwork' }}
+      {% elif category == 'vehicles' %}{{ val('make') or 'New Vehicle' }}
+      {% elif category == 'recordings' %}{{ val('artist') or 'New Recording' }}
+      {% elif category == 'rifles' %}{{ val('make') or 'New Rifle' }}
+      {% elif category == 'credit_cards' %}{{ val('name') or 'New Card' }}
+      {% elif category == 'properties' %}{{ val('name') or 'New Property' }}
+      {% elif category == 'persons' %}{{ val('name') or 'New Person' }}
+      {% endif %}
+    </span>
+    {% if not is_new %}
+      <a class="detail-nav-btn {{ 'disabled' if not prev_id }}"
+         href="{{ url_for('detail_view', category=category, record_id=prev_id) if prev_id else '#' }}">&lt;</a>
+      <a class="detail-nav-btn {{ 'disabled' if not next_id }}"
+         href="{{ url_for('detail_view', category=category, record_id=next_id) if next_id else '#' }}">&gt;</a>
+    {% endif %}
+    <a class="back-link" href="{{ url_for('list_view', category=category) }}">← Back</a>
+  </div>
+
+  {% if is_new %}<div class="new-record-bar">New {{ cat_info.name[:-1] if cat_info.name.endswith('s') else cat_info.name }}</div>{% endif %}
+
+  <!-- ══════════════════════════════════════════════════════════
+       WATCHES
+  ══════════════════════════════════════════════════════════ -->
+  {% if category == 'watches' %}
+
+  <!-- Brand row (editable, large) -->
+  <div class="detail-brand-row">
+    <input type="text" name="brand" value="{{ r['brand'] if r and r['brand'] else '' }}"
+           placeholder="Brand" class="brand-input">
+  </div>
+
+  <!-- Model name row -->
+  <div class="detail-model">
+    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+
+  <!-- Row 1: Metal, Case Diameter, Reference, Dial Color -->
+  <div class="dgrid dg4">
+    {{ cell('metal','Metal') }}
+    {{ numcell('case_diameter','mm') }}
+    {{ cell('reference','Ref') }}
+    {{ cell('dial_color','Dial') }}
+  </div>
+
+  <!-- Row 2: Case#, Movement#, Edition, Year -->
+  <div class="dgrid dg4">
+    {{ cell('case_num','Case #') }}
+    {{ cell('movement_num','Mvmt #') }}
+    {{ cell('edition','Edition') }}
+    {{ cell('year','Yr Mfg') }}
+  </div>
+
+  <!-- Photo + right specs -->
+  <div class="watch-body">
+    <div class="watch-photo">
+      {% if r and r['image_obv'] and r['image_obv']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image_obv']) }}" alt="Dial">
+      {% else %}
+        <span class="no-img">⌚</span>
+      {% endif %}
+    </div>
+    <div class="watch-specs">
+      <div class="dgrid dg1">
+        <div class="dcell">
+          <input type="text" name="calibre" value="{{ val('calibre') }}">
+          <span class="clabel">Calibre</span>
+        </div>
+      </div>
+      <div class="dgrid dg1">
+        <div class="dcell">
+          <input type="text" name="movement_origin" value="{{ r['movement_origin'] if r and r['movement_origin'] else '' }}">
+          <span class="clabel">Movement Origin</span>
+        </div>
+      </div>
+      <div class="dgrid dg2">
+        <div class="dcell">
+          <input type="text" name="beat" value="{{ val('beat')|fmt_int }}" class="price-input" inputmode="numeric">
+          <span class="clabel">VPH</span>
+        </div>
+        <div class="dcell">
+          <input type="text" value="{{ '%.2g'|format(r['beat']|float / 7200) if r and r['beat'] else '' }}" readonly style="color:#888">
+          <span class="clabel">Hz</span>
+        </div>
+      </div>
+      <div class="dcell dcell-radio">
+        <div class="radio-group">
+          <label class="radio-opt"><input type="radio" name="movement_type" value="Manual"    {{ 'checked' if val('movement_type')=='Manual'    }}> Manual</label>
+          <label class="radio-opt"><input type="radio" name="movement_type" value="Automatic" {{ 'checked' if val('movement_type')=='Automatic' }}> Automatic</label>
+        </div>
+      </div>
+      <div class="dcell">
+        <input type="text" name="reserve" value="{{ val('reserve')|fmt_int }}" inputmode="numeric">
+        <span class="clabel">Reserve (hrs)</span>
+      </div>
+      <div class="dcell {% if service_overdue %}service-overdue{% endif %}">
+        <input type="date" name="service_date" value="{{ val('service_date') }}">
+        <span class="clabel">Service</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Complications -->
+  <div class="comp-section">
+    <div class="comp-grid">
+      {% set cur = val('complications').split(',') if val('complications') else [] %}
+      {% for opt in complications_options %}
+      <label class="comp-item">
+        <span class="comp-x">
+          <input type="checkbox" name="complications" value="{{ opt }}" {{ 'checked' if opt in cur }}>
+          {{ 'x' if opt in cur else '' }}
+        </span>
+        <span class="comp-name">{{ opt }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Strap row -->
+  <div class="dgrid dg4">
+    {{ selcell('clasp_type','Clasp', ['','Tang','Deployant','Buckle','Velcro']) }}
+    <div class="dcell">
+      <input type="text" name="lug_mm" value="{{ val('lug_mm')|lug_fmt }}" placeholder="e.g. 20/16">
+      <span class="clabel">Lug mm</span>
+    </div>
+    {{ cell('strap_material','Material') }}
+    {{ cell('strap_color','Color') }}
+  </div>
+
+  <!-- Purchase row -->
+  <div class="dgrid dg3">
+    {{ datecell('date','Date') }}
+    <div class="dcell">
+      <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric">
+      <span class="clabel">Price</span>
+    </div>
+    {{ cell('vendor','Vendor') }}
+  </div>
+
+  <!-- Notes -->
+  <div class="dgrid dg1">
+    <div class="dcell dcell-notes">
+      <textarea name="notes">{{ r['notes'] if r and r['notes'] else '' }}</textarea>
+      <span class="clabel">Notes</span>
+    </div>
+  </div>
+
+  <!-- Docs row -->
+  <div class="section-bar">Images &amp; Documents</div>
+  <div class="dgrid dg3">
+    {{ imgcell('image_obv','Dial Photo') }}
+    {{ imgcell('image_rev','Case Back') }}
+    {{ doccell('receipt','Receipt') }}
+  </div>
+  <div class="dgrid dg1">{{ doccell('document','Document') }}</div>
+
+  <!-- Bottom: Property | Status | Owner -->
+  <div class="detail-bottom">
+    <div class="bottom-cell">
+      <input type="text" name="property" value="{{ val('property') }}">
+      <span class="blabel">Location</span>
+    </div>
+    <div class="bottom-cell">
+      <select name="status">
+        {% for s in ['','Owned','Sold','Loaned'] %}
+        <option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>
+        {% endfor %}
+      </select>
+      <span class="blabel">Status</span>
+    </div>
+    <div class="bottom-cell">
+      <input type="text" name="owner" value="{{ val('owner') }}">
+      <span class="blabel">Owner</span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       COINS
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'coins' %}
+
+  <!-- Authority + Mint row -->
+  <div class="dgrid dg2">
+    {{ cell('authority','Authority / Type') }}
+    {{ cell('mint','Mint') }}
+  </div>
+
+  <!-- ObvRev description -->
+  <div class="dgrid dg1">{{ cell('obv_rev','Description') }}</div>
+
+  <!-- Denomination / Metal / Date -->
+  <div class="dgrid dg3">
+    {{ cell('denomination','Denomination') }}
+    {{ cell('metal','Metal') }}
+    <div class="dcell">
+      <input type="text" value="{% if val('date_1_text') %}{{ val('date_1_text') }}{% if val('date_2_text') %} – {{ val('date_2_text') }}{% endif %}{% endif %}" readonly style="color:#555">
+      <span class="clabel">Date Range</span>
+    </div>
+  </div>
+
+  <!-- Hidden date fields -->
+  <input type="hidden" name="date_1" value="{{ val('date_1') }}">
+  <input type="hidden" name="date_1_text" value="{{ val('date_1_text') }}">
+  <input type="hidden" name="date_2" value="{{ val('date_2') }}">
+  <input type="hidden" name="date_2_text" value="{{ val('date_2_text') }}">
+
+  <!-- Coin images -->
+  {% if not is_new and (r['image_1'] or r['image_2']) %}
+  <div class="coin-imgs">
+    <div class="coin-img-panel">
+      {% if r['image_1'] and r['image_1']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="Obverse">
+      {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
+      <span class="panel-lbl">Obverse</span>
+    </div>
+    <div class="coin-img-panel">
+      {% if r['image_2'] and r['image_2']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="Reverse">
+      {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
+      <span class="panel-lbl">Reverse</span>
+    </div>
+  </div>
+  {% endif %}
+  {% if coin_age_val %}
+  <div class="coin-age-row">{{ '{:,}'.format(coin_age_val) }} yrs</div>
+  {% endif %}
+
+  <!-- Physical specs -->
+  <div class="dgrid dg4" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr;">
+    <div class="dgrid" style="grid-column:span 6; grid-template-columns: repeat(6,1fr)">
+      {{ numcell('weight','g') }}
+      {{ numcell('size','mm') }}
+      {{ cell('grade','Grade') }}
+      {{ cell('die_axis','Axis') }}
+      {{ numcell('strike','Strike') }}
+      {{ numcell('surface','Surf') }}
+    </div>
+  </div>
+
+  <!-- Purchase -->
+  <div class="dgrid dg3">
+    {{ cell('vendor','Vendor') }}
+    {{ datecell('purchase_date','Date') }}
+    <div class="dcell">
+      <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric">
+      <span class="clabel">Price</span>
+    </div>
+  </div>
+
+  <!-- Description long -->
+  <div class="dgrid dg1">{{ cell('description','Description',rows=3) }}</div>
+
+  <!-- References -->
+  <div class="section-bar">Pedigree, References</div>
+  <div class="dgrid dg1">{{ cell('coin_references','References',rows=2) }}</div>
+
+  <!-- Notes (grade/condition) -->
+  <div class="section-bar">Grade, Conditions</div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+
+  <!-- Extra fields -->
+  <div class="dgrid dg3">
+    {{ cell('sheldon','Sheldon') }}
+    {{ cell('region','Region') }}
+    {{ cell('storage_location','Storage') }}
+  </div>
+
+  <!-- Docs -->
+  <div class="section-bar">Images &amp; Documents</div>
+  <div class="dgrid dg3">
+    {{ imgcell('image_1','Obverse') }}
+    {{ imgcell('image_2','Reverse') }}
+    {{ doccell('receipt','Receipt') }}
+  </div>
+  <div class="dgrid dg2">
+    {{ doccell('document_1','Doc 1') }}
+    {{ doccell('document_2','Doc 2') }}
+  </div>
+
+  <!-- Bottom -->
+  <div class="detail-bottom">
+    <div class="bottom-cell">
+      <select name="status">
+        {% for s in ['','Own','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}
+      </select>
+      <span class="blabel">Status</span>
+    </div>
+    <div class="bottom-cell">
+      <input type="text" name="coin_id" value="{{ val('coin_id') }}" style="text-align:center">
+      <span class="blabel">Catalog #</span>
+    </div>
+    <div class="bottom-cell">
+      <input type="text" name="property_name" value="{{ val('property_name') }}">
+      <span class="blabel">Location</span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       CAMERAS
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'cameras' %}
+  <div class="detail-model">
+    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+  <div class="dgrid dg2">
+    <div class="dcell">
+      <div class="radio-group">
+        <label class="radio-opt"><input type="radio" name="digital_film" value="Digital" {{ 'checked' if val('digital_film')=='Digital' }}> Digital</label>
+        <label class="radio-opt"><input type="radio" name="digital_film" value="Film"    {{ 'checked' if val('digital_film')=='Film'    }}> Film</label>
+      </div>
+      <span class="clabel">Type</span>
+    </div>
+    <div class="dcell">
+      <div class="radio-group">
+        <label class="radio-opt"><input type="radio" name="film_size" value="35mm"    {{ 'checked' if val('film_size')=='35mm' }}> 35mm</label>
+        <label class="radio-opt"><input type="radio" name="film_size" value="120/220" {{ 'checked' if val('film_size')=='120/220' }}> 120/220</label>
+        <label class="radio-opt"><input type="radio" name="film_size" value="Sheet"   {{ 'checked' if val('film_size')=='Sheet' }}> Sheet</label>
+        <label class="radio-opt"><input type="radio" name="film_size" value="Other"   {{ 'checked' if val('film_size')=='Other' }}> Other</label>
+      </div>
+      <span class="clabel">Format</span>
+    </div>
+  </div>
+  <div class="dgrid dg2">
+    {{ cell('lens_mount','Lens Mount') }}
+    {{ numcell('megapixels','Megapixels') }}
+  </div>
+  <div class="dgrid dg2">
+    {{ cell('sensor','Sensor') }}
+    {{ cell('serial_number','Serial #') }}
+  </div>
+  <div class="dgrid dg3">
+    {{ datecell('date','Date') }}
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+    {{ cell('vendor','Vendor') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="section-bar">Image</div>
+  <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       LENSES
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'lenses' %}
+  <div class="detail-model">
+    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+  <div class="dgrid dg4">
+    {{ cell('mount','Mount') }}
+    {{ numcell('aperture','Max Aperture') }}
+    {{ numcell('length','Focal Length mm') }}
+    {{ numcell('filter_size','Filter mm') }}
+  </div>
+  <div class="dgrid dg2">
+    {{ cell('serial_number','Serial #') }}
+    {{ datecell('date','Date') }}
+  </div>
+  <div class="dgrid dg2">
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+    {{ cell('vendor','Vendor') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="section-bar">Image</div>
+  <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       PENS
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'pens' %}
+  <div class="detail-model">
+    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+  <div class="dgrid dg4">
+    {{ cell('type','Type') }}
+    {{ cell('action','Action') }}
+    {{ cell('nib','Nib') }}
+    {{ cell('cartridge','Cartridge') }}
+  </div>
+  <div class="dgrid dg2">{{ cell('reservoir','Reservoir') }}<div class="dcell"></div></div>
+  <div class="dgrid dg3">
+    {{ datecell('date','Date') }}
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+    {{ cell('vendor','Vendor') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="section-bar">Image &amp; Receipt</div>
+  <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ART
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'art' %}
+  <div class="detail-model">
+    <input type="text" name="title" value="{{ val('title') }}" placeholder="Title"
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+  <div class="dgrid dg3">
+    {{ cell('medium','Medium') }}
+    {{ numcell('year','Year') }}
+    {{ cell('dimensions','Dimensions') }}
+  </div>
+  <div class="dgrid dg3">
+    {{ datecell('date','Date') }}
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+    {{ cell('vendor','Vendor') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="section-bar">Image &amp; Receipt</div>
+  <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><input type="text" name="location" value="{{ val('location') }}"><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Property</span></div>
+    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       VEHICLES
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'vehicles' %}
+  <div class="detail-model">
+    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+  <div class="dgrid dg3">
+    {{ numcell('year','Year') }}
+    {{ cell('state','State') }}
+    {{ cell('tags','Tags / Plate') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('vin','VIN') }}</div>
+  <div class="dgrid dg3">
+    {{ datecell('date','Date') }}
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+    {{ cell('vendor','Vendor') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="section-bar">Images &amp; Documents</div>
+  <div class="dgrid dg3">{{ imgcell('image','Photo') }}{{ doccell('insurance','Insurance') }}{{ doccell('invoice','Invoice') }}</div>
+  <div class="dgrid dg1">{{ doccell('registration','Registration') }}</div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       RECORDINGS
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'recordings' %}
+  <div class="detail-model">
+    <input type="text" name="title" value="{{ val('title') }}" placeholder="Title"
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+  <div class="dgrid dg4">
+    {{ cell('type','Type') }}
+    {{ cell('genre','Genre') }}
+    {{ cell('genre_2','Genre 2') }}
+    {{ cell('year_recorded','Year') }}
+  </div>
+  <div class="dgrid dg3">
+    {{ cell('speed','Speed') }}
+    {{ cell('sound','Sound') }}
+    {{ cell('like_field','Like') }}
+  </div>
+  <div class="dgrid dg3">
+    {{ datecell('date','Date') }}
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+    {{ cell('vendor','Vendor') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="section-bar">Image &amp; Receipt</div>
+  <div class="dgrid dg2">{{ imgcell('image','Cover') }}{{ doccell('receipt','Receipt') }}</div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       RIFLES
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'rifles' %}
+  <div class="detail-model">
+    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+  <div class="dgrid dg3">
+    {{ cell('caliber','Caliber') }}
+    {{ cell('serial_number','Serial #') }}
+    {{ datecell('date','Date') }}
+  </div>
+  <div class="dgrid dg2">
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+    {{ cell('vendor','Vendor') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="section-bar">Image &amp; Receipt</div>
+  <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       CREDIT CARDS
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'credit_cards' %}
+  <div class="dgrid dg2">
+    {{ cell('number','Card Number') }}
+    {{ datecell('expiration','Expiration') }}
+  </div>
+  <div class="dgrid dg2">
+    {{ cell('cvc','CVC') }}
+    {{ cell('cvc_2','CVC 2') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('billing_address','Billing Address') }}</div>
+  <div class="dgrid dg2">
+    {{ cell('billing_short','Billing Short') }}
+    {{ cell('description','Description') }}
+  </div>
+  {% if not is_new and (r['image_front'] or r['image_back']) %}
+  <div class="coin-imgs">
+    <div class="coin-img-panel">
+      {% if r['image_front'] and r['image_front']|is_image %}<img src="{{ url_for('uploaded_file', filename=r['image_front']) }}" alt="Front">{% endif %}
+      <span class="panel-lbl">Front</span>
+    </div>
+    <div class="coin-img-panel">
+      {% if r['image_back'] and r['image_back']|is_image %}<img src="{{ url_for('uploaded_file', filename=r['image_back']) }}" alt="Back">{% endif %}
+      <span class="panel-lbl">Back</span>
+    </div>
+  </div>
+  {% endif %}
+  <div class="section-bar">Images</div>
+  <div class="dgrid dg2">{{ imgcell('image_front','Front') }}{{ imgcell('image_back','Back') }}</div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       PROPERTIES
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'properties' %}
+  <div class="detail-model">
+    <input type="text" name="short_name" value="{{ val('short_name') }}" placeholder="Short Name"
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+  <div class="dgrid dg1">{{ cell('address','Address') }}</div>
+  <div class="dgrid dg3">
+    {{ cell('type','Type') }}
+    {{ cell('year_built','Year Built') }}
+    {{ cell('llc','LLC') }}
+  </div>
+  <div class="dgrid dg2">
+    {{ cell('ein','EIN') }}
+    {{ datecell('date','Purchase Date') }}
+  </div>
+  <div class="dgrid dg1">
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Purchase Price</span></div>
+  </div>
+  <div class="section-bar">WiFi</div>
+  <div class="dgrid dg2">{{ cell('wifi_name','Network Name') }}{{ cell('wifi','Password') }}</div>
+  <div class="section-bar">Alarm</div>
+  <div class="dgrid dg4">
+    {{ cell('alarm_company','Company') }}
+    {{ cell('alarm_account','Account') }}
+    {{ cell('alarm_code_1','Code') }}
+    {{ cell('alarm_password','Password') }}
+  </div>
+  <div class="dgrid dg2">{{ cell('alarm_phone','Phone') }}{{ cell('alarm_notes','Notes') }}</div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="section-bar">Image</div>
+  <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><select name="status">{% for s in ['','Active','Sold','Rented'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><input type="text" name="archive" value="{{ val('archive') }}"><span class="blabel">Archive</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       PERSONS
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'persons' %}
+  {% if not is_new and r['head_shot'] and r['head_shot']|is_image %}
+  <div class="headshot-wrap">
+    <img src="{{ url_for('uploaded_file', filename=r['head_shot']) }}" alt="{{ val('name') }}">
+  </div>
+  {% endif %}
+  <div class="dgrid dg2">
+    {{ cell('phone','Phone') }}
+    {{ datecell('birth_date','Birth Date') }}
+  </div>
+  <div class="dgrid dg3">
+    {{ cell('blood_type','Blood Type') }}
+    {{ cell('ssn','SSN') }}
+    {{ cell('primary_care_physician','Primary Care Physician') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('home_address','Home Address') }}</div>
+  <div class="dgrid dg2">
+    {{ cell('spouse','Spouse') }}
+    {{ cell('spouse_name_and_phone','Spouse Name & Phone') }}
+  </div>
+  <div class="dgrid dg1">{{ cell('prescriptions','Prescriptions',rows=2) }}</div>
+  <div class="dgrid dg1">{{ cell('health_notes','Health Notes',rows=2) }}</div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="section-bar">Documents &amp; Images</div>
+  <div class="dgrid dg3">
+    {{ imgcell('head_shot','Head Shot') }}
+    {{ doccell('passport','Passport') }}
+    {{ doccell('license_obverse','License Front') }}
+  </div>
+  <div class="dgrid dg3">
+    {{ doccell('license_reverse','License Back') }}
+    {{ doccell('medicare','Medicare') }}
+    {{ doccell('global_entry','Global Entry') }}
+  </div>
+  <div class="dgrid dg3">
+    {{ doccell('health_card_obv','Health Card Front') }}
+    {{ doccell('health_card_rev','Health Card Back') }}
+    {{ doccell('eye_prescription','Eye Prescription') }}
+  </div>
+  <div class="detail-bottom">
+    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+  </div>
+
+  {% endif %}{# end category blocks #}
+
+  <!-- Save bar -->
+  <div class="save-bar">
+    <button type="submit" class="btn-save" id="saveBtn">{% if is_new %}Save{% else %}Upload Files{% endif %}</button>
+    {% if not is_new %}<span class="autosave-hint">Fields save automatically</span>{% endif %}
+    <a href="{{ url_for('list_view', category=category) }}" class="btn-cancel">{% if is_new %}Cancel{% else %}Back{% endif %}</a>
+    {% if not is_new %}
+    <form method="post" action="{{ url_for('delete_record', category=category, record_id=r['id']) }}" id="delForm" style="margin-left:auto">
+      <button type="button" class="btn-delete" onclick="confirmDelete()">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+
+</form>
+</div>
+
+<script>
+function confirmDelete() {
+  if (confirm('Delete this record? This cannot be undone.')) {
+    document.getElementById('delForm').submit();
+  }
+}
+function previewFile(input, previewId) {
+  const prev = document.getElementById(previewId);
+  if (!prev) return;
+  const file = input.files[0];
+  if (file && file.type.startsWith('image/')) {
+    const reader = new FileReader();
+    reader.onload = e => { prev.src = e.target.result; prev.style.display = ''; };
+    reader.readAsDataURL(file);
+  }
+}
+
+// Complications: clicking the box label toggles the X text
+document.querySelectorAll('.comp-item').forEach(item => {
+  const cb = item.querySelector('input[type=checkbox]');
+  const box = item.querySelector('.comp-x');
+  function sync() { box.textContent = cb.checked ? 'x' : ''; box.appendChild(cb); }
+  cb.addEventListener('change', sync);
+  sync();
+});
+
+// ── Auto-save on field change/blur ──────────────────────────────────────────
+(function () {
+  {% if not is_new %}
+  const SAVE_URL = "{{ url_for('save_field', category=category, record_id=r['id']) }}";
+
+  // Toast indicator
+  const toast = document.createElement('div');
+  toast.style.cssText = [
+    'position:fixed','bottom:24px','right:24px',
+    'background:#2a7a2a','color:#fff',
+    'padding:5px 14px','border-radius:5px',
+    'font-size:12px','font-family:var(--font)',
+    'opacity:0','transition:opacity 0.25s',
+    'pointer-events:none','z-index:9999'
+  ].join(';');
+  toast.textContent = 'Saved ✓';
+  document.body.appendChild(toast);
+
+  let toastTimer;
+  function showToast() {
+    toast.style.opacity = '1';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 1400);
+  }
+
+  function saveField(name, value) {
+    fetch(SAVE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field: name, value: value })
+    })
+    .then(r => r.json())
+    .then(d => { if (d.ok) showToast(); })
+    .catch(err => console.warn('Auto-save failed:', err));
+  }
+
+  const form = document.getElementById('mainForm');
+
+  // Text / textarea — save on blur
+  form.querySelectorAll('input[name]:not([type=file]):not([type=radio]):not([type=checkbox]):not([type=date]), textarea[name]').forEach(el => {
+    el.addEventListener('blur', () => saveField(el.name, el.value));
+  });
+
+  // Date inputs — save on change
+  form.querySelectorAll('input[type=date][name]').forEach(el => {
+    el.addEventListener('change', () => saveField(el.name, el.value));
+  });
+
+  // Selects — save on change
+  form.querySelectorAll('select[name]').forEach(el => {
+    el.addEventListener('change', () => saveField(el.name, el.value));
+  });
+
+  // Radio buttons — save on change
+  form.querySelectorAll('input[type=radio][name]').forEach(el => {
+    el.addEventListener('change', () => {
+      if (el.checked) saveField(el.name, el.value);
+    });
+  });
+
+  // Checkboxes (complications) — save entire group on any change
+  form.querySelectorAll('input[type=checkbox][name]').forEach(el => {
+    el.addEventListener('change', () => {
+      const groupName = el.name;
+      const vals = Array.from(
+        form.querySelectorAll(`input[type=checkbox][name="${groupName}"]:checked`)
+      ).map(cb => cb.value);
+      saveField(groupName, vals.join(','));
+    });
+  });
+
+  // Beat field: update the Hz display live on blur
+  const beatInput = form.querySelector('input[name=beat]');
+  const hzInput   = form.querySelector('.watch-specs input[readonly]');
+  if (beatInput && hzInput) {
+    beatInput.addEventListener('blur', () => {
+      const raw = parseFloat(beatInput.value.replace(/,/g, '')) || 0;
+      hzInput.value = raw ? (raw / 7200).toPrecision(2) : '';
+    });
+  }
+
+  // Brand input: update the header brand span live
+  const brandInput = form.querySelector('input[name=brand]');
+  const brandSpan  = document.querySelector('.detail-brand');
+  if (brandInput && brandSpan) {
+    brandInput.addEventListener('input', () => {
+      brandSpan.textContent = brandInput.value || '—';
+    });
+  }
+  {% endif %}
+}());
+
+// Cmd/Ctrl+S still triggers full save (needed for file uploads)
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+    e.preventDefault();
+    document.getElementById('mainForm').submit();
+  }
+});
+</script>
+{% endblock %}
