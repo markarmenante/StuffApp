@@ -117,6 +117,7 @@ a { color: var(--blue); text-decoration: none; }
   background: var(--nav-bg);
   border-bottom: 1px solid var(--nav-border);
 }
+.list-count { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-right: 6px; }
 .list-cat-title { font-size: 13px; font-weight: 600; flex: 1; }
 
 .search-wrap {
@@ -198,7 +199,7 @@ a { color: var(--blue); text-decoration: none; }
 .empty-state a { color: var(--blue); }
 
 /* ── DETAIL PAGE ── */
-.detail-page { max-width: 720px; margin: 0 auto; background: var(--surface); min-height: calc(100vh - var(--nav-height)); border-left: 1px solid var(--border-light); border-right: 1px solid var(--border-light); }
+.detail-page { max-width: 100%; margin: 0; background: var(--surface); min-height: calc(100vh - var(--nav-height)); }
 
 .detail-header {
   display: flex; align-items: center; gap: 6px;

@@ -9,19 +9,6 @@
 <body ondragover="event.preventDefault()" ondrop="event.preventDefault()">
 
 <nav class="top-nav">
-  <!-- left: count + arrows + dot -->
-  <div class="nav-left">
-    <span class="nav-count">{{ result_count if result_count is defined else (counts.get(current_category, '') if counts and current_category else '') }}</span>
-    <span class="nav-icon-btn" title="Toggle view">↔</span>
-    {% if current_category %}
-      {% set dot_on = dot is defined and dot %}
-      {% set dot_url = url_for('list_view', category=current_category) if dot_on else url_for('list_view', category=current_category, dot=1) %}
-      <a href="{{ dot_url }}" class="nav-dot {% if dot_on %}nav-dot-active{% endif %}" title="{{ 'Show all' if dot_on else 'Show unresolved (not Owned / Sold / Gifted)' }}"></a>
-    {% else %}
-      <span class="nav-dot"></span>
-    {% endif %}
-  </div>
-
   <!-- category icons -->
   <div class="nav-categories">
     {% set cat_icons = [
@@ -48,12 +35,7 @@
     {% endfor %}
   </div>
 
-  <!-- right: new + search -->
   <div class="nav-right">
-    {% if current_category %}
-    <a href="{{ url_for('new_record', category=current_category) }}" class="nav-icon-btn" title="New record">＋</a>
-    {% endif %}
-    <span class="nav-icon-btn" title="Search">🔍</span>
   </div>
 </nav>
 

@@ -4,7 +4,9 @@
 {% block content %}
 <!-- Toolbar -->
 <div class="list-toolbar">
+  <span class="list-count">{{ result_count }}</span>
   <span class="list-cat-title">{{ cat_info.name }}</span>
+  <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
   <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
     <div class="search-wrap">
       <button type="submit" title="Search">🔍</button>
@@ -12,7 +14,6 @@
       {% if q %}<a class="search-clear" href="{{ url_for('list_view', category=category) }}">×</a>{% endif %}
     </div>
   </form>
-  <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
 </div>
 
 <!-- List -->
