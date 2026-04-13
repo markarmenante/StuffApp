@@ -242,10 +242,10 @@ a { color: var(--blue); text-decoration: none; }
 .dg1 { grid-template-columns: 1fr; }
 
 .dcell {
-  padding: 5px 8px 16px;
+  padding: 2px 8px 1px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  position: relative; min-height: 38px;
+  position: relative; min-height: 22px;
   background: #ffffff;
   vertical-align: top;
 }
@@ -269,7 +269,11 @@ a { color: var(--blue); text-decoration: none; }
 }
 .dcell textarea {
   resize: vertical;
-  min-height: 70px;
+  min-height: 40px;
+}
+.dcell textarea[rows="5"] { min-height: 100px; }
+.dcell textarea[rows="6"] { min-height: 130px; }
+.dcell textarea[rows="10"] { min-height: 220px;
   line-height: 1.5;
   font-size: 13px;
   color: #111111;
@@ -313,6 +317,32 @@ a { color: var(--blue); text-decoration: none; }
 .coin-img-panel:last-child { border-right: none; }
 .coin-img-panel img { max-height: 130px; max-width: 100%; object-fit: contain; }
 .coin-img-panel .panel-lbl { font-size: 10px; color: var(--text-label); }
+/* Date range inline editor */
+.date-range-cell { cursor: pointer; text-align: center; }
+.date-display { font-size: 13px; color: #555; min-height: 1.2em; }
+.date-inputs { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.date-num-input { width: 40%; border: none; outline: none; background: transparent; font-family: var(--font); font-size: 13px; color: var(--text); text-align: center; }
+.date-num-input:focus { background: #fffde8; }
+.date-dash { color: var(--text-secondary); font-size: 13px; }
+
+/* Typeahead ghost text */
+.ta-wrap { position: relative; }
+.ta-input[data-ghost]::after { content: attr(data-ghost); color: #ccc; }
+.ta-input { position: relative; }
+
+/* Hide select arrows and date picker icons globally */
+select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: none; }
+input[type="date"]::-webkit-calendar-picker-indicator { display: none; -webkit-appearance: none; }
+input[type="date"] { -webkit-appearance: none; }
+
+/* Coin specs and purchase centered */
+.coin-specs .dcell input,
+.coin-specs .dcell select { text-align: center; }
+.coin-purchase .dcell input,
+.coin-purchase .dcell select { text-align: center; }
+
+.drop-zone { cursor: pointer; transition: background .15s; }
+.drop-zone.drag-over { background: #e8f0fe; outline: 2px dashed var(--blue); outline-offset: -2px; }
 .coin-age-row { text-align: center; font-size: 12px; color: var(--text-secondary); padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--cell-bg); }
 
 /* Complications */

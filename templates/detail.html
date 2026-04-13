@@ -35,6 +35,12 @@
   <span class="clabel">{{ label }}</span>
 </div>
 {% endmacro %}
+{% macro tacell(field, label, opts) %}
+<div class="dcell ta-wrap">
+  <input type="text" name="{{ field }}" value="{{ val(field) }}" autocomplete="off" class="ta-input" data-ta="{{ opts|join('||') }}">
+  <span class="clabel">{{ label }}</span>
+</div>
+{% endmacro %}
 {% macro imgcell(field, label) %}
 <div class="dcell file-cell">
   <span class="file-cell-name">{{ label }}</span>
@@ -79,8 +85,8 @@
   <!-- Header bar: Brand | < > ← -->
   <div class="detail-header">
     <span class="detail-brand">
-      {% if category == 'watches' %}{{ val('brand') or 'New Watch' }}
-      {% elif category == 'coins' %}{{ val('authority') or val('mint') or 'New Coin' }}
+      {% if category == 'watches' %}{{ val('model') or 'New Watch' }}
+      {% elif category == 'coins' %}{{ 'New Coin' if is_new else '' }}
       {% elif category == 'cameras' %}{{ val('make') or 'New Camera' }}
       {% elif category == 'lenses' %}{{ val('make') or 'New Lens' }}
       {% elif category == 'pens' %}{{ val('make') or 'New Pen' }}
@@ -112,7 +118,8 @@
   <!-- Brand row (editable, large) -->
   <div class="detail-brand-row">
     <input type="text" name="brand" value="{{ r['brand'] if r and r['brand'] else '' }}"
-           placeholder="Brand" class="brand-input">
+           placeholder="Brand" class="brand-input ta-input" autocomplete="off"
+           data-ta="{{ ta.get('brand', [])|join('||') }}">
   </div>
 
   <!-- Model name row -->
@@ -123,10 +130,10 @@
 
   <!-- Row 1: Metal, Case Diameter, Reference, Dial Color -->
   <div class="dgrid dg4">
-    {{ cell('metal','Metal') }}
-    {{ numcell('case_diameter','mm') }}
+    {{ selcell('metal','Metal', vlists.metal_watch) }}
+    {{ cell('case_diameter','mm') }}
     {{ cell('reference','Ref') }}
-    {{ cell('dial_color','Dial') }}
+    {{ tacell('dial_color','Dial', ta.get('dial_color', [])) }}
   </div>
 
   <!-- Row 2: Case#, Movement#, Edition, Year -->
@@ -155,7 +162,10 @@
       </div>
       <div class="dgrid dg1">
         <div class="dcell">
-          <input type="text" name="movement_origin" value="{{ r['movement_origin'] if r and r['movement_origin'] else '' }}">
+          <select name="movement_origin">
+            <option value=""></option>
+            {% for o in vlists.movement_origin %}<option value="{{ o }}" {{ 'selected' if val('movement_origin')==o }}>{{ o }}</option>{% endfor %}
+          </select>
           <span class="clabel">Movement Origin</span>
         </div>
       </div>
@@ -204,13 +214,13 @@
 
   <!-- Strap row -->
   <div class="dgrid dg4">
-    {{ selcell('clasp_type','Clasp', ['','Tang','Deployant','Buckle','Velcro']) }}
+    {{ selcell('clasp_type','Clasp', vlists.clasp_type) }}
     <div class="dcell">
       <input type="text" name="lug_mm" value="{{ val('lug_mm')|lug_fmt }}" placeholder="e.g. 20/16">
       <span class="clabel">Lug mm</span>
     </div>
-    {{ cell('strap_material','Material') }}
-    {{ cell('strap_color','Color') }}
+    {{ selcell('strap_material','Material', vlists.strap_material) }}
+    {{ tacell('strap_color','Color', ta.get('strap_color', [])) }}
   </div>
 
   <!-- Purchase row -->
@@ -220,7 +230,7 @@
       <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric">
       <span class="clabel">Price</span>
     </div>
-    {{ cell('vendor','Vendor') }}
+    {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
   </div>
 
   <!-- Notes -->
@@ -243,19 +253,24 @@
   <!-- Bottom: Property | Status | Owner -->
   <div class="detail-bottom">
     <div class="bottom-cell">
-      <input type="text" name="property" value="{{ val('property') }}">
+      <select name="property">
+        <option value=""></option>
+        {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}
+      </select>
       <span class="blabel">Location</span>
     </div>
     <div class="bottom-cell">
       <select name="status">
-        {% for s in ['','Owned','Sold','Loaned'] %}
-        <option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>
-        {% endfor %}
+        <option value=""></option>
+        {% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}
       </select>
       <span class="blabel">Status</span>
     </div>
     <div class="bottom-cell">
-      <input type="text" name="owner" value="{{ val('owner') }}">
+      <select name="owner">
+        <option value=""></option>
+        {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}
+      </select>
       <span class="blabel">Owner</span>
     </div>
   </div>
@@ -265,109 +280,95 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'coins' %}
 
-  <!-- Authority + Mint row -->
-  <div class="dgrid dg2">
-    {{ cell('authority','Authority / Type') }}
-    {{ cell('mint','Mint') }}
+  <!-- Reg / Auth / Mint -->
+  <div class="dgrid dg3">
+    <div class="dcell ta-wrap"><input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700"><span class="clabel">Reg</span></div>
+    {{ cell('authority','Auth') }}
+    {{ tacell('mint','Mint', ta.get('mint', [])) }}
   </div>
 
-  <!-- ObvRev description -->
-  <div class="dgrid dg1">{{ cell('obv_rev','Description') }}</div>
-
   <!-- Denomination / Metal / Date -->
-  <div class="dgrid dg3">
-    {{ cell('denomination','Denomination') }}
-    {{ cell('metal','Metal') }}
-    <div class="dcell">
-      <input type="text" value="{% if val('date_1_text') %}{{ val('date_1_text') }}{% if val('date_2_text') %} – {{ val('date_2_text') }}{% endif %}{% endif %}" readonly style="color:#555">
-      <span class="clabel">Date Range</span>
+  <div class="dgrid dg4">
+    <div class="dcell ta-wrap"><input type="text" name="denomination" value="{{ val('denomination') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('denomination', [])|join('||') }}"></div>
+    <div class="dcell"><select name="metal"><option value=""></option>{% for o in vlists.metal_coin %}<option value="{{ o }}" {{ 'selected' if val('metal')==o }}>{{ o }}</option>{% endfor %}</select></div>
+    <div class="dcell date-range-cell" id="dateRangeCell" style="grid-column: span 2; text-align: center;">
+      <div class="date-display" id="dateDisplay">{% if val('date_1_text') %}{{ val('date_1_text') }}{% if val('date_2_text') %} – {{ val('date_2_text') }}{% endif %}{% endif %}</div>
+      <div class="date-inputs" id="dateInputs" style="display:none">
+        <input type="text" id="dateFrom" value="{{ val('date_1') }}" placeholder="-480 or 1952" class="date-num-input" inputmode="numeric">
+        <span class="date-dash">–</span>
+        <input type="text" id="dateTo" value="{{ val('date_2') }}" placeholder="(optional)" class="date-num-input" inputmode="numeric">
+      </div>
+      <input type="hidden" name="date_1" id="hDate1" value="{{ val('date_1') }}">
+      <input type="hidden" name="date_1_text" id="hDate1Text" value="{{ val('date_1_text') }}">
+      <input type="hidden" name="date_2" id="hDate2" value="{{ val('date_2') }}">
+      <input type="hidden" name="date_2_text" id="hDate2Text" value="{{ val('date_2_text') }}">
     </div>
   </div>
 
-  <!-- Hidden date fields -->
-  <input type="hidden" name="date_1" value="{{ val('date_1') }}">
-  <input type="hidden" name="date_1_text" value="{{ val('date_1_text') }}">
-  <input type="hidden" name="date_2" value="{{ val('date_2') }}">
-  <input type="hidden" name="date_2_text" value="{{ val('date_2_text') }}">
+  <!-- Obv/Rev -->
+  <div class="dgrid dg1">{{ cell('obv_rev','') }}</div>
 
   <!-- Coin images -->
-  {% if not is_new and (r['image_1'] or r['image_2']) %}
   <div class="coin-imgs">
-    <div class="coin-img-panel">
-      {% if r['image_1'] and r['image_1']|is_image %}
+    <div class="coin-img-panel drop-zone" data-field="image_1"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image_1'] and r['image_1']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="Obverse">
       {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
       <span class="panel-lbl">Obverse</span>
     </div>
-    <div class="coin-img-panel">
-      {% if r['image_2'] and r['image_2']|is_image %}
+    <div class="coin-img-panel drop-zone" data-field="image_2"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image_2'] and r['image_2']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="Reverse">
       {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
       <span class="panel-lbl">Reverse</span>
     </div>
   </div>
-  {% endif %}
   {% if coin_age_val %}
   <div class="coin-age-row">{{ '{:,}'.format(coin_age_val) }} yrs</div>
   {% endif %}
 
   <!-- Physical specs -->
-  <div class="dgrid dg4" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr;">
-    <div class="dgrid" style="grid-column:span 6; grid-template-columns: repeat(6,1fr)">
-      {{ numcell('weight','g') }}
-      {{ numcell('size','mm') }}
-      {{ cell('grade','Grade') }}
-      {{ cell('die_axis','Axis') }}
-      {{ numcell('strike','Strike') }}
-      {{ numcell('surface','Surf') }}
-    </div>
+  <div class="dgrid coin-specs" style="grid-template-columns: repeat(6, 1fr);">
+    <div class="dcell"><input type="text" name="weight" value="{{ '%s g'|format(val('weight')) if val('weight') else '' }}" class="coin-unit-input" data-suffix=" g" style="text-align:center"></div>
+    <div class="dcell"><input type="text" name="size" value="{{ '%s mm'|format(val('size')) if val('size') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"></div>
+    <div class="dcell"><select name="grade" style="text-align:center"><option value=""></option>{% for o in vlists.coin_grade %}<option value="{{ o }}" {{ 'selected' if val('grade')==o }}>{{ o }}</option>{% endfor %}</select></div>
+    <div class="dcell"><select name="die_axis" style="text-align:center"><option value=""></option>{% for o in ['0','1','2','3','4','5','6','7','8','9','10','11','12'] %}<option value="{{ o }}" {{ 'selected' if val('die_axis')==o }}>{{ o }}</option>{% endfor %}</select></div>
+    {{ numcell('strike','Strike') }}
+    {{ numcell('surface','Surf') }}
   </div>
 
   <!-- Purchase -->
-  <div class="dgrid dg3">
-    {{ cell('vendor','Vendor') }}
-    {{ datecell('purchase_date','Date') }}
-    <div class="dcell">
-      <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric">
-      <span class="clabel">Price</span>
-    </div>
+  <div class="dgrid dg3 coin-purchase">
+    <div class="dcell ta-wrap"><input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center"></div>
+    <div class="dcell"><input type="date" name="purchase_date" value="{{ val('purchase_date') }}" style="text-align:center"></div>
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric" style="text-align:center"></div>
   </div>
 
-  <!-- Description long -->
-  <div class="dgrid dg1">{{ cell('description','Description',rows=3) }}</div>
+  <!-- Description -->
+  <div class="dgrid dg1">{{ cell('description','Description',rows=10) }}</div>
 
-  <!-- References -->
+  <!-- Pedigree, References -->
   <div class="section-bar">Pedigree, References</div>
   <div class="dgrid dg1">{{ cell('coin_references','References',rows=2) }}</div>
 
-  <!-- Notes (grade/condition) -->
+  <!-- Grade, Conditions -->
   <div class="section-bar">Grade, Conditions</div>
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  <div class="dgrid dg1">{{ cell('notes','Notes',rows=5) }}</div>
 
   <!-- Extra fields -->
-  <div class="dgrid dg3">
-    {{ cell('sheldon','Sheldon') }}
-    {{ cell('region','Region') }}
-    {{ cell('storage_location','Storage') }}
-  </div>
-
-  <!-- Docs -->
-  <div class="section-bar">Images &amp; Documents</div>
-  <div class="dgrid dg3">
-    {{ imgcell('image_1','Obverse') }}
-    {{ imgcell('image_2','Reverse') }}
-    {{ doccell('receipt','Receipt') }}
-  </div>
   <div class="dgrid dg2">
-    {{ doccell('document_1','Doc 1') }}
-    {{ doccell('document_2','Doc 2') }}
+    {{ cell('sheldon','Sheldon') }}
+    {{ cell('storage_location','Storage') }}
   </div>
 
   <!-- Bottom -->
   <div class="detail-bottom">
     <div class="bottom-cell">
       <select name="status">
-        {% for s in ['','Own','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}
+        <option value=""></option>
+        {% for s in vlists.coin_status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}
       </select>
       <span class="blabel">Status</span>
     </div>
@@ -376,7 +377,10 @@
       <span class="blabel">Catalog #</span>
     </div>
     <div class="bottom-cell">
-      <input type="text" name="property_name" value="{{ val('property_name') }}">
+      <select name="property_name">
+        <option value=""></option>
+        {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property_name')==o }}>{{ o }}</option>{% endfor %}
+      </select>
       <span class="blabel">Location</span>
     </div>
   </div>
@@ -424,9 +428,9 @@
   <div class="section-bar">Image</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
   <div class="detail-bottom">
-    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+    <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -455,9 +459,9 @@
   <div class="section-bar">Image</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
   <div class="detail-bottom">
-    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+    <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -469,12 +473,12 @@
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
   <div class="dgrid dg4">
-    {{ cell('type','Type') }}
-    {{ cell('action','Action') }}
+    {{ selcell('type','Type', vlists.pen_type) }}
+    {{ selcell('action','Action', vlists.pen_action) }}
     {{ cell('nib','Nib') }}
-    {{ cell('cartridge','Cartridge') }}
+    {{ selcell('cartridge','Cartridge', vlists.pen_cartridge) }}
   </div>
-  <div class="dgrid dg2">{{ cell('reservoir','Reservoir') }}<div class="dcell"></div></div>
+  <div class="dgrid dg2">{{ selcell('reservoir','Reservoir', vlists.pen_reservoir) }}<div class="dcell"></div></div>
   <div class="dgrid dg3">
     {{ datecell('date','Date') }}
     <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
@@ -484,9 +488,9 @@
   <div class="section-bar">Image &amp; Receipt</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
-    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+    <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -512,9 +516,9 @@
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><input type="text" name="location" value="{{ val('location') }}"><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Property</span></div>
-    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+    <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Property</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -541,9 +545,9 @@
   <div class="dgrid dg3">{{ imgcell('image','Photo') }}{{ doccell('insurance','Insurance') }}{{ doccell('invoice','Invoice') }}</div>
   <div class="dgrid dg1">{{ doccell('registration','Registration') }}</div>
   <div class="detail-bottom">
-    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+    <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -555,8 +559,8 @@
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
   <div class="dgrid dg4">
-    {{ cell('type','Type') }}
-    {{ cell('genre','Genre') }}
+    {{ selcell('type','Type', vlists.recording_type) }}
+    {{ selcell('genre','Genre', vlists.recording_genre) }}
     {{ cell('genre_2','Genre 2') }}
     {{ cell('year_recorded','Year') }}
   </div>
@@ -574,9 +578,9 @@
   <div class="section-bar">Image &amp; Receipt</div>
   <div class="dgrid dg2">{{ imgcell('image','Cover') }}{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
-    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+    <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -600,9 +604,9 @@
   <div class="section-bar">Image &amp; Receipt</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
-    <div class="bottom-cell"><input type="text" name="property" value="{{ val('property') }}"><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status">{% for s in ['','Owned','Sold','Loaned'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+    <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -637,7 +641,7 @@
   <div class="section-bar">Images</div>
   <div class="dgrid dg2">{{ imgcell('image_front','Front') }}{{ imgcell('image_back','Back') }}</div>
   <div class="detail-bottom">
-    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -650,7 +654,7 @@
   </div>
   <div class="dgrid dg1">{{ cell('address','Address') }}</div>
   <div class="dgrid dg3">
-    {{ cell('type','Type') }}
+    {{ selcell('type','Type', vlists.property_type) }}
     {{ cell('year_built','Year Built') }}
     {{ cell('llc','LLC') }}
   </div>
@@ -727,17 +731,20 @@
 
   {% endif %}{# end category blocks #}
 
-  <!-- Save bar -->
+  {% if is_new %}
+  <!-- Save bar (new records only) -->
   <div class="save-bar">
-    <button type="submit" class="btn-save" id="saveBtn">{% if is_new %}Save{% else %}Upload Files{% endif %}</button>
-    {% if not is_new %}<span class="autosave-hint">Fields save automatically</span>{% endif %}
-    <a href="{{ url_for('list_view', category=category) }}" class="btn-cancel">{% if is_new %}Cancel{% else %}Back{% endif %}</a>
-    {% if not is_new %}
+    <button type="submit" class="btn-save" id="saveBtn">Save</button>
+    <a href="{{ url_for('list_view', category=category) }}" class="btn-cancel">Cancel</a>
+  </div>
+  {% else %}
+  <div class="save-bar">
+    <span class="autosave-hint">Fields save automatically</span>
     <form method="post" action="{{ url_for('delete_record', category=category, record_id=r['id']) }}" id="delForm" style="margin-left:auto">
       <button type="button" class="btn-delete" onclick="confirmDelete()">Delete</button>
     </form>
-    {% endif %}
   </div>
+  {% endif %}
 
 </form>
 </div>
@@ -866,6 +873,138 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     document.getElementById('mainForm').submit();
   }
+});
+
+// Unit suffix inputs (weight g, size mm)
+document.querySelectorAll('.coin-unit-input').forEach(inp => {
+  const suffix = inp.dataset.suffix || '';
+  inp.addEventListener('focus', () => {
+    inp.value = inp.value.replace(suffix, '').trim();
+  });
+  inp.addEventListener('blur', () => {
+    const v = inp.value.trim();
+    if (v) inp.value = v + suffix;
+  });
+});
+
+// Date range editor
+(function() {
+  const cell = document.getElementById('dateRangeCell');
+  if (!cell) return;
+  const display = document.getElementById('dateDisplay');
+  const inputs = document.getElementById('dateInputs');
+  const fromInp = document.getElementById('dateFrom');
+  const toInp = document.getElementById('dateTo');
+  const h1 = document.getElementById('hDate1');
+  const h1t = document.getElementById('hDate1Text');
+  const h2 = document.getElementById('hDate2');
+  const h2t = document.getElementById('hDate2Text');
+
+  function fmtDate(n) {
+    if (n === '' || n === null || isNaN(n)) return '';
+    n = parseInt(n);
+    if (n < 0) return Math.abs(n) + ' BC';
+    return '' + n;
+  }
+
+  function updateDisplay() {
+    const v1 = fromInp.value.trim();
+    const v2 = toInp.value.trim();
+    const t1 = fmtDate(v1);
+    const t2 = fmtDate(v2);
+    h1.value = v1; h1t.value = t1;
+    h2.value = v2; h2t.value = t2;
+    if (t1 && t2) display.textContent = t1 + ' – ' + t2;
+    else if (t1) display.textContent = t1;
+    else display.textContent = '';
+  }
+
+  display.addEventListener('click', function(e) {
+    e.stopPropagation();
+    display.style.display = 'none';
+    inputs.style.display = 'flex';
+    fromInp.focus();
+  });
+
+  function closeEditor() {
+    updateDisplay();
+    inputs.style.display = 'none';
+    display.style.display = '';
+  }
+
+  fromInp.addEventListener('blur', function() {
+    setTimeout(function() {
+      if (document.activeElement !== toInp && document.activeElement !== fromInp) closeEditor();
+    }, 100);
+  });
+  toInp.addEventListener('blur', function() {
+    setTimeout(function() {
+      if (document.activeElement !== fromInp && document.activeElement !== toInp) closeEditor();
+    }, 100);
+  });
+  fromInp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { toInp.focus(); e.preventDefault(); } });
+  toInp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { closeEditor(); e.preventDefault(); } });
+})();
+
+// Typeahead: inline fill with tab to accept
+document.querySelectorAll('.ta-input').forEach(inp => {
+  const opts = (inp.dataset.ta || '').split('||').filter(Boolean);
+  if (!opts.length) return;
+  let ghost = '';
+  inp.addEventListener('input', () => {
+    const v = inp.value;
+    if (!v) { ghost = ''; inp.removeAttribute('data-ghost'); return; }
+    const match = opts.find(o => o.toLowerCase().startsWith(v.toLowerCase()) && o.toLowerCase() !== v.toLowerCase());
+    if (match) {
+      ghost = match;
+      inp.setAttribute('data-ghost', match.slice(v.length));
+    } else { ghost = ''; inp.removeAttribute('data-ghost'); }
+  });
+  inp.addEventListener('keydown', e => {
+    if ((e.key === 'Tab' || e.key === 'ArrowRight') && ghost && inp.selectionStart === inp.value.length) {
+      e.preventDefault();
+      inp.value = ghost;
+      ghost = '';
+      inp.removeAttribute('data-ghost');
+    }
+  });
+  inp.addEventListener('blur', () => { ghost = ''; inp.removeAttribute('data-ghost'); });
+});
+
+// Drag-and-drop on .drop-zone panels
+document.querySelectorAll('.drop-zone').forEach(zone => {
+  const uploadUrl = zone.dataset.uploadUrl;
+  const field = zone.dataset.field;
+  if (!uploadUrl) return;
+  zone.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); zone.classList.add('drag-over'); e.dataTransfer.dropEffect = 'copy'; });
+  zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over'); });
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); e.stopPropagation();
+    zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (!file || !file.type.startsWith('image/')) { alert('Please drop an image file.'); return; }
+    zone.style.opacity = '0.5';
+    const fd = new FormData();
+    fd.append('image', file);
+    if (field) fd.append('field', field);
+    fetch(uploadUrl, { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(data => {
+        zone.style.opacity = '';
+        if (data.url) {
+          let img = zone.querySelector('img');
+          const placeholder = zone.querySelector('span:not(.panel-lbl)');
+          if (img) { img.src = data.url; }
+          else {
+            if (placeholder) placeholder.remove();
+            img = document.createElement('img');
+            img.src = data.url; img.alt = '';
+            zone.insertBefore(img, zone.firstChild);
+          }
+        } else { alert('Upload failed: ' + (data.error || 'unknown')); }
+      })
+      .catch(() => { zone.style.opacity = ''; alert('Upload failed.'); });
+  });
 });
 </script>
 {% endblock %}

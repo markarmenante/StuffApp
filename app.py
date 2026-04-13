@@ -77,6 +77,28 @@ COMPLICATIONS_OPTIONS = [
     'Fusee Chain', 'Minute Rep', 'Sonnerie', 'Open Back', 'Open Dial',
 ]
 
+VALUE_LISTS = {
+    'metal_watch': ['Bronze','Ceramic','Gold Filled','Gold, Yellow','Gold: Red/Rose','Gold: Rose','Gold: White','Gold: Yellow','Platinum','Silver','Stainless','Tantalum','Titanium','Zirconium'],
+    'dial_color': ['Abalone','Black','Black/Gray','Blue','Blue/Open','Brown','Champagne','Copper','Cream','Crystal','Damascus Steel','Ebony','Enamel','Gold','Gray','Gray/Black','Green','Green/Inlaid','Grey','Inlaid','Ivory','Jade','Nacre','Open','Platinum','Purple','Red','Rose Gold','Ruthenium','Salmon','Silver','Silver / Open','Silver/Black','White','White Ceramic','White Enamel','Yellow','Yellow Gold','Zirconium'],
+    'movement_origin': ['In-House','Modified'],
+    'strap_material': ['Case Metal','Croc','Leather','Ostrich','Rubber','Skin'],
+    'strap_color': ['Black','Blue','Blue/Gray','Brown','Burgundy','Dk Brown','Eggplant','Gold','Gray','Green','Lt Brown','Navy Blue','Red','Rose Gold','Stainless','Tan','Titanium','White Gold'],
+    'owner': ['Mark','Young'],
+    'property': ['Carp','NYC','SF','Truckee'],
+    'status': ['Owned','Sold','Loaned'],
+    'coin_status': ['Owned','Sold','Loaned'],
+    'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
+    'coin_grade': ['BU','FDC','MS','PF','AU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
+    'clasp_type': ['Tang','Deployant','Buckle','Velcro'],
+    'pen_type': ['Ballpoint','Fountain','Rollerball','Mechanical Pencil'],
+    'pen_action': ['Cap','Click','Twist'],
+    'pen_cartridge': ['Proprietary','Standard International'],
+    'pen_reservoir': ['Cartridge','Converter','Piston','Vacuum'],
+    'recording_type': ['LP','CD','SACD','Digital','Cassette','Reel'],
+    'recording_genre': ['Classical','Jazz','Rock','Pop','Blues','Folk','Electronic','World'],
+    'property_type': ['Residential','Commercial','Land'],
+}
+
 FIELDS = {
     'watches': [
         {'name': 'brand',           'label': 'Brand',             'type': 'text'},
@@ -426,6 +448,18 @@ def get_counts():
     return counts
 
 
+def get_typeahead(table, *fields):
+    """Return dict of field -> sorted list of distinct non-empty values."""
+    db = get_db()
+    result = {}
+    for field in fields:
+        rows = db.execute(
+            f"SELECT DISTINCT {field} as v FROM {table} WHERE {field} IS NOT NULL AND {field} != '' ORDER BY {field}"
+        ).fetchall()
+        result[field] = [r['v'] for r in rows]
+    return result
+
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -601,7 +635,9 @@ def new_record(category):
                            next_id=None,
                            hertz=None,
                            coin_age_val=None,
-                           complications_options=COMPLICATIONS_OPTIONS)
+                           complications_options=COMPLICATIONS_OPTIONS,
+                           vlists=VALUE_LISTS,
+                           ta=get_typeahead(CATEGORIES[category]['table'], 'brand', 'dial_color', 'strap_color', 'vendor') if category == 'watches' else get_typeahead(CATEGORIES[category]['table'], 'region', 'mint', 'denomination', 'vendor') if category == 'coins' else {})
 
 
 @app.route('/<category>/<record_id>', methods=['GET', 'POST'])
@@ -690,7 +726,9 @@ def detail_view(category, record_id):
                            hertz=hertz,
                            coin_age_val=coin_age_val,
                            service_overdue=service_overdue,
-                           complications_options=COMPLICATIONS_OPTIONS)
+                           complications_options=COMPLICATIONS_OPTIONS,
+                           vlists=VALUE_LISTS,
+                           ta=get_typeahead(CATEGORIES[category]['table'], 'brand', 'dial_color', 'strap_color', 'vendor') if category == 'watches' else get_typeahead(CATEGORIES[category]['table'], 'region', 'mint', 'denomination', 'vendor') if category == 'coins' else {})
 
 
 @app.route('/<category>/<record_id>/save-field', methods=['POST'])
@@ -757,9 +795,14 @@ def upload_image(category, record_id):
     if not stored:
         return jsonify({'error': 'Upload failed'}), 500
 
-    image_field = CATEGORIES[category]['image_field']
+    # Allow specifying which image field to update (for coins with image_1/image_2 etc.)
+    image_field = request.form.get('field') or CATEGORIES[category]['image_field']
     table       = CATEGORIES[category]['table']
+    # Validate field name exists in the table schema
     db = get_db()
+    cols = [row['name'] for row in db.execute(f"PRAGMA table_info({table})").fetchall()]
+    if image_field not in cols:
+        return jsonify({'error': 'Invalid field'}), 400
     db.execute(f"UPDATE {table} SET {image_field} = ?, updated_at = ? WHERE id = ?",
                [stored, datetime.utcnow().isoformat(), record_id])
     db.commit()
