@@ -912,6 +912,9 @@ def import_file():
 # Main
 # ---------------------------------------------------------------------------
 
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 with app.app_context():
     init_db()
 
