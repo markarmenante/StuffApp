@@ -881,6 +881,34 @@ def inject_globals():
 
 
 # ---------------------------------------------------------------------------
+# Temporary data import (remove after initial upload)
+# ---------------------------------------------------------------------------
+
+IMPORT_SECRET = 'stuffapp-import-2026'
+
+@app.route('/admin/import-db', methods=['POST'])
+def import_db():
+    if request.form.get('secret') != IMPORT_SECRET:
+        abort(403)
+    f = request.files.get('db')
+    if not f:
+        return jsonify(error='no file'), 400
+    f.save(DATABASE)
+    return jsonify(ok=True, msg='Database replaced')
+
+@app.route('/admin/import-file', methods=['POST'])
+def import_file():
+    if request.form.get('secret') != IMPORT_SECRET:
+        abort(403)
+    f = request.files.get('file')
+    fname = request.form.get('filename')
+    if not f or not fname:
+        return jsonify(error='missing file or filename'), 400
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    f.save(os.path.join(UPLOAD_FOLDER, secure_filename(fname)))
+    return jsonify(ok=True)
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
