@@ -42,16 +42,17 @@
 </div>
 {% endmacro %}
 {% macro imgcell(field, label) %}
-<div class="dcell file-cell">
-  <span class="file-cell-name">{{ label }}</span>
-  {% set f = r[field] if r else none %}
+{% set f = r[field] if r else none %}
+<div class="dcell file-cell drop-zone" data-field="{{ field }}"
+     data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+  {% if label %}<span class="file-cell-name">{{ label }}</span>{% endif %}
   {% if f and f|is_image %}
     <img src="{{ url_for('uploaded_file', filename=f) }}" id="prev_{{ field }}">
   {% else %}
     <img src="" id="prev_{{ field }}" style="display:none">
   {% endif %}
-  <label class="file-upload-lbl">
-    {{ 'Replace' if f else 'Upload' }}
+  <label class="file-upload-lbl" onclick="event.stopPropagation()">
+    {{ 'Replace' if f else 'Drop or click' }}
     <input type="file" name="{{ field }}" accept="image/*,application/pdf" onchange="previewFile(this,'prev_{{ field }}')">
   </label>
 </div>
@@ -85,7 +86,7 @@
   <!-- Header bar: Brand | < > ← -->
   <div class="detail-header">
     <span class="detail-brand">
-      {% if category == 'watches' %}{{ val('model') or 'New Watch' }}
+      {% if category == 'watches' %}{{ 'New Watch' if is_new else '' }}
       {% elif category == 'coins' %}{{ 'New Coin' if is_new else '' }}
       {% elif category == 'cameras' %}{{ val('make') or 'New Camera' }}
       {% elif category == 'lenses' %}{{ val('make') or 'New Lens' }}
@@ -131,17 +132,17 @@
   <!-- Row 1: Metal, Case Diameter, Reference, Dial Color -->
   <div class="dgrid dg4">
     {{ selcell('metal','Metal', vlists.metal_watch) }}
-    {{ cell('case_diameter','mm') }}
-    {{ cell('reference','Ref') }}
-    {{ tacell('dial_color','Dial', ta.get('dial_color', [])) }}
+    <div class="dcell"><input type="text" name="case_diameter" value="{{ '%s mm'|format(val('case_diameter')) if val('case_diameter') else '' }}" class="coin-unit-input" data-suffix=" mm" inputmode="decimal" style="text-align:center"></div>
+    <div class="dcell"><input type="text" name="reference" value="{{ val('reference') }}" style="text-align:center"><span class="clabel">Ref</span></div>
+    <div class="dcell ta-wrap"><input type="text" name="dial_color" value="{{ val('dial_color') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('dial_color', [])|join('||') }}" style="text-align:center"><span class="clabel">Dial</span></div>
   </div>
 
   <!-- Row 2: Case#, Movement#, Edition, Year -->
   <div class="dgrid dg4">
-    {{ cell('case_num','Case #') }}
-    {{ cell('movement_num','Mvmt #') }}
+    <div class="dcell"><input type="text" name="case_num" value="{{ val('case_num') }}" style="text-align:center"><span class="clabel">Case</span></div>
+    <div class="dcell"><input type="text" name="movement_num" value="{{ val('movement_num') }}" style="text-align:center"><span class="clabel">M</span></div>
     {{ cell('edition','Edition') }}
-    {{ cell('year','Yr Mfg') }}
+    <div class="dcell"><input type="text" name="year" value="{{ val('year') }}" style="text-align:center"><span class="clabel">Yr Mfg</span></div>
   </div>
 
   <!-- Photo + right specs -->
@@ -171,19 +172,24 @@
       </div>
       <div class="dgrid dg2">
         <div class="dcell">
-          <input type="text" name="beat" value="{{ val('beat')|fmt_int }}" class="price-input" inputmode="numeric">
-          <span class="clabel">VPH</span>
+          <select name="beat" style="text-align:center">
+            <option value=""></option>
+            {% for b in [18000,19800,21600,25200,28800,36000] %}
+            <option value="{{ b }}" {{ 'selected' if val('beat')|string == b|string }}>{{ '{:,}'.format(b) }} vph</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="dcell">
-          <input type="text" value="{{ '%.2g'|format(r['beat']|float / 7200) if r and r['beat'] else '' }}" readonly style="color:#888">
-          <span class="clabel">Hz</span>
+          <input type="text" value="{{ '%.2g Hz'|format(r['beat']|float / 7200) if r and r['beat'] else '' }}" readonly style="color:#888; text-align:center">
         </div>
       </div>
-      <div class="dcell dcell-radio">
-        <div class="radio-group">
-          <label class="radio-opt"><input type="radio" name="movement_type" value="Manual"    {{ 'checked' if val('movement_type')=='Manual'    }}> Manual</label>
-          <label class="radio-opt"><input type="radio" name="movement_type" value="Automatic" {{ 'checked' if val('movement_type')=='Automatic' }}> Automatic</label>
-        </div>
+      <div class="dcell">
+        <select name="movement_type">
+          <option value=""></option>
+          <option value="Manual" {{ 'selected' if val('movement_type')=='Manual' }}>Manual</option>
+          <option value="Automatic" {{ 'selected' if val('movement_type')=='Automatic' }}>Automatic</option>
+        </select>
+        <span class="clabel">Winding</span>
       </div>
       <div class="dcell">
         <input type="text" name="reserve" value="{{ val('reserve')|fmt_int }}" inputmode="numeric">
@@ -214,17 +220,14 @@
 
   <!-- Strap row -->
   <div class="dgrid dg4">
-    {{ selcell('clasp_type','Clasp', vlists.clasp_type) }}
-    <div class="dcell">
-      <input type="text" name="lug_mm" value="{{ val('lug_mm')|lug_fmt }}" placeholder="e.g. 20/16">
-      <span class="clabel">Lug mm</span>
-    </div>
-    {{ selcell('strap_material','Material', vlists.strap_material) }}
-    {{ tacell('strap_color','Color', ta.get('strap_color', [])) }}
+    <div class="dcell"><select name="clasp_type" style="text-align:center"><option value=""></option>{% for o in vlists.clasp_type %}<option value="{{ o }}" {{ 'selected' if val('clasp_type')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Clasp</span></div>
+    <div class="dcell"><input type="text" name="lug_mm" value="{{ val('lug_mm')|lug_fmt }}" placeholder="e.g. 20/16" style="text-align:center"><span class="clabel">Lug mm</span></div>
+    <div class="dcell"><select name="strap_material" style="text-align:center"><option value=""></option>{% for o in vlists.strap_material %}<option value="{{ o }}" {{ 'selected' if val('strap_material')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Material</span></div>
+    <div class="dcell ta-wrap"><input type="text" name="strap_color" value="{{ val('strap_color') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('strap_color', [])|join('||') }}" style="text-align:center"><span class="clabel">Color</span></div>
   </div>
 
   <!-- Purchase row -->
-  <div class="dgrid dg3">
+  <div class="dgrid dg3 watch-purchase">
     {{ datecell('date','Date') }}
     <div class="dcell">
       <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric">
@@ -241,14 +244,8 @@
     </div>
   </div>
 
-  <!-- Docs row -->
-  <div class="section-bar">Images &amp; Documents</div>
-  <div class="dgrid dg3">
-    {{ imgcell('image_obv','Dial Photo') }}
-    {{ imgcell('image_rev','Case Back') }}
-    {{ doccell('receipt','Receipt') }}
-  </div>
-  <div class="dgrid dg1">{{ doccell('document','Document') }}</div>
+  <!-- Receipt -->
+  <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
 
   <!-- Bottom: Property | Status | Owner -->
   <div class="detail-bottom">
@@ -347,7 +344,7 @@
   </div>
 
   <!-- Description -->
-  <div class="dgrid dg1">{{ cell('description','Description',rows=10) }}</div>
+  <div class="dgrid dg1">{{ cell('description','',rows=10) }}</div>
 
   <!-- Pedigree, References -->
   <div class="section-bar">Pedigree, References</div>
@@ -425,7 +422,6 @@
     {{ cell('vendor','Vendor') }}
   </div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="section-bar">Image</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -456,7 +452,6 @@
     {{ cell('vendor','Vendor') }}
   </div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="section-bar">Image</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -485,7 +480,6 @@
     {{ cell('vendor','Vendor') }}
   </div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="section-bar">Image &amp; Receipt</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -512,7 +506,6 @@
     {{ cell('vendor','Vendor') }}
   </div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="section-bar">Image &amp; Receipt</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><input type="text" name="location" value="{{ val('location') }}"><span class="blabel">Location</span></div>
@@ -541,7 +534,6 @@
     {{ cell('vendor','Vendor') }}
   </div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="section-bar">Images &amp; Documents</div>
   <div class="dgrid dg3">{{ imgcell('image','Photo') }}{{ doccell('insurance','Insurance') }}{{ doccell('invoice','Invoice') }}</div>
   <div class="dgrid dg1">{{ doccell('registration','Registration') }}</div>
   <div class="detail-bottom">
@@ -575,7 +567,6 @@
     {{ cell('vendor','Vendor') }}
   </div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="section-bar">Image &amp; Receipt</div>
   <div class="dgrid dg2">{{ imgcell('image','Cover') }}{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -601,7 +592,6 @@
     {{ cell('vendor','Vendor') }}
   </div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="section-bar">Image &amp; Receipt</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -638,7 +628,6 @@
     </div>
   </div>
   {% endif %}
-  <div class="section-bar">Images</div>
   <div class="dgrid dg2">{{ imgcell('image_front','Front') }}{{ imgcell('image_back','Back') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
@@ -676,7 +665,6 @@
   </div>
   <div class="dgrid dg2">{{ cell('alarm_phone','Phone') }}{{ cell('alarm_notes','Notes') }}</div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="section-bar">Image</div>
   <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="status">{% for s in ['','Active','Sold','Rented'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -709,7 +697,6 @@
   <div class="dgrid dg1">{{ cell('prescriptions','Prescriptions',rows=2) }}</div>
   <div class="dgrid dg1">{{ cell('health_notes','Health Notes',rows=2) }}</div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="section-bar">Documents &amp; Images</div>
   <div class="dgrid dg3">
     {{ imgcell('head_shot','Head Shot') }}
     {{ doccell('passport','Passport') }}
@@ -874,6 +861,18 @@ document.addEventListener('keydown', e => {
     document.getElementById('mainForm').submit();
   }
 });
+
+// Beat -> Hz live update
+(function() {
+  const beatSel = document.querySelector('select[name="beat"]');
+  const hzInp = beatSel && beatSel.closest('.dgrid') && beatSel.closest('.dgrid').querySelector('input[readonly]');
+  if (!beatSel || !hzInp) return;
+  function updateHz() {
+    const b = parseFloat(beatSel.value);
+    hzInp.value = b ? (b / 7200).toPrecision(3).replace(/\.?0+$/, '') + ' Hz' : '';
+  }
+  beatSel.addEventListener('change', updateHz);
+})();
 
 // Unit suffix inputs (weight g, size mm)
 document.querySelectorAll('.coin-unit-input').forEach(inp => {

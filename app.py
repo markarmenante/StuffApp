@@ -10,8 +10,9 @@ app = Flask(__name__)
 app.secret_key = 'stuffapp-secret-key-change-me'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE = os.path.join(BASE_DIR, 'stuffapp.db')
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+DATA_DIR = os.environ.get('DATA_DIR', BASE_DIR)
+DATABASE = os.path.join(DATA_DIR, 'stuffapp.db')
+UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'tif', 'tiff'}
 
 # ---------------------------------------------------------------------------
@@ -80,7 +81,7 @@ COMPLICATIONS_OPTIONS = [
 VALUE_LISTS = {
     'metal_watch': ['Bronze','Ceramic','Gold Filled','Gold, Yellow','Gold: Red/Rose','Gold: Rose','Gold: White','Gold: Yellow','Platinum','Silver','Stainless','Tantalum','Titanium','Zirconium'],
     'dial_color': ['Abalone','Black','Black/Gray','Blue','Blue/Open','Brown','Champagne','Copper','Cream','Crystal','Damascus Steel','Ebony','Enamel','Gold','Gray','Gray/Black','Green','Green/Inlaid','Grey','Inlaid','Ivory','Jade','Nacre','Open','Platinum','Purple','Red','Rose Gold','Ruthenium','Salmon','Silver','Silver / Open','Silver/Black','White','White Ceramic','White Enamel','Yellow','Yellow Gold','Zirconium'],
-    'movement_origin': ['In-House','Modified'],
+    'movement_origin': ['In-House','Ébauche','Modified'],
     'strap_material': ['Case Metal','Croc','Leather','Ostrich','Rubber','Skin'],
     'strap_color': ['Black','Blue','Blue/Gray','Brown','Burgundy','Dk Brown','Eggplant','Gold','Gray','Green','Lt Brown','Navy Blue','Red','Rose Gold','Stainless','Tan','Titanium','White Gold'],
     'owner': ['Mark','Young'],
@@ -883,7 +884,8 @@ def inject_globals():
 # Main
 # ---------------------------------------------------------------------------
 
+with app.app_context():
+    init_db()
+
 if __name__ == '__main__':
-    with app.app_context():
-        init_db()
     app.run(debug=True, port=5001)

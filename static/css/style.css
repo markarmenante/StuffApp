@@ -331,7 +331,10 @@ a { color: var(--blue); text-decoration: none; }
 .ta-input { position: relative; }
 
 /* Hide select arrows and date picker icons globally */
-select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: none; }
+select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: none !important; background: transparent; padding-right: 0; }
+select::-ms-expand { display: none; }
+.dcell { overflow: hidden; }
+.dcell select { width: calc(100% + 20px); }
 input[type="date"]::-webkit-calendar-picker-indicator { display: none; -webkit-appearance: none; }
 input[type="date"] { -webkit-appearance: none; }
 
@@ -340,6 +343,8 @@ input[type="date"] { -webkit-appearance: none; }
 .coin-specs .dcell select { text-align: center; }
 .coin-purchase .dcell input,
 .coin-purchase .dcell select { text-align: center; }
+.watch-purchase .dcell input,
+.watch-purchase .dcell select { text-align: center; }
 
 .drop-zone { cursor: pointer; transition: background .15s; }
 .drop-zone.drag-over { background: #e8f0fe; outline: 2px dashed var(--blue); outline-offset: -2px; }
