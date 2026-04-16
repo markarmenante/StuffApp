@@ -401,16 +401,16 @@ FIELDS = {
 LIST_EXTRA_FIELDS = {
     'watches':      ['metal', 'reference', 'vendor', 'property'],
     'coins':        ['metal', 'denomination', 'date_1_text', 'grade'],
-    'cameras':      ['digital_film', 'film_size', 'lens_mount', 'property'],
-    'lenses':       ['mount', 'aperture', 'filter_size', 'property'],
-    'pens':         ['type', 'nib', 'vendor', 'property'],
-    'art':          ['medium', 'year', 'vendor', 'property'],
-    'vehicles':     ['year', 'vin', 'state', 'property'],
-    'recordings':   ['type', 'genre', 'year_recorded', 'property'],
-    'rifles':       ['caliber', 'serial_number', 'vendor', 'property'],
-    'credit_cards': ['number', 'expiration', 'billing_short', 'owner'],
-    'properties':   ['type', 'address', 'year_built', 'status'],
-    'persons':      ['phone', 'birth_date', 'blood_type', 'owner'],
+    'cameras':      ['digital_film', 'film_size', 'lens_mount', 'megapixels', 'serial_number', 'vendor', 'price', 'property'],
+    'lenses':       ['mount', 'aperture', 'filter_size', 'length', 'serial_number', 'vendor', 'price', 'property'],
+    'pens':         ['type', 'action', 'nib', 'cartridge', 'vendor', 'price', 'property'],
+    'art':          ['medium', 'year', 'dimensions', 'vendor', 'price', 'location', 'property'],
+    'vehicles':     ['year', 'vin', 'state', 'tags', 'vendor', 'price', 'property'],
+    'recordings':   ['type', 'genre', 'year_recorded', 'speed', 'vendor', 'price', 'property'],
+    'rifles':       ['caliber', 'serial_number', 'vendor', 'price', 'property'],
+    'credit_cards': ['number', 'expiration', 'billing_short', 'description', 'owner'],
+    'properties':   ['type', 'address', 'short_name', 'year_built', 'llc', 'price', 'status'],
+    'persons':      ['phone', 'birth_date', 'blood_type', 'spouse', 'owner'],
 }
 
 # ---------------------------------------------------------------------------

@@ -91,8 +91,16 @@
             <span class="ropt"><span class="rdot {{ 'on' if row['film_size'] == '120/220' }}"></span> 120/220</span>
             <span class="ropt"><span class="rdot {{ 'on' if row['film_size'] == 'Sheet' }}"></span> Sheet</span>
           </div>
-          {% if row['lens_mount'] %}<div class="idr"><span>{{ row['lens_mount'] }}</span></div>{% endif %}
-          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['lens_mount'] %}<span>{{ row['lens_mount'] }}</span>{% endif %}
+            {% if row['megapixels'] %}<span>{{ row['megapixels'] }} MP</span>{% endif %}
+            {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
+          </div>
+          <div class="idr">
+            {% if row['vendor'] %}<span>{{ row['vendor'] }}</span>{% endif %}
+            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
+            {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
+          </div>
         </div>
 
       {# ── LENSES ── #}
@@ -106,6 +114,12 @@
             {% if row['mount'] %}<span>{{ row['mount'] }}</span>{% endif %}
             {% if row['aperture'] %}<span><span class="lbl">f/</span>{{ row['aperture'] }}</span>{% endif %}
             {% if row['length'] %}<span>{{ row['length']|int }}mm</span>{% endif %}
+            {% if row['filter_size'] %}<span><span class="lbl">Filter</span> {{ row['filter_size']|int }}mm</span>{% endif %}
+          </div>
+          <div class="idr">
+            {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
+            {% if row['vendor'] %}<span>{{ row['vendor'] }}</span>{% endif %}
+            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
           </div>
           {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
         </div>
@@ -119,10 +133,15 @@
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['type'] %}<span>{{ row['type'] }}</span>{% endif %}
+            {% if row['action'] %}<span>{{ row['action'] }}</span>{% endif %}
             {% if row['nib'] %}<span><span class="lbl">Nib</span> {{ row['nib'] }}</span>{% endif %}
+            {% if row['cartridge'] %}<span>{{ row['cartridge'] }}</span>{% endif %}
           </div>
-          {% if row['vendor'] %}<div class="idr"><span>{{ row['vendor'] }}</span></div>{% endif %}
-          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['vendor'] %}<span>{{ row['vendor'] }}</span>{% endif %}
+            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
+            {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
+          </div>
         </div>
 
       {# ── ART ── #}
@@ -135,8 +154,16 @@
           <div class="idr">
             {% if row['medium'] %}<span>{{ row['medium'] }}</span>{% endif %}
             {% if row['year'] %}<span>{{ row['year'] }}</span>{% endif %}
+            {% if row['dimensions'] %}<span>{{ row['dimensions'] }}</span>{% endif %}
           </div>
-          {% if row['location'] %}<div class="idr"><span>{{ row['location'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['vendor'] %}<span>{{ row['vendor'] }}</span>{% endif %}
+            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
+          </div>
+          <div class="idr">
+            {% if row['location'] %}<span>{{ row['location'] }}</span>{% endif %}
+            {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
+          </div>
         </div>
 
       {# ── VEHICLES ── #}
@@ -149,9 +176,14 @@
           <div class="idr">
             {% if row['year'] %}<span>{{ row['year'] }}</span>{% endif %}
             {% if row['state'] %}<span>{{ row['state'] }}</span>{% endif %}
+            {% if row['tags'] %}<span>{{ row['tags'] }}</span>{% endif %}
           </div>
           {% if row['vin'] %}<div class="idr"><span><span class="lbl">VIN</span> {{ row['vin'] }}</span></div>{% endif %}
-          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['vendor'] %}<span>{{ row['vendor'] }}</span>{% endif %}
+            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
+            {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
+          </div>
         </div>
 
       {# ── RECORDINGS ── #}
@@ -165,8 +197,13 @@
             {% if row['type'] %}<span>{{ row['type'] }}</span>{% endif %}
             {% if row['genre'] %}<span>{{ row['genre'] }}</span>{% endif %}
             {% if row['year_recorded'] %}<span>{{ row['year_recorded'] }}</span>{% endif %}
+            {% if row['speed'] %}<span>{{ row['speed'] }}</span>{% endif %}
           </div>
-          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['vendor'] %}<span>{{ row['vendor'] }}</span>{% endif %}
+            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
+            {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
+          </div>
         </div>
 
       {# ── RIFLES ── #}
@@ -180,8 +217,11 @@
             {% if row['caliber'] %}<span>{{ row['caliber'] }}</span>{% endif %}
             {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
           </div>
-          {% if row['vendor'] %}<div class="idr"><span>{{ row['vendor'] }}</span></div>{% endif %}
-          {% if row['property'] %}<div class="idr"><span>{{ row['property'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['vendor'] %}<span>{{ row['vendor'] }}</span>{% endif %}
+            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
+            {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
+          </div>
         </div>
 
       {# ── CREDIT CARDS ── #}
@@ -193,22 +233,29 @@
           {% if row['number'] %}<div class="idr"><span>{{ row['number'] }}</span></div>{% endif %}
           <div class="idr">
             {% if row['expiration'] %}<span><span class="lbl">Exp</span> {{ row['expiration'] }}</span>{% endif %}
+            {% if row['billing_short'] %}<span>{{ row['billing_short'] }}</span>{% endif %}
             {% if row['owner'] %}<span>{{ row['owner'] }}</span>{% endif %}
           </div>
+          {% if row['description'] %}<div class="idr"><span>{{ row['description'] }}</span></div>{% endif %}
         </div>
 
       {# ── PROPERTIES ── #}
       {% elif category == 'properties' %}
         <div class="item-line1">
           <span class="item-brand">{{ row['name'] or '—' }}</span>
+          {% if row['short_name'] %}<span class="item-model">{{ row['short_name'] }}</span>{% endif %}
         </div>
         <div class="item-detail-rows">
           {% if row['address'] %}<div class="idr"><span>{{ row['address'] }}</span></div>{% endif %}
           <div class="idr">
             {% if row['type'] %}<span>{{ row['type'] }}</span>{% endif %}
-            {% if row['year_built'] %}<span>{{ row['year_built'] }}</span>{% endif %}
+            {% if row['year_built'] %}<span><span class="lbl">Built</span> {{ row['year_built'] }}</span>{% endif %}
+            {% if row['llc'] %}<span>{{ row['llc'] }}</span>{% endif %}
           </div>
-          {% if row['status'] %}<div class="idr"><span>{{ row['status'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
+            {% if row['status'] %}<span>{{ row['status'] }}</span>{% endif %}
+          </div>
         </div>
 
       {# ── PERSONS ── #}
@@ -221,7 +268,8 @@
           {% if row['home_address'] %}<div class="idr"><span>{{ row['home_address'] }}</span></div>{% endif %}
           <div class="idr">
             {% if row['birth_date'] %}<span><span class="lbl">DOB</span> {{ row['birth_date'] }}</span>{% endif %}
-            {% if row['blood_type'] %}<span>{{ row['blood_type'] }}</span>{% endif %}
+            {% if row['blood_type'] %}<span><span class="lbl">Blood</span> {{ row['blood_type'] }}</span>{% endif %}
+            {% if row['spouse'] %}<span><span class="lbl">Spouse</span> {{ row['spouse'] }}</span>{% endif %}
           </div>
         </div>
 
