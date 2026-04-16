@@ -33,7 +33,7 @@ CATEGORIES = {
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
     },
     'lenses': {
-        'name': 'Lenses', 'icon': '🔭', 'table': 'lenses',
+        'name': 'Lenses', 'icon': '📷', 'table': 'lenses',
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
     },
     'pens': {
