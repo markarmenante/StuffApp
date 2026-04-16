@@ -152,6 +152,7 @@ a { color: var(--blue); text-decoration: none; }
   text-decoration: none; color: inherit;
   cursor: pointer;
 }
+.item-row:nth-child(even) { background: #f7f7f7; }
 .item-row:hover { background: #f0f0ff; text-decoration: none; }
 
 .item-thumb {
