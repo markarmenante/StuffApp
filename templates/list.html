@@ -7,6 +7,10 @@
   <span class="list-count">{{ result_count }}</span>
   <span class="list-cat-title">{{ cat_info.name }}</span>
   <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
+  {% if category == 'coins' %}
+  {% set _pgs = ((result_count + 34) // 35) if result_count else 0 %}
+  <a href="{{ url_for('coins_print_pdf', q=q) }}" class="toolbar-btn" title="Print PDF cards (35 per page)" target="_blank">🖨 {{ _pgs }} pgs</a>
+  {% endif %}
   <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
     <div class="search-wrap">
       <button type="submit" title="Search">🔍</button>

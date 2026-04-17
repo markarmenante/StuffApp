@@ -3,7 +3,7 @@ import uuid
 import os
 from datetime import datetime
 from flask import (Flask, g, render_template, request, redirect, url_for,
-                   flash, send_from_directory, abort, jsonify)
+                   flash, send_from_directory, abort, jsonify, Response)
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -1099,6 +1099,152 @@ def import_watches_missing():
     total = db.execute('SELECT COUNT(*) FROM watches').fetchone()[0]
     return jsonify(inserted=inserted, skipped_existing=skipped_existing,
                    skipped_bad=skipped_bad, total=total)
+
+
+@app.route('/coins/print-pdf')
+def coins_print_pdf():
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import mm
+    import io
+
+    db = get_db()
+    q = (request.args.get('q') or '').strip()
+    if q:
+        like = f'%{q}%'
+        rows = db.execute(
+            "SELECT * FROM coins WHERE coin_id LIKE ? OR authority LIKE ? OR region LIKE ? "
+            "OR denomination LIKE ? OR mint LIKE ? OR obv_rev LIKE ? OR description LIKE ? "
+            "ORDER BY CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id",
+            [like]*7).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM coins ORDER BY CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id"
+        ).fetchall()
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    W, H = letter
+    card = 35 * mm  # 35mm square (coin-tray label size)
+    gap = 1.5 * mm
+    cols = int((W + gap) // (card + gap))
+    rows_per_page = int((H + gap) // (card + gap))
+    total_w = cols * card + (cols - 1) * gap
+    total_h = rows_per_page * card + (rows_per_page - 1) * gap
+    left = (W - total_w) / 2
+    top = (H + total_h) / 2  # top of grid
+
+    per_page = cols * rows_per_page
+    for idx, coin in enumerate(rows):
+        slot = idx % per_page
+        if idx > 0 and slot == 0:
+            c.showPage()
+        col_i = slot % cols
+        row_i = slot // cols
+        x = left + col_i * (card + gap)
+        y = top - (row_i + 1) * card - row_i * gap
+        _draw_coin_card(c, coin, x, y, card, card)
+    c.save()
+    buf.seek(0)
+    return Response(buf.read(), mimetype='application/pdf',
+                    headers={'Content-Disposition': 'inline; filename="coins.pdf"'})
+
+
+def _metal_short(metal):
+    if not metal:
+        return ''
+    return metal.split(' ')[0] if ' ' in metal else metal
+
+
+def _fit_text(c, text, max_width, font_name, font_size):
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    if not text:
+        return ''
+    while text and stringWidth(text, font_name, font_size) > max_width:
+        text = text[:-1]
+    return text
+
+
+def _draw_coin_card(c, coin, x, y, w, h):
+    from reportlab.lib.utils import ImageReader
+
+    c.setStrokeColorRGB(0.55, 0.55, 0.55)
+    c.setLineWidth(0.3)
+    c.rect(x, y, w, h, stroke=1, fill=0)
+
+    pad = 3
+    inner_w = w - 2 * pad
+
+    # Top row: authority (bold, left) + date range (right)
+    title = (coin['authority'] or coin['region'] or '').strip()
+    date_from = (coin['date_1_text'] or '').strip()
+    date_to = (coin['date_2_text'] or '').strip()
+    date_range = f'{date_from} - {date_to}' if date_from and date_to else (date_from or date_to)
+
+    top_y = y + h - pad - 6
+    c.setFont('Helvetica-Bold', 6)
+    c.drawString(x + pad, top_y, _fit_text(c, title, inner_w * 0.55, 'Helvetica-Bold', 6))
+    c.setFont('Helvetica', 5)
+    c.drawRightString(x + w - pad, top_y, _fit_text(c, date_range, inner_w * 0.45, 'Helvetica', 5))
+
+    # Description (obv_rev), full-width under title
+    obv = (coin['obv_rev'] or '').strip()
+    desc_y = top_y - 7
+    if obv:
+        c.setFont('Helvetica', 5)
+        c.drawString(x + pad, desc_y, _fit_text(c, obv, inner_w, 'Helvetica', 5))
+
+    # Bottom row: coin_id (left), weight (right)
+    bottom_y = y + pad
+    if coin['coin_id']:
+        c.setFont('Helvetica-Bold', 5)
+        c.drawString(x + pad, bottom_y, coin['coin_id'])
+    if coin['weight'] is not None:
+        c.setFont('Helvetica', 5)
+        c.drawRightString(x + w - pad, bottom_y, f'{coin["weight"]:g} g')
+
+    # Middle area: image (left) + specs stack (right)
+    mid_top = desc_y - 3
+    mid_bottom = bottom_y + 7
+    mid_h = mid_top - mid_bottom
+    if mid_h < 10:
+        return
+    img_w = w * 0.5
+
+    # Image
+    img_path = None
+    for fld in ('image_1', 'image_2'):
+        if coin[fld]:
+            p = os.path.join(UPLOAD_FOLDER, coin[fld])
+            if os.path.exists(p):
+                img_path = p
+                break
+    if img_path:
+        try:
+            c.drawImage(ImageReader(img_path), x + pad, mid_bottom,
+                        width=img_w - pad, height=mid_h,
+                        preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+
+    # Right-side specs: denomination, mint, metal (short), size
+    specs = []
+    if coin['denomination']: specs.append(coin['denomination'].strip())
+    if coin['mint']: specs.append(coin['mint'].strip())
+    m = _metal_short(coin['metal'])
+    if m: specs.append(m)
+    if coin['size'] is not None: specs.append(f"{coin['size']:g} mm")
+
+    c.setFont('Helvetica', 5)
+    spec_count = len(specs)
+    if spec_count:
+        step = min(7, mid_h / max(spec_count, 1))
+        sy = mid_top - 5
+        for s in specs:
+            c.drawRightString(x + w - pad,
+                              sy,
+                              _fit_text(c, s, w * 0.5 - pad, 'Helvetica', 5))
+            sy -= step
 
 
 @app.route('/admin/import-audio-missing', methods=['POST'])
