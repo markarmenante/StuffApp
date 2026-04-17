@@ -464,7 +464,7 @@ def get_typeahead(table, *fields):
 TYPEAHEAD_FIELDS = {
     'watches':      ('brand', 'dial_color', 'strap_color', 'vendor'),
     'coins':        ('region', 'mint', 'denomination', 'vendor'),
-    'art':          ('artist', 'medium', 'vendor'),
+    'art':          ('artist', 'medium', 'vendor', 'property', 'location'),
     'cameras':      ('make', 'vendor'),
     'lenses':       ('make', 'mount', 'vendor'),
     'pens':         ('make', 'vendor'),
@@ -898,56 +898,6 @@ def is_image_filter(filename):
 @app.context_processor
 def inject_globals():
     return {'CATEGORIES': CATEGORIES, 'now': datetime.utcnow()}
-
-
-# ---------------------------------------------------------------------------
-# Temporary bulk table import (remove after upload)
-# ---------------------------------------------------------------------------
-
-IMPORT_BULK_SECRET = 'stuffapp-bulk-import-2026'
-IMPORT_ALLOWED_TABLES = {
-    'cameras', 'lenses', 'pens', 'recordings', 'rifles', 'vehicles',
-    'properties', 'persons',
-}
-
-@app.route('/admin/import-table', methods=['POST'])
-def import_table():
-    if request.form.get('secret') != IMPORT_BULK_SECRET:
-        abort(403)
-    table = (request.form.get('table') or '').strip()
-    if table not in IMPORT_ALLOWED_TABLES:
-        return jsonify(error=f'table not allowed: {table}'), 400
-    f = request.files.get('db')
-    if not f:
-        return jsonify(error='no db file'), 400
-    tmp_path = os.path.join(DATA_DIR, f'_import_{table}.db')
-    try:
-        f.save(tmp_path)
-        src = sqlite3.connect(tmp_path)
-        src.row_factory = sqlite3.Row
-        src_cols = [r[1] for r in src.execute(f"PRAGMA table_info({table})").fetchall()]
-        rows = src.execute(f"SELECT * FROM {table}").fetchall()
-        src.close()
-        if not src_cols:
-            return jsonify(error='source table missing or empty schema'), 400
-
-        db = get_db()
-        dst_cols = [r[1] for r in db.execute(f"PRAGMA table_info({table})").fetchall()]
-        cols = [c for c in src_cols if c in dst_cols]
-        db.execute(f'DELETE FROM {table}')
-        placeholders = ', '.join(['?'] * len(cols))
-        db.executemany(
-            f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})",
-            [tuple(r[c] for c in cols) for r in rows],
-        )
-        db.commit()
-        n = db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
-    except Exception as e:
-        return jsonify(error=str(e)), 500
-    finally:
-        try: os.remove(tmp_path)
-        except OSError: pass
-    return jsonify(ok=True, table=table, rows=n)
 
 
 # ---------------------------------------------------------------------------
