@@ -1149,11 +1149,11 @@ def coins_print_pdf():
     c = canvas.Canvas(buf, pagesize=letter)
     W, H = letter
     card = 35 * mm  # 35mm square (coin-tray label size)
-    gap = 1.5 * mm
-    cols = int((W + gap) // (card + gap))
-    rows_per_page = int((H + gap) // (card + gap))
-    total_w = cols * card + (cols - 1) * gap
-    total_h = rows_per_page * card + (rows_per_page - 1) * gap
+    gap = 0  # cards abut each other for easier cutting
+    cols = int(W // card)
+    rows_per_page = int(H // card)
+    total_w = cols * card
+    total_h = rows_per_page * card
     left = (W - total_w) / 2
     top = (H + total_h) / 2  # top of grid
 
@@ -1191,8 +1191,8 @@ def _fit_text(c, text, max_width, font_name, font_size):
 def _draw_coin_card(c, coin, x, y, w, h):
     from reportlab.lib.utils import ImageReader
 
-    c.setStrokeColorRGB(0.55, 0.55, 0.55)
-    c.setLineWidth(0.3)
+    c.setStrokeColorRGB(0.25, 0.25, 0.25)
+    c.setLineWidth(0.9)
     c.rect(x, y, w, h, stroke=1, fill=0)
 
     pad = 3
@@ -1204,31 +1204,31 @@ def _draw_coin_card(c, coin, x, y, w, h):
     date_to = (coin['date_2_text'] or '').strip()
     date_range = f'{date_from} - {date_to}' if date_from and date_to else (date_from or date_to)
 
-    top_y = y + h - pad - 6
-    c.setFont('Helvetica-Bold', 6)
-    c.drawString(x + pad, top_y, _fit_text(c, title, inner_w * 0.55, 'Helvetica-Bold', 6))
-    c.setFont('Helvetica', 5)
-    c.drawRightString(x + w - pad, top_y, _fit_text(c, date_range, inner_w * 0.45, 'Helvetica', 5))
+    top_y = y + h - pad - 7
+    c.setFont('Helvetica-Bold', 7)
+    c.drawString(x + pad, top_y, _fit_text(c, title, inner_w * 0.55, 'Helvetica-Bold', 7))
+    c.setFont('Helvetica', 6)
+    c.drawRightString(x + w - pad, top_y, _fit_text(c, date_range, inner_w * 0.45, 'Helvetica', 6))
 
     # Description (obv_rev), full-width under title
     obv = (coin['obv_rev'] or '').strip()
-    desc_y = top_y - 7
+    desc_y = top_y - 8
     if obv:
-        c.setFont('Helvetica', 5)
-        c.drawString(x + pad, desc_y, _fit_text(c, obv, inner_w, 'Helvetica', 5))
+        c.setFont('Helvetica', 6)
+        c.drawString(x + pad, desc_y, _fit_text(c, obv, inner_w, 'Helvetica', 6))
 
     # Bottom row: coin_id (left), weight (right)
     bottom_y = y + pad
     if coin['coin_id']:
-        c.setFont('Helvetica-Bold', 5)
+        c.setFont('Helvetica-Bold', 6)
         c.drawString(x + pad, bottom_y, coin['coin_id'])
     if coin['weight'] is not None:
-        c.setFont('Helvetica', 5)
+        c.setFont('Helvetica', 6)
         c.drawRightString(x + w - pad, bottom_y, f'{coin["weight"]:g} g')
 
     # Middle area: image (left) + specs stack (right)
     mid_top = desc_y - 3
-    mid_bottom = bottom_y + 7
+    mid_bottom = bottom_y + 8
     mid_h = mid_top - mid_bottom
     if mid_h < 10:
         return
@@ -1258,15 +1258,15 @@ def _draw_coin_card(c, coin, x, y, w, h):
     if m: specs.append(m)
     if coin['size'] is not None: specs.append(f"{coin['size']:g} mm")
 
-    c.setFont('Helvetica', 5)
+    c.setFont('Helvetica', 6)
     spec_count = len(specs)
     if spec_count:
-        step = min(7, mid_h / max(spec_count, 1))
-        sy = mid_top - 5
+        step = min(8, mid_h / max(spec_count, 1))
+        sy = mid_top - 6
         for s in specs:
             c.drawRightString(x + w - pad,
                               sy,
-                              _fit_text(c, s, w * 0.5 - pad, 'Helvetica', 5))
+                              _fit_text(c, s, w * 0.5 - pad, 'Helvetica', 6))
             sy -= step
 
 
