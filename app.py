@@ -1138,11 +1138,11 @@ def coins_print_pdf():
         rows = db.execute(
             "SELECT * FROM coins WHERE coin_id LIKE ? OR authority LIKE ? OR region LIKE ? "
             "OR denomination LIKE ? OR mint LIKE ? OR obv_rev LIKE ? OR description LIKE ? "
-            "ORDER BY CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id",
+            "ORDER BY (coin_id IS NULL OR TRIM(coin_id) = ''), CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id",
             [like]*7).fetchall()
     else:
         rows = db.execute(
-            "SELECT * FROM coins ORDER BY CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id"
+            "SELECT * FROM coins ORDER BY (coin_id IS NULL OR TRIM(coin_id) = ''), CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id"
         ).fetchall()
 
     buf = io.BytesIO()
