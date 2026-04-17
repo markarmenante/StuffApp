@@ -533,7 +533,13 @@ def get_file_fields(category):
 
 EXCLUDED_STATUSES = ('Owned', 'Sold', 'Gifted', 'Own')  # dot filter excludes these
 
-def build_search_query(category, q, dot=False):
+COIN_FILTERS = {
+    'ca_ancient': ("date_1 < 1000 AND property_name IN ('Carp','Carpinteria')", []),
+    'ny_ancient': ("date_1 < 1000 AND property_name = 'NYC'", []),
+}
+
+
+def build_search_query(category, q, dot=False, coin_filter=None):
     """Build a SELECT with optional text search and/or dot (unresolved) filter."""
     table = CATEGORIES[category]['table']
     text_fields = [f['name'] for f in FIELDS[category]
@@ -556,6 +562,11 @@ def build_search_query(category, q, dot=False):
             placeholders = ','.join(['?' for _ in EXCLUDED_STATUSES])
             wheres.append(f"(COALESCE({status_col},'') NOT IN ({placeholders}))")
             params += list(EXCLUDED_STATUSES)
+
+    if category == 'coins' and coin_filter and coin_filter in COIN_FILTERS:
+        clause, extra_params = COIN_FILTERS[coin_filter]
+        wheres.append(f"({clause})")
+        params += list(extra_params)
 
     where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
@@ -618,7 +629,8 @@ def list_view(category):
     db = get_db()
     q   = request.args.get('q', '').strip()
     dot = request.args.get('dot', '') == '1'
-    sql, params = build_search_query(category, q, dot=dot)
+    coin_filter = request.args.get('filter', '').strip() or None
+    sql, params = build_search_query(category, q, dot=dot, coin_filter=coin_filter)
     rows = db.execute(sql, params).fetchall()
     counts = get_counts()
     cat_info = CATEGORIES[category]
@@ -632,6 +644,7 @@ def list_view(category):
                            categories=CATEGORIES,
                            q=q,
                            dot=dot,
+                           coin_filter=coin_filter,
                            result_count=len(rows),
                            extra_fields=extra_fields,
                            fields=FIELDS[category])
