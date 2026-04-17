@@ -283,6 +283,25 @@ CREATE TABLE IF NOT EXISTS properties (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS audio (
+    id TEXT PRIMARY KEY,
+    make TEXT,
+    model TEXT,
+    type TEXT,
+    serial_number TEXT,
+    date DATE,
+    price REAL,
+    vendor TEXT,
+    notes TEXT,
+    owner TEXT,
+    property TEXT,
+    status TEXT,
+    image TEXT,
+    receipt TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS persons (
     id TEXT PRIMARY KEY,
     name TEXT,

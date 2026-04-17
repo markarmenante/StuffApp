@@ -52,6 +52,10 @@ CATEGORIES = {
         'name': 'Music', 'icon': '🎵', 'table': 'recordings',
         'label_field': 'artist', 'sublabel_field': 'title', 'image_field': 'image',
     },
+    'audio': {
+        'name': 'Audio', 'icon': '🔊', 'table': 'audio',
+        'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
+    },
     'rifles': {
         'name': 'Rifles', 'icon': '🔫', 'table': 'rifles',
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
@@ -104,6 +108,7 @@ VALUE_LISTS = {
     'recording_type': ['LP','CD','SACD','Digital','Cassette','Reel'],
     'recording_genre': ['Classical','Jazz','Rock','Pop','Blues','Folk','Electronic','World'],
     'property_type': ['Residential','Commercial','Land'],
+    'audio_type': ['Amplifier','CD Player','DAC','Pre-Amp','Scaler','Speakers','Streamer','Tape Deck','Turntable','Phono Stage','Headphones','Cables','Other'],
 }
 
 FIELDS = {
@@ -307,6 +312,23 @@ FIELDS = {
         {'name': 'image',           'label': 'Cover Image',       'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
     ],
+    'audio': [
+        {'name': 'make',            'label': 'Make',              'type': 'text'},
+        {'name': 'model',           'label': 'Model',             'type': 'text'},
+        {'name': 'type',            'label': 'Type',              'type': 'select',
+         'options': ['', 'Amplifier', 'CD Player', 'DAC', 'Pre-Amp', 'Scaler', 'Speakers', 'Streamer', 'Tape Deck', 'Turntable', 'Phono Stage', 'Headphones', 'Cables', 'Other']},
+        {'name': 'serial_number',   'label': 'Serial Number',     'type': 'text'},
+        {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},
+        {'name': 'price',           'label': 'Price',             'type': 'number'},
+        {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
+        {'name': 'notes',           'label': 'Notes',             'type': 'textarea'},
+        {'name': 'owner',           'label': 'Owner',             'type': 'text'},
+        {'name': 'property',        'label': 'Property',          'type': 'text'},
+        {'name': 'status',          'label': 'Status',            'type': 'select',
+         'options': ['', 'Owned', 'Sold', 'Loaned']},
+        {'name': 'image',           'label': 'Image',             'type': 'file'},
+        {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
+    ],
     'rifles': [
         {'name': 'make',            'label': 'Make',              'type': 'text'},
         {'name': 'model',           'label': 'Model',             'type': 'text'},
@@ -413,6 +435,7 @@ LIST_EXTRA_FIELDS = {
     'art':          ['medium', 'year', 'dimensions', 'vendor', 'price', 'location', 'property'],
     'vehicles':     ['year', 'vin', 'state', 'tags', 'vendor', 'price', 'property'],
     'recordings':   ['type', 'genre', 'year_recorded', 'speed', 'vendor', 'price', 'property'],
+    'audio':        ['type', 'serial_number', 'vendor', 'price', 'property'],
     'rifles':       ['caliber', 'serial_number', 'vendor', 'price', 'property'],
     'credit_cards': ['number', 'expiration', 'billing_short', 'description', 'owner'],
     'properties':   ['type', 'address', 'short_name', 'year_built', 'llc', 'price', 'status'],
@@ -476,6 +499,7 @@ TYPEAHEAD_FIELDS = {
     'pens':         ('make', 'vendor'),
     'vehicles':     ('make', 'vendor'),
     'recordings':   ('artist', 'genre', 'vendor'),
+    'audio':        ('make', 'vendor'),
     'rifles':       ('make', 'caliber', 'vendor'),
 }
 
@@ -1073,6 +1097,56 @@ def import_watches_missing():
 
     db.commit()
     total = db.execute('SELECT COUNT(*) FROM watches').fetchone()[0]
+    return jsonify(inserted=inserted, skipped_existing=skipped_existing,
+                   skipped_bad=skipped_bad, total=total)
+
+
+@app.route('/admin/import-audio-missing', methods=['POST'])
+def import_audio_missing():
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    existing_ids = {(r['id'] or '').lower() for r in db.execute("SELECT id FROM audio")}
+
+    inserted = 0
+    skipped_existing = 0
+    skipped_bad = 0
+    now = datetime.utcnow().isoformat()
+
+    for row in _csv_rows('Audio.csv'):
+        if len(row) < 14:
+            skipped_bad += 1
+            continue
+        csv_uuid = _mclean(row[9])
+        if not csv_uuid:
+            skipped_bad += 1
+            continue
+        if csv_uuid.lower() in existing_ids:
+            skipped_existing += 1
+            continue
+
+        db.execute('''
+            INSERT INTO audio (
+                id, make, model, type, date, price, vendor, notes, property,
+                created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        ''', (
+            csv_uuid,
+            _mclean(row[0]),          # make
+            _mclean(row[4]),          # model
+            _mclean(row[12]),         # type
+            _mdate(row[3]),           # date
+            _mnum(row[8]),            # price
+            _mclean(row[13]),         # vendor
+            _mclean(row[7]),          # notes
+            _mclean(row[10]),         # property
+            now, now,
+        ))
+        inserted += 1
+        existing_ids.add(csv_uuid.lower())
+
+    db.commit()
+    total = db.execute('SELECT COUNT(*) FROM audio').fetchone()[0]
     return jsonify(inserted=inserted, skipped_existing=skipped_existing,
                    skipped_bad=skipped_bad, total=total)
 
