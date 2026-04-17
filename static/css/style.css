@@ -142,6 +142,10 @@ a { color: var(--blue); text-decoration: none; }
 .toolbar-btn:hover { background: rgba(0,0,0,.08); text-decoration: none; }
 .toolbar-btn.add { background: var(--blue); border-color: var(--blue); color: #fff; font-size: 20px; font-weight: 300; line-height: 1; }
 .toolbar-btn.add:hover { background: #0050c0; }
+.toolbar-btn.pill {
+  width: auto; padding: 0 12px; height: 26px; border-radius: 13px;
+  font-size: 12px; font-weight: 500; white-space: nowrap; gap: 4px;
+}
 
 /* ── ITEM LIST ── */
 .item-list { background: var(--surface); }
