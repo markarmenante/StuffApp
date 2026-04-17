@@ -886,6 +886,12 @@ def inject_globals():
 
 IMPORT_ART_SECRET = 'stuffapp-art-import-2026'
 
+ART_COLS = (
+    'id', 'title', 'artist', 'year', 'medium', 'dimensions', 'date',
+    'price', 'vendor', 'notes', 'owner', 'location', 'property', 'status',
+    'image', 'receipt', 'created_at', 'updated_at',
+)
+
 @app.route('/admin/import-art', methods=['POST'])
 def import_art_table():
     if request.form.get('secret') != IMPORT_ART_SECRET:
@@ -894,17 +900,24 @@ def import_art_table():
     if not f:
         return jsonify(error='no db file'), 400
     tmp_path = os.path.join(DATA_DIR, '_import_tmp.db')
-    f.save(tmp_path)
     try:
+        f.save(tmp_path)
+        src = sqlite3.connect(tmp_path)
+        src.row_factory = sqlite3.Row
+        rows = src.execute(f"SELECT {', '.join(ART_COLS)} FROM art").fetchall()
+        src.close()
+
         db = get_db()
         db.execute('DELETE FROM art')
-        db.execute("ATTACH DATABASE ? AS src", [tmp_path])
-        cols = [r[1] for r in db.execute("PRAGMA src.table_info(art)").fetchall()]
-        col_list = ', '.join(cols)
-        db.execute(f"INSERT INTO art ({col_list}) SELECT {col_list} FROM src.art")
-        db.execute("DETACH DATABASE src")
+        placeholders = ', '.join(['?'] * len(ART_COLS))
+        db.executemany(
+            f"INSERT INTO art ({', '.join(ART_COLS)}) VALUES ({placeholders})",
+            [tuple(r[c] for c in ART_COLS) for r in rows],
+        )
         db.commit()
         n = db.execute('SELECT COUNT(*) FROM art').fetchone()[0]
+    except Exception as e:
+        return jsonify(error=str(e)), 500
     finally:
         try: os.remove(tmp_path)
         except OSError: pass
