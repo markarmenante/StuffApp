@@ -1257,6 +1257,37 @@ def _draw_coin_card(c, coin, x, y, w, h):
             sy -= step
 
 
+@app.route('/admin/fix-coin-region-mint', methods=['POST'])
+def fix_coin_region_mint():
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    updated = 0
+    not_found = 0
+    for row in _csv_rows('Coin.csv'):
+        if len(row) < 45:
+            continue
+        coin_id = _mclean(row[1])
+        csv_uuid = _mclean(row[29])
+        mint = _mclean(row[21])
+        region = _mclean(row[35])
+        if coin_id:
+            r = db.execute("UPDATE coins SET mint = ?, region = ? WHERE coin_id = ?",
+                           (mint, region, coin_id))
+            if r.rowcount:
+                updated += r.rowcount
+                continue
+        if csv_uuid:
+            r = db.execute("UPDATE coins SET mint = ?, region = ? WHERE lower(id) = lower(?)",
+                           (mint, region, csv_uuid))
+            if r.rowcount:
+                updated += r.rowcount
+                continue
+        not_found += 1
+    db.commit()
+    return jsonify(updated=updated, not_found=not_found)
+
+
 @app.route('/admin/import-audio-missing', methods=['POST'])
 def import_audio_missing():
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
