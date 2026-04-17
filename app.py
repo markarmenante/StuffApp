@@ -533,9 +533,15 @@ def get_file_fields(category):
 
 EXCLUDED_STATUSES = ('Owned', 'Sold', 'Gifted', 'Own')  # dot filter excludes these
 
-COIN_FILTERS = {
-    'ca_ancient': ("date_1 < 1000 AND property_name IN ('Carp','Carpinteria')", []),
-    'ny_ancient': ("date_1 < 1000 AND property_name = 'NYC'", []),
+CATEGORY_FILTERS = {
+    'coins': {
+        'ca_ancient': ("date_1 < 1000 AND property_name IN ('Carp','Carpinteria')", []),
+        'ny_ancient': ("date_1 < 1000 AND property_name = 'NYC'", []),
+    },
+    'audio': {
+        'carp':   ("property = 'Carpinteria'", []),
+        'martis': ("property = 'Truckee'", []),
+    },
 }
 
 
@@ -563,8 +569,9 @@ def build_search_query(category, q, dot=False, coin_filter=None):
             wheres.append(f"(COALESCE({status_col},'') NOT IN ({placeholders}))")
             params += list(EXCLUDED_STATUSES)
 
-    if category == 'coins' and coin_filter and coin_filter in COIN_FILTERS:
-        clause, extra_params = COIN_FILTERS[coin_filter]
+    cat_filters = CATEGORY_FILTERS.get(category, {})
+    if coin_filter and coin_filter in cat_filters:
+        clause, extra_params = cat_filters[coin_filter]
         wheres.append(f"({clause})")
         params += list(extra_params)
 
