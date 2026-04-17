@@ -86,7 +86,7 @@ VALUE_LISTS = {
     'strap_color': ['Black','Blue','Blue/Gray','Brown','Burgundy','Dk Brown','Eggplant','Gold','Gray','Green','Lt Brown','Navy Blue','Red','Rose Gold','Stainless','Tan','Titanium','White Gold'],
     'owner': ['Mark','Young'],
     'property': ['Carp','NYC','SF','Truckee'],
-    'status': ['Owned','Sold','Loaned'],
+    'status': ['Own','Owned','Ordered','Sold','Loaned','Gifted','Consigned','Lost'],
     'coin_status': ['Owned','Sold','Loaned'],
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
     'coin_grade': ['BU','FDC','MS','PF','AU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
