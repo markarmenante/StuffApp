@@ -82,21 +82,23 @@
       action="{% if is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
       enctype="multipart/form-data" id="mainForm">
 
-  <!-- Header bar: Brand | < > ← -->
+  <!-- Header bar: (New label for new records only) | < > ← -->
   <div class="detail-header">
     <span class="detail-brand">
-      {% if category == 'watches' %}{{ 'New Watch' if is_new else '' }}
-      {% elif category == 'coins' %}{{ 'New Coin' if is_new else '' }}
-      {% elif category == 'cameras' %}{{ val('make') or 'New Camera' }}
-      {% elif category == 'lenses' %}{{ val('make') or 'New Lens' }}
-      {% elif category == 'pens' %}{{ val('make') or 'New Pen' }}
-      {% elif category == 'art' %}{{ val('artist') or 'New Artwork' }}
-      {% elif category == 'vehicles' %}{{ val('make') or 'New Vehicle' }}
-      {% elif category == 'recordings' %}{{ val('artist') or 'New Recording' }}
-      {% elif category == 'rifles' %}{{ val('make') or 'New Rifle' }}
-      {% elif category == 'credit_cards' %}{{ val('name') or 'New Card' }}
-      {% elif category == 'properties' %}{{ val('name') or 'New Property' }}
-      {% elif category == 'persons' %}{{ val('name') or 'New Person' }}
+      {% if is_new %}
+      {% if category == 'watches' %}New Watch
+      {% elif category == 'coins' %}New Coin
+      {% elif category == 'cameras' %}New Camera
+      {% elif category == 'lenses' %}New Lens
+      {% elif category == 'pens' %}New Pen
+      {% elif category == 'art' %}New Artwork
+      {% elif category == 'vehicles' %}New Vehicle
+      {% elif category == 'recordings' %}New Recording
+      {% elif category == 'rifles' %}New Rifle
+      {% elif category == 'credit_cards' %}New Card
+      {% elif category == 'properties' %}New Property
+      {% elif category == 'persons' %}New Person
+      {% endif %}
       {% endif %}
     </span>
     {% if not is_new %}
