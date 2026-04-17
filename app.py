@@ -558,7 +558,17 @@ def build_search_query(category, q, dot=False):
             params += list(EXCLUDED_STATUSES)
 
     where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
-    return f"SELECT * FROM {table} {where_clause} ORDER BY created_at DESC", params
+    order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
+    return f"SELECT * FROM {table} {where_clause} ORDER BY {order_by}", params
+
+
+CATEGORY_ORDER_BY = {
+    'coins': ("COALESCE(NULLIF(region, ''), 'zzz'), "
+              "COALESCE(NULLIF(authority, ''), 'zzz'), "
+              "COALESCE(date_1, 99999)"),
+    'watches': ("COALESCE(NULLIF(brand, ''), 'zzz'), "
+                "COALESCE(NULLIF(description, ''), 'zzz')"),
+}
 
 
 def next_coin_id(db):
@@ -1175,8 +1185,8 @@ def _draw_coin_card(c, coin, x, y, w, h):
     pad = 3
     inner_w = w - 2 * pad
 
-    # Top row: authority (bold, left) + date range (right)
-    title = (coin['authority'] or coin['region'] or '').strip()
+    # Top row: region (bold, left) + date range (right)
+    title = (coin['region'] or coin['authority'] or '').strip()
     date_from = (coin['date_1_text'] or '').strip()
     date_to = (coin['date_2_text'] or '').strip()
     date_range = f'{date_from} - {date_to}' if date_from and date_to else (date_from or date_to)
