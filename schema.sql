@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS watches (
     price REAL,
     vendor TEXT,
     service_date DATE,
+    value REAL,
+    results TEXT,
     description TEXT,
     notes TEXT,
     owner TEXT,

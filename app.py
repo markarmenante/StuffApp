@@ -1,10 +1,18 @@
 import sqlite3
 import uuid
 import os
+import json
+import re
 from datetime import datetime
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response)
 from werkzeug.utils import secure_filename
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 app = Flask(__name__)
 app.secret_key = 'stuffapp-secret-key-change-me'
@@ -140,6 +148,8 @@ FIELDS = {
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
         {'name': 'service_date',    'label': 'Service Date',      'type': 'date'},
+        {'name': 'value',           'label': 'Value',             'type': 'number'},
+        {'name': 'results',         'label': 'Results',           'type': 'textarea'},
         {'name': 'description',     'label': 'Description',       'type': 'textarea'},
         {'name': 'notes',           'label': 'Notes',             'type': 'textarea'},
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
@@ -466,6 +476,15 @@ def init_db():
     schema_path = os.path.join(BASE_DIR, 'schema.sql')
     with open(schema_path, 'r') as f:
         db.executescript(f.read())
+    # Idempotent column additions for existing DBs
+    for stmt in (
+        'ALTER TABLE watches ADD COLUMN value REAL',
+        'ALTER TABLE watches ADD COLUMN results TEXT',
+    ):
+        try:
+            db.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
     db.commit()
 
 
@@ -620,6 +639,86 @@ def watch_hertz(beat):
     return None
 
 
+def fetch_watch_valuation(watch):
+    """Use Claude's web_search tool to estimate current market value.
+
+    Returns dict {value: float|None, results: str}. Raises RuntimeError
+    on missing key or API failure.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed. Run 'pip install anthropic'.")
+
+    brand = (watch['brand'] or '').strip()
+    model = (watch['model'] or '').strip()
+    reference = (watch['reference'] or '').strip()
+    year = watch['year']
+    metal = (watch['metal'] or '').strip()
+    description = (watch['description'] or '').strip()
+
+    ident = ' '.join(x for x in [brand, model, f'Ref. {reference}' if reference else '',
+                                 f'({metal})' if metal else '',
+                                 str(year) if year else ''] if x)
+
+    prompt = f"""You are valuing a specific wristwatch using public web data.
+
+Watch: {ident}
+Description: {description or '(none provided)'}
+
+Use web search to find CURRENT (2024-2026) market prices for THIS watch on:
+- chrono24.com (active listings — sample 3-6 listings)
+- watchbox.com / thewatchbox.com (if listed)
+- acollectedman.com (A Collected Man, if listed)
+- Recent public auction results (Phillips, Christie's, Sotheby's, Antiquorum, Bonhams)
+
+Compute a consensus value in USD (the average / central estimate of the comps you found).
+
+Respond with ONLY a JSON object (no markdown fences), with this shape:
+{{
+  "consensus_usd": 12345,
+  "results_markdown": "- Chrono24 (median of 5 active listings): $X,XXX — https://...\\n- Watchbox: $X,XXX — https://...\\n- A Collected Man: $X,XXX — https://...\\n- Phillips, May 2025: $X,XXX hammer — https://...\\n- Christie's, Nov 2024: $X,XXX hammer — https://..."
+}}
+
+Include the source URL on every line in results_markdown. If no comps are found, use null for consensus_usd and explain in results_markdown."""
+
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model='claude-sonnet-4-5',
+        max_tokens=2048,
+        tools=[{
+            'type': 'web_search_20250305',
+            'name': 'web_search',
+            'max_uses': 8,
+        }],
+        messages=[{'role': 'user', 'content': prompt}],
+    )
+
+    # Concatenate all text blocks in the final assistant message
+    text = ''
+    for block in resp.content:
+        if getattr(block, 'type', None) == 'text':
+            text += block.text
+    text = text.strip()
+
+    # Strip possible markdown code fences
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if not m:
+        raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
+    data = json.loads(m.group(0))
+
+    value = data.get('consensus_usd')
+    if value is not None:
+        try:
+            value = float(value)
+        except (ValueError, TypeError):
+            value = None
+    return {'value': value, 'results': data.get('results_markdown') or ''}
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -686,7 +785,7 @@ def new_record(category):
                 data[fname] = ','.join(checked)
             else:
                 val = request.form.get(fname, '').strip()
-                if field['type'] == 'number' or fname in ('price', 'beat', 'reserve'):
+                if field['type'] == 'number' or fname in ('price', 'beat', 'reserve', 'value'):
                     val = val.replace('$', '').replace(',', '').strip()
                 data[fname] = val if val else None
 
@@ -762,7 +861,7 @@ def detail_view(category, record_id):
             else:
                 val = request.form.get(fname, '').strip()
                 # Strip currency formatting before saving numeric fields
-                if field['type'] == 'number' or fname in ('price', 'beat', 'reserve'):
+                if field['type'] == 'number' or fname in ('price', 'beat', 'reserve', 'value'):
                     val = val.replace('$', '').replace(',', '').strip()
                 updates[fname] = val if val else None
 
@@ -834,7 +933,7 @@ def save_field(category, record_id):
         return jsonify({'error': 'Field not auto-saveable'}), 400
 
     # Strip currency/comma formatting for numeric fields
-    if field['type'] == 'number' or field_name in ('price', 'beat', 'reserve'):
+    if field['type'] == 'number' or field_name in ('price', 'beat', 'reserve', 'value'):
         value = str(value).replace('$', '').replace(',', '').strip()
 
     now = datetime.utcnow().isoformat()
@@ -859,6 +958,28 @@ def delete_record(category, record_id):
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
+
+
+@app.route('/watches/<record_id>/value', methods=['POST'])
+def watch_fetch_value(record_id):
+    """Search the web for current market value of this watch and store it."""
+    db = get_db()
+    watch = db.execute("SELECT * FROM watches WHERE id = ?", (record_id,)).fetchone()
+    if not watch:
+        return jsonify({'error': 'Watch not found'}), 404
+    try:
+        data = fetch_watch_valuation(watch)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    except Exception as e:
+        return jsonify({'error': f'Valuation failed: {e}'}), 500
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "UPDATE watches SET value = ?, results = ?, updated_at = ? WHERE id = ?",
+        (data['value'], data['results'], now, record_id),
+    )
+    db.commit()
+    return jsonify(data)
 
 
 @app.route('/<category>/<record_id>/upload-image', methods=['POST'])

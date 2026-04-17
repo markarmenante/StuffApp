@@ -207,6 +207,27 @@
     </div>
   </div>
 
+  <!-- Value / Fetch row -->
+  <div class="dgrid dg2 watch-value">
+    <div class="dcell">
+      <input type="text" name="value" value="{{ val('value')|currency }}" class="price-input" inputmode="numeric">
+      <span class="clabel">Value</span>
+    </div>
+    <div class="dcell" style="justify-content:center">
+      <button type="button" id="valueBtn" class="toolbar-btn pill"
+              {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"{% endif %}>
+        Value
+      </button>
+    </div>
+  </div>
+  <!-- Results -->
+  <div class="dgrid dg1">
+    <div class="dcell dcell-notes">
+      <textarea name="results" rows="6">{{ r['results'] if r and r['results'] else '' }}</textarea>
+      <span class="clabel">Results</span>
+    </div>
+  </div>
+
   <!-- Complications -->
   <div class="comp-section">
     <div class="comp-grid">
@@ -1044,6 +1065,34 @@ function previewFile(input, previewId) {
     reader.readAsDataURL(file);
   }
 }
+
+// Watch "Value" button: fetch market valuation via backend
+document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const url = btn.dataset.url;
+  if (!url) return;
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Searching…';
+  try {
+    const res = await fetch(url, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed');
+    const valInput = document.querySelector('input[name="value"]');
+    if (valInput) {
+      valInput.value = data.value != null
+        ? '$' + Number(data.value).toLocaleString('en-US', {maximumFractionDigits: 0})
+        : '';
+    }
+    const resultsTa = document.querySelector('textarea[name="results"]');
+    if (resultsTa) resultsTa.value = data.results || '';
+    btn.textContent = 'Fetched ✓';
+  } catch (err) {
+    btn.textContent = 'Error';
+    alert('Valuation failed: ' + err.message);
+  }
+  setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+});
 
 // Complications: clicking the box label toggles the X text
 document.querySelectorAll('.comp-item').forEach(item => {

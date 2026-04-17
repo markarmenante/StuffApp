@@ -3,3 +3,4 @@ __pycache__/
 *.db
 uploads/
 .DS_Store
+.env
