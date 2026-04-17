@@ -1301,6 +1301,38 @@ def prune_empty_coin_id_dupes():
     return jsonify(deleted=deleted, kept=kept, total=total)
 
 
+@app.route('/admin/assign-missing-coin-ids', methods=['POST'])
+def assign_missing_coin_ids():
+    """Assign the next NM N coin_id to coins with an empty coin_id.
+
+    Iterates empty-coin_id rows ordered by denomination, obv_rev and
+    assigns NM <max+1>, NM <max+2>, ... in that order. Safe to re-run.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, denomination, obv_rev FROM coins "
+        "WHERE coin_id IS NULL OR TRIM(coin_id) = '' "
+        "ORDER BY denomination, obv_rev"
+    ).fetchall()
+    max_nm = 0
+    for r in db.execute("SELECT coin_id FROM coins WHERE coin_id LIKE 'NM %'"):
+        try:
+            n = int((r['coin_id'] or '').split()[1])
+            if n > max_nm: max_nm = n
+        except (ValueError, IndexError):
+            pass
+    assigned = []
+    for i, r in enumerate(rows):
+        new_id = f'NM {max_nm + 1 + i}'
+        db.execute("UPDATE coins SET coin_id = ? WHERE id = ?", (new_id, r['id']))
+        assigned.append({'id': r['id'], 'denomination': r['denomination'],
+                         'obv_rev': r['obv_rev'], 'coin_id': new_id})
+    db.commit()
+    return jsonify(assigned=assigned, count=len(assigned))
+
+
 @app.route('/admin/fix-coin-region-mint', methods=['POST'])
 def fix_coin_region_mint():
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
