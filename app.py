@@ -638,7 +638,7 @@ def new_record(category):
                            coin_age_val=None,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
-                           ta=get_typeahead(CATEGORIES[category]['table'], 'brand', 'dial_color', 'strap_color', 'vendor') if category == 'watches' else get_typeahead(CATEGORIES[category]['table'], 'region', 'mint', 'denomination', 'vendor') if category == 'coins' else {})
+                           ta=get_typeahead(CATEGORIES[category]['table'], 'brand', 'dial_color', 'strap_color', 'vendor') if category == 'watches' else get_typeahead(CATEGORIES[category]['table'], 'region', 'mint', 'denomination', 'vendor') if category == 'coins' else get_typeahead(CATEGORIES[category]['table'], 'artist', 'medium', 'vendor') if category == 'art' else {})
 
 
 @app.route('/<category>/<record_id>', methods=['GET', 'POST'])
@@ -729,7 +729,7 @@ def detail_view(category, record_id):
                            service_overdue=service_overdue,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
-                           ta=get_typeahead(CATEGORIES[category]['table'], 'brand', 'dial_color', 'strap_color', 'vendor') if category == 'watches' else get_typeahead(CATEGORIES[category]['table'], 'region', 'mint', 'denomination', 'vendor') if category == 'coins' else {})
+                           ta=get_typeahead(CATEGORIES[category]['table'], 'brand', 'dial_color', 'strap_color', 'vendor') if category == 'watches' else get_typeahead(CATEGORIES[category]['table'], 'region', 'mint', 'denomination', 'vendor') if category == 'coins' else get_typeahead(CATEGORIES[category]['table'], 'artist', 'medium', 'vendor') if category == 'art' else {})
 
 
 @app.route('/<category>/<record_id>/save-field', methods=['POST'])

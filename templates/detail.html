@@ -147,12 +147,18 @@
 
   <!-- Photo + right specs -->
   <div class="watch-body">
-    <div class="watch-photo">
+    <div class="watch-photo drop-zone" data-field="image_obv"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_obv'] and r['image_obv']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_obv']) }}" alt="Dial">
       {% else %}
         <span class="no-img">⌚</span>
       {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image_obv']) else 'Drop or click' }}
+        <input type="file" name="image_obv" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_obv')">
+      </label>
     </div>
     <div class="watch-specs">
       <div class="dgrid dg1">
@@ -491,22 +497,58 @@
        ART
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'art' %}
+
+  <!-- Artist row (editable, large) -->
+  <div class="detail-brand-row">
+    <input type="text" name="artist" value="{{ val('artist') }}"
+           placeholder="Artist Name" class="brand-input ta-input" autocomplete="off"
+           data-ta="{{ ta.get('artist', [])|join('||') }}">
+  </div>
+
+  <!-- Title -->
   <div class="detail-model">
     <input type="text" name="title" value="{{ val('title') }}" placeholder="Title"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
-  <div class="dgrid dg3">
-    {{ cell('medium','Medium') }}
-    {{ numcell('year','Year') }}
-    {{ cell('dimensions','Dimensions') }}
+
+  <!-- Photo + right specs -->
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Art">
+      {% else %}
+        <span class="no-img">🎨</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
+    </div>
+    <div class="watch-specs">
+      <div class="dgrid dg1">
+        <div class="dcell ta-wrap">
+          <input type="text" name="medium" value="{{ val('medium') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('medium', [])|join('||') }}">
+          <span class="clabel">Medium</span>
+        </div>
+      </div>
+      <div class="dgrid dg2">
+        {{ numcell('year','Year') }}
+        {{ cell('dimensions','Dimensions') }}
+      </div>
+      <div class="dgrid dg1">
+        {{ datecell('date','Date') }}
+      </div>
+      <div class="dgrid dg2">
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+      </div>
+    </div>
   </div>
-  <div class="dgrid dg3">
-    {{ datecell('date','Date') }}
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-    {{ cell('vendor','Vendor') }}
-  </div>
+
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
+  <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><input type="text" name="location" value="{{ val('location') }}"><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Property</span></div>
@@ -969,6 +1011,35 @@ document.querySelectorAll('.ta-input').forEach(inp => {
   });
   inp.addEventListener('blur', () => { ghost = ''; inp.removeAttribute('data-ghost'); });
 });
+
+// Click-to-upload helper for watch-photo-style labels (mirrors drop-zone behavior)
+function uploadViaInput(input, uploadUrl, field) {
+  if (!uploadUrl) return;
+  const file = input.files[0];
+  if (!file || !file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
+  const zone = input.closest('.drop-zone');
+  if (zone) zone.style.opacity = '0.5';
+  const fd = new FormData();
+  fd.append('image', file);
+  if (field) fd.append('field', field);
+  fetch(uploadUrl, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      if (zone) zone.style.opacity = '';
+      if (data.url && zone) {
+        let img = zone.querySelector('img');
+        const placeholder = zone.querySelector('span:not(.panel-lbl)');
+        if (img) { img.src = data.url; }
+        else {
+          if (placeholder) placeholder.remove();
+          img = document.createElement('img');
+          img.src = data.url; img.alt = '';
+          zone.insertBefore(img, zone.firstChild);
+        }
+      } else if (!data.url) { alert('Upload failed: ' + (data.error || 'unknown')); }
+    })
+    .catch(() => { if (zone) zone.style.opacity = ''; alert('Upload failed.'); });
+}
 
 // Drag-and-drop on .drop-zone panels
 document.querySelectorAll('.drop-zone').forEach(zone => {
