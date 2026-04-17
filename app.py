@@ -461,6 +461,26 @@ def get_typeahead(table, *fields):
     return result
 
 
+TYPEAHEAD_FIELDS = {
+    'watches':      ('brand', 'dial_color', 'strap_color', 'vendor'),
+    'coins':        ('region', 'mint', 'denomination', 'vendor'),
+    'art':          ('artist', 'medium', 'vendor'),
+    'cameras':      ('make', 'vendor'),
+    'lenses':       ('make', 'mount', 'vendor'),
+    'pens':         ('make', 'vendor'),
+    'vehicles':     ('make', 'vendor'),
+    'recordings':   ('artist', 'genre', 'vendor'),
+    'rifles':       ('make', 'caliber', 'vendor'),
+}
+
+
+def build_typeahead(category):
+    fields = TYPEAHEAD_FIELDS.get(category)
+    if not fields:
+        return {}
+    return get_typeahead(CATEGORIES[category]['table'], *fields)
+
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -638,7 +658,7 @@ def new_record(category):
                            coin_age_val=None,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
-                           ta=get_typeahead(CATEGORIES[category]['table'], 'brand', 'dial_color', 'strap_color', 'vendor') if category == 'watches' else get_typeahead(CATEGORIES[category]['table'], 'region', 'mint', 'denomination', 'vendor') if category == 'coins' else get_typeahead(CATEGORIES[category]['table'], 'artist', 'medium', 'vendor') if category == 'art' else {})
+                           ta=build_typeahead(category))
 
 
 @app.route('/<category>/<record_id>', methods=['GET', 'POST'])
@@ -729,7 +749,7 @@ def detail_view(category, record_id):
                            service_overdue=service_overdue,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
-                           ta=get_typeahead(CATEGORIES[category]['table'], 'brand', 'dial_color', 'strap_color', 'vendor') if category == 'watches' else get_typeahead(CATEGORIES[category]['table'], 'region', 'mint', 'denomination', 'vendor') if category == 'coins' else get_typeahead(CATEGORIES[category]['table'], 'artist', 'medium', 'vendor') if category == 'art' else {})
+                           ta=build_typeahead(category))
 
 
 @app.route('/<category>/<record_id>/save-field', methods=['POST'])

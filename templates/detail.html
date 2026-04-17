@@ -392,43 +392,66 @@
        CAMERAS
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'cameras' %}
+  <div class="detail-brand-row">
+    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+           class="brand-input ta-input" autocomplete="off"
+           data-ta="{{ ta.get('make', [])|join('||') }}">
+  </div>
   <div class="detail-model">
     <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
-  <div class="dgrid dg2">
-    <div class="dcell">
-      <div class="radio-group">
-        <label class="radio-opt"><input type="radio" name="digital_film" value="Digital" {{ 'checked' if val('digital_film')=='Digital' }}> Digital</label>
-        <label class="radio-opt"><input type="radio" name="digital_film" value="Film"    {{ 'checked' if val('digital_film')=='Film'    }}> Film</label>
-      </div>
-      <span class="clabel">Type</span>
+
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Camera">
+      {% else %}
+        <span class="no-img">📷</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
     </div>
-    <div class="dcell">
-      <div class="radio-group">
-        <label class="radio-opt"><input type="radio" name="film_size" value="35mm"    {{ 'checked' if val('film_size')=='35mm' }}> 35mm</label>
-        <label class="radio-opt"><input type="radio" name="film_size" value="120/220" {{ 'checked' if val('film_size')=='120/220' }}> 120/220</label>
-        <label class="radio-opt"><input type="radio" name="film_size" value="Sheet"   {{ 'checked' if val('film_size')=='Sheet' }}> Sheet</label>
-        <label class="radio-opt"><input type="radio" name="film_size" value="Other"   {{ 'checked' if val('film_size')=='Other' }}> Other</label>
+    <div class="watch-specs">
+      <div class="dgrid dg2">
+        <div class="dcell">
+          <div class="radio-group">
+            <label class="radio-opt"><input type="radio" name="digital_film" value="Digital" {{ 'checked' if val('digital_film')=='Digital' }}> Digital</label>
+            <label class="radio-opt"><input type="radio" name="digital_film" value="Film"    {{ 'checked' if val('digital_film')=='Film'    }}> Film</label>
+          </div>
+          <span class="clabel">Type</span>
+        </div>
+        <div class="dcell">
+          <div class="radio-group">
+            <label class="radio-opt"><input type="radio" name="film_size" value="35mm"    {{ 'checked' if val('film_size')=='35mm' }}> 35mm</label>
+            <label class="radio-opt"><input type="radio" name="film_size" value="120/220" {{ 'checked' if val('film_size')=='120/220' }}> 120</label>
+            <label class="radio-opt"><input type="radio" name="film_size" value="Sheet"   {{ 'checked' if val('film_size')=='Sheet' }}> Sheet</label>
+            <label class="radio-opt"><input type="radio" name="film_size" value="Other"   {{ 'checked' if val('film_size')=='Other' }}> Other</label>
+          </div>
+          <span class="clabel">Format</span>
+        </div>
       </div>
-      <span class="clabel">Format</span>
+      <div class="dgrid dg2">
+        {{ cell('lens_mount','Lens Mount') }}
+        {{ numcell('megapixels','Megapixels') }}
+      </div>
+      <div class="dgrid dg2">
+        {{ cell('sensor','Sensor') }}
+        {{ cell('serial_number','Serial #') }}
+      </div>
+      <div class="dgrid dg3">
+        {{ datecell('date','Date') }}
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+      </div>
     </div>
   </div>
-  <div class="dgrid dg2">
-    {{ cell('lens_mount','Lens Mount') }}
-    {{ numcell('megapixels','Megapixels') }}
-  </div>
-  <div class="dgrid dg2">
-    {{ cell('sensor','Sensor') }}
-    {{ cell('serial_number','Serial #') }}
-  </div>
-  <div class="dgrid dg3">
-    {{ datecell('date','Date') }}
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-    {{ cell('vendor','Vendor') }}
-  </div>
+
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -439,26 +462,51 @@
        LENSES
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'lenses' %}
+  <div class="detail-brand-row">
+    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+           class="brand-input ta-input" autocomplete="off"
+           data-ta="{{ ta.get('make', [])|join('||') }}">
+  </div>
   <div class="detail-model">
     <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
-  <div class="dgrid dg4">
-    {{ cell('mount','Mount') }}
-    {{ numcell('aperture','Max Aperture') }}
-    {{ numcell('length','Focal Length mm') }}
-    {{ numcell('filter_size','Filter mm') }}
+
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Lens">
+      {% else %}
+        <span class="no-img">🔭</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
+    </div>
+    <div class="watch-specs">
+      <div class="dgrid dg2">
+        {{ cell('mount','Mount') }}
+        {{ numcell('aperture','Max Aperture') }}
+      </div>
+      <div class="dgrid dg2">
+        {{ numcell('length','Focal Length mm') }}
+        {{ numcell('filter_size','Filter mm') }}
+      </div>
+      <div class="dgrid dg2">
+        {{ cell('serial_number','Serial #') }}
+        {{ datecell('date','Date') }}
+      </div>
+      <div class="dgrid dg2">
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+      </div>
+    </div>
   </div>
-  <div class="dgrid dg2">
-    {{ cell('serial_number','Serial #') }}
-    {{ datecell('date','Date') }}
-  </div>
-  <div class="dgrid dg2">
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-    {{ cell('vendor','Vendor') }}
-  </div>
+
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -469,24 +517,50 @@
        PENS
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'pens' %}
+  <div class="detail-brand-row">
+    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+           class="brand-input ta-input" autocomplete="off"
+           data-ta="{{ ta.get('make', [])|join('||') }}">
+  </div>
   <div class="detail-model">
     <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
-  <div class="dgrid dg4">
-    {{ selcell('type','Type', vlists.pen_type) }}
-    {{ selcell('action','Action', vlists.pen_action) }}
-    {{ cell('nib','Nib') }}
-    {{ selcell('cartridge','Cartridge', vlists.pen_cartridge) }}
+
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Pen">
+      {% else %}
+        <span class="no-img">🖋️</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
+    </div>
+    <div class="watch-specs">
+      <div class="dgrid dg2">
+        {{ selcell('type','Type', vlists.pen_type) }}
+        {{ selcell('action','Action', vlists.pen_action) }}
+      </div>
+      <div class="dgrid dg2">
+        {{ cell('nib','Nib') }}
+        {{ selcell('cartridge','Cartridge', vlists.pen_cartridge) }}
+      </div>
+      <div class="dgrid dg1">{{ selcell('reservoir','Reservoir', vlists.pen_reservoir) }}</div>
+      <div class="dgrid dg3">
+        {{ datecell('date','Date') }}
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+      </div>
+    </div>
   </div>
-  <div class="dgrid dg2">{{ selcell('reservoir','Reservoir', vlists.pen_reservoir) }}<div class="dcell"></div></div>
-  <div class="dgrid dg3">
-    {{ datecell('date','Date') }}
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-    {{ cell('vendor','Vendor') }}
-  </div>
+
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
+  <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -560,24 +634,47 @@
        VEHICLES
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'vehicles' %}
+  <div class="detail-brand-row">
+    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+           class="brand-input ta-input" autocomplete="off"
+           data-ta="{{ ta.get('make', [])|join('||') }}">
+  </div>
   <div class="detail-model">
     <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
-  <div class="dgrid dg3">
-    {{ numcell('year','Year') }}
-    {{ cell('state','State') }}
-    {{ cell('tags','Tags / Plate') }}
+
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Vehicle">
+      {% else %}
+        <span class="no-img">🚗</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
+    </div>
+    <div class="watch-specs">
+      <div class="dgrid dg3">
+        {{ numcell('year','Year') }}
+        {{ cell('state','State') }}
+        {{ cell('tags','Tags / Plate') }}
+      </div>
+      <div class="dgrid dg1">{{ cell('vin','VIN') }}</div>
+      <div class="dgrid dg3">
+        {{ datecell('date','Date') }}
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+      </div>
+    </div>
   </div>
-  <div class="dgrid dg1">{{ cell('vin','VIN') }}</div>
-  <div class="dgrid dg3">
-    {{ datecell('date','Date') }}
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-    {{ cell('vendor','Vendor') }}
-  </div>
+
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg3">{{ imgcell('image','Photo') }}{{ doccell('insurance','Insurance') }}{{ doccell('invoice','Invoice') }}</div>
-  <div class="dgrid dg1">{{ doccell('registration','Registration') }}</div>
+  <div class="dgrid dg3">{{ doccell('insurance','Insurance') }}{{ doccell('invoice','Invoice') }}{{ doccell('registration','Registration') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -588,28 +685,54 @@
        RECORDINGS
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'recordings' %}
+  <div class="detail-brand-row">
+    <input type="text" name="artist" value="{{ val('artist') }}" placeholder="Artist"
+           class="brand-input ta-input" autocomplete="off"
+           data-ta="{{ ta.get('artist', [])|join('||') }}">
+  </div>
   <div class="detail-model">
     <input type="text" name="title" value="{{ val('title') }}" placeholder="Title"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
-  <div class="dgrid dg4">
-    {{ selcell('type','Type', vlists.recording_type) }}
-    {{ selcell('genre','Genre', vlists.recording_genre) }}
-    {{ cell('genre_2','Genre 2') }}
-    {{ cell('year_recorded','Year') }}
+
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Cover">
+      {% else %}
+        <span class="no-img">💿</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
+    </div>
+    <div class="watch-specs">
+      <div class="dgrid dg2">
+        {{ selcell('type','Type', vlists.recording_type) }}
+        {{ selcell('genre','Genre', vlists.recording_genre) }}
+      </div>
+      <div class="dgrid dg2">
+        {{ cell('genre_2','Genre 2') }}
+        {{ cell('year_recorded','Year') }}
+      </div>
+      <div class="dgrid dg3">
+        {{ cell('speed','Speed') }}
+        {{ cell('sound','Sound') }}
+        {{ cell('like_field','Like') }}
+      </div>
+      <div class="dgrid dg3">
+        {{ datecell('date','Date') }}
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+      </div>
+    </div>
   </div>
-  <div class="dgrid dg3">
-    {{ cell('speed','Speed') }}
-    {{ cell('sound','Sound') }}
-    {{ cell('like_field','Like') }}
-  </div>
-  <div class="dgrid dg3">
-    {{ datecell('date','Date') }}
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-    {{ cell('vendor','Vendor') }}
-  </div>
+
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg2">{{ imgcell('image','Cover') }}{{ doccell('receipt','Receipt') }}</div>
+  <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -620,21 +743,45 @@
        RIFLES
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'rifles' %}
+  <div class="detail-brand-row">
+    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+           class="brand-input ta-input" autocomplete="off"
+           data-ta="{{ ta.get('make', [])|join('||') }}">
+  </div>
   <div class="detail-model">
     <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
-  <div class="dgrid dg3">
-    {{ cell('caliber','Caliber') }}
-    {{ cell('serial_number','Serial #') }}
-    {{ datecell('date','Date') }}
+
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Rifle">
+      {% else %}
+        <span class="no-img">🔫</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
+    </div>
+    <div class="watch-specs">
+      <div class="dgrid dg2">
+        {{ cell('caliber','Caliber') }}
+        {{ cell('serial_number','Serial #') }}
+      </div>
+      <div class="dgrid dg1">{{ datecell('date','Date') }}</div>
+      <div class="dgrid dg2">
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+      </div>
+    </div>
   </div>
-  <div class="dgrid dg2">
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-    {{ cell('vendor','Vendor') }}
-  </div>
+
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg2">{{ imgcell('image','Photo') }}{{ doccell('receipt','Receipt') }}</div>
+  <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -645,32 +792,51 @@
        CREDIT CARDS
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'credit_cards' %}
-  <div class="dgrid dg2">
-    {{ cell('number','Card Number') }}
-    {{ datecell('expiration','Expiration') }}
+  <div class="detail-brand-row">
+    <input type="text" name="name" value="{{ val('name') }}" placeholder="Card Name"
+           class="brand-input" autocomplete="off">
   </div>
-  <div class="dgrid dg2">
-    {{ cell('cvc','CVC') }}
-    {{ cell('cvc_2','CVC 2') }}
-  </div>
-  <div class="dgrid dg1">{{ cell('billing_address','Billing Address') }}</div>
-  <div class="dgrid dg2">
-    {{ cell('billing_short','Billing Short') }}
-    {{ cell('description','Description') }}
-  </div>
-  {% if not is_new and (r['image_front'] or r['image_back']) %}
-  <div class="coin-imgs">
-    <div class="coin-img-panel">
-      {% if r['image_front'] and r['image_front']|is_image %}<img src="{{ url_for('uploaded_file', filename=r['image_front']) }}" alt="Front">{% endif %}
-      <span class="panel-lbl">Front</span>
+
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="image_front"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image_front'] and r['image_front']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image_front']) }}" alt="Front">
+      {% else %}
+        <span class="no-img">💳</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image_front']) else 'Drop or click' }}
+        <input type="file" name="image_front" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_front')">
+      </label>
     </div>
-    <div class="coin-img-panel">
-      {% if r['image_back'] and r['image_back']|is_image %}<img src="{{ url_for('uploaded_file', filename=r['image_back']) }}" alt="Back">{% endif %}
+    <div class="watch-specs">
+      <div class="dgrid dg2">
+        {{ cell('number','Card Number') }}
+        {{ datecell('expiration','Expiration') }}
+      </div>
+      <div class="dgrid dg2">
+        {{ cell('cvc','CVC') }}
+        {{ cell('cvc_2','CVC 2') }}
+      </div>
+      <div class="dgrid dg1">{{ cell('billing_short','Billing Short') }}</div>
+      <div class="dgrid dg1">{{ cell('description','Description') }}</div>
+    </div>
+  </div>
+
+  <div class="dgrid dg1">{{ cell('billing_address','Billing Address') }}</div>
+
+  <div class="coin-imgs">
+    <div class="coin-img-panel drop-zone" data-field="image_back"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image_back'] and r['image_back']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image_back']) }}" alt="Back">
+      {% else %}<span style="font-size:28px;color:#ccc">💳</span>{% endif %}
       <span class="panel-lbl">Back</span>
     </div>
   </div>
-  {% endif %}
-  <div class="dgrid dg2">{{ imgcell('image_front','Front') }}{{ imgcell('image_back','Back') }}</div>
+
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
@@ -679,23 +845,46 @@
        PROPERTIES
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'properties' %}
+  <div class="detail-brand-row">
+    <input type="text" name="name" value="{{ val('name') }}" placeholder="Name"
+           class="brand-input" autocomplete="off">
+  </div>
   <div class="detail-model">
     <input type="text" name="short_name" value="{{ val('short_name') }}" placeholder="Short Name"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
-  <div class="dgrid dg1">{{ cell('address','Address') }}</div>
-  <div class="dgrid dg3">
-    {{ selcell('type','Type', vlists.property_type) }}
-    {{ cell('year_built','Year Built') }}
-    {{ cell('llc','LLC') }}
+
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Property">
+      {% else %}
+        <span class="no-img">🏠</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
+    </div>
+    <div class="watch-specs">
+      <div class="dgrid dg1">{{ cell('address','Address') }}</div>
+      <div class="dgrid dg3">
+        {{ selcell('type','Type', vlists.property_type) }}
+        {{ cell('year_built','Year Built') }}
+        {{ cell('llc','LLC') }}
+      </div>
+      <div class="dgrid dg2">
+        {{ cell('ein','EIN') }}
+        {{ datecell('date','Purchase Date') }}
+      </div>
+      <div class="dgrid dg1">
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Purchase Price</span></div>
+      </div>
+    </div>
   </div>
-  <div class="dgrid dg2">
-    {{ cell('ein','EIN') }}
-    {{ datecell('date','Purchase Date') }}
-  </div>
-  <div class="dgrid dg1">
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Purchase Price</span></div>
-  </div>
+
   <div class="section-bar">WiFi</div>
   <div class="dgrid dg2">{{ cell('wifi_name','Network Name') }}{{ cell('wifi','Password') }}</div>
   <div class="section-bar">Alarm</div>
@@ -707,7 +896,6 @@
   </div>
   <div class="dgrid dg2">{{ cell('alarm_phone','Phone') }}{{ cell('alarm_notes','Notes') }}</div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg2">{{ imgcell('image','Photo') }}<div class="dcell"></div></div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="status">{% for s in ['','Active','Sold','Rented'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
     <div class="bottom-cell"><input type="text" name="archive" value="{{ val('archive') }}"><span class="blabel">Archive</span></div>
@@ -717,42 +905,59 @@
        PERSONS
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'persons' %}
-  {% if not is_new and r['head_shot'] and r['head_shot']|is_image %}
-  <div class="headshot-wrap">
-    <img src="{{ url_for('uploaded_file', filename=r['head_shot']) }}" alt="{{ val('name') }}">
+  <div class="detail-brand-row">
+    <input type="text" name="name" value="{{ val('name') }}" placeholder="Name"
+           class="brand-input" autocomplete="off">
   </div>
-  {% endif %}
-  <div class="dgrid dg2">
-    {{ cell('phone','Phone') }}
-    {{ datecell('birth_date','Birth Date') }}
+
+  <div class="watch-body">
+    <div class="watch-photo drop-zone" data-field="head_shot"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['head_shot'] and r['head_shot']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['head_shot']) }}" alt="{{ val('name') }}">
+      {% else %}
+        <span class="no-img">👤</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        {{ 'Replace' if (r and r['head_shot']) else 'Drop or click' }}
+        <input type="file" name="head_shot" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'head_shot')">
+      </label>
+    </div>
+    <div class="watch-specs">
+      <div class="dgrid dg2">
+        {{ cell('phone','Phone') }}
+        {{ datecell('birth_date','Birth Date') }}
+      </div>
+      <div class="dgrid dg2">
+        {{ cell('blood_type','Blood Type') }}
+        {{ cell('ssn','SSN') }}
+      </div>
+      <div class="dgrid dg1">{{ cell('primary_care_physician','Primary Care Physician') }}</div>
+      <div class="dgrid dg1">{{ cell('home_address','Home Address') }}</div>
+      <div class="dgrid dg2">
+        {{ cell('spouse','Spouse') }}
+        {{ cell('spouse_name_and_phone','Spouse Name & Phone') }}
+      </div>
+    </div>
   </div>
-  <div class="dgrid dg3">
-    {{ cell('blood_type','Blood Type') }}
-    {{ cell('ssn','SSN') }}
-    {{ cell('primary_care_physician','Primary Care Physician') }}
-  </div>
-  <div class="dgrid dg1">{{ cell('home_address','Home Address') }}</div>
-  <div class="dgrid dg2">
-    {{ cell('spouse','Spouse') }}
-    {{ cell('spouse_name_and_phone','Spouse Name & Phone') }}
-  </div>
+
   <div class="dgrid dg1">{{ cell('prescriptions','Prescriptions',rows=2) }}</div>
   <div class="dgrid dg1">{{ cell('health_notes','Health Notes',rows=2) }}</div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="dgrid dg3">
-    {{ imgcell('head_shot','Head Shot') }}
     {{ doccell('passport','Passport') }}
     {{ doccell('license_obverse','License Front') }}
+    {{ doccell('license_reverse','License Back') }}
   </div>
   <div class="dgrid dg3">
-    {{ doccell('license_reverse','License Back') }}
     {{ doccell('medicare','Medicare') }}
     {{ doccell('global_entry','Global Entry') }}
+    {{ doccell('eye_prescription','Eye Prescription') }}
   </div>
-  <div class="dgrid dg3">
+  <div class="dgrid dg2">
     {{ doccell('health_card_obv','Health Card Front') }}
     {{ doccell('health_card_rev','Health Card Back') }}
-    {{ doccell('eye_prescription','Eye Prescription') }}
   </div>
   <div class="detail-bottom">
     <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
