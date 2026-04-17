@@ -272,8 +272,14 @@ a { color: var(--blue); text-decoration: none; }
   resize: vertical;
   min-height: 40px;
 }
+.dcell textarea[rows="4"] { min-height: 80px; }
 .dcell textarea[rows="5"] { min-height: 100px; }
 .dcell textarea[rows="6"] { min-height: 130px; }
+.dcell textarea[rows="8"] { min-height: 160px;
+  line-height: 1.5;
+  font-size: 13px;
+  color: #111111;
+}
 .dcell textarea[rows="10"] { min-height: 220px;
   line-height: 1.5;
   font-size: 13px;

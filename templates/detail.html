@@ -52,26 +52,25 @@
     <img src="" id="prev_{{ field }}" style="display:none">
   {% endif %}
   <label class="file-upload-lbl" onclick="event.stopPropagation()">
-    {{ 'Replace' if f else 'Drop or click' }}
     <input type="file" name="{{ field }}" accept="image/*,application/pdf" onchange="previewFile(this,'prev_{{ field }}')">
   </label>
 </div>
 {% endmacro %}
 {% macro doccell(field, label) %}
-<div class="dcell file-cell">
+<div class="dcell file-cell drop-zone" data-field="{{ field }}"
+     data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
   <span class="file-cell-name">{{ label }}</span>
   {% set f = r[field] if r else none %}
   {% if f %}
     {% if f|is_image %}
-      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank">
+      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" class="doc-link" onclick="event.stopPropagation()">
         <img src="{{ url_for('uploaded_file', filename=f) }}" style="max-height:50px">
       </a>
     {% else %}
-      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" style="font-size:11px">📄 View</a>
+      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" style="font-size:11px" class="doc-link" onclick="event.stopPropagation()">📄 View</a>
     {% endif %}
   {% endif %}
-  <label class="file-upload-lbl">
-    {{ 'Replace' if f else 'Upload' }}
+  <label class="file-upload-lbl" onclick="event.stopPropagation()">
     <input type="file" name="{{ field }}" accept="image/*,application/pdf">
   </label>
 </div>
@@ -118,14 +117,13 @@
 
   <!-- Brand row (editable, large) -->
   <div class="detail-brand-row">
-    <input type="text" name="brand" value="{{ r['brand'] if r and r['brand'] else '' }}"
-           placeholder="Brand" class="brand-input ta-input" autocomplete="off"
+    <input type="text" name="brand" value="{{ r['brand'] if r and r['brand'] else '' }}" class="brand-input ta-input" autocomplete="off"
            data-ta="{{ ta.get('brand', [])|join('||') }}">
   </div>
 
   <!-- Model name row -->
   <div class="detail-model">
-    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+    <input type="text" name="model" value="{{ val('model') }}"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
@@ -155,7 +153,6 @@
         <span class="no-img">⌚</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image_obv']) else 'Drop or click' }}
         <input type="file" name="image_obv" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_obv')">
       </label>
@@ -320,14 +317,12 @@
       {% if r and r['image_1'] and r['image_1']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="Obverse">
       {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
-      <span class="panel-lbl">Obverse</span>
     </div>
     <div class="coin-img-panel drop-zone" data-field="image_2"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_2'] and r['image_2']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="Reverse">
       {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
-      <span class="panel-lbl">Reverse</span>
     </div>
   </div>
   {% if coin_age_val %}
@@ -353,7 +348,7 @@
 
   <!-- Description -->
   <div class="section-bar">Description</div>
-  <div class="dgrid dg1">{{ cell('description','',rows=10) }}</div>
+  <div class="dgrid dg1">{{ cell('description','',rows=8) }}</div>
 
   <!-- Pedigree, References -->
   <div class="section-bar">Pedigree, References</div>
@@ -398,12 +393,12 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'cameras' %}
   <div class="detail-brand-row">
-    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+    <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
-    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+    <input type="text" name="model" value="{{ val('model') }}"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
@@ -416,7 +411,6 @@
         <span class="no-img">📷</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
         <input type="file" name="image" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
       </label>
@@ -468,12 +462,12 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'lenses' %}
   <div class="detail-brand-row">
-    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+    <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
-    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+    <input type="text" name="model" value="{{ val('model') }}"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
@@ -486,7 +480,6 @@
         <span class="no-img">🔭</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
         <input type="file" name="image" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
       </label>
@@ -523,12 +516,12 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'pens' %}
   <div class="detail-brand-row">
-    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+    <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
-    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+    <input type="text" name="model" value="{{ val('model') }}"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
@@ -541,7 +534,6 @@
         <span class="no-img">🖋️</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
         <input type="file" name="image" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
       </label>
@@ -579,8 +571,7 @@
 
   <!-- Artist row (editable, large) -->
   <div class="detail-brand-row">
-    <input type="text" name="artist" value="{{ val('artist') }}"
-           placeholder="Artist Name" class="brand-input ta-input" autocomplete="off"
+    <input type="text" name="artist" value="{{ val('artist') }}" class="brand-input ta-input" autocomplete="off"
            data-ta="{{ ta.get('artist', [])|join('||') }}">
   </div>
 
@@ -599,7 +590,6 @@
       <span class="no-img">🎨</span>
     {% endif %}
     <label class="file-upload-lbl watch-photo-upload">
-      {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
       <input type="file" name="image" accept="image/*" style="display:none"
              onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
     </label>
@@ -644,12 +634,12 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'vehicles' %}
   <div class="detail-brand-row">
-    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+    <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
-    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+    <input type="text" name="model" value="{{ val('model') }}"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
@@ -662,7 +652,6 @@
         <span class="no-img">🚗</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
         <input type="file" name="image" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
       </label>
@@ -695,12 +684,12 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'recordings' %}
   <div class="detail-brand-row">
-    <input type="text" name="artist" value="{{ val('artist') }}" placeholder="Artist"
+    <input type="text" name="artist" value="{{ val('artist') }}"
            class="brand-input ta-input" autocomplete="off"
            data-ta="{{ ta.get('artist', [])|join('||') }}">
   </div>
   <div class="detail-model">
-    <input type="text" name="title" value="{{ val('title') }}" placeholder="Title"
+    <input type="text" name="title" value="{{ val('title') }}"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
@@ -713,7 +702,6 @@
         <span class="no-img">💿</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
         <input type="file" name="image" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
       </label>
@@ -753,12 +741,12 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'rifles' %}
   <div class="detail-brand-row">
-    <input type="text" name="make" value="{{ val('make') }}" placeholder="Make"
+    <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
-    <input type="text" name="model" value="{{ val('model') }}" placeholder="Model"
+    <input type="text" name="model" value="{{ val('model') }}"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
@@ -771,7 +759,6 @@
         <span class="no-img">🔫</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
         <input type="file" name="image" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
       </label>
@@ -802,7 +789,7 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'credit_cards' %}
   <div class="detail-brand-row">
-    <input type="text" name="name" value="{{ val('name') }}" placeholder="Card Name"
+    <input type="text" name="name" value="{{ val('name') }}"
            class="brand-input" autocomplete="off">
   </div>
 
@@ -815,7 +802,6 @@
         <span class="no-img">💳</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image_front']) else 'Drop or click' }}
         <input type="file" name="image_front" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_front')">
       </label>
@@ -855,11 +841,11 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'properties' %}
   <div class="detail-brand-row">
-    <input type="text" name="name" value="{{ val('name') }}" placeholder="Name"
+    <input type="text" name="name" value="{{ val('name') }}"
            class="brand-input" autocomplete="off">
   </div>
   <div class="detail-model">
-    <input type="text" name="short_name" value="{{ val('short_name') }}" placeholder="Short Name"
+    <input type="text" name="short_name" value="{{ val('short_name') }}"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
@@ -872,7 +858,6 @@
         <span class="no-img">🏠</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
         <input type="file" name="image" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
       </label>
@@ -915,7 +900,7 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'persons' %}
   <div class="detail-brand-row">
-    <input type="text" name="name" value="{{ val('name') }}" placeholder="Name"
+    <input type="text" name="name" value="{{ val('name') }}"
            class="brand-input" autocomplete="off">
   </div>
 
@@ -928,7 +913,6 @@
         <span class="no-img">👤</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['head_shot']) else 'Drop or click' }}
         <input type="file" name="head_shot" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'head_shot')">
       </label>
@@ -1259,6 +1243,12 @@ function uploadViaInput(input, uploadUrl, field) {
 document.querySelectorAll('.drop-zone').forEach(zone => {
   const uploadUrl = zone.dataset.uploadUrl;
   const field = zone.dataset.field;
+  zone.style.cursor = 'pointer';
+  zone.addEventListener('click', e => {
+    if (e.target.closest('a, input, label, button')) return;
+    const input = zone.querySelector('input[type="file"]');
+    if (input) input.click();
+  });
   if (!uploadUrl) return;
   zone.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); zone.classList.add('drag-over'); e.dataTransfer.dropEffect = 'copy'; });
   zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over'); });
@@ -1266,7 +1256,13 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
     e.preventDefault(); e.stopPropagation();
     zone.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
-    if (!file || !file.type.startsWith('image/')) { alert('Please drop an image file.'); return; }
+    const isImg = file && file.type.startsWith('image/');
+    const isPdf = file && file.type === 'application/pdf';
+    const allowPdf = zone.classList.contains('file-cell');
+    if (!file || (!isImg && !(allowPdf && isPdf))) {
+      alert(allowPdf ? 'Please drop an image or PDF file.' : 'Please drop an image file.');
+      return;
+    }
     zone.style.opacity = '0.5';
     const fd = new FormData();
     fd.append('image', file);
@@ -1275,17 +1271,42 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
       .then(r => r.json())
       .then(data => {
         zone.style.opacity = '';
-        if (data.url) {
+        if (!data.url) { alert('Upload failed: ' + (data.error || 'unknown')); return; }
+        const labelEl = zone.querySelector('label.file-upload-lbl');
+        if (allowPdf && isPdf) {
+          const oldImg = zone.querySelector('img');
+          if (oldImg) oldImg.closest('a.doc-link')?.remove();
+          let link = zone.querySelector('a.doc-link');
+          if (link) { link.href = data.url; link.textContent = '📄 View'; link.style.fontSize = '11px'; }
+          else {
+            link = document.createElement('a');
+            link.href = data.url; link.target = '_blank';
+            link.className = 'doc-link'; link.style.fontSize = '11px';
+            link.textContent = '📄 View';
+            link.addEventListener('click', ev => ev.stopPropagation());
+            zone.insertBefore(link, labelEl);
+          }
+        } else {
           let img = zone.querySelector('img');
-          const placeholder = zone.querySelector('span:not(.panel-lbl)');
+          const placeholder = zone.querySelector('span:not(.panel-lbl):not(.file-cell-name)');
           if (img) { img.src = data.url; }
           else {
             if (placeholder) placeholder.remove();
             img = document.createElement('img');
             img.src = data.url; img.alt = '';
-            zone.insertBefore(img, zone.firstChild);
+            if (zone.classList.contains('file-cell')) {
+              const wrap = document.createElement('a');
+              wrap.href = data.url; wrap.target = '_blank';
+              wrap.className = 'doc-link';
+              wrap.addEventListener('click', ev => ev.stopPropagation());
+              img.style.maxHeight = '50px';
+              wrap.appendChild(img);
+              zone.insertBefore(wrap, labelEl);
+            } else {
+              zone.insertBefore(img, zone.firstChild);
+            }
           }
-        } else { alert('Upload failed: ' + (data.error || 'unknown')); }
+        }
       })
       .catch(() => { zone.style.opacity = ''; alert('Upload failed.'); });
   });

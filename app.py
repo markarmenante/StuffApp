@@ -907,6 +907,177 @@ def inject_globals():
 
 
 # ---------------------------------------------------------------------------
+# Missing-rows import endpoints (coins + watches). Safe to re-run.
+# ---------------------------------------------------------------------------
+
+IMPORT_MISSING_SECRET = 'stuffapp-bulk-import-2026'
+
+
+def _csv_rows(filename):
+    import csv, io
+    path = os.path.join(BASE_DIR, filename)
+    with open(path, 'r', encoding='utf-8-sig') as f:
+        content = f.read().replace('\r', '\n')
+    return [r for r in csv.reader(io.StringIO(content)) if any(c.strip() for c in r)]
+
+
+def _mclean(s):
+    return (s or '').replace('\x0b', '\n').strip() or None
+
+
+def _mnum(s, cast=float):
+    s = (s or '').strip().replace(',', '').replace('$', '')
+    try:
+        return cast(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _mdate(s):
+    s = (s or '').strip().split(' ')[0]
+    if not s:
+        return None
+    for fmt in ('%m/%d/%Y', '%Y-%m-%d', '%m/%d/%y'):
+        try:
+            return datetime.strptime(s, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return None
+
+
+@app.route('/admin/import-coins-missing', methods=['POST'])
+def import_coins_missing():
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    existing_coin_ids = {r['coin_id'] for r in db.execute(
+        "SELECT coin_id FROM coins WHERE coin_id IS NOT NULL AND coin_id != ''")}
+    existing_ids = {(r['id'] or '').lower() for r in db.execute("SELECT id FROM coins")}
+
+    inserted = 0
+    skipped_existing = 0
+    skipped_bad = 0
+    now = datetime.utcnow().isoformat()
+
+    for row in _csv_rows('Coin.csv'):
+        if len(row) < 45:
+            skipped_bad += 1
+            continue
+        coin_id = _mclean(row[1])
+        csv_uuid = _mclean(row[29])
+        if coin_id:
+            if coin_id in existing_coin_ids:
+                skipped_existing += 1
+                continue
+            record_id = str(uuid.uuid4())
+        else:
+            if not csv_uuid:
+                skipped_bad += 1
+                continue
+            if csv_uuid.lower() in existing_ids:
+                skipped_existing += 1
+                continue
+            record_id = csv_uuid
+
+        d1_text = row[11].strip().split(' - ', 1)[0].strip() if row[11] else ''
+
+        db.execute('''
+            INSERT INTO coins (
+                id, coin_id, authority, print_field, notes,
+                date_1, date_1_text, date_2, date_2_text,
+                denomination, obv_rev, die_axis, grade, metal,
+                mint, description, owner, price,
+                property_name, purchase_date, coin_references,
+                region, sheldon, size, status, strike, surface,
+                vendor, weight, created_at, updated_at
+            ) VALUES (?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?, ?,?,?,?,?,?, ?,?, ?,?)
+        ''', (
+            record_id, coin_id, _mclean(row[0]), _mclean(row[2]), _mclean(row[4]),
+            _mnum(row[10], int), _mclean(d1_text), _mnum(row[12], int), _mclean(row[13]),
+            _mclean(row[14]), _mclean(row[15]), _mclean(row[17]), _mclean(row[18]), _mclean(row[20]),
+            _mclean(row[21]), _mclean(row[24]), _mclean(row[27]), _mnum(row[28]),
+            _mclean(row[31]), _mdate(row[32]), _mclean(row[34]),
+            _mclean(row[35]), _mclean(row[36]), _mnum(row[38]), _mclean(row[39]),
+            _mnum(row[40]), _mnum(row[41]), _mclean(row[43]), _mnum(row[44]),
+            now, now,
+        ))
+        inserted += 1
+        if coin_id:
+            existing_coin_ids.add(coin_id)
+        existing_ids.add(record_id.lower())
+
+    db.commit()
+    total = db.execute('SELECT COUNT(*) FROM coins').fetchone()[0]
+    return jsonify(inserted=inserted, skipped_existing=skipped_existing,
+                   skipped_bad=skipped_bad, total=total)
+
+
+@app.route('/admin/import-watches-missing', methods=['POST'])
+def import_watches_missing():
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    existing = set()
+    for r in db.execute("SELECT reference, case_num, movement_num FROM watches"):
+        existing.add(((r['reference'] or '').strip(),
+                      (r['case_num'] or '').strip(),
+                      (r['movement_num'] or '').strip()))
+
+    inserted = 0
+    skipped_existing = 0
+    skipped_bad = 0
+    now = datetime.utcnow().isoformat()
+
+    for row in _csv_rows('Watch.csv'):
+        if len(row) < 38:
+            skipped_bad += 1
+            continue
+        reference = _mclean(row[28])
+        case_num = _mclean(row[3])
+        movement_num = _mclean(row[19])
+        key = ((reference or '').strip(), (case_num or '').strip(), (movement_num or '').strip())
+        if not any(key):
+            skipped_bad += 1
+            continue
+        if key in existing:
+            skipped_existing += 1
+            continue
+
+        db.execute('''
+            INSERT INTO watches (
+                id, brand, model, reference, metal, case_diameter,
+                dial_color, case_num, movement_num, edition, year,
+                calibre, movement_type, movement_origin,
+                beat, reserve, complications, clasp_type,
+                strap_material, strap_color,
+                date, price, vendor, description,
+                owner, property, status,
+                created_at, updated_at
+            ) VALUES (?,?,?,?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?,?, ?,?, ?,?,?,?, ?,?,?, ?,?)
+        ''', (
+            str(uuid.uuid4()),
+            _mclean(row[1]), _mclean(row[11]), reference,
+            _mclean(row[16]), _mnum(row[4]),
+            _mclean(row[12]), case_num, movement_num,
+            _mclean(row[15]), _mnum(row[37], int),
+            _mclean(row[2]), _mclean(row[22]), _mclean(row[21]),
+            _mnum(row[0], int), _mnum(row[13]),
+            _mclean(row[6]), _mclean(row[5]),
+            _mclean(row[35]), _mclean(row[34]),
+            _mdate(row[10]), _mnum(row[25]), _mclean(row[36]), _mclean(row[23]),
+            _mclean(row[24]), _mclean(row[27]), _mclean(row[33]),
+            now, now,
+        ))
+        inserted += 1
+        existing.add(key)
+
+    db.commit()
+    total = db.execute('SELECT COUNT(*) FROM watches').fetchone()[0]
+    return jsonify(inserted=inserted, skipped_existing=skipped_existing,
+                   skipped_bad=skipped_bad, total=total)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
