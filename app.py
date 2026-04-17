@@ -881,6 +881,37 @@ def inject_globals():
 
 
 # ---------------------------------------------------------------------------
+# Temporary art import (remove after upload)
+# ---------------------------------------------------------------------------
+
+IMPORT_ART_SECRET = 'stuffapp-art-import-2026'
+
+@app.route('/admin/import-art', methods=['POST'])
+def import_art_table():
+    if request.form.get('secret') != IMPORT_ART_SECRET:
+        abort(403)
+    f = request.files.get('db')
+    if not f:
+        return jsonify(error='no db file'), 400
+    tmp_path = os.path.join(DATA_DIR, '_import_tmp.db')
+    f.save(tmp_path)
+    try:
+        db = get_db()
+        db.execute('DELETE FROM art')
+        db.execute("ATTACH DATABASE ? AS src", [tmp_path])
+        cols = [r[1] for r in db.execute("PRAGMA src.table_info(art)").fetchall()]
+        col_list = ', '.join(cols)
+        db.execute(f"INSERT INTO art ({col_list}) SELECT {col_list} FROM src.art")
+        db.execute("DETACH DATABASE src")
+        db.commit()
+        n = db.execute('SELECT COUNT(*) FROM art').fetchone()[0]
+    finally:
+        try: os.remove(tmp_path)
+        except OSError: pass
+    return jsonify(ok=True, art_rows=n)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
