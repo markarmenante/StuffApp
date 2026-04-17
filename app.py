@@ -1257,6 +1257,37 @@ def _draw_coin_card(c, coin, x, y, w, h):
             sy -= step
 
 
+@app.route('/admin/prune-empty-coin-id-dupes', methods=['POST'])
+def prune_empty_coin_id_dupes():
+    """Delete coins rows whose coin_id is empty and whose id isn't a CSV UUID.
+
+    These are leftovers from an earlier import where bullion rows without a
+    coin_id got auto-generated UUIDs; newer imports use the CSV's own UUID,
+    creating duplicates.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    csv_uuids = set()
+    for row in _csv_rows('Coin.csv'):
+        if len(row) >= 30 and row[29]:
+            csv_uuids.add(row[29].strip().lower())
+    db = get_db()
+    stray = db.execute(
+        "SELECT id, authority, denomination FROM coins WHERE coin_id IS NULL OR coin_id = ''"
+    ).fetchall()
+    deleted = 0
+    kept = 0
+    for r in stray:
+        if (r['id'] or '').lower() in csv_uuids:
+            kept += 1
+        else:
+            db.execute("DELETE FROM coins WHERE id = ?", (r['id'],))
+            deleted += 1
+    db.commit()
+    total = db.execute('SELECT COUNT(*) FROM coins').fetchone()[0]
+    return jsonify(deleted=deleted, kept=kept, total=total)
+
+
 @app.route('/admin/fix-coin-region-mint', methods=['POST'])
 def fix_coin_region_mint():
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
