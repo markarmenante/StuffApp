@@ -7,7 +7,7 @@
 <div class="dcell" style="{% if colspan > 1 %}grid-column: span {{ colspan }};{% endif %}">
   {% set v = val(field) %}
   {% if rows > 1 %}
-    <textarea name="{{ field }}" {% if is_new and not v %}placeholder="{{ label }}"{% endif %}>{{ v }}</textarea>
+    <textarea name="{{ field }}" rows="{{ rows }}" {% if is_new and not v %}placeholder="{{ label }}"{% endif %}>{{ v }}</textarea>
   {% else %}
     <input type="text" name="{{ field }}" value="{{ v }}" {% if is_new and not v %}placeholder="{{ label }}"{% endif %}>
   {% endif %}
