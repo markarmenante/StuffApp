@@ -263,9 +263,11 @@
       <span class="blabel">Location</span>
     </div>
     <div class="bottom-cell">
-      <select name="status">
+      {% set _s = val('status') if val('status') else ('Ordered' if is_new else '') %}
+      <select name="status" class="status-select {{ 'status-ordered' if _s=='Ordered' }}"
+              onchange="this.classList.toggle('status-ordered', this.value==='Ordered')">
         <option value=""></option>
-        {% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}
+        {% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if _s==s }}>{{ s }}</option>{% endfor %}
       </select>
       <span class="blabel">Status</span>
     </div>
@@ -350,15 +352,16 @@
   </div>
 
   <!-- Description -->
+  <div class="section-bar">Description</div>
   <div class="dgrid dg1">{{ cell('description','',rows=10) }}</div>
 
   <!-- Pedigree, References -->
   <div class="section-bar">Pedigree, References</div>
-  <div class="dgrid dg1">{{ cell('coin_references','References',rows=2) }}</div>
+  <div class="dgrid dg1">{{ cell('coin_references','',rows=4) }}</div>
 
   <!-- Grade, Conditions -->
   <div class="section-bar">Grade, Conditions</div>
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=5) }}</div>
+  <div class="dgrid dg1">{{ cell('notes','',rows=4) }}</div>
 
   <!-- Extra fields -->
   <div class="dgrid dg2">
@@ -369,9 +372,11 @@
   <!-- Bottom -->
   <div class="detail-bottom">
     <div class="bottom-cell">
-      <select name="status">
+      {% set _s = val('status') if val('status') else ('Ordered' if is_new else '') %}
+      <select name="status" class="status-select {{ 'status-ordered' if _s=='Ordered' }}"
+              onchange="this.classList.toggle('status-ordered', this.value==='Ordered')">
         <option value=""></option>
-        {% for s in vlists.coin_status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}
+        {% for s in vlists.coin_status %}<option value="{{ s }}" {{ 'selected' if _s==s }}>{{ s }}</option>{% endfor %}
       </select>
       <span class="blabel">Status</span>
     </div>
@@ -579,64 +584,60 @@
            data-ta="{{ ta.get('artist', [])|join('||') }}">
   </div>
 
-  <!-- Title -->
-  <div class="detail-model">
-    <input type="text" name="title" value="{{ val('title') }}" placeholder="Title"
-           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  <!-- Title | Year -->
+  <div class="dgrid dg2">
+    {{ cell('title','Title') }}
+    {{ numcell('year','Year') }}
   </div>
 
-  <!-- Photo + right specs -->
-  <div class="watch-body">
-    <div class="watch-photo drop-zone" data-field="image"
-         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
-      {% if r and r['image'] and r['image']|is_image %}
-        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Art">
-      {% else %}
-        <span class="no-img">🎨</span>
-      {% endif %}
-      <label class="file-upload-lbl watch-photo-upload">
-        {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
-        <input type="file" name="image" accept="image/*" style="display:none"
-               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
-      </label>
+  <!-- Large photo, full width -->
+  <div class="art-photo-full drop-zone" data-field="image"
+       data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+    {% if r and r['image'] and r['image']|is_image %}
+      <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Art">
+    {% else %}
+      <span class="no-img">🎨</span>
+    {% endif %}
+    <label class="file-upload-lbl watch-photo-upload">
+      {{ 'Replace' if (r and r['image']) else 'Drop or click' }}
+      <input type="file" name="image" accept="image/*" style="display:none"
+             onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+    </label>
+  </div>
+
+  <!-- Medium -->
+  <div class="dgrid dg1">
+    <div class="dcell ta-wrap">
+      <input type="text" name="medium" value="{{ val('medium') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('medium', [])|join('||') }}">
+      <span class="clabel">Medium</span>
     </div>
-    <div class="watch-specs">
-      <div class="dgrid dg1">
-        <div class="dcell ta-wrap">
-          <input type="text" name="medium" value="{{ val('medium') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('medium', [])|join('||') }}">
-          <span class="clabel">Medium</span>
-        </div>
-      </div>
-      <div class="dgrid dg2">
-        {{ numcell('year','Year') }}
-        {{ cell('dimensions','Dimensions') }}
-      </div>
-      <div class="dgrid dg1">
-        {{ datecell('date','Date') }}
-      </div>
-      <div class="dgrid dg2">
-        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
-      </div>
+  </div>
+
+  <!-- Dimensions | Status -->
+  <div class="dgrid dg2">
+    {{ cell('dimensions','H x W x D') }}
+    {{ selcell('status','Status', vlists.status) }}
+  </div>
+
+  <!-- Date | Price | Vendor -->
+  <div class="dgrid dg3">
+    {{ datecell('date','Date') }}
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+    {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+  </div>
+
+  <!-- Owner | Property | Location -->
+  <div class="dgrid dg3">
+    {{ selcell('owner','Owner', vlists.owner) }}
+    {{ selcell('property','Property', vlists.property) }}
+    <div class="dcell ta-wrap">
+      <input type="text" name="location" value="{{ val('location') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
+      <span class="clabel">Location</span>
     </div>
   </div>
 
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
-  <div class="detail-bottom">
-    <div class="bottom-cell ta-wrap">
-      <input type="text" name="location" value="{{ val('location') }}" autocomplete="off"
-             class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
-      <span class="blabel">Location</span>
-    </div>
-    <div class="bottom-cell ta-wrap">
-      <input type="text" name="property" value="{{ val('property') }}" autocomplete="off"
-             class="ta-input" data-ta="{{ ta.get('property', [])|join('||') }}">
-      <span class="blabel">Property</span>
-    </div>
-    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
-  </div>
 
   <!-- ══════════════════════════════════════════════════════════
        VEHICLES

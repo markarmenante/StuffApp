@@ -312,6 +312,14 @@ a { color: var(--blue); text-decoration: none; }
 .watch-photo-upload { position: absolute; bottom: 6px; right: 6px; }
 .watch-specs { flex: 1; display: flex; flex-direction: column; }
 
+/* Art: full-width large photo */
+.art-photo-full { display: flex; align-items: center; justify-content: center; background: var(--cell-bg); min-height: 420px; position: relative; border-bottom: 1px solid var(--border); padding: 10px; }
+.art-photo-full img { max-width: 100%; max-height: 560px; object-fit: contain; display: block; }
+.art-photo-full .no-img { font-size: 56px; color: var(--text-hint); }
+
+/* Status = Ordered highlight (Watch/Coin new-record default) */
+.status-select.status-ordered { background: #fff3b0; }
+
 /* Coin images */
 .coin-imgs { display: flex; border-bottom: 1px solid var(--border); min-height: 150px; }
 .coin-img-panel { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--cell-bg); padding: 10px; border-right: 1px solid var(--border); gap: 4px; }

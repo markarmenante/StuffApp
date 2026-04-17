@@ -93,7 +93,7 @@ VALUE_LISTS = {
         'Dolby Chadwick','Storage','Archived','Missing','Gifted',
     ],
     'status': ['Own','Owned','Ordered','Sold','Loaned','Gifted','Consigned','Lost'],
-    'coin_status': ['Owned','Sold','Loaned'],
+    'coin_status': ['Owned','Ordered','Sold','Loaned'],
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
     'coin_grade': ['BU','FDC','MS','PF','AU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
     'clasp_type': ['Tang','Deployant','Buckle','Velcro'],
