@@ -62,7 +62,10 @@
       {# ── COINS ── #}
       {% elif category == 'coins' %}
         <div class="item-line1">
-          <span class="item-brand">{{ row['authority'] or row['mint'] or '—' }}</span>
+          <span class="item-brand">{{ row['region'] or row['authority'] or row['mint'] or '—' }}</span>
+          {% if row['region'] and row['authority'] and row['authority'] != row['region'] %}
+          <span class="item-model">{{ row['authority'] }}</span>
+          {% endif %}
         </div>
         <div class="item-detail-rows">
           <div class="idr">
