@@ -664,38 +664,52 @@ def fetch_watch_valuation(watch):
                                  f'({metal})' if metal else '',
                                  str(year) if year else ''] if x)
 
-    prompt = f"""You are valuing a specific wristwatch using public web data.
+    prompt = f"""You are valuing a specific wristwatch from public web data.
 
 Watch: {ident}
-Description: {description or '(none provided)'}
+Description: {(description[:280] + '…') if len(description) > 280 else description or '(none)'}
 
-Use web search to find CURRENT (2024-2026) market prices for THIS watch on:
-- chrono24.com (active listings — sample 3-6 listings)
-- watchbox.com / thewatchbox.com (if listed)
-- acollectedman.com (A Collected Man, if listed)
-- Recent public auction results (Phillips, Christie's, Sotheby's, Antiquorum, Bonhams)
+Use at most 4 concise web searches. Focus on:
+- Chrono24 active listings for this reference (one search; note median/range)
+- One recent auction result (Phillips, Christie's, Sotheby's, Antiquorum, or Bonhams)
+- Watchbox or A Collected Man if this reference is listed (one search combined)
 
-Compute a consensus value in USD (the average / central estimate of the comps you found).
+Compute a consensus USD value (central estimate of the comps found).
 
-Respond with ONLY a JSON object (no markdown fences), with this shape:
-{{
-  "consensus_usd": 12345,
-  "results_markdown": "- Chrono24 (median of 5 active listings): $X,XXX — https://...\\n- Watchbox: $X,XXX — https://...\\n- A Collected Man: $X,XXX — https://...\\n- Phillips, May 2025: $X,XXX hammer — https://...\\n- Christie's, Nov 2024: $X,XXX hammer — https://..."
-}}
+Reply with ONLY a JSON object, no prose, no code fences:
+{{"consensus_usd": 12345, "results_markdown": "- Chrono24 (N listings, median): $X,XXX — URL\\n- Phillips, Month YYYY: $X,XXX — URL\\n- ..."}}
 
-Include the source URL on every line in results_markdown. If no comps are found, use null for consensus_usd and explain in results_markdown."""
+Keep results_markdown to 3–6 short lines, each with a source + URL. Use null for consensus_usd if no comps."""
 
     client = anthropic.Anthropic(api_key=api_key)
-    resp = client.messages.create(
-        model='claude-sonnet-4-5',
-        max_tokens=2048,
-        tools=[{
-            'type': 'web_search_20250305',
-            'name': 'web_search',
-            'max_uses': 8,
-        }],
-        messages=[{'role': 'user', 'content': prompt}],
-    )
+
+    import time as _time
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = client.messages.create(
+                model='claude-sonnet-4-5',
+                max_tokens=1536,
+                tools=[{
+                    'type': 'web_search_20250305',
+                    'name': 'web_search',
+                    'max_uses': 4,
+                }],
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            break
+        except anthropic.RateLimitError as e:
+            last_err = e
+            # honour Retry-After if present, else exponential backoff
+            wait = 10 * (attempt + 1)
+            try:
+                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
+                if ra: wait = max(wait, int(float(ra)))
+            except Exception:
+                pass
+            _time.sleep(wait)
+    else:
+        raise RuntimeError(f'Rate limited after retries: {last_err}')
 
     # Concatenate all text blocks in the final assistant message
     text = ''
