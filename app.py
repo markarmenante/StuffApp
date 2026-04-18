@@ -735,7 +735,12 @@ results_markdown rules:
             value = float(value)
         except (ValueError, TypeError):
             value = None
-    return {'value': value, 'results': data.get('results_markdown') or ''}
+    # Models sometimes emit HTML entities (&#39;, &amp;, etc.) in JSON string
+    # values. Decode them once so the downstream format_results filter only
+    # performs a single round of HTML-escaping when rendering.
+    import html as _html
+    results_md = _html.unescape(data.get('results_markdown') or '')
+    return {'value': value, 'results': results_md}
 
 
 # ---------------------------------------------------------------------------
@@ -1100,7 +1105,9 @@ def format_results_filter(value):
     import html as _html
     from markupsafe import Markup
 
-    lines = str(value).strip().split('\n')
+    # Decode any stray HTML entities the AI may have embedded (&#39; etc.)
+    # before we re-escape during rendering.
+    lines = _html.unescape(str(value)).strip().split('\n')
     out = []
     in_list = False
     url_re = re.compile(r'https?://[^\s<>()]+')

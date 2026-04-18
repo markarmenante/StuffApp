@@ -1071,6 +1071,14 @@ function previewFile(input, previewId) {
 // filter so we can refresh the preview without a page reload).
 function formatResultsHtml(text) {
   if (!text) return '';
+  // Decode any HTML entities the AI may have embedded (&#39;, &amp;, etc.)
+  // so the subsequent escape step only runs once.
+  const decode = s => {
+    const ta = document.createElement('textarea');
+    ta.innerHTML = s;
+    return ta.value;
+  };
+  text = decode(text);
   const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const trail = /[.,;:)\]}"']+$/;
   const shortHost = u => {
