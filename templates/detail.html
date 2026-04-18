@@ -1076,6 +1076,12 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
   btn.textContent = 'Searching…';
   try {
     const res = await fetch(url, { method: 'POST' });
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      const body = await res.text();
+      throw new Error(`Server returned ${res.status} (non-JSON). ` +
+        (res.status >= 500 ? 'Possibly a timeout; try again.' : body.slice(0, 120)));
+    }
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed');
     const valInput = document.querySelector('input[name="value"]');
