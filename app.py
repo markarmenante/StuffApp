@@ -669,8 +669,9 @@ def fetch_watch_valuation(watch):
 Watch: {ident}
 Description: {(description[:280] + '…') if len(description) > 280 else description or '(none)'}
 
-Use at most 4 concise web searches. Focus on:
+Use at most 5 concise web searches. Focus on:
 - Chrono24 active listings for this reference (one search; note median/range)
+- WatchCharts market data / price history for this reference (one search)
 - One recent auction result (Phillips, Christie's, Sotheby's, Antiquorum, or Bonhams)
 - Watchbox or A Collected Man if this reference is listed (one search combined)
 
@@ -693,7 +694,7 @@ Keep results_markdown to 3–6 short lines, each with a source + URL. Use null f
                 tools=[{
                     'type': 'web_search_20250305',
                     'name': 'web_search',
-                    'max_uses': 4,
+                    'max_uses': 5,
                 }],
                 messages=[{'role': 'user', 'content': prompt}],
             )
