@@ -107,7 +107,7 @@
       <a class="detail-nav-btn {{ 'disabled' if not next_id }}"
          href="{{ url_for('detail_view', category=category, record_id=next_id) if next_id else '#' }}">&gt;</a>
     {% endif %}
-    <a class="back-link" href="{{ url_for('list_view', category=category) }}">← Back</a>
+    <a class="back-link" href="{{ url_for('list_view', category=category) }}{% if r and r['id'] %}#item-{{ r['id'] }}{% endif %}">← Back</a>
   </div>
 
   {% if is_new %}<div class="new-record-bar">New {{ cat_info.name[:-1] if cat_info.name.endswith('s') else cat_info.name }}</div>{% endif %}

@@ -36,9 +36,9 @@
 
 <!-- List -->
 {% if rows %}
-<div class="item-list">
+<div class="item-list item-list-{{ category }}">
   {% for row in rows %}
-  <div class="item-row" data-href="{{ url_for('detail_view', category=category, record_id=row['id']) }}">
+  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id']) }}">
 
     <!-- Thumbnail -->
     <div class="item-thumb"

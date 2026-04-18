@@ -159,6 +159,16 @@ a { color: var(--blue); text-decoration: none; }
   border-bottom: 1px solid var(--border-light);
   text-decoration: none; color: inherit;
   cursor: pointer;
+  scroll-margin-top: calc(var(--nav-height) + 56px);
+}
+.item-row:target {
+  background: #fff4c2 !important;
+  animation: item-flash 1.6s ease-out 0.1s 1;
+}
+@keyframes item-flash {
+  0%   { background: #fff4c2; }
+  60%  { background: #fff4c2; }
+  100% { background: transparent; }
 }
 .item-row:nth-child(even) { background: #f7f7f7; }
 .item-row:hover { background: #f0f0ff; text-decoration: none; }
@@ -598,6 +608,16 @@ input[type="date"] { -webkit-appearance: none; }
 
   /* Hide vendor + property from every list card on phones. */
   .li-hide-mobile { display: none !important; }
+
+  /* Watches list: stack the model (description) under the brand on phones. */
+  .item-list-watches .item-line1 {
+    flex-wrap: wrap; white-space: normal; align-items: flex-start;
+  }
+  .item-list-watches .item-line1 .item-brand { flex: 1 1 100%; }
+  .item-list-watches .item-line1 .item-model {
+    flex: 1 1 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
 
   /* Top nav strip already scrolls horizontally; make the pills a touch
      bigger and keep labels readable. */
