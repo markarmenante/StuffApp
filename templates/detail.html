@@ -256,7 +256,7 @@
   <!-- Value fetch + Results -->
   <div class="dgrid dg1">
     <div class="dcell value-fetch-row">
-      <span class="value-fetch-label">Value Estimate from Retailers and Recent Auctions</span>
+      <span class="value-fetch-label">Value Estimate from Retailers and Recent Auctions<span id="valueSearchedAt" class="value-fetch-stamp">{% if r and r['value_searched_at'] %} as of {{ r['value_searched_at']|short_date }}{% endif %}</span></span>
       <button type="button" id="valueBtn" class="toolbar-btn pill"
               {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"{% endif %}>
         Search Value
@@ -1156,6 +1156,14 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     if (resultsTa) resultsTa.value = data.results || '';
     const disp = document.getElementById('resultsDisplay');
     if (disp) disp.innerHTML = formatResultsHtml(data.results || '');
+    const stamp = document.getElementById('valueSearchedAt');
+    if (stamp) {
+      let iso = data.searched_at || new Date().toISOString();
+      let d = new Date(iso);
+      stamp.textContent = ' as of ' + d.toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric'
+      });
+    }
     btn.textContent = 'Fetched ✓';
   } catch (err) {
     btn.textContent = 'Error';

@@ -480,6 +480,7 @@ def init_db():
     for stmt in (
         'ALTER TABLE watches ADD COLUMN value REAL',
         'ALTER TABLE watches ADD COLUMN results TEXT',
+        'ALTER TABLE watches ADD COLUMN value_searched_at TEXT',
     ):
         try:
             db.execute(stmt)
@@ -1025,11 +1026,12 @@ def watch_fetch_value(record_id):
         return jsonify({'error': f'Valuation failed: {detail}'}), 500
     now = datetime.utcnow().isoformat()
     db.execute(
-        "UPDATE watches SET value = ?, results = ?, updated_at = ? WHERE id = ?",
-        (data['value'], data['results'], now, record_id),
+        "UPDATE watches SET value = ?, results = ?, value_searched_at = ?, "
+        "updated_at = ? WHERE id = ?",
+        (data['value'], data['results'], now, now, record_id),
     )
     db.commit()
-    return jsonify(data)
+    return jsonify({**data, 'searched_at': now})
 
 
 @app.route('/<category>/<record_id>/upload-image', methods=['POST'])
@@ -1116,6 +1118,20 @@ def fmt_int_filter(value):
         return f"{int(float(value)):,}"
     except (ValueError, TypeError):
         return str(value)
+
+
+@app.template_filter('short_date')
+def short_date_filter(value):
+    """Render an ISO datetime or YYYY-MM-DD string as 'MMM D, YYYY'."""
+    if not value:
+        return ''
+    s = str(value)
+    try:
+        # datetime.fromisoformat handles both 'YYYY-MM-DD' and full ISO.
+        dt = datetime.fromisoformat(s.replace('Z', ''))
+    except ValueError:
+        return s
+    return dt.strftime('%b %-d, %Y')
 
 
 @app.template_filter('format_results')

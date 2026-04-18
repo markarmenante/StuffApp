@@ -319,6 +319,9 @@ a { color: var(--blue); text-decoration: none; }
 .value-fetch-label {
   font-size: 13px; color: var(--text-secondary, #555); text-align: left;
 }
+.value-fetch-stamp {
+  color: var(--text-hint, #888); font-style: italic; font-weight: 400;
+}
 .results-display {
   font-family: var(--font); font-size: 13px;
   color: #111; line-height: 1.45;

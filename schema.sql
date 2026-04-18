@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS watches (
     service_date DATE,
     value REAL,
     results TEXT,
+    value_searched_at TEXT,
     description TEXT,
     notes TEXT,
     owner TEXT,
