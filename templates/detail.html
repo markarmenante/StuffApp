@@ -1072,9 +1072,30 @@ function previewFile(input, previewId) {
 function formatResultsHtml(text) {
   if (!text) return '';
   const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  const inline = s => esc(s)
-    .replace(/(https?:\/\/[^\s<>()]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
-    .replace(/(\$[0-9][0-9,]*(?:\.\d+)?)/g, '<strong>$1</strong>');
+  const trail = /[.,;:)\]}"']+$/;
+  const shortHost = u => {
+    try {
+      const h = new URL(u).hostname.replace(/^www\./, '');
+      return h || 'link';
+    } catch (e) { return 'link'; }
+  };
+  const inline = raw => {
+    // Capture URLs first so they don't get double-escaped, then substitute pills.
+    const urls = [];
+    let s = raw.replace(/https?:\/\/[^\s<>()]+/g, m => {
+      const u = m.replace(trail, '');
+      urls.push(u);
+      return `\0A${urls.length - 1}\0`;
+    });
+    s = esc(s);
+    // Strip dash/em-dash that precedes a URL placeholder
+    s = s.replace(/\s*[\u2014\u2013-]\s*(\0A\d+\0)/g, ' $1');
+    urls.forEach((u, i) => {
+      const pill = `<a class="result-src" href="${esc(u)}" target="_blank" rel="noopener">${esc(shortHost(u))}</a>`;
+      s = s.replace(`\0A${i}\0`, pill);
+    });
+    return s.replace(/(\$[0-9][0-9,]*(?:\.\d+)?)/g, '<strong>$1</strong>');
+  };
   const out = [];
   let inList = false;
   for (const raw of text.split('\n')) {

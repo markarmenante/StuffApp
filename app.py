@@ -1098,15 +1098,40 @@ def format_results_filter(value):
     lines = str(value).strip().split('\n')
     out = []
     in_list = False
-    url_re = re.compile(r'(https?://[^\s<>()]+)')
+    url_re = re.compile(r'https?://[^\s<>()]+')
     money_re = re.compile(r'(\$[0-9][0-9,]*(?:\.\d+)?)')
+    # Trim stray punctuation the model tends to attach to URLs
+    _url_trail = '.,;:)]}"\''
+
+    def _short(url):
+        u = url.rstrip(_url_trail)
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(u).hostname or u
+            if host.startswith('www.'):
+                host = host[4:]
+            return host
+        except Exception:
+            return 'link'
 
     def _inline(text):
+        # Replace URLs first (on raw text) with a placeholder that survives
+        # HTML-escape, then substitute the final anchor markup.
+        anchors = []
+        def _cap(m):
+            url = m.group(0).rstrip(_url_trail)
+            anchors.append(url)
+            return f'\x00A{len(anchors) - 1}\x00'
+        text = url_re.sub(_cap, text)
         text = _html.escape(text)
-        text = url_re.sub(
-            lambda m: f'<a href="{m.group(1)}" target="_blank" rel="noopener">{m.group(1)}</a>',
-            text,
-        )
+        # Drop any em/en-dash + whitespace immediately before the placeholder —
+        # the model tends to write "... : $X,XXX — <url>" which now reads
+        # "... : $X,XXX" with a trailing pill.
+        text = re.sub(r'\s*[\u2014\u2013-]\s*(\x00A\d+\x00)', r' \1', text)
+        for i, url in enumerate(anchors):
+            pill = (f'<a class="result-src" href="{_html.escape(url, quote=True)}" '
+                    f'target="_blank" rel="noopener">{_html.escape(_short(url))}</a>')
+            text = text.replace(f'\x00A{i}\x00', pill)
         text = money_re.sub(r'<strong>\1</strong>', text)
         return text
 

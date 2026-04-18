@@ -324,6 +324,18 @@ a { color: var(--blue); text-decoration: none; }
   color: var(--blue); text-decoration: none; word-break: break-all;
 }
 .results-display a:hover { text-decoration: underline; }
+.results-display a.result-src {
+  display: inline-block;
+  padding: 1px 8px; margin-left: 4px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: #f4f4f6; color: var(--text-secondary, #555);
+  font-size: 11px; line-height: 1.5;
+  word-break: normal; vertical-align: baseline;
+}
+.results-display a.result-src:hover {
+  background: var(--blue); border-color: var(--blue); color: #fff;
+  text-decoration: none;
+}
 .results-display strong { font-weight: 600; }
 .results-raw {
   width: 100%; min-height: 48px; resize: vertical;
