@@ -574,13 +574,30 @@ input[type="date"] { -webkit-appearance: none; }
   .ropt        { font-size: 15px; }
   .rdot        { width: 12px; height: 12px; }
 
-  /* Thumbnails: smaller than desktop's 96px, still bigger than original 64. */
-  .item-thumb        { width: 72px; min-height: 72px; }
-  .item-thumb img    { max-width: 72px; max-height: 72px; }
-  .item-thumb .no-img { font-size: 30px; }
+  /* Thumbnails: wider on phones so photos read well at a glance. */
+  .item-thumb        { width: 120px; min-height: 120px; }
+  .item-thumb img    { max-width: 120px; max-height: 120px; }
+  .item-thumb .no-img { font-size: 40px; }
 
   /* List row spacing: pack a bit more info per screen. */
-  .item-body { padding: 6px 10px; gap: 2px; }
+  .item-body { padding: 6px 10px; gap: 2px; min-width: 0; }
+
+  /* Keep brand + model (description) on one single line, ellipsize if
+     they would otherwise wrap on a narrow viewport. */
+  .item-line1 {
+    flex-wrap: nowrap; gap: 8px;
+    overflow: hidden; white-space: nowrap;
+    min-width: 0;
+  }
+  .item-brand,
+  .item-model {
+    overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .item-brand  { flex: 0 1 auto; }
+  .item-model  { flex: 1 1 auto; }
+
+  /* Hide vendor + property from every list card on phones. */
+  .li-hide-mobile { display: none !important; }
 
   /* Top nav strip already scrolls horizontally; make the pills a touch
      bigger and keep labels readable. */
