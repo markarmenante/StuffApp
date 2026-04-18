@@ -1018,7 +1018,11 @@ def watch_fetch_value(record_id):
     except RuntimeError as e:
         return jsonify({'error': str(e)}), 503
     except Exception as e:
-        return jsonify({'error': f'Valuation failed: {e}'}), 500
+        import traceback
+        tb = traceback.format_exc()
+        print(tb, flush=True)  # surface in Railway logs
+        detail = str(e) or e.__class__.__name__
+        return jsonify({'error': f'Valuation failed: {detail}'}), 500
     now = datetime.utcnow().isoformat()
     db.execute(
         "UPDATE watches SET value = ?, results = ?, updated_at = ? WHERE id = ?",
