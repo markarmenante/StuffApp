@@ -300,6 +300,13 @@ a { color: var(--blue); text-decoration: none; }
   flex-direction: column; align-items: stretch;
   padding: 8px 10px 6px; gap: 6px;
 }
+.value-fetch-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 6px 10px;
+}
+.value-fetch-label {
+  font-size: 13px; color: var(--text-secondary, #555); text-align: left;
+}
 .results-display {
   font-size: 13px; color: #111; line-height: 1.45;
   max-height: 260px; overflow-y: auto;

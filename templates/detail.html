@@ -255,10 +255,11 @@
 
   <!-- Value fetch + Results -->
   <div class="dgrid dg1">
-    <div class="dcell" style="justify-content:center; padding:6px 0;">
+    <div class="dcell value-fetch-row">
+      <span class="value-fetch-label">Value Estimate from Retailers and Recent Auctions</span>
       <button type="button" id="valueBtn" class="toolbar-btn pill"
               {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"{% endif %}>
-        Value
+        Search Value
       </button>
     </div>
   </div>
