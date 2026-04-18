@@ -161,9 +161,11 @@ a { color: var(--blue); text-decoration: none; }
   cursor: pointer;
   scroll-margin-top: calc(var(--nav-height) + 56px);
 }
-.item-row:target {
+.item-row:target,
+.item-row.just-returned {
   background: #fff4c2 !important;
-  animation: item-flash 1.6s ease-out 0.1s 1;
+  animation: item-flash 2s ease-out 0.1s 1;
+  box-shadow: inset 3px 0 0 var(--blue);
 }
 @keyframes item-flash {
   0%   { background: #fff4c2; }
@@ -459,8 +461,8 @@ input[type="date"] { -webkit-appearance: none; }
   justify-content: flex-start;
   align-items: center;
 }
-.radio-group { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
-.radio-opt { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
+.radio-group { display: flex; flex-direction: row; flex-wrap: wrap; gap: 10px 14px; padding: 2px 0; }
+.radio-opt { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .radio-opt input { accent-color: #111; }
 
 /* File cells */

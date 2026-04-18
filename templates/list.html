@@ -354,6 +354,19 @@
       .catch(function() { thumb.classList.remove('uploading'); alert('Upload failed.'); });
   }
 
+  // Arrive from a detail page's "Back" link with #item-<id> -> scroll to
+  // that row and add a highlight class so the user sees where they were
+  // even if the browser doesn't fire :target (e.g. bf-cache restores).
+  (function focusAnchoredRow() {
+    if (!window.location.hash) return;
+    var target = document.querySelector(window.location.hash.replace(/"/g, ''));
+    if (!target || !target.classList.contains('item-row')) return;
+    // Use scrollIntoView so the scroll-margin-top CSS applies.
+    target.scrollIntoView({ block: 'start', behavior: 'auto' });
+    target.classList.add('just-returned');
+    setTimeout(function() { target.classList.remove('just-returned'); }, 2200);
+  })();
+
   document.querySelectorAll('.item-row').forEach(function(row) {
     var thumb = row.querySelector('.item-thumb[data-upload-url]');
     if (!thumb) return;
