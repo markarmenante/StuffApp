@@ -556,3 +556,67 @@ input[type="date"] { -webkit-appearance: none; }
 .nav-dot:hover { background: #e0b030; text-decoration: none; }
 .nav-dot-active { background: #e8a000; box-shadow: 0 0 0 2px rgba(232,160,0,.4); }
 .nav-dot-active:hover { background: #d09000; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Phone / narrow-viewport overrides
+   Activates on any phone-sized device (iPhone 17 Air 402px, Pro Max 430px,
+   Android). Preserves desktop 1.5x scaling but tightens density, enforces
+   44px touch targets, and keeps input fonts >=16px so iOS Safari doesn't
+   auto-zoom on focus.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  /* Typography: tighten list + detail density without shrinking inputs. */
+  .item-brand  { font-size: 18px; }
+  .item-model  { font-size: 16px; }
+  .idr span    { font-size: 14px; }
+  .idr .lbl    { font-size: 12px; }
+  .item-cat-id { font-size: 14px; }
+  .ropt        { font-size: 15px; }
+  .rdot        { width: 12px; height: 12px; }
+
+  /* Thumbnails: smaller than desktop's 96px, still bigger than original 64. */
+  .item-thumb        { width: 72px; min-height: 72px; }
+  .item-thumb img    { max-width: 72px; max-height: 72px; }
+  .item-thumb .no-img { font-size: 30px; }
+
+  /* List row spacing: pack a bit more info per screen. */
+  .item-body { padding: 6px 10px; gap: 2px; }
+
+  /* Top nav strip already scrolls horizontally; make the pills a touch
+     bigger and keep labels readable. */
+  .nav-item       { min-width: 56px; }
+  .nav-item .icon { font-size: 22px; }
+  .nav-item .lbl  { font-size: 10px; }
+
+  /* Upload tap target on each row. */
+  .row-upload-btn { width: 44px; font-size: 20px; }
+
+  /* Detail grids: 4-up and 3-up become 2-up; 2-up stacks. */
+  .dgrid.dg4 { grid-template-columns: repeat(2, 1fr); }
+  .dgrid.dg3 { grid-template-columns: repeat(2, 1fr); }
+  .dgrid.dg2 { grid-template-columns: 1fr; }
+
+  /* Watches complications: 3 columns -> 2. */
+  .comp-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* Bottom action row: wrap into 2-up. */
+  .detail-bottom { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+
+  /* Every editable cell gets 16px font (no iOS zoom) + 44px min height. */
+  .dcell input,
+  .dcell select,
+  .dcell textarea { font-size: 16px; }
+  .dcell { min-height: 44px; }
+
+  /* Detail header allowed to wrap so nav arrows + Back drop to a 2nd row. */
+  .detail-header { flex-wrap: wrap; row-gap: 6px; }
+}
+
+/* Tight phones / small Androids: fully stack the wider grids. */
+@media (max-width: 380px) {
+  .dgrid.dg4 { grid-template-columns: 1fr; }
+  .dgrid.dg3 { grid-template-columns: 1fr; }
+  .comp-grid { grid-template-columns: 1fr; }
+  .item-brand { font-size: 17px; }
+  .item-model { font-size: 15px; }
+}
