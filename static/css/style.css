@@ -337,13 +337,7 @@ a { color: var(--blue); text-decoration: none; }
   text-decoration: none;
 }
 .results-display strong { font-weight: 600; }
-.results-raw {
-  width: 100%; min-height: 48px; resize: vertical;
-  font-family: var(--font);
-  font-size: 12px; color: #666; background: #fafafa;
-  border: 1px dashed var(--border); border-radius: 4px; padding: 4px 6px;
-}
-.results-raw:focus { color: #111; background: #fffde8; }
+.results-raw { display: none; }
 .dcell input:focus,
 .dcell select:focus,
 .dcell textarea:focus {
