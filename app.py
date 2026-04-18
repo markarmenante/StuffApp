@@ -680,7 +680,11 @@ Compute a consensus USD value (central estimate of the comps found).
 Reply with ONLY a JSON object, no prose, no code fences:
 {{"consensus_usd": 12345, "results_markdown": "- Chrono24 (N listings, median): $X,XXX — URL\\n- Phillips, Month YYYY: $X,XXX — URL\\n- ..."}}
 
-Keep results_markdown to 3–6 short lines, each with a source + URL. Use null for consensus_usd if no comps."""
+results_markdown rules:
+- 3–6 bullet lines for comps that have a URL source (prefix each with '- ').
+- You MAY add 1–2 short plain (non-bullet) lines of context above or below the comps when it's useful — e.g. rarity / production numbers, condition-sensitive caveats, or noting why a comp doesn't apply. These don't need a URL.
+- Keep the whole field under ~600 chars.
+- Use null for consensus_usd if no comps."""
 
     client = anthropic.Anthropic(api_key=api_key)
 
