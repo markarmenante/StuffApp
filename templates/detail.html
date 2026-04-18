@@ -207,27 +207,6 @@
     </div>
   </div>
 
-  <!-- Value / Fetch row -->
-  <div class="dgrid dg2 watch-value">
-    <div class="dcell">
-      <input type="text" name="value" value="{{ val('value')|currency }}" class="price-input" inputmode="numeric">
-      <span class="clabel">Value</span>
-    </div>
-    <div class="dcell" style="justify-content:center">
-      <button type="button" id="valueBtn" class="toolbar-btn pill"
-              {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"{% endif %}>
-        Value
-      </button>
-    </div>
-  </div>
-  <!-- Results -->
-  <div class="dgrid dg1">
-    <div class="dcell dcell-notes">
-      <textarea name="results" rows="6">{{ r['results'] if r and r['results'] else '' }}</textarea>
-      <span class="clabel">Results</span>
-    </div>
-  </div>
-
   <!-- Complications -->
   <div class="comp-section">
     <div class="comp-grid">
@@ -253,11 +232,15 @@
   </div>
 
   <!-- Purchase row -->
-  <div class="dgrid dg3 watch-purchase">
+  <div class="dgrid dg4 watch-purchase">
     {{ datecell('date','Date') }}
     <div class="dcell">
       <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric">
       <span class="clabel">Price</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="value" value="{{ val('value')|currency }}" class="price-input" inputmode="numeric">
+      <span class="clabel">Value</span>
     </div>
     {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
   </div>
@@ -267,6 +250,22 @@
     <div class="dcell dcell-notes">
       <textarea name="notes">{{ r['notes'] if r and r['notes'] else '' }}</textarea>
       <span class="clabel">Notes</span>
+    </div>
+  </div>
+
+  <!-- Value fetch + Results -->
+  <div class="dgrid dg1">
+    <div class="dcell" style="justify-content:center; padding:6px 0;">
+      <button type="button" id="valueBtn" class="toolbar-btn pill"
+              {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"{% endif %}>
+        Value
+      </button>
+    </div>
+  </div>
+  <div class="dgrid dg1">
+    <div class="dcell dcell-notes">
+      <textarea name="results" rows="6">{{ r['results'] if r and r['results'] else '' }}</textarea>
+      <span class="clabel">Results</span>
     </div>
   </div>
 
