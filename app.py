@@ -1068,6 +1068,57 @@ def fmt_int_filter(value):
         return str(value)
 
 
+@app.template_filter('format_results')
+def format_results_filter(value):
+    """Turn the AI-generated Results markdown into clean HTML.
+
+    - Lines starting with -, * or • become <li> items.
+    - URLs become clickable <a target=_blank> links.
+    - Dollar amounts like $1,234 or $12,345.67 are wrapped in <strong>.
+    """
+    if not value:
+        return ''
+    import html as _html
+    from markupsafe import Markup
+
+    lines = str(value).strip().split('\n')
+    out = []
+    in_list = False
+    url_re = re.compile(r'(https?://[^\s<>()]+)')
+    money_re = re.compile(r'(\$[0-9][0-9,]*(?:\.\d+)?)')
+
+    def _inline(text):
+        text = _html.escape(text)
+        text = url_re.sub(
+            lambda m: f'<a href="{m.group(1)}" target="_blank" rel="noopener">{m.group(1)}</a>',
+            text,
+        )
+        text = money_re.sub(r'<strong>\1</strong>', text)
+        return text
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            if in_list:
+                out.append('</ul>')
+                in_list = False
+            continue
+        bullet = line[:1] in ('-', '*', '•')
+        if bullet:
+            if not in_list:
+                out.append('<ul class="results-list">')
+                in_list = True
+            out.append(f'<li>{_inline(line[1:].strip())}</li>')
+        else:
+            if in_list:
+                out.append('</ul>')
+                in_list = False
+            out.append(f'<p>{_inline(line)}</p>')
+    if in_list:
+        out.append('</ul>')
+    return Markup(''.join(out))
+
+
 @app.template_filter('is_image')
 def is_image_filter(filename):
     if not filename:

@@ -263,8 +263,9 @@
     </div>
   </div>
   <div class="dgrid dg1">
-    <div class="dcell dcell-notes">
-      <textarea name="results" rows="6">{{ r['results'] if r and r['results'] else '' }}</textarea>
+    <div class="dcell dcell-results">
+      <div id="resultsDisplay" class="results-display">{{ val('results')|format_results }}</div>
+      <textarea id="resultsRaw" name="results" rows="3" class="results-raw">{{ r['results'] if r and r['results'] else '' }}</textarea>
       <span class="clabel">Results</span>
     </div>
   </div>
@@ -1065,6 +1066,38 @@ function previewFile(input, previewId) {
   }
 }
 
+// Format Results markdown-ish text into HTML (mirror of the server
+// filter so we can refresh the preview without a page reload).
+function formatResultsHtml(text) {
+  if (!text) return '';
+  const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const inline = s => esc(s)
+    .replace(/(https?:\/\/[^\s<>()]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+    .replace(/(\$[0-9][0-9,]*(?:\.\d+)?)/g, '<strong>$1</strong>');
+  const out = [];
+  let inList = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line) { if (inList) { out.push('</ul>'); inList = false; } continue; }
+    const bullet = '-*•'.includes(line[0]);
+    if (bullet) {
+      if (!inList) { out.push('<ul class="results-list">'); inList = true; }
+      out.push('<li>' + inline(line.slice(1).trim()) + '</li>');
+    } else {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push('<p>' + inline(line) + '</p>');
+    }
+  }
+  if (inList) out.push('</ul>');
+  return out.join('');
+}
+
+// Re-render preview whenever the raw textarea changes
+document.getElementById('resultsRaw')?.addEventListener('input', (e) => {
+  const disp = document.getElementById('resultsDisplay');
+  if (disp) disp.innerHTML = formatResultsHtml(e.target.value);
+});
+
 // Watch "Value" button: fetch market valuation via backend
 document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
@@ -1089,8 +1122,10 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
         ? '$' + Number(data.value).toLocaleString('en-US', {maximumFractionDigits: 0})
         : '';
     }
-    const resultsTa = document.querySelector('textarea[name="results"]');
+    const resultsTa = document.getElementById('resultsRaw');
     if (resultsTa) resultsTa.value = data.results || '';
+    const disp = document.getElementById('resultsDisplay');
+    if (disp) disp.innerHTML = formatResultsHtml(data.results || '');
     btn.textContent = 'Fetched ✓';
   } catch (err) {
     btn.textContent = 'Error';

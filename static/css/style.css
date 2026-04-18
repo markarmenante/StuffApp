@@ -296,6 +296,34 @@ a { color: var(--blue); text-decoration: none; }
 .dcell-notes textarea {
   min-height: 90px;
 }
+.dcell-results {
+  flex-direction: column; align-items: stretch;
+  padding: 8px 10px 6px; gap: 6px;
+}
+.results-display {
+  font-size: 13px; color: #111; line-height: 1.45;
+  max-height: 260px; overflow-y: auto;
+}
+.results-display:empty { display: none; }
+.results-display p { margin: 0 0 6px; }
+.results-display ul.results-list {
+  margin: 0 0 4px; padding-left: 18px;
+}
+.results-display ul.results-list li {
+  margin: 2px 0;
+}
+.results-display a {
+  color: var(--blue); text-decoration: none; word-break: break-all;
+}
+.results-display a:hover { text-decoration: underline; }
+.results-display strong { font-weight: 600; }
+.results-raw {
+  width: 100%; min-height: 48px; resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; color: #666; background: #fafafa;
+  border: 1px dashed var(--border); border-radius: 4px; padding: 4px 6px;
+}
+.results-raw:focus { color: #111; background: #fffde8; }
 .dcell input:focus,
 .dcell select:focus,
 .dcell textarea:focus {
