@@ -676,15 +676,16 @@ Use at most 5 concise web searches. Focus on:
 - Watchbox or A Collected Man if this reference is listed (one search combined)
 
 Compute a consensus USD value (central estimate of the comps found).
+Also capture the WatchCharts market median specifically, if that page publishes one for this reference.
 
 Reply with ONLY a JSON object, no prose, no code fences:
-{{"consensus_usd": 12345, "results_markdown": "- Chrono24 (N listings, median): $X,XXX — URL\\n- Phillips, Month YYYY: $X,XXX — URL\\n- ..."}}
+{{"consensus_usd": 12345, "watchcharts_median_usd": 12000, "results_markdown": "- Chrono24 (N listings, median): $X,XXX — URL\\n- WatchCharts median: $X,XXX — URL\\n- Phillips, Month YYYY: $X,XXX — URL\\n- ..."}}
 
 results_markdown rules:
 - 3–6 bullet lines for comps that have a URL source (prefix each with '- ').
 - You MAY add 1–2 short plain (non-bullet) lines of context above or below the comps when it's useful — e.g. rarity / production numbers, condition-sensitive caveats, or noting why a comp doesn't apply. These don't need a URL.
 - Keep the whole field under ~600 chars.
-- Use null for consensus_usd if no comps."""
+- Use null for consensus_usd / watchcharts_median_usd if not available."""
 
     client = anthropic.Anthropic(api_key=api_key)
 
@@ -729,17 +730,38 @@ results_markdown rules:
         raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
     data = json.loads(m.group(0))
 
-    value = data.get('consensus_usd')
-    if value is not None:
+    def _num(x):
+        if x is None:
+            return None
         try:
-            value = float(value)
+            return float(x)
         except (ValueError, TypeError):
-            value = None
+            return None
+
+    consensus = _num(data.get('consensus_usd'))
+    wc_median = _num(data.get('watchcharts_median_usd'))
+    orig_price = _num(watch['price'])
+
+    # Fallback chain: AI consensus → WatchCharts median → original purchase price
+    value = consensus
+    fallback_note = None
+    if value is None:
+        if wc_median is not None:
+            value = wc_median
+            fallback_note = (f"_No consensus computed — defaulted to WatchCharts median "
+                             f"(${wc_median:,.0f})._")
+        elif orig_price is not None:
+            value = orig_price
+            fallback_note = (f"_No consensus or WatchCharts median found — defaulted to "
+                             f"original purchase price (${orig_price:,.0f})._")
+
     # Models sometimes emit HTML entities (&#39;, &amp;, etc.) in JSON string
     # values. Decode them once so the downstream format_results filter only
     # performs a single round of HTML-escaping when rendering.
     import html as _html
     results_md = _html.unescape(data.get('results_markdown') or '')
+    if fallback_note:
+        results_md = (results_md + '\n\n' + fallback_note).strip()
     return {'value': value, 'results': results_md}
 
 
