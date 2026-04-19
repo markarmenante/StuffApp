@@ -26,9 +26,9 @@
      title="Audio at Truckee (Martis)">Martis</a>
   {% endif %}
   {% if category == 'vehicles' %}
-  <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'owned' else 'owned') }}"
-     class="toolbar-btn pill {% if coin_filter == 'owned' %}active{% endif %}"
-     title="Owned vehicles">Owned</a>
+  <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
+     class="toolbar-btn pill {% if coin_filter == 'own' %}active{% endif %}"
+     title="Own vehicles">Own</a>
   <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'sold' else 'sold') }}"
      class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
      title="Sold vehicles">Sold</a>

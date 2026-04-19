@@ -104,8 +104,8 @@ VALUE_LISTS = {
         'Ghent: Rec Center','Ghent: Rec Center/Arena','Ghent: Harlemville',
         'Dolby Chadwick','Storage','Archived','Missing','Gifted',
     ],
-    'status': ['Own','Owned','Ordered','Sold','Loaned','Gifted','Consigned','Lost'],
-    'coin_status': ['Owned','Ordered','Sold','Loaned'],
+    'status': ['Own','Ordered','Sold','Loaned','Gifted','Consigned','Lost'],
+    'coin_status': ['Own','Ordered','Sold','Loaned'],
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
     'coin_grade': ['BU','FDC','MS','PF','AU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
     'clasp_type': ['Tang','Deployant','Buckle','Velcro'],
@@ -155,7 +155,7 @@ FIELDS = {
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image_obv',       'label': 'Image (Obverse)',   'type': 'file'},
         {'name': 'image_rev',       'label': 'Image (Reverse)',   'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
@@ -195,7 +195,7 @@ FIELDS = {
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property_name',   'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image_1',         'label': 'Image (Obverse)',   'type': 'file'},
         {'name': 'image_2',         'label': 'Image (Reverse)',   'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
@@ -219,7 +219,7 @@ FIELDS = {
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
     ],
     'lenses': [
@@ -237,7 +237,7 @@ FIELDS = {
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
     ],
     'pens': [
@@ -255,7 +255,7 @@ FIELDS = {
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
     ],
@@ -273,7 +273,7 @@ FIELDS = {
         {'name': 'location',        'label': 'Location',          'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
     ],
@@ -291,7 +291,7 @@ FIELDS = {
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
         {'name': 'insurance',       'label': 'Insurance',         'type': 'file'},
         {'name': 'invoice',         'label': 'Invoice',           'type': 'file'},
@@ -318,7 +318,7 @@ FIELDS = {
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image',           'label': 'Cover Image',       'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
     ],
@@ -335,7 +335,7 @@ FIELDS = {
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
     ],
@@ -351,7 +351,7 @@ FIELDS = {
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Loaned']},
+         'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
     ],
@@ -389,7 +389,7 @@ FIELDS = {
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'notes',           'label': 'Notes',             'type': 'textarea'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Owned', 'Sold', 'Rented']},
+         'options': ['', 'Own', 'Sold', 'Rented']},
         {'name': 'archive',         'label': 'Archive',           'type': 'text'},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
     ],
@@ -551,7 +551,7 @@ def get_file_fields(category):
     return [f['name'] for f in FIELDS[category] if f['type'] == 'file']
 
 
-EXCLUDED_STATUSES = ('Owned', 'Sold', 'Gifted', 'Own')  # dot filter excludes these
+EXCLUDED_STATUSES = ('Own', 'Sold', 'Gifted', 'Own')  # dot filter excludes these
 
 CATEGORY_FILTERS = {
     'coins': {
@@ -563,8 +563,8 @@ CATEGORY_FILTERS = {
         'martis': ("property = 'Truckee'", []),
     },
     'vehicles': {
-        'owned': ("COALESCE(status,'') = 'Owned'", []),
-        'sold':  ("COALESCE(status,'') = 'Sold'", []),
+        'own':  ("COALESCE(status,'') = 'Own'", []),
+        'sold': ("COALESCE(status,'') = 'Sold'", []),
     },
 }
 
@@ -1546,6 +1546,26 @@ def _draw_coin_card(c, coin, x, y, w, h):
                               sy,
                               _fit_text(c, s, w * 0.5 - pad, 'Helvetica', 6))
             sy -= step
+
+
+@app.route('/admin/status-owned-to-own', methods=['POST'])
+def status_owned_to_own():
+    """Rename status='Owned' -> 'Own' across every table that has a status column."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    tables = [r['name'] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+    per_table = {}
+    total = 0
+    for t in tables:
+        cols = [r['name'] for r in db.execute(f"PRAGMA table_info({t})").fetchall()]
+        if 'status' in cols:
+            r = db.execute(f"UPDATE {t} SET status='Own' WHERE status='Owned'")
+            if r.rowcount:
+                per_table[t] = r.rowcount
+            total += r.rowcount
+    db.commit()
+    return jsonify(updated=total, per_table=per_table)
 
 
 @app.route('/admin/pens-owner-mark', methods=['POST'])
