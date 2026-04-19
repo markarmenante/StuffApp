@@ -1548,6 +1548,17 @@ def _draw_coin_card(c, coin, x, y, w, h):
             sy -= step
 
 
+@app.route('/admin/pens-owner-mark', methods=['POST'])
+def pens_owner_mark():
+    """Set owner='Mark' for all pens records."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    r = db.execute("UPDATE pens SET owner='Mark'")
+    db.commit()
+    return jsonify(updated=r.rowcount, total=db.execute('SELECT COUNT(*) FROM pens').fetchone()[0])
+
+
 @app.route('/admin/vehicles-default-sold', methods=['POST'])
 def vehicles_default_sold():
     """Set any vehicle with null/empty status to 'Sold'. Safe to re-run."""
