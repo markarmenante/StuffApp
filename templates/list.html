@@ -195,16 +195,16 @@
         </div>
         <div class="item-detail-rows">
           <div class="idr">
-            {% if row['year'] %}<span>{{ row['year'] }}</span>{% endif %}
-            {% if row['state'] %}<span>{{ row['state'] }}</span>{% endif %}
-            {% if row['tags'] %}<span>{{ row['tags'] }}</span>{% endif %}
+            {% if row['year'] %}<span><span class="lbl">Yr</span> {{ row['year'] }}</span>{% endif %}
+            {% if row['state'] %}<span><span class="lbl">State</span> {{ row['state'] }}</span>{% endif %}
+            {% if row['tags'] %}<span><span class="lbl">Plate</span> {{ row['tags'] }}</span>{% endif %}
           </div>
-          {% if row['vin'] %}<div class="idr"><span><span class="lbl">VIN</span> {{ row['vin'] }}</span></div>{% endif %}
           <div class="idr">
-            {% if row['vendor'] %}<span class="li-hide-mobile">{{ row['vendor'] }}</span>{% endif %}
+            {% if row['vin'] %}<span><span class="lbl">VIN</span> {{ row['vin'] }}</span>{% endif %}
             {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
-            {% if row['property'] %}<span class="li-hide-mobile">{{ row['property'] }}</span>{% endif %}
           </div>
+          {% if row['vendor'] %}<div class="idr li-hide-mobile"><span>{{ row['vendor'] }}</span></div>{% endif %}
+          {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
         </div>
 
       {# ── RECORDINGS ── #}

@@ -699,7 +699,14 @@
   <div class="dgrid dg3">{{ doccell('insurance','Insurance') }}{{ doccell('invoice','Invoice') }}{{ doccell('registration','Registration') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell">
+      {% set _vs = val('status') if val('status') else ('Owned' if is_new else '') %}
+      <select name="status">
+        <option value=""></option>
+        {% for s in ['Owned','Sold'] %}<option value="{{ s }}" {{ 'selected' if _vs==s }}>{{ s }}</option>{% endfor %}
+      </select>
+      <span class="blabel">Status</span>
+    </div>
     <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
