@@ -25,6 +25,14 @@
      class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
      title="Audio at Truckee (Martis)">Martis</a>
   {% endif %}
+  {% if category == 'vehicles' %}
+  <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'owned' else 'owned') }}"
+     class="toolbar-btn pill {% if coin_filter == 'owned' %}active{% endif %}"
+     title="Owned vehicles">Owned</a>
+  <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'sold' else 'sold') }}"
+     class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
+     title="Sold vehicles">Sold</a>
+  {% endif %}
   <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
     <div class="search-wrap">
       <button type="submit" title="Search">🔍</button>

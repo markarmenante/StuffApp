@@ -562,6 +562,10 @@ CATEGORY_FILTERS = {
         'carp':   ("property = 'Carpinteria'", []),
         'martis': ("property = 'Truckee'", []),
     },
+    'vehicles': {
+        'owned': ("COALESCE(status,'') = 'Owned'", []),
+        'sold':  ("COALESCE(status,'') = 'Sold'", []),
+    },
 }
 
 
@@ -606,6 +610,8 @@ CATEGORY_ORDER_BY = {
               "COALESCE(date_1, 99999)"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz'), "
                 "COALESCE(NULLIF(description, ''), 'zzz')"),
+    'vehicles': ("COALESCE(NULLIF(make, ''), 'zzz'), "
+                 "COALESCE(NULLIF(model, ''), 'zzz')"),
 }
 
 
