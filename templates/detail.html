@@ -1041,9 +1041,10 @@
   {% else %}
   <div class="save-bar">
     <span class="autosave-hint">Fields save automatically</span>
-    <form method="post" action="{{ url_for('delete_record', category=category, record_id=r['id']) }}" id="delForm" style="margin-left:auto">
-      <button type="button" class="btn-delete" onclick="confirmDelete()">Delete</button>
-    </form>
+    <button type="button" class="btn-delete" style="margin-left:auto"
+            data-delete-url="{{ url_for('delete_record', category=category, record_id=r['id']) }}"
+            data-redirect-url="{{ url_for('list_view', category=category) }}"
+            onclick="confirmDelete(this)">Delete</button>
   </div>
   {% endif %}
 
@@ -1051,10 +1052,11 @@
 </div>
 
 <script>
-function confirmDelete() {
-  if (confirm('Delete this record? This cannot be undone.')) {
-    document.getElementById('delForm').submit();
-  }
+function confirmDelete(btn) {
+  if (!confirm('Delete this record? This cannot be undone.')) return;
+  fetch(btn.dataset.deleteUrl, {method: 'POST'})
+    .then(r => { window.location.href = btn.dataset.redirectUrl; })
+    .catch(() => alert('Delete failed.'));
 }
 function previewFile(input, previewId) {
   const prev = document.getElementById(previewId);
