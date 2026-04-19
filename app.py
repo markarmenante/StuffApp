@@ -1548,6 +1548,18 @@ def _draw_coin_card(c, coin, x, y, w, h):
             sy -= step
 
 
+@app.route('/admin/vehicles-default-sold', methods=['POST'])
+def vehicles_default_sold():
+    """Set any vehicle with null/empty status to 'Sold'. Safe to re-run."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    r = db.execute("UPDATE vehicles SET status='Sold' WHERE status IS NULL OR status=''")
+    db.commit()
+    total = db.execute('SELECT COUNT(*) FROM vehicles').fetchone()[0]
+    return jsonify(updated=r.rowcount, total=total)
+
+
 @app.route('/admin/prune-empty-coin-id-dupes', methods=['POST'])
 def prune_empty_coin_id_dupes():
     """Delete coins rows whose coin_id is empty and whose id isn't a CSV UUID.
