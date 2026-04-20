@@ -945,16 +945,14 @@
     </div>
     <div class="watch-specs">
       <div class="dgrid dg1">{{ cell('address','Address') }}</div>
-      <div class="dgrid dg3">
+      <div class="dgrid dg4 properties-specs">
         {{ selcell('type','Type', vlists.property_type) }}
         {{ cell('year_built','Year Built') }}
         {{ cell('llc','LLC') }}
-      </div>
-      <div class="dgrid dg2">
         {{ cell('ein','EIN') }}
-        {{ datecell('date','Purchase Date') }}
       </div>
-      <div class="dgrid dg1">
+      <div class="dgrid dg2 properties-specs">
+        {{ datecell('date','Purchase Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Purchase Price</span></div>
       </div>
     </div>
