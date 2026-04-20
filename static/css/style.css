@@ -444,6 +444,19 @@ input[type="date"] { -webkit-appearance: none; }
   line-height: 1.35;
 }
 
+/* Property photo matches the specs-column height exactly, so its bottom
+   edge lines up with the Purchase Date / Purchase Price row bottom
+   instead of sticking past it from the 210px min-height default. */
+.properties-body { align-items: stretch; }
+.properties-photo {
+  min-height: 0;
+  align-self: stretch;
+  height: auto;
+}
+.properties-photo img {
+  max-height: 100%;
+}
+
 .drop-zone { cursor: pointer; transition: background .15s; }
 .drop-zone.drag-over { background: #e8f0fe; outline: 2px dashed var(--blue); outline-offset: -2px; }
 .coin-age-row { text-align: center; font-size: 12px; color: var(--text-secondary); padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--cell-bg); }

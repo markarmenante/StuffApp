@@ -927,8 +927,8 @@
   </div>
   <input type="hidden" name="short_name" value="{{ val('short_name') }}">
 
-  <div class="watch-body">
-    <div class="watch-photo drop-zone" data-field="image"
+  <div class="watch-body properties-body">
+    <div class="watch-photo properties-photo drop-zone" data-field="image"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image'] and r['image']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Property">
