@@ -328,14 +328,14 @@
   <!-- AI History panel (collapsed unless content present) -->
   <div class="coin-history-panel{% if not (r and (r['history_region'] or r['history_authority'])) %} is-empty{% endif %}"
        id="coinHistoryPanel"
-       data-region-html="{{ (r['history_region']|format_results) if r and r['history_region'] else '' }}"
-       data-authority-html="{{ (r['history_authority']|format_results) if r and r['history_authority'] else '' }}">
+       data-region-raw="{{ r['history_region'] if r and r['history_region'] else '' }}"
+       data-authority-raw="{{ r['history_authority'] if r and r['history_authority'] else '' }}">
     <div class="coin-history-header">
       <span class="coin-history-title" id="coinHistoryTitle">History</span>
       <span class="coin-history-stamp" id="coinHistoryStamp">{% if r and r['history_searched_at'] %}as of {{ r['history_searched_at']|short_date }}{% endif %}</span>
     </div>
     <div class="coin-history-body" id="coinHistoryBody">
-      {% if r and r['history_region'] %}{{ r['history_region']|format_results }}{% endif %}
+      {% if r and r['history_region'] %}{{ r['history_region']|format_results }}{% elif r and r['history_authority'] %}{{ r['history_authority']|format_results }}{% endif %}
     </div>
   </div>
 
@@ -1151,6 +1151,8 @@ function formatResultsHtml(text) {
     return ta.value;
   };
   text = decode(text);
+  // Strip Claude web_search <cite index="...">...</cite> wrappers.
+  text = text.replace(/<\/?cite\b[^>]*>/gi, '');
   const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const trail = /[.,;:)\]}"']+$/;
   const shortHost = u => {
@@ -1644,8 +1646,9 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
     const topicEl = document.querySelector('input[name="' + field + '"]');
     const topic = topicEl ? (topicEl.value || '').trim() : '';
     if (title) title.textContent = 'History — ' + label + (topic ? ': ' + topic : '');
-    const cached = panel.dataset[field + 'Html'] || '';
-    if (body) body.innerHTML = cached;
+    const rawKey = field + 'Raw';
+    const raw = panel.dataset[rawKey] || '';
+    if (body) body.innerHTML = raw ? formatResultsHtml(raw) : '';
     panel.classList.remove('is-empty');
   }
 
@@ -1673,9 +1676,10 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
         }
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed');
-        const html = formatResultsHtml(data.markdown || '');
+        const md = data.markdown || '';
+        const html = formatResultsHtml(md);
         if (body) body.innerHTML = html || '<p><em>(no results)</em></p>';
-        panel.dataset[field + 'Html'] = html;
+        panel.dataset[field + 'Raw'] = md;
         if (stamp && data.searched_at) {
           const d = new Date(data.searched_at);
           stamp.textContent = 'as of ' + d.toLocaleDateString('en-US',

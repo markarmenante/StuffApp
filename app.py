@@ -897,7 +897,10 @@ Reply with ONLY a JSON object, no prose, no code fences:
         raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
     data = json.loads(m.group(0))
     import html as _html
-    return {'markdown': _html.unescape(data.get('markdown') or '').strip()}
+    md = _html.unescape(data.get('markdown') or '').strip()
+    # Strip Claude web_search <cite index="...">...</cite> wrappers.
+    md = re.sub(r'</?cite\b[^>]*>', '', md, flags=re.IGNORECASE)
+    return {'markdown': md}
 
 
 # ---------------------------------------------------------------------------
@@ -1321,7 +1324,11 @@ def format_results_filter(value):
 
     # Decode any stray HTML entities the AI may have embedded (&#39; etc.)
     # before we re-escape during rendering.
-    lines = _html.unescape(str(value)).strip().split('\n')
+    raw = _html.unescape(str(value)).strip()
+    # Claude's web_search tool injects <cite index="...">...</cite> markers
+    # around quoted text. Strip the tags but keep the inner content.
+    raw = re.sub(r'</?cite\b[^>]*>', '', raw, flags=re.IGNORECASE)
+    lines = raw.split('\n')
     out = []
     in_list = False
     url_re = re.compile(r'https?://[^\s<>()]+')
