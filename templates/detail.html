@@ -465,9 +465,15 @@
       <div class="dgrid dg1">
         {{ cell('lens_mount','Lens Mount') }}
       </div>
-      <div class="dgrid dg2">
-        {{ cell('sensor','Sensor') }}
-        {{ cell('serial_number','Serial #') }}
+      <div class="dgrid dg2 cam-sensor-serial">
+        <div class="dcell cam-film-only">
+          <input type="text" name="sensor" value="{{ val('sensor') }}">
+          <span class="clabel">Sensor</span>
+        </div>
+        <div class="dcell cam-serial-cell">
+          <input type="text" name="serial_number" value="{{ val('serial_number') }}">
+          <span class="clabel">Serial #</span>
+        </div>
       </div>
       <div class="dgrid dg3">
         {{ datecell('date','Date') }}
@@ -1193,6 +1199,10 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     });
     document.querySelectorAll('.cam-digital-only').forEach(el => {
       el.style.display = isFilm ? 'none' : '';
+    });
+    // Serial # spans both columns when Sensor is hidden (Digital).
+    document.querySelectorAll('.cam-serial-cell').forEach(el => {
+      el.style.gridColumn = isFilm ? '' : '1 / -1';
     });
   }
   radios.forEach(r => r.addEventListener('change', apply));
