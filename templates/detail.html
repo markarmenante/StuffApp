@@ -308,9 +308,35 @@
 
   <!-- Reg / Auth / Mint -->
   <div class="dgrid dg3">
-    <div class="dcell ta-wrap"><input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700"><span class="clabel">Reg</span></div>
-    {{ cell('authority','Auth') }}
+    <div class="dcell ta-wrap with-hist-btn">
+      <button type="button" class="hist-btn" data-field="region"
+              {% if is_new %}disabled{% else %}data-url="{{ url_for('coin_fetch_history', record_id=r['id']) }}"{% endif %}
+              title="AI history of this region" aria-label="History of region">🔍</button>
+      <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input hist-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700">
+      <span class="clabel">Reg</span>
+    </div>
+    <div class="dcell ta-wrap with-hist-btn">
+      <button type="button" class="hist-btn" data-field="authority"
+              {% if is_new %}disabled{% else %}data-url="{{ url_for('coin_fetch_history', record_id=r['id']) }}"{% endif %}
+              title="AI history of this authority" aria-label="History of authority">🔍</button>
+      <input type="text" name="authority" value="{{ val('authority') }}" class="hist-input">
+      <span class="clabel">Auth</span>
+    </div>
     {{ tacell('mint','Mint', ta.get('mint', [])) }}
+  </div>
+
+  <!-- AI History panel (collapsed unless content present) -->
+  <div class="coin-history-panel{% if not (r and (r['history_region'] or r['history_authority'])) %} is-empty{% endif %}"
+       id="coinHistoryPanel"
+       data-region-html="{{ (r['history_region']|format_results) if r and r['history_region'] else '' }}"
+       data-authority-html="{{ (r['history_authority']|format_results) if r and r['history_authority'] else '' }}">
+    <div class="coin-history-header">
+      <span class="coin-history-title" id="coinHistoryTitle">History</span>
+      <span class="coin-history-stamp" id="coinHistoryStamp">{% if r and r['history_searched_at'] %}as of {{ r['history_searched_at']|short_date }}{% endif %}</span>
+    </div>
+    <div class="coin-history-body" id="coinHistoryBody">
+      {% if r and r['history_region'] %}{{ r['history_region']|format_results }}{% endif %}
+    </div>
   </div>
 
   <!-- Denomination / Metal / Date -->
@@ -386,6 +412,17 @@
   <div class="dgrid dg2">
     {{ cell('sheldon','Sheldon') }}
     {{ cell('storage_location','Storage') }}
+  </div>
+
+  <!-- Origin map -->
+  <div class="section-bar">Origin</div>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <div class="coin-map-panel"
+       data-region="{{ val('region') }}"
+       data-authority="{{ val('authority') }}"
+       data-mint="{{ val('mint') }}">
+    <div id="coinMap" class="coin-map"></div>
+    <div class="coin-map-caption" id="coinMapCaption">Ancient Greek &amp; Mediterranean cities — locating this coin's origin…</div>
   </div>
 
   <!-- Bottom -->
@@ -1590,4 +1627,205 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
   });
 });
 </script>
+
+{% if category == 'coins' %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function coinHistoryAndMap() {
+  // ── History: magnifier buttons on Region / Authority ──
+  const panel = document.getElementById('coinHistoryPanel');
+  const body = document.getElementById('coinHistoryBody');
+  const title = document.getElementById('coinHistoryTitle');
+  const stamp = document.getElementById('coinHistoryStamp');
+
+  function setPanelFor(field) {
+    if (!panel) return;
+    const label = field === 'authority' ? 'Authority' : 'Region';
+    const topicEl = document.querySelector('input[name="' + field + '"]');
+    const topic = topicEl ? (topicEl.value || '').trim() : '';
+    if (title) title.textContent = 'History — ' + label + (topic ? ': ' + topic : '');
+    const cached = panel.dataset[field + 'Html'] || '';
+    if (body) body.innerHTML = cached;
+    panel.classList.remove('is-empty');
+  }
+
+  document.querySelectorAll('.hist-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const field = btn.dataset.field;
+      const url = btn.dataset.url;
+      if (!url) return;
+      const topicEl = document.querySelector('input[name="' + field + '"]');
+      const topic = topicEl ? (topicEl.value || '').trim() : '';
+      if (!topic) { alert('Enter a ' + field + ' first.'); return; }
+      setPanelFor(field);
+      if (body) body.innerHTML = '<p><em>Searching…</em></p>';
+      btn.classList.add('loading'); btn.disabled = true;
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({field: field}),
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const t = await res.text();
+          throw new Error(`Server returned ${res.status}. ${t.slice(0,120)}`);
+        }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+        const html = formatResultsHtml(data.markdown || '');
+        if (body) body.innerHTML = html || '<p><em>(no results)</em></p>';
+        panel.dataset[field + 'Html'] = html;
+        if (stamp && data.searched_at) {
+          const d = new Date(data.searched_at);
+          stamp.textContent = 'as of ' + d.toLocaleDateString('en-US',
+            {month: 'short', day: 'numeric', year: 'numeric'});
+        }
+      } catch (err) {
+        if (body) body.innerHTML = '<p style="color:#c00">Error: ' + (err.message || 'unknown') + '</p>';
+      } finally {
+        btn.classList.remove('loading'); btn.disabled = false;
+      }
+    });
+  });
+
+  // ── Origin map: Mediterranean with Ancient Greek city names ──
+  if (typeof L === 'undefined') return;
+  const mapEl = document.getElementById('coinMap');
+  if (!mapEl) return;
+
+  // Ancient cities: name → [lat, lng]
+  const CITIES = {
+    'Athens':[37.97,23.72], 'Sparta':[37.08,22.43], 'Corinth':[37.93,22.93],
+    'Thebes':[38.32,23.32], 'Delphi':[38.48,22.50], 'Olympia':[37.64,21.63],
+    'Argos':[37.63,22.73], 'Mycenae':[37.73,22.75], 'Marathon':[38.15,23.97],
+    'Eretria':[38.40,23.79], 'Chalcis':[38.46,23.60], 'Aegina':[37.74,23.43],
+    'Megara':[37.99,23.34], 'Pella':[40.76,22.52], 'Thessaloniki':[40.64,22.94],
+    'Amphipolis':[40.82,23.85], 'Olynthus':[40.29,23.37], 'Larissa':[39.64,22.42],
+    'Pharsalus':[39.29,22.38], 'Dodona':[39.55,20.79],
+    'Troy':[39.96,26.24], 'Byzantium':[41.01,28.97], 'Cyzicus':[40.39,27.89],
+    'Pergamon':[39.13,27.18], 'Sardis':[38.49,28.04], 'Smyrna':[38.42,27.14],
+    'Phocaea':[38.67,26.75], 'Clazomenae':[38.36,26.78], 'Colophon':[38.10,27.16],
+    'Ephesus':[37.94,27.34], 'Miletus':[37.53,27.28], 'Halicarnassus':[37.04,27.43],
+    'Knidos':[36.69,27.37], 'Aspendos':[36.94,31.17], 'Side':[36.77,31.39],
+    'Tarsus':[36.92,34.90],
+    'Rhodes':[36.45,28.22], 'Kos':[36.89,27.29], 'Samos':[37.75,26.97],
+    'Chios':[38.37,26.13], 'Mytilene':[39.10,26.55], 'Lesbos':[39.20,26.30],
+    'Delos':[37.40,25.27], 'Naxos':[37.11,25.38], 'Paros':[37.08,25.15],
+    'Knossos':[35.30,25.17], 'Gortyn':[35.06,24.95], 'Kydonia':[35.51,24.02],
+    'Sinope':[42.03,35.16], 'Trebizond':[41.00,39.73], 'Heraclea Pontica':[41.28,31.42],
+    'Olbia':[46.69,31.91], 'Panticapaeum':[45.35,36.47],
+    'Antioch':[36.20,36.16], 'Tyre':[33.27,35.20], 'Sidon':[33.55,35.37],
+    'Alexandria':[31.20,29.92], 'Cyrene':[32.82,21.86], 'Carthage':[36.85,10.32],
+    'Rome':[41.90,12.49],
+    'Syracuse':[37.07,15.29], 'Akragas':[37.31,13.59], 'Selinunte':[37.58,12.83],
+    'Himera':[37.97,13.81], 'Naxos (Sicily)':[37.83,15.27], 'Messana':[38.19,15.55],
+    'Gela':[37.07,14.25], 'Catana':[37.50,15.09], 'Leontini':[37.29,14.99],
+    'Tarentum':[40.47,17.24], 'Croton':[39.08,17.13], 'Sybaris':[39.72,16.50],
+    'Locri':[38.23,16.26], 'Metapontum':[40.34,16.82], 'Thurii':[39.71,16.50],
+    'Neapolis':[40.84,14.25], 'Cumae':[40.85,14.06],
+    'Massalia':[43.30,5.37], 'Emporion':[42.13,3.12],
+  };
+
+  // Region / Authority / Kingdom → center (lat, lng)
+  const REGIONS = {
+    'Attica':[38.00,23.72], 'Boeotia':[38.32,23.32], 'Argolis':[37.63,22.73],
+    'Laconia':[37.08,22.43], 'Messenia':[37.10,21.93], 'Arcadia':[37.50,22.20],
+    'Achaia':[38.10,21.95], 'Elis':[37.64,21.63], 'Phocis':[38.48,22.50],
+    'Locris':[38.50,22.70], 'Euboea':[38.50,23.80],
+    'Macedonia':[40.76,22.52], 'Macedon':[40.76,22.52],
+    'Thessaly':[39.50,22.30], 'Epirus':[39.70,20.85], 'Thrace':[41.50,26.00],
+    'Aetolia':[38.50,21.50], 'Acarnania':[38.85,20.90],
+    'Mysia':[39.13,27.18], 'Lydia':[38.49,28.04], 'Ionia':[37.94,27.34],
+    'Caria':[37.04,27.43], 'Lycia':[36.30,29.80], 'Pamphylia':[36.94,31.17],
+    'Cilicia':[37.00,35.30], 'Bithynia':[40.40,30.00], 'Pontus':[42.03,35.16],
+    'Cappadocia':[38.70,35.50], 'Phrygia':[39.30,30.50],
+    'Troas':[39.80,26.30], 'Aeolis':[39.00,26.80],
+    'Phoenicia':[33.27,35.20], 'Syria':[36.20,36.16],
+    'Judaea':[31.78,35.22], 'Arabia':[30.32,35.44],
+    'Egypt':[31.20,29.92], 'Cyrenaica':[32.82,21.86],
+    'Sicily':[37.60,14.00], 'Magna Graecia':[40.47,17.24],
+    'Crete':[35.30,25.17], 'Cyclades':[37.00,25.00], 'Cyprus':[35.00,33.20],
+    'Italy':[41.90,12.49], 'Etruria':[42.50,11.50], 'Latium':[41.90,12.49],
+    'Campania':[40.85,14.26], 'Apulia':[41.10,16.50], 'Lucania':[40.21,16.66],
+    'Bruttium':[38.23,16.26],
+    // Common issuing authorities / kingdoms
+    'Seleucid Empire':[36.20,36.16], 'Seleucid':[36.20,36.16],
+    'Ptolemaic Kingdom':[31.20,29.92], 'Ptolemaic':[31.20,29.92],
+    'Roman Republic':[41.90,12.49], 'Roman Empire':[41.90,12.49],
+    'Roman Provincial':[41.90,12.49],
+    'Byzantine Empire':[41.01,28.97], 'Byzantine':[41.01,28.97],
+    'Parthian Empire':[33.10,44.40], 'Parthian':[33.10,44.40],
+    'Sasanian Empire':[32.60,51.70], 'Sasanian':[32.60,51.70],
+    'Achaemenid Empire':[29.95,52.89], 'Achaemenid':[29.95,52.89],
+    'Kingdom of Macedon':[40.76,22.52],
+    'Kingdom of Pergamon':[39.13,27.18], 'Attalid':[39.13,27.18],
+    'Kingdom of Bactria':[36.76,66.90], 'Bactria':[36.76,66.90],
+    'Kingdom of Pontus':[42.03,35.16],
+    'Kingdom of Bithynia':[40.40,30.00],
+    'Kingdom of Cappadocia':[38.70,35.50],
+  };
+
+  const map = L.map(mapEl, {
+    center: [37.5, 22.0], zoom: 5, minZoom: 3, maxZoom: 9,
+    scrollWheelZoom: false,
+  });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+    maxZoom: 19,
+  }).addTo(map);
+
+  // Plot all city markers
+  const cityMarkers = {};
+  Object.entries(CITIES).forEach(([name, [lat, lng]]) => {
+    const dot = L.marker([lat, lng], {
+      icon: L.divIcon({className: 'coin-city-pin', iconSize: [7,7], iconAnchor: [4,4]}),
+    }).addTo(map);
+    dot.bindTooltip(name, {permanent: true, direction: 'right', offset: [6,0],
+                           className: 'coin-city-label'});
+    cityMarkers[name.toLowerCase()] = {name, latlng: [lat, lng], marker: dot};
+  });
+
+  // Pinpoint origin: prefer Mint, then Region, then Authority
+  const panel2 = document.querySelector('.coin-map-panel');
+  const caption = document.getElementById('coinMapCaption');
+  function findOrigin() {
+    const mint = (panel2.dataset.mint || '').trim();
+    const region = (panel2.dataset.region || '').trim();
+    const authority = (panel2.dataset.authority || '').trim();
+    const tryCity = (s) => s && cityMarkers[s.toLowerCase()];
+    const tryRegion = (s) => {
+      if (!s) return null;
+      const k = Object.keys(REGIONS).find(r => r.toLowerCase() === s.toLowerCase());
+      return k ? {name: k, latlng: REGIONS[k]} : null;
+    };
+    // Also accept partial match against city name (first token)
+    const fuzzyCity = (s) => {
+      if (!s) return null;
+      const lc = s.toLowerCase();
+      const hit = Object.values(cityMarkers).find(c =>
+        lc.includes(c.name.toLowerCase()) || c.name.toLowerCase().includes(lc.split(/[,\s]/)[0]));
+      return hit || null;
+    };
+    return tryCity(mint) || tryCity(region) || tryCity(authority)
+        || tryRegion(region) || tryRegion(authority)
+        || fuzzyCity(mint) || fuzzyCity(region) || fuzzyCity(authority);
+  }
+
+  const origin = findOrigin();
+  if (origin) {
+    const [lat, lng] = origin.latlng;
+    const pin = L.marker([lat, lng], {
+      icon: L.divIcon({className: 'coin-origin-pin', iconSize: [14,14], iconAnchor: [7,7]}),
+      zIndexOffset: 1000,
+    }).addTo(map);
+    pin.bindPopup('<strong>Origin:</strong> ' + origin.name);
+    map.setView([lat, lng], 6);
+    if (caption) caption.textContent = 'Origin pinpointed: ' + origin.name;
+  } else {
+    if (caption) caption.textContent = 'Ancient Greek & Mediterranean cities (no origin match for this coin).';
+  }
+})();
+</script>
+{% endif %}
 {% endblock %}
