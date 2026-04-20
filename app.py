@@ -1686,6 +1686,25 @@ def backfill_property_status_own():
     return jsonify(updated=r.rowcount)
 
 
+@app.route('/admin/backfill-camera-status-own', methods=['POST'])
+def backfill_camera_status_own():
+    """Set status='Own' for any camera with a NULL/blank status.
+
+    Mirrors the local backfill after the Camera Status dropdown was
+    restricted to {Own, Sold, Gifted}. Preserves existing non-blank
+    values. Safe to re-run.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    r = db.execute(
+        "UPDATE cameras SET status = 'Own' "
+        "WHERE status IS NULL OR TRIM(status) = ''"
+    )
+    db.commit()
+    return jsonify(updated=r.rowcount)
+
+
 @app.route('/admin/backfill-property-owner-ym', methods=['POST'])
 def backfill_property_owner_ym():
     """Set owner='YM' for every Own Residential/Commercial property.
