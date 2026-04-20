@@ -721,10 +721,15 @@
        RECORDINGS
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'recordings' %}
-  <div class="detail-brand-row">
+  <div class="detail-brand-row brand-row-with-like">
     <input type="text" name="artist" value="{{ val('artist') }}"
            class="brand-input ta-input" autocomplete="off"
            data-ta="{{ ta.get('artist', [])|join('||') }}">
+    <button type="button" id="likeHeart"
+            class="like-heart like-heart-inline {% if val('like_field') == 'Yes' %}liked{% endif %}"
+            aria-label="Toggle like" title="Toggle like">&#10084;</button>
+    <input type="hidden" name="like_field" id="likeHiddenInput"
+           value="{{ 'Yes' if val('like_field') == 'Yes' else '' }}">
   </div>
   <div class="detail-model">
     <input type="text" name="title" value="{{ val('title') }}"
@@ -753,19 +758,9 @@
         {{ cell('genre_2','Genre 2') }}
         {{ cell('year_recorded','Year') }}
       </div>
-      <div class="dgrid dg3">
+      <div class="dgrid dg2">
         {{ cell('speed','Speed') }}
         {{ cell('sound','Sound') }}
-        <div class="dcell like-cell">
-          <button type="button" id="likeHeart"
-                  class="like-heart {% if val('like_field') == 'Yes' %}liked{% endif %}"
-                  aria-label="Toggle like" title="Toggle like">
-            &#10084;
-          </button>
-          <input type="hidden" name="like_field" id="likeHiddenInput"
-                 value="{{ 'Yes' if val('like_field') == 'Yes' else '' }}">
-          <span class="clabel">Like</span>
-        </div>
       </div>
       <div class="dgrid dg3">
         {{ datecell('date','Date') }}
