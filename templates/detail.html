@@ -1771,24 +1771,43 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
   };
 
   const map = L.map(mapEl, {
-    center: [37.5, 22.0], zoom: 5, minZoom: 3, maxZoom: 9,
-    scrollWheelZoom: false,
+    center: [37.5, 22.0], zoom: 5, minZoom: 3, maxZoom: 12,
+    scrollWheelZoom: true,
+    dragging: true,
   });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap',
-    maxZoom: 19,
+  // Clean basemap — no admin boundaries or territorial-water markings
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap, © CARTO',
+    subdomains: 'abcd', maxZoom: 20,
   }).addTo(map);
 
-  // Plot all city markers
+  // Plot all city markers. Tooltip only shows on hover by default; the
+  // origin city gets a permanent label. Zooming past LABEL_ZOOM pins all
+  // names permanently.
+  const LABEL_ZOOM = 7;
   const cityMarkers = {};
   Object.entries(CITIES).forEach(([name, [lat, lng]]) => {
     const dot = L.marker([lat, lng], {
       icon: L.divIcon({className: 'coin-city-pin', iconSize: [7,7], iconAnchor: [4,4]}),
     }).addTo(map);
-    dot.bindTooltip(name, {permanent: true, direction: 'right', offset: [6,0],
+    dot.bindTooltip(name, {permanent: false, direction: 'right', offset: [6,0],
                            className: 'coin-city-label'});
     cityMarkers[name.toLowerCase()] = {name, latlng: [lat, lng], marker: dot};
   });
+
+  function applyLabelZoom() {
+    const show = map.getZoom() >= LABEL_ZOOM;
+    Object.values(cityMarkers).forEach(({name, marker}) => {
+      // Skip the origin city — it keeps its permanent label always.
+      if (marker._isOrigin) return;
+      marker.unbindTooltip();
+      marker.bindTooltip(name, {
+        permanent: show, direction: 'right', offset: [6,0],
+        className: 'coin-city-label',
+      });
+    });
+  }
+  map.on('zoomend', applyLabelZoom);
 
   // Pinpoint origin: prefer Mint, then Region, then Authority
   const panel2 = document.querySelector('.coin-map-panel');
@@ -1823,12 +1842,24 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
       icon: L.divIcon({className: 'coin-origin-pin', iconSize: [14,14], iconAnchor: [7,7]}),
       zIndexOffset: 1000,
     }).addTo(map);
-    pin.bindPopup('<strong>Origin:</strong> ' + origin.name);
-    map.setView([lat, lng], 6);
-    if (caption) caption.textContent = 'Origin pinpointed: ' + origin.name;
+    pin._isOrigin = true;
+    pin.bindTooltip(origin.name, {
+      permanent: true, direction: 'right', offset: [8,0],
+      className: 'coin-city-label coin-origin-label',
+    });
+    // If this origin city also has a background city-dot, remove its label
+    // (redundant with the origin label) and mark it so zoom-toggle leaves it.
+    const dup = cityMarkers[origin.name.toLowerCase()];
+    if (dup && dup.marker) {
+      dup.marker._isOrigin = true;
+      dup.marker.unbindTooltip();
+    }
+    map.setView([lat, lng], 7);
+    if (caption) caption.textContent = 'Origin pinpointed: ' + origin.name + ' (scroll to zoom, drag to reposition)';
   } else {
-    if (caption) caption.textContent = 'Ancient Greek & Mediterranean cities (no origin match for this coin).';
+    if (caption) caption.textContent = 'Ancient Greek & Mediterranean cities — scroll to zoom, drag to reposition.';
   }
+  applyLabelZoom();
 })();
 </script>
 {% endif %}

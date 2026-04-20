@@ -832,7 +832,7 @@ input[type="date"] { -webkit-appearance: none; }
   padding: 0 !important;
   font-size: 10px;
   font-weight: 500;
-  color: #222;
+  color: #333;
   text-shadow:
     0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff,
     1px 0 1px #fff, -1px 0 1px #fff, 0 1px 1px #fff, 0 -1px 1px #fff;
@@ -840,3 +840,8 @@ input[type="date"] { -webkit-appearance: none; }
   pointer-events: none;
 }
 .leaflet-tooltip.coin-city-label::before { display: none !important; }
+.leaflet-tooltip.coin-origin-label {
+  color: #c0392b;
+  font-weight: 700;
+  font-size: 12px;
+}
