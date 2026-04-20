@@ -1686,6 +1686,100 @@ def backfill_property_status_own():
     return jsonify(updated=r.rowcount)
 
 
+@app.route('/admin/upsert-recordings', methods=['POST'])
+def upsert_recordings():
+    """Upsert Recording.csv into the recordings table.
+
+    Matches on CSV UUID (col 23) against recordings.id.
+    - existing row: overwrite a column only when the CSV value is
+      non-blank, preserving in-app edits.
+    - new UUID: INSERT as a fresh record.
+    Safe to re-run; never deletes.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+
+    def _clean(s): return (s or '').replace('\x0b', '\n').strip() or None
+    def _pdate(s):
+        s = (s or '').strip().split(' ')[0]
+        if not s: return None
+        for fmt in ('%m/%d/%Y', '%Y-%m-%d', '%m/%d/%y', '%d/%m/%Y'):
+            try: return datetime.strptime(s, fmt).strftime('%Y-%m-%d')
+            except ValueError: continue
+        return None
+    def _pnum(s, cast=float):
+        s = (s or '').strip().replace(',', '').replace('$', '')
+        try: return cast(s)
+        except (ValueError, TypeError): return None
+
+    field_map = [
+        ('title',           lambda r: _clean(r[10])),
+        ('artist',          lambda r: _clean(r[0])),
+        ('type',            lambda r: _clean(r[11])),
+        ('genre',           lambda r: _clean(r[2])),
+        ('genre_2',         lambda r: _clean(r[3])),
+        ('year_recorded',   lambda r: _clean(r[13])),
+        ('speed',           lambda r: _clean(r[9])),
+        ('sound',           lambda r: _clean(r[8])),
+        ('like_field',      lambda r: _clean(r[18])),
+        ('number_position', lambda r: _pnum(r[21], int)),
+        ('other',           lambda r: _clean(r[5])),
+        ('date',            lambda r: _pdate(r[1])),
+        ('vendor',          lambda r: _clean(r[12])),
+        ('notes',           lambda r: _clean(r[6])),
+        ('owner',           lambda r: _clean(r[22])),
+        ('property',        lambda r: _clean(r[7])),
+    ]
+
+    db = get_db()
+    updated = filled_cols = inserted = skipped = 0
+    now = datetime.utcnow().isoformat()
+
+    for row in _csv_rows('Recording.csv'):
+        if len(row) < 24:
+            skipped += 1
+            continue
+        uid = (row[23] or '').strip()
+        if not uid:
+            skipped += 1
+            continue
+        vals = {col: fn(row) for col, fn in field_map}
+        existing = db.execute(
+            "SELECT * FROM recordings WHERE lower(id) = lower(?)", (uid,)
+        ).fetchone()
+        if existing:
+            to_set = {}
+            for col, new_val in vals.items():
+                if new_val in (None, ''):
+                    continue
+                old_val = existing[col]
+                old_n = '' if old_val is None else str(old_val).strip()
+                new_n = str(new_val).strip()
+                if old_n != new_n:
+                    to_set[col] = new_val
+            if to_set:
+                assigns = ', '.join(f'{c} = ?' for c in to_set) + ', updated_at = ?'
+                db.execute(
+                    f'UPDATE recordings SET {assigns} WHERE lower(id) = lower(?)',
+                    list(to_set.values()) + [now, uid],
+                )
+                updated += 1
+                filled_cols += len(to_set)
+        else:
+            cols = ['id'] + list(vals.keys()) + ['created_at', 'updated_at']
+            placeholders = ','.join(['?'] * len(cols))
+            db.execute(
+                f'INSERT INTO recordings ({",".join(cols)}) VALUES ({placeholders})',
+                [uid] + list(vals.values()) + [now, now],
+            )
+            inserted += 1
+
+    db.commit()
+    total = db.execute('SELECT COUNT(*) FROM recordings').fetchone()[0]
+    return jsonify(updated=updated, filled_columns=filled_cols,
+                   inserted=inserted, skipped=skipped, total=total)
+
+
 @app.route('/admin/backfill-camera-status-own', methods=['POST'])
 def backfill_camera_status_own():
     """Set status='Own' for any camera with a NULL/blank status.
