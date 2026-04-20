@@ -1208,10 +1208,10 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     function derive() {
       const raw = speedInput.value.trim();
       if (!raw) return null;
-      // Reel-to-reel speeds are typed like "7.5 ips" or "15ips" — flag Tape.
+      // Reel/cassette speeds are typed like "7.5 ips" or "15ips" — flag Tape.
       if (/ips\s*$/i.test(raw)) return 'Tape';
-      // Any other speed value (rpm) implies an LP.
-      return 'LP';
+      // Any other speed value (rpm) implies a Vinyl record.
+      return 'Vinyl';
     }
     function applyDerived() {
       const want = derive();
