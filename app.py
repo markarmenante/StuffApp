@@ -1365,6 +1365,10 @@ def format_results_filter(value):
             pill = (f'<a class="result-src" href="{_html.escape(url, quote=True)}" '
                     f'target="_blank" rel="noopener">{_html.escape(_short(url))}</a>')
             text = text.replace(f'\x00A{i}\x00', pill)
+        # Markdown **bold** → <strong>, and *italic* → <em>. Run bold first
+        # so its ** markers aren't eaten by the single-asterisk italic rule.
+        text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+        text = re.sub(r'(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])', r'<em>\1</em>', text)
         text = money_re.sub(r'<strong>\1</strong>', text)
         return text
 

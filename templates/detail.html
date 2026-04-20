@@ -1176,6 +1176,9 @@ function formatResultsHtml(text) {
       const pill = `<a class="result-src" href="${esc(u)}" target="_blank" rel="noopener">${esc(shortHost(u))}</a>`;
       s = s.replace(`\0A${i}\0`, pill);
     });
+    // Markdown **bold** and *italic*.
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\w|\*)/g, '$1<em>$2</em>');
     return s.replace(/(\$[0-9][0-9,]*(?:\.\d+)?)/g, '<strong>$1</strong>');
   };
   const out = [];
@@ -1657,10 +1660,19 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
       const field = btn.dataset.field;
       const url = btn.dataset.url;
       if (!url) return;
+      // Second click on the button for the currently-showing field = collapse.
+      if (panel && panel.dataset.currentField === field
+          && !panel.classList.contains('is-empty')) {
+        panel.classList.add('is-empty');
+        if (body) body.innerHTML = '';
+        panel.dataset.currentField = '';
+        return;
+      }
       const topicEl = document.querySelector('input[name="' + field + '"]');
       const topic = topicEl ? (topicEl.value || '').trim() : '';
       if (!topic) { alert('Enter a ' + field + ' first.'); return; }
       setPanelFor(field);
+      panel.dataset.currentField = field;
       if (body) body.innerHTML = '<p><em>Searching…</em></p>';
       btn.classList.add('loading'); btn.disabled = true;
       try {

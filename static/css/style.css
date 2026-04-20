@@ -740,11 +740,11 @@ input[type="date"] { -webkit-appearance: none; }
 }
 
 /* ── Coin history magnifier + panel + origin map ── */
-.dcell.with-hist-btn { padding-left: 28px; }
-.dcell.with-hist-btn .hist-input { padding-left: 0; }
+.dcell.with-hist-btn { padding-right: 28px; }
+.dcell.with-hist-btn .clabel { right: 30px; }
 .hist-btn {
   position: absolute;
-  left: 4px; top: 50%;
+  right: 4px; top: 50%;
   transform: translateY(-50%);
   width: 22px; height: 22px;
   display: inline-flex; align-items: center; justify-content: center;
