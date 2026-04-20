@@ -756,7 +756,16 @@
       <div class="dgrid dg3">
         {{ cell('speed','Speed') }}
         {{ cell('sound','Sound') }}
-        {{ cell('like_field','Like') }}
+        <div class="dcell like-cell">
+          <button type="button" id="likeHeart"
+                  class="like-heart {% if val('like_field') == 'Yes' %}liked{% endif %}"
+                  aria-label="Toggle like" title="Toggle like">
+            &#10084;
+          </button>
+          <input type="hidden" name="like_field" id="likeHiddenInput"
+                 value="{{ 'Yes' if val('like_field') == 'Yes' else '' }}">
+          <span class="clabel">Like</span>
+        </div>
       </div>
       <div class="dgrid dg3">
         {{ datecell('date','Date') }}
@@ -1182,6 +1191,47 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
   }
   setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
 });
+
+// Recordings: heart toggle for Like, and auto-fill Type=LP when Speed set.
+(function recordingsExtras() {
+  const heart = document.getElementById('likeHeart');
+  const hidden = document.getElementById('likeHiddenInput');
+  if (heart && hidden) {
+    heart.addEventListener('click', () => {
+      const liked = !heart.classList.contains('liked');
+      heart.classList.toggle('liked', liked);
+      hidden.value = liked ? 'Yes' : '';
+      if (typeof saveField === 'function') {
+        saveField('like_field', hidden.value);
+      }
+    });
+  }
+
+  const speedInput = document.querySelector('input[name="speed"]');
+  const typeSelect = document.querySelector('select[name="type"]');
+  if (speedInput && typeSelect) {
+    function derive() {
+      const raw = speedInput.value.trim();
+      if (!raw) return null;
+      // Reel-to-reel speeds are typed like "7.5 ips" or "15ips" — flag Tape.
+      if (/ips\s*$/i.test(raw)) return 'Tape';
+      // Any other speed value (rpm) implies an LP.
+      return 'LP';
+    }
+    function applyDerived() {
+      const want = derive();
+      if (want && !typeSelect.value) {
+        typeSelect.value = want;
+        if (typeof saveField === 'function') saveField('type', want);
+      }
+    }
+    speedInput.addEventListener('blur', applyDerived);
+    speedInput.addEventListener('change', applyDerived);
+    // Also apply on initial load so a pre-filled speed with blank type
+    // self-corrects the first time the page is opened.
+    applyDerived();
+  }
+})();
 
 // Cameras: swap Format (film) <-> Megapixels (digital) based on Type radio.
 (function syncCameraType() {

@@ -428,6 +428,18 @@ input[type="date"] { -webkit-appearance: none; }
 .camera-purchase .dcell input,
 .camera-purchase .dcell select { text-align: center; }
 
+/* Recordings: heart toggle for the Like field */
+.like-cell { display: flex; align-items: center; justify-content: center; }
+.like-heart {
+  background: none; border: none; cursor: pointer;
+  font-size: 28px; line-height: 1; padding: 4px 8px;
+  color: #c7c7cc;
+  transition: color .12s ease, transform .12s ease;
+}
+.like-heart:hover { transform: scale(1.08); }
+.like-heart.liked { color: #e0245e; }
+.like-heart:focus { outline: none; }
+
 /* Property specs / purchase row: centered contents, tighter height */
 .properties-specs .dcell {
   padding-top: 4px; padding-bottom: 4px;
