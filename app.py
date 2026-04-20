@@ -1718,6 +1718,32 @@ def rename_recording_type_lp_to_vinyl():
     return jsonify(updated=r.rowcount)
 
 
+@app.route('/admin/clear-recording-numeric-notes', methods=['POST'])
+def clear_recording_numeric_notes():
+    """Null out recordings.notes where it's a bare number.
+
+    The earlier FM import mistakenly wrote CSV column 6 (price) into
+    the notes column. Any row whose notes is just an integer or
+    decimal (< 12 chars, no spaces) is that stale price data. Run
+    this on Railway once, then hit /admin/upsert-recordings to fill
+    the real price + notes columns from Recording.csv. Safe to
+    re-run.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    r = db.execute(
+        "UPDATE recordings SET notes = NULL "
+        "WHERE notes IS NOT NULL "
+        "  AND TRIM(notes) NOT LIKE '% %' "
+        "  AND LENGTH(TRIM(notes)) < 12 "
+        "  AND CAST(TRIM(notes) AS REAL) >= 0 "
+        "  AND TRIM(notes) GLOB '[0-9]*'"
+    )
+    db.commit()
+    return jsonify(updated=r.rowcount)
+
+
 @app.route('/admin/upsert-recordings', methods=['POST'])
 def upsert_recordings():
     """Upsert Recording.csv into the recordings table.
