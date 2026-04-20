@@ -428,20 +428,21 @@ input[type="date"] { -webkit-appearance: none; }
 .camera-purchase .dcell input,
 .camera-purchase .dcell select { text-align: center; }
 
-/* Recordings: type-aware radio strip */
+/* Recordings: type-aware radio strip.
+   All radio groups flow horizontally on one row; the inner radios in
+   each block also stay horizontal so Stereo/Mono, 33⅓/45, etc. never
+   stack. At narrow viewports the flex row wraps cleanly. */
 .rec-radio-row {
-  display: flex; flex-wrap: wrap; gap: 14px 22px;
+  display: flex; flex-wrap: wrap; gap: 8px 20px;
   padding: 8px 12px;
   background: #ffffff;
   border-bottom: 1px solid var(--border);
 }
 .rec-radio-block {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 4px 14px;
-  align-content: start;
+  display: flex; flex-wrap: nowrap; gap: 14px;
+  align-items: center;
 }
-.rec-radio-block .radio-opt { font-size: 14px; }
+.rec-radio-block .radio-opt { font-size: 14px; white-space: nowrap; }
 .recording-purchase .dcell input,
 .recording-purchase .dcell select { text-align: center; }
 
