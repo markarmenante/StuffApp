@@ -1685,6 +1685,24 @@ def backfill_property_status_own():
     return jsonify(updated=r.rowcount)
 
 
+@app.route('/admin/backfill-property-owner-ym', methods=['POST'])
+def backfill_property_owner_ym():
+    """Set owner='YM' for every Own Residential/Commercial property.
+
+    Mirrors the local backfill done after the Owner field was added.
+    Leaves Sold rows alone. Safe to re-run.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    r = db.execute(
+        "UPDATE properties SET owner = 'YM' "
+        "WHERE status = 'Own' AND type IN ('Residential', 'Commercial')"
+    )
+    db.commit()
+    return jsonify(updated=r.rowcount)
+
+
 @app.route('/admin/assign-missing-coin-ids', methods=['POST'])
 def assign_missing_coin_ids():
     """Assign the next NM N coin_id to coins with an empty coin_id.
