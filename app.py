@@ -114,7 +114,7 @@ VALUE_LISTS = {
     'pen_action': ['Cap','Click','Twist'],
     'pen_cartridge': ['Proprietary','Standard International'],
     'pen_reservoir': ['Cartridge','Converter','Piston','Vacuum'],
-    'recording_type': ['LP','CD','SACD','Digital','Cassette','Reel'],
+    'recording_type': ['LP','CD','SACD','Digital','Tape','Reel'],
     'recording_genre': ['Classical','Jazz','Rock','Pop','Blues','Folk','Electronic','World'],
     'property_type': ['Residential','Commercial','Land'],
     'audio_type': ['Amplifier','CD Player','DAC','Pre-Amp','Scaler','Speakers','Streamer','Tape Deck','Turntable','Phono Stage','Headphones','Cables','Other'],
@@ -1682,6 +1682,22 @@ def backfill_property_status_own():
         "UPDATE properties SET status = 'Own' "
         "WHERE status IS NULL OR TRIM(status) = ''"
     )
+    db.commit()
+    return jsonify(updated=r.rowcount)
+
+
+@app.route('/admin/rename-recording-type-vinyl-to-lp', methods=['POST'])
+def rename_recording_type_vinyl_to_lp():
+    """Rename recordings.type 'Vinyl' -> 'LP' so they match the dropdown.
+
+    The dropdown was updated to offer {LP, CD, SACD, Digital, Tape, Reel}.
+    Historical imports stored 'Vinyl' which didn't match any option, so
+    detail pages rendered a blank Type select. Safe to re-run.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    r = db.execute("UPDATE recordings SET type = 'LP' WHERE type = 'Vinyl'")
     db.commit()
     return jsonify(updated=r.rowcount)
 
