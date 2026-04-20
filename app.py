@@ -637,9 +637,9 @@ def build_search_query(category, q, dot=False, coin_filter=None):
 
 
 CATEGORY_ORDER_BY = {
-    'coins': ("COALESCE(NULLIF(region, ''), 'zzz'), "
-              "COALESCE(NULLIF(authority, ''), 'zzz'), "
-              "COALESCE(date_1, 99999)"),
+    'coins': ("COALESCE(NULLIF(region, ''), 'zzz') ASC, "
+              "COALESCE(NULLIF(authority, ''), 'zzz') ASC, "
+              "COALESCE(date_1, 99999) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz'), "
                 "COALESCE(NULLIF(description, ''), 'zzz')"),
     'vehicles': ("COALESCE(NULLIF(make, ''), 'zzz'), "
