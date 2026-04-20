@@ -440,15 +440,15 @@
       </label>
     </div>
     <div class="watch-specs">
-      <div class="dgrid dg2">
-        <div class="dcell">
+      <div class="dgrid dg2 cam-type-row">
+        <div class="dcell" id="camType">
           <div class="radio-group">
             <label class="radio-opt"><input type="radio" name="digital_film" value="Digital" {{ 'checked' if val('digital_film')=='Digital' }}> Digital</label>
             <label class="radio-opt"><input type="radio" name="digital_film" value="Film"    {{ 'checked' if val('digital_film')=='Film'    }}> Film</label>
           </div>
           <span class="clabel">Type</span>
         </div>
-        <div class="dcell">
+        <div class="dcell cam-film-only">
           <div class="radio-group">
             <label class="radio-opt"><input type="radio" name="film_size" value="35mm"    {{ 'checked' if val('film_size')=='35mm' }}> 35mm</label>
             <label class="radio-opt"><input type="radio" name="film_size" value="120/220" {{ 'checked' if val('film_size')=='120/220' }}> 120</label>
@@ -457,10 +457,13 @@
           </div>
           <span class="clabel">Format</span>
         </div>
+        <div class="dcell cam-digital-only">
+          <input type="number" step="any" name="megapixels" value="{{ val('megapixels') }}">
+          <span class="clabel">Megapixels</span>
+        </div>
       </div>
-      <div class="dgrid dg2">
+      <div class="dgrid dg1">
         {{ cell('lens_mount','Lens Mount') }}
-        {{ numcell('megapixels','Megapixels') }}
       </div>
       <div class="dgrid dg2">
         {{ cell('sensor','Sensor') }}
@@ -1175,6 +1178,26 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
   }
   setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
 });
+
+// Cameras: swap Format (film) <-> Megapixels (digital) based on Type radio.
+(function syncCameraType() {
+  const radios = document.querySelectorAll('input[name="digital_film"]');
+  if (!radios.length) return;
+  function apply() {
+    const picked = document.querySelector('input[name="digital_film"]:checked');
+    // Default to Digital when nothing is picked yet, so Megapixels is the
+    // first thing the user sees on a new record.
+    const isFilm = picked && picked.value === 'Film';
+    document.querySelectorAll('.cam-film-only').forEach(el => {
+      el.style.display = isFilm ? '' : 'none';
+    });
+    document.querySelectorAll('.cam-digital-only').forEach(el => {
+      el.style.display = isFilm ? 'none' : '';
+    });
+  }
+  radios.forEach(r => r.addEventListener('change', apply));
+  apply();
+})();
 
 // Complications: clicking the box label toggles the X text
 document.querySelectorAll('.comp-item').forEach(item => {
