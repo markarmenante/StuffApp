@@ -1663,6 +1663,25 @@ def prune_empty_coin_id_dupes():
     return jsonify(deleted=deleted, kept=kept, total=total)
 
 
+@app.route('/admin/backfill-property-status-own', methods=['POST'])
+def backfill_property_status_own():
+    """Set status='Own' for any property with a NULL/blank status.
+
+    Matches the local DB after the 2026 data cleanup that restricted
+    the Property Status dropdown to {Own, Sold}. Preserves existing
+    'Sold' rows. Safe to re-run.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    r = db.execute(
+        "UPDATE properties SET status = 'Own' "
+        "WHERE status IS NULL OR TRIM(status) = ''"
+    )
+    db.commit()
+    return jsonify(updated=r.rowcount)
+
+
 @app.route('/admin/assign-missing-coin-ids', methods=['POST'])
 def assign_missing_coin_ids():
     """Assign the next NM N coin_id to coins with an empty coin_id.

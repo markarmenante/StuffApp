@@ -967,8 +967,7 @@
   <div class="dgrid dg2">{{ cell('alarm_phone','Phone') }}{{ cell('alarm_notes','Notes') }}</div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="detail-bottom">
-    <div class="bottom-cell"><select name="status">{% for s in ['','Active','Sold','Rented'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><input type="text" name="archive" value="{{ val('archive') }}"><span class="blabel">Archive</span></div>
+    <div class="bottom-cell"><select name="status">{% for s in ['','Own','Sold'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
