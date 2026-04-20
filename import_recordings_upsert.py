@@ -67,8 +67,9 @@ FIELD_MAP = [
     ('number_position', lambda r: parse_num(r[21], int)),
     ('other',           lambda r: clean(r[5])),
     ('date',            lambda r: parse_date(r[1])),
+    ('price',           lambda r: parse_num(r[6])),
     ('vendor',          lambda r: clean(r[12])),
-    ('notes',           lambda r: clean(r[6])),
+    ('notes',           lambda r: clean(r[4])),
     ('owner',           lambda r: clean(r[22])),
     ('property',        lambda r: clean(r[7])),
 ]

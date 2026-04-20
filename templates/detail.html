@@ -750,19 +750,39 @@
       </label>
     </div>
     <div class="watch-specs">
-      <div class="dgrid dg2">
-        {{ selcell('type','Type', vlists.recording_type) }}
-        {{ selcell('genre','Genre', vlists.recording_genre) }}
+      <!-- Type-aware radio panel -->
+      <div class="rec-radio-row">
+        <div class="rec-radio-block">
+          <label class="radio-opt"><input type="radio" name="type" value="Vinyl" {{ 'checked' if val('type')=='Vinyl' }}> Vinyl</label>
+          <label class="radio-opt"><input type="radio" name="type" value="CD"    {{ 'checked' if val('type')=='CD'    }}> CD</label>
+          <label class="radio-opt"><input type="radio" name="type" value="Tape"  {{ 'checked' if val('type')=='Tape'  }}> Tape</label>
+        </div>
+        <div class="rec-radio-block">
+          <label class="radio-opt"><input type="radio" name="sound" value="Stereo" {{ 'checked' if val('sound')=='Stereo' }}> Stereo</label>
+          <label class="radio-opt"><input type="radio" name="sound" value="Mono"   {{ 'checked' if val('sound')=='Mono'   }}> Mono</label>
+        </div>
+        <div class="rec-radio-block rec-subtype">
+          <label class="radio-opt rec-vinyl-only"><input type="radio" name="other" value="140g" {{ 'checked' if val('other')=='140g' }}> 140g</label>
+          <label class="radio-opt rec-vinyl-only"><input type="radio" name="other" value="180g" {{ 'checked' if val('other')=='180g' }}> 180g</label>
+          <label class="radio-opt rec-vinyl-only"><input type="radio" name="other" value="200g" {{ 'checked' if val('other')=='200g' }}> 200g</label>
+          <label class="radio-opt rec-tape-only"><input type="radio" name="other" value="CCIR"  {{ 'checked' if val('other')=='CCIR'  }}> CCIR</label>
+          <label class="radio-opt rec-tape-only"><input type="radio" name="other" value="NAB"   {{ 'checked' if val('other')=='NAB'   }}> NAB</label>
+          <label class="radio-opt rec-cd-only"><input type="radio" name="other" value="Red Book" {{ 'checked' if val('other')=='Red Book' }}> Red Book</label>
+          <label class="radio-opt rec-cd-only"><input type="radio" name="other" value="SACD"     {{ 'checked' if val('other')=='SACD'     }}> SACD</label>
+        </div>
+        <div class="rec-radio-block rec-speed">
+          <label class="radio-opt rec-vinyl-only"><input type="radio" name="speed" value="33 ⅓"   {{ 'checked' if val('speed')=='33 ⅓'   }}> 33 ⅓</label>
+          <label class="radio-opt rec-vinyl-only"><input type="radio" name="speed" value="45"      {{ 'checked' if val('speed')=='45'      }}> 45</label>
+          <label class="radio-opt rec-tape-only"><input type="radio" name="speed" value="15 ips"  {{ 'checked' if val('speed')=='15 ips'  }}> 15 ips</label>
+          <label class="radio-opt rec-tape-only"><input type="radio" name="speed" value="30 ips"  {{ 'checked' if val('speed')=='30 ips'  }}> 30 ips</label>
+        </div>
       </div>
-      <div class="dgrid dg2">
+      <div class="dgrid dg3 recording-meta">
+        {{ selcell('genre','Genre', vlists.recording_genre) }}
         {{ cell('genre_2','Genre 2') }}
         {{ cell('year_recorded','Year') }}
       </div>
-      <div class="dgrid dg2">
-        {{ cell('speed','Speed') }}
-        {{ cell('sound','Sound') }}
-      </div>
-      <div class="dgrid dg3">
+      <div class="dgrid dg3 recording-purchase">
         {{ datecell('date','Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
@@ -1202,29 +1222,26 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     });
   }
 
-  const speedInput = document.querySelector('input[name="speed"]');
-  const typeSelect = document.querySelector('select[name="type"]');
-  if (speedInput && typeSelect) {
-    function derive() {
-      const raw = speedInput.value.trim();
-      if (!raw) return null;
-      // Reel/cassette speeds are typed like "7.5 ips" or "15ips" — flag Tape.
-      if (/ips\s*$/i.test(raw)) return 'Tape';
-      // Any other speed value (rpm) implies a Vinyl record.
-      return 'Vinyl';
+  // Recordings type radios: show only the subtype/speed radios that
+  // match the chosen Type (Vinyl / CD / Tape).
+  const typeRadios = document.querySelectorAll('input[name="type"]');
+  if (typeRadios.length) {
+    function applyType() {
+      const picked = document.querySelector('input[name="type"]:checked');
+      const t = picked ? picked.value : '';
+      const showMap = {
+        'rec-vinyl-only': t === 'Vinyl',
+        'rec-tape-only':  t === 'Tape',
+        'rec-cd-only':    t === 'CD',
+      };
+      Object.entries(showMap).forEach(([cls, vis]) => {
+        document.querySelectorAll('.' + cls).forEach(el => {
+          el.style.display = vis ? '' : 'none';
+        });
+      });
     }
-    function applyDerived() {
-      const want = derive();
-      if (want && !typeSelect.value) {
-        typeSelect.value = want;
-        if (typeof saveField === 'function') saveField('type', want);
-      }
-    }
-    speedInput.addEventListener('blur', applyDerived);
-    speedInput.addEventListener('change', applyDerived);
-    // Also apply on initial load so a pre-filled speed with blank type
-    // self-corrects the first time the page is opened.
-    applyDerived();
+    typeRadios.forEach(r => r.addEventListener('change', applyType));
+    applyType();
   }
 })();
 

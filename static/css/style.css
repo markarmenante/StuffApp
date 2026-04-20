@@ -428,6 +428,23 @@ input[type="date"] { -webkit-appearance: none; }
 .camera-purchase .dcell input,
 .camera-purchase .dcell select { text-align: center; }
 
+/* Recordings: type-aware radio strip */
+.rec-radio-row {
+  display: flex; flex-wrap: wrap; gap: 14px 22px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border-bottom: 1px solid var(--border);
+}
+.rec-radio-block {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 14px;
+  align-content: start;
+}
+.rec-radio-block .radio-opt { font-size: 14px; }
+.recording-purchase .dcell input,
+.recording-purchase .dcell select { text-align: center; }
+
 /* Recordings: heart toggle for the Like field */
 .brand-row-with-like {
   display: flex; align-items: center; gap: 10px;

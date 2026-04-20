@@ -1741,8 +1741,9 @@ def upsert_recordings():
         ('number_position', lambda r: _pnum(r[21], int)),
         ('other',           lambda r: _clean(r[5])),
         ('date',            lambda r: _pdate(r[1])),
+        ('price',           lambda r: _pnum(r[6])),
         ('vendor',          lambda r: _clean(r[12])),
-        ('notes',           lambda r: _clean(r[6])),
+        ('notes',           lambda r: _clean(r[4])),
         ('owner',           lambda r: _clean(r[22])),
         ('property',        lambda r: _clean(r[7])),
     ]
