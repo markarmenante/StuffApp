@@ -757,10 +757,6 @@
           <label class="radio-opt"><input type="radio" name="type" value="CD"    {{ 'checked' if val('type')=='CD'    }}> CD</label>
           <label class="radio-opt"><input type="radio" name="type" value="Tape"  {{ 'checked' if val('type')=='Tape'  }}> Tape</label>
         </div>
-        <div class="rec-radio-block">
-          <label class="radio-opt"><input type="radio" name="sound" value="Stereo" {{ 'checked' if val('sound')=='Stereo' }}> Stereo</label>
-          <label class="radio-opt"><input type="radio" name="sound" value="Mono"   {{ 'checked' if val('sound')=='Mono'   }}> Mono</label>
-        </div>
         <div class="rec-radio-block rec-subtype">
           <label class="radio-opt rec-vinyl-only"><input type="radio" name="other" value="140g" {{ 'checked' if val('other')=='140g' }}> 140g</label>
           <label class="radio-opt rec-vinyl-only"><input type="radio" name="other" value="180g" {{ 'checked' if val('other')=='180g' }}> 180g</label>
@@ -775,6 +771,10 @@
           <label class="radio-opt rec-vinyl-only"><input type="radio" name="speed" value="45"      {{ 'checked' if val('speed')=='45'      }}> 45</label>
           <label class="radio-opt rec-tape-only"><input type="radio" name="speed" value="15 ips"  {{ 'checked' if val('speed')=='15 ips'  }}> 15 ips</label>
           <label class="radio-opt rec-tape-only"><input type="radio" name="speed" value="30 ips"  {{ 'checked' if val('speed')=='30 ips'  }}> 30 ips</label>
+        </div>
+        <div class="rec-radio-block">
+          <label class="radio-opt"><input type="radio" name="sound" value="Stereo" {{ 'checked' if val('sound')=='Stereo' }}> Stereo</label>
+          <label class="radio-opt"><input type="radio" name="sound" value="Mono"   {{ 'checked' if val('sound')=='Mono'   }}> Mono</label>
         </div>
       </div>
       <div class="dgrid dg3 recording-meta">
