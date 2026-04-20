@@ -656,6 +656,10 @@ input[type="date"] { -webkit-appearance: none; }
   .dgrid.dg3 { grid-template-columns: repeat(2, 1fr); }
   .dgrid.dg2 { grid-template-columns: 1fr; }
 
+  /* Keep the property Purchase Date / Purchase Price inline side-by-side
+     even on narrow viewports so they read as a single "when + how much". */
+  .dgrid.dg2.properties-specs { grid-template-columns: 1fr 1fr; }
+
   /* Watches complications: 3 columns -> 2. */
   .comp-grid { grid-template-columns: repeat(2, 1fr); }
 
