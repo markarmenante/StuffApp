@@ -567,12 +567,35 @@ CATEGORY_FILTERS = {
         'sold': ("COALESCE(status,'') = 'Sold'", []),
     },
     'properties': {
+        # Single-axis filters
         'own':         ("COALESCE(status,'') = 'Own'", []),
         'sold':        ("COALESCE(status,'') = 'Sold'", []),
         'commercial':  ("COALESCE(type,'') = 'Commercial'", []),
         'residential': ("COALESCE(type,'') = 'Residential'", []),
+        # Combined (status + type)
+        'own_commercial':   ("COALESCE(status,'') = 'Own'  AND COALESCE(type,'') = 'Commercial'",  []),
+        'own_residential':  ("COALESCE(status,'') = 'Own'  AND COALESCE(type,'') = 'Residential'", []),
+        'sold_commercial':  ("COALESCE(status,'') = 'Sold' AND COALESCE(type,'') = 'Commercial'",  []),
+        'sold_residential': ("COALESCE(status,'') = 'Sold' AND COALESCE(type,'') = 'Residential'", []),
     },
 }
+
+# For properties, a filter key is split into two axes: status (own/sold)
+# and type (commercial/residential). These helpers let the template
+# independently cycle each axis while encoding the pair in one URL param.
+def _split_property_filter(f):
+    if not f:
+        return None, None
+    parts = f.split('_')
+    status = next((p for p in parts if p in ('own', 'sold')), None)
+    ptype  = next((p for p in parts if p in ('commercial', 'residential')), None)
+    return status, ptype
+
+
+def _join_property_filter(status, ptype):
+    if status and ptype:
+        return f'{status}_{ptype}'
+    return status or ptype or None
 
 
 def build_search_query(category, q, dot=False, coin_filter=None):
@@ -618,6 +641,13 @@ CATEGORY_ORDER_BY = {
                 "COALESCE(NULLIF(description, ''), 'zzz')"),
     'vehicles': ("COALESCE(NULLIF(make, ''), 'zzz'), "
                  "COALESCE(NULLIF(model, ''), 'zzz')"),
+    # Residential first, then Commercial, everything else last.
+    # Alphabetical within each group (case-insensitive).
+    'properties': ("CASE COALESCE(type,'') "
+                   "WHEN 'Residential' THEN 0 "
+                   "WHEN 'Commercial'  THEN 1 "
+                   "ELSE 2 END, "
+                   "LOWER(COALESCE(name,''))"),
 }
 
 
@@ -800,6 +830,9 @@ def list_view(category):
     counts = get_counts()
     cat_info = CATEGORIES[category]
     extra_fields = LIST_EXTRA_FIELDS.get(category, [])
+    # Split the compound properties filter into its two axes for the template.
+    prop_status, prop_type = _split_property_filter(coin_filter) \
+        if category == 'properties' else (None, None)
     return render_template('list.html',
                            category=category,
                            cat_info=cat_info,
@@ -810,6 +843,8 @@ def list_view(category):
                            q=q,
                            dot=dot,
                            coin_filter=coin_filter,
+                           prop_status=prop_status,
+                           prop_type=prop_type,
                            result_count=len(rows),
                            extra_fields=extra_fields,
                            fields=FIELDS[category])

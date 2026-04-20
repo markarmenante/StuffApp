@@ -26,14 +26,17 @@
      title="Audio at Truckee (Martis)">Martis</a>
   {% endif %}
   {% if category == 'properties' %}
-  {%- set status_next = {'': 'own', 'own': 'sold', 'sold': ''}[coin_filter if coin_filter in ('own','sold') else ''] -%}
-  {%- set type_next   = {'': 'commercial', 'commercial': 'residential', 'residential': ''}[coin_filter if coin_filter in ('commercial','residential') else ''] -%}
-  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=status_next or None) }}"
-     class="toolbar-btn pill {% if coin_filter in ('own','sold') %}active{% endif %}"
-     title="Cycle: Own → Sold → all">{% if coin_filter == 'own' %}Own{% elif coin_filter == 'sold' %}Sold{% else %}Own / Sold{% endif %}</a>
-  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=type_next or None) }}"
-     class="toolbar-btn pill {% if coin_filter in ('commercial','residential') %}active{% endif %}"
-     title="Cycle: Commercial → Residential → all">{% if coin_filter == 'commercial' %}Commercial{% elif coin_filter == 'residential' %}Residential{% else %}Comm / Res{% endif %}</a>
+  {# Each pill cycles its own axis; the other axis stays put so they combine. #}
+  {%- set next_status = {None: 'own', 'own': 'sold', 'sold': None}[prop_status] -%}
+  {%- set next_type   = {None: 'commercial', 'commercial': 'residential', 'residential': None}[prop_type] -%}
+  {%- set status_url_filter = ((next_status or '') + (('_' + prop_type) if (next_status and prop_type) else (prop_type or ''))) or None -%}
+  {%- set type_url_filter   = ((prop_status or '') + (('_' + next_type) if (prop_status and next_type) else (next_type or '')) if prop_status else (next_type or None)) -%}
+  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=status_url_filter) }}"
+     class="toolbar-btn pill {% if prop_status %}active{% endif %}"
+     title="Cycle: Own → Sold → all">{% if prop_status == 'own' %}Own{% elif prop_status == 'sold' %}Sold{% else %}Own / Sold{% endif %}</a>
+  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=type_url_filter) }}"
+     class="toolbar-btn pill {% if prop_type %}active{% endif %}"
+     title="Cycle: Commercial → Residential → all">{% if prop_type == 'commercial' %}Commercial{% elif prop_type == 'residential' %}Residential{% else %}Comm / Res{% endif %}</a>
   {% endif %}
   {% if category == 'vehicles' %}
   <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
@@ -282,7 +285,6 @@
       {% elif category == 'properties' %}
         <div class="item-line1">
           <span class="item-brand">{{ row['name'] or '—' }}</span>
-          {% if row['short_name'] %}<span class="item-model">{{ row['short_name'] }}</span>{% endif %}
         </div>
         <div class="item-detail-rows">
           {% if row['address'] %}<div class="idr"><span>{{ row['address'] }}</span></div>{% endif %}
