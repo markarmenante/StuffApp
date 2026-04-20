@@ -679,11 +679,12 @@ input[type="date"] { -webkit-appearance: none; }
   /* Bottom action row: wrap into 2-up. */
   .detail-bottom { grid-template-columns: repeat(2, 1fr); gap: 6px; }
 
-  /* Every editable cell gets 16px font (no iOS zoom) + 44px min height. */
+  /* 16px inputs so iOS Safari doesn't auto-zoom on focus. Cell height
+     stays at the desktop default (min-height: 22px on .dcell) — the
+     previous 44px blanket rule inflated every row on narrow widths. */
   .dcell input,
   .dcell select,
   .dcell textarea { font-size: 16px; }
-  .dcell { min-height: 44px; }
 
   /* Detail header allowed to wrap so nav arrows + Back drop to a 2nd row. */
   .detail-header { flex-wrap: wrap; row-gap: 6px; }
