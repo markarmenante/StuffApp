@@ -280,6 +280,7 @@ CREATE TABLE IF NOT EXISTS properties (
     price REAL,
     notes TEXT,
     status TEXT,
+    owner TEXT,
     archive TEXT,
     image TEXT,
     created_at TEXT DEFAULT (datetime('now')),

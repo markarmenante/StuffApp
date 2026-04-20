@@ -968,6 +968,7 @@
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="status">{% for s in ['','Own','Sold'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="owner">{% for o in ['','YM','Mark','Young'] %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════

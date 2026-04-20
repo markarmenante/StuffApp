@@ -389,7 +389,9 @@ FIELDS = {
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'notes',           'label': 'Notes',             'type': 'textarea'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Own', 'Sold', 'Rented']},
+         'options': ['', 'Own', 'Sold']},
+        {'name': 'owner',           'label': 'Owner',             'type': 'select',
+         'options': ['', 'YM', 'Mark', 'Young']},
         {'name': 'archive',         'label': 'Archive',           'type': 'text'},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
     ],
@@ -481,6 +483,7 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN value REAL',
         'ALTER TABLE watches ADD COLUMN results TEXT',
         'ALTER TABLE watches ADD COLUMN value_searched_at TEXT',
+        'ALTER TABLE properties ADD COLUMN owner TEXT',
     ):
         try:
             db.execute(stmt)
