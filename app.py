@@ -107,6 +107,7 @@ VALUE_LISTS = {
     'status': ['Own','Ordered','Sold','Loaned','Gifted','Consigned','Lost'],
     'camera_status': ['Own','Sold','Gifted'],
     'coin_status': ['Own','Ordered','Sold','Loaned'],
+    'recording_status': ['Own','Ordered'],
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
     'coin_grade': ['BU','FDC','MS','PF','AU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
     'clasp_type': ['Tang','Deployant','Buckle','Velcro'],
@@ -1682,6 +1683,21 @@ def backfill_property_status_own():
         "UPDATE properties SET status = 'Own' "
         "WHERE status IS NULL OR TRIM(status) = ''"
     )
+    db.commit()
+    return jsonify(updated=r.rowcount)
+
+
+@app.route('/admin/set-all-recording-status-own', methods=['POST'])
+def set_all_recording_status_own():
+    """Set every recording's status to 'Own'.
+
+    Matches the local backfill alongside the dropdown restriction
+    to {Own, Ordered}. Safe to re-run.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    r = db.execute("UPDATE recordings SET status = 'Own'")
     db.commit()
     return jsonify(updated=r.rowcount)
 
