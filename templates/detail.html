@@ -462,10 +462,8 @@
           <span class="clabel">Megapixels</span>
         </div>
       </div>
-      <div class="dgrid dg1">
+      <div class="dgrid dg3 cam-lens-sensor-serial">
         {{ cell('lens_mount','Lens Mount') }}
-      </div>
-      <div class="dgrid dg2 cam-sensor-serial">
         <div class="dcell cam-film-only">
           <input type="text" name="sensor" value="{{ val('sensor') }}">
           <span class="clabel">Sensor</span>
@@ -475,7 +473,7 @@
           <span class="clabel">Serial #</span>
         </div>
       </div>
-      <div class="dgrid dg3">
+      <div class="dgrid dg3 camera-purchase">
         {{ datecell('date','Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
@@ -1200,9 +1198,11 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     document.querySelectorAll('.cam-digital-only').forEach(el => {
       el.style.display = isFilm ? 'none' : '';
     });
-    // Serial # spans both columns when Sensor is hidden (Digital).
+    // When Sensor is hidden (Digital), Serial # fills the freed two
+    // columns next to Lens Mount; on Film it just takes its natural
+    // third-of-row slot.
     document.querySelectorAll('.cam-serial-cell').forEach(el => {
-      el.style.gridColumn = isFilm ? '' : '1 / -1';
+      el.style.gridColumn = isFilm ? '' : '2 / span 2';
     });
   }
   radios.forEach(r => r.addEventListener('change', apply));

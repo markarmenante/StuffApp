@@ -425,6 +425,8 @@ input[type="date"] { -webkit-appearance: none; }
 .coin-purchase .dcell select { text-align: center; }
 .watch-purchase .dcell input,
 .watch-purchase .dcell select { text-align: center; }
+.camera-purchase .dcell input,
+.camera-purchase .dcell select { text-align: center; }
 
 /* Property specs / purchase row: centered contents, tighter height */
 .properties-specs .dcell {
