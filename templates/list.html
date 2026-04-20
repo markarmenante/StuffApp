@@ -251,6 +251,22 @@
           </div>
         </div>
 
+      {# ── AUDIO ── #}
+      {% elif category == 'audio' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          {% if row['type'] %}<div class="idr"><span>{{ row['type'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
+            {% if row['vendor'] %}<span class="li-hide-mobile">{{ row['vendor'] }}</span>{% endif %}
+            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
+          </div>
+          {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
       {# ── RIFLES ── #}
       {% elif category == 'rifles' %}
         <div class="item-line1">
