@@ -566,6 +566,12 @@ CATEGORY_FILTERS = {
         'own':  ("COALESCE(status,'') = 'Own'", []),
         'sold': ("COALESCE(status,'') = 'Sold'", []),
     },
+    'properties': {
+        'own':         ("COALESCE(status,'') = 'Own'", []),
+        'sold':        ("COALESCE(status,'') = 'Sold'", []),
+        'commercial':  ("COALESCE(type,'') = 'Commercial'", []),
+        'residential': ("COALESCE(type,'') = 'Residential'", []),
+    },
 }
 
 

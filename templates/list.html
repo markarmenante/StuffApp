@@ -25,6 +25,16 @@
      class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
      title="Audio at Truckee (Martis)">Martis</a>
   {% endif %}
+  {% if category == 'properties' %}
+  {%- set status_next = {'': 'own', 'own': 'sold', 'sold': ''}[coin_filter if coin_filter in ('own','sold') else ''] -%}
+  {%- set type_next   = {'': 'commercial', 'commercial': 'residential', 'residential': ''}[coin_filter if coin_filter in ('commercial','residential') else ''] -%}
+  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=status_next or None) }}"
+     class="toolbar-btn pill {% if coin_filter in ('own','sold') %}active{% endif %}"
+     title="Cycle: Own → Sold → all">{% if coin_filter == 'own' %}Own{% elif coin_filter == 'sold' %}Sold{% else %}Own / Sold{% endif %}</a>
+  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=type_next or None) }}"
+     class="toolbar-btn pill {% if coin_filter in ('commercial','residential') %}active{% endif %}"
+     title="Cycle: Commercial → Residential → all">{% if coin_filter == 'commercial' %}Commercial{% elif coin_filter == 'residential' %}Residential{% else %}Comm / Res{% endif %}</a>
+  {% endif %}
   {% if category == 'vehicles' %}
   <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
      class="toolbar-btn pill {% if coin_filter == 'own' %}active{% endif %}"
