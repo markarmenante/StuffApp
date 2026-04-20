@@ -925,10 +925,7 @@
     <input type="text" name="name" value="{{ val('name') }}"
            class="brand-input" autocomplete="off">
   </div>
-  <div class="detail-model">
-    <input type="text" name="short_name" value="{{ val('short_name') }}"
-           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
-  </div>
+  <input type="hidden" name="short_name" value="{{ val('short_name') }}">
 
   <div class="watch-body">
     <div class="watch-photo drop-zone" data-field="image"
@@ -944,7 +941,7 @@
       </label>
     </div>
     <div class="watch-specs">
-      <div class="dgrid dg1">{{ cell('address','Address') }}</div>
+      <div class="dgrid dg1 properties-address">{{ cell('address','Address',rows=2) }}</div>
       <div class="dgrid dg4 properties-specs">
         {{ selcell('type','Type', vlists.property_type) }}
         {{ cell('year_built','Year Built') }}

@@ -436,6 +436,14 @@ input[type="date"] { -webkit-appearance: none; }
   text-align: center;
 }
 
+/* Property address: two-line textarea, left-aligned */
+.properties-address .dcell textarea {
+  text-align: left;
+  min-height: 44px;
+  resize: vertical;
+  line-height: 1.35;
+}
+
 .drop-zone { cursor: pointer; transition: background .15s; }
 .drop-zone.drag-over { background: #e8f0fe; outline: 2px dashed var(--blue); outline-offset: -2px; }
 .coin-age-row { text-align: center; font-size: 12px; color: var(--text-secondary); padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--cell-bg); }
