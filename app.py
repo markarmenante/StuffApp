@@ -2235,29 +2235,40 @@ def _parse_fm_filename(filename):
     return None
 
 
-def _parse_coin_bin_filename(filename):
-    """Parse '<bin><sep><1|2>.ext' -> (bin, slot, ext).
+def _coin_bin_candidates(filename):
+    """Yield plausible (bin, slot, ext) interpretations of a coin filename.
 
-    Accepts either an underscore or a space as the separator between
-    bin and slot, so all of the following resolve identically:
+    FileMaker's container-field export convention:
+      - first image keeps the bin as its base name      → slot 1 (Obverse)
+      - second image gets a ' 2' suffix appended        → slot 2 (Reverse)
 
-        C 1_1.jpg    C 1 1.jpg    NM 100 2.jpg    CM 42_2.png
+    So the caller sees all of these:
 
-    Slot ``1`` = Obverse (image_1), slot ``2`` = Reverse (image_2).
-    Underscore is tried before space so mixed filenames like
-    ``C 1_2.jpg`` (space inside bin, underscore before slot) still
-    parse cleanly.
+        C 94.jpg      → ('C 94', 1)              # Obverse only
+        C 94 2.jpg    → ('C 94', 2)              # Reverse
+        C 1_1.jpg     → ('C 1', 1)               # explicit suffix form
+        NM 100 2.jpg  → ('NM 100', 2)
+
+    There's genuine ambiguity with names like ``C 2.jpg`` — it could mean
+    bin ``C`` slot 2 OR bin ``C 2`` slot 1. We yield the suffix-stripped
+    interpretation first and the whole-name interpretation second; the
+    upload handler picks the first one whose bin exists in the coins
+    table.
     """
     name, ext = os.path.splitext(filename)
-    for sep in ('_', ' '):
-        if sep not in name:
-            continue
-        bin_part, _, slot_part = name.rpartition(sep)
-        bin_part = bin_part.strip()
-        slot_part = slot_part.strip()
-        if bin_part and slot_part in ('1', '2'):
-            return (bin_part, slot_part, ext)
-    return None
+    name = name.strip()
+    if not name:
+        return
+    seen = set()
+    for suffix, slot in ((' 2', '2'), ('_2', '2'), (' 1', '1'), ('_1', '1')):
+        if name.endswith(suffix):
+            bin_part = name[:-len(suffix)].strip()
+            if bin_part and (bin_part, slot) not in seen:
+                seen.add((bin_part, slot))
+                yield (bin_part, slot, ext)
+            break
+    if (name, '1') not in seen:
+        yield (name, '1', ext)
 
 
 @app.route('/admin/upload-fm-images', methods=['POST'])
@@ -2314,19 +2325,27 @@ def upload_fm_images():
                                 'reason': f'no record {pk} in {sql_table}'})
                 continue
         else:
-            parsed2 = _parse_coin_bin_filename(f.filename)
-            if not parsed2:
+            candidates = list(_coin_bin_candidates(f.filename))
+            if not candidates:
                 skipped.append({'file': f.filename, 'reason': 'unparseable'})
                 continue
-            bin_value, slot, ext = parsed2
-            row = db.execute(
-                "SELECT id FROM coins WHERE bin = ?", (bin_value,)
-            ).fetchone()
-            if not row:
-                skipped.append({'file': f.filename,
-                                'reason': f'no coin with bin {bin_value!r}'})
+            matched = None
+            tried_bins = []
+            for bin_value, slot, file_ext in candidates:
+                tried_bins.append(bin_value)
+                row = db.execute(
+                    "SELECT id FROM coins WHERE bin = ?", (bin_value,)
+                ).fetchone()
+                if row:
+                    matched = (row['id'], slot, file_ext)
+                    break
+            if not matched:
+                skipped.append({
+                    'file': f.filename,
+                    'reason': f'no coin with bin (tried: {tried_bins})',
+                })
                 continue
-            pk = row['id']
+            pk, slot, ext = matched
             sql_table = 'coins'
             sql_column = 'image_1' if slot == '1' else 'image_2'
 
