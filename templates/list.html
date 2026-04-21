@@ -297,6 +297,17 @@
             {% if row['year_built'] %}<span><span class="lbl">Built</span> {{ row['year_built'] }}</span>{% endif %}
             {% if row['llc'] %}<span>{{ row['llc'] }}</span>{% endif %}
           </div>
+          {% if row['alarm_code_1'] %}
+          <div class="idr alarm-row">
+            <span class="alarm-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 22" width="16" height="18" fill="currentColor">
+                <path d="M10 0L0 3v8c0 6 4 10 10 11 6-1 10-5 10-11V3L10 0z"/>
+                <path fill="#ffffff" d="M8 9V8a2 2 0 1 1 4 0v1h1v5H7V9h1zm1 0h2V8a1 1 0 1 0-2 0v1z"/>
+              </svg>
+            </span>
+            <span>{{ row['alarm_code_1'] }}</span>
+          </div>
+          {% endif %}
           {% if row['wifi_name'] or row['wifi'] %}
           <div class="idr wifi-row">
             <span class="wifi-icon" aria-hidden="true">
