@@ -311,6 +311,7 @@ CREATE TABLE IF NOT EXISTS topics (
     property_id TEXT,
     subject TEXT,
     body TEXT,
+    image TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
