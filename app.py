@@ -2236,21 +2236,28 @@ def _parse_fm_filename(filename):
 
 
 def _parse_coin_bin_filename(filename):
-    """Parse '<bin>_<1|2>.ext' -> (bin, slot, ext).
+    """Parse '<bin><sep><1|2>.ext' -> (bin, slot, ext).
 
-    Matches filenames like ``C 1_1.jpg`` (bin 'C 1', slot 1 = Obverse),
-    ``C 1_2.jpg`` (reverse). Bin values allow spaces and any non-underscore
-    characters; the last underscore separates bin from slot.
+    Accepts either an underscore or a space as the separator between
+    bin and slot, so all of the following resolve identically:
+
+        C 1_1.jpg    C 1 1.jpg    NM 100 2.jpg    CM 42_2.png
+
+    Slot ``1`` = Obverse (image_1), slot ``2`` = Reverse (image_2).
+    Underscore is tried before space so mixed filenames like
+    ``C 1_2.jpg`` (space inside bin, underscore before slot) still
+    parse cleanly.
     """
     name, ext = os.path.splitext(filename)
-    if '_' not in name:
-        return None
-    bin_part, _, slot_part = name.rpartition('_')
-    bin_part = bin_part.strip()
-    slot_part = slot_part.strip()
-    if slot_part not in ('1', '2') or not bin_part:
-        return None
-    return (bin_part, slot_part, ext)
+    for sep in ('_', ' '):
+        if sep not in name:
+            continue
+        bin_part, _, slot_part = name.rpartition(sep)
+        bin_part = bin_part.strip()
+        slot_part = slot_part.strip()
+        if bin_part and slot_part in ('1', '2'):
+            return (bin_part, slot_part, ext)
+    return None
 
 
 @app.route('/admin/upload-fm-images', methods=['POST'])
