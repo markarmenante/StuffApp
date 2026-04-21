@@ -487,6 +487,7 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN value_searched_at TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
+        'ALTER TABLE topics ADD COLUMN image TEXT',
         'ALTER TABLE coins ADD COLUMN history_region TEXT',
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
@@ -1161,6 +1162,102 @@ def delete_record(category, record_id):
     db.commit()
     flash("Record deleted.", 'info')
     return redirect(url_for('list_view', category=category))
+
+
+@app.route('/topics/new', methods=['GET', 'POST'])
+def topic_new():
+    db = get_db()
+    property_id = request.values.get('property_id') or ''
+    prop = db.execute(
+        'SELECT id, name FROM properties WHERE id = ?', [property_id]
+    ).fetchone() if property_id else None
+    if prop is None:
+        abort(404)
+    if request.method == 'POST':
+        tid = str(uuid.uuid4())
+        subject = (request.form.get('subject') or '').strip() or None
+        body = (request.form.get('body') or '').strip() or None
+        image = None
+        f = request.files.get('image')
+        if f and f.filename:
+            image = save_upload(f)
+        db.execute(
+            'INSERT INTO topics (id, property_id, subject, body, image) '
+            'VALUES (?, ?, ?, ?, ?)',
+            [tid, prop['id'], subject, body, image],
+        )
+        db.commit()
+        return redirect(url_for('topic_detail', topic_id=tid))
+    return render_template(
+        'topic_detail.html', topic=None, property=prop, is_new=True,
+        categories=CATEGORIES, counts=get_counts(), current_category='properties',
+    )
+
+
+@app.route('/topics/<topic_id>', methods=['GET', 'POST'])
+def topic_detail(topic_id):
+    db = get_db()
+    topic = db.execute('SELECT * FROM topics WHERE id = ?', [topic_id]).fetchone()
+    if topic is None:
+        abort(404)
+    prop = db.execute(
+        'SELECT id, name FROM properties WHERE id = ?', [topic['property_id']]
+    ).fetchone()
+    if request.method == 'POST':
+        subject = (request.form.get('subject') or '').strip() or None
+        body = (request.form.get('body') or '').strip() or None
+        updates = {'subject': subject, 'body': body,
+                   'updated_at': datetime.utcnow().isoformat()}
+        f = request.files.get('image')
+        if f and f.filename:
+            stored = save_upload(f)
+            if stored:
+                updates['image'] = stored
+        set_clause = ', '.join(f'{k} = ?' for k in updates)
+        db.execute(f'UPDATE topics SET {set_clause} WHERE id = ?',
+                   list(updates.values()) + [topic_id])
+        db.commit()
+        flash('Topic saved.', 'success')
+        return redirect(url_for('topic_detail', topic_id=topic_id))
+    return render_template(
+        'topic_detail.html', topic=topic, property=prop, is_new=False,
+        categories=CATEGORIES, counts=get_counts(), current_category='properties',
+    )
+
+
+@app.route('/topics/<topic_id>/delete', methods=['POST'])
+def topic_delete(topic_id):
+    db = get_db()
+    row = db.execute(
+        'SELECT property_id FROM topics WHERE id = ?', [topic_id]
+    ).fetchone()
+    db.execute('DELETE FROM topics WHERE id = ?', [topic_id])
+    db.commit()
+    flash('Topic deleted.', 'info')
+    if row and row['property_id']:
+        return redirect(url_for('detail_view', category='properties',
+                                record_id=row['property_id']))
+    return redirect(url_for('list_view', category='properties'))
+
+
+@app.route('/topics/<topic_id>/upload-image', methods=['POST'])
+def topic_upload_image(topic_id):
+    db = get_db()
+    topic = db.execute('SELECT 1 FROM topics WHERE id = ?', [topic_id]).fetchone()
+    if topic is None:
+        return jsonify({'error': 'Unknown topic'}), 404
+    f = request.files.get('image')
+    if not f or not f.filename or not allowed_file(f.filename):
+        return jsonify({'error': 'No file'}), 400
+    stored = save_upload(f)
+    if not stored:
+        return jsonify({'error': 'Upload failed'}), 500
+    db.execute(
+        'UPDATE topics SET image = ?, updated_at = datetime(\'now\') WHERE id = ?',
+        [stored, topic_id],
+    )
+    db.commit()
+    return jsonify({'url': url_for('uploaded_file', filename=stored)})
 
 
 @app.route('/uploads/<filename>')
