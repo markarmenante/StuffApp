@@ -923,7 +923,12 @@ def list_view(category):
     db = get_db()
     q   = request.args.get('q', '').strip()
     dot = request.args.get('dot', '') == '1'
-    coin_filter = request.args.get('filter', '').strip() or None
+    raw_filter = request.args.get('filter')
+    coin_filter = (raw_filter or '').strip() or None
+    # Default the properties list to Own + Residential on a fresh visit.
+    # An explicit empty ?filter= still clears all filters.
+    if category == 'properties' and raw_filter is None:
+        coin_filter = 'own_residential'
     sql, params = build_search_query(category, q, dot=dot, coin_filter=coin_filter)
     rows = db.execute(sql, params).fetchall()
     counts = get_counts()
