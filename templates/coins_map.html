@@ -42,8 +42,9 @@
   const entries = Object.values(buckets).sort((a,b) => b.coins.length - a.coins.length);
 
   const map = L.map(el, {
-    center: [37.5, 22.0], zoom: 5, minZoom: 3, maxZoom: 12,
+    center: [37.5, 22.0], zoom: 5, minZoom: 2, maxZoom: 12,
     scrollWheelZoom: true, dragging: true,
+    worldCopyJump: true,
   });
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
     attribution: '© OpenStreetMap, © CARTO',
@@ -83,6 +84,14 @@
       className: 'coin-city-label',
     });
   });
+
+  // Auto-fit viewport so eastern bubbles (Bactria, Indo-Greek, etc.) are visible.
+  if (entries.length > 1) {
+    const bounds = L.latLngBounds(entries.map(e => e.latlng));
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 6 });
+  } else if (entries.length === 1) {
+    map.setView(entries[0].latlng, 6);
+  }
 
   const placed = coins.length - unresolved;
   if (caption) {
