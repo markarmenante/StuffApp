@@ -261,11 +261,11 @@
         </div>
         <div class="item-detail-rows">
           {% if row['type'] %}<div class="idr"><span>{{ row['type'] }}</span></div>{% endif %}
+          {% if row['serial_number'] %}
           <div class="idr">
-            {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
-            {% if row['vendor'] %}<span class="li-hide-mobile">{{ row['vendor'] }}</span>{% endif %}
-            {% if row['price'] %}<span>{{ row['price']|currency }}</span>{% endif %}
+            <span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>
           </div>
+          {% endif %}
           {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
         </div>
 
