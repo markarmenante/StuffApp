@@ -3,6 +3,7 @@ import uuid
 import os
 import json
 import re
+import base64
 from datetime import datetime
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response)
@@ -2354,6 +2355,94 @@ def upload_fm_images():
         db.execute(
             f"UPDATE {sql_table} SET {sql_column} = ?, updated_at = ? WHERE id = ?",
             (stored_name, datetime.utcnow().isoformat(), pk),
+        )
+        imported += 1
+    db.commit()
+    return jsonify(imported=imported, skipped_count=len(skipped), skipped=skipped[:20])
+
+
+_IMG_MAGIC = (
+    (b'\xff\xd8\xff',       '.jpg'),
+    (b'\x89PNG\r\n\x1a\n',  '.png'),
+    (b'GIF8',               '.gif'),
+    (b'RIFF',               '.webp'),   # actual WEBP check is done separately
+    (b'II*\x00',            '.tif'),
+    (b'MM\x00*',            '.tif'),
+    (b'%PDF',               '.pdf'),
+)
+
+
+def _image_ext_from_bytes(data):
+    if len(data) >= 12 and data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return '.webp'
+    for prefix, ext in _IMG_MAGIC:
+        if data.startswith(prefix):
+            return ext
+    return '.bin'
+
+
+@app.route('/admin/upload-lens-b64', methods=['POST'])
+def upload_lens_b64():
+    """Decode and apply a FileMaker base64 text export of lens images.
+
+    Accepts a single multipart field ``file`` pointing at the .txt file
+    produced by the Lens "Export Images" FM script. Each line is:
+
+        <serial_number>|<base64-image>
+
+    separated by ``¶`` (CR) or ``\\n``. We decode, detect the image
+    format from magic bytes, write to uploads/ with a fresh UUID, and
+    set ``lenses.image`` on the matching row.
+
+    Lines whose serial is unknown (or empty) come back in ``skipped``.
+    Safe to re-run.
+
+    curl example:
+        curl -F "file=@~/Desktop/lens_images_b64.txt" \\
+             -F "secret=stuffapp-bulk-import-2026" \\
+             https://<host>/admin/upload-lens-b64
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    upload = request.files.get('file')
+    if not upload:
+        return jsonify(error='No file uploaded (field name: "file")'), 400
+    content = upload.read().decode('utf-8', errors='replace')
+    content = content.replace('\r\n', '\n').replace('\r', '\n')
+    lines = [ln for ln in content.split('\n') if ln.strip()]
+    db = get_db()
+    imported = 0
+    skipped = []
+    for i, line in enumerate(lines, 1):
+        if '|' not in line:
+            skipped.append({'line': i, 'reason': 'no separator'})
+            continue
+        serial, b64 = line.split('|', 1)
+        serial = serial.strip()
+        if not serial:
+            skipped.append({'line': i, 'reason': 'empty serial'})
+            continue
+        try:
+            data = base64.b64decode(b64, validate=False)
+        except Exception as e:
+            skipped.append({'line': i, 'serial': serial, 'reason': f'base64 decode: {e}'})
+            continue
+        if not data:
+            skipped.append({'line': i, 'serial': serial, 'reason': 'empty image'})
+            continue
+        row = db.execute(
+            'SELECT id FROM lenses WHERE serial_number = ?', (serial,)
+        ).fetchone()
+        if not row:
+            skipped.append({'line': i, 'serial': serial, 'reason': 'no lens with this serial'})
+            continue
+        ext = _image_ext_from_bytes(data)
+        stored_name = f'{uuid.uuid4().hex}{ext}'
+        with open(os.path.join(UPLOAD_FOLDER, stored_name), 'wb') as out:
+            out.write(data)
+        db.execute(
+            'UPDATE lenses SET image = ?, updated_at = ? WHERE serial_number = ?',
+            (stored_name, datetime.utcnow().isoformat(), serial),
         )
         imported += 1
     db.commit()
