@@ -2235,14 +2235,37 @@ def _parse_fm_filename(filename):
     return None
 
 
+def _parse_coin_bin_filename(filename):
+    """Parse '<bin>_<1|2>.ext' -> (bin, slot, ext).
+
+    Matches filenames like ``C 1_1.jpg`` (bin 'C 1', slot 1 = Obverse),
+    ``C 1_2.jpg`` (reverse). Bin values allow spaces and any non-underscore
+    characters; the last underscore separates bin from slot.
+    """
+    name, ext = os.path.splitext(filename)
+    if '_' not in name:
+        return None
+    bin_part, _, slot_part = name.rpartition('_')
+    bin_part = bin_part.strip()
+    slot_part = slot_part.strip()
+    if slot_part not in ('1', '2') or not bin_part:
+        return None
+    return (bin_part, slot_part, ext)
+
+
 @app.route('/admin/upload-fm-images', methods=['POST'])
 def upload_fm_images():
-    """Bulk-upload FileMaker-exported image files.
+    """Bulk-upload coin / FileMaker-exported image files.
 
-    Accepts a multipart POST with one or more files (field name: "files")
-    named in the FM export convention ``<Table>_<UUID>_<Field>.<ext>``.
-    Files are stored under uploads/ with a fresh UUID and the record's
-    image column is updated to point at the new filename.
+    Two filename conventions are accepted:
+
+    1. ``<Table>_<UUID>_<Field>.<ext>`` — the CLI exporter's format.
+       Example: ``Coin_1DCBA0A5-...-98F2CB200C67_Image1.jpg``.
+
+    2. ``<bin>_<slot>.<ext>`` — coin-only shortcut where ``<bin>`` is the
+       coin's ``bin`` column (e.g. ``C 1``) and ``<slot>`` is ``1`` for the
+       obverse (``image_1``) or ``2`` for the reverse (``image_2``).
+       Example: ``C 1_1.jpg`` (obverse of bin ``C 1``).
 
     curl example:
         for f in ~/Desktop/fm_images/*; do
@@ -2262,23 +2285,44 @@ def upload_fm_images():
     for f in files:
         if not f or not f.filename:
             continue
-        parsed = _parse_fm_filename(f.filename)
-        if not parsed:
-            skipped.append({'file': f.filename, 'reason': 'unparseable'})
-            continue
-        table_prefix, pk, field_name, ext = parsed
-        key = (table_prefix, field_name)
-        if key not in FM_FIELD_MAP:
-            skipped.append({'file': f.filename, 'reason': f'no mapping for {table_prefix}.{field_name}'})
-            continue
-        sql_table, sql_column = FM_FIELD_MAP[key]
-        row = db.execute(f"SELECT id FROM {sql_table} WHERE id = ?", (pk,)).fetchone()
-        if not row:
-            skipped.append({'file': f.filename, 'reason': f'no record {pk} in {sql_table}'})
-            continue
         if not allowed_file(f.filename):
             skipped.append({'file': f.filename, 'reason': 'extension not allowed'})
             continue
+
+        sql_table = sql_column = pk = ext = None
+
+        parsed = _parse_fm_filename(f.filename)
+        if parsed:
+            table_prefix, pk, field_name, ext = parsed
+            key = (table_prefix, field_name)
+            if key not in FM_FIELD_MAP:
+                skipped.append({'file': f.filename,
+                                'reason': f'no mapping for {table_prefix}.{field_name}'})
+                continue
+            sql_table, sql_column = FM_FIELD_MAP[key]
+            row = db.execute(f"SELECT id FROM {sql_table} WHERE id = ?",
+                             (pk,)).fetchone()
+            if not row:
+                skipped.append({'file': f.filename,
+                                'reason': f'no record {pk} in {sql_table}'})
+                continue
+        else:
+            parsed2 = _parse_coin_bin_filename(f.filename)
+            if not parsed2:
+                skipped.append({'file': f.filename, 'reason': 'unparseable'})
+                continue
+            bin_value, slot, ext = parsed2
+            row = db.execute(
+                "SELECT id FROM coins WHERE bin = ?", (bin_value,)
+            ).fetchone()
+            if not row:
+                skipped.append({'file': f.filename,
+                                'reason': f'no coin with bin {bin_value!r}'})
+                continue
+            pk = row['id']
+            sql_table = 'coins'
+            sql_column = 'image_1' if slot == '1' else 'image_2'
+
         stored_name = f"{uuid.uuid4().hex}{ext.lower()}"
         f.save(os.path.join(UPLOAD_FOLDER, stored_name))
         db.execute(
@@ -2288,6 +2332,40 @@ def upload_fm_images():
         imported += 1
     db.commit()
     return jsonify(imported=imported, skipped_count=len(skipped), skipped=skipped[:20])
+
+
+@app.route('/admin/sync-coin-bins', methods=['POST'])
+def sync_coin_bins():
+    """Populate ``coins.bin`` from Coin.csv, matched by UUID (col 29).
+
+    Coin.csv col 1 holds the bin label (e.g. ``C 1``) and col 29 holds the
+    coin's UUID. This reads the CSV shipped with the app and UPDATEs the
+    ``bin`` column on every matching coin. Safe to re-run. Required before
+    the ``<bin>_<slot>.jpg`` image uploads can find their coins.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    updated = 0
+    missing = []
+    for row in _csv_rows('Coin.csv'):
+        if len(row) < 30:
+            continue
+        bin_value = _mclean(row[1])
+        pk = (row[29] or '').strip()
+        if not bin_value or not pk:
+            continue
+        existing = db.execute('SELECT 1 FROM coins WHERE id = ?', (pk,)).fetchone()
+        if not existing:
+            missing.append({'id': pk, 'bin': bin_value})
+            continue
+        db.execute(
+            "UPDATE coins SET bin = ?, updated_at = ? WHERE id = ?",
+            (bin_value, datetime.utcnow().isoformat(), pk),
+        )
+        updated += 1
+    db.commit()
+    return jsonify(updated=updated, missing_count=len(missing), missing=missing[:20])
 
 
 @app.route('/admin/reimport-properties-topics', methods=['POST'])
