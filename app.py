@@ -2498,13 +2498,19 @@ def upload_art_b64():
     imported = 0
     skipped = []
     for i, line in enumerate(lines, 1):
-        parts = line.split('||')
+        # Accept either '||' (intended) or single '|' (common typo) as the
+        # field separator. Base64 alphabet never contains '|', so splitting
+        # on single '|' is safe even when that's what FM wrote.
+        if '||' in line:
+            parts = line.split('||')
+        else:
+            parts = line.split('|')
         if len(parts) < 3:
-            skipped.append({'line': i, 'reason': 'bad format (need title||artist||base64)'})
+            skipped.append({'line': i, 'reason': 'bad format (need title,artist,base64)'})
             continue
         title = parts[0].strip()
         artist = parts[1].strip()
-        b64 = '||'.join(parts[2:])
+        b64 = ('||' if '||' in line else '|').join(parts[2:])
         if not title or not artist:
             skipped.append({'line': i, 'reason': 'missing title or artist'})
             continue
