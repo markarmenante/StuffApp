@@ -289,14 +289,12 @@
       {% elif category == 'properties' %}
         <div class="item-line1">
           <span class="item-brand">{{ row['name'] or '—' }}</span>
+          <a class="topic-add-link" href="{{ url_for('topic_new', property_id=row['id']) }}"
+             onclick="event.stopPropagation()" title="Add a topic to this property">+ Topic</a>
         </div>
         <div class="item-detail-rows">
           {% if row['address'] %}<div class="idr"><span>{{ row['address'] }}</span></div>{% endif %}
-          <div class="idr">
-            {% if row['type'] %}<span>{{ row['type'] }}</span>{% endif %}
-            {% if row['year_built'] %}<span><span class="lbl">Built</span> {{ row['year_built'] }}</span>{% endif %}
-            {% if row['llc'] %}<span>{{ row['llc'] }}</span>{% endif %}
-          </div>
+          {% if row['llc'] %}<div class="idr"><span>{{ row['llc'] }}</span></div>{% endif %}
           {% if row['alarm_code_1'] %}
           <div class="idr alarm-row">
             <span class="alarm-icon" aria-hidden="true">
