@@ -1178,20 +1178,31 @@ def watch_fetch_value(record_id):
 
 @app.route('/coins/map')
 def coins_map_view():
-    """Distribution map of ancient coins (date_1 < 500) across the Mediterranean.
-    Passes raw region/mint/authority strings to the client, which aggregates
-    them against the shared coin-geo dictionaries.
+    """Distribution map of ancient coins across the Mediterranean.
+
+    Honours the same filter pills the list view uses: ?filter=ca_ancient or
+    ?filter=ny_ancient apply the matching WHERE clause. No filter falls
+    back to the default ancient threshold (date_1 < 500).
     """
     db = get_db()
-    rows = db.execute(
-        "SELECT id, coin_id, region, mint, authority, denomination, "
-        "date_1, date_1_text, date_2_text, image_1 "
-        "FROM coins "
-        "WHERE date_1 IS NOT NULL AND CAST(date_1 AS INTEGER) < 500 "
-        "ORDER BY date_1"
-    ).fetchall()
+    coin_filter = (request.args.get('filter') or '').strip() or None
+    base_cols = ("id, coin_id, region, mint, authority, denomination, "
+                 "date_1, date_1_text, date_2_text, image_1, property_name")
+    filters = CATEGORY_FILTERS.get('coins', {})
+    if coin_filter and coin_filter in filters:
+        where, params = filters[coin_filter]
+        label = 'CA Ancient' if coin_filter == 'ca_ancient' else \
+                'NY Ancient' if coin_filter == 'ny_ancient' else coin_filter
+    else:
+        where = "date_1 IS NOT NULL AND CAST(date_1 AS INTEGER) < 500"
+        params = []
+        label = 'ancient (date < 500)'
+    sql = (f"SELECT {base_cols} FROM coins WHERE {where} ORDER BY date_1")
+    rows = db.execute(sql, params).fetchall()
     coins = [dict(r) for r in rows]
     return render_template('coins_map.html', coins=coins,
+                           filter_label=label,
+                           coin_filter=coin_filter,
                            current_category='coins',
                            cat_info=CATEGORIES['coins'])
 

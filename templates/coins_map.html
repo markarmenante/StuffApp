@@ -4,9 +4,9 @@
 {% block content %}
 <div class="list-toolbar">
   <span class="list-count">{{ coins|length }}</span>
-  <span class="list-cat-title">Coin Map — ancient (date &lt; 500)</span>
-  <a href="{{ url_for('list_view', category='coins') }}" class="toolbar-btn pill"
-     title="Back to coin list">← List</a>
+  <span class="list-cat-title">Coin Map — {{ filter_label }}</span>
+  <a href="{{ url_for('list_view', category='coins', filter=coin_filter or None) }}"
+     class="toolbar-btn pill" title="Back to coin list">← List</a>
 </div>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
