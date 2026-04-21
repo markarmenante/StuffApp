@@ -1038,6 +1038,7 @@
   </div>
   <div class="dgrid dg2">{{ cell('alarm_phone','Phone') }}{{ cell('alarm_notes','Notes') }}</div>
   {% if property_topics %}
+  <div class="section-bar">Topics</div>
   <div class="property-topics">
     {% for t in property_topics %}
     <a class="topic-row" href="{{ url_for('topic_detail', topic_id=t['id']) }}">

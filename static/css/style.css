@@ -485,7 +485,8 @@ input[type="date"] { -webkit-appearance: none; }
 
 /* Property topics: subject / body rows under a property */
 .property-topics {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 3px solid var(--nav-border);
+  margin-bottom: 10px;
 }
 .property-topics .topic-row {
   display: grid;
