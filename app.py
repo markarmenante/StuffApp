@@ -2171,6 +2171,125 @@ def backfill_property_owner_ym():
     return jsonify(updated=r.rowcount)
 
 
+# FileMaker container-field export filename -> (table, column)
+#   Coin_<UUID>_Image1.jpg  -> coins.image_1 (obverse)
+#   Coin_<UUID>_Image2.jpg  -> coins.image_2 (reverse)
+# See import_fm_images.py for the matching CLI importer.
+FM_FIELD_MAP = {
+    ('Watch', 'ImageObv'):        ('watches',      'image_obv'),
+    ('Watch', 'ImageRev'):        ('watches',      'image_rev'),
+    ('Watch', 'Receipt'):         ('watches',      'receipt'),
+    ('Watch', 'Document'):        ('watches',      'document'),
+    ('Coin', 'Image1'):           ('coins',        'image_1'),
+    ('Coin', 'Image2'):           ('coins',        'image_2'),
+    ('Coin', 'Receipt'):          ('coins',        'receipt'),
+    ('Coin', 'Document1'):        ('coins',        'document_1'),
+    ('Coin', 'Document2'):        ('coins',        'document_2'),
+    ('Camera', 'Image'):          ('cameras',      'image'),
+    ('Lens', 'Image'):            ('lenses',       'image'),
+    ('Pen', 'Image'):             ('pens',         'image'),
+    ('Pen', 'Receipt'):           ('pens',         'receipt'),
+    ('Art', 'Image'):             ('art',          'image'),
+    ('Art', 'Receipt'):           ('art',          'receipt'),
+    ('Vehicle', 'Image'):         ('vehicles',     'image'),
+    ('Vehicle', 'Registration'):  ('vehicles',     'registration'),
+    ('Vehicle', 'Insurance'):     ('vehicles',     'insurance'),
+    ('Vehicle', 'Invoice'):       ('vehicles',     'invoice'),
+    ('Recording', 'Image'):       ('recordings',   'image'),
+    ('Recording', 'Receipt'):     ('recordings',   'receipt'),
+    ('Rifle', 'Image'):           ('rifles',       'image'),
+    ('Rifle', 'Receipt'):         ('rifles',       'receipt'),
+    ('CreditCard', 'ImageFront'): ('credit_cards', 'image_front'),
+    ('CreditCard', 'ImageBack'):  ('credit_cards', 'image_back'),
+    ('Property', 'Image'):        ('properties',   'image'),
+    ('Person', 'HeadShot'):       ('persons',      'head_shot'),
+    ('Person', 'Image1'):         ('persons',      'image_1'),
+    ('Person', 'Image7'):         ('persons',      'image_7'),
+    ('Person', 'Image9'):         ('persons',      'image_9'),
+    ('Person', 'LicenseObverse'): ('persons',      'license_obverse'),
+    ('Person', 'LicenseReverse'): ('persons',      'license_reverse'),
+    ('Person', 'HealthCardObv'):  ('persons',      'health_card_obv'),
+    ('Person', 'HealthCardRev'):  ('persons',      'health_card_rev'),
+    ('Person', 'Passport'):       ('persons',      'passport'),
+    ('Person', 'GlobalEntry'):    ('persons',      'global_entry'),
+    ('Person', 'EyePrescription'):('persons',      'eye_prescription'),
+    ('Person', 'Medicare'):       ('persons',      'medicare'),
+}
+
+
+def _parse_fm_filename(filename):
+    """Parse 'Coin_<UUID>_Image1.jpg' -> ('Coin', uuid, 'Image1', '.jpg')."""
+    name, ext = os.path.splitext(filename)
+    parts = name.split('_', 2)
+    if len(parts) < 3:
+        return None
+    table = parts[0]
+    remainder = parts[1] + '_' + parts[2]
+    for i in range(len(remainder) - 1, -1, -1):
+        if remainder[i] == '_':
+            pk = remainder[:i]
+            field = remainder[i + 1:]
+            clean = pk.replace('-', '')
+            if len(clean) >= 16 and all(c in '0123456789abcdefABCDEF' for c in clean):
+                return (table, pk, field, ext)
+    return None
+
+
+@app.route('/admin/upload-fm-images', methods=['POST'])
+def upload_fm_images():
+    """Bulk-upload FileMaker-exported image files.
+
+    Accepts a multipart POST with one or more files (field name: "files")
+    named in the FM export convention ``<Table>_<UUID>_<Field>.<ext>``.
+    Files are stored under uploads/ with a fresh UUID and the record's
+    image column is updated to point at the new filename.
+
+    curl example:
+        for f in ~/Desktop/fm_images/*; do
+          curl -F "files=@$f" \\
+               -F "secret=stuffapp-bulk-import-2026" \\
+               https://<host>/admin/upload-fm-images
+        done
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    files = request.files.getlist('files')
+    if not files:
+        return jsonify(error='No files uploaded'), 400
+    db = get_db()
+    imported = 0
+    skipped = []
+    for f in files:
+        if not f or not f.filename:
+            continue
+        parsed = _parse_fm_filename(f.filename)
+        if not parsed:
+            skipped.append({'file': f.filename, 'reason': 'unparseable'})
+            continue
+        table_prefix, pk, field_name, ext = parsed
+        key = (table_prefix, field_name)
+        if key not in FM_FIELD_MAP:
+            skipped.append({'file': f.filename, 'reason': f'no mapping for {table_prefix}.{field_name}'})
+            continue
+        sql_table, sql_column = FM_FIELD_MAP[key]
+        row = db.execute(f"SELECT id FROM {sql_table} WHERE id = ?", (pk,)).fetchone()
+        if not row:
+            skipped.append({'file': f.filename, 'reason': f'no record {pk} in {sql_table}'})
+            continue
+        if not allowed_file(f.filename):
+            skipped.append({'file': f.filename, 'reason': 'extension not allowed'})
+            continue
+        stored_name = f"{uuid.uuid4().hex}{ext.lower()}"
+        f.save(os.path.join(UPLOAD_FOLDER, stored_name))
+        db.execute(
+            f"UPDATE {sql_table} SET {sql_column} = ?, updated_at = ? WHERE id = ?",
+            (stored_name, datetime.utcnow().isoformat(), pk),
+        )
+        imported += 1
+    db.commit()
+    return jsonify(imported=imported, skipped_count=len(skipped), skipped=skipped[:20])
+
+
 @app.route('/admin/reimport-properties-topics', methods=['POST'])
 def reimport_properties_topics():
     """Re-import properties and topics from Property.csv / Topic.csv.
