@@ -2465,6 +2465,77 @@ def upload_lens_b64():
     return jsonify(imported=imported, skipped_count=len(skipped), skipped=skipped[:20])
 
 
+@app.route('/admin/upload-art-b64', methods=['POST'])
+def upload_art_b64():
+    """Decode a FileMaker base64 text export of art images.
+
+    Line format: ``<title>||<artist>||<base64-image>`` separated by
+    ``\\r`` (CR, from FM's ``¶``). Same encoding rules as
+    ``/admin/upload-lens-b64`` (UTF-16 BOM detection, CR/LF handling).
+
+    Matches art rows by the ``(title, artist)`` pair since the prod
+    UUIDs don't align with Art.csv UUIDs (legacy import generated
+    fresh UUIDs).
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    upload = request.files.get('file')
+    if not upload:
+        return jsonify(error='No file uploaded (field name: "file")'), 400
+    raw = upload.read()
+    if raw.startswith(b'\xff\xfe'):
+        content = raw[2:].decode('utf-16-le', errors='replace')
+    elif raw.startswith(b'\xfe\xff'):
+        content = raw[2:].decode('utf-16-be', errors='replace')
+    elif raw.startswith(b'\xef\xbb\xbf'):
+        content = raw[3:].decode('utf-8', errors='replace')
+    else:
+        content = raw.decode('utf-8', errors='replace')
+    content = content.replace('\r\n', '\n')
+    sep = '\r' if '\r' in content else '\n'
+    lines = [ln for ln in content.split(sep) if ln.strip()]
+    db = get_db()
+    imported = 0
+    skipped = []
+    for i, line in enumerate(lines, 1):
+        parts = line.split('||')
+        if len(parts) < 3:
+            skipped.append({'line': i, 'reason': 'bad format (need title||artist||base64)'})
+            continue
+        title = parts[0].strip()
+        artist = parts[1].strip()
+        b64 = '||'.join(parts[2:])
+        if not title or not artist:
+            skipped.append({'line': i, 'reason': 'missing title or artist'})
+            continue
+        try:
+            data = base64.b64decode(b64, validate=False)
+        except Exception as e:
+            skipped.append({'line': i, 'title': title, 'reason': f'base64 decode: {e}'})
+            continue
+        if not data:
+            skipped.append({'line': i, 'title': title, 'reason': 'empty image'})
+            continue
+        row = db.execute(
+            'SELECT id FROM art WHERE title = ? AND artist = ?', (title, artist)
+        ).fetchone()
+        if not row:
+            skipped.append({'line': i, 'title': title, 'artist': artist,
+                            'reason': 'no art with this title/artist'})
+            continue
+        ext = _image_ext_from_bytes(data)
+        stored_name = f'{uuid.uuid4().hex}{ext}'
+        with open(os.path.join(UPLOAD_FOLDER, stored_name), 'wb') as out:
+            out.write(data)
+        db.execute(
+            'UPDATE art SET image = ?, updated_at = ? WHERE title = ? AND artist = ?',
+            (stored_name, datetime.utcnow().isoformat(), title, artist),
+        )
+        imported += 1
+    db.commit()
+    return jsonify(imported=imported, skipped_count=len(skipped), skipped=skipped[:20])
+
+
 @app.route('/admin/sync-coin-bins', methods=['POST'])
 def sync_coin_bins():
     """Populate ``coins.bin`` so the bin-slot image upload can find coins.
