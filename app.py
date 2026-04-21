@@ -1084,7 +1084,7 @@ def detail_view(category, record_id):
     property_topics = None
     if category == 'properties':
         property_topics = db.execute(
-            'SELECT id, subject, body FROM topics '
+            'SELECT id, subject, body, image FROM topics '
             'WHERE property_id = ? ORDER BY created_at',
             [record_id]
         ).fetchall()

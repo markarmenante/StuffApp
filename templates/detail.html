@@ -1042,7 +1042,10 @@
     {% for t in property_topics %}
     <a class="topic-row" href="{{ url_for('topic_detail', topic_id=t['id']) }}">
       <div class="topic-subject">{{ t['subject'] or '' }}</div>
-      <div class="topic-body">{{ t['body'] or '' }}</div>
+      <div class="topic-body">
+        <span class="topic-body-text">{{ t['body'] or '' }}</span>
+        {% if t['image'] %}<span class="topic-img-icon" title="Has image" aria-label="Has image">🖼</span>{% endif %}
+      </div>
     </a>
     {% endfor %}
   </div>
