@@ -27,6 +27,14 @@
      class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
      title="Audio at Truckee (Martis)">Martis</a>
   {% endif %}
+  {% if category == 'recordings' %}
+  <a href="{{ url_for('list_view', category='recordings', q=q or None, filter=None if coin_filter == 'carp' else 'carp') }}"
+     class="toolbar-btn pill {% if coin_filter == 'carp' %}active{% endif %}"
+     title="Music at Carpinteria">Carp</a>
+  <a href="{{ url_for('list_view', category='recordings', q=q or None, filter=None if coin_filter == 'martis' else 'martis') }}"
+     class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
+     title="Music at Truckee (Martis)">Martis</a>
+  {% endif %}
   {% if category == 'properties' %}
   {# Each pill cycles its own axis; the other axis stays put so they combine. #}
   {%- set next_status = {None: 'own', 'own': 'sold', 'sold': None}[prop_status] -%}

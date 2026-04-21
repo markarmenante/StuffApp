@@ -570,6 +570,10 @@ CATEGORY_FILTERS = {
         'carp':   ("property = 'Carpinteria'", []),
         'martis': ("property = 'Truckee'", []),
     },
+    'recordings': {
+        'carp':   ("property = 'Carpinteria'", []),
+        'martis': ("property = 'Truckee'", []),
+    },
     'vehicles': {
         'own':  ("COALESCE(status,'') = 'Own'", []),
         'sold': ("COALESCE(status,'') = 'Sold'", []),
