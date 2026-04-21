@@ -2418,11 +2418,12 @@ def upload_lens_b64():
         content = raw[3:].decode('utf-8', errors='replace')
     else:
         content = raw.decode('utf-8', errors='replace')
-    # FM separates records with CR ("¶" in the script). Base64Encode
-    # wraps its output at 76 columns using LF, so we must split ONLY on
-    # CR — otherwise each base64 continuation line looks like a broken
-    # record. LFs inside a record are whitespace that b64decode ignores.
-    content = content.replace('\r\n', '\r')
+    # FM separates records with bare CR ("¶") but Base64Encode's wraps
+    # may be CRLF (depending on OS/version). If we converted CRLF → CR
+    # first, those wrap breaks would split records. Convert CRLF → LF
+    # so only the true record terminator (bare CR) remains, then split
+    # on that. b64decode ignores internal LFs as whitespace.
+    content = content.replace('\r\n', '\n')
     sep = '\r' if '\r' in content else '\n'
     lines = [ln for ln in content.split(sep) if ln.strip()]
     db = get_db()
