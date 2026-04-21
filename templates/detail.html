@@ -371,12 +371,14 @@
       {% if r and r['image_1'] and r['image_1']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="Obverse">
       {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
+      <span class="coin-img-lbl">Obverse</span>
     </div>
     <div class="coin-img-panel drop-zone" data-field="image_2"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_2'] and r['image_2']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="Reverse">
       {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
+      <span class="coin-img-lbl">Reverse</span>
     </div>
   </div>
   {% if coin_age_val %}

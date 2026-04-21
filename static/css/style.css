@@ -411,6 +411,7 @@ textarea.results-raw { display: none !important; }
 .coin-img-panel:last-child { border-right: none; }
 .coin-img-panel img { max-height: 130px; max-width: 100%; object-fit: contain; }
 .coin-img-panel .panel-lbl { font-size: 10px; color: var(--text-label); }
+.coin-img-lbl { font-size: 10px; font-weight: 600; color: var(--text-label); letter-spacing: .4px; text-transform: uppercase; }
 /* Date range inline editor */
 .date-range-cell { cursor: pointer; text-align: center; }
 .date-display { font-size: 13px; color: #555; min-height: 1.2em; }
