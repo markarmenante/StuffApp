@@ -102,6 +102,10 @@
       {% endif %}
     </span>
     {% if not is_new %}
+      {% if category == 'properties' %}
+      <a class="add-topic-link"
+         href="{{ url_for('topic_new', property_id=r['id']) }}">+ Topic</a>
+      {% endif %}
       <a class="detail-nav-btn {{ 'disabled' if not prev_id }}"
          href="{{ url_for('detail_view', category=category, record_id=prev_id) if prev_id else '#' }}">&lt;</a>
       <a class="detail-nav-btn {{ 'disabled' if not next_id }}"
@@ -1036,10 +1040,10 @@
   {% if property_topics %}
   <div class="property-topics">
     {% for t in property_topics %}
-    <div class="topic-row">
+    <a class="topic-row" href="{{ url_for('topic_detail', topic_id=t['id']) }}">
       <div class="topic-subject">{{ t['subject'] or '' }}</div>
       <div class="topic-body">{{ t['body'] or '' }}</div>
-    </div>
+    </a>
     {% endfor %}
   </div>
   {% endif %}

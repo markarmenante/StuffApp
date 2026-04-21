@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block title %}{{ topic['subject'] if topic and topic['subject'] else 'New Topic' }} — StuffApp{% endblock %}
+
+{% block content %}
+<div class="detail-page">
+<form method="post"
+      action="{% if is_new %}{{ url_for('topic_new', property_id=property['id']) }}{% else %}{{ url_for('topic_detail', topic_id=topic['id']) }}{% endif %}"
+      enctype="multipart/form-data" id="mainForm">
+
+  <div class="detail-header">
+    <span class="detail-brand">{% if is_new %}New Topic{% endif %}</span>
+    <a class="back-link" href="{{ url_for('detail_view', category='properties', record_id=property['id']) }}">← Back</a>
+  </div>
+
+  <div class="detail-brand-row">
+    <input type="text" name="subject" value="{{ topic['subject'] if topic and topic['subject'] else '' }}"
+           class="brand-input" placeholder="Topic subject" autocomplete="off">
+  </div>
+
+  <div class="dgrid dg1">
+    <div class="dcell">
+      <a class="topic-property-link"
+         href="{{ url_for('detail_view', category='properties', record_id=property['id']) }}">
+        {{ property['name'] or '—' }}
+      </a>
+      <span class="clabel">Property</span>
+    </div>
+  </div>
+
+  <div class="dgrid dg1">
+    <div class="dcell">
+      <textarea name="body" rows="6" placeholder="Body">{{ topic['body'] if topic and topic['body'] else '' }}</textarea>
+      <span class="clabel">Body</span>
+    </div>
+  </div>
+
+  <div class="topic-photo">
+    {% if topic and topic['image'] and topic['image']|is_image %}
+      <img src="{{ url_for('uploaded_file', filename=topic['image']) }}" alt="Topic image">
+    {% else %}
+      <span class="no-img">📷</span>
+    {% endif %}
+    <label class="file-upload-lbl topic-photo-upload">
+      <input type="file" name="image" accept="image/*">
+      <span class="topic-photo-hint">Choose image…</span>
+    </label>
+  </div>
+
+  <div class="save-bar">
+    <button type="submit" class="btn-save">Save</button>
+    {% if not is_new %}
+    <button type="button" class="btn-delete" style="margin-left:auto"
+            onclick="if(confirm('Delete this topic?')){document.getElementById('deleteForm').submit();}">
+      Delete
+    </button>
+    {% endif %}
+  </div>
+</form>
+
+{% if not is_new %}
+<form id="deleteForm" method="post"
+      action="{{ url_for('topic_delete', topic_id=topic['id']) }}" style="display:none"></form>
+{% endif %}
+</div>
+{% endblock %}
