@@ -486,6 +486,7 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN results TEXT',
         'ALTER TABLE watches ADD COLUMN value_searched_at TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
+        'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
         'ALTER TABLE coins ADD COLUMN history_region TEXT',
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
