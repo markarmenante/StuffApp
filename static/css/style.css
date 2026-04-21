@@ -510,12 +510,31 @@ input[type="date"] { -webkit-appearance: none; }
   font-size: 14px;
   color: #111;
   line-height: 1.35;
+}
+.property-topics .topic-subject {
+  border-right: 1px solid var(--border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.property-topics .topic-subject {
-  border-right: 1px solid var(--border);
+.property-topics .topic-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.property-topics .topic-body-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.property-topics .topic-img-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-secondary);
 }
 
 /* "+ Topic" button in property detail header */
