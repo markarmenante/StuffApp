@@ -236,6 +236,31 @@ for row in load_csv('Property.csv'):
     ))
 totals['properties'] = conn.execute('SELECT COUNT(*) FROM properties').fetchone()[0]
 
+# ---------------- TOPICS ----------------
+# Topic.csv column map (FileMaker alphabetical export, no headers):
+#  0 created_by   1 created_at    2 modified_at   3 modified_by
+#  4 subject      5 body          6 id (UUID)     7 property (matches properties.name)
+cur.execute('DELETE FROM topics')
+prop_name_to_id = {
+    name: pid for name, pid in
+    conn.execute('SELECT name, id FROM properties WHERE name IS NOT NULL')
+}
+for row in load_csv('Topic.csv'):
+    if len(row) < 8:
+        continue
+    subject = clean(row[4])
+    body = clean(row[5])
+    if not subject and not body:
+        continue
+    prop_id = prop_name_to_id.get(clean(row[7]) or '')
+    created = parse_datetime(row[1]) or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    updated = parse_datetime(row[2]) or created
+    cur.execute('''
+        INSERT INTO topics (id, property_id, subject, body, created_at, updated_at)
+        VALUES (?,?,?,?,?,?)
+    ''', (new_id(row[6]), prop_id, subject, body, created, updated))
+totals['topics'] = conn.execute('SELECT COUNT(*) FROM topics').fetchone()[0]
+
 # ---------------- PERSONS ----------------
 cur.execute('DELETE FROM persons')
 for row in load_csv('Person.csv'):

@@ -306,6 +306,17 @@ CREATE TABLE IF NOT EXISTS audio (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS topics (
+    id TEXT PRIMARY KEY,
+    property_id TEXT,
+    subject TEXT,
+    body TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_topics_property_id ON topics(property_id);
+
 CREATE TABLE IF NOT EXISTS persons (
     id TEXT PRIMARY KEY,
     name TEXT,
