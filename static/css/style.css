@@ -552,15 +552,20 @@ input[type="date"] { -webkit-appearance: none; }
   font-size: 48px;
   color: #bbb;
 }
-.topic-photo-upload {
+.topic-photo .drop-hint {
   position: absolute;
   bottom: 10px;
-  right: 10px;
-  background: rgba(255,255,255,0.9);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 13px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: #888;
+  pointer-events: none;
+}
+.topic-photo.drag-over .drop-hint { color: var(--blue); }
+.topic-photo-upload {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
 }
 .topic-photo-upload input[type=file] { display: none; }
 
