@@ -1079,6 +1079,14 @@ def detail_view(category, record_id):
     if category == 'coins' and record['date_1'] is not None:
         coin_age_val = coin_age(record['date_1'])
 
+    property_topics = None
+    if category == 'properties':
+        property_topics = db.execute(
+            'SELECT id, subject, body FROM topics '
+            'WHERE property_id = ? ORDER BY created_at',
+            [record_id]
+        ).fetchall()
+
     service_overdue = False
     if category == 'watches' and record['service_date']:
         try:
@@ -1103,6 +1111,7 @@ def detail_view(category, record_id):
                            next_id=next_id,
                            hertz=hertz,
                            coin_age_val=coin_age_val,
+                           property_topics=property_topics,
                            service_overdue=service_overdue,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
