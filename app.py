@@ -1497,6 +1497,23 @@ def _mdate(s):
     return None
 
 
+def _mdatetime(s):
+    s = (s or '').strip()
+    if not s:
+        return None
+    for fmt in (
+        '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %I:%M %p',
+        '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %H:%M',
+        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d',
+        '%m/%d/%Y',
+    ):
+        try:
+            return datetime.strptime(s, fmt).strftime('%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            continue
+    return None
+
+
 @app.route('/admin/import-coins-missing', methods=['POST'])
 def import_coins_missing():
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
@@ -2055,6 +2072,118 @@ def backfill_property_owner_ym():
     )
     db.commit()
     return jsonify(updated=r.rowcount)
+
+
+@app.route('/admin/reimport-properties-topics', methods=['POST'])
+def reimport_properties_topics():
+    """Re-import properties and topics from Property.csv / Topic.csv.
+
+    Fixes the mis-aligned columns from the prior property import
+    (wifi, wifi_name, alarm_account, archive) and populates the new
+    topics table. UPSERTs properties by id so existing ``owner`` and
+    ``image`` values are preserved. Topics are fully replaced. Safe
+    to re-run.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+
+    # --- Properties: UPSERT by id, preserving owner + image ---
+    prop_updated = 0
+    prop_inserted = 0
+    for row in _csv_rows('Property.csv'):
+        if len(row) < 26:
+            continue
+        uid = (row[19] or '').strip()
+        if len(uid) < 8:
+            uid = str(uuid.uuid4())
+        created = _mdatetime(row[10]) or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        updated = _mdatetime(row[14]) or created
+        existed = db.execute('SELECT 1 FROM properties WHERE id=?', (uid,)).fetchone()
+        db.execute('''
+            INSERT INTO properties (
+                id, name, short_name, type, address, year_built,
+                ein, llc, wifi, wifi_name, alarm_company, alarm_account,
+                alarm_code_1, alarm_password, alarm_phone, alarm_notes,
+                date, price, notes, status, archive, created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                name          = excluded.name,
+                short_name    = excluded.short_name,
+                type          = excluded.type,
+                address       = excluded.address,
+                year_built    = excluded.year_built,
+                ein           = excluded.ein,
+                llc           = excluded.llc,
+                wifi          = excluded.wifi,
+                wifi_name     = excluded.wifi_name,
+                alarm_company = excluded.alarm_company,
+                alarm_account = excluded.alarm_account,
+                alarm_code_1  = excluded.alarm_code_1,
+                alarm_password= excluded.alarm_password,
+                alarm_phone   = excluded.alarm_phone,
+                alarm_notes   = excluded.alarm_notes,
+                date          = excluded.date,
+                price         = excluded.price,
+                notes         = excluded.notes,
+                status        = excluded.status,
+                archive       = excluded.archive,
+                created_at    = excluded.created_at,
+                updated_at    = excluded.updated_at
+        ''', (
+            uid, _mclean(row[16]), _mclean(row[20]), _mclean(row[22]),
+            _mclean(row[0]), _mnum(row[25], int),
+            _mclean(row[12]), _mclean(row[13]),
+            _mclean(row[23]), _mclean(row[24]),
+            _mclean(row[3]), _mclean(row[1]), _mclean(row[2]),
+            _mclean(row[5]), _mclean(row[6]), _mclean(row[4]),
+            _mdate(row[11]), _mnum(row[18]), _mclean(row[17]), _mclean(row[21]),
+            _mclean(row[7]),
+            created, updated,
+        ))
+        if existed:
+            prop_updated += 1
+        else:
+            prop_inserted += 1
+
+    # --- Topics: full replace ---
+    db.execute('DELETE FROM topics')
+    name_to_id = {
+        r['name']: r['id'] for r in db.execute(
+            'SELECT name, id FROM properties WHERE name IS NOT NULL'
+        )
+    }
+    topics_inserted = 0
+    topics_unlinked = 0
+    for row in _csv_rows('Topic.csv'):
+        if len(row) < 8:
+            continue
+        subject = _mclean(row[4])
+        body = _mclean(row[5])
+        if not subject and not body:
+            continue
+        uid = (row[6] or '').strip()
+        if len(uid) < 8:
+            uid = str(uuid.uuid4())
+        prop_id = name_to_id.get(_mclean(row[7]) or '')
+        created = _mdatetime(row[1]) or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        updated = _mdatetime(row[2]) or created
+        db.execute(
+            'INSERT INTO topics (id, property_id, subject, body, created_at, updated_at) '
+            'VALUES (?,?,?,?,?,?)',
+            (uid, prop_id, subject, body, created, updated),
+        )
+        topics_inserted += 1
+        if prop_id is None:
+            topics_unlinked += 1
+
+    db.commit()
+    return jsonify(
+        properties_updated=prop_updated,
+        properties_inserted=prop_inserted,
+        topics_inserted=topics_inserted,
+        topics_unlinked=topics_unlinked,
+    )
 
 
 @app.route('/admin/assign-missing-coin-ids', methods=['POST'])
