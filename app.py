@@ -2336,17 +2336,25 @@ def upload_fm_images():
 
 @app.route('/admin/sync-coin-bins', methods=['POST'])
 def sync_coin_bins():
-    """Populate ``coins.bin`` from Coin.csv, matched by UUID (col 29).
+    """Populate ``coins.bin`` so the bin-slot image upload can find coins.
 
-    Coin.csv col 1 holds the bin label (e.g. ``C 1``) and col 29 holds the
-    coin's UUID. This reads the CSV shipped with the app and UPDATEs the
-    ``bin`` column on every matching coin. Safe to re-run. Required before
-    the ``<bin>_<slot>.jpg`` image uploads can find their coins.
+    Two-pass strategy:
+
+    1. **UUID match from Coin.csv.** Col 1 = bin (e.g. ``C 1``), col 29 = UUID.
+       Updates any coin whose id matches.
+    2. **coin_id fallback.** The legacy ``import_coins.py`` wrote bin-like
+       strings into ``coin_id`` instead of ``bin``. For any coin still with a
+       NULL/blank bin, copy ``coin_id`` across if it looks like a bin label
+       (starts with a letter and a space — ``C 1``, ``N 12``, …).
+
+    Safe to re-run.
     """
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
         abort(403)
     db = get_db()
-    updated = 0
+
+    # Pass 1 — UUID match
+    uuid_updated = 0
     missing = []
     for row in _csv_rows('Coin.csv'):
         if len(row) < 30:
@@ -2363,9 +2371,31 @@ def sync_coin_bins():
             "UPDATE coins SET bin = ?, updated_at = ? WHERE id = ?",
             (bin_value, datetime.utcnow().isoformat(), pk),
         )
-        updated += 1
+        uuid_updated += 1
+
+    # Pass 2 — coin_id fallback (common for data imported before bin existed)
+    coin_id_updated = db.execute(
+        "UPDATE coins "
+        "SET bin = TRIM(coin_id), updated_at = ? "
+        "WHERE (bin IS NULL OR TRIM(bin) = '') "
+        "  AND coin_id IS NOT NULL "
+        "  AND TRIM(coin_id) != '' "
+        "  AND LENGTH(TRIM(coin_id)) BETWEEN 3 AND 8 "
+        "  AND (TRIM(coin_id) LIKE '_ %' OR TRIM(coin_id) LIKE '__ %')",
+        (datetime.utcnow().isoformat(),),
+    ).rowcount
+
     db.commit()
-    return jsonify(updated=updated, missing_count=len(missing), missing=missing[:20])
+    total = db.execute(
+        "SELECT COUNT(*) FROM coins WHERE bin IS NOT NULL AND TRIM(bin) != ''"
+    ).fetchone()[0]
+    return jsonify(
+        uuid_updated=uuid_updated,
+        coin_id_updated=coin_id_updated,
+        coins_with_bin=total,
+        missing_from_csv_count=len(missing),
+        missing_from_csv=missing[:20],
+    )
 
 
 @app.route('/admin/reimport-properties-topics', methods=['POST'])
