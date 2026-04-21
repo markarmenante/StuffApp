@@ -1176,6 +1176,26 @@ def watch_fetch_value(record_id):
     return jsonify({**data, 'searched_at': now})
 
 
+@app.route('/coins/map')
+def coins_map_view():
+    """Distribution map of ancient coins (date_1 < 500) across the Mediterranean.
+    Passes raw region/mint/authority strings to the client, which aggregates
+    them against the shared coin-geo dictionaries.
+    """
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, coin_id, region, mint, authority, denomination, "
+        "date_1, date_1_text, date_2_text, image_1 "
+        "FROM coins "
+        "WHERE date_1 IS NOT NULL AND CAST(date_1 AS INTEGER) < 500 "
+        "ORDER BY date_1"
+    ).fetchall()
+    coins = [dict(r) for r in rows]
+    return render_template('coins_map.html', coins=coins,
+                           current_category='coins',
+                           cat_info=CATEGORIES['coins'])
+
+
 @app.route('/coins/<record_id>/history', methods=['POST'])
 def coin_fetch_history(record_id):
     """AI history search for a coin's region or authority."""

@@ -10,6 +10,8 @@
   {% if category == 'coins' %}
   {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
   <a href="{{ url_for('coins_print_pdf', q=q) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} pgs</a>
+  <a href="{{ url_for('coins_map_view') }}" class="toolbar-btn pill"
+     title="Mediterranean distribution of ancient coins (date_1 &lt; 500)">Map</a>
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ca_ancient' else 'ca_ancient') }}"
      class="toolbar-btn pill {% if coin_filter == 'ca_ancient' %}active{% endif %}"
      title="Ancient coins at Carpinteria (date_1 &lt; 1000)">CA Ancient</a>

@@ -845,3 +845,26 @@ input[type="date"] { -webkit-appearance: none; }
   font-weight: 700;
   font-size: 12px;
 }
+
+/* ── Coins distribution map page ── */
+.coins-map-wrap {
+  border: 1px solid var(--border, #d9d9e0);
+  background: #fff;
+  margin: 0 10px 10px;
+}
+.coins-dist-map { width: 100%; height: calc(100vh - 180px); min-height: 420px; }
+.coins-dist-caption {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-secondary, #555);
+  border-top: 1px solid var(--border, #d9d9e0);
+  background: #fafbfd;
+}
+.coins-dist-count {
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.coins-dist-count span {
+  font-size: 12px; font-weight: 700; color: #fff;
+  text-shadow: 0 0 2px #8b1a10, 0 0 2px #8b1a10;
+}
