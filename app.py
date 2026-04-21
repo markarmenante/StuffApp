@@ -2407,7 +2407,17 @@ def upload_lens_b64():
     upload = request.files.get('file')
     if not upload:
         return jsonify(error='No file uploaded (field name: "file")'), 400
-    content = upload.read().decode('utf-8', errors='replace')
+    raw = upload.read()
+    # FileMaker's Export Field Contents writes UTF-16 with a BOM; handle it
+    # along with UTF-8 (with or without BOM).
+    if raw.startswith(b'\xff\xfe'):
+        content = raw[2:].decode('utf-16-le', errors='replace')
+    elif raw.startswith(b'\xfe\xff'):
+        content = raw[2:].decode('utf-16-be', errors='replace')
+    elif raw.startswith(b'\xef\xbb\xbf'):
+        content = raw[3:].decode('utf-8', errors='replace')
+    else:
+        content = raw.decode('utf-8', errors='replace')
     content = content.replace('\r\n', '\n').replace('\r', '\n')
     lines = [ln for ln in content.split('\n') if ln.strip()]
     db = get_db()
