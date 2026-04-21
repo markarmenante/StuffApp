@@ -31,6 +31,23 @@ def parse_date(s):
     return None
 
 
+def parse_datetime(s):
+    s = (s or '').strip()
+    if not s:
+        return None
+    for fmt in (
+        '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %I:%M %p',
+        '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %H:%M',
+        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d',
+        '%m/%d/%Y',
+    ):
+        try:
+            return datetime.strptime(s, fmt).strftime('%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            continue
+    return None
+
+
 def parse_num(s, cast=float):
     s = (s or '').strip().replace(',', '').replace('$', '')
     try:
@@ -187,24 +204,35 @@ for row in load_csv('Vehicle.csv'):
 totals['vehicles'] = conn.execute('SELECT COUNT(*) FROM vehicles').fetchone()[0]
 
 # ---------------- PROPERTIES ----------------
+# Property.csv column map (FileMaker alphabetical export, no headers):
+#  0 address             1 alarm_account     2 alarm_code_1     3 alarm_company
+#  4 alarm_notes         5 alarm_password    6 alarm_phone      7 archive (Yes/No)
+#  8 (field count, const '38' — skip)        9 created_by ('Admin')
+# 10 created_at          11 date             12 ein             13 llc
+# 14 modified_at         15 modified_by      16 name            17 notes
+# 18 price               19 id (UUID)        20 short_name      21 status
+# 22 type                23 wifi (password)  24 wifi_name       25 year_built
 cur.execute('DELETE FROM properties')
 for row in load_csv('Property.csv'):
     if len(row) < 26:
         continue
+    created = parse_datetime(row[10]) or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    updated = parse_datetime(row[14]) or created
     cur.execute('''
         INSERT INTO properties (id, name, short_name, type, address, year_built,
-            ein, llc, wifi, alarm_company, alarm_account, alarm_code_1,
+            ein, llc, wifi, wifi_name, alarm_company, alarm_account, alarm_code_1,
             alarm_password, alarm_phone, alarm_notes, date, price, notes, status,
             archive, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ''', (
         new_id(row[19]), clean(row[16]), clean(row[20]), clean(row[22]),
         clean(row[0]), parse_num(row[25], int),
-        clean(row[12]), clean(row[13]), clean(row[1]),
-        clean(row[3]), clean(row[2]), clean(row[2]),
+        clean(row[12]), clean(row[13]), clean(row[23]), clean(row[24]),
+        clean(row[3]), clean(row[1]), clean(row[2]),
         clean(row[5]), clean(row[6]), clean(row[4]),
         parse_date(row[11]), parse_num(row[18]), clean(row[17]), clean(row[21]),
-        clean(row[23]),
+        clean(row[7]),
+        created, updated,
     ))
 totals['properties'] = conn.execute('SELECT COUNT(*) FROM properties').fetchone()[0]
 
