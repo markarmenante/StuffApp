@@ -1033,6 +1033,16 @@
     {{ cell('alarm_password','Password') }}
   </div>
   <div class="dgrid dg2">{{ cell('alarm_phone','Phone') }}{{ cell('alarm_notes','Notes') }}</div>
+  {% if property_topics %}
+  <div class="property-topics">
+    {% for t in property_topics %}
+    <div class="topic-row">
+      <div class="topic-subject">{{ t['subject'] or '' }}</div>
+      <div class="topic-body">{{ t['body'] or '' }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="status">{% for s in ['','Own','Sold'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
