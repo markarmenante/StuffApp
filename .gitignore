@@ -3,5 +3,7 @@ __pycache__/
 *.db
 uploads/
 coin_images/
+lens_images/
+art_images/
 .DS_Store
 .env
