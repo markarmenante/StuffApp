@@ -1114,6 +1114,8 @@ def list_view(category):
     # An explicit empty ?filter= still clears all filters.
     if category == 'properties' and raw_filter is None:
         coin_filter = 'own_residential'
+    if category == 'vehicles' and raw_filter is None:
+        coin_filter = 'own'
     sql, params = build_search_query(category, q, dot=dot, coin_filter=coin_filter)
     rows = db.execute(sql, params).fetchall()
     counts = get_counts()
