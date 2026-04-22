@@ -154,10 +154,14 @@
       </label>
     </div>
     <div class="watch-specs">
-      <div class="dgrid dg2">
+      <div class="dgrid dg3">
         <div class="dcell">
           <input type="text" name="calibre" value="{{ val('calibre') }}">
           <span class="clabel">Calibre</span>
+        </div>
+        <div class="dcell">
+          <input type="number" name="movement_jewels" value="{{ val('movement_jewels') }}" inputmode="numeric" min="0">
+          <span class="clabel">Jewels</span>
         </div>
         <div class="dcell">
           <select name="movement_origin">

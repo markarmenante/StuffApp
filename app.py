@@ -1513,29 +1513,26 @@ def watch_lookup_specs(record_id):
         print(traceback.format_exc(), flush=True)
         return jsonify({'error': f'Lookup failed: {e or e.__class__.__name__}'}), 500
 
-    # Synonym groups for watch clasps. If current and new both map to the
-    # same group, don't flag it as a change.
-    _CLASP_SYNONYMS = [
-        {'tang', 'pin', 'ardillon'},                       # tang / pin buckle
-        {'deployant', 'deployment', 'folding'},            # deployant / folding
-        {'butterfly', 'double deployant', 'double folding'},
-    ]
-
     def _clasp_equivalent(a, b):
-        """'Tang', 'Tang buckle', 'Pin buckle', 'Ardillon' are all the same."""
-        def norm(s):
-            s = (s or '').strip().lower()
+        """Two clasp values are equivalent if they normalize (via the
+        shared FIELD_ALIASES map) to the same canonical form.
+        Handles 'Tang'/'Tang Buckle'/'Pin Buckle'/'Ardillon' as one
+        group and 'Fold Over'/'Deployant'/'Folding Clasp' as another.
+        """
+        ca = normalize_field_value('watches', 'clasp_type', (a or '').strip())
+        cb = normalize_field_value('watches', 'clasp_type', (b or '').strip())
+        if not ca or not cb:
+            return False
+        # Trailing " buckle"/" clasp" suffixes are stripped so e.g.
+        # "Butterfly" and "Butterfly Clasp" are still equal even though
+        # neither is in the alias map.
+        def trim(s):
+            s = s.strip().lower()
             for suf in (' buckle', ' clasp'):
                 if s.endswith(suf):
                     s = s[: -len(suf)]
             return s.strip()
-        na, nb = norm(a), norm(b)
-        if na == nb:
-            return True
-        for group in _CLASP_SYNONYMS:
-            if na in group and nb in group:
-                return True
-        return False
+        return trim(ca) == trim(cb)
 
     # Fill blanks AND overwrite existing values whenever the web-sourced
     # suggestion differs. Complications is handled specially: we merge
@@ -1652,7 +1649,13 @@ def watch_apply_lookup(record_id):
     raw_updates = data.get('updates') or {}
     if not isinstance(raw_updates, dict):
         return jsonify({'error': 'updates must be an object'}), 400
-    updates = {k: v for k, v in raw_updates.items() if k in WATCH_LOOKUP_FILLABLE}
+    updates = {}
+    for k, v in raw_updates.items():
+        if k not in WATCH_LOOKUP_FILLABLE:
+            continue
+        if isinstance(v, str):
+            v = normalize_field_value('watches', k, v)
+        updates[k] = v
     if not updates:
         return jsonify({'updated': 0, 'fields': []})
     set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
