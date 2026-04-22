@@ -11,7 +11,9 @@ from werkzeug.utils import secure_filename
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    # override=True: a pre-existing empty ANTHROPIC_API_KEY in the parent env
+    # (e.g. from shell profile) otherwise wins over the .env value.
+    load_dotenv(override=True)
 except Exception:
     pass
 
