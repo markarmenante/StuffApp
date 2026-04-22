@@ -625,6 +625,14 @@ CATEGORY_FILTERS = {
         'own':  ("LOWER(TRIM(COALESCE(status,''))) = 'own'", []),
         'sold': ("LOWER(TRIM(COALESCE(status,''))) = 'sold'", []),
     },
+    'cameras': {
+        'own':   ("LOWER(TRIM(COALESCE(status,''))) = 'own'",  []),
+        'other': ("LOWER(TRIM(COALESCE(status,''))) <> 'own'", []),
+    },
+    'lenses': {
+        'own':   ("LOWER(TRIM(COALESCE(status,''))) = 'own'",  []),
+        'other': ("LOWER(TRIM(COALESCE(status,''))) <> 'own'", []),
+    },
     'properties': {
         # Single-axis filters
         'own':         ("LOWER(TRIM(COALESCE(status,''))) = 'own'", []),
