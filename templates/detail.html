@@ -1242,23 +1242,24 @@ document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e)
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed');
     const filledKeys = Object.keys(data.filled || {});
-    const conflictKeys = Object.keys(data.conflicts || {});
+    const overwrittenKeys = Object.keys(data.overwritten || {});
     const parts = [];
     if (filledKeys.length) {
       parts.push(`Filled ${filledKeys.length} blank field(s): ${filledKeys.join(', ')}`);
-    } else {
-      parts.push('No blank fields could be filled.');
     }
-    if (conflictKeys.length) {
-      const lines = conflictKeys.map(k => {
-        const c = data.conflicts[k];
-        return `  • ${k}: current="${c.current}" vs found="${c.suggested}"`;
+    if (overwrittenKeys.length) {
+      const lines = overwrittenKeys.map(k => {
+        const o = data.overwritten[k];
+        return `  • ${k}: "${o.current}" → "${o.new}"`;
       }).join('\n');
-      parts.push(`\nDifferent values found for ${conflictKeys.length} field(s) — not overwritten:\n${lines}`);
+      parts.push(`Updated ${overwrittenKeys.length} field(s) with better data:\n${lines}`);
+    }
+    if (!filledKeys.length && !overwrittenKeys.length) {
+      parts.push('No changes — sources did not yield new information.');
     }
     if (data.sources) parts.push(`\nSources: ${data.sources}`);
-    alert(parts.join('\n'));
-    if (filledKeys.length) window.location.reload();
+    alert(parts.join('\n\n'));
+    if (filledKeys.length || overwrittenKeys.length) window.location.reload();
   } catch (err) {
     alert('Lookup failed: ' + err.message);
   } finally {

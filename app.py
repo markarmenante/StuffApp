@@ -873,14 +873,14 @@ def fetch_watch_specs(watch):
     origins = ', '.join(VALUE_LISTS['movement_origin'])
     complications = ', '.join(COMPLICATIONS_OPTIONS)
 
-    prompt = f"""You are filling in missing specification fields for a specific wristwatch.
+    prompt = f"""You are filling in specification fields for a specific wristwatch using reputable public sources.
 
 Watch: {ident}
 
 Use at most 6 web searches, preferring these sources (roughly in order):
 {sources_bullets}
 
-For each field below, return a value ONLY if at least one reputable source above states it clearly and sources do not materially disagree. Otherwise return null. Do not guess.
+For each field below, return the value you find in any of those sources. If one reputable source states a value clearly, use it; do not require unanimous agreement. Return null only when NO source you searched mentions the field at all. Prefer sourced values over leaving fields null.
 
 Target fields:
 - metal: one of [{metals}]
@@ -1460,14 +1460,32 @@ def watch_lookup_specs(record_id):
         print(traceback.format_exc(), flush=True)
         return jsonify({'error': f'Lookup failed: {e or e.__class__.__name__}'}), 500
 
-    filled = {}
-    conflicts = {}
+    # Fill blanks AND overwrite existing values whenever the web-sourced
+    # suggestion differs. Complications is handled specially: we merge
+    # (union) rather than replace, so user-checked items aren't lost.
+    filled = {}            # blank → value
+    overwritten = {}       # existing → new value (was wrong/different)
     for f in WATCH_LOOKUP_FILLABLE:
         if f not in suggestions or suggestions[f] is None:
             continue
         val = suggestions[f]
-        if f == 'complications' and isinstance(val, list):
-            val = ','.join(str(v) for v in val if v)
+        if f == 'complications':
+            if isinstance(val, list):
+                new_set = {str(v).strip() for v in val if str(v).strip()}
+            else:
+                new_set = {c.strip() for c in str(val).split(',') if c.strip()}
+            current_set = {c.strip() for c in (watch['complications'] or '').split(',') if c.strip()}
+            merged = current_set | new_set
+            if merged != current_set:
+                val = ','.join(sorted(merged, key=lambda x: COMPLICATIONS_OPTIONS.index(x)
+                                      if x in COMPLICATIONS_OPTIONS else 999))
+                if current_set:
+                    overwritten[f] = {'current': watch['complications'], 'new': val}
+                else:
+                    filled[f] = val
+                continue
+            else:
+                continue
         if isinstance(val, str):
             val = val.strip()
             if not val:
@@ -1477,14 +1495,19 @@ def watch_lookup_specs(record_id):
         if current_is_blank:
             filled[f] = val
         elif str(current).strip() != str(val).strip():
-            # User already has a value that differs — don't overwrite.
-            # Surface it so they can reconcile manually.
-            conflicts[f] = {'current': current, 'suggested': val}
+            overwritten[f] = {'current': current, 'new': val}
 
-    if filled:
-        set_clause = ', '.join(f'{k} = ?' for k in filled.keys())
+    # Combined update map — apply both blank-fills and overwrites.
+    updates = {}
+    for k, v in filled.items():
+        updates[k] = v
+    for k, info in overwritten.items():
+        updates[k] = info['new']
+
+    if updates:
+        set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
         now = datetime.utcnow().isoformat()
-        params = list(filled.values()) + [now, record_id]
+        params = list(updates.values()) + [now, record_id]
         db.execute(
             f"UPDATE watches SET {set_clause}, updated_at = ? WHERE id = ?",
             params,
@@ -1493,7 +1516,7 @@ def watch_lookup_specs(record_id):
 
     return jsonify({
         'filled': filled,
-        'conflicts': conflicts,
+        'overwritten': overwritten,
         'sources': suggestions.get('sources', ''),
     })
 
