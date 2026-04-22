@@ -1123,18 +1123,25 @@ def list_view(category):
     if category not in CATEGORIES:
         abort(404)
     db = get_db()
-    q   = request.args.get('q', '').strip()
+    # Form field is named q_<category> so browser autocomplete history is
+    # scoped per category; legacy ?q= links (toolbar pills, bookmarks)
+    # still work.
+    q   = (request.args.get(f'q_{category}')
+           or request.args.get('q') or '').strip()
     dot = request.args.get('dot', '') == '1'
     raw_filter = request.args.get('filter')
     coin_filter = (raw_filter or '').strip() or None
-    # Default the properties list to Own + Residential on a fresh visit.
+    # Default filters apply on a fresh visit (no explicit ?filter= and no
+    # search query). An active search bypasses the default so users don't
+    # have to click Other / clear filter just to find a sold/loaned item.
     # An explicit empty ?filter= still clears all filters.
-    if category == 'properties' and raw_filter is None:
-        coin_filter = 'own_residential'
-    if category == 'vehicles' and raw_filter is None:
-        coin_filter = 'own'
-    if category in ('cameras', 'lenses') and raw_filter is None:
-        coin_filter = 'own'
+    if not q:
+        if category == 'properties' and raw_filter is None:
+            coin_filter = 'own_residential'
+        if category == 'vehicles' and raw_filter is None:
+            coin_filter = 'own'
+        if category in ('cameras', 'lenses') and raw_filter is None:
+            coin_filter = 'own'
     sql, params = build_search_query(category, q, dot=dot, coin_filter=coin_filter)
     rows = db.execute(sql, params).fetchall()
     counts = get_counts()

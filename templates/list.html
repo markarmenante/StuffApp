@@ -67,7 +67,10 @@
   <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
     <div class="search-wrap">
       <button type="submit" title="Search">🔍</button>
-      <input type="text" name="q" value="{{ q }}" placeholder="Search…" autofocus
+      {# Per-category name so browser search-history is scoped to this
+         category (typing in Cameras doesn't surface Watch searches). #}
+      <input type="text" name="q_{{ category }}" value="{{ q }}" placeholder="Search…" autofocus
+             autocomplete="on"
              onfocus="this.select()" onclick="this.select()">
       {% if q %}<a class="search-clear" href="{{ url_for('list_view', category=category) }}">×</a>{% endif %}
     </div>
