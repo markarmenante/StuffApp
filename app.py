@@ -2209,9 +2209,29 @@ def _fit_text(c, text, max_width, font_name, font_size):
     return text
 
 
-def _draw_coin_card(c, coin, x, y, w, h):
-    from reportlab.lib.utils import ImageReader
+def _card_image_reader(path):
+    """Downscale a source image to ~card size before handing to ReportLab.
 
+    Why: the card prints at 35mm (~414px at 300dpi). Decoding a full-resolution
+    source JPEG per coin is the PDF's bottleneck.
+    """
+    from io import BytesIO
+    from PIL import Image
+    from reportlab.lib.utils import ImageReader
+    try:
+        im = Image.open(path)
+        im.thumbnail((512, 512))
+        if im.mode not in ('RGB', 'L'):
+            im = im.convert('RGB')
+        buf = BytesIO()
+        im.save(buf, format='JPEG', quality=85)
+        buf.seek(0)
+        return ImageReader(buf)
+    except Exception:
+        return None
+
+
+def _draw_coin_card(c, coin, x, y, w, h):
     c.setStrokeColorRGB(0.25, 0.25, 0.25)
     c.setLineWidth(0.9)
     c.rect(x, y, w, h, stroke=1, fill=0)
@@ -2264,12 +2284,14 @@ def _draw_coin_card(c, coin, x, y, w, h):
                 img_path = p
                 break
     if img_path:
-        try:
-            c.drawImage(ImageReader(img_path), x + pad, mid_bottom,
-                        width=img_w - pad, height=mid_h,
-                        preserveAspectRatio=True, mask='auto')
-        except Exception:
-            pass
+        reader = _card_image_reader(img_path)
+        if reader:
+            try:
+                c.drawImage(reader, x + pad, mid_bottom,
+                            width=img_w - pad, height=mid_h,
+                            preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
 
     # Right-side specs: denomination, mint, metal (short), size
     specs = []
