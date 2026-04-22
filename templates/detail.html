@@ -188,8 +188,9 @@
         </div>
       </div>
       <div class="dgrid dg2">
-        <div class="dcell">
-          <input type="date" name="service_date" value="{{ val('service_date') }}">
+        <div class="dcell svc-date-cell">
+          <input type="date" name="service_date" value="{{ val('service_date') }}" class="svc-date-input">
+          <span class="svc-date-compact">{% if val('service_date') %}{{ val('service_date')[5:7] }}/{{ val('service_date')[2:4] }}{% endif %}</span>
           <span class="clabel">Svc</span>
         </div>
         <div class="dcell {% if service_overdue %}service-overdue{% endif %}">
@@ -1402,6 +1403,16 @@ document.querySelectorAll('.comp-item').forEach(item => {
       saveField(groupName, vals.join(','));
     });
   });
+
+  // Service date: keep the compact MM/YY overlay in sync
+  const svcDate = form.querySelector('input[name=service_date]');
+  const svcCompact = svcDate && svcDate.parentElement.querySelector('.svc-date-compact');
+  if (svcDate && svcCompact) {
+    svcDate.addEventListener('change', () => {
+      const v = svcDate.value;  // ISO YYYY-MM-DD or ''
+      svcCompact.textContent = v ? `${v.slice(5,7)}/${v.slice(2,4)}` : '';
+    });
+  }
 
   // Beat field: update the Hz display live on blur
   const beatInput = form.querySelector('input[name=beat]');

@@ -290,6 +290,9 @@ a { color: var(--blue); text-decoration: none; }
 .detail-page-watches .dcell input:not([type=file]):not([type=checkbox]):not([type=radio]),
 .detail-page-watches .dcell select { text-align: center; }
 
+/* Service date: desktop shows native date, compact overlay hidden. */
+.svc-date-compact { display: none; }
+
 /* Data grid cells */
 .dgrid { display: grid; }
 .dg4 { grid-template-columns: repeat(4, 1fr); }
@@ -865,6 +868,23 @@ input[type="date"] { -webkit-appearance: none; }
   /* Watch spec rows: keep two-up even on narrow viewports. */
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
   .dgrid.dg2.watch-vph-hz { grid-template-columns: 1fr 1fr; }
+
+  /* Service date: swap native rendering for a compact MM/YY overlay. */
+  .svc-date-cell { position: relative; }
+  .svc-date-cell .svc-date-input {
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+  .svc-date-cell .svc-date-input::-webkit-date-and-time-value { color: transparent; }
+  .svc-date-compact {
+    display: block;
+    position: absolute;
+    left: 0; right: 0; top: 2px;
+    text-align: center;
+    font-size: 16px;
+    color: #111;
+    pointer-events: none;
+  }
 
   /* Watches complications: keep 3 columns even on narrow viewports. */
   .comp-grid { grid-template-columns: repeat(3, 1fr); }
