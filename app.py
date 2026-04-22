@@ -892,7 +892,7 @@ Target fields:
 - edition: total count of pieces in a limited edition / limited run (integer). Return null for non-limited / open-production references.
 - calibre: movement calibre name (e.g. "L951.5", "3135")
 - movement_type: "Manual" or "Automatic"
-- movement_origin: one of [{origins}]
+- movement_origin: EXACTLY one of [{origins}] and nothing else. "In-House" = designed and made by the manufacturer; "Ébauche" = bought-in rough movement (e.g. ETA, Sellita, Valjoux) used as-is; "Modified" = an ébauche that has been noticeably reworked. Do not invent values like "Swiss" or "Ebauche-based".
 - movement_jewels: integer
 - beat: VPH (integer, e.g. 18000, 21600, 28800, 36000)
 - reserve: power reserve in hours (integer)
@@ -1464,6 +1464,16 @@ def watch_lookup_specs(record_id):
         print(traceback.format_exc(), flush=True)
         return jsonify({'error': f'Lookup failed: {e or e.__class__.__name__}'}), 500
 
+    def _clasp_equivalent(a, b):
+        """'Tang' and 'Tang buckle' are the same; don't treat as a change."""
+        def norm(s):
+            s = (s or '').strip().lower()
+            for suf in (' buckle', ' clasp'):
+                if s.endswith(suf):
+                    s = s[: -len(suf)]
+            return s.strip()
+        return norm(a) == norm(b)
+
     # Fill blanks AND overwrite existing values whenever the web-sourced
     # suggestion differs. Complications is handled specially: we merge
     # (union) rather than replace, so user-checked items aren't lost.
@@ -1473,6 +1483,16 @@ def watch_lookup_specs(record_id):
         if f not in suggestions or suggestions[f] is None:
             continue
         val = suggestions[f]
+        # Enforce strict enum for movement_origin: only In-House / Ébauche / Modified.
+        if f == 'movement_origin':
+            if not isinstance(val, str):
+                continue
+            val_norm = val.strip()
+            allowed = VALUE_LISTS['movement_origin']
+            match = next((a for a in allowed if a.lower() == val_norm.lower()), None)
+            if not match:
+                continue  # silently drop off-menu values like "Ebauche base", "Swiss"
+            val = match
         if f == 'complications':
             if isinstance(val, list):
                 new_set = {str(v).strip() for v in val if str(v).strip()}
@@ -1498,7 +1518,11 @@ def watch_lookup_specs(record_id):
         current_is_blank = current is None or (isinstance(current, str) and not current.strip())
         if current_is_blank:
             filled[f] = val
-        elif str(current).strip() != str(val).strip():
+            continue
+        # For clasp_type, don't mark changes that are just verbose variants.
+        if f == 'clasp_type' and _clasp_equivalent(current, val):
+            continue
+        if str(current).strip() != str(val).strip():
             overwritten[f] = {'current': current, 'new': val}
 
     # Combined update map — apply both blank-fills and overwrites.
