@@ -618,21 +618,24 @@ CATEGORY_FILTERS = {
         'carp':   ("property = 'Carpinteria'", []),
         'martis': ("property = 'Truckee'", []),
     },
+    # status/type comparisons are case- and whitespace-insensitive so data
+    # imported with inconsistent casing (e.g. 'commercial' vs 'Commercial')
+    # still matches.
     'vehicles': {
-        'own':  ("COALESCE(status,'') = 'Own'", []),
-        'sold': ("COALESCE(status,'') = 'Sold'", []),
+        'own':  ("LOWER(TRIM(COALESCE(status,''))) = 'own'", []),
+        'sold': ("LOWER(TRIM(COALESCE(status,''))) = 'sold'", []),
     },
     'properties': {
         # Single-axis filters
-        'own':         ("COALESCE(status,'') = 'Own'", []),
-        'sold':        ("COALESCE(status,'') = 'Sold'", []),
-        'commercial':  ("COALESCE(type,'') = 'Commercial'", []),
-        'residential': ("COALESCE(type,'') = 'Residential'", []),
+        'own':         ("LOWER(TRIM(COALESCE(status,''))) = 'own'", []),
+        'sold':        ("LOWER(TRIM(COALESCE(status,''))) = 'sold'", []),
+        'commercial':  ("LOWER(TRIM(COALESCE(type,'')))   = 'commercial'", []),
+        'residential': ("LOWER(TRIM(COALESCE(type,'')))   = 'residential'", []),
         # Combined (status + type)
-        'own_commercial':   ("COALESCE(status,'') = 'Own'  AND COALESCE(type,'') = 'Commercial'",  []),
-        'own_residential':  ("COALESCE(status,'') = 'Own'  AND COALESCE(type,'') = 'Residential'", []),
-        'sold_commercial':  ("COALESCE(status,'') = 'Sold' AND COALESCE(type,'') = 'Commercial'",  []),
-        'sold_residential': ("COALESCE(status,'') = 'Sold' AND COALESCE(type,'') = 'Residential'", []),
+        'own_commercial':   ("LOWER(TRIM(COALESCE(status,''))) = 'own'  AND LOWER(TRIM(COALESCE(type,''))) = 'commercial'",  []),
+        'own_residential':  ("LOWER(TRIM(COALESCE(status,''))) = 'own'  AND LOWER(TRIM(COALESCE(type,''))) = 'residential'", []),
+        'sold_commercial':  ("LOWER(TRIM(COALESCE(status,''))) = 'sold' AND LOWER(TRIM(COALESCE(type,''))) = 'commercial'",  []),
+        'sold_residential': ("LOWER(TRIM(COALESCE(status,''))) = 'sold' AND LOWER(TRIM(COALESCE(type,''))) = 'residential'", []),
     },
 }
 
