@@ -148,18 +148,13 @@
           <span class="item-model">{{ row['model'] or '' }}</span>
         </div>
         <div class="item-detail-rows">
-          <div class="rrow">
-            <span class="ropt"><span class="rdot {{ 'on' if row['digital_film'] == 'Digital' }}"></span> Digital</span>
-            <span class="ropt"><span class="rdot {{ 'on' if row['digital_film'] == 'Film' }}"></span> Film</span>
-            {% if row['digital_film'] == 'Film' %}
-              <span class="ropt"><span class="rdot {{ 'on' if row['film_size'] == '35mm' }}"></span> 35mm</span>
-              <span class="ropt"><span class="rdot {{ 'on' if row['film_size'] == '120/220' }}"></span> 120/220</span>
-              <span class="ropt"><span class="rdot {{ 'on' if row['film_size'] == 'Sheet' }}"></span> Sheet</span>
-            {% endif %}
+          <div class="idr">
+            {% if row['digital_film'] %}<span>{{ row['digital_film'] }}</span>{% endif %}
+            {% if row['digital_film'] == 'Film' and row['film_size'] %}<span>{{ row['film_size'] }}</span>{% endif %}
+            {% if row['digital_film'] != 'Film' and row['megapixels'] %}<span>{{ row['megapixels'] }} MP</span>{% endif %}
+            {% if row['lens_mount'] %}<span>{{ row['lens_mount'] }}</span>{% endif %}
           </div>
           <div class="idr">
-            {% if row['lens_mount'] %}<span>{{ row['lens_mount'] }}</span>{% endif %}
-            {% if row['digital_film'] != 'Film' and row['megapixels'] %}<span>{{ row['megapixels'] }} MP</span>{% endif %}
             {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
           </div>
           {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
