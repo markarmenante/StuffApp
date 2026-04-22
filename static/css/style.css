@@ -268,10 +268,11 @@ a { color: var(--blue); text-decoration: none; }
 }
 .detail-nav-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; border-radius: 4px;
-  border: 1px solid var(--border); background: none;
-  cursor: pointer; font-size: 14px; color: var(--text-secondary);
+  min-width: 26px; padding: 4px 8px; border-radius: 4px;
+  border: 1px solid var(--border); background: #fff;
+  cursor: pointer; font-size: 12px; color: var(--text);
   text-decoration: none; line-height: 1;
+  box-sizing: border-box;
 }
 .detail-nav-btn:hover { background: rgba(0,0,0,.1); text-decoration: none; }
 .detail-nav-btn.disabled { opacity: .35; pointer-events: none; }
