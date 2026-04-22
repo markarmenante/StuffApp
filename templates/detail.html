@@ -1280,13 +1280,20 @@ function showLookupReview(applyUrl, filled, overwritten, sources) {
   function row(kind, field, currentText, newValue) {
     const wrap = document.createElement('label');
     wrap.className = 'lookup-review-row';
-    const newText = Array.isArray(newValue) ? newValue.join(', ') : String(newValue);
+    const fmt = v => {
+      if (v === null || v === undefined) return '';
+      const s = Array.isArray(v) ? v.join(', ') : String(v);
+      // Insert a space after commas so long comma-lists can wrap naturally.
+      return s.replace(/,(?!\s)/g, ', ');
+    };
+    const currentHtml = currentText !== null
+      ? `<span class="lookup-review-old">"${escapeHtml(fmt(currentText))}"</span> <span class="lookup-review-arrow">→</span> `
+      : '';
     wrap.innerHTML = `
       <input type="checkbox" checked data-field="${escapeAttr(field)}">
       <span class="lookup-review-kind ${kind}">${kind === 'fill' ? 'Fill' : 'Overwrite'}</span>
       <span class="lookup-review-field">${escapeHtml(field)}</span>
-      <span class="lookup-review-arrow">${currentText !== null ? `"${escapeHtml(currentText)}" →` : ''}</span>
-      <span class="lookup-review-new">"${escapeHtml(newText)}"</span>`;
+      <span class="lookup-review-diff">${currentHtml}<span class="lookup-review-new">"${escapeHtml(fmt(newValue))}"</span></span>`;
     // Cache the raw new value on the checkbox so we can send it back as-is.
     wrap.querySelector('input').dataset.value = JSON.stringify(newValue);
     return wrap;
