@@ -129,8 +129,22 @@ VALUE_LISTS = {
 # dropdowns and filters don't fragment across synonyms.
 FIELD_ALIASES = {
     ('watches', 'clasp_type'): {
-        'deployant':  'Fold Over',
-        'deployment': 'Fold Over',
+        # Fold Over synonyms
+        'deployant':        'Fold Over',
+        'deployment':       'Fold Over',
+        'deployant clasp':  'Fold Over',
+        'deployment clasp': 'Fold Over',
+        'folding clasp':    'Fold Over',
+        'flip clasp':       'Fold Over',
+        'fold clasp':       'Fold Over',
+        # Tang synonyms
+        'tang buckle':      'Tang',
+        'pin buckle':       'Tang',
+        'strap buckle':     'Tang',
+        'belt buckle':      'Tang',
+        'pin clasp':        'Tang',
+        'ardillon buckle':  'Tang',
+        'ardillon':         'Tang',
     },
     ('watches', 'strap_material'): {
         'alligator': 'Croc',
