@@ -2472,6 +2472,32 @@ def backfill_property_status_own():
     return jsonify(updated=r.rowcount)
 
 
+@app.route('/admin/backfill-status-own-all', methods=['POST'])
+def backfill_status_own_all():
+    """Set status='Own' in every table that has a status column,
+    for any row where status is NULL or blank. Safe to re-run."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    per_table = {}
+    total = 0
+    tables = [r['name'] for r in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")]
+    for t in tables:
+        cols = [r['name'] for r in db.execute(f"PRAGMA table_info({t})")]
+        if 'status' not in cols:
+            continue
+        r = db.execute(
+            f"UPDATE {t} SET status = 'Own' "
+            "WHERE status IS NULL OR TRIM(status) = ''"
+        )
+        if r.rowcount:
+            per_table[t] = r.rowcount
+            total += r.rowcount
+    db.commit()
+    return jsonify(updated=total, per_table=per_table)
+
+
 @app.route('/admin/set-all-recording-status-own', methods=['POST'])
 def set_all_recording_status_own():
     """Set every recording's status to 'Own'.
