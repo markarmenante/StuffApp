@@ -82,9 +82,16 @@
       action="{% if is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
       enctype="multipart/form-data" id="mainForm">
 
-  <!-- Floating nav: prev / next / back (+ optional Topic link), overlays the record header row -->
+  <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
   <div class="detail-nav-overlay">
     {% if not is_new %}
+      {% if category == 'watches' %}
+      <button type="button" class="watch-lookup-btn"
+              data-url="{{ url_for('watch_lookup_specs', record_id=r['id']) }}"
+              title="Look up missing specs from manufacturer, Chrono24, WatchBox, Caliber Corner, EmmyWatch, Watch Pages, Hodinkee, Monochrome, Watch-Wiki">
+        🔎 Lookup
+      </button>
+      {% endif %}
       {% if category == 'properties' %}
       <a class="add-topic-link"
          href="{{ url_for('topic_new', property_id=r['id']) }}">+ Topic</a>
@@ -111,16 +118,9 @@
   </div>
 
   <!-- Model name row -->
-  <div class="detail-model detail-model-watches">
+  <div class="detail-model">
     <input type="text" name="model" value="{{ val('model') }}"
-           style="border:none;outline:none;font-size:16px;font-weight:600;flex:1;background:transparent;font-family:var(--font)">
-    {% if not is_new %}
-    <button type="button" class="watch-lookup-btn"
-            data-url="{{ url_for('watch_lookup_specs', record_id=r['id']) }}"
-            title="Look up missing specs from manufacturer, Chrono24, WatchBox, Caliber Corner, EmmyWatch, Watch Pages, Hodinkee, Monochrome, Watch-Wiki">
-      🔎 Lookup
-    </button>
-    {% endif %}
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
   <!-- Row 1: Metal, Case Diameter, Reference, Dial Color -->
