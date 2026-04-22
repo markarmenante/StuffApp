@@ -486,6 +486,42 @@ input[type="date"] { -webkit-appearance: none; }
 .camera-purchase .dcell input,
 .camera-purchase .dcell select { text-align: center; }
 
+/* Camera detail: compact list of same-mount, same-property lenses
+   that still need photos — a nudge to shoot them while the camera's out. */
+.cam-lens-todo {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed #c9c9c9;
+  border-radius: 6px;
+  background: #fafafa;
+}
+.cam-lens-todo-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #666;
+  margin-bottom: 4px;
+}
+.cam-lens-todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cam-lens-todo-list li { padding: 2px 0; }
+.cam-lens-todo-list a {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  text-decoration: none;
+  color: inherit;
+  font-size: 13px;
+}
+.cam-lens-todo-list a:hover { background: #f0f0f0; }
+.cam-lens-todo-list .cll-brand    { font-weight: 600; min-width: 80px; }
+.cam-lens-todo-list .cll-aperture { color: #555; min-width: 48px; }
+.cam-lens-todo-list .cll-length   { color: #555; min-width: 48px; }
+.cam-lens-todo-list .cll-desc     { color: #444; flex: 1; }
+
 /* Recordings: type-aware radio strip.
    All radio groups flow horizontally on one row; the inner radios in
    each block also stay horizontal so Stereo/Mono, 33⅓/45, etc. never

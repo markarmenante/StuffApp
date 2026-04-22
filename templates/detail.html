@@ -523,6 +523,25 @@
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
       </div>
+      {% if camera_imageless_lenses %}
+      <div class="cam-lens-todo">
+        <div class="cam-lens-todo-title">
+          Compatible Lenses in {{ val('property') }}
+        </div>
+        <ul class="cam-lens-todo-list">
+          {% for l in camera_imageless_lenses %}
+          <li>
+            <a href="{{ url_for('detail_view', category='lenses', record_id=l['id']) }}">
+              <span class="cll-brand">{{ l['make'] or '—' }}</span>
+              {% if l['aperture'] %}<span class="cll-aperture">f/{{ l['aperture'] }}</span>{% endif %}
+              {% if l['length'] %}<span class="cll-length">{{ l['length']|int }}mm</span>{% endif %}
+              {% if l['model'] %}<span class="cll-desc">{{ l['model'] }}</span>{% endif %}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
     </div>
   </div>
 
