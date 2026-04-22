@@ -111,9 +111,16 @@
   </div>
 
   <!-- Model name row -->
-  <div class="detail-model">
+  <div class="detail-model detail-model-watches">
     <input type="text" name="model" value="{{ val('model') }}"
-           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+           style="border:none;outline:none;font-size:16px;font-weight:600;flex:1;background:transparent;font-family:var(--font)">
+    {% if not is_new %}
+    <button type="button" class="watch-lookup-btn"
+            data-url="{{ url_for('watch_lookup_specs', record_id=r['id']) }}"
+            title="Look up missing specs from manufacturer, Chrono24, WatchBox, Caliber Corner, EmmyWatch, Watch Pages, Hodinkee, Monochrome, Watch-Wiki">
+      🔎 Lookup
+    </button>
+    {% endif %}
   </div>
 
   <!-- Row 1: Metal, Case Diameter, Reference, Dial Color -->
@@ -1214,6 +1221,50 @@ function formatResultsHtml(text) {
 document.getElementById('resultsRaw')?.addEventListener('input', (e) => {
   const disp = document.getElementById('resultsDisplay');
   if (disp) disp.innerHTML = formatResultsHtml(e.target.value);
+});
+
+// Watch "Lookup" button: fetch missing spec fields from reputable sources
+document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const url = btn.dataset.url;
+  if (!url) return;
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Searching…';
+  try {
+    const res = await fetch(url, { method: 'POST' });
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      const body = await res.text();
+      throw new Error(`Server returned ${res.status} (non-JSON). ` +
+        (res.status >= 500 ? 'Possibly a timeout; try again.' : body.slice(0, 120)));
+    }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed');
+    const filledKeys = Object.keys(data.filled || {});
+    const conflictKeys = Object.keys(data.conflicts || {});
+    const parts = [];
+    if (filledKeys.length) {
+      parts.push(`Filled ${filledKeys.length} blank field(s): ${filledKeys.join(', ')}`);
+    } else {
+      parts.push('No blank fields could be filled.');
+    }
+    if (conflictKeys.length) {
+      const lines = conflictKeys.map(k => {
+        const c = data.conflicts[k];
+        return `  • ${k}: current="${c.current}" vs found="${c.suggested}"`;
+      }).join('\n');
+      parts.push(`\nDifferent values found for ${conflictKeys.length} field(s) — not overwritten:\n${lines}`);
+    }
+    if (data.sources) parts.push(`\nSources: ${data.sources}`);
+    alert(parts.join('\n'));
+    if (filledKeys.length) window.location.reload();
+  } catch (err) {
+    alert('Lookup failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 });
 
 // Watch "Value" button: fetch market valuation via backend

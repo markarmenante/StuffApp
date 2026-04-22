@@ -293,6 +293,18 @@ a { color: var(--blue); text-decoration: none; }
 
 .detail-model { font-size: 15px; font-weight: 500; padding: 5px 10px 5px; border-bottom: 1px solid var(--border); background: var(--cell-bg); color: var(--text-secondary); }
 
+/* Watch subheader: make room for the Lookup button on the right. */
+.detail-model-watches { display: flex; align-items: center; gap: 8px; }
+.watch-lookup-btn {
+  font-size: 12px; line-height: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: #fff; color: var(--text); cursor: pointer;
+  white-space: nowrap;
+}
+.watch-lookup-btn:hover:not(:disabled) { background: rgba(0,0,0,.05); }
+.watch-lookup-btn:disabled { opacity: .6; cursor: progress; }
+
 /* Watch detail: center all field values */
 .detail-page-watches .dcell input:not([type=file]):not([type=checkbox]):not([type=radio]),
 .detail-page-watches .dcell select { text-align: center; }

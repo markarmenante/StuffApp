@@ -823,6 +823,143 @@ results_markdown rules:
     return {'value': value, 'results': results_md}
 
 
+WATCH_SPEC_SOURCES = [
+    "manufacturer's official website",
+    "chrono24.com",
+    "watchbox / thewatchbox.com",
+    "calibercorner.com",
+    "emmywatch.com",
+    "thewatchpages.com",
+    "hodinkee.com",
+    "monochrome-watches.com",
+    "watch-wiki.org / wikipedia watch entries",
+]
+
+
+def fetch_watch_specs(watch):
+    """Use Claude's web_search tool to look up a watch's specs from
+    reputable sources and return {field: value} suggestions.
+
+    Only fields the model is confident about should be populated; all
+    others should come back null. Raises RuntimeError on missing key or
+    API failure.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed. Run 'pip install anthropic'.")
+
+    brand = (watch['brand'] or '').strip()
+    model = (watch['model'] or '').strip()
+    reference = (watch['reference'] or '').strip()
+    calibre_hint = (watch['calibre'] or '').strip()
+    year_hint = watch['year']
+
+    if not (brand or model or reference):
+        raise RuntimeError('Need at least brand, model, or reference to look up specs.')
+
+    ident = ' '.join(x for x in [
+        brand, model,
+        f'Ref. {reference}' if reference else '',
+        f'Cal. {calibre_hint}' if calibre_hint else '',
+        str(year_hint) if year_hint else '',
+    ] if x)
+
+    sources_bullets = '\n'.join(f'- {s}' for s in WATCH_SPEC_SOURCES)
+    metals = ', '.join(VALUE_LISTS['metal_watch'])
+    origins = ', '.join(VALUE_LISTS['movement_origin'])
+    complications = ', '.join(COMPLICATIONS_OPTIONS)
+
+    prompt = f"""You are filling in missing specification fields for a specific wristwatch.
+
+Watch: {ident}
+
+Use at most 6 web searches, preferring these sources (roughly in order):
+{sources_bullets}
+
+For each field below, return a value ONLY if at least one reputable source above states it clearly and sources do not materially disagree. Otherwise return null. Do not guess.
+
+Target fields:
+- metal: one of [{metals}]
+- case_diameter: number in mm (float)
+- dial_color: short string (e.g. "Black", "Blue", "Silver")
+- year: integer year of original release/manufacture
+- calibre: movement calibre name (e.g. "L951.5", "3135")
+- movement_type: "Manual" or "Automatic"
+- movement_origin: one of [{origins}]
+- movement_jewels: integer
+- beat: VPH (integer, e.g. 18000, 21600, 28800, 36000)
+- reserve: power reserve in hours (integer)
+- complications: array of strings drawn from [{complications}]
+- clasp_type: clasp mechanism (short string)
+- lug_mm: lug width in mm (float)
+- strap_material: e.g. "Leather", "Steel", "Rubber"
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{{
+  "metal": null,
+  "case_diameter": null,
+  "dial_color": null,
+  "year": null,
+  "calibre": null,
+  "movement_type": null,
+  "movement_origin": null,
+  "movement_jewels": null,
+  "beat": null,
+  "reserve": null,
+  "complications": null,
+  "clasp_type": null,
+  "lug_mm": null,
+  "strap_material": null,
+  "sources": "one-line note of which sources hit"
+}}
+"""
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    import time as _time
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = client.messages.create(
+                model='claude-sonnet-4-5',
+                max_tokens=2048,
+                tools=[{
+                    'type': 'web_search_20250305',
+                    'name': 'web_search',
+                    'max_uses': 6,
+                }],
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            break
+        except anthropic.RateLimitError as e:
+            last_err = e
+            wait = 10 * (attempt + 1)
+            try:
+                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
+                if ra:
+                    wait = max(wait, int(float(ra)))
+            except Exception:
+                pass
+            _time.sleep(wait)
+    else:
+        raise RuntimeError(f'Rate limited after retries: {last_err}')
+
+    text = ''
+    for block in resp.content:
+        if getattr(block, 'type', None) == 'text':
+            text += block.text
+    text = text.strip()
+
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if not m:
+        raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
+    return json.loads(m.group(0))
+
+
 def fetch_coin_history(field_name, topic, coin):
     """Use Claude's web_search tool to describe the history of a coin's
     region or authority. Returns dict {markdown: str}.
@@ -1295,6 +1432,70 @@ def watch_fetch_value(record_id):
     )
     db.commit()
     return jsonify({**data, 'searched_at': now})
+
+
+# Fields the lookup is allowed to auto-fill. Serial numbers, purchase
+# details, ownership, and photos stay off this list on purpose.
+WATCH_LOOKUP_FILLABLE = (
+    'metal', 'case_diameter', 'dial_color', 'year', 'calibre',
+    'movement_type', 'movement_origin', 'movement_jewels',
+    'beat', 'reserve', 'complications', 'clasp_type', 'lug_mm',
+    'strap_material',
+)
+
+
+@app.route('/watches/<record_id>/lookup', methods=['POST'])
+def watch_lookup_specs(record_id):
+    """Use web search to fill in blank spec fields on a watch."""
+    db = get_db()
+    watch = db.execute("SELECT * FROM watches WHERE id = ?", (record_id,)).fetchone()
+    if not watch:
+        return jsonify({'error': 'Watch not found'}), 404
+    try:
+        suggestions = fetch_watch_specs(watch)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        return jsonify({'error': f'Lookup failed: {e or e.__class__.__name__}'}), 500
+
+    filled = {}
+    conflicts = {}
+    for f in WATCH_LOOKUP_FILLABLE:
+        if f not in suggestions or suggestions[f] is None:
+            continue
+        val = suggestions[f]
+        if f == 'complications' and isinstance(val, list):
+            val = ','.join(str(v) for v in val if v)
+        if isinstance(val, str):
+            val = val.strip()
+            if not val:
+                continue
+        current = watch[f]
+        current_is_blank = current is None or (isinstance(current, str) and not current.strip())
+        if current_is_blank:
+            filled[f] = val
+        elif str(current).strip() != str(val).strip():
+            # User already has a value that differs — don't overwrite.
+            # Surface it so they can reconcile manually.
+            conflicts[f] = {'current': current, 'suggested': val}
+
+    if filled:
+        set_clause = ', '.join(f'{k} = ?' for k in filled.keys())
+        now = datetime.utcnow().isoformat()
+        params = list(filled.values()) + [now, record_id]
+        db.execute(
+            f"UPDATE watches SET {set_clause}, updated_at = ? WHERE id = ?",
+            params,
+        )
+        db.commit()
+
+    return jsonify({
+        'filled': filled,
+        'conflicts': conflicts,
+        'sources': suggestions.get('sources', ''),
+    })
 
 
 @app.route('/coins/map')
