@@ -887,6 +887,7 @@ Target fields:
 - case_diameter: number in mm (float)
 - dial_color: short string (e.g. "Black", "Blue", "Silver")
 - year: integer year of original release/manufacture
+- edition: total count of pieces in a limited edition / limited run (integer). Return null for non-limited / open-production references.
 - calibre: movement calibre name (e.g. "L951.5", "3135")
 - movement_type: "Manual" or "Automatic"
 - movement_origin: one of [{origins}]
@@ -904,6 +905,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
   "case_diameter": null,
   "dial_color": null,
   "year": null,
+  "edition": null,
   "calibre": null,
   "movement_type": null,
   "movement_origin": null,
@@ -1437,7 +1439,7 @@ def watch_fetch_value(record_id):
 # Fields the lookup is allowed to auto-fill. Serial numbers, purchase
 # details, ownership, and photos stay off this list on purpose.
 WATCH_LOOKUP_FILLABLE = (
-    'metal', 'case_diameter', 'dial_color', 'year', 'calibre',
+    'metal', 'case_diameter', 'dial_color', 'year', 'edition', 'calibre',
     'movement_type', 'movement_origin', 'movement_jewels',
     'beat', 'reserve', 'complications', 'clasp_type', 'lug_mm',
     'strap_material',
