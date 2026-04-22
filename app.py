@@ -113,7 +113,7 @@ VALUE_LISTS = {
     'recording_status': ['Own','Ordered'],
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
     'coin_grade': ['BU','FDC','MS','PF','AU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
-    'clasp_type': ['Tang','Deployant','Buckle','Velcro'],
+    'clasp_type': ['Tang','Fold Over','Butterfly','Buckle','Velcro'],
     'pen_type': ['Ballpoint','Fountain','Rollerball','Mechanical Pencil'],
     'pen_action': ['Cap','Click','Twist'],
     'pen_cartridge': ['Proprietary','Standard International'],
@@ -123,6 +123,31 @@ VALUE_LISTS = {
     'property_type': ['Residential','Commercial','Land'],
     'audio_type': ['Amplifier','CD Player','DAC','Pre-Amp','Scaler','Speakers','Streamer','Tape Deck','Turntable','Phono Stage','Headphones','Cables','Other'],
 }
+
+# (table, field) -> {alias (lowercase): canonical}. Values entered through
+# the web UI or imported from CSV get folded to the canonical form so
+# dropdowns and filters don't fragment across synonyms.
+FIELD_ALIASES = {
+    ('watches', 'clasp_type'): {
+        'deployant':  'Fold Over',
+        'deployment': 'Fold Over',
+    },
+    ('watches', 'strap_material'): {
+        'alligator': 'Croc',
+        'aligator':  'Croc',   # common misspelling
+    },
+}
+
+
+def normalize_field_value(table, field_name, value):
+    """Return the canonical value for a known alias, or the value unchanged."""
+    if value is None:
+        return value
+    aliases = FIELD_ALIASES.get((table, field_name))
+    if not aliases:
+        return value
+    return aliases.get(value.strip().lower(), value)
+
 
 FIELDS = {
     'watches': [
@@ -1207,6 +1232,7 @@ def detail_view(category, record_id):
                 # Strip currency formatting before saving numeric fields
                 if field['type'] == 'number' or fname in ('price', 'beat', 'reserve', 'value'):
                     val = val.replace('$', '').replace(',', '').strip()
+                val = normalize_field_value(table, fname, val)
                 updates[fname] = val if val else None
 
         set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
@@ -1292,6 +1318,8 @@ def save_field(category, record_id):
     # Strip currency/comma formatting for numeric fields
     if field['type'] == 'number' or field_name in ('price', 'beat', 'reserve', 'value'):
         value = str(value).replace('$', '').replace(',', '').strip()
+
+    value = normalize_field_value(table, field_name, str(value).strip() if value else '')
 
     now = datetime.utcnow().isoformat()
     db.execute(f"UPDATE {table} SET {field_name} = ?, updated_at = ? WHERE id = ?",
