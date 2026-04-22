@@ -101,7 +101,7 @@
       <a class="detail-nav-btn {{ 'disabled' if not next_id }}"
          href="{{ url_for('detail_view', category=category, record_id=next_id) if next_id else '#' }}">&gt;</a>
     {% endif %}
-    <a class="back-link" href="{{ url_for('list_view', category=category) }}{% if r and r['id'] %}#item-{{ r['id'] }}{% endif %}">← Back</a>
+    <a class="back-link" href="{{ back_href if back_href else url_for('list_view', category=category) ~ ('#item-' ~ r['id'] if r and r['id'] else '') }}">← Back</a>
   </div>
 
   {% if is_new %}<div class="new-record-bar">New {{ cat_info.name[:-1] if cat_info.name.endswith('s') else cat_info.name }}</div>{% endif %}
@@ -531,7 +531,7 @@
         <ul class="cam-lens-todo-list">
           {% for l in camera_compatible_lenses %}
           <li>
-            <a href="{{ url_for('detail_view', category='lenses', record_id=l['id']) }}">
+            <a href="{{ url_for('detail_view', category='lenses', record_id=l['id'], from_camera=r['id']) }}">
               <span class="cll-brand">{{ l['make'] or '—' }}</span>
               {% if l['aperture'] %}<span class="cll-aperture">f/{{ l['aperture'] }}</span>{% endif %}
               {% if l['length'] %}<span class="cll-length">{{ l['length']|int }}mm</span>{% endif %}

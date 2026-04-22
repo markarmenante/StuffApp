@@ -1301,6 +1301,20 @@ def detail_view(category, record_id):
             [record_id]
         ).fetchall()
 
+    # Lens detail opened from a camera detail: Back should return to
+    # the camera rather than the lenses list.
+    back_href = None
+    if category == 'lenses':
+        from_camera = request.args.get('from_camera')
+        if from_camera:
+            cam = db.execute(
+                "SELECT id FROM cameras WHERE id = ?", [from_camera]
+            ).fetchone()
+            if cam:
+                back_href = url_for('detail_view',
+                                    category='cameras',
+                                    record_id=cam['id'])
+
     # Camera detail: list every lens with the same mount and property,
     # so the user can see the full kit available at that location.
     camera_compatible_lenses = None
@@ -1343,6 +1357,7 @@ def detail_view(category, record_id):
                            coin_age_val=coin_age_val,
                            property_topics=property_topics,
                            camera_compatible_lenses=camera_compatible_lenses,
+                           back_href=back_href,
                            service_overdue=service_overdue,
                            service_years=service_years,
                            complications_options=COMPLICATIONS_OPTIONS,
