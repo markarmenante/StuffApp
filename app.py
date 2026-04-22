@@ -1127,6 +1127,8 @@ def list_view(category):
         coin_filter = 'own_residential'
     if category == 'vehicles' and raw_filter is None:
         coin_filter = 'own'
+    if category in ('cameras', 'lenses') and raw_filter is None:
+        coin_filter = 'own'
     sql, params = build_search_query(category, q, dot=dot, coin_filter=coin_filter)
     rows = db.execute(sql, params).fetchall()
     counts = get_counts()
@@ -2398,6 +2400,24 @@ def prune_empty_coin_id_dupes():
     db.commit()
     total = db.execute('SELECT COUNT(*) FROM coins').fetchone()[0]
     return jsonify(deleted=deleted, kept=kept, total=total)
+
+
+@app.route('/admin/property-type-audit', methods=['GET'])
+def property_type_audit():
+    """Return the distinct status/type values in the properties table.
+
+    Diagnostic endpoint — gated by the shared import secret. Helps
+    identify data-casing or naming drift that makes filter pills miss rows.
+    """
+    if request.args.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    rows = db.execute(
+        "SELECT COALESCE(type,'(null)') AS type, "
+        "COALESCE(status,'(null)') AS status, COUNT(*) AS n "
+        "FROM properties GROUP BY type, status ORDER BY type, status"
+    ).fetchall()
+    return jsonify(rows=[dict(r) for r in rows])
 
 
 @app.route('/admin/backfill-property-status-own', methods=['POST'])
