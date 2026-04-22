@@ -900,6 +900,7 @@ Target fields:
 - clasp_type: clasp mechanism (short string)
 - lug_mm: lug width in mm (float)
 - strap_material: e.g. "Leather", "Steel", "Rubber"
+- notes: a 2-4 sentence quality blurb about what makes this specific reference notable — its place in the brand's history, design innovation, technical distinction, or cultural significance. Write in a knowledgeable but concise collector's voice. Keep under 500 characters. Return null only if sources offer nothing substantive.
 
 Reply with ONLY a JSON object, no prose, no code fences:
 {{
@@ -918,6 +919,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
   "clasp_type": null,
   "lug_mm": null,
   "strap_material": null,
+  "notes": null,
   "sources": "one-line note of which sources hit"
 }}
 """
@@ -1444,8 +1446,11 @@ WATCH_LOOKUP_FILLABLE = (
     'metal', 'case_diameter', 'dial_color', 'year', 'edition', 'calibre',
     'movement_type', 'movement_origin', 'movement_jewels',
     'beat', 'reserve', 'complications', 'clasp_type', 'lug_mm',
-    'strap_material',
+    'strap_material', 'notes',
 )
+
+# Fields we'll only populate when blank — never overwrite user's words.
+WATCH_LOOKUP_BLANK_ONLY = {'notes'}
 
 
 @app.route('/watches/<record_id>/lookup', methods=['POST'])
@@ -1518,6 +1523,9 @@ def watch_lookup_specs(record_id):
         current_is_blank = current is None or (isinstance(current, str) and not current.strip())
         if current_is_blank:
             filled[f] = val
+            continue
+        # Fields in WATCH_LOOKUP_BLANK_ONLY are never overwritten.
+        if f in WATCH_LOOKUP_BLANK_ONLY:
             continue
         # For clasp_type, don't mark changes that are just verbose variants.
         if f == 'clasp_type' and _clasp_equivalent(current, val):
