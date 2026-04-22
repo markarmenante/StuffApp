@@ -1555,8 +1555,32 @@ WATCH_LOOKUP_FILLABLE = (
 
 # Fields we'll only populate when blank — never overwrite the existing
 # value. Year is frequently engraved on caseback or papers, so the user's
-# entry is authoritative over a web guess.
-WATCH_LOOKUP_BLANK_ONLY = {'year'}
+# entry is authoritative over a web guess. Strap material is set from
+# the physical strap on the watch — a web guess ("Leather") is almost
+# always less precise than what's already there ("Croc").
+WATCH_LOOKUP_BLANK_ONLY = {'year', 'strap_material'}
+
+
+def _numeric_field(field):
+    """True for watch fields whose values are numbers and should be
+    compared numerically rather than as strings (e.g. 41.0 vs '41')."""
+    return field in ('case_diameter', 'lug_mm', 'reserve', 'beat',
+                     'movement_jewels', 'year', 'edition')
+
+
+def _values_equivalent(field, current, new):
+    """Are these two values effectively equal for change-tracking?
+
+    For numeric fields, compare as floats so the stored REAL (e.g. 41.0)
+    matches a stringified int ('41') from the lookup. For everything else
+    fall back to stripped string equality.
+    """
+    if _numeric_field(field):
+        try:
+            return float(current) == float(new)
+        except (TypeError, ValueError):
+            pass
+    return str(current or '').strip() == str(new or '').strip()
 
 # Fields that should append to existing content rather than replace it.
 # For notes the lookup writes a quality blurb about the reference;
@@ -1694,8 +1718,9 @@ def watch_lookup_specs(record_id):
         # For clasp_type, don't mark changes that are just verbose variants.
         if f == 'clasp_type' and _clasp_equivalent(current, val):
             continue
-        if str(current).strip() != str(val).strip():
-            overwritten[f] = {'current': current, 'new': val}
+        if _values_equivalent(f, current, val):
+            continue
+        overwritten[f] = {'current': current, 'new': val}
 
     # Combined update map — apply both blank-fills and overwrites.
     updates = {}
