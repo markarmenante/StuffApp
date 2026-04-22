@@ -77,7 +77,7 @@
 {% endmacro %}
 
 {% block content %}
-<div class="detail-page">
+<div class="detail-page detail-page-{{ category }}">
 <form method="post"
       action="{% if is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
       enctype="multipart/form-data" id="mainForm">
@@ -162,9 +162,9 @@
           <span class="clabel">Movement Origin</span>
         </div>
       </div>
-      <div class="dgrid dg2">
+      <div class="dgrid dg2 watch-vph-hz">
         <div class="dcell">
-          <select name="beat" style="text-align:center">
+          <select name="beat">
             <option value=""></option>
             {% for b in [18000,19800,21600,25200,28800,36000] %}
             <option value="{{ b }}" {{ 'selected' if val('beat')|string == b|string }}>{{ '{:,}'.format(b) }} vph</option>
@@ -172,7 +172,7 @@
           </select>
         </div>
         <div class="dcell">
-          <input type="text" value="{{ '%.2g Hz'|format(r['beat']|float / 7200) if r and r['beat'] else '' }}" readonly style="color:#888; text-align:center">
+          <input type="text" value="{{ '%.2g Hz'|format(r['beat']|float / 7200) if r and r['beat'] else '' }}" readonly style="color:#888">
         </div>
       </div>
       <div class="dcell">
@@ -184,8 +184,8 @@
         <span class="clabel">Winding</span>
       </div>
       <div class="dcell">
-        <input type="text" name="reserve" value="{{ val('reserve')|fmt_int }}" inputmode="numeric">
-        <span class="clabel">Reserve (hrs)</span>
+        <input type="text" name="reserve" value="{{ '%s hrs'|format(val('reserve')|fmt_int) if val('reserve') else '' }}" class="coin-unit-input" data-suffix=" hrs" inputmode="numeric">
+        <span class="clabel">Reserve</span>
       </div>
       <div class="dcell {% if service_overdue %}service-overdue{% endif %}">
         <input type="date" name="service_date" value="{{ val('service_date') }}">

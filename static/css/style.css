@@ -286,6 +286,10 @@ a { color: var(--blue); text-decoration: none; }
 
 .detail-model { font-size: 15px; font-weight: 500; padding: 5px 10px 5px; border-bottom: 1px solid var(--border); background: var(--cell-bg); color: var(--text-secondary); }
 
+/* Watch detail: center all field values */
+.detail-page-watches .dcell input:not([type=file]):not([type=checkbox]):not([type=radio]),
+.detail-page-watches .dcell select { text-align: center; }
+
 /* Data grid cells */
 .dgrid { display: grid; }
 .dg4 { grid-template-columns: repeat(4, 1fr); }
@@ -857,6 +861,9 @@ input[type="date"] { -webkit-appearance: none; }
   /* Keep the property Purchase Date / Purchase Price inline side-by-side
      even on narrow viewports so they read as a single "when + how much". */
   .dgrid.dg2.properties-specs { grid-template-columns: 1fr 1fr; }
+
+  /* Keep watch vph / Hz side-by-side on narrow viewports. */
+  .dgrid.dg2.watch-vph-hz { grid-template-columns: 1fr 1fr; }
 
   /* Watches complications: 3 columns -> 2. */
   .comp-grid { grid-template-columns: repeat(2, 1fr); }
