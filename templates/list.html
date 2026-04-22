@@ -96,10 +96,11 @@
           <div class="idr">
             {% if row['metal'] %}<span>{{ row['metal'] }}</span>{% endif %}
             {% if row['reference'] %}<span><span class="lbl">Ref</span> {{ row['reference'] }}</span>{% endif %}
+            {% if row['dial_color'] %}<span><span class="lbl">Dial</span> {{ row['dial_color'] }}</span>{% endif %}
           </div>
           <div class="idr">
             {% if row['case_num'] %}<span><span class="lbl">s/n</span> {{ row['case_num'] }}</span>{% endif %}
-            {% if row['beat'] %}<span><span class="lbl">vph</span> {{ '{:,}'.format(row['beat']|int) }}</span>{% endif %}
+            {% if row['movement_num'] %}<span><span class="lbl">Mvt</span> {{ row['movement_num'] }}</span>{% endif %}
           </div>
           {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
         </div>
