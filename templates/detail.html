@@ -190,7 +190,7 @@
       <div class="dgrid dg2">
         <div class="dcell">
           <input type="date" name="service_date" value="{{ val('service_date') }}">
-          <span class="clabel">Service</span>
+          <span class="clabel">Svc</span>
         </div>
         <div class="dcell {% if service_overdue %}service-overdue{% endif %}">
           <input type="text" value="{{ ('%d yrs'|format(service_years)) if service_years is not none else '' }}" readonly style="color:#888">

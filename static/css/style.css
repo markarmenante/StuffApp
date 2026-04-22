@@ -866,8 +866,8 @@ input[type="date"] { -webkit-appearance: none; }
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
   .dgrid.dg2.watch-vph-hz { grid-template-columns: 1fr 1fr; }
 
-  /* Watches complications: 3 columns -> 2. */
-  .comp-grid { grid-template-columns: repeat(2, 1fr); }
+  /* Watches complications: keep 3 columns even on narrow viewports. */
+  .comp-grid { grid-template-columns: repeat(3, 1fr); }
 
   /* Bottom action row: wrap into 2-up. */
   .detail-bottom { grid-template-columns: repeat(2, 1fr); gap: 6px; }
@@ -885,7 +885,7 @@ input[type="date"] { -webkit-appearance: none; }
 @media (max-width: 380px) {
   .dgrid.dg4 { grid-template-columns: 1fr; }
   .dgrid.dg3 { grid-template-columns: 1fr; }
-  .comp-grid { grid-template-columns: 1fr; }
+  .comp-grid { grid-template-columns: repeat(3, 1fr); }
   .item-brand { font-size: 17px; }
   .item-model { font-size: 15px; }
 }
