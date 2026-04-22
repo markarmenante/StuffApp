@@ -894,7 +894,7 @@ Target fields:
 - movement_type: "Manual" or "Automatic"
 - movement_origin: EXACTLY one of [{origins}] and nothing else. "In-House" = designed and made by the manufacturer; "Ébauche" = bought-in rough movement (e.g. ETA, Sellita, Valjoux) used as-is; "Modified" = an ébauche that has been noticeably reworked. Do not invent values like "Swiss" or "Ebauche-based".
 - movement_jewels: integer
-- beat: EXACTLY one of [18000, 19800, 21600, 25200, 28800, 36000] — vibrations per hour (VPH), not Hz. If the source lists Hz, multiply by 7200 (2.5 Hz = 18000 vph, 3 Hz = 21600, 4 Hz = 28800, 5 Hz = 36000). Return null if sources disagree or the movement doesn't run at one of these standard rates.
+- beat: vibrations per hour (VPH) for mechanical movements, or raw Hz for quartz/tuning-fork movements. For mechanical (Manual/Automatic) pick from [18000, 19800, 21600, 25200, 28800, 36000]; if the source gives Hz, multiply by 7200 (2.5 Hz = 18000, 3 Hz = 21600, 4 Hz = 28800, 5 Hz = 36000). For battery-powered/quartz/tuning-fork movements, return the actual rate as stated (e.g. 360 for Accutron, 32768 for a quartz crystal, 7200 for a 1 Hz stepping quartz). Do NOT assume 28800 as a default — only return a value if the source clearly states it.
 - reserve: power reserve in hours (integer)
 - complications: array of strings drawn from [{complications}]
 - clasp_type: clasp mechanism (short string)
@@ -1488,19 +1488,36 @@ def watch_lookup_specs(record_id):
         if f not in suggestions or suggestions[f] is None:
             continue
         val = suggestions[f]
-        # Enforce canonical VPH rates; auto-convert if source gave Hz.
+        # Beat sanity check. Mechanical movements (Manual/Automatic) run at
+        # well-known VPH rates and sources often quote Hz instead — so for
+        # those we auto-convert small numbers and snap to the canonical set.
+        # Quartz and tuning-fork movements (e.g. Accutron at 360 Hz) have
+        # non-standard rates that should be stored verbatim.
         if f == 'beat':
             try:
                 n = float(val)
             except (TypeError, ValueError):
                 continue
-            # Hz values (typically 2.5–5) → multiply up to VPH.
-            if 0 < n < 100:
-                n = n * 7200
-            allowed_beat = {18000, 19800, 21600, 25200, 28800, 36000}
-            val = int(round(n))
-            if val not in allowed_beat:
+            if n <= 0:
                 continue
+            mech_allowed = {18000, 19800, 21600, 25200, 28800, 36000}
+            # Determine whether this is a mechanical movement (from the new
+            # suggestion if provided, otherwise from the existing record).
+            mt_sugg = suggestions.get('movement_type')
+            mt = (mt_sugg if isinstance(mt_sugg, str) and mt_sugg else (watch['movement_type'] or '')).strip()
+            is_mechanical = mt in ('Manual', 'Automatic')
+            if is_mechanical:
+                if 0 < n < 100:  # source gave Hz
+                    n = n * 7200
+                val = int(round(n))
+                if val not in mech_allowed:
+                    continue
+            else:
+                # Quartz / tuning fork / other — accept any positive integer
+                # up to a reasonable ceiling. 32768 is a common quartz crystal.
+                val = int(round(n))
+                if val < 1 or val > 200_000:
+                    continue
         # Enforce strict enum for movement_origin: only In-House / Ébauche / Modified.
         if f == 'movement_origin':
             if not isinstance(val, str):
