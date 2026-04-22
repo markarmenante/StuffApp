@@ -1491,8 +1491,10 @@ WATCH_LOOKUP_FILLABLE = (
     'strap_material', 'notes',
 )
 
-# Fields we'll only populate when blank — never overwrite user's words.
-WATCH_LOOKUP_BLANK_ONLY = {'notes'}
+# Fields we'll only populate when blank — never overwrite the existing
+# value. Notes are user-authored; year is frequently engraved on caseback
+# or papers, so the user's entry is authoritative over a web guess.
+WATCH_LOOKUP_BLANK_ONLY = {'notes', 'year'}
 
 
 @app.route('/watches/<record_id>/lookup', methods=['POST'])
