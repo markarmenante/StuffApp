@@ -152,7 +152,7 @@
             {% if row['digital_film'] %}<span>{{ row['digital_film'] }}</span>{% endif %}
             {% if row['digital_film'] == 'Film' and row['film_size'] %}<span>{{ row['film_size'] }}</span>{% endif %}
             {% if row['digital_film'] != 'Film' and row['megapixels'] %}<span>{{ row['megapixels'] }} MP</span>{% endif %}
-            {% if row['lens_mount'] %}<span>{{ row['lens_mount'] }}</span>{% endif %}
+            {% if row['lens_mount'] %}<span>{{ row['lens_mount'] }} Mount</span>{% endif %}
           </div>
           <div class="idr">
             {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
