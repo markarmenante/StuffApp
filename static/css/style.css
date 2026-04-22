@@ -252,11 +252,12 @@ a { color: var(--blue); text-decoration: none; }
 .detail-page { max-width: 100%; margin: 0; background: var(--surface); min-height: calc(100vh - var(--nav-height)); position: relative; }
 
 .detail-nav-overlay {
-  position: absolute; top: 6px; right: 10px;
+  position: fixed; top: calc(var(--nav-height) + 6px); right: 10px;
   display: flex; align-items: center; gap: 6px;
-  z-index: 5;
-  background: rgba(255, 255, 255, 0.85);
+  z-index: 50;
+  background: rgba(255, 255, 255, 0.92);
   padding: 2px 6px; border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 .detail-nav-btn {
   display: flex; align-items: center; justify-content: center;
