@@ -2434,6 +2434,22 @@ def prune_empty_coin_id_dupes():
     return jsonify(deleted=deleted, kept=kept, total=total)
 
 
+@app.route('/admin/lens-mount-audit', methods=['GET'])
+def lens_mount_audit():
+    """Distinct mount values in lenses and lens_mount values in cameras.
+    Helps identify drift between camera mount and lens mount strings."""
+    if request.args.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    lenses = [dict(r) for r in db.execute(
+        "SELECT COALESCE(mount,'(null)') AS mount, COUNT(*) AS n "
+        "FROM lenses GROUP BY mount ORDER BY mount").fetchall()]
+    cameras = [dict(r) for r in db.execute(
+        "SELECT COALESCE(lens_mount,'(null)') AS lens_mount, COUNT(*) AS n "
+        "FROM cameras GROUP BY lens_mount ORDER BY lens_mount").fetchall()]
+    return jsonify(lenses=lenses, cameras=cameras)
+
+
 @app.route('/admin/property-type-audit', methods=['GET'])
 def property_type_audit():
     """Return the distinct status/type values in the properties table.
