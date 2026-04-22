@@ -119,15 +119,15 @@
   <!-- Row 1: Metal, Case Diameter, Reference, Dial Color -->
   <div class="dgrid dg4">
     {{ selcell('metal','Metal', vlists.metal_watch) }}
-    <div class="dcell"><input type="text" name="case_diameter" value="{{ '%s mm'|format(val('case_diameter')) if val('case_diameter') else '' }}" class="coin-unit-input" data-suffix=" mm" inputmode="decimal" style="text-align:center"></div>
+    <div class="dcell"><input type="text" name="case_diameter" value="{{ '%s mm'|format(val('case_diameter')) if val('case_diameter') else '' }}" class="coin-unit-input" data-suffix=" mm" inputmode="decimal" style="text-align:center"><span class="clabel">Width</span></div>
     <div class="dcell"><input type="text" name="reference" value="{{ val('reference') }}" style="text-align:center"><span class="clabel">Ref</span></div>
     <div class="dcell ta-wrap"><input type="text" name="dial_color" value="{{ val('dial_color') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('dial_color', [])|join('||') }}" style="text-align:center"><span class="clabel">Dial</span></div>
   </div>
 
   <!-- Row 2: Case#, Movement#, Edition, Year -->
   <div class="dgrid dg4">
-    <div class="dcell"><input type="text" name="case_num" value="{{ val('case_num') }}" style="text-align:center"><span class="clabel">Case</span></div>
-    <div class="dcell"><input type="text" name="movement_num" value="{{ val('movement_num') }}" style="text-align:center"><span class="clabel">M</span></div>
+    <div class="dcell"><input type="text" name="case_num" value="{{ val('case_num') }}" style="text-align:center"><span class="clabel">Case#</span></div>
+    <div class="dcell"><input type="text" name="movement_num" value="{{ val('movement_num') }}" style="text-align:center"><span class="clabel">Mvt#</span></div>
     {{ cell('edition','Edition') }}
     <div class="dcell"><input type="text" name="year" value="{{ val('year') }}" style="text-align:center"><span class="clabel">Yr Mfg</span></div>
   </div>
