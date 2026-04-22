@@ -1301,15 +1301,14 @@ def detail_view(category, record_id):
             [record_id]
         ).fetchall()
 
-    # Camera detail: suggest lenses with the same mount + property that
-    # still need a photo, so the user can grab them while shooting.
-    camera_imageless_lenses = None
+    # Camera detail: list every lens with the same mount and property,
+    # so the user can see the full kit available at that location.
+    camera_compatible_lenses = None
     if category == 'cameras' and record['lens_mount'] and record['property']:
-        camera_imageless_lenses = db.execute(
-            "SELECT id, make, model, aperture, length FROM lenses "
+        camera_compatible_lenses = db.execute(
+            "SELECT id, make, model, aperture, length, image FROM lenses "
             "WHERE LOWER(TRIM(COALESCE(mount,''))) = LOWER(TRIM(?)) "
             "  AND LOWER(TRIM(COALESCE(property,''))) = LOWER(TRIM(?)) "
-            "  AND (image IS NULL OR TRIM(image) = '') "
             "ORDER BY LOWER(COALESCE(make,'')), "
             "         CAST(COALESCE(length,0) AS REAL)",
             [record['lens_mount'], record['property']],
@@ -1343,7 +1342,7 @@ def detail_view(category, record_id):
                            hertz=hertz,
                            coin_age_val=coin_age_val,
                            property_topics=property_topics,
-                           camera_imageless_lenses=camera_imageless_lenses,
+                           camera_compatible_lenses=camera_compatible_lenses,
                            service_overdue=service_overdue,
                            service_years=service_years,
                            complications_options=COMPLICATIONS_OPTIONS,
