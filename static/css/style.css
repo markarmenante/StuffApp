@@ -508,6 +508,7 @@ input[type="date"] { -webkit-appearance: none; }
   padding: 0;
 }
 .cam-lens-todo-list li { padding: 2px 0; }
+.cam-lens-todo-list li:nth-child(even) { background: rgba(0, 0, 0, 0.04); }
 .cam-lens-todo-list a {
   display: flex;
   gap: 10px;

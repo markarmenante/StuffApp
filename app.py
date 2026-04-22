@@ -1317,15 +1317,20 @@ def detail_view(category, record_id):
 
     # Camera detail: list every lens with the same mount and property,
     # so the user can see the full kit available at that location.
+    # Lenses whose make matches the mount brand (e.g. Leica make on a
+    # Leica M mount) sort to the top; other brands fall underneath.
     camera_compatible_lenses = None
     if category == 'cameras' and record['lens_mount'] and record['property']:
+        mount_brand = record['lens_mount'].split()[0] if record['lens_mount'] else ''
         camera_compatible_lenses = db.execute(
             "SELECT id, make, model, aperture, length, image FROM lenses "
             "WHERE LOWER(TRIM(COALESCE(mount,''))) = LOWER(TRIM(?)) "
             "  AND LOWER(TRIM(COALESCE(property,''))) = LOWER(TRIM(?)) "
-            "ORDER BY LOWER(COALESCE(make,'')), "
+            "ORDER BY CASE WHEN LOWER(COALESCE(make,'')) LIKE LOWER(?) || '%' "
+            "              THEN 0 ELSE 1 END, "
+            "         LOWER(COALESCE(make,'')), "
             "         CAST(COALESCE(length,0) AS REAL)",
-            [record['lens_mount'], record['property']],
+            [record['lens_mount'], record['property'], mount_brand],
         ).fetchall()
 
     service_overdue = False
