@@ -117,6 +117,13 @@ a { color: var(--blue); text-decoration: none; }
   background: var(--nav-bg);
   border-bottom: 1px solid var(--nav-border);
 }
+
+/* Watch list: keep toolbar (incl. search) pinned below the top nav. */
+.list-toolbar-watches {
+  position: sticky;
+  top: var(--nav-height);
+  z-index: 90;
+}
 .list-count { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-right: 6px; }
 .list-cat-title { font-size: 13px; font-weight: 600; flex: 1; }
 

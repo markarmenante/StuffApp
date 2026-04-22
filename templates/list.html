@@ -3,7 +3,7 @@
 
 {% block content %}
 <!-- Toolbar -->
-<div class="list-toolbar">
+<div class="list-toolbar list-toolbar-{{ category }}">
   <span class="list-count">{{ result_count }}</span>
   <span class="list-cat-title">{{ cat_info.name }}</span>
   <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
