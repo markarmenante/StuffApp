@@ -1628,21 +1628,42 @@ def watch_lookup_specs(record_id):
     for k, info in overwritten.items():
         updates[k] = info['new']
 
-    if updates:
-        set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
-        now = datetime.utcnow().isoformat()
-        params = list(updates.values()) + [now, record_id]
-        db.execute(
-            f"UPDATE watches SET {set_clause}, updated_at = ? WHERE id = ?",
-            params,
-        )
-        db.commit()
-
+    # Return the proposed changes WITHOUT applying. The client presents
+    # a checkbox review; accepted items are POSTed to /apply-lookup.
     return jsonify({
         'filled': filled,
         'overwritten': overwritten,
         'sources': suggestions.get('sources', ''),
     })
+
+
+@app.route('/watches/<record_id>/apply-lookup', methods=['POST'])
+def watch_apply_lookup(record_id):
+    """Apply a user-selected subset of lookup suggestions to a watch.
+
+    Body: ``{"updates": {"<field>": <value>, ...}}``
+    Only fields listed in ``WATCH_LOOKUP_FILLABLE`` are accepted.
+    """
+    db = get_db()
+    watch = db.execute("SELECT id FROM watches WHERE id = ?", (record_id,)).fetchone()
+    if not watch:
+        return jsonify({'error': 'Watch not found'}), 404
+    data = request.get_json(force=True) or {}
+    raw_updates = data.get('updates') or {}
+    if not isinstance(raw_updates, dict):
+        return jsonify({'error': 'updates must be an object'}), 400
+    updates = {k: v for k, v in raw_updates.items() if k in WATCH_LOOKUP_FILLABLE}
+    if not updates:
+        return jsonify({'updated': 0, 'fields': []})
+    set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
+    now = datetime.utcnow().isoformat()
+    params = list(updates.values()) + [now, record_id]
+    db.execute(
+        f"UPDATE watches SET {set_clause}, updated_at = ? WHERE id = ?",
+        params,
+    )
+    db.commit()
+    return jsonify({'updated': len(updates), 'fields': list(updates.keys())})
 
 
 @app.route('/coins/map')
