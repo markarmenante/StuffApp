@@ -674,9 +674,15 @@ def build_search_query(category, q, dot=False, coin_filter=None):
     wheres, params = [], []
 
     if q and text_fields:
-        conditions = ' OR '.join([f"{col} LIKE ?" for col in text_fields])
-        wheres.append(f"({conditions})")
-        params += [f'%{q}%'] * len(text_fields)
+        # Split the query on whitespace and AND the terms together: each
+        # term must match at least one text field. "Breguet Carp" finds
+        # watches where 'Breguet' appears in any text field AND 'Carp'
+        # appears in any text field — so brand+property combos work.
+        terms = [t for t in q.split() if t.strip()]
+        for term in terms:
+            conditions = ' OR '.join([f"{col} LIKE ?" for col in text_fields])
+            wheres.append(f"({conditions})")
+            params += [f'%{term}%'] * len(text_fields)
 
     if dot:
         # Find which field holds status for this category
