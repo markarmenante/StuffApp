@@ -1223,7 +1223,9 @@ document.getElementById('resultsRaw')?.addEventListener('input', (e) => {
   if (disp) disp.innerHTML = formatResultsHtml(e.target.value);
 });
 
-// Watch "Lookup" button: fetch missing spec fields from reputable sources
+// Watch "Lookup" button: fetch missing spec fields from reputable sources.
+// Server returns the proposed changes WITHOUT applying them; we render a
+// checkbox review modal and POST the user's selection to /apply-lookup.
 document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   const url = btn.dataset.url;
@@ -1241,25 +1243,15 @@ document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e)
     }
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed');
-    const filledKeys = Object.keys(data.filled || {});
-    const overwrittenKeys = Object.keys(data.overwritten || {});
-    const parts = [];
-    if (filledKeys.length) {
-      parts.push(`Filled ${filledKeys.length} blank field(s): ${filledKeys.join(', ')}`);
+    const filled = data.filled || {};
+    const overwritten = data.overwritten || {};
+    if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
+      alert('No changes — sources did not yield new information.' +
+            (data.sources ? '\n\nSources: ' + data.sources : ''));
+      return;
     }
-    if (overwrittenKeys.length) {
-      const lines = overwrittenKeys.map(k => {
-        const o = data.overwritten[k];
-        return `  • ${k}: "${o.current}" → "${o.new}"`;
-      }).join('\n');
-      parts.push(`Updated ${overwrittenKeys.length} field(s) with better data:\n${lines}`);
-    }
-    if (!filledKeys.length && !overwrittenKeys.length) {
-      parts.push('No changes — sources did not yield new information.');
-    }
-    if (data.sources) parts.push(`\nSources: ${data.sources}`);
-    alert(parts.join('\n\n'));
-    if (filledKeys.length || overwrittenKeys.length) window.location.reload();
+    showLookupReview(url.replace('/lookup', '/apply-lookup'),
+                     filled, overwritten, data.sources || '');
   } catch (err) {
     alert('Lookup failed: ' + err.message);
   } finally {
@@ -1267,6 +1259,81 @@ document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e)
     btn.textContent = original;
   }
 });
+
+function showLookupReview(applyUrl, filled, overwritten, sources) {
+  // Build the modal.
+  const overlay = document.createElement('div');
+  overlay.className = 'lookup-review-overlay';
+  overlay.innerHTML = `
+    <div class="lookup-review-modal">
+      <h3>Review lookup changes</h3>
+      <p class="lookup-review-hint">Uncheck anything you don't want applied.</p>
+      <div class="lookup-review-list"></div>
+      ${sources ? `<div class="lookup-review-sources"><strong>Sources:</strong> ${escapeHtml(sources)}</div>` : ''}
+      <div class="lookup-review-actions">
+        <button type="button" class="btn-cancel" data-act="cancel">Cancel</button>
+        <button type="button" class="btn-save" data-act="apply">Apply selected</button>
+      </div>
+    </div>`;
+  const list = overlay.querySelector('.lookup-review-list');
+
+  function row(kind, field, currentText, newValue) {
+    const wrap = document.createElement('label');
+    wrap.className = 'lookup-review-row';
+    const newText = Array.isArray(newValue) ? newValue.join(', ') : String(newValue);
+    wrap.innerHTML = `
+      <input type="checkbox" checked data-field="${escapeAttr(field)}">
+      <span class="lookup-review-kind ${kind}">${kind === 'fill' ? 'Fill' : 'Overwrite'}</span>
+      <span class="lookup-review-field">${escapeHtml(field)}</span>
+      <span class="lookup-review-arrow">${currentText !== null ? `"${escapeHtml(currentText)}" →` : ''}</span>
+      <span class="lookup-review-new">"${escapeHtml(newText)}"</span>`;
+    // Cache the raw new value on the checkbox so we can send it back as-is.
+    wrap.querySelector('input').dataset.value = JSON.stringify(newValue);
+    return wrap;
+  }
+
+  Object.keys(filled).sort().forEach(f => {
+    list.appendChild(row('fill', f, null, filled[f]));
+  });
+  Object.keys(overwritten).sort().forEach(f => {
+    const info = overwritten[f];
+    list.appendChild(row('overwrite', f, info.current, info.new));
+  });
+
+  overlay.addEventListener('click', async (ev) => {
+    const act = ev.target.dataset.act;
+    if (act === 'cancel' || ev.target === overlay) {
+      overlay.remove();
+      return;
+    }
+    if (act !== 'apply') return;
+    const updates = {};
+    overlay.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      if (cb.checked) updates[cb.dataset.field] = JSON.parse(cb.dataset.value);
+    });
+    try {
+      const res = await fetch(applyUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({updates}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Apply failed');
+      overlay.remove();
+      if (data.updated) window.location.reload();
+    } catch (err) {
+      alert('Apply failed: ' + err.message);
+    }
+  });
+  document.body.appendChild(overlay);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]
+  ));
+}
+function escapeAttr(s) { return escapeHtml(s); }
 
 // Watch "Value" button: fetch market valuation via backend
 document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
