@@ -510,18 +510,19 @@ input[type="date"] { -webkit-appearance: none; }
 .cam-lens-todo-list li { padding: 2px 0; }
 .cam-lens-todo-list li:nth-child(even) { background: rgba(0, 0, 0, 0.04); }
 .cam-lens-todo-list a {
-  display: flex;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: 130px 64px 64px 1fr;
+  column-gap: 12px;
   align-items: baseline;
   text-decoration: none;
   color: inherit;
   font-size: 13px;
 }
 .cam-lens-todo-list a:hover { background: #f0f0f0; }
-.cam-lens-todo-list .cll-brand    { font-weight: 600; min-width: 80px; }
-.cam-lens-todo-list .cll-aperture { color: #555; min-width: 48px; }
-.cam-lens-todo-list .cll-length   { color: #555; min-width: 48px; }
-.cam-lens-todo-list .cll-desc     { color: #444; flex: 1; }
+.cam-lens-todo-list .cll-brand    { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cam-lens-todo-list .cll-aperture { color: #555; }
+.cam-lens-todo-list .cll-length   { color: #555; }
+.cam-lens-todo-list .cll-desc     { color: #444; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Recordings: type-aware radio strip.
    All radio groups flow horizontally on one row; the inner radios in
