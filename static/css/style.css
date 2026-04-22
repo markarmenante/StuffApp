@@ -500,7 +500,9 @@ input[type="date"] { -webkit-appearance: none; }
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #666;
-  margin-bottom: 4px;
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #d0d0d0;
 }
 .cam-lens-todo-list {
   list-style: none;
