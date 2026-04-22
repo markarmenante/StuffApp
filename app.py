@@ -1469,15 +1469,29 @@ def watch_lookup_specs(record_id):
         print(traceback.format_exc(), flush=True)
         return jsonify({'error': f'Lookup failed: {e or e.__class__.__name__}'}), 500
 
+    # Synonym groups for watch clasps. If current and new both map to the
+    # same group, don't flag it as a change.
+    _CLASP_SYNONYMS = [
+        {'tang', 'pin', 'ardillon'},                       # tang / pin buckle
+        {'deployant', 'deployment', 'folding'},            # deployant / folding
+        {'butterfly', 'double deployant', 'double folding'},
+    ]
+
     def _clasp_equivalent(a, b):
-        """'Tang' and 'Tang buckle' are the same; don't treat as a change."""
+        """'Tang', 'Tang buckle', 'Pin buckle', 'Ardillon' are all the same."""
         def norm(s):
             s = (s or '').strip().lower()
             for suf in (' buckle', ' clasp'):
                 if s.endswith(suf):
                     s = s[: -len(suf)]
             return s.strip()
-        return norm(a) == norm(b)
+        na, nb = norm(a), norm(b)
+        if na == nb:
+            return True
+        for group in _CLASP_SYNONYMS:
+            if na in group and nb in group:
+                return True
+        return False
 
     # Fill blanks AND overwrite existing values whenever the web-sourced
     # suggestion differs. Complications is handled specially: we merge
