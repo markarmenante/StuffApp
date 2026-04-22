@@ -862,7 +862,8 @@ input[type="date"] { -webkit-appearance: none; }
      even on narrow viewports so they read as a single "when + how much". */
   .dgrid.dg2.properties-specs { grid-template-columns: 1fr 1fr; }
 
-  /* Keep watch vph / Hz side-by-side on narrow viewports. */
+  /* Watch spec rows: keep two-up even on narrow viewports. */
+  .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
   .dgrid.dg2.watch-vph-hz { grid-template-columns: 1fr 1fr; }
 
   /* Watches complications: 3 columns -> 2. */
