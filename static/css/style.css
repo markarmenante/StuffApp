@@ -249,14 +249,15 @@ a { color: var(--blue); text-decoration: none; }
 .empty-state a { color: var(--blue); }
 
 /* ── DETAIL PAGE ── */
-.detail-page { max-width: 100%; margin: 0; background: var(--surface); min-height: calc(100vh - var(--nav-height)); }
+.detail-page { max-width: 100%; margin: 0; background: var(--surface); min-height: calc(100vh - var(--nav-height)); position: relative; }
 
-.detail-header {
+.detail-nav-overlay {
+  position: absolute; top: 6px; right: 10px;
   display: flex; align-items: center; gap: 6px;
-  background: var(--nav-bg); border-bottom: 1px solid var(--nav-border);
-  padding: 0 10px; height: 40px;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 2px 6px; border-radius: 6px;
 }
-.detail-brand { font-size: 15px; font-weight: 700; flex: 1; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .detail-nav-btn {
   display: flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border-radius: 4px;
@@ -869,8 +870,6 @@ input[type="date"] { -webkit-appearance: none; }
   .dcell select,
   .dcell textarea { font-size: 16px; }
 
-  /* Detail header allowed to wrap so nav arrows + Back drop to a 2nd row. */
-  .detail-header { flex-wrap: wrap; row-gap: 6px; }
 }
 
 /* Tight phones / small Androids: fully stack the wider grids. */

@@ -82,25 +82,8 @@
       action="{% if is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
       enctype="multipart/form-data" id="mainForm">
 
-  <!-- Header bar: (New label for new records only) | < > ← -->
-  <div class="detail-header">
-    <span class="detail-brand">
-      {% if is_new %}
-      {% if category == 'watches' %}New Watch
-      {% elif category == 'coins' %}New Coin
-      {% elif category == 'cameras' %}New Camera
-      {% elif category == 'lenses' %}New Lens
-      {% elif category == 'pens' %}New Pen
-      {% elif category == 'art' %}New Artwork
-      {% elif category == 'vehicles' %}New Vehicle
-      {% elif category == 'recordings' %}New Recording
-      {% elif category == 'rifles' %}New Rifle
-      {% elif category == 'credit_cards' %}New Card
-      {% elif category == 'properties' %}New Property
-      {% elif category == 'persons' %}New Person
-      {% endif %}
-      {% endif %}
-    </span>
+  <!-- Floating nav: prev / next / back (+ optional Topic link), overlays the record header row -->
+  <div class="detail-nav-overlay">
     {% if not is_new %}
       {% if category == 'properties' %}
       <a class="add-topic-link"
