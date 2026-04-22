@@ -1082,8 +1082,8 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .lookup-review-row {
   display: grid;
-  grid-template-columns: 24px 90px 150px auto 1fr;
-  align-items: center; gap: 8px;
+  grid-template-columns: 24px 90px 150px minmax(0, 1fr);
+  align-items: start; gap: 8px;
   padding: 8px 6px;
   background: #fff;
   cursor: pointer;
@@ -1091,15 +1091,22 @@ input[type="date"] { -webkit-appearance: none; }
 .lookup-review-row:hover { background: #f4f7ff; }
 .lookup-review-row:nth-child(even) { background: #fafafa; }
 .lookup-review-row:nth-child(even):hover { background: #f4f7ff; }
+.lookup-review-row > input[type=checkbox] { margin-top: 3px; }
 .lookup-review-kind {
   font-size: 10px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .4px; padding: 2px 6px; border-radius: 3px; text-align: center;
+  align-self: start;
 }
 .lookup-review-kind.fill { background: #e0f2e0; color: #2d5a2d; }
 .lookup-review-kind.overwrite { background: #fff0c2; color: #7a5c00; }
-.lookup-review-field { font-family: monospace; font-size: 13px; color: #333; }
-.lookup-review-arrow { color: var(--text-label); font-size: 13px; }
-.lookup-review-new { font-size: 13px; color: #111; word-break: break-word; }
+.lookup-review-field { font-family: monospace; font-size: 13px; color: #333; word-break: break-word; }
+.lookup-review-diff {
+  font-size: 13px; color: #111; line-height: 1.4;
+  min-width: 0; overflow-wrap: anywhere;
+}
+.lookup-review-old { color: var(--text-secondary); }
+.lookup-review-arrow { color: var(--text-label); }
+.lookup-review-new { color: #111; font-weight: 500; }
 .lookup-review-sources {
   font-size: 11px; color: var(--text-secondary);
   background: #f7f7f7; padding: 6px 8px; border-radius: 4px;
