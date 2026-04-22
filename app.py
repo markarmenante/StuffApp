@@ -1091,13 +1091,16 @@ def detail_view(category, record_id):
         ).fetchall()
 
     service_overdue = False
+    service_years = None
     if category == 'watches' and record['service_date']:
         try:
             from datetime import date as _date
             num_comp = len([c for c in (record['complications'] or '').split(',') if c.strip()])
             threshold = 10 if num_comp > 5 else 15
             svc = datetime.strptime(record['service_date'], '%Y-%m-%d').date()
-            service_overdue = (_date.today() - svc).days / 365.25 > threshold
+            years = (_date.today() - svc).days / 365.25
+            service_years = int(years)  # floor
+            service_overdue = years > threshold
         except Exception:
             pass
 
@@ -1116,6 +1119,7 @@ def detail_view(category, record_id):
                            coin_age_val=coin_age_val,
                            property_topics=property_topics,
                            service_overdue=service_overdue,
+                           service_years=service_years,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
                            ta=build_typeahead(category))
