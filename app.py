@@ -1492,9 +1492,15 @@ WATCH_LOOKUP_FILLABLE = (
 )
 
 # Fields we'll only populate when blank — never overwrite the existing
-# value. Notes are user-authored; year is frequently engraved on caseback
-# or papers, so the user's entry is authoritative over a web guess.
-WATCH_LOOKUP_BLANK_ONLY = {'notes', 'year'}
+# value. Year is frequently engraved on caseback or papers, so the user's
+# entry is authoritative over a web guess.
+WATCH_LOOKUP_BLANK_ONLY = {'year'}
+
+# Fields that should append to existing content rather than replace it.
+# For notes the lookup writes a quality blurb about the reference;
+# merging it onto the user's own notes (separated by a blank line)
+# preserves their wording while still surfacing the web research.
+WATCH_LOOKUP_APPEND = {'notes'}
 
 
 @app.route('/watches/<record_id>/lookup', methods=['POST'])
@@ -1611,6 +1617,17 @@ def watch_lookup_specs(record_id):
             continue
         # Fields in WATCH_LOOKUP_BLANK_ONLY are never overwritten.
         if f in WATCH_LOOKUP_BLANK_ONLY:
+            continue
+        # For append fields, don't replace — concatenate new text after
+        # existing text (separated by a blank line). Skip if the existing
+        # content already contains the suggestion verbatim.
+        if f in WATCH_LOOKUP_APPEND:
+            cur_text = str(current).rstrip()
+            new_text = str(val).strip()
+            if not new_text or new_text in cur_text:
+                continue
+            merged = cur_text + '\n\n' + new_text
+            overwritten[f] = {'current': current, 'new': merged}
             continue
         # For clasp_type, don't mark changes that are just verbose variants.
         if f == 'clasp_type' and _clasp_equivalent(current, val):
