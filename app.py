@@ -894,7 +894,7 @@ Target fields:
 - movement_type: "Manual" or "Automatic"
 - movement_origin: EXACTLY one of [{origins}] and nothing else. "In-House" = designed and made by the manufacturer; "Ébauche" = bought-in rough movement (e.g. ETA, Sellita, Valjoux) used as-is; "Modified" = an ébauche that has been noticeably reworked. Do not invent values like "Swiss" or "Ebauche-based".
 - movement_jewels: integer
-- beat: VPH (integer, e.g. 18000, 21600, 28800, 36000)
+- beat: EXACTLY one of [18000, 19800, 21600, 25200, 28800, 36000] — vibrations per hour (VPH), not Hz. If the source lists Hz, multiply by 7200 (2.5 Hz = 18000 vph, 3 Hz = 21600, 4 Hz = 28800, 5 Hz = 36000). Return null if sources disagree or the movement doesn't run at one of these standard rates.
 - reserve: power reserve in hours (integer)
 - complications: array of strings drawn from [{complications}]
 - clasp_type: clasp mechanism (short string)
@@ -1488,6 +1488,19 @@ def watch_lookup_specs(record_id):
         if f not in suggestions or suggestions[f] is None:
             continue
         val = suggestions[f]
+        # Enforce canonical VPH rates; auto-convert if source gave Hz.
+        if f == 'beat':
+            try:
+                n = float(val)
+            except (TypeError, ValueError):
+                continue
+            # Hz values (typically 2.5–5) → multiply up to VPH.
+            if 0 < n < 100:
+                n = n * 7200
+            allowed_beat = {18000, 19800, 21600, 25200, 28800, 36000}
+            val = int(round(n))
+            if val not in allowed_beat:
+                continue
         # Enforce strict enum for movement_origin: only In-House / Ébauche / Modified.
         if f == 'movement_origin':
             if not isinstance(val, str):
