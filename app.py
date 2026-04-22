@@ -2171,10 +2171,15 @@ def coins_print_pdf():
 
     wheres, params = [], []
     if q:
-        like = f'%{q}%'
-        wheres.append("(coin_id LIKE ? OR authority LIKE ? OR region LIKE ? "
-                      "OR denomination LIKE ? OR mint LIKE ? OR obv_rev LIKE ? OR description LIKE ?)")
-        params += [like] * 7
+        # Same multi-term AND logic as build_search_query: each
+        # whitespace-separated term must match at least one column.
+        search_cols = ['coin_id', 'authority', 'region', 'denomination',
+                       'mint', 'obv_rev', 'description']
+        terms = [t for t in q.split() if t.strip()]
+        for term in terms:
+            conditions = ' OR '.join([f'{c} LIKE ?' for c in search_cols])
+            wheres.append(f"({conditions})")
+            params += [f'%{term}%'] * len(search_cols)
     cat_filters = CATEGORY_FILTERS.get('coins', {})
     if coin_filter and coin_filter in cat_filters:
         clause, extra = cat_filters[coin_filter]
