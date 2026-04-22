@@ -2146,17 +2146,25 @@ def coins_print_pdf():
 
     db = get_db()
     q = (request.args.get('q') or '').strip()
+    coin_filter = (request.args.get('filter') or '').strip() or None
+
+    wheres, params = [], []
     if q:
         like = f'%{q}%'
-        rows = db.execute(
-            "SELECT * FROM coins WHERE coin_id LIKE ? OR authority LIKE ? OR region LIKE ? "
-            "OR denomination LIKE ? OR mint LIKE ? OR obv_rev LIKE ? OR description LIKE ? "
-            "ORDER BY (coin_id IS NULL OR TRIM(coin_id) = ''), CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id",
-            [like]*7).fetchall()
-    else:
-        rows = db.execute(
-            "SELECT * FROM coins ORDER BY (coin_id IS NULL OR TRIM(coin_id) = ''), CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id"
-        ).fetchall()
+        wheres.append("(coin_id LIKE ? OR authority LIKE ? OR region LIKE ? "
+                      "OR denomination LIKE ? OR mint LIKE ? OR obv_rev LIKE ? OR description LIKE ?)")
+        params += [like] * 7
+    cat_filters = CATEGORY_FILTERS.get('coins', {})
+    if coin_filter and coin_filter in cat_filters:
+        clause, extra = cat_filters[coin_filter]
+        wheres.append(f"({clause})")
+        params += list(extra)
+
+    where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+    rows = db.execute(
+        f"SELECT * FROM coins {where_sql} "
+        "ORDER BY (coin_id IS NULL OR TRIM(coin_id) = ''), CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id",
+        params).fetchall()
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)

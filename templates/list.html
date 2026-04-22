@@ -9,7 +9,7 @@
   <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
   {% if category == 'coins' %}
   {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
-  <a href="{{ url_for('coins_print_pdf', q=q) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} pgs</a>
+  <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} pgs</a>
   <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
      title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ca_ancient' else 'ca_ancient') }}"
