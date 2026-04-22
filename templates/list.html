@@ -81,7 +81,7 @@
 {% if rows %}
 <div class="item-list item-list-{{ category }}">
   {% for row in rows %}
-  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id']) }}">
+  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None) }}">
 
     <!-- Thumbnail -->
     <div class="item-thumb"

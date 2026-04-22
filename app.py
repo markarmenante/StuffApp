@@ -1315,6 +1315,17 @@ def detail_view(category, record_id):
                                     category='cameras',
                                     record_id=cam['id'])
 
+    # Preserve the list's search/filter when returning via Back, so
+    # "search Gela → click coin → Back" lands on the same filtered list
+    # scrolled to the same record.
+    if back_href is None:
+        back_q = (request.args.get('q') or '').strip() or None
+        back_filter = (request.args.get('filter') or '').strip() or None
+        if back_q or back_filter:
+            back_href = url_for('list_view', category=category,
+                                q=back_q, filter=back_filter) \
+                        + f'#item-{record_id}'
+
     # Camera detail: list every lens with the same mount and property,
     # so the user can see the full kit available at that location.
     # Lenses whose make matches the mount brand (e.g. Leica make on a
