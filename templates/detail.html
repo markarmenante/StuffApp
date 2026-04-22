@@ -197,12 +197,13 @@
   <!-- Complications -->
   <div class="comp-section">
     <div class="comp-grid">
-      {% set cur = val('complications').split(',') if val('complications') else [] %}
+      {% set cur = val('complications').split(',') if val('complications') else (['Hours','Minutes'] if is_new else []) %}
       {% for opt in complications_options %}
+      {% set is_checked = (opt in cur) or opt in ('Hours', 'Minutes') %}
       <label class="comp-item">
         <span class="comp-x">
-          <input type="checkbox" name="complications" value="{{ opt }}" {{ 'checked' if opt in cur }}>
-          {{ 'x' if opt in cur else '' }}
+          <input type="checkbox" name="complications" value="{{ opt }}" {{ 'checked' if is_checked }}>
+          {{ 'x' if is_checked else '' }}
         </span>
         <span class="comp-name">{{ opt }}</span>
       </label>
