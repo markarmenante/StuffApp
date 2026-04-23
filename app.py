@@ -1140,7 +1140,7 @@ def list_view(category):
             coin_filter = 'own_residential'
         if category == 'vehicles' and raw_filter is None:
             coin_filter = 'own'
-        if category == 'cameras' and raw_filter is None:
+        if category in ('cameras', 'lenses') and raw_filter is None:
             coin_filter = 'own'
     sql, params = build_search_query(category, q, dot=dot, coin_filter=coin_filter)
     rows = db.execute(sql, params).fetchall()
