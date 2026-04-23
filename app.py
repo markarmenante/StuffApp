@@ -159,6 +159,9 @@ FIELD_ALIASES = {
         'alligator': 'Croc',
         'aligator':  'Croc',   # common misspelling
     },
+    ('watches', 'dial_color'): {
+        'skeleton': 'Open',
+    },
 }
 
 
@@ -568,6 +571,20 @@ def init_db():
             pass
     db.commit()
     _backfill_meds_from_prescriptions(db)
+    # Apply field-alias normalizations to legacy rows so the UI never has to
+    # handle synonym values. Runs every boot — cheap (small table, indexed
+    # by the rewritten column being equal to a constant) and idempotent.
+    for (table, field), aliases in FIELD_ALIASES.items():
+        for synonym, canonical in aliases.items():
+            try:
+                db.execute(
+                    f"UPDATE {table} SET {field} = ? "
+                    f"WHERE LOWER(TRIM({field})) = ?",
+                    (canonical, synonym),
+                )
+            except sqlite3.OperationalError:
+                pass
+    db.commit()
 
 
 def _parse_prescription_lines(text):
@@ -1680,7 +1697,7 @@ WATCH_LOOKUP_FILLABLE = (
 # entry is authoritative over a web guess. Strap material is set from
 # the physical strap on the watch — a web guess ("Leather") is almost
 # always less precise than what's already there ("Croc").
-WATCH_LOOKUP_BLANK_ONLY = {'year', 'strap_material'}
+WATCH_LOOKUP_BLANK_ONLY = {'year', 'strap_material', 'clasp_type'}
 
 
 def _numeric_field(field):

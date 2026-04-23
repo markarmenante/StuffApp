@@ -148,7 +148,7 @@
     {{ selcell('metal','Metal', vlists.metal_watch) }}
     <div class="dcell"><input type="text" name="case_diameter" value="{{ '%s mm'|format(val('case_diameter')) if val('case_diameter') else '' }}" class="coin-unit-input" data-suffix=" mm" inputmode="decimal" style="text-align:center"><span class="clabel">Width</span></div>
     <div class="dcell"><input type="text" name="reference" value="{{ val('reference') }}" style="text-align:center"><span class="clabel">Ref</span></div>
-    <div class="dcell ta-wrap"><input type="text" name="dial_color" value="{{ val('dial_color') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('dial_color', [])|join('||') }}" style="text-align:center"><span class="clabel">Dial</span></div>
+    <div class="dcell ta-wrap"><input type="text" name="dial_color" value="{{ val('dial_color') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('dial_color', [])|join('||') }}" data-ta-aliases='{"skeleton":"Open"}' style="text-align:center"><span class="clabel">Dial</span></div>
   </div>
 
   <!-- Row 2: Case#, Movement#, Edition, Year -->
@@ -1774,7 +1774,15 @@ function _setupTaGhost(inp) {
 }
 document.querySelectorAll('.ta-input').forEach(inp => {
   const opts = (inp.dataset.ta || '').split('||').filter(Boolean);
-  if (!opts.length) return;
+  let aliases = {};  // { lowercased_synonym: 'CanonicalValue' }
+  try {
+    const raw = inp.dataset.taAliases;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      for (const k in parsed) aliases[k.toLowerCase()] = parsed[k];
+    }
+  } catch (_) {}
+  if (!opts.length && !Object.keys(aliases).length) return;
   const wrap = inp.closest('.ta-wrap') || inp.parentElement;
   if (wrap && getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
   const menu = document.createElement('div');
@@ -1803,14 +1811,33 @@ document.querySelectorAll('.ta-input').forEach(inp => {
       return;
     }
     const matches = opts.filter(o => o.toLowerCase().includes(q)).slice(0, 20);
+    // Surface canonical values via synonym matches. If a synonym key
+    // (e.g. "skeleton") matches the query, pull the canonical value
+    // (e.g. "Open") into the dropdown labelled "Open ← Skeleton".
+    const aliasHits = [];
+    for (const syn in aliases) {
+      if (syn.includes(q)) {
+        const canonical = aliases[syn];
+        if (!matches.some(m => m.toLowerCase() === canonical.toLowerCase())) {
+          aliasHits.push({ canonical, synonym: syn });
+        }
+      }
+    }
     prefixMatch = opts.find(o => o.toLowerCase().startsWith(q) && o.toLowerCase() !== q) || '';
     updateGhost();
-    if (!matches.length || (matches.length === 1 && matches[0].toLowerCase() === q)) {
+    if (!matches.length && !aliasHits.length) { menu.style.display = 'none'; return; }
+    if (matches.length === 1 && !aliasHits.length && matches[0].toLowerCase() === q) {
       menu.style.display = 'none'; return;
     }
-    menu.innerHTML = matches.map(m =>
-      `<div class="ta-opt" style="padding:6px 10px;cursor:pointer;">${_escHtml(m)}</div>`
-    ).join('');
+    const html = []
+      .concat(matches.map(m =>
+        `<div class="ta-opt" data-val="${_escHtml(m)}" style="padding:6px 10px;cursor:pointer;">${_escHtml(m)}</div>`))
+      .concat(aliasHits.map(h => {
+        const label = `${_escHtml(h.canonical)} <span style="color:#888;font-size:12px">← ${_escHtml(h.synonym)}</span>`;
+        return `<div class="ta-opt" data-val="${_escHtml(h.canonical)}" style="padding:6px 10px;cursor:pointer;">${label}</div>`;
+      }))
+      .join('');
+    menu.innerHTML = html;
     menu.style.display = 'block';
     activeIdx = -1;
     items = menu.querySelectorAll('.ta-opt');
@@ -1842,8 +1869,8 @@ document.querySelectorAll('.ta-input').forEach(inp => {
     if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); }
     else if (e.key === 'Enter' || e.key === 'Tab') {
-      if (activeIdx >= 0) { e.preventDefault(); pick(items[activeIdx].textContent); }
-      else if (items.length === 1) { e.preventDefault(); pick(items[0].textContent); }
+      if (activeIdx >= 0) { e.preventDefault(); pick(items[activeIdx].dataset.val || items[activeIdx].textContent); }
+      else if (items.length === 1) { e.preventDefault(); pick(items[0].dataset.val || items[0].textContent); }
       return;
     } else if (e.key === 'Escape') {
       menu.style.display = 'none'; activeIdx = -1;
@@ -1854,7 +1881,7 @@ document.querySelectorAll('.ta-input').forEach(inp => {
   });
   menu.addEventListener('mousedown', e => {
     const opt = e.target.closest('.ta-opt');
-    if (opt) { e.preventDefault(); pick(opt.textContent); }
+    if (opt) { e.preventDefault(); pick(opt.dataset.val || opt.textContent); }
   });
 });
 
