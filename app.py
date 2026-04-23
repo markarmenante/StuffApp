@@ -1711,7 +1711,7 @@ WATCH_LOOKUP_FILLABLE = (
 # entry is authoritative over a web guess. Strap material is set from
 # the physical strap on the watch — a web guess ("Leather") is almost
 # always less precise than what's already there ("Croc").
-WATCH_LOOKUP_BLANK_ONLY = {'year', 'strap_material', 'clasp_type'}
+WATCH_LOOKUP_BLANK_ONLY = {'year', 'strap_material', 'clasp_type', 'dial_color', 'metal'}
 
 
 def _numeric_field(field):
