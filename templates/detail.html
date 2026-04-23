@@ -1015,44 +1015,43 @@
            {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
   </div>
 
-  <div class="watch-body">
-    <div class="watch-photo drop-zone" data-field="image_front"
+  <div class="coin-imgs">
+    <div class="coin-img-panel drop-zone" data-field="image_front"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_front'] and r['image_front']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_front']) }}" alt="Front">
-      {% else %}
-        <span class="no-img">💳</span>
-      {% endif %}
-      <label class="file-upload-lbl watch-photo-upload">
-        <input type="file" name="image_front" accept="image/*" style="display:none"
-               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_front')">
-      </label>
+      {% else %}<span style="font-size:28px;color:#ccc">💳</span>{% endif %}
+      <span class="panel-lbl">Front</span>
+      <input type="file" name="image_front" accept="image/*" style="display:none">
     </div>
-    <div class="watch-specs">
-      <div class="dgrid dg2">
-        {{ cell('number','Card Number') }}
-        {{ datecell('expiration','Expiration') }}
-      </div>
-      <div class="dgrid dg2">
-        {{ cell('cvc','CVC') }}
-        {{ cell('cvc_2','CVC 2') }}
-      </div>
-      <div class="dgrid dg1">{{ cell('billing_short','Billing Short') }}</div>
-      <div class="dgrid dg1">{{ cell('description','Description') }}</div>
-    </div>
-  </div>
-
-  <div class="dgrid dg1">{{ cell('billing_address','Billing Address') }}</div>
-
-  <div class="coin-imgs">
     <div class="coin-img-panel drop-zone" data-field="image_back"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_back'] and r['image_back']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_back']) }}" alt="Back">
       {% else %}<span style="font-size:28px;color:#ccc">💳</span>{% endif %}
       <span class="panel-lbl">Back</span>
+      <input type="file" name="image_back" accept="image/*" style="display:none">
     </div>
   </div>
+
+  <div class="watch-specs" style="border-bottom:1px solid var(--border)">
+    <div class="dgrid dg2">
+      {{ cell('number','Card Number') }}
+      <div class="dcell">
+        {% set _exp = val('expiration') %}
+        <input type="month" name="expiration" value="{{ _exp[:7] if _exp else '' }}">
+        <span class="clabel">Expiration</span>
+      </div>
+    </div>
+    <div class="dgrid dg2">
+      {{ cell('cvc','CVC') }}
+      {{ cell('cvc_2','CVC 2') }}
+    </div>
+    <div class="dgrid dg1">{{ cell('billing_short','Billing Short') }}</div>
+    <div class="dgrid dg1">{{ cell('description','Description') }}</div>
+  </div>
+
+  <div class="dgrid dg1">{{ cell('billing_address','Billing Address') }}</div>
 
   <div class="detail-bottom">
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
@@ -1589,8 +1588,8 @@ document.querySelectorAll('.comp-item').forEach(item => {
     el.addEventListener('blur', () => saveField(el.name, el.value));
   });
 
-  // Date inputs — save on change
-  form.querySelectorAll('input[type=date][name]').forEach(el => {
+  // Date / month inputs — save on change
+  form.querySelectorAll('input[type=date][name], input[type=month][name]').forEach(el => {
     el.addEventListener('change', () => saveField(el.name, el.value));
   });
 

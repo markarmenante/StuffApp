@@ -308,7 +308,7 @@
         <div class="item-detail-rows">
           {% if row['number'] %}<div class="idr"><span>{{ row['number'] }}</span></div>{% endif %}
           <div class="idr">
-            {% if row['expiration'] %}<span><span class="lbl">Exp</span> {{ row['expiration'] }}</span>{% endif %}
+            {% if row['expiration'] %}{% set _e = row['expiration'] %}<span><span class="lbl">Exp</span> {{ '%s/%s'|format(_e[5:7], _e[:4]) }}</span>{% endif %}
             {% if row['billing_short'] %}<span>{{ row['billing_short'] }}</span>{% endif %}
             {% if row['owner'] %}<span>{{ row['owner'] }}</span>{% endif %}
           </div>
