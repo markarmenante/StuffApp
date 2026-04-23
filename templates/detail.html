@@ -56,9 +56,22 @@
   </label>
 </div>
 {% endmacro %}
-{% macro doccell(field, label) %}
+{% macro doccell(field, label, num_field='', num_label='', num_static='', share_with=None) %}
 <div class="dcell file-cell drop-zone" data-field="{{ field }}"
      data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+  {% if share_with is not none %}
+  <button type="button" class="doc-share-btn" title="Share via Messages / Mail"
+          data-fields="{{ ([field] + share_with)|join(',') }}"
+          onclick="shareDocFiles(event, this)" aria-label="Share">
+    <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+         stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 2 V17"/>
+      <path d="M6 8 L12 2 L18 8"/>
+      <path d="M5 13 H3 V25 H21 V13 H19"/>
+    </svg>
+  </button>
+  {% endif %}
   <span class="file-cell-name">{{ label }}</span>
   {% set f = r[field] if r else none %}
   {% if f %}
@@ -69,6 +82,11 @@
     {% else %}
       <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" style="font-size:11px" class="doc-link" onclick="event.stopPropagation()">📄 View</a>
     {% endif %}
+  {% endif %}
+  {% if num_field %}
+    <input class="doc-num-input" type="text" name="{{ num_field }}" value="{{ val(num_field) }}" placeholder="{{ num_label }}" onclick="event.stopPropagation()">
+  {% elif num_static %}
+    <span class="doc-num-static">{{ num_static }}</span>
   {% endif %}
   <label class="file-upload-lbl" onclick="event.stopPropagation()">
     <input type="file" name="{{ field }}" accept="image/*,application/pdf">
@@ -1111,37 +1129,54 @@
       </label>
     </div>
     <div class="watch-specs">
-      <div class="dgrid dg2">
-        {{ cell('phone','Phone') }}
-        {{ datecell('birth_date','Birth Date') }}
+      <div class="person-doc-group" data-group="ids">
+        <div class="dgrid person-id-top">
+          {{ cell('home_address','Home Address',rows=3) }}
+          {{ cell('phone','Phone') }}
+          {{ datecell('birth_date','Birth Date') }}
+          {{ cell('ssn','SSN') }}
+        </div>
+        <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
       </div>
-      <div class="dgrid dg2">
-        {{ cell('blood_type','Blood Type') }}
-        {{ cell('ssn','SSN') }}
-      </div>
-      <div class="dgrid dg1">{{ cell('primary_care_physician','Primary Care Physician') }}</div>
-      <div class="dgrid dg1">{{ cell('home_address','Home Address') }}</div>
-      <div class="dgrid dg2">
-        {{ cell('spouse','Spouse') }}
-        {{ cell('spouse_name_and_phone','Spouse Name & Phone') }}
+      <div class="person-doc-group" data-group="health" hidden>
+        <div class="dgrid dg1">{{ cell('blood_type','Blood Type') }}</div>
+        <div class="dgrid dg2">
+          {{ cell('primary_care_physician','Primary Care Physician',rows=4) }}
+          {{ cell('spouse_name_and_phone','Emergency Contact',rows=4) }}
+        </div>
+        <div class="med-table dcell">
+          <div class="med-row med-head">
+            <span>Medication</span><span>Dosage</span><span>Note</span>
+          </div>
+          {% for i in range(1, 8) %}
+          <div class="med-row">
+            <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
+            <input type="text" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
+            <input type="text" name="med_note_{{ i }}" value="{{ val('med_note_' ~ i) }}">
+          </div>
+          {% endfor %}
+          <span class="clabel">Medications</span>
+        </div>
+        <div class="dgrid dg1">{{ cell('health_notes','Notes',rows=2) }}</div>
       </div>
     </div>
   </div>
 
-  <div class="dgrid dg1">{{ cell('prescriptions','Prescriptions',rows=2) }}</div>
-  <div class="dgrid dg1">{{ cell('health_notes','Health Notes',rows=2) }}</div>
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="dgrid dg4 person-doc-group" data-group="ids">
-    {{ doccell('passport','Passport') }}
-    {{ doccell('license_obverse','License Front') }}
-    {{ doccell('license_reverse','License Back') }}
-    {{ doccell('global_entry','Global Entry') }}
+    {{ doccell('license_obverse','License Front', num_field='license_number', num_label='License Number', share_with=['license_reverse']) }}
+    {{ doccell('license_reverse','License Back', num_static='License Back') }}
+    {{ doccell('passport','Passport', num_field='passport_number', num_label='Passport Number', share_with=[]) }}
+    {{ doccell('global_entry','Global Entry', num_field='global_entry_number', num_label='Global Entry Number') }}
   </div>
-  <div class="dgrid dg4 person-doc-group" data-group="health" hidden>
-    {{ doccell('medicare','Medicare Card') }}
-    {{ doccell('health_card_obv','Health Card Front') }}
-    {{ doccell('health_card_rev','Health Card Back') }}
+  <div class="dgrid dg3 person-doc-group" data-group="health" hidden>
+    {{ doccell('medicare','Medicare Card', num_field='medicare_number', num_label='Medicare Number', share_with=[]) }}
+    {{ doccell('health_card_obv','Health Card Front', num_field='health_insurance_number', num_label='Health Insurance Number', share_with=['health_card_rev']) }}
+    {{ doccell('health_card_rev','Health Card Back', num_static='Health Card Back') }}
+  </div>
+  <div class="dgrid dg3 person-doc-group" data-group="health" hidden>
     {{ doccell('eye_prescription','Eye Prescription') }}
+    {{ doccell('other_health_1','Other Health 1') }}
+    {{ doccell('other_health_2','Other Health 2') }}
   </div>
 
   {% endif %}{# end category blocks #}
@@ -1819,6 +1854,57 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
     });
   }
 });
+
+// Share doc-cell file(s) via the OS share sheet (Messages, Mail, AirDrop on
+// iOS) — downloads them if the browser can't share files.
+async function shareDocFiles(ev, btn) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const fields = (btn.dataset.fields || '').split(',').filter(Boolean);
+  const form = document.getElementById('mainForm');
+  const urls = [];
+  for (const f of fields) {
+    const cell = form.querySelector(`.drop-zone[data-field="${f}"]`);
+    if (!cell) continue;
+    const img = cell.querySelector('a.doc-link img');
+    if (img && img.src) { urls.push(img.src); continue; }
+    const link = cell.querySelector('a.doc-link');
+    if (link && link.href) urls.push(link.href);
+  }
+  if (urls.length === 0) {
+    alert('Nothing to share — no files uploaded yet.');
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const files = [];
+    for (const url of urls) {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const name = url.split('/').pop() || 'file';
+      files.push(new File([blob], name, { type: blob.type || 'application/octet-stream' }));
+    }
+    if (navigator.canShare && navigator.canShare({ files })) {
+      try { await navigator.share({ files }); }
+      catch (err) { if (err.name !== 'AbortError') throw err; }
+    } else {
+      // Desktop fallback: trigger download for each file
+      files.forEach(f => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(f);
+        a.download = f.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      });
+    }
+  } catch (err) {
+    alert('Share failed: ' + (err.message || err));
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 // People: IDs / Health section pills
 document.querySelectorAll('.person-tab').forEach(btn => {

@@ -558,7 +558,11 @@ input[type="date"] { -webkit-appearance: none; }
 .recording-purchase .dcell select { text-align: center; }
 
 /* People: Name row with Health / IDs section pills */
-.person-brand-row { display: flex; align-items: center; gap: 10px; }
+.person-brand-row {
+  display: flex; align-items: center; gap: 10px;
+  /* leave room for the floating Prev/Next/Back overlay on the right */
+  padding-right: 180px;
+}
 .person-brand-row .brand-input { flex: 1 1 auto; min-width: 0; }
 .person-doc-tabs { display: flex; gap: 6px; flex-shrink: 0; }
 .person-tab {
@@ -571,6 +575,64 @@ input[type="date"] { -webkit-appearance: none; }
 .person-tab:hover { background: var(--cell-bg); }
 .person-tab.active { background: #111; color: #fff; border-color: #111; }
 .person-tab:focus { outline: none; }
+/* `display: grid` on .dgrid was beating the UA [hidden] rule */
+.person-doc-group[hidden] { display: none; }
+
+/* IDs panel: Home Address (3-line textarea) on the left spans the full
+   height of the right column which stacks Phone / Birth Date / SSN. */
+.dgrid.person-id-top {
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: auto;
+}
+.dgrid.person-id-top > .dcell:first-child { grid-row: 1 / span 3; }
+.dgrid.person-id-top > .dcell:first-child textarea { height: 100%; }
+
+/* Number input / static label that sits under a doc-cell image. */
+.doc-num-input {
+  font-family: var(--font); font-size: 11px; text-align: center;
+  border: none; outline: none; background: transparent;
+  color: var(--text); width: 100%; padding: 0;
+}
+.doc-num-input:focus { background: #fffde8; }
+.doc-num-input::placeholder { color: var(--text-label); }
+.doc-num-static { font-size: 11px; color: var(--text-label); }
+
+/* Share-via-OS button on shareable doc cells. The cell is already a flex
+   column, so absolute-position the button in the top-right corner. */
+.dcell.file-cell { position: relative; }
+.doc-share-btn {
+  position: absolute; top: 4px; right: 4px;
+  width: 24px; height: 24px; padding: 0;
+  border: none; border-radius: 4px;
+  background: transparent; color: var(--blue);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.doc-share-btn:hover { background: rgba(0, 122, 255, 0.1); }
+.doc-share-btn:focus { outline: none; }
+.doc-share-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Medications table inside the Health pill panel */
+.med-table { padding: 6px 10px 4px; position: relative; }
+.med-table .med-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 1.6fr;
+  align-items: stretch;
+}
+.med-table .med-row.med-head {
+  font-size: 10px; color: var(--text-label);
+  padding: 2px 2px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.med-table .med-row.med-head > span { padding: 0 4px; }
+.med-table .med-row:not(.med-head):nth-child(odd) { background: var(--cell-bg); }
+.med-table .med-row:not(.med-head) > input {
+  border: none; outline: none; background: transparent;
+  font-family: var(--font); font-size: 13px; color: var(--text);
+  padding: 4px 6px; width: 100%; border-right: 1px solid var(--border-light);
+}
+.med-table .med-row:not(.med-head) > input:last-child { border-right: none; }
+.med-table .med-row:not(.med-head) > input:focus { background: #fffde8; }
 
 /* Recordings: heart toggle for the Like field */
 .brand-row-with-like {

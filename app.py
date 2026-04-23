@@ -24,7 +24,16 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get('DATA_DIR', BASE_DIR)
 DATABASE = os.path.join(DATA_DIR, 'stuffapp.db')
 UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploads')
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'tif', 'tiff'}
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'tif', 'tiff', 'heic', 'heif'}
+
+# iPhones export photos as HEIC; browsers can't render it. Register the HEIF
+# opener so PIL can decode HEIC bytes, then convert to JPEG on upload.
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    HEIF_SUPPORTED = True
+except ImportError:
+    HEIF_SUPPORTED = False
 
 # ---------------------------------------------------------------------------
 # Category definitions
@@ -471,12 +480,22 @@ FIELDS = {
         {'name': 'image_text_9',          'label': 'Image Caption 9',        'type': 'text'},
         {'name': 'license_obverse',       'label': "License (Front)",        'type': 'file'},
         {'name': 'license_reverse',       'label': "License (Back)",         'type': 'file'},
+        {'name': 'license_number',        'label': 'License Number',         'type': 'text'},
         {'name': 'passport',              'label': 'Passport',               'type': 'file'},
+        {'name': 'passport_number',       'label': 'Passport Number',        'type': 'text'},
         {'name': 'medicare',              'label': 'Medicare Card',          'type': 'file'},
+        {'name': 'medicare_number',       'label': 'Medicare Number',        'type': 'text'},
         {'name': 'health_card_obv',       'label': 'Health Card (Front)',    'type': 'file'},
         {'name': 'health_card_rev',       'label': 'Health Card (Back)',     'type': 'file'},
+        {'name': 'health_insurance_number','label': 'Health Insurance Number','type': 'text'},
+        {'name': 'other_health_1',        'label': 'Other Health 1',         'type': 'file'},
+        {'name': 'other_health_2',        'label': 'Other Health 2',         'type': 'file'},
         {'name': 'global_entry',          'label': 'Global Entry',           'type': 'file'},
+        {'name': 'global_entry_number',   'label': 'Global Entry Number',    'type': 'text'},
         {'name': 'eye_prescription',      'label': 'Eye Prescription',       'type': 'file'},
+        *[{'name': f'med_name_{i}', 'label': f'Medication {i}', 'type': 'text'} for i in range(1, 8)],
+        *[{'name': f'med_dose_{i}', 'label': f'Dosage {i}',     'type': 'text'} for i in range(1, 8)],
+        *[{'name': f'med_note_{i}', 'label': f'Med Note {i}',   'type': 'text'} for i in range(1, 8)],
     ],
 }
 
@@ -532,6 +551,16 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN history_region TEXT',
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
+        'ALTER TABLE persons ADD COLUMN license_number TEXT',
+        'ALTER TABLE persons ADD COLUMN passport_number TEXT',
+        'ALTER TABLE persons ADD COLUMN global_entry_number TEXT',
+        'ALTER TABLE persons ADD COLUMN medicare_number TEXT',
+        'ALTER TABLE persons ADD COLUMN health_insurance_number TEXT',
+        'ALTER TABLE persons ADD COLUMN other_health_1 TEXT',
+        'ALTER TABLE persons ADD COLUMN other_health_2 TEXT',
+        *[f'ALTER TABLE persons ADD COLUMN med_name_{i} TEXT' for i in range(1, 8)],
+        *[f'ALTER TABLE persons ADD COLUMN med_dose_{i} TEXT' for i in range(1, 8)],
+        *[f'ALTER TABLE persons ADD COLUMN med_note_{i} TEXT' for i in range(1, 8)],
     ):
         try:
             db.execute(stmt)
@@ -586,16 +615,42 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+_HEIF_BRANDS = {b'heic', b'heix', b'hevc', b'heim', b'heis', b'hevx',
+                b'mif1', b'msf1', b'heif'}
+
+
+def _looks_like_heic(data):
+    """Detect HEIC/HEIF by ISO BMFF magic bytes regardless of file extension.
+    iPhone photos often arrive as .jpg but are actually HEIC."""
+    return len(data) >= 12 and data[4:8] == b'ftyp' and data[8:12] in _HEIF_BRANDS
+
+
 def save_upload(file_obj):
-    """Save an uploaded file and return the stored filename."""
+    """Save an uploaded file and return the stored filename.
+    HEIC/HEIF input is transcoded to JPEG so browsers can render it."""
     if not file_obj or file_obj.filename == '':
         return None
-    if allowed_file(file_obj.filename):
-        ext = file_obj.filename.rsplit('.', 1)[1].lower()
-        stored_name = f"{uuid.uuid4().hex}.{ext}"
-        file_obj.save(os.path.join(UPLOAD_FOLDER, stored_name))
-        return stored_name
-    return None
+    if not allowed_file(file_obj.filename):
+        return None
+
+    data = file_obj.read()
+    ext = file_obj.filename.rsplit('.', 1)[1].lower()
+
+    if _looks_like_heic(data) and HEIF_SUPPORTED:
+        from io import BytesIO
+        from PIL import Image
+        img = Image.open(BytesIO(data))
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        out = BytesIO()
+        img.save(out, format='JPEG', quality=90)
+        data = out.getvalue()
+        ext = 'jpg'
+
+    stored_name = f"{uuid.uuid4().hex}.{ext}"
+    with open(os.path.join(UPLOAD_FOLDER, stored_name), 'wb') as f:
+        f.write(data)
+    return stored_name
 
 
 def get_file_fields(category):
