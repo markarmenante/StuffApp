@@ -1739,9 +1739,39 @@ document.querySelectorAll('.coin-unit-input').forEach(inp => {
   toInp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { closeEditor(); e.preventDefault(); } });
 })();
 
-// Typeahead: visible dropdown of matches. Replaces an older ghost-text
-// approach that relied on ::after pseudo-elements on <input>, which the
-// CSS spec doesn't support on replaced elements.
+// Typeahead: visible dropdown of matches + inline grey ghost suffix
+// (on left-aligned inputs only). Tab / Right Arrow / Enter accepts the
+// best prefix match; arrow keys + click pick from the dropdown.
+function _escHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function _setupTaGhost(inp) {
+  const parent = inp.parentElement;
+  if (!parent) return null;
+  // Inline ghosts only line up against left-aligned text. Force left so the
+  // mirror's "typed | ghost" sequence overlays the input's typed portion
+  // exactly, even when the surrounding stylesheet centers the cell.
+  inp.style.textAlign = 'left';
+  const cs = getComputedStyle(inp);
+  if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+  const wrap = document.createElement('span');
+  wrap.style.cssText = 'position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;overflow:hidden;white-space:pre;z-index:0;';
+  wrap.style.font = cs.font;
+  wrap.style.lineHeight = cs.lineHeight;
+  wrap.style.padding = cs.padding;
+  wrap.style.letterSpacing = cs.letterSpacing;
+  const typed = document.createElement('span');
+  typed.style.visibility = 'hidden';
+  const ghost = document.createElement('span');
+  ghost.style.color = '#bbb';
+  wrap.appendChild(typed);
+  wrap.appendChild(ghost);
+  parent.appendChild(wrap);
+  inp.style.position = 'relative';
+  inp.style.zIndex = '1';
+  inp.style.background = 'transparent';
+  return { wrap, typed, ghost };
+}
 document.querySelectorAll('.ta-input').forEach(inp => {
   const opts = (inp.dataset.ta || '').split('||').filter(Boolean);
   if (!opts.length) return;
@@ -1749,19 +1779,37 @@ document.querySelectorAll('.ta-input').forEach(inp => {
   if (wrap && getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
   const menu = document.createElement('div');
   menu.className = 'ta-menu';
-  menu.style.cssText = 'position:absolute;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.12);z-index:1000;display:none;font-size:14px;';
+  menu.style.cssText = 'position:absolute;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.12);z-index:1000;display:none;font-size:14px;text-align:left;';
   wrap.appendChild(menu);
+  const ghostMirror = _setupTaGhost(inp);
   let activeIdx = -1;
   let items = [];
+  let prefixMatch = '';  // best startsWith match for the inline ghost
+  function updateGhost() {
+    if (!ghostMirror) return;
+    if (prefixMatch && prefixMatch.toLowerCase() !== inp.value.toLowerCase()) {
+      ghostMirror.typed.textContent = inp.value;
+      ghostMirror.ghost.textContent = prefixMatch.slice(inp.value.length);
+    } else {
+      ghostMirror.typed.textContent = '';
+      ghostMirror.ghost.textContent = '';
+    }
+  }
   function render(query) {
     const q = (query || '').trim().toLowerCase();
-    if (!q) { menu.style.display = 'none'; return; }
+    if (!q) {
+      menu.style.display = 'none';
+      prefixMatch = ''; updateGhost();
+      return;
+    }
     const matches = opts.filter(o => o.toLowerCase().includes(q)).slice(0, 20);
+    prefixMatch = opts.find(o => o.toLowerCase().startsWith(q) && o.toLowerCase() !== q) || '';
+    updateGhost();
     if (!matches.length || (matches.length === 1 && matches[0].toLowerCase() === q)) {
       menu.style.display = 'none'; return;
     }
     menu.innerHTML = matches.map(m =>
-      `<div class="ta-opt" style="padding:6px 10px;cursor:pointer;">${m.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</div>`
+      `<div class="ta-opt" style="padding:6px 10px;cursor:pointer;">${_escHtml(m)}</div>`
     ).join('');
     menu.style.display = 'block';
     activeIdx = -1;
@@ -1770,13 +1818,26 @@ document.querySelectorAll('.ta-input').forEach(inp => {
   function pick(val) {
     inp.value = val;
     menu.style.display = 'none';
+    prefixMatch = ''; updateGhost();
     inp.dispatchEvent(new Event('input', { bubbles: true }));
     inp.dispatchEvent(new Event('change', { bubbles: true }));
   }
   inp.addEventListener('input', () => render(inp.value));
   inp.addEventListener('focus', () => { if (inp.value) render(inp.value); });
-  inp.addEventListener('blur', () => setTimeout(() => { menu.style.display = 'none'; }, 150));
+  inp.addEventListener('blur', () => setTimeout(() => {
+    menu.style.display = 'none';
+    prefixMatch = ''; updateGhost();
+  }, 150));
   inp.addEventListener('keydown', e => {
+    // Tab / ArrowRight / Enter accept the inline ghost when caret is at end.
+    if ((e.key === 'Tab' || e.key === 'ArrowRight' || e.key === 'Enter')
+        && prefixMatch
+        && (activeIdx < 0)
+        && inp.selectionStart === inp.value.length) {
+      e.preventDefault();
+      pick(prefixMatch);
+      return;
+    }
     if (menu.style.display === 'none') return;
     if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); }
@@ -1784,8 +1845,11 @@ document.querySelectorAll('.ta-input').forEach(inp => {
       if (activeIdx >= 0) { e.preventDefault(); pick(items[activeIdx].textContent); }
       else if (items.length === 1) { e.preventDefault(); pick(items[0].textContent); }
       return;
-    } else if (e.key === 'Escape') { menu.style.display = 'none'; activeIdx = -1; return; }
-    else { return; }
+    } else if (e.key === 'Escape') {
+      menu.style.display = 'none'; activeIdx = -1;
+      prefixMatch = ''; updateGhost();
+      return;
+    } else { return; }
     items.forEach((it, i) => it.style.background = i === activeIdx ? '#e8e8e8' : '');
   });
   menu.addEventListener('mousedown', e => {
