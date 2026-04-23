@@ -1088,9 +1088,13 @@
        PERSONS
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'persons' %}
-  <div class="detail-brand-row">
+  <div class="detail-brand-row person-brand-row">
     <input type="text" name="name" value="{{ val('name') }}"
            class="brand-input" autocomplete="off">
+    <div class="person-doc-tabs">
+      <button type="button" class="person-tab active" data-tab="ids">IDs</button>
+      <button type="button" class="person-tab" data-tab="health">Health</button>
+    </div>
   </div>
 
   <div class="watch-body">
@@ -1127,22 +1131,17 @@
   <div class="dgrid dg1">{{ cell('prescriptions','Prescriptions',rows=2) }}</div>
   <div class="dgrid dg1">{{ cell('health_notes','Health Notes',rows=2) }}</div>
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg3">
+  <div class="dgrid dg4 person-doc-group" data-group="ids">
     {{ doccell('passport','Passport') }}
     {{ doccell('license_obverse','License Front') }}
     {{ doccell('license_reverse','License Back') }}
-  </div>
-  <div class="dgrid dg3">
-    {{ doccell('medicare','Medicare') }}
     {{ doccell('global_entry','Global Entry') }}
-    {{ doccell('eye_prescription','Eye Prescription') }}
   </div>
-  <div class="dgrid dg2">
+  <div class="dgrid dg4 person-doc-group" data-group="health" hidden>
+    {{ doccell('medicare','Medicare Card') }}
     {{ doccell('health_card_obv','Health Card Front') }}
     {{ doccell('health_card_rev','Health Card Back') }}
-  </div>
-  <div class="detail-bottom">
-    <div class="bottom-cell"><input type="text" name="owner" value="{{ val('owner') }}"><span class="blabel">Owner</span></div>
+    {{ doccell('eye_prescription','Eye Prescription') }}
   </div>
 
   {% endif %}{# end category blocks #}
@@ -1733,10 +1732,68 @@ function uploadViaInput(input, uploadUrl, field) {
     .catch(() => { if (zone) zone.style.opacity = ''; alert('Upload failed.'); });
 }
 
-// Drag-and-drop on .drop-zone panels
-document.querySelectorAll('.drop-zone').forEach(zone => {
+// Drag-and-drop + click-to-upload on .drop-zone panels
+function uploadFileToZone(zone, file) {
   const uploadUrl = zone.dataset.uploadUrl;
   const field = zone.dataset.field;
+  if (!uploadUrl || !file) return;
+  const isImg = file.type.startsWith('image/');
+  const isPdf = file.type === 'application/pdf';
+  const allowPdf = zone.classList.contains('file-cell');
+  if (!isImg && !(allowPdf && isPdf)) {
+    alert(allowPdf ? 'Please choose an image or PDF file.' : 'Please choose an image file.');
+    return;
+  }
+  zone.style.opacity = '0.5';
+  const fd = new FormData();
+  fd.append('image', file);
+  if (field) fd.append('field', field);
+  fetch(uploadUrl, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      zone.style.opacity = '';
+      if (!data.url) { alert('Upload failed: ' + (data.error || 'unknown')); return; }
+      const labelEl = zone.querySelector('label.file-upload-lbl');
+      if (allowPdf && isPdf) {
+        const oldImg = zone.querySelector('img');
+        if (oldImg) oldImg.closest('a.doc-link')?.remove();
+        let link = zone.querySelector('a.doc-link');
+        if (link) { link.href = data.url; link.textContent = '📄 View'; link.style.fontSize = '11px'; }
+        else {
+          link = document.createElement('a');
+          link.href = data.url; link.target = '_blank';
+          link.className = 'doc-link'; link.style.fontSize = '11px';
+          link.textContent = '📄 View';
+          link.addEventListener('click', ev => ev.stopPropagation());
+          zone.insertBefore(link, labelEl);
+        }
+      } else {
+        let img = zone.querySelector('img');
+        const placeholder = zone.querySelector('span:not(.panel-lbl):not(.file-cell-name)');
+        if (img) { img.src = data.url; }
+        else {
+          if (placeholder) placeholder.remove();
+          img = document.createElement('img');
+          img.src = data.url; img.alt = '';
+          if (zone.classList.contains('file-cell')) {
+            const wrap = document.createElement('a');
+            wrap.href = data.url; wrap.target = '_blank';
+            wrap.className = 'doc-link';
+            wrap.addEventListener('click', ev => ev.stopPropagation());
+            img.style.maxHeight = '50px';
+            wrap.appendChild(img);
+            zone.insertBefore(wrap, labelEl);
+          } else {
+            zone.insertBefore(img, zone.firstChild);
+          }
+        }
+      }
+    })
+    .catch(() => { zone.style.opacity = ''; alert('Upload failed.'); });
+}
+
+document.querySelectorAll('.drop-zone').forEach(zone => {
+  const uploadUrl = zone.dataset.uploadUrl;
   zone.style.cursor = 'pointer';
   zone.addEventListener('click', e => {
     if (e.target.closest('a, input, label, button')) return;
@@ -1749,60 +1806,30 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
   zone.addEventListener('drop', e => {
     e.preventDefault(); e.stopPropagation();
     zone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    const isImg = file && file.type.startsWith('image/');
-    const isPdf = file && file.type === 'application/pdf';
-    const allowPdf = zone.classList.contains('file-cell');
-    if (!file || (!isImg && !(allowPdf && isPdf))) {
-      alert(allowPdf ? 'Please drop an image or PDF file.' : 'Please drop an image file.');
-      return;
-    }
-    zone.style.opacity = '0.5';
-    const fd = new FormData();
-    fd.append('image', file);
-    if (field) fd.append('field', field);
-    fetch(uploadUrl, { method: 'POST', body: fd })
-      .then(r => r.json())
-      .then(data => {
-        zone.style.opacity = '';
-        if (!data.url) { alert('Upload failed: ' + (data.error || 'unknown')); return; }
-        const labelEl = zone.querySelector('label.file-upload-lbl');
-        if (allowPdf && isPdf) {
-          const oldImg = zone.querySelector('img');
-          if (oldImg) oldImg.closest('a.doc-link')?.remove();
-          let link = zone.querySelector('a.doc-link');
-          if (link) { link.href = data.url; link.textContent = '📄 View'; link.style.fontSize = '11px'; }
-          else {
-            link = document.createElement('a');
-            link.href = data.url; link.target = '_blank';
-            link.className = 'doc-link'; link.style.fontSize = '11px';
-            link.textContent = '📄 View';
-            link.addEventListener('click', ev => ev.stopPropagation());
-            zone.insertBefore(link, labelEl);
-          }
-        } else {
-          let img = zone.querySelector('img');
-          const placeholder = zone.querySelector('span:not(.panel-lbl):not(.file-cell-name)');
-          if (img) { img.src = data.url; }
-          else {
-            if (placeholder) placeholder.remove();
-            img = document.createElement('img');
-            img.src = data.url; img.alt = '';
-            if (zone.classList.contains('file-cell')) {
-              const wrap = document.createElement('a');
-              wrap.href = data.url; wrap.target = '_blank';
-              wrap.className = 'doc-link';
-              wrap.addEventListener('click', ev => ev.stopPropagation());
-              img.style.maxHeight = '50px';
-              wrap.appendChild(img);
-              zone.insertBefore(wrap, labelEl);
-            } else {
-              zone.insertBefore(img, zone.firstChild);
-            }
-          }
-        }
-      })
-      .catch(() => { zone.style.opacity = ''; alert('Upload failed.'); });
+    uploadFileToZone(zone, e.dataTransfer.files[0]);
+  });
+  // File-picker path: inputs without their own onchange handler (e.g. doccell)
+  // otherwise just sit with a selected file and never upload.
+  const input = zone.querySelector('input[type="file"]');
+  if (input && !input.hasAttribute('onchange')) {
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (file) uploadFileToZone(zone, file);
+      input.value = '';
+    });
+  }
+});
+
+// People: IDs / Health section pills
+document.querySelectorAll('.person-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.person-tab').forEach(b => {
+      b.classList.toggle('active', b === btn);
+    });
+    document.querySelectorAll('.person-doc-group').forEach(g => {
+      g.hidden = g.dataset.group !== tab;
+    });
   });
 });
 </script>

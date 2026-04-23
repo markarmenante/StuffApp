@@ -451,7 +451,6 @@ FIELDS = {
         {'name': 'primary_care_physician','label': 'Primary Care Physician', 'type': 'text'},
         {'name': 'prescriptions',         'label': 'Prescriptions',          'type': 'textarea'},
         {'name': 'health_notes',          'label': 'Health Notes',           'type': 'textarea'},
-        {'name': 'owner',                 'label': 'Owner',                  'type': 'text'},
         {'name': 'notes',                 'label': 'Notes',                  'type': 'textarea'},
         {'name': 'text_1',                'label': 'Text 1',                 'type': 'text'},
         {'name': 'text_2',                'label': 'Text 2',                 'type': 'text'},
@@ -495,7 +494,7 @@ LIST_EXTRA_FIELDS = {
     'rifles':       ['caliber', 'serial_number', 'vendor', 'price', 'property'],
     'credit_cards': ['number', 'expiration', 'billing_short', 'description', 'owner'],
     'properties':   ['type', 'address', 'short_name', 'year_built', 'llc', 'price', 'status'],
-    'persons':      ['phone', 'birth_date', 'blood_type', 'spouse', 'owner'],
+    'persons':      ['phone', 'birth_date', 'blood_type', 'spouse'],
 }
 
 # ---------------------------------------------------------------------------

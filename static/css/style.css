@@ -557,6 +557,21 @@ input[type="date"] { -webkit-appearance: none; }
 .recording-purchase .dcell input,
 .recording-purchase .dcell select { text-align: center; }
 
+/* People: Name row with Health / IDs section pills */
+.person-brand-row { display: flex; align-items: center; gap: 10px; }
+.person-brand-row .brand-input { flex: 1 1 auto; min-width: 0; }
+.person-doc-tabs { display: flex; gap: 6px; flex-shrink: 0; }
+.person-tab {
+  font-family: var(--font); font-size: 12px; line-height: 1;
+  padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff; color: var(--text-secondary);
+  cursor: pointer;
+}
+.person-tab:hover { background: var(--cell-bg); }
+.person-tab.active { background: #111; color: #fff; border-color: #111; }
+.person-tab:focus { outline: none; }
+
 /* Recordings: heart toggle for the Like field */
 .brand-row-with-like {
   display: flex; align-items: center; gap: 10px;
