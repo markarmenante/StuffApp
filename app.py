@@ -706,9 +706,13 @@ def get_file_fields(category):
 EXCLUDED_STATUSES = ('Own', 'Sold', 'Gifted', 'Own')  # dot filter excludes these
 
 CATEGORY_FILTERS = {
+    'watches': {
+        'ordered': ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
+    },
     'coins': {
         'ca_ancient': ("date_1 < 1000 AND property_name IN ('Carp','Carpinteria')", []),
         'ny_ancient': ("date_1 < 1000 AND property_name = 'NYC'", []),
+        'ordered':    ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
     },
     'audio': {
         'carp':   ("property = 'Carpinteria'", []),
