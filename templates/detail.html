@@ -473,7 +473,7 @@
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
-  <div class="watch-body">
+  <div class="watch-body cam-body">
     <div class="watch-photo drop-zone" data-field="image"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image'] and r['image']|is_image %}

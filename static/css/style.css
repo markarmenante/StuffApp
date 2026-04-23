@@ -962,36 +962,32 @@ input[type="date"] { -webkit-appearance: none; }
   /* Bottom action row: wrap into 2-up. */
   .detail-bottom { grid-template-columns: repeat(2, 1fr); gap: 6px; }
 
-  /* Recording detail: on phones the 210px side photo crushed the radio
-     panel and spec cells. Stack photo above specs instead. */
-  .rec-body { flex-direction: column; }
-  .rec-body .watch-photo {
+  /* Detail pages share the .watch-body layout (photo left, specs right).
+     On phones that 210px side photo crushed the spec column so labels
+     like "Jewels", "Reserve", "Vendor", and "Tags/Plate" overlapped
+     their inputs. Stack photo above specs for every category at once. */
+  .watch-body { flex-direction: column; }
+  .watch-body .watch-photo {
     width: 100%;
     border-right: none;
     border-bottom: 1px solid var(--border);
     min-height: 0;
     padding: 10px;
   }
-  .rec-body .watch-photo img { max-width: 100%; max-height: 280px; }
-  /* Radio panel breathes with the full width. */
+  .watch-body .watch-photo img { max-width: 100%; max-height: 280px; }
+  /* Recording radio panel breathes with the full width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
   /* Keep the two post-radio meta/purchase rows two-up on mobile so
      Genre/Genre 2, Year/Date, and Price/Vendor pair cleanly. */
   .watch-specs .dgrid.dg3.recording-meta,
   .watch-specs .dgrid.dg3.recording-purchase { grid-template-columns: 1fr 1fr; }
-
-  /* Watch detail: same side-crush problem. The right-side spec column
-     was clipping labels like "Jewels" / "Reserve" against the edge.
-     Stack the dial photo above the spec cells on narrow viewports. */
-  .watch-body-watch { flex-direction: column; }
-  .watch-body-watch .watch-photo {
-    width: 100%;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    min-height: 0;
-    padding: 10px;
+  /* Compatible Lenses grid tightens so brand/aperture/length/description
+     all fit on one row instead of clipping against the right edge. */
+  .cam-lens-todo-list a {
+    grid-template-columns: minmax(80px, 1fr) 50px 50px minmax(0, 1.4fr);
+    column-gap: 8px;
+    font-size: 12px;
   }
-  .watch-body-watch .watch-photo img { max-width: 100%; max-height: 280px; }
 
   /* 16px inputs so iOS Safari doesn't auto-zoom on focus. Cell height
      stays at the desktop default (min-height: 22px on .dcell) — the
