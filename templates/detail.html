@@ -1739,29 +1739,59 @@ document.querySelectorAll('.coin-unit-input').forEach(inp => {
   toInp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { closeEditor(); e.preventDefault(); } });
 })();
 
-// Typeahead: inline fill with tab to accept
+// Typeahead: visible dropdown of matches. Replaces an older ghost-text
+// approach that relied on ::after pseudo-elements on <input>, which the
+// CSS spec doesn't support on replaced elements.
 document.querySelectorAll('.ta-input').forEach(inp => {
   const opts = (inp.dataset.ta || '').split('||').filter(Boolean);
   if (!opts.length) return;
-  let ghost = '';
-  inp.addEventListener('input', () => {
-    const v = inp.value;
-    if (!v) { ghost = ''; inp.removeAttribute('data-ghost'); return; }
-    const match = opts.find(o => o.toLowerCase().startsWith(v.toLowerCase()) && o.toLowerCase() !== v.toLowerCase());
-    if (match) {
-      ghost = match;
-      inp.setAttribute('data-ghost', match.slice(v.length));
-    } else { ghost = ''; inp.removeAttribute('data-ghost'); }
-  });
-  inp.addEventListener('keydown', e => {
-    if ((e.key === 'Tab' || e.key === 'ArrowRight') && ghost && inp.selectionStart === inp.value.length) {
-      e.preventDefault();
-      inp.value = ghost;
-      ghost = '';
-      inp.removeAttribute('data-ghost');
+  const wrap = inp.closest('.ta-wrap') || inp.parentElement;
+  if (wrap && getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+  const menu = document.createElement('div');
+  menu.className = 'ta-menu';
+  menu.style.cssText = 'position:absolute;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.12);z-index:1000;display:none;font-size:14px;';
+  wrap.appendChild(menu);
+  let activeIdx = -1;
+  let items = [];
+  function render(query) {
+    const q = (query || '').trim().toLowerCase();
+    if (!q) { menu.style.display = 'none'; return; }
+    const matches = opts.filter(o => o.toLowerCase().includes(q)).slice(0, 20);
+    if (!matches.length || (matches.length === 1 && matches[0].toLowerCase() === q)) {
+      menu.style.display = 'none'; return;
     }
+    menu.innerHTML = matches.map(m =>
+      `<div class="ta-opt" style="padding:6px 10px;cursor:pointer;">${m.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</div>`
+    ).join('');
+    menu.style.display = 'block';
+    activeIdx = -1;
+    items = menu.querySelectorAll('.ta-opt');
+  }
+  function pick(val) {
+    inp.value = val;
+    menu.style.display = 'none';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  inp.addEventListener('input', () => render(inp.value));
+  inp.addEventListener('focus', () => { if (inp.value) render(inp.value); });
+  inp.addEventListener('blur', () => setTimeout(() => { menu.style.display = 'none'; }, 150));
+  inp.addEventListener('keydown', e => {
+    if (menu.style.display === 'none') return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); }
+    else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (activeIdx >= 0) { e.preventDefault(); pick(items[activeIdx].textContent); }
+      else if (items.length === 1) { e.preventDefault(); pick(items[0].textContent); }
+      return;
+    } else if (e.key === 'Escape') { menu.style.display = 'none'; activeIdx = -1; return; }
+    else { return; }
+    items.forEach((it, i) => it.style.background = i === activeIdx ? '#e8e8e8' : '');
   });
-  inp.addEventListener('blur', () => { ghost = ''; inp.removeAttribute('data-ghost'); });
+  menu.addEventListener('mousedown', e => {
+    const opt = e.target.closest('.ta-opt');
+    if (opt) { e.preventDefault(); pick(opt.textContent); }
+  });
 });
 
 // Click-to-upload helper for watch-photo-style labels (mirrors drop-zone behavior)
