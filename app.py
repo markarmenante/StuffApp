@@ -567,6 +567,52 @@ def init_db():
         except sqlite3.OperationalError:
             pass
     db.commit()
+    _backfill_meds_from_prescriptions(db)
+
+
+def _parse_prescription_lines(text):
+    """Split free-text prescriptions into [(name, dose), ...].
+    Heuristic: dose starts at the first whitespace-separated token containing
+    a digit; everything before is the name. Header lines like 'Medications:'
+    are skipped."""
+    out = []
+    for raw in (text or '').splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.endswith(':') and not any(c.isdigit() for c in line):
+            continue
+        tokens = line.split()
+        split_at = next((i for i, t in enumerate(tokens) if any(c.isdigit() for c in t)), None)
+        if not split_at:
+            out.append((line, ''))
+        else:
+            out.append((' '.join(tokens[:split_at]), ' '.join(tokens[split_at:])))
+    return out
+
+
+def _backfill_meds_from_prescriptions(db):
+    """One-time: copy free-text prescriptions into the structured med_* slots.
+    Skips a person if any med_name_N is already populated, so re-running is
+    safe and won't clobber edits."""
+    rows = db.execute(
+        "SELECT id, prescriptions, "
+        + ", ".join(f"med_name_{i}" for i in range(1, 8))
+        + " FROM persons WHERE prescriptions IS NOT NULL AND prescriptions != ''"
+    ).fetchall()
+    for row in rows:
+        if any((row[f'med_name_{i}'] or '').strip() for i in range(1, 8)):
+            continue  # already migrated or hand-edited
+        meds = _parse_prescription_lines(row['prescriptions'])[:7]
+        if not meds:
+            continue
+        cols, vals = [], []
+        for i, (name, dose) in enumerate(meds, start=1):
+            cols.append(f'med_name_{i} = ?'); vals.append(name)
+            cols.append(f'med_dose_{i} = ?'); vals.append(dose)
+        db.execute(f"UPDATE persons SET {', '.join(cols)} WHERE id = ?",
+                   vals + [row['id']])
+    db.commit()
 
 
 def get_counts():
