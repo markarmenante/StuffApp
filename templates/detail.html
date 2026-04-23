@@ -140,7 +140,7 @@
   </div>
 
   <!-- Photo + right specs -->
-  <div class="watch-body">
+  <div class="watch-body watch-body-watch">
     <div class="watch-photo drop-zone" data-field="image_obv"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_obv'] and r['image_obv']|is_image %}
@@ -331,6 +331,25 @@
     {{ tacell('mint','Mint', ta.get('mint', [])) }}
   </div>
 
+  <!-- Coin images (obverse + reverse) — pinned near the top so the
+       visual is the first thing you see on the detail page. -->
+  <div class="coin-imgs">
+    <div class="coin-img-panel drop-zone" data-field="image_1"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image_1'] and r['image_1']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="Obverse">
+      {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
+      <span class="coin-img-lbl">Obverse</span>
+    </div>
+    <div class="coin-img-panel drop-zone" data-field="image_2"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image_2'] and r['image_2']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="Reverse">
+      {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
+      <span class="coin-img-lbl">Reverse</span>
+    </div>
+  </div>
+
   <!-- AI History panel (collapsed unless content present) -->
   <div class="coin-history-panel{% if not (r and (r['history_region'] or r['history_authority'])) %} is-empty{% endif %}"
        id="coinHistoryPanel"
@@ -366,23 +385,6 @@
   <!-- Obv/Rev -->
   <div class="dgrid dg1">{{ cell('obv_rev','') }}</div>
 
-  <!-- Coin images -->
-  <div class="coin-imgs">
-    <div class="coin-img-panel drop-zone" data-field="image_1"
-         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
-      {% if r and r['image_1'] and r['image_1']|is_image %}
-        <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="Obverse">
-      {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
-      <span class="coin-img-lbl">Obverse</span>
-    </div>
-    <div class="coin-img-panel drop-zone" data-field="image_2"
-         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
-      {% if r and r['image_2'] and r['image_2']|is_image %}
-        <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="Reverse">
-      {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
-      <span class="coin-img-lbl">Reverse</span>
-    </div>
-  </div>
   {% if coin_age_val %}
   <div class="coin-age-row">{{ '{:,}'.format(coin_age_val) }} yrs</div>
   {% endif %}

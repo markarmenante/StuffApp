@@ -980,6 +980,19 @@ input[type="date"] { -webkit-appearance: none; }
   .watch-specs .dgrid.dg3.recording-meta,
   .watch-specs .dgrid.dg3.recording-purchase { grid-template-columns: 1fr 1fr; }
 
+  /* Watch detail: same side-crush problem. The right-side spec column
+     was clipping labels like "Jewels" / "Reserve" against the edge.
+     Stack the dial photo above the spec cells on narrow viewports. */
+  .watch-body-watch { flex-direction: column; }
+  .watch-body-watch .watch-photo {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    min-height: 0;
+    padding: 10px;
+  }
+  .watch-body-watch .watch-photo img { max-width: 100%; max-height: 280px; }
+
   /* 16px inputs so iOS Safari doesn't auto-zoom on focus. Cell height
      stays at the desktop default (min-height: 22px on .dcell) — the
      previous 44px blanket rule inflated every row on narrow widths. */
