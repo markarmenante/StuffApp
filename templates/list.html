@@ -242,9 +242,9 @@
         <div class="item-line1">
           <span class="item-brand">{{ row['artist'] or '—' }}</span>
         </div>
-        <div class="item-detail-rows">
-          {% if row['title'] %}<div class="idr"><span>{{ row['title'] }}</span></div>{% endif %}
-          <div class="idr">
+        <div class="item-detail-rows rec-detail">
+          {% if row['title'] %}<div class="idr idr-rec-title"><span>{{ row['title'] }}</span></div>{% endif %}
+          <div class="idr idr-rec-format">
             {% if _fmt %}<span>{{ _fmt }}</span>{% endif %}
             {% if row['speed'] %}<span>{{ row['speed'] }}</span>{% endif %}
             {% if row['sound'] %}<span>{{ row['sound'] }}</span>{% endif %}

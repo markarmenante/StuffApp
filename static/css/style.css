@@ -223,6 +223,16 @@ a { color: var(--blue); text-decoration: none; }
 .topic-add-link:hover { background: #eaf2ff; text-decoration: none; }
 
 .item-detail-rows { display: flex; flex-direction: column; gap: 0; margin-top: 3px; }
+
+/* Recordings: title hugs the artist, italic and indented; then a gap
+   before the format line separates metadata from the record title. */
+.rec-detail { margin-top: 0; }
+.idr-rec-title { margin-top: -2px; }
+.idr-rec-title span {
+  font-style: italic;
+  padding-left: 16px;
+}
+.idr-rec-format { margin-top: 8px; }
 .idr { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 .idr span { font-size: 17px; color: var(--text-secondary); white-space: nowrap; }
 .idr .lbl { font-size: 15px; color: var(--text-label); }
