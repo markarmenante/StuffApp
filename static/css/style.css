@@ -962,6 +962,24 @@ input[type="date"] { -webkit-appearance: none; }
   /* Bottom action row: wrap into 2-up. */
   .detail-bottom { grid-template-columns: repeat(2, 1fr); gap: 6px; }
 
+  /* Recording detail: on phones the 210px side photo crushed the radio
+     panel and spec cells. Stack photo above specs instead. */
+  .rec-body { flex-direction: column; }
+  .rec-body .watch-photo {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    min-height: 0;
+    padding: 10px;
+  }
+  .rec-body .watch-photo img { max-width: 100%; max-height: 280px; }
+  /* Radio panel breathes with the full width. */
+  .rec-body .rec-radio-row { gap: 10px 16px; }
+  /* Keep the two post-radio meta/purchase rows two-up on mobile so
+     Genre/Genre 2, Year/Date, and Price/Vendor pair cleanly. */
+  .watch-specs .dgrid.dg3.recording-meta,
+  .watch-specs .dgrid.dg3.recording-purchase { grid-template-columns: 1fr 1fr; }
+
   /* 16px inputs so iOS Safari doesn't auto-zoom on focus. Cell height
      stays at the desktop default (min-height: 22px on .dcell) — the
      previous 44px blanket rule inflated every row on narrow widths. */
