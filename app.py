@@ -1674,13 +1674,27 @@ def watch_fetch_value(record_id):
         detail = str(e) or e.__class__.__name__
         return jsonify({'error': f'Valuation failed: {detail}'}), 500
     now = datetime.utcnow().isoformat()
+    # If the user has already entered a value, preserve it — only refresh
+    # the supporting research (results + timestamp). The response still
+    # carries the freshly-fetched number so the UI can display it inside
+    # the Results panel, but the stored Value field is left alone.
+    user_value = watch['value']
+    user_set = user_value is not None and (not isinstance(user_value, (int, float)) or user_value > 0)
+    if user_set:
+        db.execute(
+            "UPDATE watches SET results = ?, value_searched_at = ?, "
+            "updated_at = ? WHERE id = ?",
+            (data['results'], now, now, record_id),
+        )
+        db.commit()
+        return jsonify({**data, 'value': user_value, 'value_overridden': True, 'searched_at': now})
     db.execute(
         "UPDATE watches SET value = ?, results = ?, value_searched_at = ?, "
         "updated_at = ? WHERE id = ?",
         (data['value'], data['results'], now, now, record_id),
     )
     db.commit()
-    return jsonify({**data, 'searched_at': now})
+    return jsonify({**data, 'value_overridden': False, 'searched_at': now})
 
 
 # Fields the lookup is allowed to auto-fill. Serial numbers, purchase

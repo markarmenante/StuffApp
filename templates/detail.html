@@ -1448,7 +1448,7 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed');
     const valInput = document.querySelector('input[name="value"]');
-    if (valInput) {
+    if (valInput && !data.value_overridden) {
       valInput.value = data.value != null
         ? '$' + Number(data.value).toLocaleString('en-US', {maximumFractionDigits: 0})
         : '';
