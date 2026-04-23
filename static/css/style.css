@@ -230,7 +230,7 @@ a { color: var(--blue); text-decoration: none; }
 .idr-rec-title { margin-top: -2px; }
 .idr-rec-title span {
   font-style: italic;
-  font-size: 19px;
+  font-size: 21px;
   padding-left: 8px;
 }
 .idr-rec-format { margin-top: 8px; }
