@@ -235,8 +235,9 @@
       {% elif category == 'recordings' %}
         {%- set _vinyl_types = ('LP', '45', '78', 'EP') -%}
         {%- set _tape_types  = ('Cassette', '8-Track', 'Reel') -%}
+        {%- set _is_tape = row['type'] in _tape_types -%}
         {%- set _fmt = 'Vinyl' if row['type'] in _vinyl_types
-                        else ('Tape' if row['type'] in _tape_types
+                        else ('Tape' if _is_tape
                               else (row['type'] or '')) -%}
         <div class="item-line1">
           <span class="item-brand">{{ row['artist'] or '—' }}</span>
@@ -247,13 +248,15 @@
             {% if _fmt %}<span>{{ _fmt }}</span>{% endif %}
             {% if row['speed'] %}<span>{{ row['speed'] }}</span>{% endif %}
             {% if row['sound'] %}<span>{{ row['sound'] }}</span>{% endif %}
-            {% if row['other'] %}<span>{{ row['other'] }}</span>{% endif %}
-            {% if row['year_recorded'] %}<span>{{ row['year_recorded'] }}</span>{% endif %}
+            {# `other` holds tape EQ (CCIR/NAB) for reels and pressing
+               weight (140g/180g) for vinyl. Only the tape variant is
+               useful in the list. #}
+            {% if _is_tape and row['other'] %}<span>{{ row['other'] }}</span>{% endif %}
           </div>
-          {% if row['property'] or row['genre'] %}
+          {% if row['property'] or row['genre'] or row['year_recorded'] %}
           <div class="idr">
             <span>
-              {{ row['property'] }}{% if row['property'] and row['genre'] %} {% endif %}{{ row['genre'] }}
+              {{ row['property'] }}{% if row['property'] and row['genre'] %} {% endif %}{{ row['genre'] }}{% if (row['property'] or row['genre']) and row['year_recorded'] %} {% endif %}{{ row['year_recorded'] }}
             </span>
           </div>
           {% endif %}
