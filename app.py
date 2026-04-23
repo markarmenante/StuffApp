@@ -1331,8 +1331,16 @@ def new_record(category):
         db.execute(f"INSERT INTO {CATEGORIES[category]['table']} ({cols}) VALUES ({placeholders})",
                    list(data.values()))
         db.commit()
+        detail_url = url_for('detail_view', category=category, record_id=record_id)
+        save_url = url_for('save_field', category=category, record_id=record_id)
+        # AJAX path (used by autosave-on-/new flow): return JSON so the
+        # client can flip into save_field mode without a page reload.
+        if request.headers.get('Accept', '').startswith('application/json') \
+                or request.headers.get('X-Requested-With') == 'fetch':
+            return jsonify({'ok': True, 'id': record_id,
+                            'detail_url': detail_url, 'save_url': save_url})
         flash(f"Record created successfully.", 'success')
-        return redirect(url_for('detail_view', category=category, record_id=record_id))
+        return redirect(detail_url)
 
     # GET - blank form
     return render_template('detail.html',

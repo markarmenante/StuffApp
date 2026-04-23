@@ -1547,8 +1547,11 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
 // ── Auto-save on field change/blur ──────────────────────────────────────────
 (function () {
-  {% if not is_new %}
-  const SAVE_URL = "{{ url_for('save_field', category=category, record_id=r['id']) }}";
+  {% set _autosave_on_new = category == 'credit_cards' %}
+  {% if not is_new or _autosave_on_new %}
+  let SAVE_URL = "{% if not is_new %}{{ url_for('save_field', category=category, record_id=r['id']) }}{% endif %}";
+  let recordExists = {{ 'true' if not is_new else 'false' }};
+  let creatingPromise = null;
 
   // Toast indicator
   const toast = document.createElement('div');
@@ -1570,18 +1573,58 @@ document.querySelectorAll('.comp-item').forEach(item => {
     toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 1400);
   }
 
-  function saveField(name, value) {
-    fetch(SAVE_URL, {
+  const form = document.getElementById('mainForm');
+
+  function ensureRecord() {
+    if (recordExists) return Promise.resolve();
+    if (creatingPromise) return creatingPromise;
+    const fd = new FormData(form);
+    creatingPromise = fetch(form.action, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ field: name, value: value })
+      headers: { 'Accept': 'application/json' },
+      body: fd
     })
-    .then(r => r.json())
-    .then(d => { if (d.ok) showToast(); })
-    .catch(err => console.warn('Auto-save failed:', err));
+      .then(r => r.json())
+      .then(d => {
+        if (!d || !d.ok) throw new Error('Create failed');
+        recordExists = true;
+        SAVE_URL = d.save_url;
+        // URL bar swaps to the detail URL — back button still goes home.
+        window.history.replaceState({}, '', d.detail_url);
+        // Future file uploads need a real record_id; rewrite form action
+        // and any per-field upload URLs (data-upload-url on .drop-zone).
+        form.action = d.detail_url;
+        form.querySelectorAll('.drop-zone').forEach(zone => {
+          if (!zone.dataset.uploadUrl) zone.dataset.uploadUrl = d.detail_url + '/upload-image';
+        });
+        form.querySelectorAll('input[type=file][onchange]').forEach(inp => {
+          // The inline onchange="uploadViaInput(this, '', 'image_obv')" needs
+          // its empty URL backfilled. Re-bind by replacing onchange.
+          const field = inp.name;
+          const url = d.detail_url + '/upload-image';
+          inp.setAttribute('onchange',
+            `uploadViaInput(this, '${url}', '${field}')`);
+        });
+      })
+      .catch(err => {
+        creatingPromise = null;
+        console.warn('Create failed:', err);
+        throw err;
+      });
+    return creatingPromise;
   }
 
-  const form = document.getElementById('mainForm');
+  function saveField(name, value) {
+    return ensureRecord().then(() => {
+      return fetch(SAVE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field: name, value: value })
+      })
+        .then(r => r.json())
+        .then(d => { if (d.ok) showToast(); });
+    }).catch(err => console.warn('Auto-save failed:', err));
+  }
 
   // Text / textarea — save on blur
   form.querySelectorAll('input[name]:not([type=file]):not([type=radio]):not([type=checkbox]):not([type=date]), textarea[name]').forEach(el => {
@@ -2024,7 +2067,8 @@ function previewInZone(zone, file) {
 }
 
 document.querySelectorAll('.drop-zone').forEach(zone => {
-  const uploadUrl = zone.dataset.uploadUrl;
+  // Read uploadUrl fresh inside each handler — credit_cards/new can switch
+  // from "no URL" to "real URL" mid-session once the record is created.
   zone.style.cursor = 'pointer';
   zone.addEventListener('click', e => {
     if (e.target.closest('a, input, label, button')) return;
@@ -2038,7 +2082,7 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
     zone.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
     if (!file) return;
-    if (uploadUrl) {
+    if (zone.dataset.uploadUrl) {
       uploadFileToZone(zone, file);
     } else {
       // New record: stash file in the form's <input type="file"> so it submits with POST.
@@ -2060,7 +2104,7 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
     input.addEventListener('change', () => {
       const file = input.files && input.files[0];
       if (!file) return;
-      if (uploadUrl) {
+      if (zone.dataset.uploadUrl) {
         uploadFileToZone(zone, file);
         input.value = '';
       } else {
