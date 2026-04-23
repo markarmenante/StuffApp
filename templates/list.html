@@ -346,15 +346,11 @@
         <div class="item-line1">
           <span class="item-brand">{{ row['name'] or '—' }}</span>
         </div>
+        {% if row['home_address'] %}
         <div class="item-detail-rows">
-          {% if row['phone'] %}<div class="idr"><span>{{ row['phone'] }}</span></div>{% endif %}
-          {% if row['home_address'] %}<div class="idr"><span>{{ row['home_address'] }}</span></div>{% endif %}
-          <div class="idr">
-            {% if row['birth_date'] %}<span><span class="lbl">DOB</span> {{ row['birth_date'] }}</span>{% endif %}
-            {% if row['blood_type'] %}<span><span class="lbl">Blood</span> {{ row['blood_type'] }}</span>{% endif %}
-            {% if row['spouse'] %}<span><span class="lbl">Spouse</span> {{ row['spouse'] }}</span>{% endif %}
-          </div>
+          <div class="idr person-addr-block"><span>{{ row['home_address'] }}</span></div>
         </div>
+        {% endif %}
 
       {# ── FALLBACK ── #}
       {% else %}

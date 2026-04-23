@@ -239,6 +239,17 @@ a { color: var(--blue); text-decoration: none; }
 .idr { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 .idr span { font-size: 17px; color: var(--text-secondary); white-space: nowrap; }
 .idr .lbl { font-size: 15px; color: var(--text-label); }
+/* People list: address as a 3-line block. Honours newlines from the
+   stored field; reserves 3 lines of vertical space even for shorter
+   addresses so rows stay uniform. */
+.idr.person-addr-block { display: block; }
+.idr.person-addr-block > span {
+  display: block;
+  white-space: pre-line;
+  min-height: calc(3em * 1.25);
+  line-height: 1.25;
+}
+
 .idr.wifi-row { align-items: center; gap: 10px; }
 .idr.wifi-row .wifi-icon {
   display: inline-flex;
