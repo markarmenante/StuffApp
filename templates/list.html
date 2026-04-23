@@ -93,13 +93,15 @@
 
     <!-- Thumbnail -->
     <div class="item-thumb"
-         data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}">
+         data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
+         title="Drop or click to upload an image">
       {% set img = row[cat_info.image_field] if cat_info.image_field else none %}
       {% if img and img|is_image %}
         <img src="{{ url_for('uploaded_file', filename=img) }}" alt="" loading="lazy">
       {% else %}
         <span class="no-img">{{ cat_info.icon }}</span>
       {% endif %}
+      <input type="file" accept="image/*" class="thumb-file-input" style="display:none">
     </div>
 
     <!-- Body -->
@@ -437,13 +439,30 @@
     var thumb = row.querySelector('.item-thumb[data-upload-url]');
     if (!thumb) return;
     var uploadUrl = thumb.dataset.uploadUrl;
-    var fileInput = row.querySelector('.row-upload-btn input[type=file]');
+    var rowFileBtn = row.querySelector('.row-upload-btn input[type=file]');
+    var thumbFileInput = thumb.querySelector('input.thumb-file-input');
 
-    // Click row -> navigate, but not if clicking the upload button
+    // Click row -> navigate, but not if clicking the upload button or thumb
     row.addEventListener('click', function(e) {
-      if (e.target.closest('.row-upload-btn')) return;
+      if (e.target.closest('.row-upload-btn, .item-thumb')) return;
       window.location = row.dataset.href;
     });
+
+    // Click thumb -> open the file picker (don't navigate)
+    if (thumbFileInput) {
+      thumb.addEventListener('click', function(e) {
+        if (e.target.closest('input')) return;
+        e.stopPropagation();
+        thumbFileInput.click();
+      });
+      thumbFileInput.addEventListener('click', function(e) { e.stopPropagation(); });
+      thumbFileInput.addEventListener('change', function() {
+        if (thumbFileInput.files[0]) {
+          uploadFile(thumbFileInput.files[0], uploadUrl, thumb);
+          thumbFileInput.value = '';
+        }
+      });
+    }
 
     // Drag and drop
     row.addEventListener('dragenter', function(e) { e.preventDefault(); e.stopPropagation(); row.classList.add('drag-over'); });
@@ -455,11 +474,11 @@
       uploadFile(e.dataTransfer.files[0], uploadUrl, thumb);
     });
 
-    // Click upload button
-    if (!fileInput) return;
-    fileInput.addEventListener('click', function(e) { e.stopPropagation(); });
-    fileInput.addEventListener('change', function() {
-      if (fileInput.files[0]) uploadFile(fileInput.files[0], uploadUrl, thumb);
+    // Legacy explicit upload button (kept for layouts that opt into it)
+    if (!rowFileBtn) return;
+    rowFileBtn.addEventListener('click', function(e) { e.stopPropagation(); });
+    rowFileBtn.addEventListener('change', function() {
+      if (rowFileBtn.files[0]) uploadFile(rowFileBtn.files[0], uploadUrl, thumb);
     });
   });
 })();
