@@ -489,19 +489,21 @@
     <div class="watch-specs">
       <div class="dgrid dg2 cam-type-row">
         <div class="dcell" id="camType">
-          <div class="radio-group">
-            <label class="radio-opt"><input type="radio" name="digital_film" value="Digital" {{ 'checked' if val('digital_film')=='Digital' }}> Digital</label>
-            <label class="radio-opt"><input type="radio" name="digital_film" value="Film"    {{ 'checked' if val('digital_film')=='Film'    }}> Film</label>
-          </div>
+          <select name="digital_film">
+            <option value=""></option>
+            <option value="Digital" {{ 'selected' if val('digital_film')=='Digital' }}>Digital</option>
+            <option value="Film"    {{ 'selected' if val('digital_film')=='Film'    }}>Film</option>
+          </select>
           <span class="clabel">Type</span>
         </div>
         <div class="dcell cam-film-only">
-          <div class="radio-group">
-            <label class="radio-opt"><input type="radio" name="film_size" value="35mm"    {{ 'checked' if val('film_size')=='35mm' }}> 35mm</label>
-            <label class="radio-opt"><input type="radio" name="film_size" value="120/220" {{ 'checked' if val('film_size')=='120/220' }}> 120</label>
-            <label class="radio-opt"><input type="radio" name="film_size" value="Sheet"   {{ 'checked' if val('film_size')=='Sheet' }}> Sheet</label>
-            <label class="radio-opt"><input type="radio" name="film_size" value="Other"   {{ 'checked' if val('film_size')=='Other' }}> Other</label>
-          </div>
+          <select name="film_size">
+            <option value=""></option>
+            <option value="35mm"    {{ 'selected' if val('film_size')=='35mm' }}>35mm</option>
+            <option value="120/220" {{ 'selected' if val('film_size')=='120/220' }}>120</option>
+            <option value="Sheet"   {{ 'selected' if val('film_size')=='Sheet' }}>Sheet</option>
+            <option value="Other"   {{ 'selected' if val('film_size')=='Other' }}>Other</option>
+          </select>
           <span class="clabel">Format</span>
         </div>
         <div class="dcell cam-digital-only">
