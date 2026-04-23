@@ -1326,6 +1326,11 @@ def new_record(category):
                            next_id=None,
                            hertz=None,
                            coin_age_val=None,
+                           property_topics=None,
+                           camera_compatible_lenses=None,
+                           back_href=None,
+                           service_overdue=None,
+                           service_years=None,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
                            ta=build_typeahead(category))
