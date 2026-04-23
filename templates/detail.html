@@ -22,7 +22,8 @@
 {% endmacro %}
 {% macro datecell(field, label) %}
 <div class="dcell">
-  <input type="date" name="{{ field }}" value="{{ val(field) }}">
+  {% set _dv = val(field) %}
+  <input type="date" name="{{ field }}" value="{{ _dv if _dv else (today_iso if is_new else '') }}">
   <span class="clabel">{{ label }}</span>
 </div>
 {% endmacro %}
@@ -122,7 +123,7 @@
     <a class="back-link" href="{{ back_href if back_href else url_for('list_view', category=category) ~ ('#item-' ~ r['id'] if r and r['id'] else '') }}">← Back</a>
   </div>
 
-  {% if is_new %}<div class="new-record-bar">New {{ cat_info.name[:-1] if cat_info.name.endswith('s') else cat_info.name }}</div>{% endif %}
+  {% if is_new %}<div class="new-record-bar">Add a New {{ cat_info.singular }}</div>{% endif %}
 
   <!-- ══════════════════════════════════════════════════════════
        WATCHES
@@ -132,6 +133,7 @@
   <!-- Brand row (editable, large) -->
   <div class="detail-brand-row">
     <input type="text" name="brand" value="{{ r['brand'] if r and r['brand'] else '' }}" class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not (r and r['brand']) %}placeholder="Brand"{% endif %}
            data-ta="{{ ta.get('brand', [])|join('||') }}">
   </div>
 
@@ -317,9 +319,10 @@
       <span class="blabel">Status</span>
     </div>
     <div class="bottom-cell">
+      {% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}
       <select name="owner">
         <option value=""></option>
-        {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}
+        {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}
       </select>
       <span class="blabel">Owner</span>
     </div>
@@ -426,7 +429,12 @@
 
   <!-- Description -->
   <div class="section-bar">Description</div>
-  <div class="dgrid dg1">{{ cell('description','',rows=8) }}</div>
+  {% set _desc = val('description') %}
+  <div class="dgrid dg1">
+    <div class="dcell">
+      <textarea name="description" rows="8" {% if is_new and not _desc %}placeholder="Description"{% endif %}>{{ _desc }}</textarea>
+    </div>
+  </div>
 
   <!-- Pedigree, References -->
   <div class="section-bar">Pedigree, References</div>
@@ -484,6 +492,7 @@
   <div class="detail-brand-row">
     <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not val('make') %}placeholder="Make"{% endif %}
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
@@ -571,7 +580,7 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.camera_status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -581,6 +590,7 @@
   <div class="detail-brand-row">
     <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not val('make') %}placeholder="Make"{% endif %}
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
@@ -625,7 +635,7 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -635,6 +645,7 @@
   <div class="detail-brand-row">
     <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not val('make') %}placeholder="Make"{% endif %}
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
@@ -678,7 +689,7 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -689,6 +700,7 @@
   <!-- Artist row (editable, large) -->
   <div class="detail-brand-row">
     <input type="text" name="artist" value="{{ val('artist') }}" class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not val('artist') %}placeholder="Artist"{% endif %}
            data-ta="{{ ta.get('artist', [])|join('||') }}">
   </div>
 
@@ -735,7 +747,14 @@
 
   <!-- Owner | Property | Location -->
   <div class="dgrid dg3">
-    {{ selcell('owner','Owner', vlists.owner) }}
+    {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
+    <div class="dcell">
+      <select name="owner">
+        <option value=""></option>
+        {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}
+      </select>
+      <span class="clabel">Owner</span>
+    </div>
     {{ selcell('property','Property', vlists.property) }}
     <div class="dcell ta-wrap">
       <input type="text" name="location" value="{{ val('location') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
@@ -753,6 +772,7 @@
   <div class="detail-brand-row">
     <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not val('make') %}placeholder="Make"{% endif %}
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
@@ -800,7 +820,7 @@
       </select>
       <span class="blabel">Status</span>
     </div>
-    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -810,6 +830,7 @@
   <div class="detail-brand-row brand-row-with-like">
     <input type="text" name="artist" value="{{ val('artist') }}"
            class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not val('artist') %}placeholder="Artist"{% endif %}
            data-ta="{{ ta.get('artist', [])|join('||') }}">
     <button type="button" id="likeHeart"
             class="like-heart like-heart-inline {% if val('like_field') == 'Yes' %}liked{% endif %}"
@@ -881,7 +902,7 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status">{% for s in ['','Own','Ordered'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -891,6 +912,7 @@
   <div class="detail-brand-row">
     <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not val('make') %}placeholder="Make"{% endif %}
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
@@ -929,7 +951,7 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -939,6 +961,7 @@
   <div class="detail-brand-row">
     <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not val('make') %}placeholder="Make"{% endif %}
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">
@@ -979,7 +1002,7 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -988,7 +1011,8 @@
   {% elif category == 'credit_cards' %}
   <div class="detail-brand-row">
     <input type="text" name="name" value="{{ val('name') }}"
-           class="brand-input" autocomplete="off">
+           class="brand-input" autocomplete="off"
+           {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
   </div>
 
   <div class="watch-body">
@@ -1031,7 +1055,7 @@
   </div>
 
   <div class="detail-bottom">
-    <div class="bottom-cell"><select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1040,7 +1064,8 @@
   {% elif category == 'properties' %}
   <div class="detail-brand-row">
     <input type="text" name="name" value="{{ val('name') }}"
-           class="brand-input" autocomplete="off">
+           class="brand-input" autocomplete="off"
+           {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
   </div>
   <input type="hidden" name="short_name" value="{{ val('short_name') }}">
 
@@ -1099,7 +1124,7 @@
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="status">{% for s in ['','Own','Sold'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
-    <div class="bottom-cell"><select name="owner">{% for o in ['','YM','Mark','Young'] %}<option value="{{ o }}" {{ 'selected' if val('owner')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}<select name="owner">{% for o in ['','YM','Mark','Young'] %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1108,7 +1133,8 @@
   {% elif category == 'persons' %}
   <div class="detail-brand-row person-brand-row">
     <input type="text" name="name" value="{{ val('name') }}"
-           class="brand-input" autocomplete="off">
+           class="brand-input" autocomplete="off"
+           {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
     <div class="person-doc-tabs">
       <button type="button" class="person-tab active" data-tab="health">Health</button>
       <button type="button" class="person-tab" data-tab="ids">IDs</button>
@@ -1740,9 +1766,14 @@ document.querySelectorAll('.ta-input').forEach(inp => {
 
 // Click-to-upload helper for watch-photo-style labels (mirrors drop-zone behavior)
 function uploadViaInput(input, uploadUrl, field) {
-  if (!uploadUrl) return;
   const file = input.files[0];
   if (!file || !file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
+  // New record: no uploadUrl yet — show preview, file rides with form submit.
+  if (!uploadUrl) {
+    const zone = input.closest('.drop-zone');
+    if (zone) previewInZone(zone, file);
+    return;
+  }
   const zone = input.closest('.drop-zone');
   if (zone) zone.style.opacity = '0.5';
   const fd = new FormData();
@@ -1827,6 +1858,51 @@ function uploadFileToZone(zone, file) {
     .catch(() => { zone.style.opacity = ''; alert('Upload failed.'); });
 }
 
+// Local preview helper used when there's no uploadUrl yet (new records):
+// the file stays in the <input type="file"> and rides with the form POST.
+function previewInZone(zone, file) {
+  if (!file) return;
+  const isImg = file.type.startsWith('image/');
+  const isPdf = file.type === 'application/pdf';
+  const allowPdf = zone.classList.contains('file-cell');
+  if (!isImg && !(allowPdf && isPdf)) {
+    alert(allowPdf ? 'Please choose an image or PDF file.' : 'Please choose an image file.');
+    return;
+  }
+  const labelEl = zone.querySelector('label.file-upload-lbl');
+  if (allowPdf && isPdf) {
+    let link = zone.querySelector('a.doc-link');
+    if (!link) {
+      link = document.createElement('a');
+      link.className = 'doc-link'; link.style.fontSize = '11px';
+      link.textContent = '📄 ' + file.name;
+      link.addEventListener('click', ev => ev.preventDefault());
+      if (labelEl) zone.insertBefore(link, labelEl);
+      else zone.insertBefore(link, zone.firstChild);
+    } else {
+      link.textContent = '📄 ' + file.name;
+    }
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const placeholder = zone.querySelector('span.no-img, span:not(.panel-lbl):not(.file-cell-name):not(.clabel):not(.blabel):not(.svc-date-compact)');
+    let img = zone.querySelector('img');
+    if (img) {
+      img.src = e.target.result;
+      img.style.display = '';
+    } else {
+      if (placeholder) placeholder.style.display = 'none';
+      img = document.createElement('img');
+      img.src = e.target.result; img.alt = '';
+      if (zone.classList.contains('file-cell')) img.style.maxHeight = '50px';
+      if (labelEl) zone.insertBefore(img, labelEl);
+      else zone.insertBefore(img, zone.firstChild);
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
 document.querySelectorAll('.drop-zone').forEach(zone => {
   const uploadUrl = zone.dataset.uploadUrl;
   zone.style.cursor = 'pointer';
@@ -1835,13 +1911,27 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
     const input = zone.querySelector('input[type="file"]');
     if (input) input.click();
   });
-  if (!uploadUrl) return;
   zone.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); zone.classList.add('drag-over'); e.dataTransfer.dropEffect = 'copy'; });
   zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over'); });
   zone.addEventListener('drop', e => {
     e.preventDefault(); e.stopPropagation();
     zone.classList.remove('drag-over');
-    uploadFileToZone(zone, e.dataTransfer.files[0]);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    if (uploadUrl) {
+      uploadFileToZone(zone, file);
+    } else {
+      // New record: stash file in the form's <input type="file"> so it submits with POST.
+      const input = zone.querySelector('input[type="file"]');
+      if (input) {
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          input.files = dt.files;
+        } catch (_) { /* DataTransfer not supported — fall back to preview-only */ }
+      }
+      previewInZone(zone, file);
+    }
   });
   // File-picker path: inputs without their own onchange handler (e.g. doccell)
   // otherwise just sit with a selected file and never upload.
@@ -1849,8 +1939,14 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
   if (input && !input.hasAttribute('onchange')) {
     input.addEventListener('change', () => {
       const file = input.files && input.files[0];
-      if (file) uploadFileToZone(zone, file);
-      input.value = '';
+      if (!file) return;
+      if (uploadUrl) {
+        uploadFileToZone(zone, file);
+        input.value = '';
+      } else {
+        // New record: keep the file in the input so it submits, just preview.
+        previewInZone(zone, file);
+      }
     });
   }
 });

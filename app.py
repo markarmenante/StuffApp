@@ -4,7 +4,7 @@ import os
 import json
 import re
 import base64
-from datetime import datetime
+from datetime import datetime, date
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response)
 from werkzeug.utils import secure_filename
@@ -41,55 +41,55 @@ except ImportError:
 
 CATEGORIES = {
     'watches': {
-        'name': 'Watches', 'icon': '⌚', 'table': 'watches',
+        'name': 'Watches', 'singular': 'Watch', 'icon': '⌚', 'table': 'watches',
         'label_field': 'brand', 'sublabel_field': 'model', 'image_field': 'image_obv',
     },
     'coins': {
-        'name': 'Coins', 'icon': '🪙', 'table': 'coins',
+        'name': 'Coins', 'singular': 'Coin', 'icon': '🪙', 'table': 'coins',
         'label_field': 'authority', 'sublabel_field': 'denomination', 'image_field': 'image_1',
     },
     'cameras': {
-        'name': 'Cameras', 'icon': '📷', 'table': 'cameras',
+        'name': 'Cameras', 'singular': 'Camera', 'icon': '📷', 'table': 'cameras',
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
     },
     'lenses': {
-        'name': 'Lenses', 'icon': '🔘', 'table': 'lenses',
+        'name': 'Lenses', 'singular': 'Lens', 'icon': '🔘', 'table': 'lenses',
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
     },
     'pens': {
-        'name': 'Pens', 'icon': '✒️', 'table': 'pens',
+        'name': 'Pens', 'singular': 'Pen', 'icon': '✒️', 'table': 'pens',
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
     },
     'art': {
-        'name': 'Art', 'icon': '🎨', 'table': 'art',
+        'name': 'Art', 'singular': 'Artwork', 'icon': '🎨', 'table': 'art',
         'label_field': 'artist', 'sublabel_field': 'title', 'image_field': 'image',
     },
     'vehicles': {
-        'name': 'Vehicles', 'icon': '🚗', 'table': 'vehicles',
+        'name': 'Vehicles', 'singular': 'Vehicle', 'icon': '🚗', 'table': 'vehicles',
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
     },
     'recordings': {
-        'name': 'Music', 'icon': '🎵', 'table': 'recordings',
+        'name': 'Music', 'singular': 'Recording', 'icon': '🎵', 'table': 'recordings',
         'label_field': 'artist', 'sublabel_field': 'title', 'image_field': 'image',
     },
     'audio': {
-        'name': 'Audio', 'icon': '🔊', 'table': 'audio',
+        'name': 'Audio', 'singular': 'Audio Component', 'icon': '🔊', 'table': 'audio',
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
     },
     'rifles': {
-        'name': 'Rifles', 'icon': '🔫', 'table': 'rifles',
+        'name': 'Rifles', 'singular': 'Rifle', 'icon': '🔫', 'table': 'rifles',
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
     },
     'credit_cards': {
-        'name': 'Credit Cards', 'icon': '💳', 'table': 'credit_cards',
+        'name': 'Credit Cards', 'singular': 'Credit Card', 'icon': '💳', 'table': 'credit_cards',
         'label_field': 'name', 'sublabel_field': 'number', 'image_field': 'image_front',
     },
     'properties': {
-        'name': 'Properties', 'icon': '🏠', 'table': 'properties',
+        'name': 'Properties', 'singular': 'Property', 'icon': '🏠', 'table': 'properties',
         'label_field': 'name', 'sublabel_field': 'address', 'image_field': 'image',
     },
     'persons': {
-        'name': 'People', 'icon': '👤', 'table': 'persons',
+        'name': 'People', 'singular': 'Person', 'icon': '👤', 'table': 'persons',
         'label_field': 'name', 'sublabel_field': 'phone', 'image_field': 'head_shot',
     },
 }
@@ -1331,6 +1331,7 @@ def new_record(category):
                            back_href=None,
                            service_overdue=None,
                            service_years=None,
+                           today_iso=date.today().isoformat(),
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
                            ta=build_typeahead(category))
@@ -1481,6 +1482,7 @@ def detail_view(category, record_id):
                            back_href=back_href,
                            service_overdue=service_overdue,
                            service_years=service_years,
+                           today_iso=None,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
                            ta=build_typeahead(category))
