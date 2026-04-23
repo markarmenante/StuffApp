@@ -122,7 +122,7 @@ VALUE_LISTS = {
     'recording_status': ['Own','Ordered'],
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
     'coin_grade': ['BU','FDC','MS','PF','AU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
-    'clasp_type': ['Tang','Fold Over','Butterfly','Buckle','Velcro'],
+    'clasp_type': ['Tang','Fold Over','Butterfly','Velcro'],
     'pen_type': ['Ballpoint','Fountain','Rollerball','Mechanical Pencil'],
     'pen_action': ['Cap','Click','Twist'],
     'pen_cartridge': ['Proprietary','Standard International'],
@@ -154,6 +154,7 @@ FIELD_ALIASES = {
         'pin clasp':        'Tang',
         'ardillon buckle':  'Tang',
         'ardillon':         'Tang',
+        'buckle':           'Tang',
     },
     ('watches', 'strap_material'): {
         'alligator': 'Croc',
