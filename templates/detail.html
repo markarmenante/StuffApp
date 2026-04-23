@@ -99,7 +99,7 @@
 <div class="detail-page detail-page-{{ category }}">
 <form method="post"
       action="{% if is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
-      enctype="multipart/form-data" id="mainForm">
+      enctype="multipart/form-data" id="mainForm" autocomplete="off">
 
   <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
   <div class="detail-nav-overlay">
