@@ -70,6 +70,8 @@ a { color: var(--blue); text-decoration: none; }
   display: flex; align-items: stretch;
   overflow-x: auto; flex: 1;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
 }
 .nav-categories::-webkit-scrollbar { display: none; }
 
