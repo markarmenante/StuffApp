@@ -103,6 +103,20 @@
 
   <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
   <div class="detail-nav-overlay">
+    {% if category == 'credit_cards' %}
+    <button type="button" class="card-share-btn"
+            onclick="shareCardDetails(event)"
+            title="Share card details via Messages / Mail / AirDrop"
+            aria-label="Share card">
+      <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 2 V17"/>
+        <path d="M6 8 L12 2 L18 8"/>
+        <path d="M5 13 H3 V25 H21 V13 H19"/>
+      </svg>
+    </button>
+    {% endif %}
     {% if not is_new %}
       {% if category == 'watches' %}
       <button type="button" class="watch-lookup-btn"
@@ -1035,17 +1049,48 @@
   </div>
 
   <div class="watch-specs" style="border-bottom:1px solid var(--border)">
+    {# Defeat Safari/iCloud-Keychain credit-card autofill: avoid the
+       names/labels its heuristics latch onto, suppress autocomplete
+       explicitly, and tag with the data-form-type that 1Password and
+       similar managers honor. #}
     <div class="dgrid dg2">
-      {{ cell('number','Card Number') }}
+      <div class="dcell">
+        <input type="text" name="number" value="{{ val('number') }}"
+               autocomplete="off" data-form-type="other" data-1p-ignore="true"
+               inputmode="numeric"
+               {% if is_new and not val('number') %}placeholder="Card Number"{% endif %}>
+        <span class="clabel">Card Number</span>
+      </div>
       <div class="dcell">
         {% set _exp = val('expiration') %}
-        <input type="month" name="expiration" value="{{ _exp[:7] if _exp else '' }}">
+        {%- if _exp %}
+          {%- if '/' in _exp %}{% set _exp_disp = _exp %}
+          {%- elif '-' in _exp %}{% set _exp_disp = _exp[5:7] ~ '/' ~ _exp[:4] %}
+          {%- else %}{% set _exp_disp = _exp %}{% endif %}
+        {%- else %}{% set _exp_disp = '' %}{% endif -%}
+        <input type="text" name="expiration" value="{{ _exp_disp }}"
+               class="cc-exp-input"
+               autocomplete="off" data-form-type="other" data-1p-ignore="true"
+               inputmode="numeric" maxlength="7"
+               placeholder="MM/YYYY">
         <span class="clabel">Expiration</span>
       </div>
     </div>
     <div class="dgrid dg2">
-      {{ cell('cvc','CVC') }}
-      {{ cell('cvc_2','CVC 2') }}
+      <div class="dcell">
+        <input type="text" name="cvc" value="{{ val('cvc') }}"
+               autocomplete="off" data-form-type="other" data-1p-ignore="true"
+               inputmode="numeric"
+               {% if is_new and not val('cvc') %}placeholder="CVC"{% endif %}>
+        <span class="clabel">CVC</span>
+      </div>
+      <div class="dcell">
+        <input type="text" name="cvc_2" value="{{ val('cvc_2') }}"
+               autocomplete="off" data-form-type="other" data-1p-ignore="true"
+               inputmode="numeric"
+               {% if is_new and not val('cvc_2') %}placeholder="CVC 2"{% endif %}>
+        <span class="clabel">CVC 2</span>
+      </div>
     </div>
     <div class="dgrid dg1">{{ cell('billing_short','Billing Short') }}</div>
     <div class="dgrid dg1">{{ cell('description','Description') }}</div>
@@ -2049,19 +2094,23 @@ function previewInZone(zone, file) {
   }
   const reader = new FileReader();
   reader.onload = e => {
-    const placeholder = zone.querySelector('span.no-img, span:not(.panel-lbl):not(.file-cell-name):not(.clabel):not(.blabel):not(.svc-date-compact)');
+    // Hide every direct-child <span> that isn't a structural label so
+    // the picture-icon placeholder etc. don't sit alongside the preview.
+    zone.querySelectorAll(':scope > span').forEach(s => {
+      if (!s.matches('.panel-lbl, .coin-img-lbl, .file-cell-name, .clabel, .blabel, .svc-date-compact')) {
+        s.style.display = 'none';
+      }
+    });
     let img = zone.querySelector('img');
-    if (img) {
-      img.src = e.target.result;
-      img.style.display = '';
-    } else {
-      if (placeholder) placeholder.style.display = 'none';
+    if (!img) {
       img = document.createElement('img');
-      img.src = e.target.result; img.alt = '';
+      img.alt = '';
       if (zone.classList.contains('file-cell')) img.style.maxHeight = '50px';
       if (labelEl) zone.insertBefore(img, labelEl);
       else zone.insertBefore(img, zone.firstChild);
     }
+    img.src = e.target.result;
+    img.style.display = '';
   };
   reader.readAsDataURL(file);
 }
@@ -2117,6 +2166,49 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
 
 // Share doc-cell file(s) via the OS share sheet (Messages, Mail, AirDrop on
 // iOS) — downloads them if the browser can't share files.
+// Credit card MM/YYYY expiration field: auto-insert the slash so the user
+// can type 6 digits and end up with "08/2030".
+document.querySelectorAll('input.cc-exp-input').forEach(inp => {
+  inp.addEventListener('input', () => {
+    const digits = inp.value.replace(/\D/g, '').slice(0, 6);
+    inp.value = digits.length <= 2 ? digits : digits.slice(0, 2) + '/' + digits.slice(2);
+  });
+});
+
+// Share a credit card's holder + key digits via the native share sheet
+// (iMessage, Mail, AirDrop, etc.). Reads live form values so any unsaved
+// edits in the same session are included.
+async function shareCardDetails(ev) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const form = document.getElementById('mainForm');
+  function val(name) {
+    const el = form.querySelector(`[name="${name}"]`);
+    return (el && el.value || '').trim();
+  }
+  const lines = [];
+  if (val('name')) lines.push(val('name'));
+  if (val('number')) lines.push('Number: ' + val('number'));
+  const exp = val('expiration');
+  if (exp) lines.push('Exp: ' + (exp.length >= 7 ? `${exp.slice(5,7)}/${exp.slice(0,4)}` : exp));
+  if (val('cvc')) lines.push('CVC: ' + val('cvc'));
+  if (val('billing_short')) lines.push('Billing zip code: ' + val('billing_short'));
+  const text = lines.join('\n');
+  if (!text) { alert('Nothing to share — fill in some fields first.'); return; }
+  if (navigator.share) {
+    try { await navigator.share({ text }); }
+    catch (err) { if (err.name !== 'AbortError') alert('Share failed: ' + (err.message || err)); }
+  } else {
+    // Desktop fallback: copy to clipboard
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Copied to clipboard:\n\n' + text);
+    } catch (_) {
+      prompt('Copy this text:', text);
+    }
+  }
+}
+
 async function shareDocFiles(ev, btn) {
   ev.preventDefault();
   ev.stopPropagation();

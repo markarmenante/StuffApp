@@ -194,6 +194,13 @@ a { color: var(--blue); text-decoration: none; }
 .item-thumb img { max-width: 96px; max-height: 96px; object-fit: contain; display: block; }
 .item-thumb .no-img { font-size: 36px; color: var(--text-hint); }
 
+/* Credit cards: condense rows so they hug their three lines of text. */
+.item-list-credit_cards .item-thumb { width: 64px; min-height: 64px; }
+.item-list-credit_cards .item-thumb img { max-width: 64px; max-height: 64px; }
+.item-list-credit_cards .item-thumb .no-img { font-size: 24px; }
+.item-list-credit_cards .item-row { align-items: center; }
+.item-list-credit_cards .item-content { padding: 4px 14px; }
+
 .row-upload-btn {
   display: flex; align-items: center; justify-content: center;
   width: 60px; flex-shrink: 0;
@@ -328,6 +335,15 @@ a { color: var(--blue); text-decoration: none; }
 }
 .watch-lookup-btn:hover:not(:disabled) { background: rgba(0,0,0,.05); }
 .watch-lookup-btn:disabled { opacity: .6; cursor: progress; }
+
+.card-share-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  padding: 0; margin: 0 4px 0 0;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: #fff; color: var(--blue); cursor: pointer;
+}
+.card-share-btn:hover { background: rgba(0,0,0,.05); }
 
 /* Watch detail: center all field values */
 .detail-page-watches .dcell input:not([type=file]):not([type=checkbox]):not([type=radio]),
