@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS watches (
     image_obv TEXT,
     image_rev TEXT,
     receipt TEXT,
+    container_1 TEXT,
+    container_2 TEXT,
     document TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))

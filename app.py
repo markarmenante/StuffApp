@@ -216,6 +216,8 @@ FIELDS = {
         {'name': 'image_obv',       'label': 'Image (Obverse)',   'type': 'file'},
         {'name': 'image_rev',       'label': 'Image (Reverse)',   'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
+        {'name': 'container_1',     'label': 'Container 1',       'type': 'file'},
+        {'name': 'container_2',     'label': 'Container 2',       'type': 'file'},
         {'name': 'document',        'label': 'Document',          'type': 'file'},
     ],
     'coins': [
@@ -549,6 +551,8 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN value REAL',
         'ALTER TABLE watches ADD COLUMN results TEXT',
         'ALTER TABLE watches ADD COLUMN value_searched_at TEXT',
+        'ALTER TABLE watches ADD COLUMN container_1 TEXT',
+        'ALTER TABLE watches ADD COLUMN container_2 TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
         'ALTER TABLE topics ADD COLUMN image TEXT',
