@@ -204,6 +204,15 @@ a { color: var(--blue); text-decoration: none; }
 .item-list-credit_cards .item-thumb .no-img { font-size: 24px; }
 .item-list-credit_cards .item-row { align-items: center; }
 .item-list-credit_cards .item-content { padding: 4px 14px; }
+.item-list-credit_cards .item-line1 { position: relative; padding-right: 36px; }
+.row-share-btn {
+  position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  padding: 0; border: 1px solid var(--border); border-radius: 6px;
+  background: #fff; color: var(--blue); cursor: pointer;
+}
+.row-share-btn:hover { background: rgba(0,0,0,.05); }
 
 .row-upload-btn {
   display: flex; align-items: center; justify-content: center;

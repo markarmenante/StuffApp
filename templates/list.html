@@ -305,13 +305,33 @@
       {# ── CREDIT CARDS ── #}
       {% elif category == 'credit_cards' %}
         {% set _desc1 = (row['description'] or '').splitlines()[0] if row['description'] else '' %}
+        {%- set _e = row['expiration'] or '' -%}
+        {%- if _e and '-' in _e %}{% set _e_disp = '%s/%s'|format(_e[5:7], _e[:4]) %}
+        {%- elif _e %}{% set _e_disp = _e %}
+        {%- else %}{% set _e_disp = '' %}{% endif %}
         <div class="item-line1">
           <span class="item-brand">{{ _desc1 or row['name'] or '—' }}</span>
+          <button type="button" class="row-share-btn"
+                  data-name="{{ row['name'] or '' }}"
+                  data-number="{{ row['number'] or '' }}"
+                  data-exp="{{ _e_disp }}"
+                  data-cvc="{{ row['cvc'] or '' }}"
+                  data-zip="{{ row['billing_short'] or '' }}"
+                  onclick="shareCardRow(event, this)"
+                  title="Share card details" aria-label="Share card">
+            <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+                 stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2 V17"/>
+              <path d="M6 8 L12 2 L18 8"/>
+              <path d="M5 13 H3 V25 H21 V13 H19"/>
+            </svg>
+          </button>
         </div>
         <div class="item-detail-rows">
           {% if row['number'] %}<div class="idr"><span>{{ row['number'] }}</span></div>{% endif %}
           <div class="idr">
-            {% if row['expiration'] %}{% set _e = row['expiration'] %}<span><span class="lbl">Exp</span> {{ '%s/%s'|format(_e[5:7], _e[:4]) }}</span>{% endif %}
+            {% if _e_disp %}<span><span class="lbl">Exp</span> {{ _e_disp }}</span>{% endif %}
             {% if row['cvc'] %}<span><span class="lbl">CVC</span> {{ row['cvc'] }}</span>{% endif %}
             {% if row['billing_short'] %}<span><span class="lbl">Zip</span> {{ row['billing_short'] }}</span>{% endif %}
           </div>
@@ -388,6 +408,31 @@
 {% endif %}
 
 <script>
+// Credit card row share button — opens the iOS share sheet (Messages /
+// Mail / AirDrop) with the same payload as the detail-page share button.
+window.shareCardRow = async function (ev, btn) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const d = btn.dataset;
+  const lines = [];
+  if (d.name) lines.push(d.name);
+  if (d.number) lines.push('Number: ' + d.number);
+  if (d.exp) lines.push('Exp: ' + d.exp);
+  if (d.cvc) lines.push('CVC: ' + d.cvc);
+  if (d.zip) lines.push('Billing zip code: ' + d.zip);
+  const text = lines.join('\n');
+  if (!text) { alert('Nothing to share — fill in some fields first.'); return; }
+  if (navigator.share) {
+    try { await navigator.share({ text }); }
+    catch (err) { if (err.name !== 'AbortError') alert('Share failed: ' + (err.message || err)); }
+  } else {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Copied to clipboard:\n\n' + text);
+    } catch (_) { prompt('Copy this text:', text); }
+  }
+};
+
 (function() {
   // Prevent browser from opening dropped files
   document.addEventListener('dragover', function(e) { e.preventDefault(); }, true);
