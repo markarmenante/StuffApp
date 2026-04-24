@@ -1669,6 +1669,46 @@ def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 
+_FILE_THUMB_DIR = os.path.join(UPLOAD_FOLDER, '.thumbs')
+
+
+@app.route('/file-thumb/<filename>')
+def file_thumb(filename):
+    """Render a small preview for an uploaded document.
+
+    PDFs: first page rendered via pypdfium2, cached as JPEG. Anything
+    else (or any failure) returns 404 so the template can fall back to
+    its existing icon.
+    """
+    src = os.path.join(UPLOAD_FOLDER, filename)
+    if not os.path.exists(src):
+        abort(404)
+    ext = os.path.splitext(filename)[1].lower()
+    if ext != '.pdf':
+        abort(404)
+    os.makedirs(_FILE_THUMB_DIR, exist_ok=True)
+    thumb_path = os.path.join(_FILE_THUMB_DIR, filename + '.jpg')
+    if not os.path.exists(thumb_path) or \
+            os.path.getmtime(thumb_path) < os.path.getmtime(src):
+        try:
+            import pypdfium2 as pdfium
+            doc = pdfium.PdfDocument(src)
+            try:
+                page = doc[0]
+                # scale 1.0 = 72 dpi. 2.0 → ~150 dpi, plenty for a 160px thumb.
+                bitmap = page.render(scale=2.0)
+                pil = bitmap.to_pil()
+                pil.thumbnail((320, 320))
+                if pil.mode not in ('RGB', 'L'):
+                    pil = pil.convert('RGB')
+                pil.save(thumb_path, format='JPEG', quality=82)
+            finally:
+                doc.close()
+        except Exception:
+            abort(404)
+    return send_from_directory(_FILE_THUMB_DIR, filename + '.jpg')
+
+
 @app.route('/watches/<record_id>/value', methods=['POST'])
 def watch_fetch_value(record_id):
     """Search the web for current market value of this watch and store it."""

@@ -80,6 +80,11 @@
       <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" class="doc-link" onclick="event.stopPropagation()">
         <img src="{{ url_for('uploaded_file', filename=f) }}" style="max-height:50px">
       </a>
+    {% elif f.lower().endswith('.pdf') %}
+      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" class="doc-link doc-pdf-link" onclick="event.stopPropagation()">
+        <img src="{{ url_for('file_thumb', filename=f) }}" alt="PDF preview" class="doc-pdf-thumb" style="max-height:72px;border:1px solid var(--border-light);background:#fff"
+             onerror="this.parentNode.innerHTML='📄 View';this.parentNode.style.fontSize='11px';">
+      </a>
     {% else %}
       <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" style="font-size:11px" class="doc-link" onclick="event.stopPropagation()">📄 View</a>
     {% endif %}
