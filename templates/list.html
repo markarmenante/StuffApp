@@ -39,23 +39,18 @@
   {%- set _is_ancient = coin_filter in ('ca_ancient', 'ny_ancient') -%}
   {%- set _is_modern  = coin_filter in ('ca_modern',  'ny_modern')  -%}
 
-  {% if _is_modern %}
-  <span class="toolbar-btn pill disabled"
-        title="Deactivate Modern first to cycle Ancient">{{ _ancient_label }}</span>
-  {% else %}
-  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_ancient_next.get(coin_filter, 'ca_ancient')) }}"
-     class="toolbar-btn pill {% if _is_ancient %}active{% endif %}"
+  {# Clicking the opposite-era pill jumps straight into that era
+     (starting at ca_...) rather than being blocked. The greyed
+     style is purely visual — it always stays clickable. #}
+  {% set _ancient_href = _ancient_next.get(coin_filter) if _is_ancient else 'ca_ancient' %}
+  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_ancient_href) }}"
+     class="toolbar-btn pill {% if _is_ancient %}active{% elif _is_modern %}muted{% endif %}"
      title="Cycle: off → CA Ancient → NY Ancient → off (date_1 &lt; 500)">{{ _ancient_label }}</a>
-  {% endif %}
 
-  {% if _is_ancient %}
-  <span class="toolbar-btn pill disabled"
-        title="Deactivate Ancient first to cycle Modern">{{ _modern_label }}</span>
-  {% else %}
-  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_modern_next.get(coin_filter, 'ca_modern')) }}"
-     class="toolbar-btn pill {% if _is_modern %}active{% endif %}"
+  {% set _modern_href = _modern_next.get(coin_filter) if _is_modern else 'ca_modern' %}
+  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_modern_href) }}"
+     class="toolbar-btn pill {% if _is_modern %}active{% elif _is_ancient %}muted{% endif %}"
      title="Cycle: off → CA Modern → NY Modern → off (date_1 ≥ 500)">{{ _modern_label }}</a>
-  {% endif %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
      title="Coins with status Ordered">Ordered</a>
