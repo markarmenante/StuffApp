@@ -1704,9 +1704,28 @@ def detail_view(category, record_id):
     if record is None:
         abort(404)
 
-    # Prev/Next navigation
-    all_ids = [r['id'] for r in db.execute(
-        f"SELECT id FROM {table} ORDER BY created_at DESC").fetchall()]
+    # Prev/Next navigation. If the URL carries the same q / filter the
+    # list view used (we forward both into the detail link), navigate
+    # within that scoped, sorted set instead of the full table — so
+    # < / > on a NY-Ancient-filtered coin walks the NY-Ancient list,
+    # not the entire collection.
+    nav_q = (request.args.get('q') or '').strip()
+    nav_filter = (request.args.get('filter') or '').strip() or None
+    if nav_q or nav_filter:
+        try:
+            nav_sql, nav_params = build_search_query(
+                category, nav_q, dot=False, coin_filter=nav_filter)
+        except Exception:
+            nav_sql, nav_params = None, None
+        if nav_sql:
+            id_sql = re.sub(r'^SELECT \*', 'SELECT id', nav_sql, count=1)
+            all_ids = [r['id'] for r in db.execute(id_sql, nav_params).fetchall()]
+        else:
+            all_ids = [r['id'] for r in db.execute(
+                f"SELECT id FROM {table} ORDER BY created_at DESC").fetchall()]
+    else:
+        all_ids = [r['id'] for r in db.execute(
+            f"SELECT id FROM {table} ORDER BY created_at DESC").fetchall()]
     idx = all_ids.index(record_id) if record_id in all_ids else -1
     prev_id = all_ids[idx - 1] if idx > 0 else None
     next_id = all_ids[idx + 1] if idx < len(all_ids) - 1 else None
