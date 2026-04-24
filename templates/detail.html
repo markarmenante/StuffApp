@@ -377,6 +377,16 @@
     {{ tacell('mint','Mint', ta.get('mint', [])) }}
   </div>
 
+  <!-- Description — sits up top so the narrative reads with the
+       identifying fields, not buried below specs/purchase. -->
+  <div class="section-bar">Description</div>
+  {% set _desc = val('description') %}
+  <div class="dgrid dg1">
+    <div class="dcell">
+      <textarea name="description" rows="8" {% if is_new and not _desc %}placeholder="Description"{% endif %}>{{ _desc }}</textarea>
+    </div>
+  </div>
+
   <!-- Coin images (obverse + reverse) — pinned near the top so the
        visual is the first thing you see on the detail page. -->
   <div class="coin-imgs">
@@ -410,11 +420,11 @@
     </div>
   </div>
 
-  <!-- Denomination / Metal / Date -->
+  <!-- Denomination / Metal / Date / Age -->
   <div class="dgrid dg4">
     <div class="dcell ta-wrap"><input type="text" name="denomination" value="{{ val('denomination') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('denomination', [])|join('||') }}"></div>
     <div class="dcell"><select name="metal"><option value=""></option>{% for o in vlists.metal_coin %}<option value="{{ o }}" {{ 'selected' if val('metal')==o }}>{{ o }}</option>{% endfor %}</select></div>
-    <div class="dcell date-range-cell" id="dateRangeCell" style="grid-column: span 2; text-align: center;">
+    <div class="dcell date-range-cell" id="dateRangeCell" style="text-align: center;">
       <div class="date-display" id="dateDisplay">{% if val('date_1_text') %}{{ val('date_1_text') }}{% if val('date_2_text') %} – {{ val('date_2_text') }}{% endif %}{% endif %}</div>
       <div class="date-inputs" id="dateInputs" style="display:none">
         <input type="text" id="dateFrom" value="{{ val('date_1') }}" placeholder="-480 or 1952" class="date-num-input" inputmode="numeric">
@@ -426,14 +436,13 @@
       <input type="hidden" name="date_2" id="hDate2" value="{{ val('date_2') }}">
       <input type="hidden" name="date_2_text" id="hDate2Text" value="{{ val('date_2_text') }}">
     </div>
+    <div class="dcell coin-age-cell" style="text-align: center;">
+      {% if coin_age_val %}{{ '{:,}'.format(coin_age_val) }} yrs{% endif %}
+    </div>
   </div>
 
   <!-- Obv/Rev -->
   <div class="dgrid dg1">{{ cell('obv_rev','') }}</div>
-
-  {% if coin_age_val %}
-  <div class="coin-age-row">{{ '{:,}'.format(coin_age_val) }} yrs</div>
-  {% endif %}
 
   <!-- Physical specs -->
   <div class="dgrid coin-specs" style="grid-template-columns: repeat(6, 1fr);">
@@ -450,15 +459,6 @@
     <div class="dcell ta-wrap"><input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center"></div>
     <div class="dcell"><input type="date" name="purchase_date" value="{{ val('purchase_date') }}" style="text-align:center"></div>
     <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric" style="text-align:center"></div>
-  </div>
-
-  <!-- Description -->
-  <div class="section-bar">Description</div>
-  {% set _desc = val('description') %}
-  <div class="dgrid dg1">
-    <div class="dcell">
-      <textarea name="description" rows="8" {% if is_new and not _desc %}placeholder="Description"{% endif %}>{{ _desc }}</textarea>
-    </div>
   </div>
 
   <!-- Pedigree, References -->
