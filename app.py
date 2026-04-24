@@ -734,10 +734,10 @@ CATEGORY_FILTERS = {
         'ordered': ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
     },
     'coins': {
-        'ca_ancient': ("date_1 < 1000 AND property_name IN ('Carp','Carpinteria')", []),
-        'ny_ancient': ("date_1 < 1000 AND property_name = 'NYC'", []),
-        'ca_modern':  ("date_1 >= 1000 AND property_name IN ('Carp','Carpinteria')", []),
-        'ny_modern':  ("date_1 >= 1000 AND property_name = 'NYC'", []),
+        'ca_ancient': ("date_1 <  500 AND property_name IN ('Carp','Carpinteria')", []),
+        'ny_ancient': ("date_1 <  500 AND property_name = 'NYC'", []),
+        'ca_modern':  ("date_1 >= 500 AND property_name IN ('Carp','Carpinteria')", []),
+        'ny_modern':  ("date_1 >= 500 AND property_name = 'NYC'", []),
         'ordered':    ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
     },
     'audio': {
@@ -1381,8 +1381,22 @@ def new_record(category):
                     val = val.replace('$', '').replace(',', '').strip()
                 data[fname] = val if val else None
 
-        # Auto coin_id
+        # Coins must have a property + date before they can save (both
+        # drive Display Position numbering downstream).
         if category == 'coins':
+            missing = []
+            if not (data.get('property_name') or '').strip():
+                missing.append('Property')
+            if data.get('date_1') in (None, '') and not (data.get('date_1_text') or '').strip():
+                missing.append('Date')
+            if missing:
+                err = 'Missing required field(s): ' + ', '.join(missing)
+                # AJAX autosave-on-/new flow: client expects JSON.
+                if request.headers.get('Accept', '').startswith('application/json') \
+                        or request.headers.get('X-Requested-With') == 'fetch':
+                    return jsonify({'ok': False, 'error': err}), 400
+                flash(err, 'error')
+                return redirect(url_for('new_record', category=category))
             data['coin_id'] = next_coin_id(db)
             data['cat_id'] = next_cat_id(db, data.get('property_name'), data.get('date_1'))
 
@@ -1390,6 +1404,12 @@ def new_record(category):
         placeholders = ', '.join(['?' for _ in data])
         db.execute(f"INSERT INTO {CATEGORIES[category]['table']} ({cols}) VALUES ({placeholders})",
                    list(data.values()))
+
+        # After the coin lands, resequence Display Position across all
+        # four era/property groups so the new one slots in cleanly.
+        if category == 'coins':
+            _renumber_coin_groups(db)
+
         db.commit()
         detail_url = url_for('detail_view', category=category, record_id=record_id)
         save_url = url_for('save_field', category=category, record_id=record_id)
@@ -1473,9 +1493,32 @@ def detail_view(category, record_id):
                 val = normalize_field_value(table, fname, val)
                 updates[fname] = val if val else None
 
+        # If a coin's property or date crossed into a new group, we need
+        # to resequence Display Position afterwards.
+        coin_group_changed = False
+        if category == 'coins':
+            def _era(d):
+                try:
+                    return 'A' if int(d) < 500 else 'M'
+                except (TypeError, ValueError):
+                    return None
+            old_key = (
+                (record['property_name'] or '').strip().lower(),
+                _era(record['date_1']),
+            )
+            new_prop = updates.get('property_name', record['property_name'])
+            new_date = updates.get('date_1', record['date_1'])
+            new_key = (
+                (new_prop or '').strip().lower(),
+                _era(new_date),
+            )
+            coin_group_changed = old_key != new_key
+
         set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
         db.execute(f"UPDATE {table} SET {set_clause} WHERE id = ?",
                    list(updates.values()) + [record_id])
+        if coin_group_changed:
+            _renumber_coin_groups(db)
         db.commit()
         flash("Record saved.", 'success')
         return redirect(url_for('detail_view', category=category, record_id=record_id))
@@ -1605,9 +1648,32 @@ def save_field(category, record_id):
 
     value = normalize_field_value(table, field_name, str(value).strip() if value else '')
 
+    # Grab the old value before writing so we can decide whether a
+    # coin-group resequence is needed on property_name / date_1 changes.
+    old_row = None
+    if category == 'coins' and field_name in ('property_name', 'date_1'):
+        old_row = db.execute(
+            "SELECT property_name, date_1 FROM coins WHERE id = ?",
+            [record_id]).fetchone()
+
     now = datetime.utcnow().isoformat()
     db.execute(f"UPDATE {table} SET {field_name} = ?, updated_at = ? WHERE id = ?",
                [value if value != '' else None, now, record_id])
+
+    if old_row is not None:
+        def _era(d):
+            try:
+                return 'A' if int(d) < 500 else 'M'
+            except (TypeError, ValueError):
+                return None
+        new_prop = value if field_name == 'property_name' else old_row['property_name']
+        new_date = value if field_name == 'date_1' else old_row['date_1']
+        old_key = ((old_row['property_name'] or '').strip().lower(),
+                   _era(old_row['date_1']))
+        new_key = ((new_prop or '').strip().lower(), _era(new_date))
+        if old_key != new_key:
+            _renumber_coin_groups(db)
+
     db.commit()
     return jsonify({'ok': True})
 
@@ -2801,6 +2867,25 @@ _RENUMBER_GROUPS = {
     'ca_modern':  ('CM', 'CA Modern'),
     'ny_modern':  ('NM', 'NY Modern'),
 }
+
+
+def _renumber_coin_groups(db, groups=None):
+    """Resequence coin_id (Display Position) for the given groups.
+    Defaults to every Ancient/Modern group. Caller is responsible for
+    commit — we stay inside the surrounding transaction."""
+    if groups is None:
+        groups = list(_RENUMBER_GROUPS.keys())
+    order_by = CATEGORY_ORDER_BY['coins']
+    for g in groups:
+        prefix, _ = _RENUMBER_GROUPS[g]
+        where, extra = CATEGORY_FILTERS['coins'][g]
+        rows = db.execute(
+            f"SELECT id FROM coins WHERE {where} ORDER BY {order_by}",
+            list(extra),
+        ).fetchall()
+        for i, row in enumerate(rows, start=1):
+            db.execute("UPDATE coins SET coin_id = ? WHERE id = ?",
+                       (f'{prefix}{i}', row['id']))
 
 
 @app.route('/coins/renumber/<group>', methods=['POST'])
