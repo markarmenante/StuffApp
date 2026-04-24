@@ -377,15 +377,8 @@
     {{ tacell('mint','Mint', ta.get('mint', [])) }}
   </div>
 
-  <!-- Description — sits up top so the narrative reads with the
-       identifying fields, not buried below specs/purchase. -->
-  <div class="section-bar">Description</div>
-  {% set _desc = val('description') %}
-  <div class="dgrid dg1">
-    <div class="dcell">
-      <textarea name="description" rows="8" {% if is_new and not _desc %}placeholder="Description"{% endif %}>{{ _desc }}</textarea>
-    </div>
-  </div>
+  <!-- Obv/Rev one-liner sits up top alongside the identifying fields. -->
+  <div class="dgrid dg1">{{ cell('obv_rev','') }}</div>
 
   <!-- Coin images (obverse + reverse) — pinned near the top so the
        visual is the first thing you see on the detail page. -->
@@ -441,9 +434,6 @@
     </div>
   </div>
 
-  <!-- Obv/Rev -->
-  <div class="dgrid dg1">{{ cell('obv_rev','') }}</div>
-
   <!-- Physical specs -->
   <div class="dgrid coin-specs" style="grid-template-columns: repeat(6, 1fr);">
     <div class="dcell"><input type="text" name="weight" value="{{ '%s g'|format(val('weight')) if val('weight') else '' }}" class="coin-unit-input" data-suffix=" g" style="text-align:center"></div>
@@ -459,6 +449,15 @@
     <div class="dcell ta-wrap"><input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center"></div>
     <div class="dcell"><input type="date" name="purchase_date" value="{{ val('purchase_date') }}" style="text-align:center"></div>
     <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric" style="text-align:center"></div>
+  </div>
+
+  <!-- Description -->
+  <div class="section-bar">Description</div>
+  {% set _desc = val('description') %}
+  <div class="dgrid dg1">
+    <div class="dcell">
+      <textarea name="description" rows="8" {% if is_new and not _desc %}placeholder="Description"{% endif %}>{{ _desc }}</textarea>
+    </div>
   </div>
 
   <!-- Pedigree, References -->
