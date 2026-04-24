@@ -134,10 +134,12 @@
       <a class="add-topic-link"
          href="{{ url_for('topic_new', property_id=r['id']) }}">+ Topic</a>
       {% endif %}
+      {% if category != 'persons' %}
       <a class="detail-nav-btn {{ 'disabled' if not prev_id }}"
          href="{{ url_for('detail_view', category=category, record_id=prev_id) if prev_id else '#' }}">&lt;</a>
       <a class="detail-nav-btn {{ 'disabled' if not next_id }}"
          href="{{ url_for('detail_view', category=category, record_id=next_id) if next_id else '#' }}">&gt;</a>
+      {% endif %}
     {% endif %}
     <a class="back-link" href="{{ back_href if back_href else url_for('list_view', category=category) ~ ('#item-' ~ r['id'] if r and r['id'] else '') }}">← Back</a>
   </div>
@@ -1185,13 +1187,13 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'persons' %}
   <div class="detail-brand-row person-brand-row">
-    <input type="text" name="name" value="{{ val('name') }}"
-           class="brand-input" autocomplete="off"
-           {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
     <div class="person-doc-tabs">
       <button type="button" class="person-tab active" data-tab="health">Health</button>
       <button type="button" class="person-tab" data-tab="ids">IDs</button>
     </div>
+    <input type="text" name="name" value="{{ val('name') }}"
+           class="brand-input" autocomplete="off"
+           {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
   </div>
 
   <div class="watch-body">

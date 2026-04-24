@@ -607,11 +607,12 @@ input[type="date"] { -webkit-appearance: none; }
 .recording-purchase .dcell input,
 .recording-purchase .dcell select { text-align: center; }
 
-/* People: Name row with Health / IDs section pills */
+/* People: Health / IDs section pills sit at the left, then the Name
+   input, with space on the right only for the floating Back link
+   (no Prev/Next buttons on this category). */
 .person-brand-row {
   display: flex; align-items: center; gap: 10px;
-  /* leave room for the floating Prev/Next/Back overlay on the right */
-  padding-right: 180px;
+  padding-right: 80px;
 }
 .person-brand-row .brand-input { flex: 1 1 auto; min-width: 0; }
 .person-doc-tabs { display: flex; gap: 6px; flex-shrink: 0; }
