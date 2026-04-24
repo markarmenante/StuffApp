@@ -45,16 +45,7 @@
   {% else %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_ancient_next.get(coin_filter, 'ca_ancient')) }}"
      class="toolbar-btn pill {% if _is_ancient %}active{% endif %}"
-     title="Cycle: off → CA Ancient → NY Ancient → off (date_1 &lt; 1000)">{{ _ancient_label }}</a>
-  {% endif %}
-  {% if _is_ancient %}
-  <form method="post" action="{{ url_for('coins_renumber_group', group=coin_filter) }}" style="display:inline">
-    <button type="submit" class="toolbar-btn pill"
-            title="Resequence Display Position for the current sort"
-            onclick="return confirm('Renumber {{ result_count }} {{ _ancient_label }} coins? This overwrites the current Display Position values.');">
-      Renumber
-    </button>
-  </form>
+     title="Cycle: off → CA Ancient → NY Ancient → off (date_1 &lt; 500)">{{ _ancient_label }}</a>
   {% endif %}
 
   {% if _is_ancient %}
@@ -63,16 +54,7 @@
   {% else %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_modern_next.get(coin_filter, 'ca_modern')) }}"
      class="toolbar-btn pill {% if _is_modern %}active{% endif %}"
-     title="Cycle: off → CA Modern → NY Modern → off (date_1 ≥ 1000)">{{ _modern_label }}</a>
-  {% endif %}
-  {% if _is_modern %}
-  <form method="post" action="{{ url_for('coins_renumber_group', group=coin_filter) }}" style="display:inline">
-    <button type="submit" class="toolbar-btn pill"
-            title="Resequence Display Position for the current sort"
-            onclick="return confirm('Renumber {{ result_count }} {{ _modern_label }} coins? This overwrites the current Display Position values.');">
-      Renumber
-    </button>
-  </form>
+     title="Cycle: off → CA Modern → NY Modern → off (date_1 ≥ 500)">{{ _modern_label }}</a>
   {% endif %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"

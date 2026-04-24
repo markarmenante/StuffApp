@@ -1496,23 +1496,23 @@ def detail_view(category, record_id):
                 val = normalize_field_value(table, fname, val)
                 updates[fname] = val if val else None
 
-        # If a coin moved into a different group, resequence just that
-        # group (Carp/NYC × Ancient/Modern). The old group keeps its
-        # current numbering — gaps can be squashed by clicking Renumber.
-        new_group_to_resequence = None
+        # If a coin moved groups, resequence both the old group (to
+        # close the gap) and the new group (to place the coin).
+        groups_to_resequence = []
         if category == 'coins':
             new_prop = updates.get('property_name', record['property_name'])
             new_date = updates.get('date_1', record['date_1'])
             old_group = _coin_group_for(record['property_name'], record['date_1'])
             new_group = _coin_group_for(new_prop, new_date)
-            if new_group and new_group != old_group:
-                new_group_to_resequence = new_group
+            if old_group != new_group:
+                if old_group: groups_to_resequence.append(old_group)
+                if new_group: groups_to_resequence.append(new_group)
 
         set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
         db.execute(f"UPDATE {table} SET {set_clause} WHERE id = ?",
                    list(updates.values()) + [record_id])
-        if new_group_to_resequence:
-            _renumber_coin_groups(db, [new_group_to_resequence])
+        if groups_to_resequence:
+            _renumber_coin_groups(db, groups_to_resequence)
         db.commit()
         flash("Record saved.", 'success')
         return redirect(url_for('detail_view', category=category, record_id=record_id))
@@ -1659,8 +1659,10 @@ def save_field(category, record_id):
         new_date = value if field_name == 'date_1' else old_row['date_1']
         old_group = _coin_group_for(old_row['property_name'], old_row['date_1'])
         new_group = _coin_group_for(new_prop, new_date)
-        if new_group and new_group != old_group:
-            _renumber_coin_groups(db, [new_group])
+        if old_group != new_group:
+            touched = [g for g in (old_group, new_group) if g]
+            if touched:
+                _renumber_coin_groups(db, touched)
 
     db.commit()
     return jsonify({'ok': True})
@@ -1672,7 +1674,17 @@ def delete_record(category, record_id):
         abort(404)
     db = get_db()
     table = CATEGORIES[category]['table']
+    # Capture the coin's group before deleting so we can close the gap.
+    gap_group = None
+    if category == 'coins':
+        row = db.execute(
+            "SELECT property_name, date_1 FROM coins WHERE id = ?",
+            [record_id]).fetchone()
+        if row:
+            gap_group = _coin_group_for(row['property_name'], row['date_1'])
     db.execute(f"DELETE FROM {table} WHERE id = ?", [record_id])
+    if gap_group:
+        _renumber_coin_groups(db, [gap_group])
     db.commit()
     flash("Record deleted.", 'info')
     return redirect(url_for('list_view', category=category))
