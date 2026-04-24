@@ -502,6 +502,10 @@
       <span class="blabel">Catalog #</span>
     </div>
     <div class="bottom-cell">
+      <input type="text" name="cat_id" value="{{ val('cat_id') }}" readonly style="text-align:center">
+      <span class="blabel">Cat ID</span>
+    </div>
+    <div class="bottom-cell">
       <select name="property_name">
         <option value=""></option>
         {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property_name')==o }}>{{ o }}</option>{% endfor %}

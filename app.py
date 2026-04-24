@@ -222,6 +222,7 @@ FIELDS = {
     ],
     'coins': [
         {'name': 'coin_id',         'label': 'Coin ID',           'type': 'text', 'readonly': True},
+        {'name': 'cat_id',          'label': 'Cat ID',            'type': 'text', 'readonly': True},
         {'name': 'authority',       'label': 'Authority',         'type': 'text'},
         {'name': 'region',          'label': 'Region',            'type': 'text'},
         {'name': 'denomination',    'label': 'Denomination',      'type': 'text'},
@@ -559,6 +560,7 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN history_region TEXT',
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
+        'ALTER TABLE coins ADD COLUMN cat_id TEXT',
         'ALTER TABLE persons ADD COLUMN license_number TEXT',
         'ALTER TABLE persons ADD COLUMN passport_number TEXT',
         'ALTER TABLE persons ADD COLUMN global_entry_number TEXT',
@@ -870,6 +872,48 @@ def next_coin_id(db):
     # fallback: count rows
     count = db.execute("SELECT COUNT(*) as c FROM coins").fetchone()['c']
     return f"C {count + 1}"
+
+
+def _cat_id_prefix(property_name, date_1):
+    """Two-letter prefix for a coin's cat_id: <location><era>.
+
+    Location: C = Carpinteria, N = New York. Anything else is unmapped.
+    Era:      A = minted before 500 AD, M = minted 500 AD or later.
+    Returns None if either axis can't be determined.
+    """
+    p = (property_name or '').strip().lower()
+    if p in ('carp', 'carpinteria'):
+        loc = 'C'
+    elif p in ('nyc', 'new york', 'ny'):
+        loc = 'N'
+    else:
+        return None
+    if date_1 is None or date_1 == '':
+        return None
+    try:
+        d = int(date_1)
+    except (TypeError, ValueError):
+        return None
+    return loc + ('A' if d < 500 else 'M')
+
+
+def next_cat_id(db, property_name, date_1):
+    """Next sequential cat_id for a coin at this property / era,
+    zero-padded to 3 digits (e.g. 'CA001'). None if unassignable."""
+    prefix = _cat_id_prefix(property_name, date_1)
+    if not prefix:
+        return None
+    row = db.execute(
+        "SELECT cat_id FROM coins WHERE cat_id LIKE ? "
+        "ORDER BY CAST(SUBSTR(cat_id, 3) AS INTEGER) DESC LIMIT 1",
+        [f'{prefix}%']).fetchone()
+    n = 1
+    if row and row['cat_id']:
+        try:
+            n = int(row['cat_id'][2:]) + 1
+        except ValueError:
+            n = 1
+    return f'{prefix}{n:03d}'
 
 
 def coin_age(date_1):
@@ -1338,6 +1382,7 @@ def new_record(category):
         # Auto coin_id
         if category == 'coins':
             data['coin_id'] = next_coin_id(db)
+            data['cat_id'] = next_cat_id(db, data.get('property_name'), data.get('date_1'))
 
         cols = ', '.join(data.keys())
         placeholders = ', '.join(['?' for _ in data])
@@ -2745,6 +2790,49 @@ def backfill_property_status_own():
     )
     db.commit()
     return jsonify(updated=r.rowcount)
+
+
+@app.route('/admin/backfill-coin-cat-ids', methods=['POST'])
+def backfill_coin_cat_ids():
+    """Assign cat_id to every coin that still lacks one.
+
+    Coins are grouped by (location letter, era letter) and numbered
+    sequentially in purchase order (rowid). Existing cat_id values are
+    preserved. Coins without a mappable property (Carp/NYC) or a date_1
+    are skipped. Safe to re-run.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    # Per-prefix counter starts at the current max.
+    counters = {}
+    for r in db.execute(
+            "SELECT cat_id FROM coins "
+            "WHERE cat_id IS NOT NULL AND LENGTH(cat_id) >= 3"):
+        c = r['cat_id']
+        try:
+            counters[c[:2]] = max(counters.get(c[:2], 0), int(c[2:]))
+        except ValueError:
+            pass
+    assigned = 0
+    per_prefix = {}
+    rows = db.execute(
+        "SELECT id, property_name, date_1 FROM coins "
+        "WHERE cat_id IS NULL OR TRIM(cat_id) = '' "
+        "ORDER BY rowid").fetchall()
+    for row in rows:
+        prefix = _cat_id_prefix(row['property_name'], row['date_1'])
+        if not prefix:
+            continue
+        counters[prefix] = counters.get(prefix, 0) + 1
+        cat_id = f'{prefix}{counters[prefix]:03d}'
+        db.execute("UPDATE coins SET cat_id = ? WHERE id = ?",
+                   (cat_id, row['id']))
+        assigned += 1
+        per_prefix[prefix] = per_prefix.get(prefix, 0) + 1
+    db.commit()
+    return jsonify(assigned=assigned, per_prefix=per_prefix,
+                   skipped=len(rows) - assigned)
 
 
 @app.route('/admin/backfill-status-own-all', methods=['POST'])
