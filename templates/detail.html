@@ -367,11 +367,8 @@
 
   <!-- Reg / Auth / Mint -->
   <div class="dgrid dg3">
-    <div class="dcell ta-wrap with-hist-btn">
-      <button type="button" class="hist-btn" data-field="region"
-              {% if is_new %}disabled{% else %}data-url="{{ url_for('coin_fetch_history', record_id=r['id']) }}"{% endif %}
-              title="AI history of this region" aria-label="History of region">🔍</button>
-      <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input hist-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700">
+    <div class="dcell ta-wrap">
+      <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700">
       <span class="clabel">Reg</span>
     </div>
     <div class="dcell">
