@@ -561,6 +561,10 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
         'ALTER TABLE coins ADD COLUMN history_context TEXT',
+        'ALTER TABLE coins ADD COLUMN image_audit_match TEXT',
+        'ALTER TABLE coins ADD COLUMN image_audit_confidence REAL',
+        'ALTER TABLE coins ADD COLUMN image_audit_reason TEXT',
+        'ALTER TABLE coins ADD COLUMN image_audit_at TEXT',
         'ALTER TABLE coins ADD COLUMN cat_id TEXT',
         'ALTER TABLE persons ADD COLUMN license_number TEXT',
         'ALTER TABLE persons ADD COLUMN passport_number TEXT',
@@ -1202,6 +1206,98 @@ Reply with ONLY a JSON object, no prose, no code fences:
     if not m:
         raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
     return json.loads(m.group(0))
+
+
+def audit_coin_image_vs_description(coin):
+    """Send a coin's obverse + reverse images and its catalog description
+    to Claude vision and ask whether they describe the same coin.
+
+    Returns {match: True|False|None, confidence: float|None, reason: str}.
+    Returns match=None when there isn't enough material to judge.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    desc = (coin['description'] or '').strip()
+    if not desc:
+        return {'match': None, 'confidence': None,
+                'reason': 'no description on record'}
+    images = []
+    for fld, label in (('image_1', 'obverse'), ('image_2', 'reverse')):
+        name = coin[fld]
+        if not name:
+            continue
+        path = os.path.join(UPLOAD_FOLDER, name)
+        if not os.path.exists(path):
+            continue
+        ext = os.path.splitext(name)[1].lower().lstrip('.')
+        media_type = {
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'png': 'image/png', 'webp': 'image/webp', 'gif': 'image/gif',
+        }.get(ext)
+        if not media_type:
+            continue
+        try:
+            import base64
+            with open(path, 'rb') as fh:
+                data = base64.b64encode(fh.read()).decode('ascii')
+            images.append({'label': label, 'data': data,
+                           'media_type': media_type})
+        except Exception:
+            continue
+    if not images:
+        return {'match': None, 'confidence': None,
+                'reason': 'no usable images on record'}
+
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+    content = []
+    for img in images:
+        content.append({'type': 'text', 'text': f'{img["label"].capitalize()}:'})
+        content.append({'type': 'image', 'source': {
+            'type': 'base64',
+            'media_type': img['media_type'],
+            'data': img['data'],
+        }})
+    content.append({'type': 'text', 'text':
+        f"""Catalog description for the same coin:
+\"\"\"{desc}\"\"\"
+
+Compare the image(s) above to the description. Focus on iconography
+(figures, animals, legends, layout, key symbols). Wear, lighting,
+angle, and minor flan differences do NOT count as mismatches. A
+mismatch means the depicted subject is fundamentally different from
+what the description says.
+
+Reply with ONLY a JSON object, no prose:
+{{"match": true|false, "confidence": 0.0, "reason": "one short sentence"}}"""})
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model='claude-haiku-4-5-20251001',
+        max_tokens=300,
+        messages=[{'role': 'user', 'content': content}],
+    )
+    text = ''
+    for block in resp.content:
+        if getattr(block, 'type', None) == 'text':
+            text += block.text
+    text = text.strip()
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if not m:
+        return {'match': None, 'confidence': None,
+                'reason': f'parse error: {text[:80]}'}
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return {'match': None, 'confidence': None,
+                'reason': f'JSON error: {text[:80]}'}
+    return {
+        'match': bool(data.get('match')) if data.get('match') is not None else None,
+        'confidence': data.get('confidence'),
+        'reason': (data.get('reason') or '').strip(),
+    }
 
 
 def fetch_coin_context(coin):
@@ -2985,6 +3081,89 @@ def prune_empty_coin_id_dupes():
     db.commit()
     total = db.execute('SELECT COUNT(*) FROM coins').fetchone()[0]
     return jsonify(deleted=deleted, kept=kept, total=total)
+
+
+@app.route('/admin/coin-image-audit', methods=['POST'])
+def coin_image_audit():
+    """Run a Claude-vision pass over coins and flag rows where the
+    obverse/reverse images don't match the catalog description.
+
+    Form params:
+      secret    — IMPORT_MISSING_SECRET (required)
+      limit     — max coins to process this call (default 25)
+      offset    — skip N before starting (default 0)
+      recheck   — '1' to re-run on rows that already have a stored verdict
+                  (default skips them; set to recheck after image edits)
+      mismatch_only — '1' to return only the mismatches in the JSON
+
+    Persists per-coin verdicts so successive calls walk the table
+    incrementally. Use small limits (~25) to stay under Railway's
+    request timeout.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    try:
+        limit = int(request.form.get('limit') or 25)
+    except ValueError:
+        limit = 25
+    try:
+        offset = int(request.form.get('offset') or 0)
+    except ValueError:
+        offset = 0
+    recheck = request.form.get('recheck') == '1'
+    mismatch_only = request.form.get('mismatch_only') == '1'
+
+    where = ("description IS NOT NULL AND TRIM(description) <> '' "
+             "AND (image_1 IS NOT NULL OR image_2 IS NOT NULL)")
+    if not recheck:
+        where += " AND (image_audit_at IS NULL OR TRIM(image_audit_at) = '')"
+    rows = db.execute(
+        f"SELECT * FROM coins WHERE {where} ORDER BY rowid "
+        "LIMIT ? OFFSET ?",
+        [max(1, min(limit, 200)), max(0, offset)],
+    ).fetchall()
+
+    now = datetime.utcnow().isoformat()
+    results = []
+    for coin in rows:
+        try:
+            r = audit_coin_image_vs_description(coin)
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc(), flush=True)
+            r = {'match': None, 'confidence': None,
+                 'reason': f'exception: {str(e)[:120]}'}
+        match_str = ('true' if r['match'] is True
+                     else 'false' if r['match'] is False else None)
+        db.execute(
+            "UPDATE coins SET image_audit_match = ?, "
+            "image_audit_confidence = ?, image_audit_reason = ?, "
+            "image_audit_at = ? WHERE id = ?",
+            [match_str, r.get('confidence'), r.get('reason'), now, coin['id']],
+        )
+        results.append({
+            'id': coin['id'],
+            'cat_id': coin['cat_id'],
+            'coin_id': coin['coin_id'],
+            'region': coin['region'],
+            'authority': coin['authority'],
+            'match': r['match'],
+            'confidence': r.get('confidence'),
+            'reason': r.get('reason'),
+        })
+    db.commit()
+
+    mismatches = [r for r in results if r['match'] is False]
+    payload = {
+        'checked': len(results),
+        'mismatches': mismatches,
+        'mismatch_count': len(mismatches),
+        'next_offset': offset + len(rows),
+    }
+    if not mismatch_only:
+        payload['all'] = results
+    return jsonify(payload)
 
 
 @app.route('/admin/lens-mount-audit', methods=['GET'])
