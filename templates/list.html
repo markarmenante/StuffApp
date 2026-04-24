@@ -15,6 +15,15 @@
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ca_ancient' else 'ca_ancient') }}"
      class="toolbar-btn pill {% if coin_filter == 'ca_ancient' %}active{% endif %}"
      title="Ancient coins at Carpinteria (date_1 &lt; 1000)">CA Ancient</a>
+  {% if coin_filter == 'ca_ancient' %}
+  <form method="post" action="{{ url_for('coins_renumber_ca_ancient') }}" style="display:inline">
+    <button type="submit" class="toolbar-btn pill"
+            title="Resequence Display Position to C1..C{{ result_count }} in the current sort order"
+            onclick="return confirm('Renumber all {{ result_count }} CA Ancient coins as C1..C{{ result_count }}? This overwrites the current Display Position values.');">
+      Renumber
+    </button>
+  </form>
+  {% endif %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ny_ancient' else 'ny_ancient') }}"
      class="toolbar-btn pill {% if coin_filter == 'ny_ancient' %}active{% endif %}"
      title="Ancient coins at NYC (date_1 &lt; 1000)">NY Ancient</a>

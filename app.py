@@ -2792,6 +2792,30 @@ def backfill_property_status_own():
     return jsonify(updated=r.rowcount)
 
 
+@app.route('/coins/renumber-ca-ancient', methods=['POST'])
+def coins_renumber_ca_ancient():
+    """Resequence coin_id for every coin in the CA Ancient filter.
+
+    Ordering matches the coin list: region, authority, date_1. The first
+    coin becomes C1, the second C2, and so on — so the Display Position
+    on the printed cards matches the order shown in the list.
+    """
+    db = get_db()
+    where, extra = CATEGORY_FILTERS['coins']['ca_ancient']
+    order_by = CATEGORY_ORDER_BY['coins']
+    rows = db.execute(
+        f"SELECT id FROM coins WHERE {where} ORDER BY {order_by}",
+        list(extra),
+    ).fetchall()
+    for i, row in enumerate(rows, start=1):
+        db.execute("UPDATE coins SET coin_id = ? WHERE id = ?",
+                   (f'C{i}', row['id']))
+    db.commit()
+    flash(f'Renumbered {len(rows)} CA Ancient coins (C1–C{len(rows)}).',
+          'success')
+    return redirect(url_for('list_view', category='coins', filter='ca_ancient'))
+
+
 @app.route('/admin/backfill-coin-cat-ids', methods=['POST'])
 def backfill_coin_cat_ids():
     """Assign cat_id to every coin that still lacks one.
