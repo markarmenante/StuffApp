@@ -2190,7 +2190,15 @@ async function shareCardDetails(ev) {
   if (val('name')) lines.push(val('name'));
   if (val('number')) lines.push('Number: ' + val('number'));
   const exp = val('expiration');
-  if (exp) lines.push('Exp: ' + (exp.length >= 7 ? `${exp.slice(5,7)}/${exp.slice(0,4)}` : exp));
+  if (exp) {
+    let expDisp = exp;
+    // Convert ISO YYYY-MM(-DD) → MM/YYYY. If the value is already in
+    // MM/YYYY (the input now uses that format), leave it alone.
+    if (exp.includes('-') && exp.length >= 7) {
+      expDisp = `${exp.slice(5,7)}/${exp.slice(0,4)}`;
+    }
+    lines.push('Exp: ' + expDisp);
+  }
   if (val('cvc')) lines.push('CVC: ' + val('cvc'));
   if (val('billing_short')) lines.push('Billing zip code: ' + val('billing_short'));
   const text = lines.join('\n');
