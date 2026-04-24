@@ -99,7 +99,29 @@
       "Bash(npx tsc *)",
       "Read(//Users/markarmenante/**)",
       "Read(//Users/markarmenante/.nvm/versions/**)",
-      "Bash(export PATH=\"$HOME/.nvm/versions/node/$\\(ls ~/.nvm/versions/node)"
+      "Bash(export PATH=\"$HOME/.nvm/versions/node/$\\(ls ~/.nvm/versions/node)",
+      "Bash(python3 -m pip install --user --quiet flask werkzeug)",
+      "Bash(python3 *)",
+      "Bash(sqlite3 *)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5001/)",
+      "Bash(curl -s http://localhost:5001/persons/4068F5DC-E2D3-4E1D-89DF-FF8F4AF13706)",
+      "Bash(curl *)",
+      "Bash(git log *)",
+      "Bash(ssh -T -o StrictHostKeyChecking=no -o BatchMode=yes git@github.com)",
+      "Bash(mkdir -p ~/bin)",
+      "Bash(unzip -q -o gh.zip)",
+      "Bash(cp gh_2.91.0_macOS_arm64/bin/gh ~/bin/gh)",
+      "Bash(chmod +x ~/bin/gh)",
+      "Bash(~/bin/gh --version)",
+      "Bash(command -v railway)",
+      "Bash(railway whoami *)",
+      "Bash(lsof -ti:5000)",
+      "Bash(ps -p 663 -o pid,command)",
+      "Bash(lsof -ti:5001)",
+      "Bash(awk 'NR>=130 && NR<=327' templates/detail.html)",
+      "Bash(awk *)",
+      "Bash(grep -oE 'data-ta=\"[^\"]{0,200}\"')",
+      "Bash(grep -oE 'name=\"\\(cvc|number|expiration|cvc_2\\)\"[^>]{0,100}')"
     ]
   }
 }
