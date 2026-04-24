@@ -2792,16 +2792,27 @@ def backfill_property_status_own():
     return jsonify(updated=r.rowcount)
 
 
-@app.route('/coins/renumber-ca-ancient', methods=['POST'])
-def coins_renumber_ca_ancient():
-    """Resequence coin_id for every coin in the CA Ancient filter.
+_RENUMBER_GROUPS = {
+    # filter_name: (display prefix, human label)
+    'ca_ancient': ('C', 'CA Ancient'),
+    'ny_ancient': ('N', 'NY Ancient'),
+}
+
+
+@app.route('/coins/renumber/<group>', methods=['POST'])
+def coins_renumber_group(group):
+    """Resequence coin_id for every coin in the given filter group.
 
     Ordering matches the coin list: region, authority, date_1. The first
-    coin becomes C1, the second C2, and so on — so the Display Position
-    on the printed cards matches the order shown in the list.
+    coin becomes <prefix>1, the second <prefix>2, and so on — so the
+    Display Position on the printed cards matches the order shown in
+    the list. Prefix per group: C for CA Ancient, N for NY Ancient.
     """
+    if group not in _RENUMBER_GROUPS:
+        abort(404)
+    prefix, label = _RENUMBER_GROUPS[group]
     db = get_db()
-    where, extra = CATEGORY_FILTERS['coins']['ca_ancient']
+    where, extra = CATEGORY_FILTERS['coins'][group]
     order_by = CATEGORY_ORDER_BY['coins']
     rows = db.execute(
         f"SELECT id FROM coins WHERE {where} ORDER BY {order_by}",
@@ -2809,11 +2820,14 @@ def coins_renumber_ca_ancient():
     ).fetchall()
     for i, row in enumerate(rows, start=1):
         db.execute("UPDATE coins SET coin_id = ? WHERE id = ?",
-                   (f'C{i}', row['id']))
+                   (f'{prefix}{i}', row['id']))
     db.commit()
-    flash(f'Renumbered {len(rows)} CA Ancient coins (C1–C{len(rows)}).',
-          'success')
-    return redirect(url_for('list_view', category='coins', filter='ca_ancient'))
+    flash(
+        f'Renumbered {len(rows)} {label} coins '
+        f'({prefix}1–{prefix}{len(rows)}).',
+        'success',
+    )
+    return redirect(url_for('list_view', category='coins', filter=group))
 
 
 @app.route('/admin/backfill-coin-cat-ids', methods=['POST'])
