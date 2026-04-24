@@ -423,7 +423,7 @@
 
   <!-- Physical specs -->
   <div class="dgrid coin-specs" style="grid-template-columns: repeat(6, 1fr);">
-    <div class="dcell"><input type="text" name="weight" value="{{ '%s g'|format(val('weight')) if val('weight') else '' }}" class="coin-unit-input" data-suffix=" g" style="text-align:center"></div>
+    <div class="dcell"><input type="text" name="weight" value="{{ '%.2f g'|format(val('weight')|float) if val('weight') else '' }}" class="coin-unit-input" data-suffix=" g" style="text-align:center"></div>
     <div class="dcell"><input type="text" name="size" value="{{ '%s mm'|format(val('size')) if val('size') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"></div>
     <div class="dcell"><select name="grade" style="text-align:center"><option value=""></option>{% for o in vlists.coin_grade %}<option value="{{ o }}" {{ 'selected' if val('grade')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Grade</span></div>
     <div class="dcell"><select name="die_axis" style="text-align:center"><option value=""></option>{% for o in ['0','1','2','3','4','5','6','7','8','9','10','11','12'] %}<option value="{{ o }}" {{ 'selected' if val('die_axis')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Die Axis</span></div>

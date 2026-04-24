@@ -2980,7 +2980,7 @@ def _draw_coin_card(c, coin, x, y, w, h):
         c.drawString(x + pad, bottom_y, coin['coin_id'])
     if coin['weight'] is not None:
         c.setFont('Helvetica', 6)
-        c.drawRightString(x + w - pad, bottom_y, f'{coin["weight"]:g} g')
+        c.drawRightString(x + w - pad, bottom_y, f'{coin["weight"]:.2f} g')
 
     # Middle area: image (left) + specs stack (right)
     mid_top = desc_y - 3

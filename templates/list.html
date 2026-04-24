@@ -181,7 +181,7 @@
             {% if row['date_1_text'] %}<span>{{ row['date_1_text'] }}{% if row['date_2_text'] %} – {{ row['date_2_text'] }}{% endif %}</span>{% endif %}
           </div>
           <div class="idr">
-            {% if row['weight'] %}<span>{{ row['weight'] }} g</span>{% endif %}
+            {% if row['weight'] %}<span>{{ '%.2f'|format(row['weight']|float) }} g</span>{% endif %}
             {% if row['size'] %}<span>{{ row['size'] }} mm</span>{% endif %}
             {% if row['coin_id'] %}<span class="item-cat-id">{{ row['coin_id'] }}</span>{% endif %}
           </div>
