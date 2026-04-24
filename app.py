@@ -1231,9 +1231,9 @@ def fetch_coin_context(coin):
     if not (region or authority or mint or date_hint):
         raise RuntimeError('Fill in at least region, authority, mint, or date first.')
 
-    prompt = f"""You are an ancient-numismatics historian summarizing the
-historical environment in which a specific coin was minted. You have
-five inputs; weave them together — don't just restate them.
+    prompt = f"""You are an ancient-numismatics historian writing a short,
+rich profile of a specific coin. You have five inputs; weave them
+together — don't just restate them.
 
 Region:      {region or '(not specified)'}
 Authority:   {authority or '(not specified)'}
@@ -1241,16 +1241,29 @@ Mint:        {mint or '(not specified)'}
 Date range:  {date_hint or '(not specified)'}
 Description: {desc or '(not specified)'}
 
-Use up to 4 concise web searches to ground the facts. Focus on:
-- The political / military situation at this mint during the date range
-- Who was in power (dynasty, city magistrate, satrap, etc.) and what they
-  were reacting to (war, trade boom, reform, succession crisis…)
-- Why THIS coin type / iconography fit the moment — propaganda, trade
-  denomination, military pay, civic pride, religious festival
-- One-line significance in the broader Mediterranean / Near-Eastern world
+Use up to 4 concise web searches to ground the facts. Cover, in this order:
+
+1. Historical environment — the political / military situation at this
+   mint during the date range; who was in power (dynasty, magistrate,
+   satrap, emperor…) and what they were reacting to (war, trade boom,
+   succession, reform).
+
+2. Coin style — the iconography, engraving school, fabric / flan, and
+   any artistic signatures (e.g. late-Classical Syracusan masters,
+   Hellenistic realism, archaic incuse reverse, Roman provincial
+   portrait conventions). Name the style when it's identifiable.
+
+3. Numismatic importance — rarity, die-study or hoard context,
+   significance within the series (first portrait of a ruler, earliest
+   use of a legend, reference-book pedigree, a benchmark type in a
+   standard catalog). Skip padding; only include what actually applies.
+
+4. How this coin reflected the times — propaganda choices, civic pride,
+   response to economic or military pressure, religious festival,
+   trade denomination. Tie the imagery or metal directly to the moment.
 
 Reply with ONLY a JSON object, no prose, no code fences:
-{{"markdown": "4–7 short lines. Prefix factual claims with '- '. You may include 1–2 plain lines of context. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~900 chars total."}}"""
+{{"markdown": "Four short sections — use '**Historical environment**', '**Style**', '**Numismatic importance**', '**Reflection of the times**' as bold section labels on their own lines, each followed by 1–3 bullets starting with '- '. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~1600 chars total."}}"""
 
     client = anthropic.Anthropic(api_key=api_key)
     import time as _time
@@ -1259,7 +1272,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
         try:
             resp = client.messages.create(
                 model='claude-sonnet-4-5',
-                max_tokens=1400,
+                max_tokens=2000,
                 tools=[{
                     'type': 'web_search_20250305',
                     'name': 'web_search',
