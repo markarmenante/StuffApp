@@ -1222,6 +1222,8 @@ def fetch_coin_context(coin):
     authority = (coin['authority'] or '').strip()
     mint      = (coin['mint']      or '').strip()
     desc      = (coin['description'] or '').strip()
+    refs      = (coin['coin_references'] or '').strip()
+    grade_notes = (coin['notes'] or '').strip()
     date_hint = ''
     if coin['date_1_text'] or coin['date_2_text']:
         date_hint = (coin['date_1_text'] or '')
@@ -1232,14 +1234,19 @@ def fetch_coin_context(coin):
         raise RuntimeError('Fill in at least region, authority, mint, or date first.')
 
     prompt = f"""You are an ancient-numismatics historian writing a short,
-rich profile of a specific coin. You have five inputs; weave them
-together — don't just restate them.
+rich profile of a specific coin. You have seven inputs; weave them
+together — don't just restate them. The catalog references and
+grade notes often carry a lot of signal (BCD pedigree, Calciati
+number, hoard provenance, strike quality, rarity call-outs); mine
+them for anything useful.
 
 Region:      {region or '(not specified)'}
 Authority:   {authority or '(not specified)'}
 Mint:        {mint or '(not specified)'}
 Date range:  {date_hint or '(not specified)'}
 Description: {desc or '(not specified)'}
+Pedigree / References: {refs or '(not specified)'}
+Grade / Conditions:    {grade_notes or '(not specified)'}
 
 Use up to 4 concise web searches to ground the facts. Cover, in this order:
 
