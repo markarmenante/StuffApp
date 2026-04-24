@@ -560,6 +560,7 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN history_region TEXT',
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
+        'ALTER TABLE coins ADD COLUMN history_context TEXT',
         'ALTER TABLE coins ADD COLUMN cat_id TEXT',
         'ALTER TABLE persons ADD COLUMN license_number TEXT',
         'ALTER TABLE persons ADD COLUMN passport_number TEXT',
@@ -1201,6 +1202,97 @@ Reply with ONLY a JSON object, no prose, no code fences:
     if not m:
         raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
     return json.loads(m.group(0))
+
+
+def fetch_coin_context(coin):
+    """Claude-driven historical-environment summary for a coin, drawing
+    on region, authority, mint, date, and description together.
+    Returns dict {markdown: str}. Raises RuntimeError on missing key
+    / API failure.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed. Run 'pip install anthropic'.")
+
+    region    = (coin['region']    or '').strip()
+    authority = (coin['authority'] or '').strip()
+    mint      = (coin['mint']      or '').strip()
+    desc      = (coin['description'] or '').strip()
+    date_hint = ''
+    if coin['date_1_text'] or coin['date_2_text']:
+        date_hint = (coin['date_1_text'] or '')
+        if coin['date_2_text']:
+            date_hint = f"{date_hint} – {coin['date_2_text']}"
+
+    if not (region or authority or mint or date_hint):
+        raise RuntimeError('Fill in at least region, authority, mint, or date first.')
+
+    prompt = f"""You are an ancient-numismatics historian summarizing the
+historical environment in which a specific coin was minted. You have
+five inputs; weave them together — don't just restate them.
+
+Region:      {region or '(not specified)'}
+Authority:   {authority or '(not specified)'}
+Mint:        {mint or '(not specified)'}
+Date range:  {date_hint or '(not specified)'}
+Description: {desc or '(not specified)'}
+
+Use up to 4 concise web searches to ground the facts. Focus on:
+- The political / military situation at this mint during the date range
+- Who was in power (dynasty, city magistrate, satrap, etc.) and what they
+  were reacting to (war, trade boom, reform, succession crisis…)
+- Why THIS coin type / iconography fit the moment — propaganda, trade
+  denomination, military pay, civic pride, religious festival
+- One-line significance in the broader Mediterranean / Near-Eastern world
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{{"markdown": "4–7 short lines. Prefix factual claims with '- '. You may include 1–2 plain lines of context. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~900 chars total."}}"""
+
+    client = anthropic.Anthropic(api_key=api_key)
+    import time as _time
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = client.messages.create(
+                model='claude-sonnet-4-5',
+                max_tokens=1400,
+                tools=[{
+                    'type': 'web_search_20250305',
+                    'name': 'web_search',
+                    'max_uses': 4,
+                }],
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            break
+        except anthropic.RateLimitError as e:
+            last_err = e
+            wait = 10 * (attempt + 1)
+            try:
+                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
+                if ra: wait = max(wait, int(float(ra)))
+            except Exception:
+                pass
+            _time.sleep(wait)
+    else:
+        raise RuntimeError(f'Rate limited after retries: {last_err}')
+
+    text = ''
+    for block in resp.content:
+        if getattr(block, 'type', None) == 'text':
+            text += block.text
+    text = text.strip()
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if not m:
+        raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
+    data = json.loads(m.group(0))
+    import html as _html
+    md = _html.unescape(data.get('markdown') or '').strip()
+    md = re.sub(r'</?cite\b[^>]*>', '', md, flags=re.IGNORECASE)
+    return {'markdown': md}
 
 
 def fetch_coin_history(field_name, topic, coin):
@@ -2141,6 +2233,33 @@ def coins_map_view():
                            coin_filter=coin_filter,
                            current_category='coins',
                            cat_info=CATEGORIES['coins'])
+
+
+@app.route('/coins/<record_id>/context', methods=['POST'])
+def coin_fetch_context(record_id):
+    """Combined historical-environment lookup using region + authority +
+    mint + date + description together."""
+    db = get_db()
+    coin = db.execute("SELECT * FROM coins WHERE id = ?", (record_id,)).fetchone()
+    if not coin:
+        return jsonify({'error': 'Coin not found'}), 404
+    try:
+        data = fetch_coin_context(coin)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        detail = str(e) or e.__class__.__name__
+        return jsonify({'error': f'Context lookup failed: {detail}'}), 500
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "UPDATE coins SET history_context = ?, history_searched_at = ?, "
+        "updated_at = ? WHERE id = ?",
+        (data['markdown'], now, now, record_id),
+    )
+    db.commit()
+    return jsonify({'markdown': data['markdown'], 'searched_at': now})
 
 
 @app.route('/coins/<record_id>/history', methods=['POST'])

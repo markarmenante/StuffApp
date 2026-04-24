@@ -130,6 +130,13 @@
         🔎 Lookup
       </button>
       {% endif %}
+      {% if category == 'coins' %}
+      <button type="button" class="watch-lookup-btn coin-lookup-btn"
+              data-url="{{ url_for('coin_fetch_context', record_id=r['id']) }}"
+              title="Look up the historical environment at this mint, combining region, authority, mint, date, and description">
+        🔎 Lookup
+      </button>
+      {% endif %}
       {% if category == 'properties' %}
       <a class="add-topic-link"
          href="{{ url_for('topic_new', property_id=r['id']) }}">+ Topic</a>
@@ -399,20 +406,6 @@
     </div>
   </div>
 
-  <!-- AI History panel (collapsed unless content present) -->
-  <div class="coin-history-panel{% if not (r and (r['history_region'] or r['history_authority'])) %} is-empty{% endif %}"
-       id="coinHistoryPanel"
-       data-region-raw="{{ r['history_region'] if r and r['history_region'] else '' }}"
-       data-authority-raw="{{ r['history_authority'] if r and r['history_authority'] else '' }}">
-    <div class="coin-history-header">
-      <span class="coin-history-title" id="coinHistoryTitle">History</span>
-      <span class="coin-history-stamp" id="coinHistoryStamp">{% if r and r['history_searched_at'] %}as of {{ r['history_searched_at']|short_date }}{% endif %}</span>
-    </div>
-    <div class="coin-history-body" id="coinHistoryBody">
-      {% if r and r['history_region'] %}{{ r['history_region']|format_results }}{% elif r and r['history_authority'] %}{{ r['history_authority']|format_results }}{% endif %}
-    </div>
-  </div>
-
   <!-- Denomination / Metal / Date / Age -->
   <div class="dgrid dg4">
     <div class="dcell ta-wrap"><input type="text" name="denomination" value="{{ val('denomination') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('denomination', [])|join('||') }}"></div>
@@ -472,6 +465,22 @@
   <div class="dgrid dg2">
     {{ cell('sheldon','Sheldon') }}
     {{ cell('storage_location','Storage') }}
+  </div>
+
+  <!-- AI History panel — pinned just above the Origin map so the
+       narrative and the geography sit together. -->
+  <div class="coin-history-panel{% if not (r and (r['history_region'] or r['history_authority'] or r['history_context'])) %} is-empty{% endif %}"
+       id="coinHistoryPanel"
+       data-region-raw="{{ r['history_region'] if r and r['history_region'] else '' }}"
+       data-authority-raw="{{ r['history_authority'] if r and r['history_authority'] else '' }}"
+       data-context-raw="{{ r['history_context'] if r and r['history_context'] else '' }}">
+    <div class="coin-history-header">
+      <span class="coin-history-title" id="coinHistoryTitle">History</span>
+      <span class="coin-history-stamp" id="coinHistoryStamp">{% if r and r['history_searched_at'] %}as of {{ r['history_searched_at']|short_date }}{% endif %}</span>
+    </div>
+    <div class="coin-history-body" id="coinHistoryBody">
+      {% if r and r['history_context'] %}{{ r['history_context']|format_results }}{% elif r and r['history_region'] %}{{ r['history_region']|format_results }}{% elif r and r['history_authority'] %}{{ r['history_authority']|format_results }}{% endif %}
+    </div>
   </div>
 
   <!-- Origin map -->
@@ -2354,6 +2363,54 @@ document.querySelectorAll('.person-tab').forEach(btn => {
         const html = formatResultsHtml(md);
         if (body) body.innerHTML = html || '<p><em>(no results)</em></p>';
         panel.dataset[field + 'Raw'] = md;
+        if (stamp && data.searched_at) {
+          const d = new Date(data.searched_at);
+          stamp.textContent = 'as of ' + d.toLocaleDateString('en-US',
+            {month: 'short', day: 'numeric', year: 'numeric'});
+        }
+      } catch (err) {
+        if (body) body.innerHTML = '<p style="color:#c00">Error: ' + (err.message || 'unknown') + '</p>';
+      } finally {
+        btn.classList.remove('loading'); btn.disabled = false;
+      }
+    });
+  });
+
+  // ── Coin-wide Lookup: combined historical context ──
+  document.querySelectorAll('.coin-lookup-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const url = btn.dataset.url;
+      if (!url) return;
+      // Second click while Context is showing = collapse.
+      if (panel && panel.dataset.currentField === 'context'
+          && !panel.classList.contains('is-empty')) {
+        panel.classList.add('is-empty');
+        if (body) body.innerHTML = '';
+        panel.dataset.currentField = '';
+        return;
+      }
+      if (title) title.textContent = 'Historical Context';
+      panel.dataset.currentField = 'context';
+      panel.classList.remove('is-empty');
+      if (body) body.innerHTML = '<p><em>Searching…</em></p>';
+      btn.classList.add('loading'); btn.disabled = true;
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: '{}',
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const t = await res.text();
+          throw new Error(`Server returned ${res.status}. ${t.slice(0,120)}`);
+        }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+        const md = data.markdown || '';
+        const html = formatResultsHtml(md);
+        if (body) body.innerHTML = html || '<p><em>(no results)</em></p>';
+        panel.dataset.contextRaw = md;
         if (stamp && data.searched_at) {
           const d = new Date(data.searched_at);
           stamp.textContent = 'as of ' + d.toLocaleDateString('en-US',
