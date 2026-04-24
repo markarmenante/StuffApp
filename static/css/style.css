@@ -29,6 +29,16 @@ html { font-size: 14px; }
 body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
 a { color: var(--blue); text-decoration: none; }
 
+/* Hide native number-input spinners app-wide — they clutter cells like
+   Jewels, Megapixels, etc. and are rarely useful on touch devices. */
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
 /* ── TOP NAVIGATION ── */
 .top-nav {
   position: sticky; top: 0; z-index: 100;
