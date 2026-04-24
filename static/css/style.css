@@ -1127,6 +1127,11 @@ input[type="date"] { -webkit-appearance: none; }
     font-size: 12px;
   }
 
+  /* Persons detail on mobile: head shot eats a lot of vertical space
+     that would otherwise show the health/ID form. Hide the photo and
+     let the specs take the full width. */
+  .detail-page-persons .watch-photo { display: none; }
+
   /* Camera Type/Format radios crowded four options (35mm/120/Sheet/Other)
      into a ~170px half-width cell and overlapped. Let the row go full
      width on mobile so each radio-group has room to flow cleanly. */
