@@ -112,18 +112,54 @@ window.COIN_REGIONS = {
   'Dalmatia':[43.50,16.60],
 };
 
+// Greek transliteration → canonical Latinized city name in COIN_CITIES.
+// Add new entries as you encounter mismatches; they all resolve via byCity.
+window.COIN_CITY_ALIASES = {
+  'phokaia':       'Phocaea',
+  'phokaea':       'Phocaea',
+  'kyzikos':       'Cyzicus',
+  'kyme':          'Pergamon',     // approximate — Kyme is just north of Pergamon
+  'korinth':       'Corinth',
+  'korinthos':     'Corinth',
+  'thebai':        'Thebes',
+  'athenai':       'Athens',
+  'syrakousai':    'Syracuse',
+  'kroton':        'Croton',
+  'taras':         'Tarentum',
+  'metapontion':   'Metapontum',
+  'massalia':      'Massalia',
+  'panticapaion':  'Panticapaeum',
+  'pantikapaion':  'Panticapaeum',
+  'olbia pontike': 'Olbia',
+  'sikyon':        'Sicyon',
+  'aigai':         'Aegae',
+  'klazomenai':    'Clazomenae',
+  'kos':           'Kos',
+  'karystos':      'Carystus',
+  'kameiros':      'Camirus',
+  'lampsakos':     'Lampsacus',
+  'kebren':        'Cebren',
+  'kerasos':       'Cerasus',
+  'mytilini':      'Mytilene',
+  'mytilene':      'Mytilene',
+  'knidos':        'Knidos',
+};
+
 // Given a coin's {mint, region, authority}, return the best {name, latlng}
 // match or null. Exposed so the detail and list maps share identical logic.
 window.resolveCoinOrigin = function(coin) {
   const cities = window.COIN_CITIES, regions = window.COIN_REGIONS;
+  const aliases = window.COIN_CITY_ALIASES || {};
   const mint = (coin.mint || '').trim();
   const region = (coin.region || '').trim();
   const authority = (coin.authority || '').trim();
 
   const byCity = (s) => {
     if (!s) return null;
-    const key = Object.keys(cities).find(k => k.toLowerCase() === s.toLowerCase());
-    return key ? {name: key, latlng: cities[key]} : null;
+    const lc = s.toLowerCase();
+    let key = Object.keys(cities).find(k => k.toLowerCase() === lc);
+    if (!key && aliases[lc]) key = aliases[lc];
+    return key && cities[key] ? {name: key, latlng: cities[key]} : null;
   };
   const byRegion = (s) => {
     if (!s) return null;
