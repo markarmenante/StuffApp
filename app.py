@@ -2507,12 +2507,20 @@ def format_results_filter(value):
                 out.append('</ul>')
                 in_list = False
             continue
-        bullet = line[:1] in ('-', '*', '•')
+        # A bullet is '-', '•', or '*' followed by whitespace. Bare
+        # '*' at line start belongs to **bold** and must NOT be treated
+        # as a bullet marker (otherwise the first asterisk gets eaten
+        # and `**Style**` renders as `*Style**`).
+        bullet = False
+        content = line
+        if len(line) >= 2 and line[0] in ('-', '•', '*') and line[1] in ' \t':
+            bullet = True
+            content = line[2:].strip()
         if bullet:
             if not in_list:
                 out.append('<ul class="results-list">')
                 in_list = True
-            out.append(f'<li>{_inline(line[1:].strip())}</li>')
+            out.append(f'<li>{_inline(content)}</li>')
         else:
             if in_list:
                 out.append('</ul>')

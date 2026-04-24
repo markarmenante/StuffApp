@@ -131,7 +131,7 @@
       </button>
       {% endif %}
       {% if category == 'coins' %}
-      <button type="button" class="watch-lookup-btn coin-lookup-btn"
+      <button type="button" class="coin-lookup-btn"
               data-url="{{ url_for('coin_fetch_context', record_id=r['id']) }}"
               title="Look up the historical environment at this mint, combining region, authority, mint, date, and description">
         🔎 Lookup
@@ -1394,8 +1394,9 @@ document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e)
     const filled = data.filled || {};
     const overwritten = data.overwritten || {};
     if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
-      alert('No changes — sources did not yield new information.' +
-            (data.sources ? '\n\nSources: ' + data.sources : ''));
+      alert('Already up to date. Every field the lookup checked matches '
+            + 'this watch.'
+            + (data.sources ? '\n\nChecked: ' + data.sources : ''));
       return;
     }
     showLookupReview(url.replace('/lookup', '/apply-lookup'),

@@ -376,15 +376,18 @@ input[type="number"]::-webkit-outer-spin-button {
 .detail-model { font-size: 15px; font-weight: 500; padding: 5px 10px 5px; border-bottom: 1px solid var(--border); background: var(--cell-bg); color: var(--text-secondary); }
 
 /* Lookup button sits inside the floating nav overlay. */
-.watch-lookup-btn {
+.watch-lookup-btn,
+.coin-lookup-btn {
   font-size: 12px; line-height: 1;
   padding: 4px 8px;
   border: 1px solid var(--border); border-radius: 4px;
   background: #fff; color: var(--text); cursor: pointer;
   white-space: nowrap;
 }
-.watch-lookup-btn:hover:not(:disabled) { background: rgba(0,0,0,.05); }
-.watch-lookup-btn:disabled { opacity: .6; cursor: progress; }
+.watch-lookup-btn:hover:not(:disabled),
+.coin-lookup-btn:hover:not(:disabled) { background: rgba(0,0,0,.05); }
+.watch-lookup-btn:disabled,
+.coin-lookup-btn:disabled { opacity: .6; cursor: progress; }
 
 .card-share-btn {
   display: inline-flex; align-items: center; justify-content: center;
