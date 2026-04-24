@@ -17,6 +17,14 @@
       ('properties',   '🏠', 'Property'),
       ('credit_cards', '💳', 'Cards'),
       ('persons',      '👤', 'People'),
+      ('cameras',      '📷', 'Cameras'),
+      ('lenses',       '🔭', 'Lenses'),
+      ('pens',         '✒️', 'Pens'),
+      ('art',          '🎨', 'Art'),
+      ('vehicles',     '🚗', 'Vehicles'),
+      ('recordings',   '🎵', 'Music'),
+      ('audio',        '🔊', 'Audio'),
+      ('rifles',       '🔫', 'Rifles'),
     ] %}
     {% for slug, icon, label in cat_icons %}
     <a href="{{ url_for('list_view', category=slug) }}"
