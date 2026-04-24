@@ -1405,10 +1405,13 @@ def new_record(category):
         db.execute(f"INSERT INTO {CATEGORIES[category]['table']} ({cols}) VALUES ({placeholders})",
                    list(data.values()))
 
-        # After the coin lands, resequence Display Position across all
-        # four era/property groups so the new one slots in cleanly.
+        # Resequence Display Position for only the new coin's group
+        # (Carp Ancient, Carp Modern, NY Ancient, or NY Modern).
         if category == 'coins':
-            _renumber_coin_groups(db)
+            new_group = _coin_group_for(
+                data.get('property_name'), data.get('date_1'))
+            if new_group:
+                _renumber_coin_groups(db, [new_group])
 
         db.commit()
         detail_url = url_for('detail_view', category=category, record_id=record_id)
@@ -1493,32 +1496,23 @@ def detail_view(category, record_id):
                 val = normalize_field_value(table, fname, val)
                 updates[fname] = val if val else None
 
-        # If a coin's property or date crossed into a new group, we need
-        # to resequence Display Position afterwards.
-        coin_group_changed = False
+        # If a coin moved into a different group, resequence just that
+        # group (Carp/NYC × Ancient/Modern). The old group keeps its
+        # current numbering — gaps can be squashed by clicking Renumber.
+        new_group_to_resequence = None
         if category == 'coins':
-            def _era(d):
-                try:
-                    return 'A' if int(d) < 500 else 'M'
-                except (TypeError, ValueError):
-                    return None
-            old_key = (
-                (record['property_name'] or '').strip().lower(),
-                _era(record['date_1']),
-            )
             new_prop = updates.get('property_name', record['property_name'])
             new_date = updates.get('date_1', record['date_1'])
-            new_key = (
-                (new_prop or '').strip().lower(),
-                _era(new_date),
-            )
-            coin_group_changed = old_key != new_key
+            old_group = _coin_group_for(record['property_name'], record['date_1'])
+            new_group = _coin_group_for(new_prop, new_date)
+            if new_group and new_group != old_group:
+                new_group_to_resequence = new_group
 
         set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
         db.execute(f"UPDATE {table} SET {set_clause} WHERE id = ?",
                    list(updates.values()) + [record_id])
-        if coin_group_changed:
-            _renumber_coin_groups(db)
+        if new_group_to_resequence:
+            _renumber_coin_groups(db, [new_group_to_resequence])
         db.commit()
         flash("Record saved.", 'success')
         return redirect(url_for('detail_view', category=category, record_id=record_id))
@@ -1661,18 +1655,12 @@ def save_field(category, record_id):
                [value if value != '' else None, now, record_id])
 
     if old_row is not None:
-        def _era(d):
-            try:
-                return 'A' if int(d) < 500 else 'M'
-            except (TypeError, ValueError):
-                return None
         new_prop = value if field_name == 'property_name' else old_row['property_name']
         new_date = value if field_name == 'date_1' else old_row['date_1']
-        old_key = ((old_row['property_name'] or '').strip().lower(),
-                   _era(old_row['date_1']))
-        new_key = ((new_prop or '').strip().lower(), _era(new_date))
-        if old_key != new_key:
-            _renumber_coin_groups(db)
+        old_group = _coin_group_for(old_row['property_name'], old_row['date_1'])
+        new_group = _coin_group_for(new_prop, new_date)
+        if new_group and new_group != old_group:
+            _renumber_coin_groups(db, [new_group])
 
     db.commit()
     return jsonify({'ok': True})
@@ -2877,6 +2865,8 @@ def _renumber_coin_groups(db, groups=None):
         groups = list(_RENUMBER_GROUPS.keys())
     order_by = CATEGORY_ORDER_BY['coins']
     for g in groups:
+        if g not in _RENUMBER_GROUPS:
+            continue
         prefix, _ = _RENUMBER_GROUPS[g]
         where, extra = CATEGORY_FILTERS['coins'][g]
         rows = db.execute(
@@ -2886,6 +2876,26 @@ def _renumber_coin_groups(db, groups=None):
         for i, row in enumerate(rows, start=1):
             db.execute("UPDATE coins SET coin_id = ? WHERE id = ?",
                        (f'{prefix}{i}', row['id']))
+
+
+def _coin_group_for(property_name, date_1):
+    """Return the era/property group name ('ca_ancient', 'ny_modern',
+    etc.) a coin belongs to, or None if either axis is unmappable.
+    Boundary: date_1 < 500 → Ancient, otherwise Modern."""
+    p = (property_name or '').strip().lower()
+    if p in ('carp', 'carpinteria'):
+        loc = 'ca'
+    elif p in ('nyc', 'new york', 'ny'):
+        loc = 'ny'
+    else:
+        return None
+    if date_1 in (None, ''):
+        return None
+    try:
+        d = int(date_1)
+    except (TypeError, ValueError):
+        return None
+    return f"{loc}_{'ancient' if d < 500 else 'modern'}"
 
 
 @app.route('/coins/renumber/<group>', methods=['POST'])
