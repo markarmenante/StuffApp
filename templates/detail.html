@@ -2387,6 +2387,10 @@ document.querySelectorAll('.person-tab').forEach(btn => {
       panel.dataset.currentField = 'context';
       panel.classList.remove('is-empty');
       if (body) body.innerHTML = '<p><em>Searching…</em></p>';
+      // Scroll the panel into view so the user sees results unfolding.
+      if (panel && typeof panel.scrollIntoView === 'function') {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       btn.classList.add('loading'); btn.disabled = true;
       try {
         const res = await fetch(url, {
