@@ -736,6 +736,8 @@ CATEGORY_FILTERS = {
     'coins': {
         'ca_ancient': ("date_1 < 1000 AND property_name IN ('Carp','Carpinteria')", []),
         'ny_ancient': ("date_1 < 1000 AND property_name = 'NYC'", []),
+        'ca_modern':  ("date_1 >= 1000 AND property_name IN ('Carp','Carpinteria')", []),
+        'ny_modern':  ("date_1 >= 1000 AND property_name = 'NYC'", []),
         'ordered':    ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
     },
     'audio': {
@@ -2794,8 +2796,10 @@ def backfill_property_status_own():
 
 _RENUMBER_GROUPS = {
     # filter_name: (display prefix, human label)
-    'ca_ancient': ('C', 'CA Ancient'),
-    'ny_ancient': ('N', 'NY Ancient'),
+    'ca_ancient': ('C',  'CA Ancient'),
+    'ny_ancient': ('N',  'NY Ancient'),
+    'ca_modern':  ('CM', 'CA Modern'),
+    'ny_modern':  ('NM', 'NY Modern'),
 }
 
 

@@ -169,6 +169,11 @@ input[type="number"]::-webkit-outer-spin-button {
   background: var(--blue); border-color: var(--blue); color: #fff;
 }
 .toolbar-btn.pill.active:hover { background: #0050c0; }
+.toolbar-btn.pill.disabled {
+  opacity: 0.35;
+  pointer-events: none;
+  cursor: default;
+}
 
 /* ── ITEM LIST ── */
 .item-list { background: var(--surface); }
