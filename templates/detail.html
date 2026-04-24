@@ -374,11 +374,8 @@
       <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input hist-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700">
       <span class="clabel">Reg</span>
     </div>
-    <div class="dcell ta-wrap with-hist-btn">
-      <button type="button" class="hist-btn" data-field="authority"
-              {% if is_new %}disabled{% else %}data-url="{{ url_for('coin_fetch_history', record_id=r['id']) }}"{% endif %}
-              title="AI history of this authority" aria-label="History of authority">🔍</button>
-      <input type="text" name="authority" value="{{ val('authority') }}" class="hist-input">
+    <div class="dcell">
+      <input type="text" name="authority" value="{{ val('authority') }}">
       <span class="clabel">Auth</span>
     </div>
     {{ tacell('mint','Mint', ta.get('mint', [])) }}
