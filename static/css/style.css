@@ -1109,19 +1109,15 @@ input[type="date"] { -webkit-appearance: none; }
   .detail-bottom { grid-template-columns: repeat(2, 1fr); gap: 6px; }
 
   /* Detail pages share the .watch-body layout (photo left, specs right).
-     On phones that 210px side photo crushed the spec column so labels
-     like "Jewels", "Reserve", "Vendor", and "Tags/Plate" overlapped
-     their inputs. Stack photo above specs for every category at once. */
-  .watch-body { flex-direction: column; }
+     On phones shrink the photo so the spec column has room to breathe,
+     keeping the balanced side-by-side split instead of stacking. */
   .watch-body .watch-photo {
-    width: 100%;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    min-height: 0;
-    padding: 10px;
+    width: 140px;
+    min-height: 140px;
+    padding: 6px;
   }
-  .watch-body .watch-photo img { max-width: 100%; max-height: 280px; }
-  /* Recording radio panel breathes with the full width. */
+  .watch-body .watch-photo img { max-width: 128px; max-height: 220px; }
+  /* Recording radio panel gets breathing room at the reduced spec width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
   /* Keep the two post-radio meta/purchase rows two-up on mobile so
      Genre/Genre 2, Year/Date, and Price/Vendor pair cleanly. */
