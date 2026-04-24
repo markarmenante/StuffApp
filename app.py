@@ -1269,8 +1269,14 @@ Use up to 4 concise web searches to ground the facts. Cover, in this order:
    response to economic or military pressure, religious festival,
    trade denomination. Tie the imagery or metal directly to the moment.
 
-Reply with ONLY a JSON object, no prose, no code fences:
-{{"markdown": "Four short sections — use '**Historical environment**', '**Style**', '**Numismatic importance**', '**Reflection of the times**' as bold section labels on their own lines, each followed by 1–3 bullets starting with '- '. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~1600 chars total."}}"""
+Write four short sections using these bold labels on their own lines:
+**Historical environment**, **Style**, **Numismatic importance**,
+**Reflection of the times**. Each label is followed by 1–3 bullets
+starting with '- '. Include 2–4 source URLs as trailing bare URLs
+after relevant bullets. Under ~1600 chars total.
+
+Reply with ONLY the markdown, wrapped in a <markdown>…</markdown> tag.
+No prose, no code fences, no JSON."""
 
     client = anthropic.Anthropic(api_key=api_key)
     import time as _time
@@ -1305,12 +1311,28 @@ Reply with ONLY a JSON object, no prose, no code fences:
         if getattr(block, 'type', None) == 'text':
             text += block.text
     text = text.strip()
-    m = re.search(r'\{.*\}', text, re.DOTALL)
-    if not m:
-        raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
-    data = json.loads(m.group(0))
+
+    # Prefer the <markdown>…</markdown> envelope. Fall back to legacy
+    # JSON shape, then finally to the raw text, so a sloppy output
+    # from Claude still lands as usable content.
+    md = ''
+    m = re.search(r'<markdown>(.*?)</markdown>', text, re.DOTALL | re.IGNORECASE)
+    if m:
+        md = m.group(1).strip()
+    else:
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+                md = (data.get('markdown') or '').strip()
+            except ValueError:
+                md = ''
+        if not md:
+            md = text  # last-ditch: show the whole thing
+    if not md:
+        raise RuntimeError(f'Empty response from model: {text[:200]}')
     import html as _html
-    md = _html.unescape(data.get('markdown') or '').strip()
+    md = _html.unescape(md).strip()
     md = re.sub(r'</?cite\b[^>]*>', '', md, flags=re.IGNORECASE)
     return {'markdown': md}
 
