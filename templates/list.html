@@ -94,14 +94,13 @@
     <!-- Thumbnail -->
     <div class="item-thumb"
          data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
-         title="Drop or click to upload an image">
+         title="Drop an image here to upload">
       {% set img = row[cat_info.image_field] if cat_info.image_field else none %}
       {% if img and img|is_image %}
         <img src="{{ url_for('uploaded_file', filename=img) }}" alt="" loading="lazy">
       {% else %}
         <span class="no-img">{{ cat_info.icon }}</span>
       {% endif %}
-      <input type="file" accept="image/*" class="thumb-file-input" style="display:none">
     </div>
 
     <!-- Body -->
@@ -485,31 +484,15 @@ window.shareCardRow = async function (ev, btn) {
     if (!thumb) return;
     var uploadUrl = thumb.dataset.uploadUrl;
     var rowFileBtn = row.querySelector('.row-upload-btn input[type=file]');
-    var thumbFileInput = thumb.querySelector('input.thumb-file-input');
 
-    // Click row -> navigate, but not if clicking the upload button or thumb
+    // Click anywhere on the row (including the thumbnail) -> navigate to
+    // the detail page. Drop is still wired below for upload.
     row.addEventListener('click', function(e) {
-      if (e.target.closest('.row-upload-btn, .item-thumb')) return;
+      if (e.target.closest('.row-upload-btn')) return;
       window.location = row.dataset.href;
     });
 
-    // Click thumb -> open the file picker (don't navigate)
-    if (thumbFileInput) {
-      thumb.addEventListener('click', function(e) {
-        if (e.target.closest('input')) return;
-        e.stopPropagation();
-        thumbFileInput.click();
-      });
-      thumbFileInput.addEventListener('click', function(e) { e.stopPropagation(); });
-      thumbFileInput.addEventListener('change', function() {
-        if (thumbFileInput.files[0]) {
-          uploadFile(thumbFileInput.files[0], uploadUrl, thumb);
-          thumbFileInput.value = '';
-        }
-      });
-    }
-
-    // Drag and drop
+    // Drag and drop -> upload to this row's image field
     row.addEventListener('dragenter', function(e) { e.preventDefault(); e.stopPropagation(); row.classList.add('drag-over'); });
     row.addEventListener('dragover', function(e) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; });
     row.addEventListener('dragleave', function(e) { if (!row.contains(e.relatedTarget)) row.classList.remove('drag-over'); });
