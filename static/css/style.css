@@ -208,13 +208,20 @@ input[type="number"]::-webkit-outer-spin-button {
 .item-thumb img { max-width: 96px; max-height: 96px; object-fit: contain; display: block; }
 .item-thumb .no-img { font-size: 36px; color: var(--text-hint); }
 
-/* Credit cards: condense rows so they hug their three lines of text. */
-.item-list-credit_cards .item-thumb { width: 64px; min-height: 64px; }
-.item-list-credit_cards .item-thumb img { max-width: 64px; max-height: 64px; }
-.item-list-credit_cards .item-thumb .no-img { font-size: 24px; }
+/* Credit cards: taller rows with larger type for glanceable reading.
+   Number / Exp+CVC / Zip each live on their own line so nothing wraps
+   mid-value at phone widths. */
+.item-list-credit_cards .item-thumb { width: 80px; min-height: 96px; }
+.item-list-credit_cards .item-thumb img { max-width: 80px; max-height: 80px; }
+.item-list-credit_cards .item-thumb .no-img { font-size: 28px; }
 .item-list-credit_cards .item-row { align-items: center; }
-.item-list-credit_cards .item-content { padding: 4px 14px; }
+.item-list-credit_cards .item-body { padding: 10px 14px; }
 .item-list-credit_cards .item-line1 { position: relative; padding-right: 36px; }
+.item-list-credit_cards .item-brand { font-size: 22px; }
+.item-list-credit_cards .item-detail-rows { gap: 4px; margin-top: 6px; }
+.item-list-credit_cards .idr { gap: 18px; }
+.item-list-credit_cards .idr span { font-size: 18px; }
+.item-list-credit_cards .idr .lbl { font-size: 14px; }
 .row-share-btn {
   position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
   display: inline-flex; align-items: center; justify-content: center;

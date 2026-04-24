@@ -332,8 +332,10 @@
           <div class="idr">
             {% if _e_disp %}<span><span class="lbl">Exp</span> {{ _e_disp }}</span>{% endif %}
             {% if row['cvc'] %}<span><span class="lbl">CVC</span> {{ row['cvc'] }}</span>{% endif %}
-            {% if row['billing_short'] %}<span><span class="lbl">Zip</span> {{ row['billing_short'] }}</span>{% endif %}
           </div>
+          {% if row['billing_short'] %}
+          <div class="idr"><span><span class="lbl">Zip</span> {{ row['billing_short'] }}</span></div>
+          {% endif %}
         </div>
 
       {# ── PROPERTIES ── #}
