@@ -52,6 +52,13 @@ window.COIN_CITIES = {
   'Istros':[44.55,28.78], 'Histria':[44.55,28.78],
   'Nikaia':[40.43,29.72], 'Nicomedia':[40.77,29.95],
   'Amastris':[41.75,32.39],
+  // ── Illyria & Adriatic coast ──
+  'Apollonia':[40.72,19.47], 'Apollonia (Illyria)':[40.72,19.47],
+  'Dyrrhachium':[41.32,19.45], 'Dyrrachium':[41.32,19.45],
+  'Epidamnus':[41.32,19.45], 'Durrës':[41.32,19.45],
+  'Lissus':[41.95,19.65], 'Scodra':[42.07,19.51],
+  'Pharos':[43.17,16.45], 'Issa':[43.05,16.17],
+  'Byllis':[40.53,19.74],
 };
 
 window.COIN_REGIONS = {
@@ -101,6 +108,8 @@ window.COIN_REGIONS = {
   'Kingdom of Pontus':[42.03,35.16],
   'Kingdom of Bithynia':[40.40,30.00],
   'Kingdom of Cappadocia':[38.70,35.50],
+  'Illyria':[41.50,20.00], 'Illyricum':[41.50,20.00],
+  'Dalmatia':[43.50,16.60],
 };
 
 // Given a coin's {mint, region, authority}, return the best {name, latlng}
