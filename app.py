@@ -840,9 +840,18 @@ CATEGORY_ORDER_BY = {
                 "COALESCE(NULLIF(description, ''), 'zzz')"),
     'vehicles': ("COALESCE(NULLIF(make, ''), 'zzz'), "
                  "COALESCE(NULLIF(model, ''), 'zzz')"),
-    # Residential first, then Commercial, everything else last.
-    # Alphabetical within each group (case-insensitive).
-    'properties': ("CASE COALESCE(type,'') "
+    # Featured-first sort for the six primary homes, then Residential
+    # before Commercial, then alphabetical (case-insensitive).
+    'properties': ("CASE "
+                   "  WHEN LOWER(COALESCE(name,'')) = 'carpinteria'    THEN 0 "
+                   "  WHEN LOWER(COALESCE(name,'')) = 'martis camp'    THEN 1 "
+                   "  WHEN LOWER(COALESCE(name,'')) LIKE '%56 leonard%'  THEN 2 "
+                   "  WHEN LOWER(COALESCE(name,'')) LIKE '%42 hotaling%' THEN 3 "
+                   "  WHEN LOWER(COALESCE(name,'')) LIKE '%glass house%' THEN 4 "
+                   "  WHEN LOWER(COALESCE(name,'')) = 'paris'          THEN 5 "
+                   "  ELSE 99 "
+                   "END, "
+                   "CASE COALESCE(type,'') "
                    "WHEN 'Residential' THEN 0 "
                    "WHEN 'Commercial'  THEN 1 "
                    "ELSE 2 END, "
