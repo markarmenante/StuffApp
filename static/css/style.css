@@ -130,8 +130,9 @@ input[type="number"]::-webkit-outer-spin-button {
   border-bottom: 1px solid var(--nav-border);
 }
 
-/* Watch list: keep toolbar (incl. search) pinned below the top nav. */
-.list-toolbar-watches {
+/* Watch + Coins lists: keep toolbar (incl. search) pinned below the top nav. */
+.list-toolbar-watches,
+.list-toolbar-coins {
   position: sticky;
   top: var(--nav-height);
   z-index: 90;
