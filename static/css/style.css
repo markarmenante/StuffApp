@@ -515,12 +515,7 @@ textarea.results-raw { display: none !important; }
   background: #fffde8;
   outline: none;
 }
-/* Keep native select arrow so value is always visible */
-.dcell select {
-  cursor: pointer;
-  -webkit-appearance: auto;
-  appearance: auto;
-}
+.dcell select { cursor: pointer; }
 
 .clabel {
   position: absolute; bottom: 3px; right: 6px;
@@ -571,7 +566,8 @@ textarea.results-raw { display: none !important; }
 select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: none !important; background: transparent; padding-right: 0; }
 select::-ms-expand { display: none; }
 .dcell { overflow: hidden; }
-.dcell select { width: calc(100% + 20px); }
+/* Width 100%; no overflow needed for a hidden native arrow. */
+.dcell select { width: 100%; }
 input[type="date"]::-webkit-calendar-picker-indicator { display: none; -webkit-appearance: none; }
 input[type="date"] { -webkit-appearance: none; }
 
