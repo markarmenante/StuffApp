@@ -568,11 +568,13 @@ textarea.results-raw { display: none !important; }
 .coin-img-lbl { font-size: 10px; font-weight: 600; color: var(--text-label); letter-spacing: .4px; text-transform: uppercase; }
 /* Date range inline editor */
 .date-range-cell { cursor: pointer; text-align: center; }
-.date-display { font-size: 13px; color: #555; min-height: 1.2em; }
+/* Match .dcell input typography (14px / #111) so the date range cell
+   doesn't read as a smaller, grayer outlier next to its row neighbors. */
+.date-display { font-size: 14px; color: #111111; min-height: 1.2em; line-height: 1.35; }
 .date-inputs { display: flex; align-items: center; justify-content: center; gap: 4px; }
-.date-num-input { width: 40%; border: none; outline: none; background: transparent; font-family: var(--font); font-size: 13px; color: var(--text); text-align: center; }
+.date-num-input { width: 40%; border: none; outline: none; background: transparent; font-family: var(--font); font-size: 14px; color: #111111; text-align: center; line-height: 1.35; }
 .date-num-input:focus { background: #fffde8; }
-.date-dash { color: var(--text-secondary); font-size: 13px; }
+.date-dash { color: #111111; font-size: 14px; }
 
 /* Typeahead ghost text */
 .ta-wrap { position: relative; }
