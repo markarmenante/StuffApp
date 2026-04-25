@@ -3626,6 +3626,23 @@ def pens_owner_mark():
     return jsonify(updated=r.rowcount, total=db.execute('SELECT COUNT(*) FROM pens').fetchone()[0])
 
 
+@app.route('/admin/coins-owner-mark', methods=['POST'])
+def coins_owner_mark():
+    """Set owner='Mark' on every coin whose owner isn't already 'Mark'."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    now = datetime.utcnow().isoformat()
+    r = db.execute(
+        "UPDATE coins SET owner='Mark', updated_at=? "
+        "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'Mark'",
+        [now],
+    )
+    db.commit()
+    return jsonify(updated=r.rowcount,
+                   total=db.execute('SELECT COUNT(*) FROM coins').fetchone()[0])
+
+
 @app.route('/admin/vehicles-default-sold', methods=['POST'])
 def vehicles_default_sold():
     """Set any vehicle with null/empty status to 'Sold'. Safe to re-run."""
