@@ -268,7 +268,7 @@ FIELDS = {
         {'name': 'digital_film',    'label': 'Digital / Film',    'type': 'select',
          'options': ['', 'Digital', 'Film', 'Both']},
         {'name': 'film_size',       'label': 'Film Size',         'type': 'text'},
-        {'name': 'lens_mount',      'label': 'Lens Mount',        'type': 'text'},
+        {'name': 'lens_mount',      'label': 'Mount',             'type': 'text'},
         {'name': 'megapixels',      'label': 'Megapixels',        'type': 'number'},
         {'name': 'sensor',          'label': 'Sensor',            'type': 'text'},
         {'name': 'serial_number',   'label': 'Serial Number',     'type': 'text'},
