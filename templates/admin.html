@@ -27,7 +27,6 @@ document.querySelectorAll('.admin-action').forEach(li => {
   const out = li.querySelector('.admin-result');
   const url = li.dataset.url;
   btn.addEventListener('click', async () => {
-    if (!confirm(`Run "${li.querySelector('strong').textContent}"?`)) return;
     btn.disabled = true;
     out.textContent = 'Running…';
     out.className = 'admin-result running';
