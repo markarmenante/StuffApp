@@ -2632,6 +2632,11 @@ def art_lookup_bio(record_id):
         if current_blank:
             filled[field] = val
             continue
+        # Artist Notes ('notes') is the propagated artist bio — never
+        # prompt the user to overwrite an existing one; just discard
+        # the new draft so a fill of object_notes can apply silently.
+        if field == 'notes':
+            continue
         if _text_already_present(val, str(current)):
             continue
         overwritten[field] = {'current': current, 'new': val}
