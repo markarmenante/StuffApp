@@ -305,6 +305,13 @@ input[type="number"]::-webkit-outer-spin-button {
   color: var(--text-secondary);
   padding-left: 14px;
   margin-top: 2px;
+  /* Long piece titles (e.g. Matisse's "...SEULE, AU PIED DU GRAND
+     CAROUBIER... (p. 71; variant III)") otherwise wrap to a second
+     line on iPhone widths and crowd the row — truncate with an
+     ellipsis instead. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .idr { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 .idr span { font-size: 17px; color: var(--text-secondary); white-space: nowrap; }
