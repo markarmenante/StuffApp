@@ -633,10 +633,24 @@
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
-  <!-- Aperture | Focal Length sit directly under the model description -->
+  <!-- Aperture | Length sit directly under the model description.
+       Aperture renders its value with a ƒ/ prefix; Length with a mm
+       suffix. The .coin-unit-input handler strips/re-applies the
+       prefix or suffix on focus / blur so the saved value is just
+       the raw number. -->
   <div class="dgrid dg2 lens-purchase">
-    {{ numcell('aperture','Max Aperture') }}
-    {{ numcell('length','Focal Length mm') }}
+    <div class="dcell">
+      <input type="text" name="aperture"
+             value="{{ 'ƒ/%g'|format(val('aperture')|float) if val('aperture') else '' }}"
+             class="coin-unit-input" data-prefix="ƒ/" inputmode="decimal">
+      <span class="clabel">Aperture</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="length"
+             value="{{ '%g mm'|format(val('length')|float) if val('length') else '' }}"
+             class="coin-unit-input" data-suffix=" mm" inputmode="decimal">
+      <span class="clabel">Length</span>
+    </div>
   </div>
   <!-- Mount | Filter mm -->
   <div class="dgrid dg2 lens-purchase">
@@ -1845,12 +1859,16 @@ document.addEventListener('keydown', e => {
 // Unit suffix inputs (weight g, size mm)
 document.querySelectorAll('.coin-unit-input').forEach(inp => {
   const suffix = inp.dataset.suffix || '';
+  const prefix = inp.dataset.prefix || '';
   inp.addEventListener('focus', () => {
-    inp.value = inp.value.replace(suffix, '').trim();
+    let v = inp.value;
+    if (prefix && v.startsWith(prefix)) v = v.slice(prefix.length);
+    if (suffix) v = v.replace(suffix, '');
+    inp.value = v.trim();
   });
   inp.addEventListener('blur', () => {
     const v = inp.value.trim();
-    if (v) inp.value = v + suffix;
+    if (v) inp.value = prefix + v + suffix;
   });
 });
 
