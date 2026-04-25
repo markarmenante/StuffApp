@@ -601,6 +601,13 @@ textarea.results-raw { display: none !important; }
 .art-photo-full img { max-width: 100%; max-height: 560px; object-fit: contain; display: block; }
 .art-photo-full .no-img { font-size: 56px; color: var(--text-hint); }
 
+/* Lens photo: full-width band sitting between the spec rows above and
+   the purchase row below. Smaller min-height than art since lens
+   product shots are compact. */
+.lens-photo-full { display: flex; align-items: center; justify-content: center; background: var(--cell-bg); min-height: 240px; position: relative; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 10px; }
+.lens-photo-full img { max-width: 100%; max-height: 280px; object-fit: contain; display: block; }
+.lens-photo-full .no-img { font-size: 44px; color: var(--text-hint); }
+
 /* Status = Ordered highlight (Watch/Coin new-record default) */
 .status-select.status-ordered { background: #fff3b0; }
 
@@ -665,6 +672,13 @@ input[type="date"] { -webkit-appearance: none; }
 .detail-page-art .dcell input,
 .detail-page-art .dcell select,
 .detail-page-art .dcell textarea {
+  text-align: center;
+}
+
+/* Lens detail: center field values too, same convention. */
+.detail-page-lenses .dcell input,
+.detail-page-lenses .dcell select,
+.detail-page-lenses .dcell textarea {
   text-align: center;
 }
 
@@ -1247,6 +1261,11 @@ input[type="date"] { -webkit-appearance: none; }
      side-by-side on phones instead of letting dg2/dg3 stack. */
   .dgrid.dg2.art-purchase { grid-template-columns: 1fr 1fr; }
   .dgrid.dg3.art-purchase { grid-template-columns: 1fr 1fr 1fr; }
+
+  /* Lens detail rows: keep the explicit pairings (Aperture|Length,
+     Mount|Filter, Date|Price|Vendor) side-by-side on phones too. */
+  .dgrid.dg2.lens-purchase { grid-template-columns: 1fr 1fr; }
+  .dgrid.dg3.lens-purchase { grid-template-columns: 1fr 1fr 1fr; }
 
   /* Watch spec rows: keep two-up even on narrow viewports. */
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
