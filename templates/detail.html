@@ -481,10 +481,13 @@
     <div class="coin-history-header">
       <span class="coin-history-title" id="coinHistoryTitle">History</span>
       <span class="coin-history-stamp" id="coinHistoryStamp">{% if r and r['history_searched_at'] %}as of {{ r['history_searched_at']|short_date }}{% endif %}</span>
+      <span class="coin-history-edit-hint" id="coinHistoryEditHint" title="Click to edit">✎</span>
     </div>
-    <div class="coin-history-body" id="coinHistoryBody">
+    <div class="coin-history-body" id="coinHistoryBody" title="Click to edit">
       {% if r and r['history_context'] %}{{ r['history_context']|format_results }}{% elif r and r['history_region'] %}{{ r['history_region']|format_results }}{% elif r and r['history_authority'] %}{{ r['history_authority']|format_results }}{% endif %}
     </div>
+    <textarea class="coin-history-edit" id="coinHistoryEdit" name="history_context"
+              style="display:none">{{ r['history_context'] if r and r['history_context'] else (r['history_region'] if r and r['history_region'] else (r['history_authority'] if r and r['history_authority'] else '')) }}</textarea>
   </div>
 
   <!-- Origin map -->
@@ -2564,6 +2567,57 @@ document.querySelectorAll('.person-tab').forEach(btn => {
       }
     });
   });
+
+  // ── History panel: click body / pencil to edit raw markdown ──
+  (function wireHistoryEdit() {
+    const edit = document.getElementById('coinHistoryEdit');
+    const hint = document.getElementById('coinHistoryEditHint');
+    if (!panel || !body || !edit) return;
+    function enterEdit() {
+      if (panel.classList.contains('is-empty')) return;
+      // Prefer the freshest raw text we know about (last lookup wins).
+      const fresh = panel.dataset.contextRaw
+        || panel.dataset.regionRaw
+        || panel.dataset.authorityRaw
+        || edit.value;
+      edit.value = fresh;
+      const measured = Math.max(160, body.offsetHeight + 24);
+      edit.style.minHeight = measured + 'px';
+      body.style.display = 'none';
+      edit.style.display = 'block';
+      edit.focus();
+    }
+    function leaveEdit() {
+      const md = edit.value;
+      panel.dataset.contextRaw = md;
+      body.innerHTML = md ? formatResultsHtml(md) : '';
+      body.style.display = '';
+      edit.style.display = 'none';
+      // Persist via the standard /save-field endpoint. Silent on failure.
+      const url = "{% if r %}{{ url_for('save_field', category='coins', record_id=r['id']) }}{% endif %}";
+      if (!url) return;
+      fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({field: 'history_context', value: md}),
+      }).catch(() => {});
+    }
+    body.addEventListener('click', e => {
+      // Don't enter edit when clicking a citation pill or other anchor.
+      if (e.target.closest('a, button')) return;
+      enterEdit();
+    });
+    if (hint) hint.addEventListener('click', enterEdit);
+    edit.addEventListener('blur', leaveEdit);
+    edit.addEventListener('keydown', e => {
+      // Esc cancels by re-rendering from the dataset (discards local edits).
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        edit.style.display = 'none';
+        body.style.display = '';
+      }
+    });
+  })();
 
   // ── Origin map: Mediterranean with Ancient Greek city names ──
   if (typeof L === 'undefined') return;

@@ -1490,6 +1490,19 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .coin-history-body {
   color: #111; line-height: 1.45;
+  cursor: text;
+}
+.coin-history-edit-hint {
+  margin-left: 6px; cursor: pointer; color: var(--text-hint, #888);
+  font-size: 12px; user-select: none;
+}
+.coin-history-edit-hint:hover { color: var(--blue); }
+.coin-history-edit {
+  width: 100%; box-sizing: border-box;
+  font: inherit; color: #111; line-height: 1.45;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #d9d9e0); border-radius: 4px;
+  background: #fff; resize: vertical;
 }
 .coin-history-body p { margin: 0 0 6px; }
 .coin-history-body ul.results-list { margin: 0 0 4px; padding-left: 18px; }

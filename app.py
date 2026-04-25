@@ -235,6 +235,7 @@ FIELDS = {
         {'name': 'description',     'label': 'Description',       'type': 'textarea'},
         {'name': 'coin_references',  'label': 'References / Pedigree', 'type': 'textarea'},
         {'name': 'notes',           'label': 'Notes / Grade',     'type': 'textarea'},
+        {'name': 'history_context', 'label': 'Historical Context','type': 'textarea'},
         {'name': 'grade',           'label': 'Grade',             'type': 'text'},
         {'name': 'die_axis',        'label': 'Die Axis',          'type': 'text'},
         {'name': 'strike',          'label': 'Strike',            'type': 'number'},
