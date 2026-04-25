@@ -139,10 +139,6 @@
         🔎 Lookup
       </button>
       {% endif %}
-      {% if category == 'properties' %}
-      <a class="add-topic-link"
-         href="{{ url_for('topic_new', property_id=r['id']) }}">+ Topic</a>
-      {% endif %}
       {% if category != 'persons' %}
       {%- set _nav_q = request.args.get('q') or None -%}
       {%- set _nav_filter = request.args.get('filter') or None -%}
@@ -1165,7 +1161,7 @@
   </div>
 
   <div class="section-bar">WiFi</div>
-  <div class="dgrid dg2">{{ cell('wifi_name','Network Name') }}{{ cell('wifi','Password') }}</div>
+  <div class="dgrid dg2 properties-wifi">{{ cell('wifi_name','Network Name') }}{{ cell('wifi','Password') }}</div>
   <div class="section-bar">Alarm</div>
   <div class="dgrid dg4">
     {{ cell('alarm_company','Company') }}
@@ -1174,8 +1170,13 @@
     {{ cell('alarm_password','Password') }}
   </div>
   <div class="dgrid dg2">{{ cell('alarm_phone','Phone') }}{{ cell('alarm_notes','Notes') }}</div>
+  <div class="section-bar topics-bar">
+    <span>Topics</span>
+    {% if not is_new %}
+    <a class="add-topic-link" href="{{ url_for('topic_new', property_id=r['id']) }}">+ Topic</a>
+    {% endif %}
+  </div>
   {% if property_topics %}
-  <div class="section-bar">Topics</div>
   <div class="property-topics">
     {% for t in property_topics %}
     <a class="topic-row" href="{{ url_for('topic_detail', topic_id=t['id']) }}">

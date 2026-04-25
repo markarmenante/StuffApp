@@ -799,10 +799,15 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .property-topics .topic-subject,
 .property-topics .topic-body {
-  padding: 6px 10px;
+  /* Match the padding / typography of a standard .dcell input so
+     topic rows visually align with the rest of the property fields. */
+  padding: 2px 8px 1px;
+  font-family: var(--font);
   font-size: 14px;
-  color: #111;
+  font-weight: 400;
+  color: #111111;
   line-height: 1.35;
+  min-height: 22px;
 }
 .property-topics .topic-subject {
   border-right: 1px solid var(--border);
@@ -830,18 +835,30 @@ input[type="date"] { -webkit-appearance: none; }
   color: var(--text-secondary);
 }
 
-/* "+ Topic" button in property detail header */
+/* "+ Topic" pill — sized to fit inside the thin Topics section-bar.
+   Resets section-bar's inherited uppercase / letter-spacing / weight
+   so the button reads as a button, not a heading. */
 .add-topic-link {
-  margin-right: 10px;
-  padding: 4px 10px;
+  padding: 1px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: #ffffff;
   color: #111;
   text-decoration: none;
-  font-size: 14px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: 0;
 }
 .add-topic-link:hover { background: #f0f0f0; }
+.topics-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
 
 /* Topic detail photo */
 .topic-photo {
@@ -888,8 +905,14 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .topic-property-link:hover { text-decoration: underline; }
 
-/* Property address: two-line textarea, left-aligned */
-.properties-address .dcell textarea {
+/* Property detail: center all field values except the address. The
+   address (line wraps, multi-line) reads better flush-left. */
+.detail-page-properties .dcell input,
+.detail-page-properties .dcell select,
+.detail-page-properties .dcell textarea {
+  text-align: center;
+}
+.detail-page-properties .properties-address .dcell textarea {
   text-align: left;
   min-height: 44px;
   resize: vertical;
@@ -1133,6 +1156,10 @@ input[type="date"] { -webkit-appearance: none; }
   /* Keep the property Purchase Date / Purchase Price inline side-by-side
      even on narrow viewports so they read as a single "when + how much". */
   .dgrid.dg2.properties-specs { grid-template-columns: 1fr 1fr; }
+
+  /* Keep WiFi Network Name + Password on a single row instead of
+     stacking when the screen narrows — they read as a pair. */
+  .dgrid.dg2.properties-wifi { grid-template-columns: 1fr 1fr; }
 
   /* Watch spec rows: keep two-up even on narrow viewports. */
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
