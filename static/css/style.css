@@ -1280,6 +1280,11 @@ input[type="date"] { -webkit-appearance: none; }
   .dgrid.dg2.lens-purchase { grid-template-columns: 1fr 1fr; }
   .dgrid.dg3.lens-purchase { grid-template-columns: 1fr 1fr 1fr; }
 
+  /* Person detail Health-tab document rows (Health Card Front/Back,
+     Medicare/Eye Prescription, Other Health 1/2) are paired by intent
+     — keep them two-up on phones instead of stacking. */
+  .dgrid.dg2.person-doc-group { grid-template-columns: 1fr 1fr; }
+
   /* Watch spec rows: keep two-up even on narrow viewports. */
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
   .dgrid.dg2.watch-vph-hz { grid-template-columns: 1fr 1fr; }
