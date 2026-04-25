@@ -1467,9 +1467,14 @@ document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e)
     // shared handler works for both buttons.
     if (data.specs_searched_at || data.art_searched_at) btn.classList.add('done');
     if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
-      alert('Already up to date. Every field the lookup checked matches '
-            + 'this watch.'
-            + (data.sources ? '\n\nChecked: ' + data.sources : ''));
+      const isArt = btn.classList.contains('art-lookup-btn');
+      alert(isArt
+        ? 'Lookup ran but found nothing new for this piece. Existing '
+          + 'notes were not changed.'
+          + (data.sources ? '\n\nChecked: ' + data.sources : '')
+        : 'Already up to date. Every field the lookup checked matches '
+          + 'this record.'
+          + (data.sources ? '\n\nChecked: ' + data.sources : ''));
       return;
     }
     const applyUrl = url.replace('/lookup', '/apply-lookup');

@@ -2525,8 +2525,16 @@ def fetch_art_lookup(art):
 
 Piece: {ident}{vendor_hint}
 
-Use at most 2 web searches. Return:
-- object_notes: 2-3 sentences about THIS specific work or its series — period, technique, exhibition history, edition info, or any notable context. Return null if nothing specific is found about this piece.
+Use up to 3 web searches and look hard before giving up. Even partial
+context helps the collector — period, technique, series, exhibition
+history, edition info, gallery-page text, or any notable context. If
+the piece itself is poorly documented, fall back to the series, the
+edition, the year/period, or what makes the artist's pieces of this
+era distinctive. Only return null if NO source mentions anything that
+relates to this piece at all.
+
+Return:
+- object_notes: 2-3 sentences about THIS work / its series / its period / edition.
 
 Reply with ONLY a JSON object, no prose, no code fences:
 {{
@@ -2567,9 +2575,10 @@ Reply with ONLY a JSON object, no prose, no code fences:
                 tools=[{
                     'type': 'web_search_20250305',
                     'name': 'web_search',
-                    # Narrower search budget when we only need
-                    # piece-specific info (bio is already on file).
-                    'max_uses': 2 if have_bio else 3,
+                    # Same budget either way — when bio is on file the
+                    # piece search needs every search to land something
+                    # useful before falling back to null.
+                    'max_uses': 3,
                 }],
                 messages=[{'role': 'user', 'content': prompt}],
             )
