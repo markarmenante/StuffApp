@@ -2797,6 +2797,209 @@ def coin_fetch_history(record_id):
     return jsonify({'field': field, 'topic': topic, 'markdown': data['markdown'], 'searched_at': now})
 
 
+# ---------------------------------------------------------------------------
+# Coin spec lookup: fill missing region/authority/denomination/metal/dates
+# from whatever the user has already entered.
+# ---------------------------------------------------------------------------
+
+COIN_SPEC_FILLABLE = ('region', 'authority', 'denomination', 'metal',
+                      'date_1', 'date_2')
+
+
+def fetch_coin_specs(coin):
+    """Use Claude web_search to fill missing identifying fields on a coin.
+
+    Returns a dict like ``{field: value, ...}`` containing ONLY fields the
+    model is confident about. Existing non-empty fields are sent as
+    context but never overwritten by the caller.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+
+    known = {}
+    for f in COIN_SPEC_FILLABLE:
+        v = coin[f]
+        if v not in (None, ''):
+            known[f] = v
+    if not known:
+        raise RuntimeError(
+            'Need at least one of region / authority / denomination / metal '
+            '/ date to look up the rest.')
+
+    metals = ', '.join(VALUE_LISTS['metal_coin'])
+    obv_rev = (coin['obv_rev'] or '').strip()
+    description = (coin['description'] or '').strip()
+    mint = (coin['mint'] or '').strip()
+
+    known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items())
+    extras = []
+    if mint:        extras.append(f'mint: {mint}')
+    if obv_rev:     extras.append(f'obv/rev: {obv_rev}')
+    if description: extras.append(f'description (first 400 chars): {description[:400]}')
+    extras_text = '\n'.join(f'- {e}' for e in extras) if extras else '(none)'
+
+    prompt = f"""You are identifying a specific ancient or historical coin.
+
+Known fields (do NOT change these):
+{known_lines}
+
+Other context for matching:
+{extras_text}
+
+Use up to 4 web searches across reputable numismatic sources (e.g. CoinArchives, ACSearch, Wildwinds, NGC Ancients, British Museum, ANS Mantis, vCoins, CNG, Roma Numismatics, NumisBids).
+
+Fill in any of the following fields you can identify with confidence. For fields already provided above, return null (we will not overwrite them).
+
+Target fields:
+- region: short geographic / cultural region name (e.g. "Ionia", "Roman Republic", "Byzantine Empire", "United States")
+- authority: ruler, polity, or issuing authority (e.g. "Augustus", "Phokaia", "Constantine I", "United States Mint")
+- denomination: coin denomination (e.g. "Drachm", "Tetradrachm", "Aureus", "Antoninianus", "Dollar")
+- metal: EXACTLY one of [{metals}]. Use the two-letter prefix codes shown.
+- date_1: integer year of issue. NEGATIVE for BC (e.g. -450 for 450 BC), positive for AD/CE.
+- date_2: integer year ending a date range. Same sign convention. Return null if not a range.
+
+Reply with ONLY a JSON object, no prose, no code fences. Use null for fields you cannot confidently fill OR that were already provided above:
+{{
+  "region": null,
+  "authority": null,
+  "denomination": null,
+  "metal": null,
+  "date_1": null,
+  "date_2": null,
+  "sources": "one-line note of which sources hit"
+}}
+"""
+
+    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    import time as _time
+    last_err = None
+    transient_errs = (
+        anthropic.RateLimitError,
+        anthropic.APIConnectionError,
+        anthropic.APITimeoutError,
+        anthropic.InternalServerError,
+    )
+    resp = None
+    for attempt in range(3):
+        try:
+            resp = client.messages.create(
+                model='claude-sonnet-4-5',
+                max_tokens=1024,
+                tools=[{
+                    'type': 'web_search_20250305',
+                    'name': 'web_search',
+                    'max_uses': 4,
+                }],
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            break
+        except transient_errs as e:
+            last_err = e
+            wait = 10 * (attempt + 1)
+            try:
+                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
+                if ra:
+                    wait = max(wait, int(float(ra)))
+            except Exception:
+                pass
+            if attempt == 2:
+                raise RuntimeError(f'Coin spec lookup failed: {last_err}')
+            _time.sleep(wait)
+    if resp is None:
+        raise RuntimeError('Coin spec lookup returned no response')
+
+    text = ''
+    for block in resp.content:
+        if getattr(block, 'type', None) == 'text':
+            text += block.text
+    text = text.strip()
+    # Strip code fences if the model added them anyway
+    text = re.sub(r'^```(?:json)?\s*', '', text)
+    text = re.sub(r'\s*```$', '', text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]*\}', text)
+        if m:
+            return json.loads(m.group(0))
+        raise RuntimeError('Could not parse Claude response as JSON')
+
+
+@app.route('/coins/<record_id>/lookup-specs', methods=['POST'])
+def coin_lookup_specs(record_id):
+    """Fill blank region/authority/denomination/metal/date fields from web."""
+    db = get_db()
+    coin = db.execute("SELECT * FROM coins WHERE id = ?", (record_id,)).fetchone()
+    if not coin:
+        return jsonify({'error': 'Coin not found'}), 404
+    try:
+        suggestions = fetch_coin_specs(coin)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        return jsonify({'error': f'Lookup failed: {e or e.__class__.__name__}'}), 500
+
+    metal_allowed = {m.lower(): m for m in VALUE_LISTS['metal_coin']}
+    updates = {}
+    for f in COIN_SPEC_FILLABLE:
+        cur = coin[f]
+        if cur not in (None, ''):
+            continue  # never overwrite
+        v = suggestions.get(f)
+        if v is None:
+            continue
+        if f == 'metal':
+            if not isinstance(v, str):
+                continue
+            match = metal_allowed.get(v.strip().lower())
+            if not match:
+                continue
+            v = match
+        elif f in ('date_1', 'date_2'):
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                continue
+        elif isinstance(v, str):
+            v = normalize_field_value('coins', f, v.strip())
+            if not v:
+                continue
+        updates[f] = v
+
+    if not updates:
+        return jsonify({'updated': {}, 'sources': suggestions.get('sources', '')})
+
+    set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
+    now = datetime.utcnow().isoformat()
+    params = list(updates.values()) + [now, record_id]
+    db.execute(
+        f"UPDATE coins SET {set_clause}, updated_at = ? WHERE id = ?",
+        params,
+    )
+
+    # If date_1 just got filled, the coin may now belong to a numbered
+    # group (Carp/NY × Ancient/Modern); resequence Display Position.
+    if 'date_1' in updates:
+        group = _coin_group_for(coin['property_name'], updates['date_1'])
+        if group:
+            _renumber_coin_groups(db, [group])
+        if not coin['cat_id']:
+            new_cat = next_cat_id(db, coin['property_name'], updates['date_1'])
+            if new_cat:
+                db.execute("UPDATE coins SET cat_id = ? WHERE id = ?", (new_cat, record_id))
+                updates['cat_id'] = new_cat
+
+    db.commit()
+    return jsonify({'updated': updates, 'sources': suggestions.get('sources', '')})
+
+
 @app.route('/<category>/<record_id>/upload-image', methods=['POST'])
 def upload_image(category, record_id):
     """AJAX endpoint: drop an image on a list row to set its primary image."""

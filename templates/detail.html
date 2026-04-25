@@ -375,9 +375,14 @@
 
   <!-- Reg / Auth / Mint -->
   <div class="dgrid dg3">
-    <div class="dcell ta-wrap">
+    <div class="dcell ta-wrap coin-region-cell">
       <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700"
              {% if is_new and not val('region') %}placeholder="Region"{% endif %}>
+      {% if not is_new %}
+      <button type="button" class="coin-spec-lookup-btn" id="coinSpecLookupBtn"
+              data-url="{{ url_for('coin_lookup_specs', record_id=r['id']) }}"
+              title="Look up missing region/authority/denomination/metal/date from web">✓</button>
+      {% endif %}
       <span class="clabel">Reg</span>
     </div>
     <div class="dcell">
@@ -2600,6 +2605,70 @@ document.querySelectorAll('.person-tab').forEach(btn => {
       }
     });
   });
+
+  // ── Region ✓ button: fill missing region/authority/denomination/metal/dates ──
+  const specBtn = document.getElementById('coinSpecLookupBtn');
+  if (specBtn) {
+    specBtn.addEventListener('click', async () => {
+      if (specBtn.classList.contains('busy')) return;
+      const url = specBtn.dataset.url;
+      if (!url) return;
+      specBtn.classList.add('busy');
+      const prevText = specBtn.textContent;
+      specBtn.textContent = '';
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          alert(data.error || 'Lookup failed');
+          return;
+        }
+        const updates = data.updated || {};
+        const filled = Object.keys(updates);
+        if (!filled.length) {
+          alert('No new information found.');
+          return;
+        }
+        // Apply each update to the matching form input.
+        const form = document.getElementById('mainForm');
+        for (const [k, v] of Object.entries(updates)) {
+          if (k === 'cat_id') {
+            const catInp = form.querySelector('input[name="cat_id"]');
+            if (catInp) catInp.value = v;
+            continue;
+          }
+          if (k === 'date_1' || k === 'date_2') {
+            const inp = document.getElementById(k === 'date_1' ? 'dateFrom' : 'dateTo');
+            if (!inp) continue;
+            const n = parseInt(v);
+            const disp = isNaN(n) ? '' : (n < 0 ? Math.abs(n) + ' BC' : String(n));
+            inp.dataset.raw = String(n);
+            inp.value = disp;
+            inp.setAttribute('value', String(n));
+            const hidden = document.getElementById(k === 'date_1' ? 'hDate1Text' : 'hDate2Text');
+            if (hidden) hidden.value = disp;
+            continue;
+          }
+          const el = form.querySelector(`[name="${k}"]`);
+          if (!el) continue;
+          el.value = v;
+          // Trigger change so any listeners (e.g. typeahead) refresh.
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        specBtn.textContent = '✓';
+        specBtn.style.background = '#d8edd8';
+        setTimeout(() => { specBtn.style.background = ''; }, 1500);
+      } catch (err) {
+        alert('Lookup failed: ' + (err.message || err));
+      } finally {
+        specBtn.classList.remove('busy');
+        if (!specBtn.textContent) specBtn.textContent = prevText;
+      }
+    });
+  }
 
   // ── Coin-wide Lookup: combined historical context ──
   document.querySelectorAll('.coin-lookup-btn').forEach(btn => {

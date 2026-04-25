@@ -1209,6 +1209,32 @@ input[type="date"] { -webkit-appearance: none; }
   opacity: 1;
 }
 
+/* Coin spec lookup ✓ button — sits in the upper-right of the Region cell,
+   triggers a web lookup that fills any missing region/authority/denom/
+   metal/date_1/date_2 fields without overwriting existing values. */
+.coin-region-cell { position: relative; }
+.coin-spec-lookup-btn {
+  position: absolute; top: 4px; right: 4px;
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid #b8d8b8; background: #f0f8f0;
+  color: #2a7a2a; border-radius: 50%;
+  font-size: 11px; line-height: 1; font-weight: 700;
+  cursor: pointer; padding: 0; z-index: 2;
+  transition: background 0.15s, transform 0.1s;
+}
+.coin-spec-lookup-btn:hover { background: #d8edd8; }
+.coin-spec-lookup-btn:active { transform: scale(0.92); }
+.coin-spec-lookup-btn.busy {
+  cursor: wait; color: #999; border-color: #ddd; background: #f4f4f4;
+}
+.coin-spec-lookup-btn.busy::after {
+  content: ''; position: absolute; inset: 0;
+  border: 2px solid transparent; border-top-color: #2a7a2a;
+  border-radius: 50%; animation: coinSpecSpin 0.6s linear infinite;
+}
+@keyframes coinSpecSpin { to { transform: rotate(360deg); } }
+
 /* ── Drag-and-drop image upload on list rows ── */
 .item-row.drag-over .item-thumb {
   outline: 3px dashed var(--blue);
