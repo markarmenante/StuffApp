@@ -1472,8 +1472,28 @@ document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e)
             + (data.sources ? '\n\nChecked: ' + data.sources : ''));
       return;
     }
-    showLookupReview(url.replace('/lookup', '/apply-lookup'),
-                     filled, overwritten, data.sources || '');
+    const applyUrl = url.replace('/lookup', '/apply-lookup');
+    // If nothing is being overwritten — every change is a fresh fill
+    // into a blank field — apply it directly without bothering the
+    // user with the review dialog. The dialog only earns its keep
+    // when there's an actual choice to make (existing values that
+    // would change).
+    if (!Object.keys(overwritten).length) {
+      try {
+        const res2 = await fetch(applyUrl, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({updates: filled}),
+        });
+        const d = await res2.json();
+        if (!res2.ok) throw new Error(d.error || 'Apply failed');
+        if (d.updated) window.location.reload();
+      } catch (err) {
+        alert('Apply failed: ' + err.message);
+      }
+      return;
+    }
+    showLookupReview(applyUrl, filled, overwritten, data.sources || '');
   } catch (err) {
     alert('Lookup failed: ' + err.message);
   } finally {
