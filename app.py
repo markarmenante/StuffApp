@@ -2506,7 +2506,27 @@ def fetch_art_lookup(art):
         if vendor else ''
     )
 
-    prompt = f"""You are filling in two short notes fields about a piece of art.
+    # If the artist biography is already on file, skip refetching it
+    # and narrow the search to per-piece info only — fewer searches,
+    # faster response, more focused.
+    have_bio = bool((art['notes'] or '').strip())
+
+    if have_bio:
+        prompt = f"""You are filling in one short notes field about a specific piece of art. The artist's biography is already on file — do NOT include one.
+
+Piece: {ident}{vendor_hint}
+
+Use at most 2 web searches. Return:
+- object_notes: 2-3 sentences about THIS specific work or its series — period, technique, exhibition history, edition info, or any notable context. Return null if nothing specific is found about this piece.
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{{
+  "artist_notes": null,
+  "object_notes": "..." or null,
+  "sources": "one-line note of which sources hit"
+}}"""
+    else:
+        prompt = f"""You are filling in two short notes fields about a piece of art.
 
 Piece: {ident}{vendor_hint}
 
@@ -2538,7 +2558,9 @@ Reply with ONLY a JSON object, no prose, no code fences:
                 tools=[{
                     'type': 'web_search_20250305',
                     'name': 'web_search',
-                    'max_uses': 3,
+                    # Narrower search budget when we only need
+                    # piece-specific info (bio is already on file).
+                    'max_uses': 2 if have_bio else 3,
                 }],
                 messages=[{'role': 'user', 'content': prompt}],
             )
