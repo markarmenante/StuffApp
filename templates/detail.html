@@ -842,9 +842,12 @@
            specs column so they share the right-half on desktop.
            "Artist Notes" holds the artist biography (lookup populates
            it); "Object Notes" holds piece-specific notes (lookup
-           populates if the model finds anything specific). -->
-      <div class="dgrid dg1">{{ cell('notes','Artist Notes',rows=3) }}</div>
-      <div class="dgrid dg1">{{ cell('object_notes','Object Notes',rows=3) }}</div>
+           populates if the model finds anything specific). The
+           .art-notes-grow class flex-expands the two notes rows on
+           desktop so together they fill the leftover height beside
+           the image instead of leaving an empty band below. -->
+      <div class="dgrid dg1 art-notes-grow">{{ cell('notes','Artist Notes',rows=8) }}</div>
+      <div class="dgrid dg1 art-notes-grow">{{ cell('object_notes','Object Notes',rows=8) }}</div>
       <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
     </div>
   </div>

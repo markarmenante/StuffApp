@@ -635,6 +635,12 @@ textarea.results-raw { display: none !important; }
     display: flex;
     flex-direction: column;
   }
+  /* Let the two notes rows split the leftover vertical space inside
+     .art-specs so they bottom-align with the image instead of leaving
+     an empty band. The textareas inside fill their cell's height. */
+  .art-body .art-specs .art-notes-grow { flex: 1; min-height: 0; display: flex; }
+  .art-body .art-specs .art-notes-grow .dcell { flex: 1; display: flex; flex-direction: column; }
+  .art-body .art-specs .art-notes-grow textarea { flex: 1; height: auto; resize: none; }
 }
 
 /* Lens photo: full-width band sitting between the spec rows above and
