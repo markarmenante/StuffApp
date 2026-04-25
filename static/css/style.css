@@ -654,6 +654,13 @@ input[type="date"] { -webkit-appearance: none; }
   text-align: center;
 }
 
+/* Art detail: center every field value the same way for a tidy grid. */
+.detail-page-art .dcell input,
+.detail-page-art .dcell select,
+.detail-page-art .dcell textarea {
+  text-align: center;
+}
+
 /* Camera detail: compact list of same-mount, same-property lenses
    that still need photos — a nudge to shoot them while the camera's out. */
 .cam-lens-todo {
@@ -1220,6 +1227,12 @@ input[type="date"] { -webkit-appearance: none; }
      with Vendor orphaned on its own row. */
   .dgrid.dg3.camera-purchase { grid-template-columns: 1fr 1fr 1fr; }
 
+  /* Art detail rows are explicitly grouped (Medium|Dimensions,
+     Date|Price|Vendor, Property|Location, Owner|Status) — keep them
+     side-by-side on phones instead of letting dg2/dg3 stack. */
+  .dgrid.dg2.art-purchase { grid-template-columns: 1fr 1fr; }
+  .dgrid.dg3.art-purchase { grid-template-columns: 1fr 1fr 1fr; }
+
   /* Watch spec rows: keep two-up even on narrow viewports. */
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
   .dgrid.dg2.watch-vph-hz { grid-template-columns: 1fr 1fr; }
@@ -1247,8 +1260,14 @@ input[type="date"] { -webkit-appearance: none; }
     position: absolute;
     left: 0; right: 0; top: 2px;
     text-align: center;
-    font-size: 14px;
+    /* iOS at 640px bumps .dcell input to 16px to avoid the focus
+       auto-zoom — match that here so the date doesn't read as a
+       different-sized text than its neighbors. */
+    font-family: var(--font);
+    font-size: 16px;
+    font-weight: 400;
     color: #111;
+    -webkit-font-smoothing: antialiased;
     pointer-events: none;
   }
 

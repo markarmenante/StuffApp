@@ -778,29 +778,33 @@
     </label>
   </div>
 
-  <!-- Medium -->
-  <div class="dgrid dg1">
+  <!-- Medium | Dimensions -->
+  <div class="dgrid dg2 art-purchase">
     <div class="dcell ta-wrap">
       <input type="text" name="medium" value="{{ val('medium') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('medium', [])|join('||') }}">
       <span class="clabel">Medium</span>
     </div>
-  </div>
-
-  <!-- Dimensions | Status -->
-  <div class="dgrid dg2">
     {{ cell('dimensions','H x W x D') }}
-    {{ selcell('status','Status', vlists.status) }}
   </div>
 
   <!-- Date | Price | Vendor -->
-  <div class="dgrid dg3">
+  <div class="dgrid dg3 art-purchase">
     {{ datecell('date','Date') }}
     <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
     {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
   </div>
 
-  <!-- Owner | Property | Location -->
-  <div class="dgrid dg3">
+  <!-- Property | Location -->
+  <div class="dgrid dg2 art-purchase">
+    {{ selcell('property','Property', vlists.property) }}
+    <div class="dcell ta-wrap">
+      <input type="text" name="location" value="{{ val('location') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
+      <span class="clabel">Location</span>
+    </div>
+  </div>
+
+  <!-- Owner | Status -->
+  <div class="dgrid dg2 art-purchase">
     {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
     <div class="dcell">
       <select name="owner">
@@ -809,11 +813,7 @@
       </select>
       <span class="clabel">Owner</span>
     </div>
-    {{ selcell('property','Property', vlists.property) }}
-    <div class="dcell ta-wrap">
-      <input type="text" name="location" value="{{ val('location') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
-      <span class="clabel">Location</span>
-    </div>
+    {{ selcell('status','Status', vlists.status) }}
   </div>
 
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
