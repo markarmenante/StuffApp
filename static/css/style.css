@@ -672,6 +672,24 @@ textarea.results-raw { display: none !important; }
 .coin-imgs-large { min-height: 252px; }
 .coin-imgs-large .coin-img-panel { padding: 6px; }
 .coin-imgs-large .coin-img-panel img { max-height: 238px; max-width: 100%; }
+
+/* Desktop: keep both obv + rev visible side-by-side. Collapse the reverse
+   panel when the viewport gets too narrow or too short to show the
+   detail's spec/description rows without cutting them off. The collapsed
+   state still lives in the DOM (so the file input + dropzone still work)
+   — it just gets visually hidden and the obverse stretches to full
+   width. Mobile (<641px) uses its own stacked rules. */
+@media (min-width: 641px) and (max-width: 1100px),
+       (min-width: 641px) and (max-height: 760px) {
+  .coin-imgs-large { min-height: 200px; }
+  .coin-imgs-large .coin-img-panel:nth-child(2) {
+    display: none;
+  }
+  .coin-imgs-large .coin-img-panel:first-child {
+    border-right: none;
+  }
+  .coin-imgs-large .coin-img-panel img { max-height: 190px; }
+}
 .coin-img-lbl { font-size: 10px; font-weight: 600; color: var(--text-label); letter-spacing: .4px; text-transform: uppercase; }
 /* Date range inline editor */
 .date-range-cell { cursor: pointer; text-align: center; }
