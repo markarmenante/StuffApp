@@ -621,6 +621,16 @@ input[type="date"] { -webkit-appearance: none; }
 .camera-purchase .dcell input,
 .camera-purchase .dcell select { text-align: center; }
 
+/* Camera detail: center every field value (Type / Megapixels / Mount /
+   Sensor / Serial #, etc.) so the right-hand spec column reads as a
+   tidy centered list. The Compatible Lenses panel uses its own
+   .cam-lens-todo-list markup (no .dcell), so it stays left-aligned. */
+.detail-page-cameras .dcell input,
+.detail-page-cameras .dcell select,
+.detail-page-cameras .dcell textarea {
+  text-align: center;
+}
+
 /* Camera detail: compact list of same-mount, same-property lenses
    that still need photos — a nudge to shoot them while the camera's out. */
 .cam-lens-todo {
