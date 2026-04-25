@@ -1970,6 +1970,22 @@ def save_field(category, record_id):
     # Strip currency/comma formatting for numeric fields
     if field['type'] == 'number' or field_name in ('price', 'beat', 'reserve', 'value'):
         value = str(value).replace('$', '').replace(',', '').strip()
+        # Coin date fields render as "625 BC" / "1952" / "1952 AD" but
+        # store as a signed integer year. Accept any of those forms.
+        if category == 'coins' and field_name in ('date_1', 'date_2'):
+            s = str(value).strip()
+            m = re.match(r'^\s*(-?\d+)\s*(BC|BCE|AD|CE)?\s*$', s, re.IGNORECASE)
+            if m:
+                n = int(m.group(1))
+                era = (m.group(2) or '').upper()
+                if era in ('BC', 'BCE') and n > 0:
+                    n = -n
+                value = str(n)
+        else:
+            # Generic unit-suffix strip: "8.50 g", "26.5 mm", etc.
+            m = re.match(r'^\s*(-?\d+(?:\.\d+)?)\s*[A-Za-z%°/]*\s*$', str(value))
+            if m:
+                value = m.group(1)
 
     value = normalize_field_value(table, field_name, str(value).strip() if value else '')
 

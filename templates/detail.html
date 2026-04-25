@@ -1870,16 +1870,26 @@ document.querySelectorAll('.comp-item').forEach(item => {
       return fetch(SAVE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field: name, value: value })
+        body: JSON.stringify({ field: name, value: value }),
+        // keepalive: let the request complete even if the page is
+        // navigating away (e.g. user clicks Back right after blur).
+        keepalive: true,
       })
         .then(r => r.json())
         .then(d => { if (d.ok) showToast(); });
     }).catch(err => console.warn('Auto-save failed:', err));
   }
 
-  // Text / textarea — save on blur
+  // Text / textarea — save on blur. For inputs that maintain a canonical
+  // raw value on data-raw (e.g. coin date fields whose `.value` is the
+  // formatted display "625 BC"), prefer that so the server receives the
+  // real signed integer, not the formatted display.
+  function valueFor(el) {
+    if (el.dataset && 'raw' in el.dataset && el.dataset.raw !== '') return el.dataset.raw;
+    return el.value;
+  }
   form.querySelectorAll('input[name]:not([type=file]):not([type=radio]):not([type=checkbox]):not([type=date]), textarea[name]').forEach(el => {
-    el.addEventListener('blur', () => saveField(el.name, el.value));
+    el.addEventListener('blur', () => saveField(el.name, valueFor(el)));
   });
 
   // Date / month inputs — save on change
