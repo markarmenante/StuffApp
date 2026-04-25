@@ -376,18 +376,20 @@
   <!-- Reg / Auth / Mint -->
   <div class="dgrid dg3">
     <div class="dcell ta-wrap">
-      <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700">
+      <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700"
+             {% if is_new and not val('region') %}placeholder="Region"{% endif %}>
       <span class="clabel">Reg</span>
     </div>
     <div class="dcell">
-      <input type="text" name="authority" value="{{ val('authority') }}">
+      <input type="text" name="authority" value="{{ val('authority') }}"
+             {% if is_new and not val('authority') %}placeholder="Authority"{% endif %}>
       <span class="clabel">Auth</span>
     </div>
     {{ tacell('mint','Mint', ta.get('mint', [])) }}
   </div>
 
   <!-- Obv/Rev one-liner sits up top alongside the identifying fields. -->
-  <div class="dgrid dg1">{{ cell('obv_rev','') }}</div>
+  <div class="dgrid dg1">{{ cell('obv_rev','Obv/Rev one-liner') }}</div>
 
   <!-- Coin images (obverse + reverse) — pinned near the top so the
        visual is the first thing you see on the detail page. -->
@@ -406,31 +408,61 @@
     </div>
   </div>
 
-  <!-- Denomination / Metal / Date / Age -->
-  <div class="dgrid dg4">
-    <div class="dcell ta-wrap"><input type="text" name="denomination" value="{{ val('denomination') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('denomination', [])|join('||') }}"></div>
-    <div class="dcell"><select name="metal"><option value=""></option>{% for o in vlists.metal_coin %}<option value="{{ o }}" {{ 'selected' if val('metal')==o }}>{{ o }}</option>{% endfor %}</select></div>
-    <div class="dcell date-range-cell" id="dateRangeCell" style="text-align: center;">
-      <div class="date-display" id="dateDisplay">{% if val('date_1_text') %}{{ val('date_1_text') }}{% if val('date_2_text') %} – {{ val('date_2_text') }}{% endif %}{% endif %}</div>
-      <div class="date-inputs" id="dateInputs" style="display:none">
-        <input type="text" id="dateFrom" value="{{ val('date_1') }}" placeholder="-480 or 1952" class="date-num-input" inputmode="numeric">
-        <span class="date-dash">–</span>
-        <input type="text" id="dateTo" value="{{ val('date_2') }}" placeholder="(optional)" class="date-num-input" inputmode="numeric">
-      </div>
-      <input type="hidden" name="date_1" id="hDate1" value="{{ val('date_1') }}">
-      <input type="hidden" name="date_1_text" id="hDate1Text" value="{{ val('date_1_text') }}">
-      <input type="hidden" name="date_2" id="hDate2" value="{{ val('date_2') }}">
-      <input type="hidden" name="date_2_text" id="hDate2Text" value="{{ val('date_2_text') }}">
+  <!-- Denomination / Metal / Date 1 / Date 2 / Age -->
+  <div class="dgrid" style="grid-template-columns: repeat(5, 1fr);">
+    <div class="dcell ta-wrap">
+      <input type="text" name="denomination" value="{{ val('denomination') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('denomination', [])|join('||') }}"
+             {% if is_new and not val('denomination') %}placeholder="Denomination"{% endif %}>
+      <span class="clabel">Denomination</span>
     </div>
-    <div class="dcell coin-age-cell" style="text-align: center;">
+    <div class="dcell">
+      <select name="metal"><option value=""></option>{% for o in vlists.metal_coin %}<option value="{{ o }}" {{ 'selected' if val('metal')==o }}>{{ o }}</option>{% endfor %}</select>
+      <span class="clabel">Metal</span>
+    </div>
+    <div class="dcell coin-date-cell" style="text-align:center">
+      {% set _d1 = val('date_1') %}
+      {%- if val('date_1_text') %}{% set _d1_disp = val('date_1_text') %}
+      {%- elif _d1 %}{% set _d1_disp = (_d1|int|abs|string) ~ (' BC' if _d1|int < 0 else '') %}
+      {%- else %}{% set _d1_disp = '' %}{% endif %}
+      <input type="text" name="date_1" id="dateFrom" class="coin-date-input"
+             data-raw="{{ _d1 }}" value="{{ _d1_disp }}"
+             inputmode="numeric"
+             {% if is_new and not _d1 %}placeholder="-450 / 1952"{% endif %}
+             style="text-align:center">
+      <input type="hidden" name="date_1_text" id="hDate1Text" value="{{ _d1_disp }}">
+      <span class="clabel">Date 1</span>
+    </div>
+    <div class="dcell coin-date-cell" style="text-align:center">
+      {% set _d2 = val('date_2') %}
+      {%- if val('date_2_text') %}{% set _d2_disp = val('date_2_text') %}
+      {%- elif _d2 %}{% set _d2_disp = (_d2|int|abs|string) ~ (' BC' if _d2|int < 0 else '') %}
+      {%- else %}{% set _d2_disp = '' %}{% endif %}
+      <input type="text" name="date_2" id="dateTo" class="coin-date-input"
+             data-raw="{{ _d2 }}" value="{{ _d2_disp }}"
+             inputmode="numeric"
+             {% if is_new and not _d2 %}placeholder="(opt)"{% endif %}
+             style="text-align:center">
+      <input type="hidden" name="date_2_text" id="hDate2Text" value="{{ _d2_disp }}">
+      <span class="clabel">Date 2</span>
+    </div>
+    <div class="dcell coin-age-cell" style="text-align:center">
       {% if coin_age_val %}{{ '{:,}'.format(coin_age_val) }} yrs{% endif %}
+      <span class="clabel">Age</span>
     </div>
   </div>
 
   <!-- Physical specs -->
   <div class="dgrid coin-specs" style="grid-template-columns: repeat(6, 1fr);">
-    <div class="dcell"><input type="text" name="weight" value="{{ '%.2f g'|format(val('weight')|float) if val('weight') else '' }}" class="coin-unit-input" data-suffix=" g" style="text-align:center"></div>
-    <div class="dcell"><input type="text" name="size" value="{{ '%.1f mm'|format(val('size')|float) if val('size') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"></div>
+    <div class="dcell">
+      <input type="text" name="weight" value="{{ '%.2f g'|format(val('weight')|float) if val('weight') else '' }}" class="coin-unit-input" data-suffix=" g" style="text-align:center"
+             {% if is_new and not val('weight') %}placeholder="Weight"{% endif %}>
+      <span class="clabel">Weight</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="size" value="{{ '%.1f mm'|format(val('size')|float) if val('size') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
+             {% if is_new and not val('size') %}placeholder="Size"{% endif %}>
+      <span class="clabel">Size</span>
+    </div>
     <div class="dcell"><select name="grade" style="text-align:center"><option value=""></option>{% for o in vlists.coin_grade %}<option value="{{ o }}" {{ 'selected' if val('grade')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Grade</span></div>
     <div class="dcell"><select name="die_axis" style="text-align:center"><option value=""></option>{% for o in ['0','1','2','3','4','5','6','7','8','9','10','11','12'] %}<option value="{{ o }}" {{ 'selected' if val('die_axis')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Die Axis</span></div>
     {{ numcell('strike','Strike') }}
@@ -439,13 +471,23 @@
 
   <!-- Purchase -->
   <div class="dgrid dg3 coin-purchase">
-    <div class="dcell ta-wrap"><input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center"></div>
+    <div class="dcell ta-wrap">
+      <input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center"
+             {% if is_new and not val('vendor') %}placeholder="Vendor"{% endif %}>
+      <span class="clabel">Vendor</span>
+    </div>
     <div class="dcell date-overlay-cell">
       {% set _pd = val('purchase_date') %}
-      <input type="date" name="purchase_date" value="{{ _pd }}" class="date-overlay-input" style="text-align:center">
-      <span class="date-overlay-display">{% if _pd and _pd|length >= 10 %}{{ _pd[5:7] }}/{{ _pd[8:10] }}/{{ _pd[0:4] }}{% endif %}</span>
+      {% set _pd_eff = _pd if _pd else (today_iso if is_new else '') %}
+      <input type="date" name="purchase_date" value="{{ _pd_eff }}" class="date-overlay-input" style="text-align:center">
+      <span class="date-overlay-display">{% if _pd_eff and _pd_eff|length >= 10 %}{{ _pd_eff[5:7] }}/{{ _pd_eff[8:10] }}/{{ _pd_eff[0:4] }}{% endif %}</span>
+      <span class="clabel">Date</span>
     </div>
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric" style="text-align:center"></div>
+    <div class="dcell">
+      <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric" style="text-align:center"
+             {% if is_new and not val('price') %}placeholder="Price"{% endif %}>
+      <span class="clabel">Price</span>
+    </div>
   </div>
 
   <!-- Description -->
@@ -521,11 +563,17 @@
       <span class="blabel">Cat ID</span>
     </div>
     <div class="bottom-cell">
+      {% set _pn = val('property_name') if val('property_name') else ('Carpinteria' if is_new else '') %}
       <select name="property_name">
         <option value=""></option>
-        {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property_name')==o }}>{{ o }}</option>{% endfor %}
+        {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if _pn==o }}>{{ o }}</option>{% endfor %}
       </select>
       <span class="blabel">Location</span>
+    </div>
+    <div class="bottom-cell">
+      {% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}
+      <select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select>
+      <span class="blabel">Owner</span>
     </div>
   </div>
 
@@ -1930,63 +1978,61 @@ document.querySelectorAll('.coin-unit-input').forEach(inp => {
   });
 });
 
-// Date range editor
+// Coin date inputs — two always-visible fields. On focus, swap to the
+// raw signed integer ("-450" / "1952"). On blur, render as "450 BC" /
+// "1952" and keep the hidden `date_*_text` companion in sync. The form
+// submits the raw value via the visible input itself, so we only need
+// one DOM field per date; the text companion is for legacy storage.
 (function() {
-  const cell = document.getElementById('dateRangeCell');
-  if (!cell) return;
-  const display = document.getElementById('dateDisplay');
-  const inputs = document.getElementById('dateInputs');
   const fromInp = document.getElementById('dateFrom');
   const toInp = document.getElementById('dateTo');
-  const h1 = document.getElementById('hDate1');
-  const h1t = document.getElementById('hDate1Text');
-  const h2 = document.getElementById('hDate2');
-  const h2t = document.getElementById('hDate2Text');
-
-  function fmtDate(n) {
-    if (n === '' || n === null || isNaN(n)) return '';
-    n = parseInt(n);
-    if (n < 0) return Math.abs(n) + ' BC';
-    return '' + n;
+  if (!fromInp && !toInp) return;
+  function fmtDate(raw) {
+    const s = (raw || '').trim();
+    if (s === '' || isNaN(parseInt(s))) return '';
+    const n = parseInt(s);
+    return n < 0 ? Math.abs(n) + ' BC' : String(n);
   }
-
-  function updateDisplay() {
-    const v1 = fromInp.value.trim();
-    const v2 = toInp.value.trim();
-    const t1 = fmtDate(v1);
-    const t2 = fmtDate(v2);
-    h1.value = v1; h1t.value = t1;
-    h2.value = v2; h2t.value = t2;
-    if (t1 && t2) display.textContent = t1 + ' – ' + t2;
-    else if (t1) display.textContent = t1;
-    else display.textContent = '';
+  function rawFromDisplay(disp) {
+    const s = (disp || '').trim();
+    if (!s) return '';
+    const m = s.match(/^(-?\d+)/);
+    if (m) return m[1];
+    const bc = s.match(/^(\d+)\s*BC$/i);
+    if (bc) return '-' + bc[1];
+    return s;
   }
-
-  display.addEventListener('click', function(e) {
-    e.stopPropagation();
-    display.style.display = 'none';
-    inputs.style.display = 'flex';
-    fromInp.focus();
-  });
-
-  function closeEditor() {
-    updateDisplay();
-    inputs.style.display = 'none';
-    display.style.display = '';
+  function wire(inp, hiddenId) {
+    if (!inp) return;
+    const hidden = document.getElementById(hiddenId);
+    inp.addEventListener('focus', () => {
+      // Show the raw signed number while editing.
+      const raw = inp.dataset.raw || rawFromDisplay(inp.value);
+      inp.value = raw;
+      setTimeout(() => inp.select(), 0);
+    });
+    inp.addEventListener('blur', () => {
+      const raw = inp.value.trim();
+      inp.dataset.raw = raw;
+      const disp = fmtDate(raw);
+      inp.value = disp;
+      if (hidden) hidden.value = disp;
+      // Submit form expects the numeric value in the visible input's
+      // `value` attribute. Set it via DOM so the next form post sees it.
+      inp.setAttribute('value', raw);
+    });
+    // Submit catches the visible input's current value; ensure it's the
+    // raw number even if the user blurred and the display flipped.
+    const form = inp.closest('form');
+    if (form) {
+      form.addEventListener('submit', () => {
+        const raw = inp.dataset.raw || rawFromDisplay(inp.value);
+        inp.value = raw;
+      }, true);
+    }
   }
-
-  fromInp.addEventListener('blur', function() {
-    setTimeout(function() {
-      if (document.activeElement !== toInp && document.activeElement !== fromInp) closeEditor();
-    }, 100);
-  });
-  toInp.addEventListener('blur', function() {
-    setTimeout(function() {
-      if (document.activeElement !== fromInp && document.activeElement !== toInp) closeEditor();
-    }, 100);
-  });
-  fromInp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { toInp.focus(); e.preventDefault(); } });
-  toInp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { closeEditor(); e.preventDefault(); } });
+  wire(fromInp, 'hDate1Text');
+  wire(toInp, 'hDate2Text');
 })();
 
 // Typeahead: visible dropdown of matches + inline grey ghost suffix
