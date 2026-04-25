@@ -710,6 +710,12 @@ input[type="date"] { -webkit-appearance: none; }
 .detail-page-art .dcell textarea {
   text-align: center;
 }
+/* …except the Artist Notes / Object Notes textareas, which read as
+   prose paragraphs and should be flush-left. */
+.detail-page-art .dcell textarea[name="notes"],
+.detail-page-art .dcell textarea[name="object_notes"] {
+  text-align: left;
+}
 
 /* Lens detail: center field values too, same convention. */
 .detail-page-lenses .dcell input,
