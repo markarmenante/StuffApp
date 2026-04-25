@@ -44,6 +44,29 @@
   <div class="nav-right">
   </div>
 </nav>
+<script>
+  // Persist the horizontal scroll position of the category nav across
+  // navigations within the same tab. Restored synchronously here
+  // (before the rest of the body paints) to avoid the bar visibly
+  // snapping back to 0 on load. sessionStorage scopes it per tab.
+  (function () {
+    var KEY = 'stuffapp:navScroll';
+    var nav = document.querySelector('.nav-categories');
+    if (!nav) return;
+    var saved = sessionStorage.getItem(KEY);
+    if (saved !== null) {
+      var x = parseInt(saved, 10);
+      if (!isNaN(x)) nav.scrollLeft = x;
+    }
+    var t;
+    nav.addEventListener('scroll', function () {
+      clearTimeout(t);
+      t = setTimeout(function () {
+        sessionStorage.setItem(KEY, String(nav.scrollLeft));
+      }, 50);
+    }, { passive: true });
+  })();
+</script>
 
 <div class="flash-messages">
   {% with messages = get_flashed_messages(with_categories=true) %}
