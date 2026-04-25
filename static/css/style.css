@@ -458,6 +458,11 @@ input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   -moz-appearance: none;
   background-image: none;
+  /* iOS Safari ignores text-align on <select>; text-align-last is the
+     property that actually centers the selected option's text. Without
+     it, values like "Tang" or "Croc" render flush-left even when the
+     select carries an inline style="text-align:center". */
+  text-align-last: center;
 }
 .dcell textarea {
   resize: vertical;
