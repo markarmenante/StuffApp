@@ -2233,10 +2233,12 @@ def watch_lookup_specs(record_id):
             continue
         val = suggestions[f]
         # A watch can't have been bought before it was made — if the
-        # lookup's year is later than purchase_date, clamp it down to
-        # the purchase year (the receipt is hard evidence, the web isn't).
+        # lookup's year is later than the purchase date, clamp it down
+        # to the purchase year (the receipt is hard evidence, the web
+        # isn't). The watches column is named `date` (UI label
+        # "Purchase Date").
         if f == 'year':
-            pd = watch['purchase_date']
+            pd = watch['date']
             if pd:
                 try:
                     purchase_year = int(str(pd)[:4])
