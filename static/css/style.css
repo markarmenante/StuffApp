@@ -790,6 +790,9 @@ input[type="date"] { -webkit-appearance: none; }
   align-items: center;
 }
 .rec-radio-block .radio-opt { font-size: 14px; white-space: nowrap; }
+/* Vertical divider that sits to the right of every block except the
+   last, separating Type | Speed | Sound | Subtype visually. */
+.rec-radio-block-divider { padding-right: 20px; border-right: 1px solid var(--border); }
 .recording-purchase .dcell input,
 .recording-purchase .dcell select { text-align: center; }
 

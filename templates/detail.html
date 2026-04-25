@@ -929,12 +929,26 @@
       </label>
     </div>
     <div class="watch-specs">
-      <!-- Type-aware radio panel -->
+      <!-- Type-aware radio panel. Order: format, speed, sound, then
+           the format-specific subtype last so the type-aware variants
+           (140g / CCIR / Red Book / etc.) sit on the trailing edge of
+           the row. .rec-radio-block-divider draws a vertical separator
+           between groups. -->
       <div class="rec-radio-row">
-        <div class="rec-radio-block">
+        <div class="rec-radio-block rec-radio-block-divider">
           <label class="radio-opt"><input type="radio" name="type" value="Vinyl" {{ 'checked' if val('type')=='Vinyl' }}> Vinyl</label>
           <label class="radio-opt"><input type="radio" name="type" value="CD"    {{ 'checked' if val('type')=='CD'    }}> CD</label>
           <label class="radio-opt"><input type="radio" name="type" value="Tape"  {{ 'checked' if val('type')=='Tape'  }}> Tape</label>
+        </div>
+        <div class="rec-radio-block rec-radio-block-divider rec-speed">
+          <label class="radio-opt rec-vinyl-only"><input type="radio" name="speed" value="33 ⅓"   {{ 'checked' if val('speed')=='33 ⅓'   }}> 33 ⅓</label>
+          <label class="radio-opt rec-vinyl-only"><input type="radio" name="speed" value="45"      {{ 'checked' if val('speed')=='45'      }}> 45</label>
+          <label class="radio-opt rec-tape-only"><input type="radio" name="speed" value="15 ips"  {{ 'checked' if val('speed')=='15 ips'  }}> 15 ips</label>
+          <label class="radio-opt rec-tape-only"><input type="radio" name="speed" value="30 ips"  {{ 'checked' if val('speed')=='30 ips'  }}> 30 ips</label>
+        </div>
+        <div class="rec-radio-block rec-radio-block-divider">
+          <label class="radio-opt"><input type="radio" name="sound" value="Stereo" {{ 'checked' if val('sound')=='Stereo' }}> Stereo</label>
+          <label class="radio-opt"><input type="radio" name="sound" value="Mono"   {{ 'checked' if val('sound')=='Mono'   }}> Mono</label>
         </div>
         <div class="rec-radio-block rec-subtype">
           <label class="radio-opt rec-vinyl-only"><input type="radio" name="other" value="140g" {{ 'checked' if val('other')=='140g' }}> 140g</label>
@@ -944,16 +958,6 @@
           <label class="radio-opt rec-tape-only"><input type="radio" name="other" value="NAB"   {{ 'checked' if val('other')=='NAB'   }}> NAB</label>
           <label class="radio-opt rec-cd-only"><input type="radio" name="other" value="Red Book" {{ 'checked' if val('other')=='Red Book' }}> Red Book</label>
           <label class="radio-opt rec-cd-only"><input type="radio" name="other" value="SACD"     {{ 'checked' if val('other')=='SACD'     }}> SACD</label>
-        </div>
-        <div class="rec-radio-block rec-speed">
-          <label class="radio-opt rec-vinyl-only"><input type="radio" name="speed" value="33 ⅓"   {{ 'checked' if val('speed')=='33 ⅓'   }}> 33 ⅓</label>
-          <label class="radio-opt rec-vinyl-only"><input type="radio" name="speed" value="45"      {{ 'checked' if val('speed')=='45'      }}> 45</label>
-          <label class="radio-opt rec-tape-only"><input type="radio" name="speed" value="15 ips"  {{ 'checked' if val('speed')=='15 ips'  }}> 15 ips</label>
-          <label class="radio-opt rec-tape-only"><input type="radio" name="speed" value="30 ips"  {{ 'checked' if val('speed')=='30 ips'  }}> 30 ips</label>
-        </div>
-        <div class="rec-radio-block">
-          <label class="radio-opt"><input type="radio" name="sound" value="Stereo" {{ 'checked' if val('sound')=='Stereo' }}> Stereo</label>
-          <label class="radio-opt"><input type="radio" name="sound" value="Mono"   {{ 'checked' if val('sound')=='Mono'   }}> Mono</label>
         </div>
       </div>
       <div class="dgrid dg3 recording-meta">
