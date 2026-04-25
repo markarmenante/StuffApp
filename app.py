@@ -804,11 +804,20 @@ def _join_property_filter(status, ptype):
     return status or ptype or None
 
 
+SEARCHABLE_NUMERIC = {
+    'coins': ['weight'],
+}
+
+
 def build_search_query(category, q, dot=False, coin_filter=None):
     """Build a SELECT with optional text search and/or dot (unresolved) filter."""
     table = CATEGORIES[category]['table']
     text_fields = [f['name'] for f in FIELDS[category]
                    if f['type'] in ('text', 'textarea', 'select') and f.get('type') != 'file']
+    # Per-category extra columns to expose in free-text search. SQLite's
+    # LIKE coerces numerics to strings, so a coin search for "1.5" matches
+    # weight = 1.5 the same way it would a text column.
+    text_fields += SEARCHABLE_NUMERIC.get(category, [])
 
     wheres, params = [], []
 
