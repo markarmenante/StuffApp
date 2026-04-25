@@ -1710,6 +1710,7 @@ def new_record(category):
                            coin_age_val=None,
                            property_topics=None,
                            camera_compatible_lenses=None,
+                           lens_compatible_cameras=None,
                            back_href=None,
                            service_overdue=None,
                            service_years=None,
@@ -1865,6 +1866,25 @@ def detail_view(category, record_id):
             [record['lens_mount'], record['property'], mount_brand],
         ).fetchall()
 
+    # Lens detail: list every camera with the same mount and property,
+    # so the user can see which bodies the lens pairs with at that
+    # location. Same sort logic as compatible_lenses — same-make
+    # bodies (e.g. a Canon body for a Canon lens) sort to the top.
+    lens_compatible_cameras = None
+    if category == 'lenses' and record['mount'] and record['property']:
+        mount_brand = record['mount'].split()[0] if record['mount'] else ''
+        lens_compatible_cameras = db.execute(
+            "SELECT id, make, model, digital_film, film_size, megapixels, image "
+            "FROM cameras "
+            "WHERE LOWER(TRIM(COALESCE(lens_mount,''))) = LOWER(TRIM(?)) "
+            "  AND LOWER(TRIM(COALESCE(property,''))) = LOWER(TRIM(?)) "
+            "ORDER BY CASE WHEN LOWER(COALESCE(make,'')) LIKE LOWER(?) || '%' "
+            "              THEN 0 ELSE 1 END, "
+            "         LOWER(COALESCE(make,'')), "
+            "         LOWER(COALESCE(model,''))",
+            [record['mount'], record['property'], mount_brand],
+        ).fetchall()
+
     service_overdue = False
     service_years = None
     if category == 'watches' and record['service_date']:
@@ -1894,6 +1914,7 @@ def detail_view(category, record_id):
                            coin_age_val=coin_age_val,
                            property_topics=property_topics,
                            camera_compatible_lenses=camera_compatible_lenses,
+                           lens_compatible_cameras=lens_compatible_cameras,
                            back_href=back_href,
                            service_overdue=service_overdue,
                            service_years=service_years,

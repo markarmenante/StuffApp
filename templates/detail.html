@@ -665,6 +665,25 @@
       </div>
     </div>
   </div>
+  {% if lens_compatible_cameras %}
+  <div class="cam-lens-todo cam-lens-todo-fullwidth">
+    <div class="cam-lens-todo-title">
+      Compatible Cameras in {{ val('property') }}
+    </div>
+    <ul class="cam-lens-todo-list">
+      {% for c in lens_compatible_cameras %}
+      <li>
+        <a href="{{ url_for('detail_view', category='cameras', record_id=c['id']) }}">
+          <span class="cll-brand">{{ c['make'] or '—' }}</span>
+          {% if c['digital_film'] %}<span class="cll-aperture">{{ c['digital_film'] }}</span>{% endif %}
+          {% if c['digital_film'] == 'Film' and c['film_size'] %}<span class="cll-length">{{ c['film_size'] }}</span>{% elif c['digital_film'] != 'Film' and c['megapixels'] %}<span class="cll-length">{{ c['megapixels'] }} MP</span>{% endif %}
+          {% if c['model'] %}<span class="cll-desc">{{ c['model'] }}</span>{% endif %}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="detail-bottom">
