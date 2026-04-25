@@ -399,12 +399,20 @@
       {% if r and r['image_1'] and r['image_1']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="">
       {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
+      <label class="file-upload-lbl">
+        <input type="file" name="image_1" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_1')">
+      </label>
     </div>
     <div class="coin-img-panel drop-zone" data-field="image_2"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_2'] and r['image_2']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="">
       {% else %}<span style="font-size:28px;color:#ccc">🪙</span>{% endif %}
+      <label class="file-upload-lbl">
+        <input type="file" name="image_2" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_2')">
+      </label>
     </div>
   </div>
 

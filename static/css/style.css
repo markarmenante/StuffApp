@@ -1199,6 +1199,16 @@ input[type="date"] { -webkit-appearance: none; }
 /* New record bar */
 .new-record-bar { background: #e8f0ff; border-bottom: 1px solid #b0c4ff; padding: 6px 12px; font-size: 12px; color: var(--blue); }
 
+/* Placeholder hints inside the detail form: mute color and weight so the
+   hint reads as guidance, not as a value. Placeholders only appear on the
+   /new page (templates only set placeholder when is_new + value is empty). */
+.detail-page input::placeholder,
+.detail-page textarea::placeholder {
+  color: #c4c4c4;
+  font-weight: 300;
+  opacity: 1;
+}
+
 /* ── Drag-and-drop image upload on list rows ── */
 .item-row.drag-over .item-thumb {
   outline: 3px dashed var(--blue);
