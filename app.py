@@ -2515,41 +2515,21 @@ def fetch_art_lookup(art):
         if vendor else ''
     )
 
-    # If the artist biography is already on file, skip refetching it
-    # and narrow the search to per-piece info only — fewer searches,
-    # faster response, more focused.
-    have_bio = bool((art['notes'] or '').strip())
-
-    if have_bio:
-        prompt = f"""You are filling in one short notes field about a specific piece of art. The artist's biography is already on file — do NOT include one.
-
-Piece: {ident}{vendor_hint}
-
-Use up to 3 web searches and look hard before giving up. Even partial
-context helps the collector — period, technique, series, exhibition
-history, edition info, gallery-page text, or any notable context. If
-the piece itself is poorly documented, fall back to the series, the
-edition, the year/period, or what makes the artist's pieces of this
-era distinctive. Only return null if NO source mentions anything that
-relates to this piece at all.
-
-Return:
-- object_notes: 2-3 sentences about THIS work / its series / its period / edition.
-
-Reply with ONLY a JSON object, no prose, no code fences:
-{{
-  "artist_notes": null,
-  "object_notes": "..." or null,
-  "sources": "one-line note of which sources hit"
-}}"""
-    else:
-        prompt = f"""You are filling in two short notes fields about a piece of art.
+    # We always ask for BOTH fields with the same prompt, regardless of
+    # whether the bio is on file. The previous "have_bio → narrow prompt"
+    # branch made the model return object_notes=null much more often:
+    # presumably the broader bio search gives the model the context it
+    # needs to recognize and describe the specific piece. When bio is
+    # already on file, the route ignores the returned artist_notes (the
+    # per-field loop in art_lookup_bio handles the "don't overwrite"
+    # rule), so the only cost is one extra short search per call.
+    prompt = f"""You are filling in two short notes fields about a piece of art.
 
 Piece: {ident}{vendor_hint}
 
-Use at most 3 web searches. Return:
+Use up to 3 web searches. Return:
 - artist_notes: 2-4 sentence biography of {artist} — birth/death years, nationality, primary medium, what they're known for. Plain prose, no headings, under 500 chars.
-- object_notes: 2-3 sentences about THIS specific work or its series — period, technique, exhibition history, edition info, or any notable context. Return null if nothing specific is found about this piece.
+- object_notes: 2-3 sentences about THIS specific work or its series — period, technique, exhibition history, edition info, or any notable context. Fall back to the series / edition / period if the piece itself is poorly documented; only return null if absolutely nothing surfaces.
 
 Reply with ONLY a JSON object, no prose, no code fences:
 {{
