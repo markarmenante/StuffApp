@@ -1665,6 +1665,11 @@ def new_record(category):
                 val = request.form.get(fname, '').strip()
                 if field['type'] == 'number' or fname in ('price', 'beat', 'reserve', 'value'):
                     val = val.replace('$', '').replace(',', '').strip()
+                    # Strip trailing unit suffix ("8.50 g", "26.5 mm", "28800 hrs")
+                    # in case the JS submit handler didn't run.
+                    m = re.match(r'^\s*(-?\d+(?:\.\d+)?)\s*[A-Za-z%°/]*\s*$', val)
+                    if m:
+                        val = m.group(1)
                 data[fname] = val if val else None
 
         # Coins must have a property + date before they can save (both

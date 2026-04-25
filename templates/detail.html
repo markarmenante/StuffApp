@@ -1979,10 +1979,41 @@ document.querySelectorAll('.coin-unit-input').forEach(inp => {
     if (prefix && v.startsWith(prefix)) v = v.slice(prefix.length);
     if (suffix) v = v.replace(suffix, '');
     inp.value = v.trim();
+    setTimeout(() => inp.select(), 0);
   });
   inp.addEventListener('blur', () => {
     const v = inp.value.trim();
     if (v) inp.value = prefix + v + suffix;
+  });
+  // Strip the suffix/prefix at submit so the server stores a clean number,
+  // not e.g. "8.50 g" (which |float later parses as 0.0).
+  const form = inp.closest('form');
+  if (form) {
+    form.addEventListener('submit', () => {
+      let v = inp.value;
+      if (prefix && v.startsWith(prefix)) v = v.slice(prefix.length);
+      if (suffix) v = v.replace(suffix, '');
+      inp.value = v.trim();
+    }, true);
+  }
+});
+
+// Detail view: clicking/tabbing into any text-ish input selects all so the
+// next keystroke replaces the current value instead of appending to it.
+document.querySelectorAll(
+  '#mainForm input[type="text"], #mainForm input[type="number"], ' +
+  '#mainForm input[type="search"], #mainForm input[type="tel"], ' +
+  '#mainForm input[type="email"], #mainForm input[type="url"], ' +
+  '#mainForm input[type="date"], #mainForm input[type="month"], ' +
+  '#mainForm textarea'
+).forEach(el => {
+  el.addEventListener('focus', () => {
+    // setTimeout so we run after the browser places the caret from the
+    // initiating click; without it, the click can immediately collapse
+    // the selection we just made.
+    setTimeout(() => {
+      try { el.select(); } catch (_) {}
+    }, 0);
   });
 });
 
