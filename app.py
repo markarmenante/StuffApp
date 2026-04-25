@@ -866,6 +866,10 @@ CATEGORY_ORDER_BY = {
                    "WHEN 'Commercial'  THEN 1 "
                    "ELSE 2 END, "
                    "LOWER(COALESCE(name,''))"),
+    # Cards: sort by description (the bank/issuer name shown next to
+    # each card) descending so heavier-use families group together.
+    'credit_cards': ("LOWER(COALESCE(description, '')) DESC, "
+                     "LOWER(COALESCE(name, ''))"),
 }
 
 

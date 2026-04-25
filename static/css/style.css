@@ -226,9 +226,13 @@ input[type="number"]::-webkit-outer-spin-button {
    so the art (not whitespace) sits beside the text. */
 .item-list-credit_cards .item-row { align-items: stretch; }
 .item-list-credit_cards .item-thumb {
-  width: 110px;
+  /* Wider cell + tighter padding so the card art fills the frame.
+     150px leaves enough room on a 390px iPhone viewport for the
+     longest data line (19-char card number) to render without
+     wrapping. */
+  width: 150px;
   min-height: 0;
-  padding: 6px;
+  padding: 2px;
   align-self: stretch;
 }
 .item-list-credit_cards .item-thumb img {
