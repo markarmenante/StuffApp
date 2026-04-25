@@ -1608,15 +1608,15 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
   }
 })();
 
-// Cameras: swap Format (film) <-> Megapixels (digital) based on Type radio.
+// Cameras: swap Format (film) <-> Megapixels + Sensor (digital) based
+// on the Type select. (Used to read radios — the input was switched
+// to a <select> later, which silently broke the toggle and left every
+// type-specific cell visible at once.)
 (function syncCameraType() {
-  const radios = document.querySelectorAll('input[name="digital_film"]');
-  if (!radios.length) return;
+  const sel = document.querySelector('select[name="digital_film"]');
+  if (!sel) return;
   function apply() {
-    const picked = document.querySelector('input[name="digital_film"]:checked');
-    // Default to Digital when nothing is picked yet, so Megapixels is the
-    // first thing the user sees on a new record.
-    const isFilm = picked && picked.value === 'Film';
+    const isFilm = sel.value === 'Film';
     document.querySelectorAll('.cam-film-only').forEach(el => {
       el.style.display = isFilm ? '' : 'none';
     });
@@ -1630,7 +1630,7 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
       el.style.gridColumn = isFilm ? '2 / span 2' : '';
     });
   }
-  radios.forEach(r => r.addEventListener('change', apply));
+  sel.addEventListener('change', apply);
   apply();
 })();
 
