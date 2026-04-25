@@ -124,9 +124,10 @@
     {% endif %}
     {% if not is_new %}
       {% if category == 'watches' %}
-      <button type="button" class="watch-lookup-btn"
+      <button type="button"
+              class="watch-lookup-btn{% if r['specs_searched_at'] %} done{% endif %}"
               data-url="{{ url_for('watch_lookup_specs', record_id=r['id']) }}"
-              title="Look up missing specs from manufacturer, Chrono24, WatchBox, Caliber Corner, EmmyWatch, Watch Pages, Hodinkee, Monochrome, Watch-Wiki">
+              title="{% if r['specs_searched_at'] %}Lookup last run {{ r['specs_searched_at'][:10] }} — click to re-run{% else %}Look up missing specs from manufacturer, Chrono24, WatchBox, Caliber Corner, EmmyWatch, Watch Pages, Hodinkee, Monochrome, Watch-Wiki{% endif %}">
         🔎 Lookup
       </button>
       {% endif %}
@@ -1393,6 +1394,9 @@ document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e)
     if (!res.ok) throw new Error(data.error || 'Failed');
     const filled = data.filled || {};
     const overwritten = data.overwritten || {};
+    // Lookup ran successfully — mark the button green for this session
+    // (the server has also persisted the timestamp for future visits).
+    if (data.specs_searched_at) btn.classList.add('done');
     if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
       alert('Already up to date. Every field the lookup checked matches '
             + 'this watch.'

@@ -552,6 +552,7 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN value REAL',
         'ALTER TABLE watches ADD COLUMN results TEXT',
         'ALTER TABLE watches ADD COLUMN value_searched_at TEXT',
+        'ALTER TABLE watches ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE watches ADD COLUMN container_1 TEXT',
         'ALTER TABLE watches ADD COLUMN container_2 TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
@@ -2361,12 +2362,24 @@ def watch_lookup_specs(record_id):
     for k, info in overwritten.items():
         updates[k] = info['new']
 
+    # Stamp that the lookup ran successfully — used to mark the button
+    # green on subsequent visits to this watch. We stamp here (after the
+    # API succeeded) rather than in apply-lookup so it still counts when
+    # the user cancels the review modal.
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "UPDATE watches SET specs_searched_at = ? WHERE id = ?",
+        (now, record_id),
+    )
+    db.commit()
+
     # Return the proposed changes WITHOUT applying. The client presents
     # a checkbox review; accepted items are POSTed to /apply-lookup.
     return jsonify({
         'filled': filled,
         'overwritten': overwritten,
         'sources': suggestions.get('sources', ''),
+        'specs_searched_at': now,
     })
 
 
