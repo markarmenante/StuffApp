@@ -381,8 +381,7 @@
           <span class="item-brand">{{ row['name'] or '—' }}</span>
         </div>
         <div class="item-detail-rows">
-          {% if row['address'] %}<div class="idr"><span>{{ row['address'] }}</span></div>{% endif %}
-          {% if row['llc'] %}<div class="idr"><span>{{ row['llc'] }}</span></div>{% endif %}
+          {% if row['address'] %}<div class="idr property-address-row"><span>{{ row['address'] }}</span></div>{% endif %}
           {% if row['alarm_code_1'] %}
           <div class="idr alarm-row">
             <span class="alarm-icon" aria-hidden="true">

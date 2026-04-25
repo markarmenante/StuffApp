@@ -296,6 +296,18 @@ input[type="number"]::-webkit-outer-spin-button {
 .idr-rec-format { margin-top: 8px; }
 .idr { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 .idr span { font-size: 17px; color: var(--text-secondary); white-space: nowrap; }
+
+/* Property list: let the address wrap up to two lines instead of
+   clipping at one, and put a small visual break between it and the
+   alarm-code row that follows. */
+.property-address-row span {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.item-detail-rows .alarm-row { margin-top: 6px; }
 .idr .lbl { font-size: 15px; color: var(--text-label); }
 /* People list: address as a 3-line block. Honours newlines from the
    stored field; reserves 3 lines of vertical space even for shorter
