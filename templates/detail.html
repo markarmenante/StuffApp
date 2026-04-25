@@ -139,6 +139,14 @@
         🔎 Lookup
       </button>
       {% endif %}
+      {% if category == 'art' %}
+      <button type="button"
+              class="watch-lookup-btn art-lookup-btn{% if r['art_searched_at'] %} done{% endif %}"
+              data-url="{{ url_for('art_lookup_bio', record_id=r['id']) }}"
+              title="{% if r['art_searched_at'] %}Lookup last run {{ r['art_searched_at'][:10] }} — click to re-run{% else %}Look up an artist biography (and per-piece notes if available) — checks the vendor / gallery site too{% endif %}">
+        🔎 Lookup
+      </button>
+      {% endif %}
       {% if category != 'persons' %}
       {%- set _nav_q = request.args.get('q') or None -%}
       {%- set _nav_filter = request.args.get('filter') or None -%}
@@ -831,8 +839,12 @@
         {{ selcell('status','Status', vlists.status) }}
       </div>
       <!-- Notes + Receipt sit under the data fields, inside the
-           specs column so they share the right-half on desktop. -->
-      <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+           specs column so they share the right-half on desktop.
+           "Artist Notes" holds the artist biography (lookup populates
+           it); "Object Notes" holds piece-specific notes (lookup
+           populates if the model finds anything specific). -->
+      <div class="dgrid dg1">{{ cell('notes','Artist Notes',rows=3) }}</div>
+      <div class="dgrid dg1">{{ cell('object_notes','Object Notes',rows=3) }}</div>
       <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
     </div>
   </div>
@@ -1448,7 +1460,9 @@ document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e)
     const overwritten = data.overwritten || {};
     // Lookup ran successfully — mark the button green for this session
     // (the server has also persisted the timestamp for future visits).
-    if (data.specs_searched_at) btn.classList.add('done');
+    // Accept either the watch-side or art-side timestamp key so the
+    // shared handler works for both buttons.
+    if (data.specs_searched_at || data.art_searched_at) btn.classList.add('done');
     if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
       alert('Already up to date. Every field the lookup checked matches '
             + 'this watch.'

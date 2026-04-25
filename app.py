@@ -328,7 +328,8 @@ FIELDS = {
         {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
-        {'name': 'notes',           'label': 'Notes',             'type': 'textarea'},
+        {'name': 'notes',           'label': 'Artist Notes',      'type': 'textarea'},
+        {'name': 'object_notes',    'label': 'Object Notes',      'type': 'textarea'},
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'location',        'label': 'Location',          'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
@@ -553,6 +554,8 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN results TEXT',
         'ALTER TABLE watches ADD COLUMN value_searched_at TEXT',
         'ALTER TABLE watches ADD COLUMN specs_searched_at TEXT',
+        'ALTER TABLE art ADD COLUMN object_notes TEXT',
+        'ALTER TABLE art ADD COLUMN art_searched_at TEXT',
         'ALTER TABLE watches ADD COLUMN container_1 TEXT',
         'ALTER TABLE watches ADD COLUMN container_2 TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
@@ -2457,6 +2460,182 @@ def watch_apply_lookup(record_id):
         f"UPDATE watches SET {set_clause}, updated_at = ? WHERE id = ?",
         params,
     )
+    db.commit()
+    return jsonify({'updated': len(updates), 'fields': list(updates.keys())})
+
+
+# ---------------------------------------------------------------------------
+# Art lookup: simple biography + per-piece notes via Claude web search.
+# ---------------------------------------------------------------------------
+
+def fetch_art_lookup(art):
+    """Return {artist_notes, object_notes, sources} for an art record.
+
+    Single small web-search prompt — short artist biography plus a
+    couple of sentences about the specific piece if any source has
+    something to say. Either may come back as None.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+
+    artist = (art['artist'] or '').strip()
+    title  = (art['title'] or '').strip()
+    year   = art['year']
+    medium = (art['medium'] or '').strip()
+    vendor = (art['vendor'] or '').strip()
+    if not artist:
+        raise RuntimeError('Need an artist name to look up.')
+
+    ident_bits = [artist]
+    if title:  ident_bits.append(f'"{title}"')
+    if year:   ident_bits.append(str(year))
+    if medium: ident_bits.append(f'({medium})')
+    ident = ' '.join(ident_bits)
+
+    # Galleries often publish their own bios + edition/exhibition info
+    # for pieces they sold — give the model a nudge to check the
+    # vendor's site too.
+    vendor_hint = (
+        f'\n- The acquiring gallery / vendor is "{vendor}"; their site '
+        f'often has artist bios and per-piece notes worth checking.'
+        if vendor else ''
+    )
+
+    prompt = f"""You are filling in two short notes fields about a piece of art.
+
+Piece: {ident}{vendor_hint}
+
+Use at most 3 web searches. Return:
+- artist_notes: 2-4 sentence biography of {artist} — birth/death years, nationality, primary medium, what they're known for. Plain prose, no headings, under 500 chars.
+- object_notes: 2-3 sentences about THIS specific work or its series — period, technique, exhibition history, edition info, or any notable context. Return null if nothing specific is found about this piece.
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{{
+  "artist_notes": "...",
+  "object_notes": "..." or null,
+  "sources": "one-line note of which sources hit"
+}}"""
+
+    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    import time as _time
+    last_err = None
+    transient_errs = (
+        anthropic.RateLimitError,
+        anthropic.APIConnectionError,
+        anthropic.APITimeoutError,
+        anthropic.InternalServerError,
+    )
+    for attempt in range(3):
+        try:
+            resp = client.messages.create(
+                model='claude-sonnet-4-5',
+                max_tokens=1024,
+                tools=[{
+                    'type': 'web_search_20250305',
+                    'name': 'web_search',
+                    'max_uses': 3,
+                }],
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            break
+        except transient_errs as e:
+            last_err = e
+            wait = 10 * (attempt + 1)
+            try:
+                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
+                if ra:
+                    wait = max(wait, int(float(ra)))
+            except Exception:
+                pass
+            _time.sleep(wait)
+    else:
+        raise RuntimeError(f'Lookup failed after retries: {last_err}')
+
+    text = ''
+    for block in resp.content:
+        if getattr(block, 'type', None) == 'text':
+            text += block.text
+    text = text.strip()
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if not m:
+        raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
+    return json.loads(m.group(0))
+
+
+@app.route('/art/<record_id>/lookup', methods=['POST'])
+def art_lookup_bio(record_id):
+    db = get_db()
+    art = db.execute("SELECT * FROM art WHERE id = ?", (record_id,)).fetchone()
+    if not art:
+        return jsonify({'error': 'Art not found'}), 404
+    try:
+        suggestions = fetch_art_lookup(art)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        return jsonify({'error': f'Lookup failed: {e or e.__class__.__name__}'}), 500
+
+    # Map response keys to the art table's columns. The artist
+    # biography goes into the existing `notes` column (relabeled
+    # "Artist Notes" in the UI); per-piece info into `object_notes`.
+    pairs = (('notes', suggestions.get('artist_notes')),
+             ('object_notes', suggestions.get('object_notes')))
+    filled = {}
+    overwritten = {}
+    for field, val in pairs:
+        if not val or not isinstance(val, str):
+            continue
+        val = val.strip()
+        if not val:
+            continue
+        current = art[field]
+        current_blank = current is None or (isinstance(current, str) and not current.strip())
+        if current_blank:
+            filled[field] = val
+            continue
+        if _text_already_present(val, str(current)):
+            continue
+        overwritten[field] = {'current': current, 'new': val}
+
+    now = datetime.utcnow().isoformat()
+    db.execute("UPDATE art SET art_searched_at = ? WHERE id = ?",
+               (now, record_id))
+    db.commit()
+
+    return jsonify({
+        'filled': filled,
+        'overwritten': overwritten,
+        'sources': suggestions.get('sources', ''),
+        'art_searched_at': now,
+    })
+
+
+@app.route('/art/<record_id>/apply-lookup', methods=['POST'])
+def art_apply_lookup(record_id):
+    db = get_db()
+    art = db.execute("SELECT id FROM art WHERE id = ?", (record_id,)).fetchone()
+    if not art:
+        return jsonify({'error': 'Art not found'}), 404
+    data = request.get_json(force=True) or {}
+    raw = data.get('updates') or {}
+    if not isinstance(raw, dict):
+        return jsonify({'error': 'updates must be an object'}), 400
+    updates = {k: v for k, v in raw.items()
+               if k in ('notes', 'object_notes') and isinstance(v, str)}
+    if not updates:
+        return jsonify({'updated': 0, 'fields': []})
+    set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
+    now = datetime.utcnow().isoformat()
+    params = list(updates.values()) + [now, record_id]
+    db.execute(f"UPDATE art SET {set_clause}, updated_at = ? WHERE id = ?",
+               params)
     db.commit()
     return jsonify({'updated': len(updates), 'fields': list(updates.keys())})
 
