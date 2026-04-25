@@ -2620,7 +2620,8 @@ def art_lookup_bio(record_id):
 @app.route('/art/<record_id>/apply-lookup', methods=['POST'])
 def art_apply_lookup(record_id):
     db = get_db()
-    art = db.execute("SELECT id FROM art WHERE id = ?", (record_id,)).fetchone()
+    art = db.execute("SELECT id, artist FROM art WHERE id = ?",
+                     (record_id,)).fetchone()
     if not art:
         return jsonify({'error': 'Art not found'}), 404
     data = request.get_json(force=True) or {}
@@ -2636,8 +2637,30 @@ def art_apply_lookup(record_id):
     params = list(updates.values()) + [now, record_id]
     db.execute(f"UPDATE art SET {set_clause}, updated_at = ? WHERE id = ?",
                params)
+
+    # Artist biography is not piece-specific — fan it out to every
+    # other work by the same artist whose Artist Notes are still
+    # blank, so the user only has to look an artist up once. Pieces
+    # that already have manually-written notes are left alone.
+    propagated = 0
+    if 'notes' in updates and art['artist']:
+        new_bio = updates['notes']
+        artist_name = (art['artist'] or '').strip()
+        if artist_name:
+            cur = db.execute(
+                "UPDATE art SET notes = ?, updated_at = ? "
+                "WHERE LOWER(TRIM(COALESCE(artist,''))) = LOWER(TRIM(?)) "
+                "  AND id != ? "
+                "  AND (notes IS NULL OR TRIM(notes) = '')",
+                (new_bio, now, artist_name, record_id),
+            )
+            propagated = cur.rowcount or 0
     db.commit()
-    return jsonify({'updated': len(updates), 'fields': list(updates.keys())})
+    return jsonify({
+        'updated': len(updates),
+        'fields': list(updates.keys()),
+        'propagated': propagated,
+    })
 
 
 @app.route('/coins/map')
