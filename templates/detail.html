@@ -582,32 +582,34 @@
           <span class="clabel">Serial #</span>
         </div>
       </div>
-      <div class="dgrid dg3 camera-purchase">
-        {{ datecell('date','Date') }}
-        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
-      </div>
-      {% if camera_compatible_lenses %}
-      <div class="cam-lens-todo">
-        <div class="cam-lens-todo-title">
-          Compatible Lenses in {{ val('property') }}
-        </div>
-        <ul class="cam-lens-todo-list">
-          {% for l in camera_compatible_lenses %}
-          <li>
-            <a href="{{ url_for('detail_view', category='lenses', record_id=l['id'], from_camera=r['id']) }}">
-              <span class="cll-brand">{{ l['make'] or '—' }}</span>
-              {% if l['aperture'] %}<span class="cll-aperture">f/{{ l['aperture'] }}</span>{% endif %}
-              {% if l['length'] %}<span class="cll-length">{{ l['length']|int }}mm</span>{% endif %}
-              {% if l['model'] %}<span class="cll-desc">{{ l['model'] }}</span>{% endif %}
-            </a>
-          </li>
-          {% endfor %}
-        </ul>
-      </div>
-      {% endif %}
     </div>
   </div>
+  <!-- Below the image: Date / Price / Vendor stays on one row, then
+       the Compatible Lenses panel spans the full width. -->
+  <div class="dgrid dg3 camera-purchase">
+    {{ datecell('date','Date') }}
+    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+    {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+  </div>
+  {% if camera_compatible_lenses %}
+  <div class="cam-lens-todo cam-lens-todo-fullwidth">
+    <div class="cam-lens-todo-title">
+      Compatible Lenses in {{ val('property') }}
+    </div>
+    <ul class="cam-lens-todo-list">
+      {% for l in camera_compatible_lenses %}
+      <li>
+        <a href="{{ url_for('detail_view', category='lenses', record_id=l['id'], from_camera=r['id']) }}">
+          <span class="cll-brand">{{ l['make'] or '—' }}</span>
+          {% if l['aperture'] %}<span class="cll-aperture">f/{{ l['aperture'] }}</span>{% endif %}
+          {% if l['length'] %}<span class="cll-length">{{ l['length']|int }}mm</span>{% endif %}
+          {% if l['model'] %}<span class="cll-desc">{{ l['model'] }}</span>{% endif %}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="detail-bottom">

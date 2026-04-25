@@ -1177,6 +1177,11 @@ input[type="date"] { -webkit-appearance: none; }
      stacking when the screen narrows — they read as a pair. */
   .dgrid.dg2.properties-wifi { grid-template-columns: 1fr 1fr; }
 
+  /* Camera purchase row sits below the image; keep all three cells
+     on one line (Date | Price | Vendor) instead of wrapping to 2x2
+     with Vendor orphaned on its own row. */
+  .dgrid.dg3.camera-purchase { grid-template-columns: 1fr 1fr 1fr; }
+
   /* Watch spec rows: keep two-up even on narrow viewports. */
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
   .dgrid.dg2.watch-vph-hz { grid-template-columns: 1fr 1fr; }
