@@ -21,9 +21,10 @@
 </div>
 {% endmacro %}
 {% macro datecell(field, label) %}
-<div class="dcell">
-  {% set _dv = val(field) %}
-  <input type="date" name="{{ field }}" value="{{ _dv if _dv else (today_iso if is_new else '') }}">
+<div class="dcell date-overlay-cell">
+  {% set _dv = val(field) if val(field) else (today_iso if is_new else '') %}
+  <input type="date" name="{{ field }}" value="{{ _dv }}" class="date-overlay-input">
+  <span class="date-overlay-display">{% if _dv and _dv|length >= 10 %}{{ _dv[5:7] }}/{{ _dv[8:10] }}/{{ _dv[0:4] }}{% endif %}</span>
   <span class="clabel">{{ label }}</span>
 </div>
 {% endmacro %}
@@ -435,7 +436,11 @@
   <!-- Purchase -->
   <div class="dgrid dg3 coin-purchase">
     <div class="dcell ta-wrap"><input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center"></div>
-    <div class="dcell"><input type="date" name="purchase_date" value="{{ val('purchase_date') }}" style="text-align:center"></div>
+    <div class="dcell date-overlay-cell">
+      {% set _pd = val('purchase_date') %}
+      <input type="date" name="purchase_date" value="{{ _pd }}" class="date-overlay-input" style="text-align:center">
+      <span class="date-overlay-display">{% if _pd and _pd|length >= 10 %}{{ _pd[5:7] }}/{{ _pd[8:10] }}/{{ _pd[0:4] }}{% endif %}</span>
+    </div>
     <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric" style="text-align:center"></div>
   </div>
 
@@ -1757,6 +1762,21 @@ document.querySelectorAll('.comp-item').forEach(item => {
       svcCompact.textContent = v ? `${v.slice(5,7)}/${v.slice(2,4)}` : '';
     });
   }
+
+  // Generic date cells: keep the MM/DD/YYYY overlay in sync after the
+  // native picker writes a new value (the server-rendered overlay
+  // would otherwise stay stale until the next page load).
+  form.querySelectorAll('.date-overlay-cell').forEach(cell => {
+    const input = cell.querySelector('.date-overlay-input');
+    const display = cell.querySelector('.date-overlay-display');
+    if (!input || !display) return;
+    input.addEventListener('change', () => {
+      const v = input.value;
+      display.textContent = (v && v.length >= 10)
+        ? `${v.slice(5,7)}/${v.slice(8,10)}/${v.slice(0,4)}`
+        : '';
+    });
+  });
 
   // Beat field: update the Hz display live on blur
   const beatInput = form.querySelector('input[name=beat]');
