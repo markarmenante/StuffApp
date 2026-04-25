@@ -2586,7 +2586,19 @@ Reply with ONLY a JSON object, no prose, no code fences:
     m = re.search(r'\{.*\}', text, re.DOTALL)
     if not m:
         raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
-    return json.loads(m.group(0))
+    data = json.loads(m.group(0))
+
+    # Claude's web_search tool wraps quoted spans in <cite index="...">…</cite>
+    # markers — strip them so the raw tags don't end up in the saved
+    # notes fields.
+    def _scrub(s):
+        if not isinstance(s, str):
+            return s
+        return re.sub(r'</?cite\b[^>]*>', '', s, flags=re.IGNORECASE).strip()
+    for k in ('artist_notes', 'object_notes', 'sources'):
+        if k in data:
+            data[k] = _scrub(data[k]) if data[k] else data[k]
+    return data
 
 
 @app.route('/art/<record_id>/lookup', methods=['POST'])
