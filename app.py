@@ -2186,6 +2186,26 @@ def _values_equivalent(field, current, new):
 WATCH_LOOKUP_APPEND = {'notes'}
 
 
+def _text_already_present(needle, haystack):
+    """True if `needle` is effectively contained in `haystack`, ignoring
+    cosmetic differences the model often introduces between runs:
+    smart vs straight quotes, em/en dashes, non-breaking spaces, case,
+    and whitespace runs. Without this, re-running the lookup on a
+    record that already has the model's blurb appends a near-duplicate.
+    """
+    def _norm(s):
+        s = (s or '').lower()
+        # Unify quote / dash families.
+        s = (s.replace('’', "'").replace('‘', "'")
+              .replace('“', '"').replace('”', '"')
+              .replace('–', '-').replace('—', '-')
+              .replace(' ', ' '))
+        # Collapse all whitespace.
+        return re.sub(r'\s+', ' ', s).strip()
+    n = _norm(needle)
+    return bool(n) and n in _norm(haystack)
+
+
 @app.route('/watches/<record_id>/lookup', methods=['POST'])
 def watch_lookup_specs(record_id):
     """Use web search to fill in blank spec fields on a watch."""
@@ -2322,7 +2342,7 @@ def watch_lookup_specs(record_id):
         if f in WATCH_LOOKUP_APPEND:
             cur_text = str(current).rstrip()
             new_text = str(val).strip()
-            if not new_text or new_text in cur_text:
+            if not new_text or _text_already_present(new_text, cur_text):
                 continue
             merged = cur_text + '\n\n' + new_text
             overwritten[f] = {'current': current, 'new': merged}
