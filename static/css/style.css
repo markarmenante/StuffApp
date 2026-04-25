@@ -242,11 +242,20 @@ input[type="number"]::-webkit-outer-spin-button {
 .item-list-credit_cards .item-thumb .no-img { font-size: 28px; }
 .item-list-credit_cards .item-body { padding: 10px 10px 10px 10px; }
 .item-list-credit_cards .item-line1 { position: relative; padding-right: 36px; }
-/* Font sizes match the Property list (default .item-brand 20px,
-   default .idr span 17px) for visual consistency across categories.
-   Layout gaps stay slightly wider to keep the card lines readable. */
-.item-list-credit_cards .item-detail-rows { gap: 4px; margin-top: 6px; }
-.item-list-credit_cards .idr { gap: 18px; }
+/* Cards + Properties share a slightly larger, more glanceable font
+   scale than the smaller-list categories: 22px title and 18px detail
+   text with wider gaps. They're the two lists you scan from across
+   the room. */
+.item-list-credit_cards .item-brand,
+.item-list-properties  .item-brand { font-size: 22px; }
+.item-list-credit_cards .item-detail-rows,
+.item-list-properties  .item-detail-rows { gap: 4px; margin-top: 6px; }
+.item-list-credit_cards .idr,
+.item-list-properties  .idr { gap: 18px; }
+.item-list-credit_cards .idr span,
+.item-list-properties  .idr span { font-size: 18px; }
+.item-list-credit_cards .idr .lbl,
+.item-list-properties  .idr .lbl { font-size: 14px; }
 .row-share-btn {
   position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
   display: inline-flex; align-items: center; justify-content: center;
