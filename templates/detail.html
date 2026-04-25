@@ -1295,13 +1295,15 @@
     {{ doccell('passport','Passport', num_field='passport_number', num_label='Passport Number', share_with=[]) }}
     {{ doccell('global_entry','Global Entry', num_field='global_entry_number', num_label='Global Entry Number') }}
   </div>
-  <div class="dgrid dg3 person-doc-group" data-group="health">
-    {{ doccell('medicare','Medicare Card', num_field='medicare_number', num_label='Medicare Number', share_with=[]) }}
+  <div class="dgrid dg2 person-doc-group" data-group="health">
     {{ doccell('health_card_obv','Health Card Front', num_field='health_insurance_number', num_label='Health Insurance Number', share_with=['health_card_rev']) }}
     {{ doccell('health_card_rev','Health Card Back', num_static='Health Card Back') }}
   </div>
-  <div class="dgrid dg3 person-doc-group" data-group="health">
+  <div class="dgrid dg2 person-doc-group" data-group="health">
+    {{ doccell('medicare','Medicare Card', num_field='medicare_number', num_label='Medicare Number', share_with=[]) }}
     {{ doccell('eye_prescription','Eye Prescription') }}
+  </div>
+  <div class="dgrid dg2 person-doc-group" data-group="health">
     {{ doccell('other_health_1','Other Health 1') }}
     {{ doccell('other_health_2','Other Health 2') }}
   </div>
