@@ -2950,6 +2950,11 @@ def format_results_filter(value):
         # Markdown **bold** → <strong>, and *italic* → <em>. Run bold first
         # so its ** markers aren't eaten by the single-asterisk italic rule.
         text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+        # Tolerate the AI's lopsided bold attempts: `*Heading**` and
+        # `**Heading*` show up periodically (especially as bullet headings)
+        # and would otherwise render with a stray asterisk on each side.
+        text = re.sub(r'(?<!\*)\*([^*\n]+?)\*\*(?!\*)', r'<strong>\1</strong>', text)
+        text = re.sub(r'(?<!\*)\*\*([^*\n]+?)\*(?!\*)', r'<strong>\1</strong>', text)
         text = re.sub(r'(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])', r'<em>\1</em>', text)
         text = money_re.sub(r'<strong>\1</strong>', text)
         return text
