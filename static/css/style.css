@@ -840,12 +840,6 @@ input[type="date"] { -webkit-appearance: none; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.property-topics .topic-img-icon {
-  flex-shrink: 0;
-  font-size: 16px;
-  line-height: 1;
-  color: var(--text-secondary);
-}
 
 /* "+ Topic" pill — sized to fit inside the thin Topics section-bar.
    Resets section-bar's inherited uppercase / letter-spacing / weight
@@ -929,6 +923,13 @@ input[type="date"] { -webkit-appearance: none; }
   min-height: 44px;
   resize: vertical;
   line-height: 1.35;
+}
+/* Notes fields (property notes textarea + the alarm_notes one-liner)
+   read better flush-left — long sentences would otherwise center and
+   shift around as the user types. */
+.detail-page-properties .dcell textarea[name="notes"],
+.detail-page-properties .dcell input[name="alarm_notes"] {
+  text-align: left;
 }
 
 /* Property photo matches the specs-column height exactly, so its bottom
