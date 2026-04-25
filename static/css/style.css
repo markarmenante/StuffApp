@@ -705,8 +705,16 @@ input[type="date"] { -webkit-appearance: none; }
 .cam-lens-todo-list a:hover { background: #f0f0f0; }
 .cam-lens-todo-list .cll-brand    { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cam-lens-todo-list .cll-aperture { color: #555; }
-.cam-lens-todo-list .cll-length   { color: #555; }
+.cam-lens-todo-list .cll-length   { color: #555; white-space: nowrap; }
 .cam-lens-todo-list .cll-desc     { color: #444; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Lens detail's Compatible Cameras list has one fewer column than
+   the camera detail's Compatible Lenses list (no f-stop), and the
+   MP column needs more room (e.g. "100.0 MP" was wrapping at 64px).
+   Override the grid: brand | MP | model. */
+.detail-page-lenses .cam-lens-todo-list a {
+  grid-template-columns: 130px 90px 1fr;
+}
 
 /* Recordings: type-aware radio strip.
    All radio groups flow horizontally on one row; the inner radios in

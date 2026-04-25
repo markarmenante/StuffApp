@@ -675,7 +675,6 @@
       <li>
         <a href="{{ url_for('detail_view', category='cameras', record_id=c['id']) }}">
           <span class="cll-brand">{{ c['make'] or '—' }}</span>
-          {% if c['digital_film'] %}<span class="cll-aperture">{{ c['digital_film'] }}</span>{% endif %}
           {% if c['digital_film'] == 'Film' and c['film_size'] %}<span class="cll-length">{{ c['film_size'] }}</span>{% elif c['digital_film'] != 'Film' and c['megapixels'] %}<span class="cll-length">{{ c['megapixels'] }} MP</span>{% endif %}
           {% if c['model'] %}<span class="cll-desc">{{ c['model'] }}</span>{% endif %}
         </a>
