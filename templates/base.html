@@ -42,6 +42,12 @@
   </div>
 
   <div class="nav-right">
+    <a href="{{ url_for('admin_index') }}"
+       class="nav-item nav-admin {% if current_category == '__admin__' %}active{% endif %}"
+       title="Admin">
+      <span class="icon">⚙</span>
+      <span class="lbl">Admin</span>
+    </a>
   </div>
 </nav>
 <script>

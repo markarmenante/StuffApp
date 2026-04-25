@@ -3643,7 +3643,7 @@ def admin_index():
     ]
     return render_template('admin.html', actions=actions,
                            secret=IMPORT_MISSING_SECRET,
-                           current_category=None,
+                           current_category='__admin__',
                            categories=CATEGORIES,
                            counts=get_counts())
 

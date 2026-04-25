@@ -107,6 +107,13 @@ input[type="number"]::-webkit-outer-spin-button {
   flex-shrink: 0;
 }
 
+/* Admin gear in the top-nav right slot — slightly larger and tinted so
+   it's visually distinct from the category emoji row. */
+.nav-admin .icon { font-size: 22px; }
+.nav-admin       { color: var(--text-secondary); }
+.nav-admin:hover { color: var(--text); background: rgba(0,0,0,.07); }
+.nav-admin.active { background: var(--nav-active-bg); color: var(--text); }
+
 /* ── FLASH MESSAGES ── */
 .flash-messages {
   position: fixed; top: calc(var(--nav-height) + 8px); right: 12px;
