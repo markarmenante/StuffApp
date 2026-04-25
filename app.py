@@ -1539,6 +1539,24 @@ def index():
     return redirect(url_for('list_view', category='watches'))
 
 
+@app.route('/persons-default')
+def persons_default():
+    """Entry point used by the People nav tab — opens Mark's detail
+    page directly so the tab lands on the most-used record instead of
+    the full list. Back / search / direct list URLs still route
+    through list_view normally.
+    """
+    db = get_db()
+    row = db.execute(
+        "SELECT id FROM persons "
+        "WHERE name LIKE 'Mark%Armenante%' "
+        "ORDER BY length(name) DESC LIMIT 1"
+    ).fetchone()
+    if row:
+        return redirect(url_for('detail_view', category='persons', record_id=row['id']))
+    return redirect(url_for('list_view', category='persons'))
+
+
 @app.route('/<category>')
 def list_view(category):
     if category not in CATEGORIES:

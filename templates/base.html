@@ -27,7 +27,7 @@
       ('rifles',       '🔫', 'Rifles'),
     ] %}
     {% for slug, icon, label in cat_icons %}
-    <a href="{{ url_for('list_view', category=slug) }}"
+    <a href="{% if slug == 'persons' %}{{ url_for('persons_default') }}{% else %}{{ url_for('list_view', category=slug) }}{% endif %}"
        class="nav-item {% if current_category == slug %}active{% endif %}"
        title="{{ label }}">
       <span class="icon">{{ icon }}</span>
