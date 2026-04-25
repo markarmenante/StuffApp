@@ -1166,10 +1166,19 @@ Reply with ONLY a JSON object, no prose, no code fences:
 }}
 """
 
-    client = anthropic.Anthropic(api_key=api_key)
+    # Cap the SDK request below gunicorn's 300s killer so we surface a
+    # clean Python exception (and a JSON 503) instead of letting the
+    # worker get SIGKILLed mid-flight and returning HTML/empty 500s.
+    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
 
     import time as _time
     last_err = None
+    transient_errs = (
+        anthropic.RateLimitError,
+        anthropic.APIConnectionError,
+        anthropic.APITimeoutError,
+        anthropic.InternalServerError,
+    )
     for attempt in range(3):
         try:
             resp = client.messages.create(
@@ -1183,7 +1192,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
                 messages=[{'role': 'user', 'content': prompt}],
             )
             break
-        except anthropic.RateLimitError as e:
+        except transient_errs as e:
             last_err = e
             wait = 10 * (attempt + 1)
             try:
@@ -1194,7 +1203,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
                 pass
             _time.sleep(wait)
     else:
-        raise RuntimeError(f'Rate limited after retries: {last_err}')
+        raise RuntimeError(f'Lookup failed after retries: {last_err}')
 
     text = ''
     for block in resp.content:
