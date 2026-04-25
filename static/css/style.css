@@ -301,7 +301,11 @@ input[type="number"]::-webkit-outer-spin-button {
    clipping at one, and put a small visual break between it and the
    alarm-code row that follows. */
 .property-address-row span {
-  white-space: normal;
+  /* pre-line (not normal) so any \n stored in the address is honoured —
+     this makes the list break at the same spot the detail textarea
+     does (street on line 1, city/state on line 2) instead of wrapping
+     wherever the line happens to fill. */
+  white-space: pre-line;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
