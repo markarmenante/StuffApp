@@ -113,8 +113,11 @@
     <div class="search-wrap">
       <button type="submit" title="Search">🔍</button>
       {# Per-category name so browser search-history is scoped to this
-         category (typing in Cameras doesn't surface Watch searches). #}
-      <input type="text" name="q_{{ category }}" value="{{ q }}" placeholder="Search…" autofocus
+         category (typing in Cameras doesn't surface Watch searches).
+         No autofocus — landing on a list shouldn't pop the keyboard
+         (and with it iOS's form-assistant accessory bar) just to
+         scroll through items. #}
+      <input type="text" name="q_{{ category }}" value="{{ q }}" placeholder="Search…"
              autocomplete="on"
              onfocus="this.select()" onclick="this.select()">
       {% if q %}<a class="search-clear" href="{{ url_for('list_view', category=category) }}">×</a>{% endif %}
