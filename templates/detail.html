@@ -424,7 +424,7 @@
   <!-- Physical specs -->
   <div class="dgrid coin-specs" style="grid-template-columns: repeat(6, 1fr);">
     <div class="dcell"><input type="text" name="weight" value="{{ '%.2f g'|format(val('weight')|float) if val('weight') else '' }}" class="coin-unit-input" data-suffix=" g" style="text-align:center"></div>
-    <div class="dcell"><input type="text" name="size" value="{{ '%s mm'|format(val('size')) if val('size') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"></div>
+    <div class="dcell"><input type="text" name="size" value="{{ '%.1f mm'|format(val('size')|float) if val('size') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"></div>
     <div class="dcell"><select name="grade" style="text-align:center"><option value=""></option>{% for o in vlists.coin_grade %}<option value="{{ o }}" {{ 'selected' if val('grade')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Grade</span></div>
     <div class="dcell"><select name="die_axis" style="text-align:center"><option value=""></option>{% for o in ['0','1','2','3','4','5','6','7','8','9','10','11','12'] %}<option value="{{ o }}" {{ 'selected' if val('die_axis')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Die Axis</span></div>
     {{ numcell('strike','Strike') }}
@@ -1448,13 +1448,35 @@ function showLookupReview(applyUrl, filled, overwritten, sources) {
     return wrap;
   }
 
+  // If the existing text already contains the proposed value (after
+  // case/whitespace normalization), the overwrite is a no-op visually —
+  // skip those rows so reviewers only see real changes.
+  const _norm = v => {
+    if (v === null || v === undefined) return '';
+    const s = Array.isArray(v) ? v.join(' ') : String(v);
+    return s.toLowerCase().replace(/\s+/g, ' ').trim();
+  };
+  const _currentCoversNew = (current, newVal) => {
+    const n = _norm(newVal);
+    if (!n) return true;
+    return _norm(current).includes(n);
+  };
+
   Object.keys(filled).sort().forEach(f => {
     list.appendChild(row('fill', f, null, filled[f]));
   });
   Object.keys(overwritten).sort().forEach(f => {
     const info = overwritten[f];
+    if (_currentCoversNew(info.current, info.new)) return;
     list.appendChild(row('overwrite', f, info.current, info.new));
   });
+
+  if (!list.children.length) {
+    alert('Already up to date. Every field the lookup checked matches '
+          + 'this watch.'
+          + (sources ? '\n\nChecked: ' + sources : ''));
+    return;
+  }
 
   overlay.addEventListener('click', async (ev) => {
     const act = ev.target.dataset.act;
