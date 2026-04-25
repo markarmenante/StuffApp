@@ -3626,6 +3626,28 @@ def pens_owner_mark():
     return jsonify(updated=r.rowcount, total=db.execute('SELECT COUNT(*) FROM pens').fetchone()[0])
 
 
+@app.route('/admin', methods=['GET'])
+def admin_index():
+    """Tiny browser-friendly index of one-shot maintenance actions.
+    The action POSTs are still gated by IMPORT_MISSING_SECRET; the secret
+    is just baked into the page's submit JS so the button works without
+    extra typing. Cloudflare Access still gates the page itself in prod.
+    """
+    actions = [
+        {
+            'label': "Coins: set every owner to 'Mark'",
+            'desc':  "Sets owner='Mark' on every coin whose owner is NULL, "
+                     "blank, or anything other than 'Mark'.",
+            'url':   url_for('coins_owner_mark'),
+        },
+    ]
+    return render_template('admin.html', actions=actions,
+                           secret=IMPORT_MISSING_SECRET,
+                           current_category=None,
+                           categories=CATEGORIES,
+                           counts=get_counts())
+
+
 @app.route('/admin/coins-owner-mark', methods=['POST'])
 def coins_owner_mark():
     """Set owner='Mark' on every coin whose owner isn't already 'Mark'."""
