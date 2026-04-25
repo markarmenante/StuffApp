@@ -1129,6 +1129,14 @@ input[type="date"] { -webkit-appearance: none; }
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
   .dgrid.dg2.watch-vph-hz { grid-template-columns: 1fr 1fr; }
 
+  /* dg3 (Calibre | Jewels | Origin) wraps to 2 cols on narrow screens.
+     Let Origin span both columns of its row so it sits cleanly above
+     the vph | Hz pair below it — and so there's no phantom empty cell
+     leaving the Hz cell without a top border. */
+  .watch-specs .dgrid.dg3 .dcell:nth-child(3) {
+    grid-column: span 2;
+  }
+
   /* Service date: swap native rendering for a compact MM/YY overlay. */
   .svc-date-cell { position: relative; }
   .svc-date-cell .svc-date-input {
@@ -1400,4 +1408,27 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .lookup-review-actions .btn-cancel {
   background: #fff; color: #111;
+}
+
+/* On phones the four-column row (checkbox | kind | field | diff)
+   leaves the diff column with negative width, forcing the value to
+   wrap one character at a time. Stack the diff onto its own line
+   below the field name so it can use the full row width. */
+@media (max-width: 640px) {
+  .lookup-review-modal { padding: 14px 12px; }
+  .lookup-review-row {
+    grid-template-columns: 24px 80px 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 8px;
+    row-gap: 4px;
+    padding: 10px 6px;
+  }
+  .lookup-review-row > input[type=checkbox] { grid-column: 1; grid-row: 1; }
+  .lookup-review-row > .lookup-review-kind  { grid-column: 2; grid-row: 1; }
+  .lookup-review-row > .lookup-review-field { grid-column: 3; grid-row: 1; }
+  .lookup-review-row > .lookup-review-diff  {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding-left: 32px;
+  }
 }
