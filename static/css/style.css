@@ -457,7 +457,14 @@ input[type="number"]::-webkit-outer-spin-button {
   background: transparent;
   font-family: var(--font);
   font-size: 14px;
+  font-weight: 400;        /* explicit — iOS renders <input> heavier than
+                              an appearance:none <select> at the implicit
+                              default, making rows like "Canon FD" read
+                              as bold next to "Film" */
   color: #111111;          /* explicit — not a var, avoids Safari inheritance bugs */
+  -webkit-text-fill-color: #111111;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   padding: 0;
   line-height: 1.35;
   display: block;
@@ -550,8 +557,8 @@ textarea.results-raw { display: none !important; }
 .dcell select { cursor: pointer; }
 
 .clabel {
-  position: absolute; bottom: 3px; right: 6px;
-  font-size: 9px; color: var(--text-label); white-space: nowrap; line-height: 1;
+  position: absolute; bottom: 1px; right: 3px;
+  font-size: 8px; color: var(--text-label); white-space: nowrap; line-height: 1;
 }
 .clabel-left {
   position: absolute; bottom: 3px; left: 6px;
@@ -1037,7 +1044,12 @@ input[type="date"] { -webkit-appearance: none; }
 .bottom-cell input, .bottom-cell select {
   border: none; outline: none; background: transparent;
   font-family: var(--font); font-size: 13px; color: var(--text);
-  text-align: center; width: 100%;
+  /* text-align-last is required for iOS Safari to actually center the
+     selected option's text inside <select> — text-align alone is
+     ignored on selects there. Without it Location/Status/Owner
+     (NYC / Own / Mark) render flush-left even though the cell itself
+     is text-align:center. */
+  text-align: center; text-align-last: center; width: 100%;
 }
 .bottom-cell .blabel { font-size: 9px; color: var(--text-label); }
 .bottom-cell.btn-cell {
