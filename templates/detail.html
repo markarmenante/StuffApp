@@ -1232,10 +1232,9 @@
         <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
       </div>
       <div class="person-doc-group" data-group="health">
-        <div class="dgrid dg1">{{ cell('blood_type','Blood Type') }}</div>
         <div class="dgrid dg2">
-          {{ cell('primary_care_physician','Primary Care Physician',rows=4) }}
-          {{ cell('spouse_name_and_phone','Emergency Contact',rows=4) }}
+          {{ cell('primary_care_physician','Physician',rows=4) }}
+          {{ cell('spouse_name_and_phone','Contact',rows=4) }}
         </div>
         <div class="med-table dcell">
           <div class="med-row med-head">
@@ -1270,6 +1269,9 @@
     {{ doccell('eye_prescription','Eye Prescription') }}
     {{ doccell('other_health_1','Other Health 1') }}
     {{ doccell('other_health_2','Other Health 2') }}
+  </div>
+  <div class="dgrid dg1 person-doc-group" data-group="health">
+    {{ cell('blood_type','Blood Type') }}
   </div>
 
   {% endif %}{# end category blocks #}
