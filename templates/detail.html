@@ -830,11 +830,12 @@
         </div>
         {{ selcell('status','Status', vlists.status) }}
       </div>
+      <!-- Notes + Receipt sit under the data fields, inside the
+           specs column so they share the right-half on desktop. -->
+      <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+      <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
     </div>
   </div>
-
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
 
   <!-- ══════════════════════════════════════════════════════════
        VEHICLES
