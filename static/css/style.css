@@ -294,6 +294,18 @@ input[type="number"]::-webkit-outer-spin-button {
   padding-left: 8px;
 }
 .idr-rec-format { margin-top: 8px; }
+
+/* Art list: render the title on its own line right under the artist,
+   italicized and indented a couple of spaces — same idea as the
+   recordings title above, sized to match the rest of the art row's
+   metadata. */
+.art-title {
+  font-style: italic;
+  font-size: 17px;
+  color: var(--text-secondary);
+  padding-left: 14px;
+  margin-top: 2px;
+}
 .idr { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 .idr span { font-size: 17px; color: var(--text-secondary); white-space: nowrap; }
 

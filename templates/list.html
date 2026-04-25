@@ -251,8 +251,8 @@
         <div class="item-line1">
           <span class="item-brand">{{ row['artist'] or '—' }}</span>
         </div>
+        {% if row['title'] %}<div class="art-title">{{ row['title'] }}</div>{% endif %}
         <div class="item-detail-rows">
-          {% if row['title'] %}<div class="idr"><span>{{ row['title'] }}</span></div>{% endif %}
           <div class="idr">
             {% if row['medium'] %}<span>{{ row['medium'] }}</span>{% endif %}
             {% if row['year'] %}<span>{{ row['year'] }}</span>{% endif %}
