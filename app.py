@@ -2845,7 +2845,7 @@ def fetch_coin_specs(coin):
 
     prompt = f"""You are identifying a specific ancient or historical coin.
 
-Known fields (do NOT change these):
+What the user has entered so far (treat as evidence, but you may correct it if a reputable source clearly shows otherwise):
 {known_lines}
 
 Other context for matching:
@@ -2853,7 +2853,7 @@ Other context for matching:
 
 Use up to 4 web searches across reputable numismatic sources (e.g. CoinArchives, ACSearch, Wildwinds, NGC Ancients, British Museum, ANS Mantis, vCoins, CNG, Roma Numismatics, NumisBids).
 
-Fill in any of the following fields you can identify with confidence. For fields already provided above, return null (we will not overwrite them).
+For every field below, return your best identified value if you can. The user wants both fills (where they left a field blank) and corrections (where what they entered conflicts with what reputable sources clearly indicate). Return null only when you genuinely cannot identify the value.
 
 Target fields:
 - region: short geographic / cultural region name (e.g. "Ionia", "Roman Republic", "Byzantine Empire", "United States")
@@ -2863,7 +2863,7 @@ Target fields:
 - date_1: integer year of issue. NEGATIVE for BC (e.g. -450 for 450 BC), positive for AD/CE.
 - date_2: integer year ending a date range. Same sign convention. Return null if not a range.
 
-Reply with ONLY a JSON object, no prose, no code fences. Use null for fields you cannot confidently fill OR that were already provided above:
+Reply with ONLY a JSON object, no prose, no code fences. Use null only when you cannot identify a value:
 {{
   "region": null,
   "authority": null,
@@ -2947,57 +2947,71 @@ def coin_lookup_specs(record_id):
         return jsonify({'error': f'Lookup failed: {e or e.__class__.__name__}'}), 500
 
     metal_allowed = {m.lower(): m for m in VALUE_LISTS['metal_coin']}
-    updates = {}
-    for f in COIN_SPEC_FILLABLE:
-        cur = coin[f]
-        if cur not in (None, ''):
-            continue  # never overwrite
-        v = suggestions.get(f)
-        if v is None:
-            continue
-        if f == 'metal':
-            if not isinstance(v, str):
-                continue
-            match = metal_allowed.get(v.strip().lower())
-            if not match:
-                continue
-            v = match
-        elif f in ('date_1', 'date_2'):
+
+    def _coerce(field, raw):
+        if raw is None:
+            return None
+        if field == 'metal':
+            if not isinstance(raw, str):
+                return None
+            return metal_allowed.get(raw.strip().lower())
+        if field in ('date_1', 'date_2'):
             try:
-                v = int(v)
+                return int(raw)
             except (TypeError, ValueError):
-                continue
-        elif isinstance(v, str):
-            v = normalize_field_value('coins', f, v.strip())
-            if not v:
-                continue
-        updates[f] = v
+                return None
+        if isinstance(raw, str):
+            v = normalize_field_value('coins', field, raw.strip())
+            return v or None
+        return raw
 
-    if not updates:
-        return jsonify({'updated': {}, 'sources': suggestions.get('sources', '')})
+    def _equivalent(field, current, suggested):
+        if field in ('date_1', 'date_2'):
+            try:
+                return int(current) == int(suggested)
+            except (TypeError, ValueError):
+                return False
+        return str(current or '').strip().lower() == str(suggested or '').strip().lower()
 
-    set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
-    now = datetime.utcnow().isoformat()
-    params = list(updates.values()) + [now, record_id]
-    db.execute(
-        f"UPDATE coins SET {set_clause}, updated_at = ? WHERE id = ?",
-        params,
-    )
+    fills = {}        # field -> new value, applied immediately
+    overwrites = {}   # field -> {current, suggested}, returned for confirm
+    for f in COIN_SPEC_FILLABLE:
+        v = _coerce(f, suggestions.get(f))
+        if v in (None, ''):
+            continue
+        cur = coin[f]
+        if cur in (None, ''):
+            fills[f] = v
+        elif not _equivalent(f, cur, v):
+            overwrites[f] = {'current': cur, 'suggested': v}
 
-    # If date_1 just got filled, the coin may now belong to a numbered
-    # group (Carp/NY × Ancient/Modern); resequence Display Position.
-    if 'date_1' in updates:
-        group = _coin_group_for(coin['property_name'], updates['date_1'])
-        if group:
-            _renumber_coin_groups(db, [group])
-        if not coin['cat_id']:
-            new_cat = next_cat_id(db, coin['property_name'], updates['date_1'])
-            if new_cat:
-                db.execute("UPDATE coins SET cat_id = ? WHERE id = ?", (new_cat, record_id))
-                updates['cat_id'] = new_cat
+    if fills:
+        set_clause = ', '.join(f'{k} = ?' for k in fills.keys())
+        now = datetime.utcnow().isoformat()
+        params = list(fills.values()) + [now, record_id]
+        db.execute(
+            f"UPDATE coins SET {set_clause}, updated_at = ? WHERE id = ?",
+            params,
+        )
 
-    db.commit()
-    return jsonify({'updated': updates, 'sources': suggestions.get('sources', '')})
+        # If date_1 just got filled, the coin may now belong to a numbered
+        # group (Carp/NY × Ancient/Modern); resequence Display Position.
+        if 'date_1' in fills:
+            group = _coin_group_for(coin['property_name'], fills['date_1'])
+            if group:
+                _renumber_coin_groups(db, [group])
+            if not coin['cat_id']:
+                new_cat = next_cat_id(db, coin['property_name'], fills['date_1'])
+                if new_cat:
+                    db.execute("UPDATE coins SET cat_id = ? WHERE id = ?", (new_cat, record_id))
+                    fills['cat_id'] = new_cat
+        db.commit()
+
+    return jsonify({
+        'updated': fills,
+        'overwrites': overwrites,
+        'sources': suggestions.get('sources', ''),
+    })
 
 
 @app.route('/<category>/<record_id>/upload-image', methods=['POST'])

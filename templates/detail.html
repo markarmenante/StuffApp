@@ -381,6 +381,7 @@
       {% if not is_new %}
       <button type="button" class="coin-spec-lookup-btn" id="coinSpecLookupBtn"
               data-url="{{ url_for('coin_lookup_specs', record_id=r['id']) }}"
+              data-save-url="{{ url_for('save_field', category='coins', record_id=r['id']) }}"
               title="Look up missing region/authority/denomination/metal/date from web">✓</button>
       {% endif %}
       <span class="clabel">Reg</span>
@@ -2609,9 +2610,52 @@ document.querySelectorAll('.person-tab').forEach(btn => {
   // ── Region ✓ button: fill missing region/authority/denomination/metal/dates ──
   const specBtn = document.getElementById('coinSpecLookupBtn');
   if (specBtn) {
+    const FIELD_LABELS = {
+      region: 'Region', authority: 'Authority', denomination: 'Denomination',
+      metal: 'Metal', date_1: 'Date 1', date_2: 'Date 2',
+    };
+    function dispDate(n) {
+      const x = parseInt(n);
+      if (isNaN(x)) return String(n);
+      return x < 0 ? Math.abs(x) + ' BC' : String(x);
+    }
+    function applyToForm(field, value) {
+      const form = document.getElementById('mainForm');
+      if (field === 'cat_id') {
+        const catInp = form.querySelector('input[name="cat_id"]');
+        if (catInp) catInp.value = value;
+        return;
+      }
+      if (field === 'date_1' || field === 'date_2') {
+        const inp = document.getElementById(field === 'date_1' ? 'dateFrom' : 'dateTo');
+        if (!inp) return;
+        const n = parseInt(value);
+        const disp = isNaN(n) ? '' : dispDate(n);
+        inp.dataset.raw = String(n);
+        inp.value = disp;
+        inp.setAttribute('value', String(n));
+        const hidden = document.getElementById(field === 'date_1' ? 'hDate1Text' : 'hDate2Text');
+        if (hidden) hidden.value = disp;
+        return;
+      }
+      const el = form.querySelector(`[name="${field}"]`);
+      if (!el) return;
+      el.value = value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    function persist(field, value, saveUrl) {
+      // Per-field save endpoint expects {field, value}. Dates store the
+      // raw signed integer in the date_1/date_2 column.
+      return fetch(saveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field, value }),
+      }).then(r => r.json()).catch(() => null);
+    }
     specBtn.addEventListener('click', async () => {
       if (specBtn.classList.contains('busy')) return;
       const url = specBtn.dataset.url;
+      const saveUrl = specBtn.dataset.saveUrl;
       if (!url) return;
       specBtn.classList.add('busy');
       const prevText = specBtn.textContent;
@@ -2626,37 +2670,34 @@ document.querySelectorAll('.person-tab').forEach(btn => {
           alert(data.error || 'Lookup failed');
           return;
         }
-        const updates = data.updated || {};
-        const filled = Object.keys(updates);
-        if (!filled.length) {
+        const fills = data.updated || {};
+        const overwrites = data.overwrites || {};
+
+        // Auto-applied fills: write straight to the form (server already
+        // persisted them).
+        for (const [k, v] of Object.entries(fills)) {
+          applyToForm(k, v);
+        }
+
+        // Overwrites: prompt per field. Accepted ones get written to the
+        // form AND persisted via save-field (which handles date_1 group
+        // resequencing for us).
+        const accepted = [];
+        for (const [k, info] of Object.entries(overwrites)) {
+          const label = FIELD_LABELS[k] || k;
+          const cur = (k === 'date_1' || k === 'date_2') ? dispDate(info.current) : info.current;
+          const sug = (k === 'date_1' || k === 'date_2') ? dispDate(info.suggested) : info.suggested;
+          if (window.confirm(`${label} is currently "${cur}". Web search suggests "${sug}". Replace?`)) {
+            applyToForm(k, info.suggested);
+            if (saveUrl) await persist(k, info.suggested, saveUrl);
+            accepted.push(k);
+          }
+        }
+
+        const totalChanged = Object.keys(fills).length + accepted.length;
+        if (!totalChanged) {
           alert('No new information found.');
           return;
-        }
-        // Apply each update to the matching form input.
-        const form = document.getElementById('mainForm');
-        for (const [k, v] of Object.entries(updates)) {
-          if (k === 'cat_id') {
-            const catInp = form.querySelector('input[name="cat_id"]');
-            if (catInp) catInp.value = v;
-            continue;
-          }
-          if (k === 'date_1' || k === 'date_2') {
-            const inp = document.getElementById(k === 'date_1' ? 'dateFrom' : 'dateTo');
-            if (!inp) continue;
-            const n = parseInt(v);
-            const disp = isNaN(n) ? '' : (n < 0 ? Math.abs(n) + ' BC' : String(n));
-            inp.dataset.raw = String(n);
-            inp.value = disp;
-            inp.setAttribute('value', String(n));
-            const hidden = document.getElementById(k === 'date_1' ? 'hDate1Text' : 'hDate2Text');
-            if (hidden) hidden.value = disp;
-            continue;
-          }
-          const el = form.querySelector(`[name="${k}"]`);
-          if (!el) continue;
-          el.value = v;
-          // Trigger change so any listeners (e.g. typeahead) refresh.
-          el.dispatchEvent(new Event('change', { bubbles: true }));
         }
         specBtn.textContent = '✓';
         specBtn.style.background = '#d8edd8';
