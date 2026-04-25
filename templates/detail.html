@@ -778,56 +778,59 @@
     {{ numcell('year','Year') }}
   </div>
 
-  <!-- Large photo, full width -->
-  <div class="art-photo-full drop-zone" data-field="image"
-       data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
-    {% if r and r['image'] and r['image']|is_image %}
-      <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Art">
-    {% else %}
-      <span class="no-img">🎨</span>
-    {% endif %}
-    <label class="file-upload-lbl watch-photo-upload">
-      <input type="file" name="image" accept="image/*" style="display:none"
-             onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
-    </label>
-  </div>
-
-  <!-- Medium | Dimensions -->
-  <div class="dgrid dg2 art-purchase">
-    <div class="dcell ta-wrap">
-      <input type="text" name="medium" value="{{ val('medium') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('medium', [])|join('||') }}">
-      <span class="clabel">Medium</span>
+  <!-- On desktop the image and the four spec rows sit side by side
+       (image left 50%, specs right 50%); on phones .art-body falls
+       back to a normal block flow so the image still spans the full
+       width above the specs. -->
+  <div class="art-body">
+    <div class="art-photo-full drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Art">
+      {% else %}
+        <span class="no-img">🎨</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
     </div>
-    {{ cell('dimensions','H x W x D') }}
-  </div>
-
-  <!-- Date | Price | Vendor -->
-  <div class="dgrid dg3 art-purchase">
-    {{ datecell('date','Date') }}
-    <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
-    {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
-  </div>
-
-  <!-- Property | Location -->
-  <div class="dgrid dg2 art-purchase">
-    {{ selcell('property','Property', vlists.property) }}
-    <div class="dcell ta-wrap">
-      <input type="text" name="location" value="{{ val('location') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
-      <span class="clabel">Location</span>
+    <div class="art-specs">
+      <!-- Medium | Dimensions -->
+      <div class="dgrid dg2 art-purchase">
+        <div class="dcell ta-wrap">
+          <input type="text" name="medium" value="{{ val('medium') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('medium', [])|join('||') }}">
+          <span class="clabel">Medium</span>
+        </div>
+        {{ cell('dimensions','H x W x D') }}
+      </div>
+      <!-- Date | Price | Vendor -->
+      <div class="dgrid dg3 art-purchase">
+        {{ datecell('date','Date') }}
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+      </div>
+      <!-- Property | Location -->
+      <div class="dgrid dg2 art-purchase">
+        {{ selcell('property','Property', vlists.property) }}
+        <div class="dcell ta-wrap">
+          <input type="text" name="location" value="{{ val('location') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
+          <span class="clabel">Location</span>
+        </div>
+      </div>
+      <!-- Owner | Status -->
+      <div class="dgrid dg2 art-purchase">
+        {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
+        <div class="dcell">
+          <select name="owner">
+            <option value=""></option>
+            {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}
+          </select>
+          <span class="clabel">Owner</span>
+        </div>
+        {{ selcell('status','Status', vlists.status) }}
+      </div>
     </div>
-  </div>
-
-  <!-- Owner | Status -->
-  <div class="dgrid dg2 art-purchase">
-    {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
-    <div class="dcell">
-      <select name="owner">
-        <option value=""></option>
-        {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}
-      </select>
-      <span class="clabel">Owner</span>
-    </div>
-    {{ selcell('status','Status', vlists.status) }}
   </div>
 
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
