@@ -227,6 +227,13 @@ input[type="number"]::-webkit-outer-spin-button {
 .item-thumb img { max-width: 96px; max-height: 96px; object-fit: contain; display: block; }
 .item-thumb .no-img { font-size: 36px; color: var(--text-hint); }
 
+/* Coin reverse thumbnail (sits next to the obverse on the list view).
+   Slightly muted "no-img" placeholder so the empty side reads as
+   "no reverse uploaded yet" rather than a duplicate of the obverse. */
+.item-thumb-rev { background: var(--cell-bg); cursor: default; }
+.item-thumb-rev:hover { background: var(--cell-bg); }
+.item-thumb-rev .no-img { color: #ddd; }
+
 /* Credit cards: taller rows with larger type for glanceable reading.
    Number / Exp+CVC / Zip each live on their own line so nothing wraps
    mid-value at phone widths. The card thumbnail fills its cell height
@@ -1319,6 +1326,9 @@ input[type="date"] { -webkit-appearance: none; }
   .item-thumb        { width: 120px; min-height: 120px; }
   .item-thumb img    { max-width: 120px; max-height: 120px; }
   .item-thumb .no-img { font-size: 40px; }
+
+  /* Two coin thumbs would crowd the row on phones; collapse the reverse. */
+  .item-thumb-rev { display: none; }
 
   /* List row spacing: pack a bit more info per screen. */
   .item-body { padding: 6px 10px; gap: 2px; min-width: 0; }
