@@ -2223,6 +2223,19 @@ def watch_lookup_specs(record_id):
         if f not in suggestions or suggestions[f] is None:
             continue
         val = suggestions[f]
+        # A watch can't have been bought before it was made — if the
+        # lookup's year is later than purchase_date, clamp it down to
+        # the purchase year (the receipt is hard evidence, the web isn't).
+        if f == 'year':
+            pd = watch['purchase_date']
+            if pd:
+                try:
+                    purchase_year = int(str(pd)[:4])
+                    sugg_year = int(float(val))
+                    if purchase_year < sugg_year:
+                        val = purchase_year
+                except (TypeError, ValueError):
+                    pass
         # Beat sanity check. Mechanical movements (Manual/Automatic) run at
         # well-known VPH rates and sources often quote Hz instead — so for
         # those we auto-convert small numbers and snap to the canonical set.
@@ -3014,7 +3027,7 @@ def _draw_coin_card(c, coin, x, y, w, h):
     if coin['mint']: specs.append(coin['mint'].strip())
     m = _metal_short(coin['metal'])
     if m: specs.append(m)
-    if coin['size'] is not None: specs.append(f"{coin['size']:g} mm")
+    if coin['size'] is not None: specs.append(f"{coin['size']:.1f} mm")
 
     c.setFont('Helvetica', 6)
     spec_count = len(specs)
