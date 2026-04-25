@@ -286,7 +286,7 @@ FIELDS = {
         {'name': 'make',            'label': 'Make',              'type': 'text'},
         {'name': 'model',           'label': 'Model',             'type': 'text'},
         {'name': 'mount',           'label': 'Mount',             'type': 'text'},
-        {'name': 'aperture',        'label': 'Aperture (f/)',     'type': 'number'},
+        {'name': 'aperture',        'label': 'Aperture (ƒ/)',     'type': 'number'},
         {'name': 'filter_size',     'label': 'Filter Size (mm)',  'type': 'number'},
         {'name': 'length',          'label': 'Length (mm)',       'type': 'number'},
         {'name': 'serial_number',   'label': 'Serial Number',     'type': 'text'},

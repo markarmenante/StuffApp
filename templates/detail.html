@@ -601,7 +601,7 @@
       <li>
         <a href="{{ url_for('detail_view', category='lenses', record_id=l['id'], from_camera=r['id']) }}">
           <span class="cll-brand">{{ l['make'] or '—' }}</span>
-          {% if l['aperture'] %}<span class="cll-aperture">f/{{ l['aperture'] }}</span>{% endif %}
+          {% if l['aperture'] %}<span class="cll-aperture">ƒ/{{ l['aperture'] }}</span>{% endif %}
           {% if l['length'] %}<span class="cll-length">{{ l['length']|int }}mm</span>{% endif %}
           {% if l['model'] %}<span class="cll-desc">{{ l['model'] }}</span>{% endif %}
         </a>
