@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Stop iOS Safari from turning 7+ digit numbers (e.g. a serial
+       like "2599959") into blue tel: links. Real phone numbers can
+       still be made tappable explicitly via <a href="tel:..."> if
+       we want them to be. -->
+  <meta name="format-detection" content="telephone=no">
   <title>{% block title %}StuffApp{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?t={{ range(100000,999999)|random }}">
 </head>
