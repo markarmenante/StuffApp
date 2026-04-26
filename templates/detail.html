@@ -579,6 +579,13 @@
   </div>
   {% endif %}
 
+  <!-- Receipt + Document containers (drag & drop enabled via doccell). -->
+  <div class="dgrid dg3 watch-doc-row">
+    {{ doccell('receipt','Receipt') }}
+    {{ doccell('document_1','Doc 1') }}
+    {{ doccell('document_2','Doc 2') }}
+  </div>
+
   <!-- Bottom -->
   <div class="detail-bottom">
     <div class="bottom-cell">
