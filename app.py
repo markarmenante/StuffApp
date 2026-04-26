@@ -2205,36 +2205,65 @@ _FILE_THUMB_DIR = os.path.join(UPLOAD_FOLDER, '.thumbs')
 def file_thumb(filename):
     """Render a small preview for an uploaded document.
 
-    PDFs: first page rendered via pypdfium2, cached as JPEG. Anything
-    else (or any failure) returns 404 so the template can fall back to
-    its existing icon.
+    PDFs: first page rendered via pypdfium2.
+    HEIC/HEIF: rendered via pillow-heif (browsers don't display them).
+    Cached as JPEG under .thumbs/. Failures log a reason and 404 so the
+    template can fall back to its existing 📄 icon.
+
+    `?debug=1` returns the failure reason as plain text instead of 404
+    so production issues can be diagnosed without shell access.
     """
+    debug = request.args.get('debug') == '1'
+    def _bail(msg, code=404):
+        app.logger.warning(f'file-thumb {filename}: {msg}')
+        if debug:
+            return Response(msg, status=200, mimetype='text/plain')
+        abort(code)
+
     src = os.path.join(UPLOAD_FOLDER, filename)
     if not os.path.exists(src):
-        abort(404)
+        return _bail(f'source file missing at {src}')
     ext = os.path.splitext(filename)[1].lower()
-    if ext != '.pdf':
-        abort(404)
-    os.makedirs(_FILE_THUMB_DIR, exist_ok=True)
+    if ext not in ('.pdf', '.heic', '.heif'):
+        return _bail(f'unsupported extension: {ext!r}')
+
+    try:
+        os.makedirs(_FILE_THUMB_DIR, exist_ok=True)
+    except OSError as e:
+        return _bail(f'cannot create thumb dir: {e}', code=500)
+
     thumb_path = os.path.join(_FILE_THUMB_DIR, filename + '.jpg')
     if not os.path.exists(thumb_path) or \
             os.path.getmtime(thumb_path) < os.path.getmtime(src):
         try:
-            import pypdfium2 as pdfium
-            doc = pdfium.PdfDocument(src)
-            try:
-                page = doc[0]
-                # scale 1.0 = 72 dpi. 2.0 → ~150 dpi, plenty for a 160px thumb.
-                bitmap = page.render(scale=2.0)
-                pil = bitmap.to_pil()
-                pil.thumbnail((320, 320))
-                if pil.mode not in ('RGB', 'L'):
-                    pil = pil.convert('RGB')
-                pil.save(thumb_path, format='JPEG', quality=82)
-            finally:
-                doc.close()
-        except Exception:
-            abort(404)
+            from PIL import Image
+            if ext == '.pdf':
+                try:
+                    import pypdfium2 as pdfium
+                except ImportError as e:
+                    return _bail(f'pypdfium2 not installed: {e}', code=500)
+                doc = pdfium.PdfDocument(src)
+                try:
+                    page = doc[0]
+                    bitmap = page.render(scale=2.0)
+                    pil = bitmap.to_pil()
+                finally:
+                    doc.close()
+            else:  # .heic / .heif
+                try:
+                    import pillow_heif
+                    pillow_heif.register_heif_opener()
+                except ImportError as e:
+                    return _bail(f'pillow-heif not installed: {e}', code=500)
+                pil = Image.open(src)
+            pil.thumbnail((320, 320))
+            if pil.mode not in ('RGB', 'L'):
+                pil = pil.convert('RGB')
+            pil.save(thumb_path, format='JPEG', quality=82)
+        except Exception as e:
+            import traceback
+            app.logger.warning('file-thumb render failed:\n' + traceback.format_exc())
+            return _bail(f'render failed: {e.__class__.__name__}: {e}', code=500)
     return send_from_directory(_FILE_THUMB_DIR, filename + '.jpg')
 
 
