@@ -13,12 +13,7 @@
         <strong>{{ action.label }}</strong>
         <span class="admin-action-desc">{{ action.desc }}</span>
       </div>
-      {% if action.kind == 'download' %}
-      <a class="admin-run-btn" href="{{ action.url }}?secret={{ secret|urlencode }}"
-         download>Download</a>
-      {% else %}
-      <button type="button" class="admin-run-btn">Run</button>
-      {% endif %}
+      <button type="button" class="admin-run-btn">{% if action.kind == 'download' %}Download{% else %}Run{% endif %}</button>
       <span class="admin-result"></span>
     </li>
     {% endfor %}
@@ -27,25 +22,57 @@
 
 <script>
 const SECRET = {{ secret|tojson }};
+
+function triggerDownload(blob, filenameFallback) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filenameFallback;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+
 document.querySelectorAll('.admin-action').forEach(li => {
-  if (li.dataset.kind === 'download') return;  // anchor handles itself
   const btn = li.querySelector('.admin-run-btn');
   const out = li.querySelector('.admin-result');
   const url = li.dataset.url;
+  const kind = li.dataset.kind;
+
   btn.addEventListener('click', async () => {
     btn.disabled = true;
-    out.textContent = 'Running…';
+    out.textContent = kind === 'download' ? 'Building…' : 'Running…';
     out.className = 'admin-result running';
     try {
-      const fd = new URLSearchParams({secret: SECRET});
-      const r = await fetch(url, {method: 'POST', body: fd});
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        out.textContent = `Error ${r.status}: ${data.error || 'failed'}`;
-        out.className = 'admin-result err';
-      } else {
-        out.textContent = JSON.stringify(data);
+      if (kind === 'download') {
+        // GET with secret in the query string. fetch() sends credentials
+        // (Cloudflare Access cookie) by default for same-origin.
+        const fullUrl = url + '?secret=' + encodeURIComponent(SECRET);
+        const r = await fetch(fullUrl);
+        if (!r.ok) {
+          out.textContent = `Error ${r.status}`;
+          out.className = 'admin-result err';
+          return;
+        }
+        const cd = r.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^";]+)"?/);
+        const fname = m ? m[1] : 'stuffapp-backup.zip';
+        const blob = await r.blob();
+        triggerDownload(blob, fname);
+        const mb = (blob.size / 1048576).toFixed(1);
+        out.textContent = `Downloaded ${fname} (${mb} MB)`;
         out.className = 'admin-result ok';
+      } else {
+        const fd = new URLSearchParams({secret: SECRET});
+        const r = await fetch(url, {method: 'POST', body: fd});
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          out.textContent = `Error ${r.status}: ${data.error || 'failed'}`;
+          out.className = 'admin-result err';
+        } else {
+          out.textContent = JSON.stringify(data);
+          out.className = 'admin-result ok';
+        }
       }
     } catch (e) {
       out.textContent = 'Network error: ' + (e.message || e);
