@@ -381,8 +381,8 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'coins' %}
 
-  <!-- Reg / Auth / Mint / Official -->
-  <div class="dgrid dg4">
+  <!-- Row 1: Region | Authority | Mint -->
+  <div class="dgrid dg3">
     <div class="dcell ta-wrap coin-region-cell">
       <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700"
              {% if is_new and not val('region') %}placeholder="Region"{% endif %}>
@@ -394,15 +394,17 @@
       <span class="clabel">Auth</span>
     </div>
     {{ tacell('mint','Mint', ta.get('mint', [])) }}
+  </div>
+
+  <!-- Row 2: Obv/Rev one-liner (description) | Official -->
+  <div class="dgrid dg2 coin-desc-official">
+    {{ cell('obv_rev','Obv/Rev one-liner') }}
     <div class="dcell">
       <input type="text" name="official" value="{{ val('official') }}"
              {% if is_new and not val('official') %}placeholder="Name, role"{% endif %}>
       <span class="clabel">Official</span>
     </div>
   </div>
-
-  <!-- Obv/Rev one-liner sits up top alongside the identifying fields. -->
-  <div class="dgrid dg1">{{ cell('obv_rev','Obv/Rev one-liner') }}</div>
 
   <!-- Coin images (obverse + reverse) — pinned near the top so the
        visual is the first thing you see on the detail page. -->

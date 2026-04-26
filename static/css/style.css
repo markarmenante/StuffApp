@@ -1395,6 +1395,11 @@ input[type="date"] { -webkit-appearance: none; }
      — keep them two-up on phones instead of stacking. */
   .dgrid.dg2.person-doc-group { grid-template-columns: 1fr 1fr; }
 
+  /* Coin detail's description | official row pairs the two by intent
+     (the official often appears in the obv/rev description), so keep
+     them side-by-side on phones too. */
+  .dgrid.dg2.coin-desc-official { grid-template-columns: 1fr 1fr; }
+
   /* Watch spec rows: keep two-up even on narrow viewports. */
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
   .dgrid.dg2.watch-vph-hz { grid-template-columns: 1fr 1fr; }
