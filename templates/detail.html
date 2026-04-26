@@ -481,7 +481,7 @@
   </div>
 
   <!-- Physical specs -->
-  <div class="dgrid coin-specs" style="grid-template-columns: repeat(7, 1fr);">
+  <div class="dgrid coin-specs" style="grid-template-columns: repeat(6, 1fr);">
     <div class="dcell">
       <input type="text" name="weight" value="{{ '%.2f g'|format(val('weight')|float) if val('weight') else '' }}" class="coin-unit-input" data-suffix=" g" style="text-align:center"
              {% if is_new and not val('weight') %}placeholder="Weight"{% endif %}>
@@ -489,16 +489,11 @@
     </div>
     <div class="dcell">
       <input type="text" name="size" value="{{ '%.1f mm'|format(val('size')|float) if val('size') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
-             {% if is_new and not val('size') %}placeholder="Width"{% endif %}>
-      <span class="clabel">Width</span>
-    </div>
-    <div class="dcell">
-      <input type="text" name="height" value="{{ '%.1f mm'|format(val('height')|float) if val('height') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
-             {% if is_new and not val('height') %}placeholder="Height"{% endif %}>
-      <span class="clabel">Height</span>
+             {% if is_new and not val('size') %}placeholder="Size"{% endif %}>
+      <span class="clabel">Size</span>
     </div>
     <div class="dcell"><select name="grade" style="text-align:center"><option value=""></option>{% for o in vlists.coin_grade %}<option value="{{ o }}" {{ 'selected' if val('grade')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Grade</span></div>
-    <div class="dcell"><select name="die_axis" style="text-align:center"><option value=""></option>{% for o in ['0','1','2','3','4','5','6','7','8','9','10','11','12'] %}<option value="{{ o }}" {{ 'selected' if val('die_axis')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Die Axis</span></div>
+    <div class="dcell"><select name="die_axis" style="text-align:center"><option value=""></option>{% for o in ['0','1','2','3','4','5','6','7','8','9','10','11','12'] %}<option value="{{ o }}" {{ 'selected' if val('die_axis')==o }}>{{ o }}h</option>{% endfor %}</select><span class="clabel">Die Axis</span></div>
     {{ numcell('strike','Strike') }}
     {{ numcell('surface','Surf') }}
   </div>
