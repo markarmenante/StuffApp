@@ -121,7 +121,7 @@ VALUE_LISTS = {
     'coin_status': ['Own','Ordered','Sold','Loaned'],
     'recording_status': ['Own','Ordered'],
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
-    'coin_grade': ['BU','FDC','MS','PF','AU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
+    'coin_grade': ['BU','FDC','MS','PF','cAU','AU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
     'clasp_type': ['Tang','Fold Over','Butterfly','Velcro'],
     'pen_type': ['Ballpoint','Fountain','Rollerball','Mechanical Pencil'],
     'pen_action': ['Cap','Click','Twist'],
@@ -168,6 +168,7 @@ FIELD_ALIASES = {
     # canonical short form so a description that says "Choice EF"
     # snaps to the value-list entry "cEF" on save.
     ('coins', 'grade'): {
+        'choice au':  'cAU',
         'choice ef':  'cEF',
         'choice vf':  'cVF',
         'about ef':   'aEF',
