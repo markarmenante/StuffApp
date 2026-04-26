@@ -486,6 +486,13 @@ FIELDS = {
             {'name': f'doc_{i}_title', 'label': f'Doc {i} Title', 'type': 'text'},
             {'name': f'doc_{i}',       'label': f'Doc {i}',       'type': 'file'},
         )],
+        # Alarm code list — 8 rows of (Entry, Code, Notes) under the
+        # existing alarm fields, with delete-row + shift-up like meds.
+        *[v for i in range(1, 9) for v in (
+            {'name': f'alarm_codes_entry_{i}', 'label': f'Alarm Entry {i}', 'type': 'text'},
+            {'name': f'alarm_codes_code_{i}',  'label': f'Alarm Code {i}',  'type': 'text'},
+            {'name': f'alarm_codes_note_{i}',  'label': f'Alarm Note {i}',  'type': 'text'},
+        )],
     ],
     'persons': [
         {'name': 'name',                  'label': 'Name',                   'type': 'text'},
@@ -612,6 +619,10 @@ def init_db():
         'ALTER TABLE properties ADD COLUMN doc_9_title TEXT',
         'ALTER TABLE properties ADD COLUMN doc_10 TEXT',
         'ALTER TABLE properties ADD COLUMN doc_10_title TEXT',
+        # Alarm-codes list (8 rows × {entry, code, note})
+        *[f'ALTER TABLE properties ADD COLUMN alarm_codes_entry_{i} TEXT' for i in range(1, 9)],
+        *[f'ALTER TABLE properties ADD COLUMN alarm_codes_code_{i} TEXT' for i in range(1, 9)],
+        *[f'ALTER TABLE properties ADD COLUMN alarm_codes_note_{i} TEXT' for i in range(1, 9)],
         'ALTER TABLE properties ADD COLUMN owner TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
         'ALTER TABLE topics ADD COLUMN image TEXT',

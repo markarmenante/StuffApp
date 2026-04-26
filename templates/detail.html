@@ -1327,6 +1327,26 @@
     {{ cell('alarm_password','Password') }}
   </div>
   <div class="dgrid dg2">{{ cell('alarm_phone','Phone') }}{{ cell('alarm_notes','Notes') }}</div>
+
+  <!-- Alarm-codes list. Mirrors the medications table on persons:
+       fixed slots, per-row × deletes + shifts subsequent rows up.
+       Empty rows hide their × button so the only delete affordances
+       you see are on rows with content. Entry + Code share 40% of
+       the line; Notes takes 60%. -->
+  <div class="alarm-codes-table dcell">
+    <div class="alarm-codes-row alarm-codes-head">
+      <span>Entry</span><span>Code</span><span>Notes</span><span></span>
+    </div>
+    {% for i in range(1, 9) %}
+    <div class="alarm-codes-row" data-alarm-idx="{{ i }}">
+      <input type="text" name="alarm_codes_entry_{{ i }}" value="{{ val('alarm_codes_entry_' ~ i) }}">
+      <input type="text" name="alarm_codes_code_{{ i }}"  value="{{ val('alarm_codes_code_' ~ i) }}">
+      <input type="text" name="alarm_codes_note_{{ i }}"  value="{{ val('alarm_codes_note_' ~ i) }}">
+      <button type="button" class="alarm-del-btn" title="Delete this row">×</button>
+    </div>
+    {% endfor %}
+  </div>
+
   <div class="section-bar topics-bar">
     <span>Topics</span>
     {% if not is_new %}
@@ -2651,6 +2671,54 @@ document.querySelectorAll('.person-tab').forEach(btn => {
           const next = i < MAX ? form.querySelector(`[name="${f}_${i+1}"]`) : null;
           const newVal = next ? next.value : '';
           if (cur.value !== newVal) {
+            cur.value = newVal;
+            cur.dispatchEvent(new Event('blur'));
+          }
+        });
+      }
+      refreshEmptyClass();
+    });
+  });
+})();
+
+// Property > Alarm: per-row × delete + shift-up. Same pattern as the
+// medications table on persons. Field set is {entry, code, note} and
+// goes up to 8 rows.
+(function alarmCodesDelete() {
+  const FIELDS = ['alarm_codes_entry', 'alarm_codes_code', 'alarm_codes_note'];
+  const MAX = 8;
+  const form = document.getElementById('mainForm');
+  if (!form) return;
+  if (!form.querySelector('.alarm-codes-row[data-alarm-idx]')) return;
+
+  function rowIsEmpty(idx) {
+    return FIELDS.every(f => {
+      const el = form.querySelector(`[name="${f}_${idx}"]`);
+      return !el || !el.value.trim();
+    });
+  }
+  function refreshEmptyClass() {
+    form.querySelectorAll('.alarm-codes-row[data-alarm-idx]').forEach(row => {
+      const idx = parseInt(row.dataset.alarmIdx);
+      row.classList.toggle('alarm-codes-row-empty', rowIsEmpty(idx));
+    });
+  }
+  refreshEmptyClass();
+  form.querySelectorAll('.alarm-codes-row[data-alarm-idx] input').forEach(inp => {
+    inp.addEventListener('blur', refreshEmptyClass);
+  });
+
+  form.querySelectorAll('.alarm-del-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest('.alarm-codes-row');
+      if (!row) return;
+      const startIdx = parseInt(row.dataset.alarmIdx);
+      for (let i = startIdx; i <= MAX; i++) {
+        FIELDS.forEach(f => {
+          const cur = form.querySelector(`[name="${f}_${i}"]`);
+          const next = i < MAX ? form.querySelector(`[name="${f}_${i+1}"]`) : null;
+          const newVal = next ? next.value : '';
+          if (cur && cur.value !== newVal) {
             cur.value = newVal;
             cur.dispatchEvent(new Event('blur'));
           }

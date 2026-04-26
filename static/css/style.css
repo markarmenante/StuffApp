@@ -940,6 +940,42 @@ input[type="date"] { -webkit-appearance: none; }
 .med-table .med-row:not(.med-head) > input:last-child { border-right: none; }
 .med-table .med-row:not(.med-head) > input:focus { background: #fffde8; }
 
+/* Property alarm-codes table — same shape as the medications table on
+   persons, but with custom column proportions: Entry + Code share 40%
+   of the row (20% each); Notes takes 60%. Per-row × delete + shift-up
+   behaviour wired in JS, mirroring the meds delete logic. */
+.alarm-codes-table { padding: 6px 10px 4px; position: relative; }
+.alarm-codes-table .alarm-codes-row {
+  display: grid;
+  grid-template-columns: 20% 20% 60% 22px;
+  align-items: stretch;
+}
+.alarm-del-btn {
+  width: 18px; height: 18px; align-self: center; margin: 0 2px;
+  border: 1px solid var(--border); background: #fff;
+  color: var(--text-label); border-radius: 50%;
+  font-size: 12px; line-height: 1; padding: 0; cursor: pointer;
+  opacity: 0.4; transition: opacity .12s, background .12s, color .12s;
+}
+.alarm-codes-row:hover .alarm-del-btn { opacity: 1; }
+.alarm-del-btn:hover { background: #ffe9e6; color: #c0392b; border-color: #e6b6ad; opacity: 1; }
+.alarm-codes-row.alarm-codes-row-empty .alarm-del-btn { visibility: hidden; }
+.alarm-codes-table .alarm-codes-row.alarm-codes-head {
+  font-size: 10px; color: var(--text-label);
+  padding: 2px 2px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.alarm-codes-table .alarm-codes-row.alarm-codes-head > span { padding: 0 4px; }
+.alarm-codes-table .alarm-codes-row:not(.alarm-codes-head):nth-child(odd) { background: var(--cell-bg); }
+.alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input {
+  border: none; outline: none; background: transparent;
+  font-family: var(--font); font-size: 14px; color: #111111;
+  font-weight: 400;
+  padding: 4px 6px; width: 100%; border-right: 1px solid var(--border-light);
+}
+.alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input:last-of-type { border-right: none; }
+.alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input:focus { background: #fffde8; }
+
 /* Recordings: heart toggle for the Like field */
 .brand-row-with-like {
   display: flex; align-items: center; gap: 10px;

@@ -309,6 +309,14 @@ CREATE TABLE IF NOT EXISTS properties (
     doc_8 TEXT, doc_8_title TEXT,
     doc_9 TEXT, doc_9_title TEXT,
     doc_10 TEXT, doc_10_title TEXT,
+    alarm_codes_entry_1 TEXT, alarm_codes_code_1 TEXT, alarm_codes_note_1 TEXT,
+    alarm_codes_entry_2 TEXT, alarm_codes_code_2 TEXT, alarm_codes_note_2 TEXT,
+    alarm_codes_entry_3 TEXT, alarm_codes_code_3 TEXT, alarm_codes_note_3 TEXT,
+    alarm_codes_entry_4 TEXT, alarm_codes_code_4 TEXT, alarm_codes_note_4 TEXT,
+    alarm_codes_entry_5 TEXT, alarm_codes_code_5 TEXT, alarm_codes_note_5 TEXT,
+    alarm_codes_entry_6 TEXT, alarm_codes_code_6 TEXT, alarm_codes_note_6 TEXT,
+    alarm_codes_entry_7 TEXT, alarm_codes_code_7 TEXT, alarm_codes_note_7 TEXT,
+    alarm_codes_entry_8 TEXT, alarm_codes_code_8 TEXT, alarm_codes_note_8 TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
