@@ -2388,7 +2388,18 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
     const input = zone.querySelector('input[type="file"]');
     if (input) input.click();
   });
-  zone.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); zone.classList.add('drag-over'); e.dataTransfer.dropEffect = 'copy'; });
+  zone.addEventListener('dragover', e => {
+    e.preventDefault(); e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    // Clear drag-over from any other zone first so adjacent panels
+    // (e.g. coin obverse + reverse) never highlight at the same time.
+    if (!zone.classList.contains('drag-over')) {
+      document.querySelectorAll('.drop-zone.drag-over').forEach(z => {
+        if (z !== zone) z.classList.remove('drag-over');
+      });
+      zone.classList.add('drag-over');
+    }
+  });
   zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over'); });
   zone.addEventListener('drop', e => {
     e.preventDefault(); e.stopPropagation();
