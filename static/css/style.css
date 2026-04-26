@@ -927,14 +927,14 @@ input[type="date"] { -webkit-appearance: none; }
   padding: 2px 2px 4px;
   border-bottom: 1px solid var(--border);
 }
-.med-table .med-row.med-head > span { padding: 0 4px; }
+.med-table .med-row.med-head > span { padding: 0 4px; text-align: left; }
 .med-table .med-row:not(.med-head):nth-child(odd) { background: var(--cell-bg); }
 .med-table .med-row:not(.med-head) > input {
   /* Match the standard .dcell input typography (14px / #111) so the
      medications table reads in the same voice as the rest of the form. */
   border: none; outline: none; background: transparent;
   font-family: var(--font); font-size: 14px; color: #111111;
-  font-weight: 400;
+  font-weight: 400; text-align: left;
   padding: 4px 6px; width: 100%; border-right: 1px solid var(--border-light);
 }
 .med-table .med-row:not(.med-head) > input:last-child { border-right: none; }
@@ -965,12 +965,12 @@ input[type="date"] { -webkit-appearance: none; }
   padding: 2px 2px 4px;
   border-bottom: 1px solid var(--border);
 }
-.alarm-codes-table .alarm-codes-row.alarm-codes-head > span { padding: 0 4px; }
+.alarm-codes-table .alarm-codes-row.alarm-codes-head > span { padding: 0 4px; text-align: left; }
 .alarm-codes-table .alarm-codes-row:not(.alarm-codes-head):nth-child(odd) { background: var(--cell-bg); }
 .alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input {
   border: none; outline: none; background: transparent;
   font-family: var(--font); font-size: 14px; color: #111111;
-  font-weight: 400;
+  font-weight: 400; text-align: left;
   padding: 4px 6px; width: 100%; border-right: 1px solid var(--border-light);
 }
 .alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input:last-of-type { border-right: none; }
@@ -1000,12 +1000,12 @@ input[type="date"] { -webkit-appearance: none; }
   padding: 2px 2px 4px;
   border-bottom: 1px solid var(--border);
 }
-.people-table .people-row.people-head > span { padding: 0 4px; }
+.people-table .people-row.people-head > span { padding: 0 4px; text-align: left; }
 .people-table .people-row:not(.people-head):nth-child(odd) { background: var(--cell-bg); }
 .people-table .people-row:not(.people-head) > input {
   border: none; outline: none; background: transparent;
   font-family: var(--font); font-size: 14px; color: #111111;
-  font-weight: 400;
+  font-weight: 400; text-align: left;
   padding: 4px 6px; width: 100%; border-right: 1px solid var(--border-light);
 }
 .people-table .people-row:not(.people-head) > input:last-of-type { border-right: none; }
@@ -1294,7 +1294,7 @@ input[type="date"] { -webkit-appearance: none; }
   padding: 6px 8px; font-size: 12px; font-weight: 600;
   font-family: var(--font); color: var(--text);
   outline: none;
-  text-align: center;
+  text-align: left;
 }
 .property-doc-title:focus { background: #fffde8; }
 .property-doc-title::placeholder { color: #b8b8b8; font-weight: 400; }
