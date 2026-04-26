@@ -479,10 +479,10 @@ FIELDS = {
          'options': ['', 'YM', 'Mark', 'Young']},
         {'name': 'archive',         'label': 'Archive',           'type': 'text'},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
-        # Six freeform document slots with editable titles. Two rows of
-        # three on the detail page so the user can drop deeds/insurance/
+        # Ten freeform document slots with editable titles. Two rows of
+        # five on the detail page so the user can drop deeds/insurance/
         # warranties/etc. with their own labels.
-        *[v for i in range(1, 7) for v in (
+        *[v for i in range(1, 11) for v in (
             {'name': f'doc_{i}_title', 'label': f'Doc {i} Title', 'type': 'text'},
             {'name': f'doc_{i}',       'label': f'Doc {i}',       'type': 'file'},
         )],
@@ -604,6 +604,14 @@ def init_db():
         'ALTER TABLE properties ADD COLUMN doc_5_title TEXT',
         'ALTER TABLE properties ADD COLUMN doc_6 TEXT',
         'ALTER TABLE properties ADD COLUMN doc_6_title TEXT',
+        'ALTER TABLE properties ADD COLUMN doc_7 TEXT',
+        'ALTER TABLE properties ADD COLUMN doc_7_title TEXT',
+        'ALTER TABLE properties ADD COLUMN doc_8 TEXT',
+        'ALTER TABLE properties ADD COLUMN doc_8_title TEXT',
+        'ALTER TABLE properties ADD COLUMN doc_9 TEXT',
+        'ALTER TABLE properties ADD COLUMN doc_9_title TEXT',
+        'ALTER TABLE properties ADD COLUMN doc_10 TEXT',
+        'ALTER TABLE properties ADD COLUMN doc_10_title TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
         'ALTER TABLE topics ADD COLUMN image TEXT',

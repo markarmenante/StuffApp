@@ -305,6 +305,10 @@ CREATE TABLE IF NOT EXISTS properties (
     doc_4 TEXT, doc_4_title TEXT,
     doc_5 TEXT, doc_5_title TEXT,
     doc_6 TEXT, doc_6_title TEXT,
+    doc_7 TEXT, doc_7_title TEXT,
+    doc_8 TEXT, doc_8_title TEXT,
+    doc_9 TEXT, doc_9_title TEXT,
+    doc_10 TEXT, doc_10_title TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

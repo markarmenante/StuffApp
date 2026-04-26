@@ -507,6 +507,7 @@ input[type="number"]::-webkit-outer-spin-button {
 
 /* Data grid cells */
 .dgrid { display: grid; }
+.dg5 { grid-template-columns: repeat(5, 1fr); }
 .dg4 { grid-template-columns: repeat(4, 1fr); }
 .dg3 { grid-template-columns: repeat(3, 1fr); }
 .dg2 { grid-template-columns: repeat(2, 1fr); }
@@ -1211,9 +1212,10 @@ input[type="date"] { -webkit-appearance: none; }
   font-size: 48px; flex: 1;
 }
 
-/* Properties detail: 6 doc slots in a 3x2 grid. Each cell has an
-   editable title input above the drop-zone so the user labels
-   them per record. */
+/* Properties detail: 10 doc slots in a 5×2 grid on desktop. Each cell
+   has an editable title input above the drop-zone so the user labels
+   them per record. Mobile collapses to a 2-column tile layout — see
+   the @media (max-width: 640px) block far below. */
 .property-doc { display: flex; flex-direction: column; }
 .property-doc-title {
   border: 1px solid var(--border); border-bottom: none;
@@ -1221,12 +1223,16 @@ input[type="date"] { -webkit-appearance: none; }
   padding: 6px 8px; font-size: 12px; font-weight: 600;
   font-family: var(--font); color: var(--text);
   outline: none;
+  text-align: center;
 }
 .property-doc-title:focus { background: #fffde8; }
 .property-doc-title::placeholder { color: #b8b8b8; font-weight: 400; }
-.property-doc-row { min-height: 180px; }
-.property-doc-row .file-cell { padding: 12px; min-height: 180px; gap: 6px; justify-content: flex-start; }
-.property-doc-row .file-cell img { max-width: 100% !important; max-height: 130px !important; }
+.property-doc-row { min-height: 150px; }
+.property-doc-row .file-cell {
+  padding: 8px; min-height: 150px; gap: 4px;
+  justify-content: flex-start; min-width: 0;
+}
+.property-doc-row .file-cell img { max-width: 100% !important; max-height: 100px !important; }
 .property-doc-row .file-cell-name { display: none; }   /* title input replaces it */
 .property-doc-row .doc-link { display: flex; align-items: center; justify-content: center; }
 .file-upload-lbl { font-size: 11px; color: var(--blue); cursor: pointer; }
@@ -1432,9 +1438,44 @@ input[type="date"] { -webkit-appearance: none; }
   .row-upload-btn { width: 44px; font-size: 20px; }
 
   /* Detail grids: 4-up and 3-up become 2-up; 2-up stacks. */
+  .dgrid.dg5 { grid-template-columns: repeat(2, 1fr); }
   .dgrid.dg4 { grid-template-columns: repeat(2, 1fr); }
   .dgrid.dg3 { grid-template-columns: repeat(2, 1fr); }
   .dgrid.dg2 { grid-template-columns: 1fr; }
+
+  /* Property document tiles on iPhone: 2-up cards with rounded corners,
+     soft shadow, and a generous tap target. The title input becomes the
+     card header; the drop zone fills the rest. */
+  .property-doc-row {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    padding: 8px 10px;
+    background: transparent;
+    border-bottom: none;
+  }
+  .property-doc {
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    border: 1px solid #ececef;
+  }
+  .property-doc-title {
+    border: none;
+    background: linear-gradient(180deg, #fafbfc, #f1f3f6);
+    padding: 8px 10px;
+    font-size: 13px;
+    text-align: center;
+    border-bottom: 1px solid #ececef;
+  }
+  .property-doc-row .file-cell {
+    border-right: none;
+    background: #fff;
+    min-height: 130px;
+    padding: 14px 10px;
+  }
+  .property-doc-row .file-cell img { max-height: 110px !important; }
+  .property-doc-row .doc-empty-icon { font-size: 38px; }
 
   /* Keep the property Purchase Date / Purchase Price inline side-by-side
      even on narrow viewports so they read as a single "when + how much". */

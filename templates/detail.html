@@ -1347,18 +1347,19 @@
   {% endif %}
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
 
-  <!-- Six freeform document slots (deeds / insurance / warranties / …)
-       in a 3 x 2 grid. Each has its own editable title above the
-       drop-zone so the user can label them per record. -->
+  <!-- Ten freeform document slots (deeds / insurance / warranties / …)
+       in a 5 x 2 grid on desktop; mobile collapses to a 2-column grid
+       (see .property-doc-row in style.css). Each has its own editable
+       title above the drop-zone so the user can label them per record. -->
   <div class="section-bar">Documents</div>
-  {% for row in [[1,2,3], [4,5,6]] %}
-  <div class="dgrid dg3 property-doc-row">
+  {% for row in [[1,2,3,4,5], [6,7,8,9,10]] %}
+  <div class="dgrid dg5 property-doc-row">
     {% for i in row %}
     <div class="property-doc">
       <input type="text" name="doc_{{ i }}_title"
              value="{{ val('doc_' ~ i ~ '_title') }}"
              class="property-doc-title"
-             placeholder="Doc {{ i }} title (e.g. Deed)">
+             placeholder="Doc {{ i }}">
       {{ doccell('doc_' ~ i, '') }}
     </div>
     {% endfor %}
