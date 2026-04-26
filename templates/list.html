@@ -149,9 +149,14 @@
       {% endif %}
     </div>
 
-    {# Reverse thumbnail — only coins. Hidden on mobile to keep the row tight. #}
+    {# Reverse thumbnail — only coins. Hidden on mobile to keep the row tight.
+       Has its own upload-url + data-field so dropping on it goes to image_2,
+       not image_1. #}
     {% if category == 'coins' %}
-    <div class="item-thumb item-thumb-rev">
+    <div class="item-thumb item-thumb-rev"
+         data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
+         data-field="image_2"
+         title="Drop the reverse image here">
       {% set img2 = row['image_2'] %}
       {% if img2 and img2|is_image %}
         <img src="{{ url_for('uploaded_file', filename=img2) }}" alt="" loading="lazy">
@@ -497,11 +502,12 @@ window.shareCardRow = async function (ev, btn) {
   document.addEventListener('dragover', function(e) { e.preventDefault(); }, true);
   document.addEventListener('drop', function(e) { e.preventDefault(); }, true);
 
-  function uploadFile(file, uploadUrl, thumb) {
+  function uploadFile(file, uploadUrl, thumb, field) {
     if (!file || !file.type.startsWith('image/')) { alert('Please drop an image file.'); return; }
     thumb.classList.add('uploading');
     var fd = new FormData();
     fd.append('image', file);
+    if (field) fd.append('field', field);
 
     fetch(uploadUrl, { method: 'POST', body: fd })
       .then(function(r) { return r.json(); })
@@ -540,33 +546,58 @@ window.shareCardRow = async function (ev, btn) {
   })();
 
   document.querySelectorAll('.item-row').forEach(function(row) {
-    var thumb = row.querySelector('.item-thumb[data-upload-url]');
-    if (!thumb) return;
-    var uploadUrl = thumb.dataset.uploadUrl;
     var rowFileBtn = row.querySelector('.row-upload-btn input[type=file]');
+    var firstThumb = row.querySelector('.item-thumb[data-upload-url]');
+    if (!firstThumb) return;
+    var firstUploadUrl = firstThumb.dataset.uploadUrl;
+    var firstField = firstThumb.dataset.field || null;
 
-    // Click anywhere on the row (including the thumbnail) -> navigate to
-    // the detail page. Drop is still wired below for upload.
+    // Click anywhere on the row -> navigate to the detail page (the per-
+    // thumb drop handlers below stop propagation only on drag events,
+    // so click still bubbles up here).
     row.addEventListener('click', function(e) {
       if (e.target.closest('.row-upload-btn')) return;
       window.location = row.dataset.href;
     });
 
-    // Drag and drop -> upload to this row's image field
-    row.addEventListener('dragenter', function(e) { e.preventDefault(); e.stopPropagation(); row.classList.add('drag-over'); });
-    row.addEventListener('dragover', function(e) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; });
-    row.addEventListener('dragleave', function(e) { if (!row.contains(e.relatedTarget)) row.classList.remove('drag-over'); });
-    row.addEventListener('drop', function(e) {
-      e.preventDefault(); e.stopPropagation();
-      row.classList.remove('drag-over');
-      uploadFile(e.dataTransfer.files[0], uploadUrl, thumb);
+    // Per-thumb drag-and-drop. Each thumb is its own drop target so the
+    // correct `field` form param is sent (image_1 vs image_2 for coins)
+    // and the highlight only lights up the cell under the cursor.
+    row.querySelectorAll('.item-thumb[data-upload-url]').forEach(function(thumb) {
+      var uploadUrl = thumb.dataset.uploadUrl;
+      var field = thumb.dataset.field || null;
+      thumb.addEventListener('dragenter', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        // Make sure no other thumb on this row stays highlighted.
+        row.querySelectorAll('.item-thumb.drag-over').forEach(function(t) {
+          if (t !== thumb) t.classList.remove('drag-over');
+        });
+        thumb.classList.add('drag-over');
+      });
+      thumb.addEventListener('dragover', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        row.querySelectorAll('.item-thumb.drag-over').forEach(function(t) {
+          if (t !== thumb) t.classList.remove('drag-over');
+        });
+        thumb.classList.add('drag-over');
+      });
+      thumb.addEventListener('dragleave', function(e) {
+        if (!thumb.contains(e.relatedTarget)) thumb.classList.remove('drag-over');
+      });
+      thumb.addEventListener('drop', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        thumb.classList.remove('drag-over');
+        uploadFile(e.dataTransfer.files[0], uploadUrl, thumb, field);
+      });
     });
 
-    // Legacy explicit upload button (kept for layouts that opt into it)
+    // Legacy explicit upload button (kept for layouts that opt into it).
+    // Always uploads to the first thumb / image_1.
     if (!rowFileBtn) return;
     rowFileBtn.addEventListener('click', function(e) { e.stopPropagation(); });
     rowFileBtn.addEventListener('change', function() {
-      if (rowFileBtn.files[0]) uploadFile(rowFileBtn.files[0], uploadUrl, thumb);
+      if (rowFileBtn.files[0]) uploadFile(rowFileBtn.files[0], firstUploadUrl, firstThumb, firstField);
     });
   });
 })();

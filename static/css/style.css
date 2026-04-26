@@ -223,15 +223,13 @@ input[type="number"]::-webkit-outer-spin-button {
   position: relative;
 }
 .item-thumb:hover { background: rgba(0,0,0,.04); }
-.item-row.drag-over .item-thumb { background: rgba(0, 122, 255, 0.12); box-shadow: inset 0 0 0 2px var(--blue); }
+.item-thumb.drag-over { background: rgba(0, 122, 255, 0.12); box-shadow: inset 0 0 0 2px var(--blue); }
 .item-thumb img { max-width: 96px; max-height: 96px; object-fit: contain; display: block; }
 .item-thumb .no-img { font-size: 36px; color: var(--text-hint); }
 
 /* Coin reverse thumbnail (sits next to the obverse on the list view).
    Slightly muted "no-img" placeholder so the empty side reads as
    "no reverse uploaded yet" rather than a duplicate of the obverse. */
-.item-thumb-rev { background: var(--cell-bg); cursor: default; }
-.item-thumb-rev:hover { background: var(--cell-bg); }
 .item-thumb-rev .no-img { color: #ddd; }
 
 /* Credit cards: taller rows with larger type for glanceable reading.
@@ -1249,13 +1247,16 @@ input[type="date"] { -webkit-appearance: none; }
 }
 @keyframes coinSpecSpin { to { transform: rotate(360deg); } }
 
-/* ── Drag-and-drop image upload on list rows ── */
-.item-row.drag-over .item-thumb {
+/* ── Drag-and-drop image upload on list rows ──
+   Per-thumb highlight: only the cell directly under the cursor lights
+   up. Coin rows have two thumbs (obverse + reverse) so a row-wide
+   highlight would falsely suggest both will receive the file. */
+.item-thumb.drag-over {
   outline: 3px dashed var(--blue);
   outline-offset: -3px;
   background: #e8f0ff;
 }
-.item-row.drag-over .item-thumb .no-img {
+.item-thumb.drag-over .no-img {
   color: var(--blue);
 }
 .item-thumb .drop-hint {
@@ -1269,7 +1270,7 @@ input[type="date"] { -webkit-appearance: none; }
   left: 0; right: 0;
 }
 .item-thumb { position: relative; }
-.item-row.drag-over .item-thumb .drop-hint { display: block; }
+.item-thumb.drag-over .drop-hint { display: block; }
 .item-thumb.uploading { opacity: 0.5; }
 
 /* ── Overdue service date ── */
