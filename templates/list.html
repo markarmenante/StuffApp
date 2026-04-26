@@ -209,7 +209,7 @@
           <div class="idr">
             {% if row['weight'] %}<span>{{ '%.2f'|format(row['weight']|float) }} <span class="lbl">wt</span></span>{% endif %}
             {% if row['size'] %}<span>{{ '%.1f'|format(row['size']|float) }} <span class="lbl">mm</span></span>{% endif %}
-            {% if row['die_axis'] %}<span>{{ row['die_axis'] }}h <span class="lbl">axis</span></span>{% endif %}
+            {% if row['die_axis'] %}<span>{{ row['die_axis'] }}h</span>{% endif %}
             {% if row['coin_id'] %}<span class="item-cat-id">{{ row['coin_id'] }}</span>{% endif %}
           </div>
         </div>
