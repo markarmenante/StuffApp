@@ -121,7 +121,18 @@
       "Bash(awk 'NR>=130 && NR<=327' templates/detail.html)",
       "Bash(awk *)",
       "Bash(grep -oE 'data-ta=\"[^\"]{0,200}\"')",
-      "Bash(grep -oE 'name=\"\\(cvc|number|expiration|cvc_2\\)\"[^>]{0,100}')"
+      "Bash(grep -oE 'name=\"\\(cvc|number|expiration|cvc_2\\)\"[^>]{0,100}')",
+      "Bash(grep -nB2 -A1 'name=\"region\"\\\\|name=\"authority\"' templates/detail.html)",
+      "Bash(xargs -I {} git show --stat {})",
+      "Bash(git restore *)",
+      "Bash(git commit -m 'Admin page: drop confirm\\(\\) before running an action *)",
+      "Bash(git commit -m 'Drop zones: always clear other zones each dragover tick *)",
+      "Bash(git commit -m 'Properties list: widen desktop thumbnail by 30% *)",
+      "Bash(tmutil status *)",
+      "Bash(tmutil destinationinfo *)",
+      "Bash(grep -n \"'art':\\\\|'art':$\\\\|art.*\\\\\\\\[\" /Users/markarmenante/Desktop/StuffApp/app.py)",
+      "Bash(git checkout *)",
+      "Bash(grep -n \"init_db\\(\\)$\\\\|^    return\\\\|init_db.*return\\\\|db.commit\" /Users/markarmenante/Desktop/StuffApp/app.py)"
     ]
   }
 }

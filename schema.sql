@@ -1,6 +1,19 @@
 -- StuffApp Schema
 -- All tables use TEXT primary keys (UUID)
 
+-- Users + per-category authorization. The Cloudflare Access edge
+-- authenticates a user by email; this table maps that email to a set
+-- of allowed categories (CSV of slugs, or '*' for owner = everything).
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    role TEXT DEFAULT 'member',          -- 'owner' or 'member'
+    categories TEXT DEFAULT '',          -- '*' for owner, else CSV of slugs
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS watches (
     id TEXT PRIMARY KEY,
     brand TEXT,

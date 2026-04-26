@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Users · Admin · StuffApp{% endblock %}
+{% block content %}
+<div class="admin-page">
+  <div class="admin-crumbs">
+    <a href="{{ url_for('admin_index') }}">Admin</a> &rsaquo; Users
+  </div>
+  <h1 class="admin-title">Users &amp; access</h1>
+  <p class="admin-note">
+    Cloudflare Access controls who can reach the app at all. This page
+    controls which categories each authenticated user can see and edit
+    once they're past the edge. Owner ({{ owner_email }}) always has
+    full access regardless of category boxes.
+  </p>
+
+  <table class="admin-users-table">
+    <thead>
+      <tr>
+        <th>Email / Name</th>
+        <th>Role</th>
+        <th>Categories</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <form method="post" action="{{ url_for('admin_users_update', user_id=u.id) }}" class="user-edit-form">
+          <td>
+            <div class="user-email">{{ u.email }}</div>
+            <input type="text" name="display_name" value="{{ u.display_name or '' }}" placeholder="Display name" class="user-name-input">
+          </td>
+          <td>
+            <select name="role" {% if u.email|lower == owner_email|lower %}disabled data-locked="true"{% endif %}>
+              <option value="member" {% if u.role == 'member' %}selected{% endif %}>Member</option>
+              <option value="owner"  {% if u.role == 'owner'  %}selected{% endif %}>Owner</option>
+            </select>
+            {% if u.email|lower == owner_email|lower %}
+              <input type="hidden" name="role" value="{{ u.role }}">
+            {% endif %}
+          </td>
+          <td>
+            {% if u.role == 'owner' %}
+              <span class="user-cats-all">All categories</span>
+            {% else %}
+              <div class="user-cats-grid">
+                {% for slug, name in cat_choices %}
+                <label class="user-cat-chk">
+                  <input type="checkbox" name="categories" value="{{ slug }}"
+                         {% if slug in u.cat_set %}checked{% endif %}>
+                  {{ name }}
+                </label>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </td>
+          <td class="user-actions">
+            <button type="submit" class="user-btn">Save</button>
+        </form>
+            <form method="post" action="{{ url_for('admin_users_delete', user_id=u.id) }}"
+                  style="display:inline" onsubmit="return confirm('Remove {{ u.email }}? They lose access immediately.')">
+              <button type="submit" class="user-btn user-btn-danger"
+                      {% if u.email|lower == current_user.email|lower or
+                            (u.role == 'owner' and users|selectattr('role','equalto','owner')|list|length <= 1) %}
+                        disabled title="Cannot remove the only owner or yourself"
+                      {% endif %}>Remove</button>
+            </form>
+          </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2 class="admin-subhead">Add user</h2>
+  <form method="post" action="{{ url_for('admin_users_add') }}" class="user-add-form">
+    <div class="user-add-row">
+      <input type="email" name="email" placeholder="email@example.com" required>
+      <input type="text" name="display_name" placeholder="Display name (optional)">
+      <select name="role">
+        <option value="member" selected>Member</option>
+        <option value="owner">Owner (full access)</option>
+      </select>
+      <button type="submit" class="user-btn user-btn-primary">Add</button>
+    </div>
+    <div class="user-cats-grid user-cats-add">
+      {% for slug, name in cat_choices %}
+      <label class="user-cat-chk">
+        <input type="checkbox" name="categories" value="{{ slug }}">
+        {{ name }}
+      </label>
+      {% endfor %}
+    </div>
+    <p class="admin-note">Pick the categories this user gets. Ignored if you
+      choose Owner above (owners always see everything).</p>
+  </form>
+</div>
+
+<style>
+.admin-crumbs { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.admin-crumbs a { color: var(--blue); text-decoration: none; }
+.admin-subhead { font-size: 16px; margin-top: 24px; margin-bottom: 8px; }
+.admin-users-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+}
+.admin-users-table th, .admin-users-table td {
+  padding: 10px 12px; text-align: left; vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.admin-users-table tr:last-child td { border-bottom: none; }
+.admin-users-table th {
+  background: #f4f4f6; font-size: 11px; color: var(--text-label);
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.user-email { font-weight: 600; }
+.user-name-input {
+  display: block; margin-top: 4px; padding: 4px 6px; width: 180px;
+  border: 1px solid var(--border); border-radius: 4px; font-size: 12px;
+}
+.user-cats-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px;
+}
+.user-cats-add { margin-top: 8px; }
+.user-cat-chk { font-size: 12px; display: flex; align-items: center; gap: 4px; }
+.user-cats-all { color: var(--text-secondary); font-style: italic; }
+.user-actions { white-space: nowrap; }
+.user-btn {
+  padding: 5px 12px; border: 1px solid var(--blue); background: #fff;
+  color: var(--blue); border-radius: 4px; cursor: pointer; font-size: 12px;
+  margin-left: 4px;
+}
+.user-btn:hover:not(:disabled) { background: #e8f0ff; }
+.user-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.user-btn-danger { border-color: #c0392b; color: #c0392b; }
+.user-btn-danger:hover:not(:disabled) { background: #ffe9e6; }
+.user-btn-primary { background: var(--blue); color: #fff; }
+.user-btn-primary:hover { background: var(--blue); filter: brightness(1.1); }
+.user-add-form {
+  margin-top: 8px; padding: 12px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--surface);
+}
+.user-add-row {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.user-add-row input[type=email],
+.user-add-row input[type=text],
+.user-add-row select {
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+  font-size: 13px;
+}
+.user-add-row input[type=email] { flex: 1; min-width: 200px; }
+</style>
+{% endblock %}
