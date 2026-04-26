@@ -2880,7 +2880,7 @@ Target fields:
 - metal: EXACTLY one of [{metals}]. Use the two-letter prefix codes shown.
 - date_1: integer year of issue. NEGATIVE for BC (e.g. -450 for 450 BC), positive for AD/CE.
 - date_2: integer year ending a date range. Same sign convention. Return null if not a range.
-- official: the named individual associated with the coin's striking and their role, formatted as "Name, role" — e.g. "Straton, magistrate", "Marcus Junius Brutus, moneyer", "John Reich, engraver", "Lucius Memmius, mint official". Look in the user-entered description first (it often spells this out), then in your sources. Return null if no specific person + role can be identified.
+- official: the named individual associated with the coin's striking and their role, formatted as "Name, role" — e.g. "Straton, magistrate", "Marcus Junius Brutus, moneyer", "John Reich, engraver", "Lucius Memmius, mint official". Look in the user-entered description first (it often spells this out), then in your sources. If the dies are explicitly "unsigned", "attributed to", or "in the style of" a known artist/official, preserve that nuance in the value — e.g. "Euainetos, engraver (unsigned, attributed)" or "Kimon, engraver (style of)". Do NOT silently promote a stylistic attribution to a confirmed signature. Return null if no specific person + role can be identified.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null only when you cannot identify a value:
 {{
