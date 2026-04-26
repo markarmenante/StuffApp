@@ -170,14 +170,18 @@ FIELD_ALIASES = {
     ('coins', 'grade'): {
         'choice au':  'cAU',
         'choice ef':  'cEF',
+        'choice xf':  'cEF',
         'choice vf':  'cVF',
         'about au':   'aAU',
         'almost au':  'aAU',
         'about ef':   'aEF',
         'almost ef':  'aEF',
+        'about xf':   'aEF',
+        'almost xf':  'aEF',
         'about vf':   'aVF',
         'almost vf':  'aVF',
         'good vf':    'gVF',
+        'xf':         'EF',
     },
 }
 
