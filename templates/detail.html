@@ -1365,13 +1365,21 @@
   <div class="section-bar">People</div>
   <div class="people-table dcell">
     <div class="people-row people-head">
-      <span>Name</span><span>Role</span><span>Phone</span><span>Notes</span><span></span>
+      <span>Name</span><span>Role</span><span>Phone</span><span>Email</span><span>Notes</span><span></span>
     </div>
     {% for i in range(1, 11) %}
     <div class="people-row" data-people-idx="{{ i }}">
       <input type="text" name="people_name_{{ i }}"  value="{{ val('people_name_'  ~ i) }}">
       <input type="text" name="people_role_{{ i }}"  value="{{ val('people_role_'  ~ i) }}">
-      <input type="text" name="people_phone_{{ i }}" value="{{ val('people_phone_' ~ i) }}">
+      <div class="people-cell-phone">
+        <input type="text" inputmode="tel" name="people_phone_{{ i }}" value="{{ val('people_phone_' ~ i) }}">
+        <button type="button" class="ppl-act" data-action="tel" data-target="people_phone_{{ i }}" title="Call">📞</button>
+        <button type="button" class="ppl-act" data-action="sms" data-target="people_phone_{{ i }}" title="Text">💬</button>
+      </div>
+      <div class="people-cell-email">
+        <input type="email" name="people_email_{{ i }}" value="{{ val('people_email_' ~ i) }}">
+        <button type="button" class="ppl-act" data-action="mail" data-target="people_email_{{ i }}" title="Email">✉️</button>
+      </div>
       <input type="text" name="people_note_{{ i }}"  value="{{ val('people_note_'  ~ i) }}">
       <button type="button" class="people-del-btn" title="Delete this row">×</button>
     </div>
@@ -2756,7 +2764,44 @@ function _wireRowDelete(rowSelector, btnClass, emptyClass, dataAttr,
 _wireRowDelete(
   '.people-row[data-people-idx]', 'people-del-btn',
   'people-row-empty', 'peopleIdx',
-  ['people_name', 'people_role', 'people_phone', 'people_note'], 10, 4);
+  ['people_name', 'people_role', 'people_phone', 'people_email', 'people_note'], 10, 4);
+
+// Property > People: tel:/sms:/mailto: action icons. Clicking grabs
+// the live value from the target input and opens the OS handler.
+// Empty inputs render their icon muted via .is-disabled.
+(function peopleActions() {
+  const form = document.getElementById('mainForm');
+  if (!form) return;
+  function refreshActions() {
+    form.querySelectorAll('.ppl-act').forEach(btn => {
+      const inp = form.querySelector(`[name="${btn.dataset.target}"]`);
+      const has = inp && inp.value.trim();
+      btn.classList.toggle('is-disabled', !has);
+    });
+  }
+  refreshActions();
+  form.querySelectorAll('.people-cell-phone input, .people-cell-email input').forEach(inp => {
+    inp.addEventListener('input', refreshActions);
+    inp.addEventListener('blur', refreshActions);
+  });
+  form.addEventListener('click', e => {
+    const btn = e.target.closest('.ppl-act');
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    const inp = form.querySelector(`[name="${btn.dataset.target}"]`);
+    if (!inp) return;
+    let val = (inp.value || '').trim();
+    if (!val) return;
+    const action = btn.dataset.action;
+    if (action === 'mail') {
+      window.location.href = 'mailto:' + encodeURIComponent(val);
+    } else {
+      // tel:/sms: only want digits and a leading +.
+      const cleaned = val.replace(/[^\d+]/g, '');
+      if (cleaned) window.location.href = action + ':' + cleaned;
+    }
+  });
+})();
 
 // Property > Alarm Codes — 8 rows total, 4 visible by default.
 _wireRowDelete(

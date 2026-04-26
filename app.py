@@ -487,13 +487,15 @@ FIELDS = {
             {'name': f'alarm_codes_code_{i}',  'label': f'Alarm Code {i}',  'type': 'text'},
             {'name': f'alarm_codes_note_{i}',  'label': f'Alarm Note {i}',  'type': 'text'},
         )],
-        # People list — 10 rows of (Name, Role, Phone, Notes). Sits above
-        # Documents on the property detail. Same per-row × delete +
-        # shift-up behaviour as the alarm-codes / medications tables.
+        # People list — 10 rows of (Name, Role, Phone, Email, Notes).
+        # Sits above Documents on the property detail. Same per-row ×
+        # delete + shift-up behaviour as the alarm-codes / medications
+        # tables.
         *[v for i in range(1, 11) for v in (
             {'name': f'people_name_{i}',  'label': f'Person {i} Name',  'type': 'text'},
             {'name': f'people_role_{i}',  'label': f'Person {i} Role',  'type': 'text'},
             {'name': f'people_phone_{i}', 'label': f'Person {i} Phone', 'type': 'text'},
+            {'name': f'people_email_{i}', 'label': f'Person {i} Email', 'type': 'text'},
             {'name': f'people_note_{i}',  'label': f'Person {i} Notes', 'type': 'text'},
         )],
     ],
@@ -631,6 +633,7 @@ def init_db():
         *[f'ALTER TABLE properties ADD COLUMN people_role_{i} TEXT'  for i in range(1, 11)],
         *[f'ALTER TABLE properties ADD COLUMN people_phone_{i} TEXT' for i in range(1, 11)],
         *[f'ALTER TABLE properties ADD COLUMN people_note_{i} TEXT'  for i in range(1, 11)],
+        *[f'ALTER TABLE properties ADD COLUMN people_email_{i} TEXT' for i in range(1, 11)],
         # Drop legacy single-value alarm fields — replaced by the
         # alarm-codes table. Idempotent: try/except below treats
         # already-dropped columns as a no-op.

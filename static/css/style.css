@@ -980,15 +980,40 @@ input[type="date"] { -webkit-appearance: none; }
 .alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input:last-of-type { border-right: none; }
 .alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input:focus { background: #fffde8; }
 
-/* Property People table — sits above Documents. Columns: Name 25%,
-   Role 20%, Phone 20%, Notes 35% (sums to 100%). Same per-row × +
-   shift-up behaviour as alarm-codes / medications. */
+/* Property People table — sits above Documents. Columns: Name 20%,
+   Role 14%, Phone 23%, Email 18%, Notes 25% (sums to 100%) plus a
+   22px slot for the row-delete button. Phone & Email cells are flex
+   containers — input takes remaining space; tel:/sms:/mailto: action
+   icons sit alongside. */
 .people-table { padding: 6px 10px 4px; position: relative; }
 .people-table .people-row {
   display: grid;
-  grid-template-columns: 25% 20% 20% 35% 22px;
+  grid-template-columns: 20% 14% 23% 18% 25% 22px;
   align-items: stretch;
 }
+.people-cell-phone, .people-cell-email {
+  display: flex; align-items: center;
+  border-right: 1px solid var(--border-light);
+  min-width: 0;
+}
+.people-cell-phone > input,
+.people-cell-email > input {
+  flex: 1; min-width: 0;
+  border: none; outline: none; background: transparent;
+  font-family: var(--font); font-size: 14px; color: #111111;
+  font-weight: 400; text-align: left;
+  padding: 4px 6px; border-right: none;
+}
+.people-cell-phone > input:focus,
+.people-cell-email > input:focus { background: #fffde8; }
+.ppl-act {
+  background: none; border: none; cursor: pointer;
+  padding: 0 4px; font-size: 14px; line-height: 1;
+  opacity: 0.45; transition: opacity .12s;
+}
+.ppl-act:hover { opacity: 1; }
+/* Disabled state for actions whose target field is empty (set via JS). */
+.ppl-act.is-disabled { opacity: 0.18; cursor: default; }
 .people-del-btn {
   width: 18px; height: 18px; align-self: center; margin: 0 2px;
   border: 1px solid var(--border); background: #fff;
