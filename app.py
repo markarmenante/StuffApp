@@ -464,12 +464,6 @@ FIELDS = {
         {'name': 'llc',             'label': 'LLC',               'type': 'text'},
         {'name': 'wifi',            'label': 'WiFi Password',     'type': 'text'},
         {'name': 'wifi_name',       'label': 'WiFi Name (SSID)',  'type': 'text'},
-        {'name': 'alarm_company',   'label': 'Alarm Company',     'type': 'text'},
-        {'name': 'alarm_account',   'label': 'Alarm Account',     'type': 'text'},
-        {'name': 'alarm_code_1',    'label': 'Alarm Code',        'type': 'text'},
-        {'name': 'alarm_password',  'label': 'Alarm Password',    'type': 'text'},
-        {'name': 'alarm_phone',     'label': 'Alarm Phone',       'type': 'text'},
-        {'name': 'alarm_notes',     'label': 'Alarm Notes',       'type': 'textarea'},
         {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'notes',           'label': 'Notes',             'type': 'textarea'},
@@ -637,6 +631,15 @@ def init_db():
         *[f'ALTER TABLE properties ADD COLUMN people_role_{i} TEXT'  for i in range(1, 11)],
         *[f'ALTER TABLE properties ADD COLUMN people_phone_{i} TEXT' for i in range(1, 11)],
         *[f'ALTER TABLE properties ADD COLUMN people_note_{i} TEXT'  for i in range(1, 11)],
+        # Drop legacy single-value alarm fields — replaced by the
+        # alarm-codes table. Idempotent: try/except below treats
+        # already-dropped columns as a no-op.
+        'ALTER TABLE properties DROP COLUMN alarm_company',
+        'ALTER TABLE properties DROP COLUMN alarm_account',
+        'ALTER TABLE properties DROP COLUMN alarm_code_1',
+        'ALTER TABLE properties DROP COLUMN alarm_password',
+        'ALTER TABLE properties DROP COLUMN alarm_phone',
+        'ALTER TABLE properties DROP COLUMN alarm_notes',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
         'ALTER TABLE topics ADD COLUMN image TEXT',
