@@ -45,23 +45,58 @@ document.querySelectorAll('.admin-action').forEach(li => {
     out.className = 'admin-result running';
     try {
       if (kind === 'download') {
-        // GET with secret in the query string. fetch() sends credentials
-        // (Cloudflare Access cookie) by default for same-origin.
+        // Default name (timestamped server-side via Content-Disposition).
         const fullUrl = url + '?secret=' + encodeURIComponent(SECRET);
-        const r = await fetch(fullUrl);
-        if (!r.ok) {
-          out.textContent = `Error ${r.status}`;
-          out.className = 'admin-result err';
-          return;
+        const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,15);
+        const suggested = `stuffapp-backup-${ts}.zip`;
+
+        // Chromium-based browsers (Chrome, Edge, Comet, Brave): open a
+        // native Save dialog so the user picks the folder per-file and
+        // we can stream the response straight to disk instead of
+        // buffering 2.3 GB in memory.
+        if (window.showSaveFilePicker) {
+          let handle;
+          try {
+            handle = await window.showSaveFilePicker({
+              suggestedName: suggested,
+              types: [{description: 'StuffApp backup', accept: {'application/zip': ['.zip']}}],
+            });
+          } catch (e) {
+            // User cancelled the Save dialog — bail without erroring.
+            out.textContent = 'Cancelled';
+            out.className = 'admin-result';
+            return;
+          }
+          out.textContent = 'Downloading…';
+          const r = await fetch(fullUrl);
+          if (!r.ok) {
+            out.textContent = `Error ${r.status}`;
+            out.className = 'admin-result err';
+            return;
+          }
+          const writable = await handle.createWritable();
+          await r.body.pipeTo(writable);
+          out.textContent = `Saved ${handle.name}`;
+          out.className = 'admin-result ok';
+        } else {
+          // Safari / Firefox fallback: buffer to a blob and synthesize
+          // a download click. Lands in the browser's default downloads
+          // folder; user can move it after the fact.
+          const r = await fetch(fullUrl);
+          if (!r.ok) {
+            out.textContent = `Error ${r.status}`;
+            out.className = 'admin-result err';
+            return;
+          }
+          const cd = r.headers.get('Content-Disposition') || '';
+          const m = cd.match(/filename="?([^";]+)"?/);
+          const fname = m ? m[1] : suggested;
+          const blob = await r.blob();
+          triggerDownload(blob, fname);
+          const mb = (blob.size / 1048576).toFixed(1);
+          out.textContent = `Downloaded ${fname} (${mb} MB) — to default downloads folder`;
+          out.className = 'admin-result ok';
         }
-        const cd = r.headers.get('Content-Disposition') || '';
-        const m = cd.match(/filename="?([^";]+)"?/);
-        const fname = m ? m[1] : 'stuffapp-backup.zip';
-        const blob = await r.blob();
-        triggerDownload(blob, fname);
-        const mb = (blob.size / 1048576).toFixed(1);
-        out.textContent = `Downloaded ${fname} (${mb} MB)`;
-        out.className = 'admin-result ok';
       } else {
         const fd = new URLSearchParams({secret: SECRET});
         const r = await fetch(url, {method: 'POST', body: fd});
