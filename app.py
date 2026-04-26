@@ -613,6 +613,8 @@ def init_db():
         except sqlite3.OperationalError:
             pass
     db.commit()
+    _ensure_owner_user(db)
+    db.commit()
     _backfill_meds_from_prescriptions(db)
     # Apply field-alias normalizations to legacy rows so the UI never has to
     # handle synonym values. Runs every boot — cheap (small table, indexed
@@ -3478,7 +3480,102 @@ def is_image_filter(filename):
 
 @app.context_processor
 def inject_globals():
-    return {'CATEGORIES': CATEGORIES, 'now': datetime.utcnow()}
+    return {
+        'CATEGORIES': CATEGORIES,
+        'now': datetime.utcnow(),
+        'current_user': g.get('current_user'),
+        'allowed_cats': g.get('allowed_cats', set()),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Multi-user authorization
+#
+# Cloudflare Access authenticates the visitor at the edge and forwards
+# their verified email in `Cf-Access-Authenticated-User-Email`. The app
+# trusts that header (production-only — locally we fall back to an env
+# var so dev still works).
+#
+# The `users` table maps each email to a set of allowed category slugs.
+# Owner role gets categories='*' which expands to every category. Anyone
+# whose email isn't in the table gets 403.
+# ---------------------------------------------------------------------------
+
+OWNER_EMAIL = (os.environ.get('STUFFAPP_OWNER_EMAIL') or
+               'MarkArmenante@gmail.com').lower()
+
+
+def _ensure_owner_user(db):
+    """Idempotent: make sure the owner email exists with full access."""
+    db.execute(
+        "INSERT INTO users (id, email, display_name, role, categories) "
+        "VALUES (?, ?, ?, 'owner', '*') "
+        "ON CONFLICT(email) DO UPDATE SET role='owner', categories='*'",
+        [str(uuid.uuid4()), OWNER_EMAIL, 'Mark Armenante']
+    )
+
+
+def _resolve_user_email():
+    """Email of the currently authenticated visitor. CF Access on prod;
+    STUFFAPP_DEV_USER env var locally so per-user testing still works."""
+    e = (request.headers.get('Cf-Access-Authenticated-User-Email') or
+         os.environ.get('STUFFAPP_DEV_USER') or OWNER_EMAIL)
+    return (e or '').strip().lower()
+
+
+def _expand_categories(raw, role):
+    """Resolve a user's category list. '*' or owner role → everything."""
+    if role == 'owner' or (raw or '').strip() == '*':
+        return set(CATEGORIES.keys())
+    return {c.strip() for c in (raw or '').split(',') if c.strip() in CATEGORIES}
+
+
+# Endpoints that everyone gets to hit regardless of category access.
+# (The static handler also bypasses; checked separately below.)
+_AUTH_EXEMPT_ENDPOINTS = {'static', 'uploaded_file', 'file_thumb'}
+
+
+@app.before_request
+def _load_user_and_authorize():
+    """Identify the user, attach to flask.g, and 403 if they don't have
+    access to whichever category the URL targets. Owner-only routes
+    check g.current_user.role themselves."""
+    if request.endpoint in _AUTH_EXEMPT_ENDPOINTS:
+        return
+    db = get_db()
+    email = _resolve_user_email()
+    g.user_email = email
+    row = db.execute(
+        "SELECT * FROM users WHERE LOWER(email) = ?", [email]
+    ).fetchone()
+    if not row:
+        # Fail closed: unknown email → 403, no app access.
+        g.current_user = None
+        g.allowed_cats = set()
+        return Response(
+            f"<h1>403 Forbidden</h1>"
+            f"<p>Your email ({email}) isn't registered with this app. "
+            f"Ask the owner to grant access.</p>",
+            status=403, mimetype='text/html'
+        )
+    g.current_user = dict(row)
+    g.allowed_cats = _expand_categories(row['categories'], row['role'])
+    # Anything under /admin is owner-only.
+    if (request.path or '').startswith('/admin') and \
+            g.current_user['role'] != 'owner':
+        abort(403)
+    # Path-based category gate. Catches both /<category>/... routes and
+    # category-prefixed routes like /coins/<id>/lookup-specs.
+    if g.current_user['role'] != 'owner':
+        first = (request.path or '/').strip('/').split('/', 1)[0]
+        if first in CATEGORIES and first not in g.allowed_cats:
+            abort(403)
+
+
+def require_owner():
+    """Call inside an owner-only route to 403 non-owners."""
+    if not g.get('current_user') or g.current_user.get('role') != 'owner':
+        abort(403)
 
 
 # ---------------------------------------------------------------------------
@@ -3879,6 +3976,112 @@ def pens_owner_mark():
     r = db.execute("UPDATE pens SET owner='Mark'")
     db.commit()
     return jsonify(updated=r.rowcount, total=db.execute('SELECT COUNT(*) FROM pens').fetchone()[0])
+
+
+@app.route('/admin/users', methods=['GET'])
+def admin_users():
+    """List + manage application users (owner-only). Cloudflare Access
+    still controls who can hit the URL at all; this page controls
+    per-category authorization once they're past the edge."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, email, display_name, role, categories, created_at "
+        "FROM users ORDER BY role DESC, LOWER(email)"
+    ).fetchall()
+    users = []
+    for r in rows:
+        d = dict(r)
+        d['cat_set'] = _expand_categories(d['categories'], d['role'])
+        users.append(d)
+    cat_choices = [(slug, info['name']) for slug, info in CATEGORIES.items()]
+    return render_template('admin_users.html',
+                           users=users,
+                           cat_choices=cat_choices,
+                           owner_email=OWNER_EMAIL,
+                           current_category='__admin__',
+                           categories=CATEGORIES,
+                           counts=get_counts())
+
+
+@app.route('/admin/users/add', methods=['POST'])
+def admin_users_add():
+    db = get_db()
+    email = (request.form.get('email') or '').strip().lower()
+    if not email or '@' not in email:
+        flash('Email is required.', 'error')
+        return redirect(url_for('admin_users'))
+    display = (request.form.get('display_name') or '').strip()
+    role = request.form.get('role') or 'member'
+    if role not in ('owner', 'member'):
+        role = 'member'
+    cats_list = request.form.getlist('categories')
+    cats_csv = '*' if role == 'owner' else \
+        ','.join(c for c in cats_list if c in CATEGORIES)
+    try:
+        db.execute(
+            "INSERT INTO users (id, email, display_name, role, categories) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [str(uuid.uuid4()), email, display or None, role, cats_csv]
+        )
+        db.commit()
+        flash(f'Added {email}.', 'success')
+    except sqlite3.IntegrityError:
+        flash(f'{email} already exists — edit it instead.', 'error')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/users/<user_id>/update', methods=['POST'])
+def admin_users_update(user_id):
+    db = get_db()
+    row = db.execute("SELECT * FROM users WHERE id = ?", [user_id]).fetchone()
+    if not row:
+        abort(404)
+    display = (request.form.get('display_name') or '').strip()
+    role = request.form.get('role') or row['role']
+    if role not in ('owner', 'member'):
+        role = 'member'
+    cats_list = request.form.getlist('categories')
+    cats_csv = '*' if role == 'owner' else \
+        ','.join(c for c in cats_list if c in CATEGORIES)
+    # Don't allow demoting the very last owner — would lock everyone out.
+    if row['role'] == 'owner' and role != 'owner':
+        owner_count = db.execute(
+            "SELECT COUNT(*) AS c FROM users WHERE role = 'owner'"
+        ).fetchone()['c']
+        if owner_count <= 1:
+            flash('Cannot demote the only owner.', 'error')
+            return redirect(url_for('admin_users'))
+    db.execute(
+        "UPDATE users SET display_name = ?, role = ?, categories = ?, "
+        "updated_at = datetime('now') WHERE id = ?",
+        [display or None, role, cats_csv, user_id]
+    )
+    db.commit()
+    flash(f"Updated {row['email']}.", 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/users/<user_id>/delete', methods=['POST'])
+def admin_users_delete(user_id):
+    db = get_db()
+    row = db.execute("SELECT * FROM users WHERE id = ?", [user_id]).fetchone()
+    if not row:
+        abort(404)
+    # Block deleting yourself or the last owner.
+    if row['email'].lower() == g.current_user['email'].lower():
+        flash('Cannot delete yourself.', 'error')
+        return redirect(url_for('admin_users'))
+    if row['role'] == 'owner':
+        owner_count = db.execute(
+            "SELECT COUNT(*) AS c FROM users WHERE role = 'owner'"
+        ).fetchone()['c']
+        if owner_count <= 1:
+            flash('Cannot delete the only owner.', 'error')
+            return redirect(url_for('admin_users'))
+    db.execute("DELETE FROM users WHERE id = ?", [user_id])
+    db.commit()
+    flash(f"Removed {row['email']}.", 'success')
+    return redirect(url_for('admin_users'))
 
 
 @app.route('/admin', methods=['GET'])

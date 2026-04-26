@@ -32,22 +32,32 @@
       ('rifles',       '🔫', 'Rifles'),
     ] %}
     {% for slug, icon, label in cat_icons %}
+    {% if (not current_user) or (current_user.role == 'owner') or (slug in allowed_cats) %}
     <a href="{% if slug == 'persons' %}{{ url_for('persons_default') }}{% else %}{{ url_for('list_view', category=slug) }}{% endif %}"
        class="nav-item {% if current_category == slug %}active{% endif %}"
        title="{{ label }}">
       <span class="icon">{{ icon }}</span>
       <span class="lbl">{{ label }}</span>
     </a>
+    {% endif %}
     {% endfor %}
   </div>
 
   <div class="nav-right">
+    {% if current_user and current_user.role == 'owner' %}
     <a href="{{ url_for('admin_index') }}"
        class="nav-item nav-admin {% if current_category == '__admin__' %}active{% endif %}"
        title="Admin">
       <span class="icon">⚙</span>
       <span class="lbl">Admin</span>
     </a>
+    {% endif %}
+    {% if current_user %}
+    <span class="nav-user" title="Signed in as {{ current_user.email }}">
+      <span class="nav-user-name">{{ current_user.display_name or current_user.email.split('@')[0] }}</span>
+      {% if current_user.role == 'owner' %}<span class="nav-user-role">owner</span>{% endif %}
+    </span>
+    {% endif %}
   </div>
 </nav>
 <script>

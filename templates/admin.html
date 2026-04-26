@@ -6,6 +6,8 @@
   <p class="admin-note">One-shot maintenance actions. All gated by the
     server-side secret <code>{{ secret }}</code> and Cloudflare Access.</p>
 
+  <p class="admin-note"><a href="{{ url_for('admin_users') }}">Manage users &amp; access &rsaquo;</a></p>
+
   <ul class="admin-list">
     {% for action in actions %}
     <li class="admin-action" data-url="{{ action.url }}" data-kind="{{ action.kind|default('post') }}">
