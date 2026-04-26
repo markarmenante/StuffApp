@@ -833,28 +833,46 @@ SEARCHABLE_NUMERIC = {
 }
 
 
+def _normalize_numeric_term(term):
+    """Strip trailing zeros after the decimal point so a user search for
+    '10.20' still matches a column stored as REAL 10.2 (which SQLite's
+    LIKE coerces to the string '10.2', not '10.20')."""
+    try:
+        f = float(term)
+    except (TypeError, ValueError):
+        return term
+    s = ('%f' % f).rstrip('0').rstrip('.')
+    return s or term
+
+
 def build_search_query(category, q, dot=False, coin_filter=None):
     """Build a SELECT with optional text search and/or dot (unresolved) filter."""
     table = CATEGORIES[category]['table']
     text_fields = [f['name'] for f in FIELDS[category]
                    if f['type'] in ('text', 'textarea', 'select') and f.get('type') != 'file']
     # Per-category extra columns to expose in free-text search. SQLite's
-    # LIKE coerces numerics to strings, so a coin search for "1.5" matches
-    # weight = 1.5 the same way it would a text column.
-    text_fields += SEARCHABLE_NUMERIC.get(category, [])
+    # LIKE coerces numerics to strings, but strips trailing zeros — so
+    # the search term gets normalized before matching against these.
+    numeric_fields = SEARCHABLE_NUMERIC.get(category, [])
 
     wheres, params = [], []
 
-    if q and text_fields:
+    if q and (text_fields or numeric_fields):
         # Split the query on whitespace and AND the terms together: each
-        # term must match at least one text field. "Breguet Carp" finds
-        # watches where 'Breguet' appears in any text field AND 'Carp'
-        # appears in any text field — so brand+property combos work.
+        # term must match at least one searchable field. "Breguet Carp"
+        # finds watches where 'Breguet' is in some field AND 'Carp' is
+        # in some field — so brand+property combos work.
         terms = [t for t in q.split() if t.strip()]
         for term in terms:
-            conditions = ' OR '.join([f"{col} LIKE ?" for col in text_fields])
-            wheres.append(f"({conditions})")
-            params += [f'%{term}%'] * len(text_fields)
+            num_term = _normalize_numeric_term(term)
+            conds = []
+            for col in text_fields:
+                conds.append(f"{col} LIKE ?")
+                params.append(f'%{term}%')
+            for col in numeric_fields:
+                conds.append(f"{col} LIKE ?")
+                params.append(f'%{num_term}%')
+            wheres.append('(' + ' OR '.join(conds) + ')')
 
     if dot:
         # Find which field holds status for this category
