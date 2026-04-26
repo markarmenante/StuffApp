@@ -1390,13 +1390,14 @@
         </div>
         <div class="med-table dcell">
           <div class="med-row med-head">
-            <span>Medication</span><span>Dosage</span><span>Note</span>
+            <span>Medication</span><span>Dosage</span><span>Note</span><span></span>
           </div>
           {% for i in range(1, 8) %}
-          <div class="med-row">
+          <div class="med-row" data-med-idx="{{ i }}">
             <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
             <input type="text" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
             <input type="text" name="med_note_{{ i }}" value="{{ val('med_note_' ~ i) }}">
+            <button type="button" class="med-del-btn" title="Delete this medication">×</button>
           </div>
           {% endfor %}
           <span class="clabel">Medications</span>
@@ -2585,6 +2586,55 @@ document.querySelectorAll('.person-tab').forEach(btn => {
     });
   });
 });
+
+// People > Health > Medications: per-row × button.
+// Clicking deletes the row by shifting all rows below it up by one and
+// clearing the last slot. Each affected slot's input fires a blur
+// event so the existing per-field autosave persists the change.
+(function medsDelete() {
+  const MED_FIELDS = ['med_name', 'med_dose', 'med_note'];
+  const MAX = 7;
+  const form = document.getElementById('mainForm');
+  if (!form) return;
+
+  function rowIsEmpty(idx) {
+    return MED_FIELDS.every(f => {
+      const el = form.querySelector(`[name="${f}_${idx}"]`);
+      return !el || !el.value.trim();
+    });
+  }
+  function refreshEmptyClass() {
+    form.querySelectorAll('.med-row[data-med-idx]').forEach(row => {
+      const idx = parseInt(row.dataset.medIdx);
+      row.classList.toggle('med-row-empty', rowIsEmpty(idx));
+    });
+  }
+  refreshEmptyClass();
+  form.querySelectorAll('.med-row[data-med-idx] input').forEach(inp => {
+    inp.addEventListener('blur', refreshEmptyClass);
+  });
+
+  form.querySelectorAll('.med-del-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest('.med-row');
+      if (!row) return;
+      const startIdx = parseInt(row.dataset.medIdx);
+      // Shift rows startIdx+1 .. MAX up by one; clear MAX.
+      for (let i = startIdx; i <= MAX; i++) {
+        MED_FIELDS.forEach(f => {
+          const cur = form.querySelector(`[name="${f}_${i}"]`);
+          const next = i < MAX ? form.querySelector(`[name="${f}_${i+1}"]`) : null;
+          const newVal = next ? next.value : '';
+          if (cur.value !== newVal) {
+            cur.value = newVal;
+            cur.dispatchEvent(new Event('blur'));
+          }
+        });
+      }
+      refreshEmptyClass();
+    });
+  });
+})();
 </script>
 
 {% if category == 'coins' %}
