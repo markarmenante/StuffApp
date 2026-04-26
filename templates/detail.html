@@ -2687,10 +2687,23 @@ document.querySelectorAll('.person-tab').forEach(btn => {
           });
         }
         const url = specBtn.dataset.url;
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: { 'Accept': 'application/json' },
-        });
+        // Cap the wait so the browser doesn't sit forever if the
+        // upstream proxy (Cloudflare ~100s edge timeout, Railway,
+        // etc.) silently drops the response. AbortController gives
+        // us a clean signal to message the user instead of the
+        // generic browser "Failed to fetch".
+        const ctl = new AbortController();
+        const timeoutId = setTimeout(() => ctl.abort(), 280000);
+        let resp;
+        try {
+          resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            signal: ctl.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) {
           alert(data.error || 'Lookup failed');
@@ -2722,7 +2735,20 @@ document.querySelectorAll('.person-tab').forEach(btn => {
         // Anything to overwrite → checkbox review modal.
         showLookupReview(applyUrl, filled, overwritten, data.sources || '');
       } catch (err) {
-        alert('Lookup failed: ' + (err.message || err));
+        // Translate the two common failure modes into something the
+        // user can act on. AbortError = our 280s timer fired. A bare
+        // TypeError "Failed to fetch" means the connection died
+        // before any response — usually an upstream-proxy edge
+        // timeout (Railway / Cloudflare) or transient network blip.
+        let msg;
+        if (err && err.name === 'AbortError') {
+          msg = 'Lookup took too long — the server didn\'t respond within ~5 minutes. Try again, or with fewer fields filled in for the model to work with.';
+        } else if (err && /Failed to fetch/i.test(err.message || '')) {
+          msg = 'Network error reaching the server. The lookup may have run too long for the upstream proxy. Wait a few seconds and retry — the server usually finishes in the background.';
+        } else {
+          msg = 'Lookup failed: ' + (err.message || err);
+        }
+        alert(msg);
       } finally {
         specBtn.classList.remove('busy');
         specBtn.textContent = prevText;
