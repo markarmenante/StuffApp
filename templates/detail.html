@@ -1320,14 +1320,6 @@
   <div class="section-bar">WiFi</div>
   <div class="dgrid dg2 properties-wifi">{{ cell('wifi_name','Network Name') }}{{ cell('wifi','Password') }}</div>
   <div class="section-bar">Alarm</div>
-  <div class="dgrid dg4">
-    {{ cell('alarm_company','Company') }}
-    {{ cell('alarm_account','Account') }}
-    {{ cell('alarm_code_1','Code') }}
-    {{ cell('alarm_password','Password') }}
-  </div>
-  <div class="dgrid dg2">{{ cell('alarm_phone','Phone') }}{{ cell('alarm_notes','Notes') }}</div>
-
   <!-- Alarm-codes list. Mirrors the medications table on persons:
        fixed slots, per-row × deletes + shifts subsequent rows up.
        Empty rows hide their × button so the only delete affordances
