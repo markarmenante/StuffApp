@@ -3072,6 +3072,23 @@ def coin_apply_lookup_specs(record_id):
     if not updates:
         return jsonify({'updated': 0, 'fields': []})
 
+    # The detail template prefers date_1_text / date_2_text for
+    # display when present. If we update the integer date columns
+    # without also rewriting the text columns, the old text value
+    # shadows the new integer and the field appears unchanged on
+    # reload. Sync both whenever a date integer is updated.
+    def _date_text(n):
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return ''
+        return f'{abs(n)} BC' if n < 0 else str(n)
+
+    if 'date_1' in updates:
+        updates['date_1_text'] = _date_text(updates['date_1'])
+    if 'date_2' in updates:
+        updates['date_2_text'] = _date_text(updates['date_2'])
+
     set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
     now = datetime.utcnow().isoformat()
     params = list(updates.values()) + [now, record_id]
