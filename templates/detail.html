@@ -2391,14 +2391,14 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
   zone.addEventListener('dragover', e => {
     e.preventDefault(); e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
-    // Clear drag-over from any other zone first so adjacent panels
-    // (e.g. coin obverse + reverse) never highlight at the same time.
-    if (!zone.classList.contains('drag-over')) {
-      document.querySelectorAll('.drop-zone.drag-over').forEach(z => {
-        if (z !== zone) z.classList.remove('drag-over');
-      });
-      zone.classList.add('drag-over');
-    }
+    // Clear drag-over from every other zone every tick. dragover fires
+    // continuously while the cursor is inside; a one-shot guard would
+    // miss the case where an adjacent zone still has its highlight from
+    // a stale dragenter that never got a matching dragleave.
+    document.querySelectorAll('.drop-zone.drag-over').forEach(z => {
+      if (z !== zone) z.classList.remove('drag-over');
+    });
+    zone.classList.add('drag-over');
   });
   zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over'); });
   zone.addEventListener('drop', e => {
