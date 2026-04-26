@@ -546,6 +546,12 @@
               style="display:none">{{ r['history_context'] if r and r['history_context'] else (r['history_region'] if r and r['history_region'] else (r['history_authority'] if r and r['history_authority'] else '')) }}</textarea>
   </div>
 
+  {# Origin map only renders for ancient coins (date_1 < 500). Modern
+     coinage (date_1 >= 500) doesn't benefit from the Mediterranean
+     city map, so skip the panel entirely on those records. #}
+  {%- set _d1 = val('date_1') -%}
+  {%- set _is_ancient_coin = _d1 not in (None, '') and (_d1|int) < 500 -%}
+  {% if _is_ancient_coin %}
   <!-- Origin map -->
   <div class="section-bar">Origin</div>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -556,6 +562,7 @@
     <div id="coinMap" class="coin-map"></div>
     <div class="coin-map-caption" id="coinMapCaption">Ancient Greek &amp; Mediterranean cities — locating this coin's origin…</div>
   </div>
+  {% endif %}
 
   <!-- Bottom -->
   <div class="detail-bottom">
