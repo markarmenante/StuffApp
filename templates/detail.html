@@ -132,21 +132,27 @@
         🔎 Lookup
       </button>
       {% endif %}
-      {% if category == 'coins' %}
-      <button type="button"
-              id="coinSpecLookupBtn"
-              class="coin-lookup-btn coin-check-btn{% if r['specs_searched_at'] %} done{% endif %}"
-              data-url="{{ url_for('coin_lookup_specs', record_id=r['id']) }}"
-              title="{% if r['specs_searched_at'] %}Specs lookup last run {{ r['specs_searched_at'][:10] }} — click to re-run{% else %}Check region / authority / denomination / metal / date / official against reputable numismatic sources{% endif %}">
-        🔎 Check
-      </button>
-      <button type="button"
-              class="coin-lookup-btn coin-history-btn{% if r['history_searched_at'] %} done{% endif %}"
-              data-url="{{ url_for('coin_fetch_context', record_id=r['id']) }}"
-              title="{% if r['history_searched_at'] %}History last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Look up the historical environment at this mint, combining region, authority, mint, date, and description{% endif %}">
-        🔎 History
-      </button>
-      {% endif %}
+    {% endif %}
+    {% if category == 'coins' %}
+    {# Check + History pills render even on the new-coin form. The
+       autosave-on-new path creates the record on first interaction,
+       and the Check JS calls ensureRecord() before fetching so the
+       record_id is in place before the lookup URL is built. #}
+    <button type="button"
+            id="coinSpecLookupBtn"
+            class="coin-lookup-btn coin-check-btn{% if r and r['specs_searched_at'] %} done{% endif %}"
+            data-url="{% if not is_new %}{{ url_for('coin_lookup_specs', record_id=r['id']) }}{% endif %}"
+            title="{% if r and r['specs_searched_at'] %}Specs lookup last run {{ r['specs_searched_at'][:10] }} — click to re-run{% else %}Check region / authority / denomination / metal / date / official / weight / size / grade against reputable numismatic sources{% endif %}">
+      🔎 Check
+    </button>
+    <button type="button"
+            class="coin-lookup-btn coin-history-btn{% if r and r['history_searched_at'] %} done{% endif %}"
+            data-url="{% if not is_new %}{{ url_for('coin_fetch_context', record_id=r['id']) }}{% endif %}"
+            title="{% if r and r['history_searched_at'] %}History last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Look up the historical environment at this mint, combining region, authority, mint, date, and description{% endif %}">
+      🔎 History
+    </button>
+    {% endif %}
+    {% if not is_new %}
       {% if category == 'art' %}
       <button type="button"
               class="watch-lookup-btn art-lookup-btn{% if r['art_searched_at'] %} done{% endif %}"
@@ -1814,7 +1820,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
 // ── Auto-save on field change/blur ──────────────────────────────────────────
 (function () {
-  {% set _autosave_on_new = category == 'credit_cards' %}
+  {% set _autosave_on_new = category in ('credit_cards', 'coins') %}
   {% if not is_new or _autosave_on_new %}
   let SAVE_URL = "{% if not is_new %}{{ url_for('save_field', category=category, record_id=r['id']) }}{% endif %}";
   let recordExists = {{ 'true' if not is_new else 'false' }};
@@ -2653,12 +2659,31 @@ document.querySelectorAll('.person-tab').forEach(btn => {
   if (specBtn) {
     specBtn.addEventListener('click', async () => {
       if (specBtn.classList.contains('busy')) return;
-      const url = specBtn.dataset.url;
-      if (!url) return;
       specBtn.classList.add('busy');
       const prevText = specBtn.textContent;
       specBtn.textContent = '⏳';
       try {
+        // New-coin path: data-url is empty until the record exists.
+        // ensureRecord() (provided by the autosave-on-new hookup) does
+        // a one-shot POST to /coins/new with the current form values
+        // and updates form.action to /coins/<new-id>. Once that
+        // resolves, derive the lookup URL from the saved detail URL.
+        if (!specBtn.dataset.url) {
+          if (typeof ensureRecord !== 'function') {
+            alert('Save the record first.');
+            return;
+          }
+          await ensureRecord();
+          const detailPath = (document.getElementById('mainForm') || {}).action || '';
+          if (!detailPath) throw new Error('No record URL after save');
+          specBtn.dataset.url = detailPath + '/lookup-specs';
+          // Patch the History pill the same way so its first click
+          // also has a valid URL without another reload.
+          document.querySelectorAll('.coin-history-btn').forEach(b => {
+            if (!b.dataset.url) b.dataset.url = detailPath + '/context';
+          });
+        }
+        const url = specBtn.dataset.url;
         const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Accept': 'application/json' },

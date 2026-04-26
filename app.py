@@ -2822,7 +2822,8 @@ def coin_fetch_history(record_id):
 # ---------------------------------------------------------------------------
 
 COIN_SPEC_FILLABLE = ('region', 'authority', 'denomination', 'metal',
-                      'date_1', 'date_2', 'official')
+                      'date_1', 'date_2', 'official',
+                      'weight', 'size', 'grade')
 
 
 def fetch_coin_specs(coin):
@@ -2854,12 +2855,16 @@ def fetch_coin_specs(coin):
     obv_rev = (coin['obv_rev'] or '').strip()
     description = (coin['description'] or '').strip()
     mint = (coin['mint'] or '').strip()
+    pedigree = (coin['coin_references'] or '').strip()
+    condition = (coin['condition'] or '').strip()
 
     known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items())
     extras = []
     if mint:        extras.append(f'mint: {mint}')
     if obv_rev:     extras.append(f'obv/rev: {obv_rev}')
     if description: extras.append(f'description (first 400 chars): {description[:400]}')
+    if pedigree:    extras.append(f'references / pedigree: {pedigree[:300]}')
+    if condition:   extras.append(f'condition note: {condition[:200]}')
     extras_text = '\n'.join(f'- {e}' for e in extras) if extras else '(none)'
 
     prompt = f"""You are identifying a specific ancient or historical coin.
@@ -2882,6 +2887,9 @@ Target fields:
 - date_1: integer year of issue. NEGATIVE for BC (e.g. -450 for 450 BC), positive for AD/CE.
 - date_2: integer year ending a date range. Same sign convention. Return null if not a range.
 - official: the named individual associated with the coin's striking and their role, formatted as "Name, role" — e.g. "Straton, magistrate", "Marcus Junius Brutus, moneyer", "John Reich, engraver", "Lucius Memmius, mint official". Look in the user-entered description FIRST — it often spells this out as "<Name>, <role>" anywhere in the text, including parenthetical asides and even abbreviated or initialed magistrate signatures (e.g. "Ct..., magistrate", "ΔΗ, magistrate", "CT, magistrate"). Capture those verbatim — partial / two-letter names ARE the actual signature on the die. Then fall back to your web sources for fuller context. If the dies are explicitly "unsigned", "attributed to", or "in the style of" a known artist/official, preserve that nuance in the value — e.g. "Euainetos, engraver (unsigned, attributed)" or "Kimon, engraver (style of)". Do NOT silently promote a stylistic attribution to a confirmed signature. Return null only if the description contains no "<Name>, <role>" construct AND your sources don't surface one.
+- weight: weight in grams (float). Pull from the user's description / pedigree / condition note if it includes an explicit "X.XX g" measurement; otherwise look up the canonical published weight for this exact reference from your sources. Return null if you cannot find a specific figure.
+- size: diameter in mm (float). Same rule: take an explicit "XX mm" / "XX.X mm" from the user's notes first, then fall back to the canonical published size for the reference.
+- grade: short condition grade as written by collectors (e.g. "VF", "gVF", "EF", "MS-65", "Choice EF"). Pull from the description or condition note when present; only return one if the source actually grades the coin (don't invent).
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null only when you cannot identify a value:
 {{
@@ -2892,6 +2900,9 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null only when you 
   "date_1": null,
   "date_2": null,
   "official": null,
+  "weight": null,
+  "size": null,
+  "grade": null,
   "sources": "one-line note of which sources hit"
 }}
 """
@@ -2981,6 +2992,20 @@ def coin_lookup_specs(record_id):
                 return int(raw)
             except (TypeError, ValueError):
                 return None
+        if field in ('weight', 'size'):
+            # Accept "16.85", "16.85 g", "30 mm" — strip the unit.
+            if isinstance(raw, str):
+                m = re.match(r'^\s*(-?\d+(?:\.\d+)?)', raw)
+                if not m:
+                    return None
+                try:
+                    return float(m.group(1))
+                except ValueError:
+                    return None
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return None
         if isinstance(raw, str):
             v = normalize_field_value('coins', field, raw.strip())
             return v or None
@@ -2990,6 +3015,13 @@ def coin_lookup_specs(record_id):
         if field in ('date_1', 'date_2'):
             try:
                 return int(current) == int(suggested)
+            except (TypeError, ValueError):
+                return False
+        if field in ('weight', 'size'):
+            # Tolerance: don't propose a "change" for a sub-0.05
+            # difference (rounding noise / source-to-source jitter).
+            try:
+                return abs(float(current) - float(suggested)) < 0.05
             except (TypeError, ValueError):
                 return False
         return str(current or '').strip().lower() == str(suggested or '').strip().lower()
@@ -3055,6 +3087,19 @@ def coin_apply_lookup_specs(record_id):
         if field in ('date_1', 'date_2'):
             try:
                 return int(raw_v)
+            except (TypeError, ValueError):
+                return None
+        if field in ('weight', 'size'):
+            if isinstance(raw_v, str):
+                m = re.match(r'^\s*(-?\d+(?:\.\d+)?)', raw_v)
+                if not m:
+                    return None
+                try:
+                    return float(m.group(1))
+                except ValueError:
+                    return None
+            try:
+                return float(raw_v)
             except (TypeError, ValueError):
                 return None
         if isinstance(raw_v, str):
