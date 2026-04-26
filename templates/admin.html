@@ -15,13 +15,64 @@
       </div>
       <button type="button" class="admin-run-btn">{% if action.kind == 'download' %}Download{% else %}Run{% endif %}</button>
       <span class="admin-result"></span>
+      <button type="button" class="admin-hide-btn" title="Hide this action">×</button>
     </li>
     {% endfor %}
   </ul>
+
+  <div class="admin-hidden-bar" id="adminHiddenBar" style="display:none">
+    <span class="admin-hidden-count"></span>
+    <button type="button" id="adminShowHidden" class="admin-link-btn">Show all</button>
+  </div>
 </div>
 
 <script>
 const SECRET = {{ secret|tojson }};
+
+// Per-browser hidden-actions list. Keyed by action URL since labels can
+// drift but URLs are stable. localStorage so the list survives reloads
+// without needing a server round-trip.
+const HIDE_KEY = 'stuffapp:admin:hidden';
+function loadHidden() {
+  try { return new Set(JSON.parse(localStorage.getItem(HIDE_KEY) || '[]')); }
+  catch (_) { return new Set(); }
+}
+function saveHidden(set) {
+  localStorage.setItem(HIDE_KEY, JSON.stringify([...set]));
+}
+function applyHidden() {
+  const hidden = loadHidden();
+  let count = 0;
+  document.querySelectorAll('.admin-action').forEach(li => {
+    if (hidden.has(li.dataset.url)) { li.style.display = 'none'; count++; }
+    else                            { li.style.display = ''; }
+  });
+  const bar = document.getElementById('adminHiddenBar');
+  if (count) {
+    bar.style.display = '';
+    bar.querySelector('.admin-hidden-count').textContent =
+      count + ' hidden action' + (count === 1 ? '' : 's');
+  } else {
+    bar.style.display = 'none';
+  }
+}
+applyHidden();
+
+document.querySelectorAll('.admin-hide-btn').forEach(btn => {
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const li = btn.closest('.admin-action');
+    const hidden = loadHidden();
+    hidden.add(li.dataset.url);
+    saveHidden(hidden);
+    applyHidden();
+  });
+});
+
+document.getElementById('adminShowHidden').addEventListener('click', () => {
+  saveHidden(new Set());
+  applyHidden();
+});
 
 function triggerDownload(blob, filenameFallback) {
   const url = URL.createObjectURL(blob);
@@ -143,5 +194,23 @@ document.querySelectorAll('.admin-action').forEach(li => {
 .admin-result.ok { color: #2a7a2a; }
 .admin-result.err { color: #c0392b; }
 .admin-result.running { color: var(--text-secondary); font-style: italic; }
+.admin-hide-btn {
+  margin-left: 4px; width: 22px; height: 22px; padding: 0;
+  border: 1px solid var(--border); background: #fff;
+  color: var(--text-label); border-radius: 50%;
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.admin-hide-btn:hover { background: #ffe9e6; color: #c0392b; border-color: #e6b6ad; }
+.admin-hidden-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 12px; padding: 6px 12px;
+  font-size: 12px; color: var(--text-secondary);
+  background: #f4f4f6; border-radius: 5px;
+}
+.admin-link-btn {
+  background: none; border: none; padding: 0;
+  color: var(--blue); cursor: pointer; font-size: 12px;
+}
+.admin-link-btn:hover { text-decoration: underline; }
 </style>
 {% endblock %}
