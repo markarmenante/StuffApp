@@ -258,7 +258,7 @@ FIELDS = {
         {'name': 'strike',          'label': 'Strike',            'type': 'number'},
         {'name': 'surface',         'label': 'Surface',           'type': 'number'},
         {'name': 'weight',          'label': 'Weight (g)',        'type': 'number'},
-        {'name': 'size',            'label': 'Size (mm)',         'type': 'number'},
+        {'name': 'size',            'label': 'Diameter (mm)',     'type': 'number'},
         {'name': 'bullion',         'label': 'Bullion',           'type': 'text'},
         {'name': 'bin',             'label': 'Bin',               'type': 'text'},
         {'name': 'storage_location','label': 'Storage Location',  'type': 'text'},
