@@ -89,6 +89,8 @@
     {% else %}
       <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" style="font-size:11px" class="doc-link" onclick="event.stopPropagation()">📄 View</a>
     {% endif %}
+  {% else %}
+    <span class="doc-empty-icon" aria-hidden="true">📄</span>
   {% endif %}
   {% if num_field %}
     <input class="doc-num-input" type="text" name="{{ num_field }}" value="{{ val(num_field) }}" placeholder="{{ num_label }}" onclick="event.stopPropagation()">

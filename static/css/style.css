@@ -1198,6 +1198,19 @@ input[type="date"] { -webkit-appearance: none; }
 .art-doc-row .file-cell-name { font-size: 12px; }
 .art-doc-row .doc-link { display: flex; align-items: center; justify-content: center; }
 
+/* Empty doc cell placeholder (used by doccell when no file uploaded).
+   Default sizing for inline file-cells; larger inside the dedicated
+   doc-row contexts so the empty cell still reads as "drop file here". */
+.doc-empty-icon {
+  font-size: 18px; color: #ccc; opacity: 0.6;
+  display: flex; align-items: center; justify-content: center;
+}
+.property-doc-row .doc-empty-icon,
+.art-doc-row .doc-empty-icon,
+.watch-doc-row .doc-empty-icon {
+  font-size: 48px; flex: 1;
+}
+
 /* Properties detail: 6 doc slots in a 3x2 grid. Each cell has an
    editable title input above the drop-zone so the user labels
    them per record. */
