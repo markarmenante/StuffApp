@@ -985,6 +985,16 @@ input[type="date"] { -webkit-appearance: none; }
    22px slot for the row-delete button. Phone & Email cells are flex
    containers — input takes remaining space; tel:/sms:/mailto: action
    icons sit alongside. */
+/* Standard: structured table-style components (people, medications,
+   alarm codes) always render their cell inputs left-aligned, even
+   inside detail pages that center their generic .dcell inputs.
+   Tabular data reads as columns of left-aligned strings, not as
+   centered single values. */
+.people-table input,
+.med-table input,
+.alarm-codes-table input {
+  text-align: left;
+}
 .people-table { padding: 6px 10px 4px; position: relative; }
 .people-table .people-row {
   display: grid;
