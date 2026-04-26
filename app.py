@@ -225,6 +225,7 @@ FIELDS = {
         {'name': 'cat_id',          'label': 'Cat ID',            'type': 'text', 'readonly': True},
         {'name': 'authority',       'label': 'Authority',         'type': 'text'},
         {'name': 'region',          'label': 'Region',            'type': 'text'},
+        {'name': 'official',        'label': 'Official',          'type': 'text'},
         {'name': 'denomination',    'label': 'Denomination',      'type': 'text'},
         {'name': 'metal',           'label': 'Metal',             'type': 'text'},
         {'name': 'mint',            'label': 'Mint',              'type': 'text'},
@@ -557,6 +558,7 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE art ADD COLUMN object_notes TEXT',
         'ALTER TABLE art ADD COLUMN art_searched_at TEXT',
+        'ALTER TABLE coins ADD COLUMN official TEXT',
         'ALTER TABLE watches ADD COLUMN container_1 TEXT',
         'ALTER TABLE watches ADD COLUMN container_2 TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
@@ -2819,7 +2821,7 @@ def coin_fetch_history(record_id):
 # ---------------------------------------------------------------------------
 
 COIN_SPEC_FILLABLE = ('region', 'authority', 'denomination', 'metal',
-                      'date_1', 'date_2')
+                      'date_1', 'date_2', 'official')
 
 
 def fetch_coin_specs(coin):
@@ -2878,6 +2880,7 @@ Target fields:
 - metal: EXACTLY one of [{metals}]. Use the two-letter prefix codes shown.
 - date_1: integer year of issue. NEGATIVE for BC (e.g. -450 for 450 BC), positive for AD/CE.
 - date_2: integer year ending a date range. Same sign convention. Return null if not a range.
+- official: the named individual associated with the coin's striking and their role, formatted as "Name, role" — e.g. "Straton, magistrate", "Marcus Junius Brutus, moneyer", "John Reich, engraver", "Lucius Memmius, mint official". Look in the user-entered description first (it often spells this out), then in your sources. Return null if no specific person + role can be identified.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null only when you cannot identify a value:
 {{
@@ -2887,6 +2890,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null only when you 
   "metal": null,
   "date_1": null,
   "date_2": null,
+  "official": null,
   "sources": "one-line note of which sources hit"
 }}
 """

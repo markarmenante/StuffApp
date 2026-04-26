@@ -373,8 +373,8 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'coins' %}
 
-  <!-- Reg / Auth / Mint -->
-  <div class="dgrid dg3">
+  <!-- Reg / Auth / Mint / Official -->
+  <div class="dgrid dg4">
     <div class="dcell ta-wrap coin-region-cell">
       <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700"
              {% if is_new and not val('region') %}placeholder="Region"{% endif %}>
@@ -382,7 +382,7 @@
       <button type="button" class="coin-spec-lookup-btn" id="coinSpecLookupBtn"
               data-url="{{ url_for('coin_lookup_specs', record_id=r['id']) }}"
               data-save-url="{{ url_for('save_field', category='coins', record_id=r['id']) }}"
-              title="Look up missing region/authority/denomination/metal/date from web">✓</button>
+              title="Look up missing region/authority/denomination/metal/date/official from web">✓</button>
       {% endif %}
       <span class="clabel">Reg</span>
     </div>
@@ -392,6 +392,11 @@
       <span class="clabel">Auth</span>
     </div>
     {{ tacell('mint','Mint', ta.get('mint', [])) }}
+    <div class="dcell">
+      <input type="text" name="official" value="{{ val('official') }}"
+             {% if is_new and not val('official') %}placeholder="Name, role"{% endif %}>
+      <span class="clabel">Official</span>
+    </div>
   </div>
 
   <!-- Obv/Rev one-liner sits up top alongside the identifying fields. -->
