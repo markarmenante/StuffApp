@@ -1367,6 +1367,25 @@
   {% endif %}
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
 
+  <!-- People associated with this property (landlord, plumber, agent,
+       neighbor, etc.). Same shape as the alarm-codes / medications
+       tables: per-row × clears + shifts up; "add" is implicit. -->
+  <div class="section-bar">People</div>
+  <div class="people-table dcell">
+    <div class="people-row people-head">
+      <span>Name</span><span>Role</span><span>Phone</span><span>Notes</span><span></span>
+    </div>
+    {% for i in range(1, 11) %}
+    <div class="people-row" data-people-idx="{{ i }}">
+      <input type="text" name="people_name_{{ i }}"  value="{{ val('people_name_'  ~ i) }}">
+      <input type="text" name="people_role_{{ i }}"  value="{{ val('people_role_'  ~ i) }}">
+      <input type="text" name="people_phone_{{ i }}" value="{{ val('people_phone_' ~ i) }}">
+      <input type="text" name="people_note_{{ i }}"  value="{{ val('people_note_'  ~ i) }}">
+      <button type="button" class="people-del-btn" title="Delete this row">×</button>
+    </div>
+    {% endfor %}
+  </div>
+
   <!-- Ten freeform document slots (deeds / insurance / warranties / …)
        in a 5 x 2 grid on desktop; mobile collapses to a 2-column grid
        (see .property-doc-row in style.css). Each has its own editable
@@ -2680,6 +2699,57 @@ document.querySelectorAll('.person-tab').forEach(btn => {
     });
   });
 })();
+
+// Generic per-row × delete + shift-up. Used by alarm-codes, people,
+// and (in spirit) medications — all share the same pattern: fixed
+// number of rows, blank rows hide their delete affordance, click clears
+// + shifts subsequent rows up so values stay packed at the top.
+function _wireRowDelete(rowSelector, btnClass, emptyClass, dataAttr, fieldPrefixes, max) {
+  const form = document.getElementById('mainForm');
+  if (!form) return;
+  if (!form.querySelector(rowSelector)) return;
+  function rowIsEmpty(idx) {
+    return fieldPrefixes.every(f => {
+      const el = form.querySelector(`[name="${f}_${idx}"]`);
+      return !el || !el.value.trim();
+    });
+  }
+  function refresh() {
+    form.querySelectorAll(rowSelector).forEach(row => {
+      const idx = parseInt(row.dataset[dataAttr]);
+      row.classList.toggle(emptyClass, rowIsEmpty(idx));
+    });
+  }
+  refresh();
+  form.querySelectorAll(`${rowSelector} input`).forEach(inp => {
+    inp.addEventListener('blur', refresh);
+  });
+  form.querySelectorAll('.' + btnClass).forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest(rowSelector);
+      if (!row) return;
+      const startIdx = parseInt(row.dataset[dataAttr]);
+      for (let i = startIdx; i <= max; i++) {
+        fieldPrefixes.forEach(f => {
+          const cur = form.querySelector(`[name="${f}_${i}"]`);
+          const next = i < max ? form.querySelector(`[name="${f}_${i+1}"]`) : null;
+          const newVal = next ? next.value : '';
+          if (cur && cur.value !== newVal) {
+            cur.value = newVal;
+            cur.dispatchEvent(new Event('blur'));
+          }
+        });
+      }
+      refresh();
+    });
+  });
+}
+
+// Property > People (10 rows × {name, role, phone, note})
+_wireRowDelete(
+  '.people-row[data-people-idx]', 'people-del-btn',
+  'people-row-empty', 'peopleIdx',
+  ['people_name', 'people_role', 'people_phone', 'people_note'], 10);
 
 // Property > Alarm: per-row × delete + shift-up. Same pattern as the
 // medications table on persons. Field set is {entry, code, note} and

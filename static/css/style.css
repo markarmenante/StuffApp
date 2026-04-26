@@ -976,6 +976,41 @@ input[type="date"] { -webkit-appearance: none; }
 .alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input:last-of-type { border-right: none; }
 .alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input:focus { background: #fffde8; }
 
+/* Property People table — sits above Documents. Columns: Name 25%,
+   Role 20%, Phone 20%, Notes 35% (sums to 100%). Same per-row × +
+   shift-up behaviour as alarm-codes / medications. */
+.people-table { padding: 6px 10px 4px; position: relative; }
+.people-table .people-row {
+  display: grid;
+  grid-template-columns: 25% 20% 20% 35% 22px;
+  align-items: stretch;
+}
+.people-del-btn {
+  width: 18px; height: 18px; align-self: center; margin: 0 2px;
+  border: 1px solid var(--border); background: #fff;
+  color: var(--text-label); border-radius: 50%;
+  font-size: 12px; line-height: 1; padding: 0; cursor: pointer;
+  opacity: 0.4; transition: opacity .12s, background .12s, color .12s;
+}
+.people-row:hover .people-del-btn { opacity: 1; }
+.people-del-btn:hover { background: #ffe9e6; color: #c0392b; border-color: #e6b6ad; opacity: 1; }
+.people-row.people-row-empty .people-del-btn { visibility: hidden; }
+.people-table .people-row.people-head {
+  font-size: 10px; color: var(--text-label);
+  padding: 2px 2px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.people-table .people-row.people-head > span { padding: 0 4px; }
+.people-table .people-row:not(.people-head):nth-child(odd) { background: var(--cell-bg); }
+.people-table .people-row:not(.people-head) > input {
+  border: none; outline: none; background: transparent;
+  font-family: var(--font); font-size: 14px; color: #111111;
+  font-weight: 400;
+  padding: 4px 6px; width: 100%; border-right: 1px solid var(--border-light);
+}
+.people-table .people-row:not(.people-head) > input:last-of-type { border-right: none; }
+.people-table .people-row:not(.people-head) > input:focus { background: #fffde8; }
+
 /* Recordings: heart toggle for the Like field */
 .brand-row-with-like {
   display: flex; align-items: center; gap: 10px;

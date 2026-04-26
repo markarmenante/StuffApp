@@ -493,6 +493,15 @@ FIELDS = {
             {'name': f'alarm_codes_code_{i}',  'label': f'Alarm Code {i}',  'type': 'text'},
             {'name': f'alarm_codes_note_{i}',  'label': f'Alarm Note {i}',  'type': 'text'},
         )],
+        # People list — 10 rows of (Name, Role, Phone, Notes). Sits above
+        # Documents on the property detail. Same per-row × delete +
+        # shift-up behaviour as the alarm-codes / medications tables.
+        *[v for i in range(1, 11) for v in (
+            {'name': f'people_name_{i}',  'label': f'Person {i} Name',  'type': 'text'},
+            {'name': f'people_role_{i}',  'label': f'Person {i} Role',  'type': 'text'},
+            {'name': f'people_phone_{i}', 'label': f'Person {i} Phone', 'type': 'text'},
+            {'name': f'people_note_{i}',  'label': f'Person {i} Notes', 'type': 'text'},
+        )],
     ],
     'persons': [
         {'name': 'name',                  'label': 'Name',                   'type': 'text'},
@@ -623,6 +632,11 @@ def init_db():
         *[f'ALTER TABLE properties ADD COLUMN alarm_codes_entry_{i} TEXT' for i in range(1, 9)],
         *[f'ALTER TABLE properties ADD COLUMN alarm_codes_code_{i} TEXT' for i in range(1, 9)],
         *[f'ALTER TABLE properties ADD COLUMN alarm_codes_note_{i} TEXT' for i in range(1, 9)],
+        # People list (10 rows × {name, role, phone, note})
+        *[f'ALTER TABLE properties ADD COLUMN people_name_{i} TEXT'  for i in range(1, 11)],
+        *[f'ALTER TABLE properties ADD COLUMN people_role_{i} TEXT'  for i in range(1, 11)],
+        *[f'ALTER TABLE properties ADD COLUMN people_phone_{i} TEXT' for i in range(1, 11)],
+        *[f'ALTER TABLE properties ADD COLUMN people_note_{i} TEXT'  for i in range(1, 11)],
         'ALTER TABLE properties ADD COLUMN owner TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
         'ALTER TABLE topics ADD COLUMN image TEXT',
