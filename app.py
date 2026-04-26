@@ -2004,6 +2004,22 @@ def save_field(category, record_id):
     db.execute(f"UPDATE {table} SET {field_name} = ?, updated_at = ? WHERE id = ?",
                [value if value != '' else None, now, record_id])
 
+    # date_1 / date_2 each have a parallel _text column the detail
+    # template prefers for display. Without keeping them in sync, the
+    # old text shadows the new integer on reload (the field appears
+    # to "revert" even though the integer was saved correctly).
+    if category == 'coins' and field_name in ('date_1', 'date_2'):
+        try:
+            n = int(value) if value not in ('', None) else None
+        except (TypeError, ValueError):
+            n = None
+        text_col = f'{field_name}_text'
+        text_val = (f'{abs(n)} BC' if n is not None and n < 0
+                    else (str(n) if n is not None else None))
+        db.execute(
+            f"UPDATE {table} SET {text_col} = ? WHERE id = ?",
+            [text_val, record_id])
+
     if old_row is not None:
         new_prop = value if field_name == 'property_name' else old_row['property_name']
         new_date = value if field_name == 'date_1' else old_row['date_1']
