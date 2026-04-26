@@ -6,7 +6,8 @@ import re
 import base64
 from datetime import datetime, date
 from flask import (Flask, g, render_template, request, redirect, url_for,
-                   flash, send_from_directory, abort, jsonify, Response)
+                   flash, send_from_directory, abort, jsonify, Response,
+                   send_file)
 from werkzeug.utils import secure_filename
 
 try:
@@ -3858,6 +3859,14 @@ def admin_index():
     """
     actions = [
         {
+            'label': "Download backup (DB + uploads)",
+            'desc':  "Streams a zip of the SQLite database (consistent "
+                     "snapshot via SQLite's online backup API) plus every "
+                     "file in uploads/. Save somewhere offsite.",
+            'url':   url_for('admin_backup'),
+            'kind':  'download',
+        },
+        {
             'label': "Coins: set every owner to 'Mark'",
             'desc':  "Sets owner='Mark' on every coin whose owner is NULL, "
                      "blank, or anything other than 'Mark'.",
@@ -3869,6 +3878,56 @@ def admin_index():
                            current_category='__admin__',
                            categories=CATEGORIES,
                            counts=get_counts())
+
+
+@app.route('/admin/backup', methods=['GET'])
+def admin_backup():
+    """Stream a zip containing a consistent snapshot of the SQLite DB
+    plus the entire uploads/ directory. Browser triggers a download.
+
+    Authentication: in production Cloudflare Access gates the URL; the
+    IMPORT_MISSING_SECRET is also required as a query string so the link
+    isn't trivially fetchable by anything that gets past Access.
+    """
+    if request.args.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+
+    import io
+    import zipfile
+    import tempfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # Use SQLite's online backup API for a consistent snapshot —
+        # safer than copying stuffapp.db while writes may be in flight.
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            src = sqlite3.connect(DATABASE)
+            dst = sqlite3.connect(tmp_path)
+            src.backup(dst)
+            dst.close()
+            src.close()
+            zf.write(tmp_path, arcname='stuffapp.db')
+        finally:
+            try: os.unlink(tmp_path)
+            except OSError: pass
+
+        # Walk uploads/ but skip the .thumbs cache (regenerable).
+        if os.path.isdir(UPLOAD_FOLDER):
+            for dirpath, dirnames, filenames in os.walk(UPLOAD_FOLDER):
+                dirnames[:] = [d for d in dirnames if d != '.thumbs']
+                for name in filenames:
+                    if name == '.DS_Store':
+                        continue
+                    full = os.path.join(dirpath, name)
+                    rel = os.path.relpath(full, UPLOAD_FOLDER)
+                    zf.write(full, arcname=os.path.join('uploads', rel))
+
+    buf.seek(0)
+    fname = f"stuffapp-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
+    return send_file(buf, as_attachment=True, download_name=fname,
+                     mimetype='application/zip')
 
 
 @app.route('/admin/coins-owner-mark', methods=['POST'])

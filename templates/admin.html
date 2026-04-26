@@ -8,12 +8,17 @@
 
   <ul class="admin-list">
     {% for action in actions %}
-    <li class="admin-action" data-url="{{ action.url }}">
+    <li class="admin-action" data-url="{{ action.url }}" data-kind="{{ action.kind|default('post') }}">
       <div class="admin-action-text">
         <strong>{{ action.label }}</strong>
         <span class="admin-action-desc">{{ action.desc }}</span>
       </div>
+      {% if action.kind == 'download' %}
+      <a class="admin-run-btn" href="{{ action.url }}?secret={{ secret|urlencode }}"
+         download>Download</a>
+      {% else %}
       <button type="button" class="admin-run-btn">Run</button>
+      {% endif %}
       <span class="admin-result"></span>
     </li>
     {% endfor %}
@@ -23,6 +28,7 @@
 <script>
 const SECRET = {{ secret|tojson }};
 document.querySelectorAll('.admin-action').forEach(li => {
+  if (li.dataset.kind === 'download') return;  // anchor handles itself
   const btn = li.querySelector('.admin-run-btn');
   const out = li.querySelector('.admin-result');
   const url = li.dataset.url;
