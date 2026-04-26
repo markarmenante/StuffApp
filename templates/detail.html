@@ -2700,24 +2700,38 @@ document.querySelectorAll('.person-tab').forEach(btn => {
   });
 })();
 
-// Generic per-row × delete + shift-up. Used by alarm-codes, people,
-// and (in spirit) medications — all share the same pattern: fixed
-// number of rows, blank rows hide their delete affordance, click clears
-// + shifts subsequent rows up so values stay packed at the top.
-function _wireRowDelete(rowSelector, btnClass, emptyClass, dataAttr, fieldPrefixes, max) {
+// Generic per-row × delete + shift-up + auto-grow visibility. Used by
+// alarm-codes and people (and meds in spirit). Behaviour:
+//   - Click × on a row → clear that row, shift rows below up by one,
+//     last row becomes empty.
+//   - .row-empty class flips on rows whose fields are all blank, so
+//     CSS can hide their × button.
+//   - .row-hidden class flips on rows beyond the visible window. The
+//     window is max(minVisible, lastFilled + 1), so empty trailing
+//     slots stay collapsed unless they're needed for the next entry.
+function _wireRowDelete(rowSelector, btnClass, emptyClass, dataAttr,
+                        fieldPrefixes, max, minVisible) {
   const form = document.getElementById('mainForm');
   if (!form) return;
   if (!form.querySelector(rowSelector)) return;
+  const minVis = minVisible || max;
   function rowIsEmpty(idx) {
     return fieldPrefixes.every(f => {
       const el = form.querySelector(`[name="${f}_${idx}"]`);
       return !el || !el.value.trim();
     });
   }
+  function lastFilledIdx() {
+    let last = 0;
+    for (let i = 1; i <= max; i++) if (!rowIsEmpty(i)) last = i;
+    return last;
+  }
   function refresh() {
+    const visible = Math.min(max, Math.max(minVis, lastFilledIdx() + 1));
     form.querySelectorAll(rowSelector).forEach(row => {
       const idx = parseInt(row.dataset[dataAttr]);
       row.classList.toggle(emptyClass, rowIsEmpty(idx));
+      row.classList.toggle('row-hidden', idx > visible);
     });
   }
   refresh();
@@ -2745,59 +2759,18 @@ function _wireRowDelete(rowSelector, btnClass, emptyClass, dataAttr, fieldPrefix
   });
 }
 
-// Property > People (10 rows × {name, role, phone, note})
+// Property > People — 10 rows total, 4 visible by default; auto-grows
+// as rows fill, collapses back as they're cleared.
 _wireRowDelete(
   '.people-row[data-people-idx]', 'people-del-btn',
   'people-row-empty', 'peopleIdx',
-  ['people_name', 'people_role', 'people_phone', 'people_note'], 10);
+  ['people_name', 'people_role', 'people_phone', 'people_note'], 10, 4);
 
-// Property > Alarm: per-row × delete + shift-up. Same pattern as the
-// medications table on persons. Field set is {entry, code, note} and
-// goes up to 8 rows.
-(function alarmCodesDelete() {
-  const FIELDS = ['alarm_codes_entry', 'alarm_codes_code', 'alarm_codes_note'];
-  const MAX = 8;
-  const form = document.getElementById('mainForm');
-  if (!form) return;
-  if (!form.querySelector('.alarm-codes-row[data-alarm-idx]')) return;
-
-  function rowIsEmpty(idx) {
-    return FIELDS.every(f => {
-      const el = form.querySelector(`[name="${f}_${idx}"]`);
-      return !el || !el.value.trim();
-    });
-  }
-  function refreshEmptyClass() {
-    form.querySelectorAll('.alarm-codes-row[data-alarm-idx]').forEach(row => {
-      const idx = parseInt(row.dataset.alarmIdx);
-      row.classList.toggle('alarm-codes-row-empty', rowIsEmpty(idx));
-    });
-  }
-  refreshEmptyClass();
-  form.querySelectorAll('.alarm-codes-row[data-alarm-idx] input').forEach(inp => {
-    inp.addEventListener('blur', refreshEmptyClass);
-  });
-
-  form.querySelectorAll('.alarm-del-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const row = btn.closest('.alarm-codes-row');
-      if (!row) return;
-      const startIdx = parseInt(row.dataset.alarmIdx);
-      for (let i = startIdx; i <= MAX; i++) {
-        FIELDS.forEach(f => {
-          const cur = form.querySelector(`[name="${f}_${i}"]`);
-          const next = i < MAX ? form.querySelector(`[name="${f}_${i+1}"]`) : null;
-          const newVal = next ? next.value : '';
-          if (cur && cur.value !== newVal) {
-            cur.value = newVal;
-            cur.dispatchEvent(new Event('blur'));
-          }
-        });
-      }
-      refreshEmptyClass();
-    });
-  });
-})();
+// Property > Alarm Codes — 8 rows total, 4 visible by default.
+_wireRowDelete(
+  '.alarm-codes-row[data-alarm-idx]', 'alarm-del-btn',
+  'alarm-codes-row-empty', 'alarmIdx',
+  ['alarm_codes_entry', 'alarm_codes_code', 'alarm_codes_note'], 8, 4);
 </script>
 
 {% if category == 'coins' %}

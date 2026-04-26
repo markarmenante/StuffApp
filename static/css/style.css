@@ -940,6 +940,10 @@ input[type="date"] { -webkit-appearance: none; }
 .med-table .med-row:not(.med-head) > input:last-child { border-right: none; }
 .med-table .med-row:not(.med-head) > input:focus { background: #fffde8; }
 
+/* List tables: rows beyond the visible window collapse via .row-hidden
+   so the table stays compact until the user actually fills slots. */
+.row-hidden { display: none !important; }
+
 /* Property alarm-codes table — same shape as the medications table on
    persons, but with custom column proportions: Entry + Code share 40%
    of the row (20% each); Notes takes 60%. Per-row × delete + shift-up
