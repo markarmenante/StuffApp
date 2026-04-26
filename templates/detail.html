@@ -1344,6 +1344,25 @@
   </div>
   {% endif %}
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+
+  <!-- Six freeform document slots (deeds / insurance / warranties / …)
+       in a 3 x 2 grid. Each has its own editable title above the
+       drop-zone so the user can label them per record. -->
+  <div class="section-bar">Documents</div>
+  {% for row in [[1,2,3], [4,5,6]] %}
+  <div class="dgrid dg3 property-doc-row">
+    {% for i in row %}
+    <div class="property-doc">
+      <input type="text" name="doc_{{ i }}_title"
+             value="{{ val('doc_' ~ i ~ '_title') }}"
+             class="property-doc-title"
+             placeholder="Doc {{ i }} title (e.g. Deed)">
+      {{ doccell('doc_' ~ i, '') }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="status">{% for s in ['','Own','Sold'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}<select name="owner">{% for o in ['','YM','Mark','Young'] %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>

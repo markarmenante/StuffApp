@@ -1197,6 +1197,25 @@ input[type="date"] { -webkit-appearance: none; }
 .art-doc-row .file-cell img { max-width: 100% !important; max-height: 130px !important; }
 .art-doc-row .file-cell-name { font-size: 12px; }
 .art-doc-row .doc-link { display: flex; align-items: center; justify-content: center; }
+
+/* Properties detail: 6 doc slots in a 3x2 grid. Each cell has an
+   editable title input above the drop-zone so the user labels
+   them per record. */
+.property-doc { display: flex; flex-direction: column; }
+.property-doc-title {
+  border: 1px solid var(--border); border-bottom: none;
+  background: #f7f7f9;
+  padding: 6px 8px; font-size: 12px; font-weight: 600;
+  font-family: var(--font); color: var(--text);
+  outline: none;
+}
+.property-doc-title:focus { background: #fffde8; }
+.property-doc-title::placeholder { color: #b8b8b8; font-weight: 400; }
+.property-doc-row { min-height: 180px; }
+.property-doc-row .file-cell { padding: 12px; min-height: 180px; gap: 6px; justify-content: flex-start; }
+.property-doc-row .file-cell img { max-width: 100% !important; max-height: 130px !important; }
+.property-doc-row .file-cell-name { display: none; }   /* title input replaces it */
+.property-doc-row .doc-link { display: flex; align-items: center; justify-content: center; }
 .file-upload-lbl { font-size: 11px; color: var(--blue); cursor: pointer; }
 .file-upload-lbl input { display: none; }
 

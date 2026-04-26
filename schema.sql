@@ -299,6 +299,12 @@ CREATE TABLE IF NOT EXISTS properties (
     owner TEXT,
     archive TEXT,
     image TEXT,
+    doc_1 TEXT, doc_1_title TEXT,
+    doc_2 TEXT, doc_2_title TEXT,
+    doc_3 TEXT, doc_3_title TEXT,
+    doc_4 TEXT, doc_4_title TEXT,
+    doc_5 TEXT, doc_5_title TEXT,
+    doc_6 TEXT, doc_6_title TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
