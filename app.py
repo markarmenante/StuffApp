@@ -255,7 +255,8 @@ FIELDS = {
         {'name': 'strike',          'label': 'Strike',            'type': 'number'},
         {'name': 'surface',         'label': 'Surface',           'type': 'number'},
         {'name': 'weight',          'label': 'Weight (g)',        'type': 'number'},
-        {'name': 'size',            'label': 'Size (mm)',         'type': 'number'},
+        {'name': 'size',            'label': 'Width (mm)',        'type': 'number'},
+        {'name': 'height',          'label': 'Height (mm)',       'type': 'number'},
         {'name': 'bullion',         'label': 'Bullion',           'type': 'text'},
         {'name': 'bin',             'label': 'Bin',               'type': 'text'},
         {'name': 'storage_location','label': 'Storage Location',  'type': 'text'},
@@ -573,6 +574,7 @@ def init_db():
         'ALTER TABLE art ADD COLUMN art_searched_at TEXT',
         'ALTER TABLE coins ADD COLUMN official TEXT',
         'ALTER TABLE coins ADD COLUMN specs_searched_at TEXT',
+        'ALTER TABLE coins ADD COLUMN height REAL',
         'ALTER TABLE watches ADD COLUMN container_1 TEXT',
         'ALTER TABLE watches ADD COLUMN container_2 TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
@@ -2852,7 +2854,7 @@ def coin_fetch_history(record_id):
 
 COIN_SPEC_FILLABLE = ('region', 'authority', 'denomination', 'metal',
                       'date_1', 'date_2', 'official',
-                      'weight', 'size', 'grade')
+                      'weight', 'size', 'height', 'grade')
 
 
 def fetch_coin_specs(coin):
@@ -2917,7 +2919,8 @@ Target fields:
 - date_2: integer year ending a date range. Same sign convention. Return null if not a range.
 - official: the named individual associated with the coin's striking and their role, formatted as "Name, role" — e.g. "Straton, magistrate", "Marcus Junius Brutus, moneyer", "John Reich, engraver", "Lucius Memmius, mint official". Look in the user-entered description FIRST — it often spells this out as "<Name>, <role>" anywhere in the text, including parenthetical asides and even abbreviated or initialed magistrate signatures (e.g. "Ct..., magistrate", "ΔΗ, magistrate", "CT, magistrate"). Capture those verbatim — partial / two-letter names ARE the actual signature on the die. Then fall back to your web sources for fuller context. If the dies are explicitly "unsigned", "attributed to", or "in the style of" a known artist/official, preserve that nuance in the value — e.g. "Euainetos, engraver (unsigned, attributed)" or "Kimon, engraver (style of)". Do NOT silently promote a stylistic attribution to a confirmed signature. Return null only if the description contains no "<Name>, <role>" construct AND your sources don't surface one.
 - weight: weight in grams (float). Pull from the user's description / pedigree / condition note if it includes an explicit "X.XX g" measurement; otherwise look up the canonical published weight for this exact reference from your sources. Return null if you cannot find a specific figure.
-- size: diameter in mm (float). Same rule: take an explicit "XX mm" / "XX.X mm" from the user's notes first, then fall back to the canonical published size for the reference.
+- size: width / diameter in mm (float). Take the FIRST dimension when the source quotes two ("28 x 22 mm" → 28). For round coins this is just the diameter. Use the user's notes first, then canonical published size for the reference.
+- height: height in mm (float). Only meaningful for non-round coins (rectangular, oval, scyphate, irregular flans). Take the SECOND dimension when the source quotes two ("28 x 22 mm" → 22). Return null for clearly round coins or when only one dimension is published.
 - grade: short condition grade as written by collectors (e.g. "VF", "gVF", "EF", "MS-65", "Choice EF"). Pull from the description or condition note when present; only return one if the source actually grades the coin (don't invent).
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null only when you cannot identify a value:
@@ -2931,6 +2934,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null only when you 
   "official": null,
   "weight": null,
   "size": null,
+  "height": null,
   "grade": null,
   "sources": "one-line note of which sources hit"
 }}
@@ -3021,7 +3025,7 @@ def coin_lookup_specs(record_id):
                 return int(raw)
             except (TypeError, ValueError):
                 return None
-        if field in ('weight', 'size'):
+        if field in ('weight', 'size', 'height'):
             # Accept "16.85", "16.85 g", "30 mm" — strip the unit.
             if isinstance(raw, str):
                 m = re.match(r'^\s*(-?\d+(?:\.\d+)?)', raw)
@@ -3046,7 +3050,7 @@ def coin_lookup_specs(record_id):
                 return int(current) == int(suggested)
             except (TypeError, ValueError):
                 return False
-        if field in ('weight', 'size'):
+        if field in ('weight', 'size', 'height'):
             # Tolerance: don't propose a "change" for a sub-0.05
             # difference (rounding noise / source-to-source jitter).
             try:
