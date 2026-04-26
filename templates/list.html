@@ -207,8 +207,9 @@
             {% if row['date_1_text'] %}<span>{{ row['date_1_text'] }}{% if row['date_2_text'] %} – {{ row['date_2_text'] }}{% endif %}</span>{% endif %}
           </div>
           <div class="idr">
-            {% if row['weight'] %}<span>{{ '%.2f'|format(row['weight']|float) }} g</span>{% endif %}
-            {% if row['size'] %}<span>{{ '%.1f'|format(row['size']|float) }} mm</span>{% endif %}
+            {% if row['weight'] %}<span>{{ '%.2f'|format(row['weight']|float) }} <span class="lbl">wt</span></span>{% endif %}
+            {% if row['size'] %}<span>{{ '%.1f'|format(row['size']|float) }} <span class="lbl">mm</span></span>{% endif %}
+            {% if row['die_axis'] %}<span>{{ row['die_axis'] }}h <span class="lbl">axis</span></span>{% endif %}
             {% if row['coin_id'] %}<span class="item-cat-id">{{ row['coin_id'] }}</span>{% endif %}
           </div>
         </div>
