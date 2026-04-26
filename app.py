@@ -2993,45 +2993,100 @@ def coin_lookup_specs(record_id):
                 return False
         return str(current or '').strip().lower() == str(suggested or '').strip().lower()
 
-    fills = {}        # field -> new value, applied immediately
-    overwrites = {}   # field -> {current, suggested}, returned for confirm
+    # Build proposals (no longer auto-apply fills — every change now
+    # flows through the review modal client-side, matching the watch
+    # lookup behaviour).
+    filled = {}
+    overwritten = {}
     for f in COIN_SPEC_FILLABLE:
         v = _coerce(f, suggestions.get(f))
         if v in (None, ''):
             continue
         cur = coin[f]
         if cur in (None, ''):
-            fills[f] = v
+            filled[f] = v
         elif not _equivalent(f, cur, v):
-            overwrites[f] = {'current': cur, 'suggested': v}
-
-    if fills:
-        set_clause = ', '.join(f'{k} = ?' for k in fills.keys())
-        now = datetime.utcnow().isoformat()
-        params = list(fills.values()) + [now, record_id]
-        db.execute(
-            f"UPDATE coins SET {set_clause}, updated_at = ? WHERE id = ?",
-            params,
-        )
-
-        # If date_1 just got filled, the coin may now belong to a numbered
-        # group (Carp/NY × Ancient/Modern); resequence Display Position.
-        if 'date_1' in fills:
-            group = _coin_group_for(coin['property_name'], fills['date_1'])
-            if group:
-                _renumber_coin_groups(db, [group])
-            if not coin['cat_id']:
-                new_cat = next_cat_id(db, coin['property_name'], fills['date_1'])
-                if new_cat:
-                    db.execute("UPDATE coins SET cat_id = ? WHERE id = ?", (new_cat, record_id))
-                    fills['cat_id'] = new_cat
-        db.commit()
+            overwritten[f] = {'current': cur, 'new': v}
 
     return jsonify({
-        'updated': fills,
-        'overwrites': overwrites,
+        'filled': filled,
+        'overwritten': overwritten,
         'sources': suggestions.get('sources', ''),
     })
+
+
+@app.route('/coins/<record_id>/apply-lookup-specs', methods=['POST'])
+def coin_apply_lookup_specs(record_id):
+    """Apply a user-selected subset of coin spec lookup suggestions.
+
+    Body: ``{"updates": {"<field>": <value>, ...}}``
+    Only fields in COIN_SPEC_FILLABLE are accepted. Handles the
+    cat_id assignment + group resequencing if date_1 changes — the
+    same housekeeping the old lookup endpoint did inline.
+    """
+    db = get_db()
+    coin = db.execute("SELECT * FROM coins WHERE id = ?",
+                      (record_id,)).fetchone()
+    if not coin:
+        return jsonify({'error': 'Coin not found'}), 404
+    data = request.get_json(force=True) or {}
+    raw = data.get('updates') or {}
+    if not isinstance(raw, dict):
+        return jsonify({'error': 'updates must be an object'}), 400
+
+    metal_allowed = {m.lower(): m for m in VALUE_LISTS['metal_coin']}
+
+    def _coerce(field, raw_v):
+        if raw_v is None:
+            return None
+        if field == 'metal':
+            if not isinstance(raw_v, str):
+                return None
+            return metal_allowed.get(raw_v.strip().lower())
+        if field in ('date_1', 'date_2'):
+            try:
+                return int(raw_v)
+            except (TypeError, ValueError):
+                return None
+        if isinstance(raw_v, str):
+            return normalize_field_value('coins', field, raw_v.strip()) or None
+        return raw_v
+
+    updates = {}
+    for k, v in raw.items():
+        if k not in COIN_SPEC_FILLABLE:
+            continue
+        coerced = _coerce(k, v)
+        if coerced in (None, ''):
+            continue
+        updates[k] = coerced
+    if not updates:
+        return jsonify({'updated': 0, 'fields': []})
+
+    set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
+    now = datetime.utcnow().isoformat()
+    params = list(updates.values()) + [now, record_id]
+    db.execute(
+        f"UPDATE coins SET {set_clause}, updated_at = ? WHERE id = ?",
+        params,
+    )
+
+    # date_1 housekeeping — same as the old lookup endpoint did
+    # inline. If the coin now falls into a numbered group (Carp/NY ×
+    # Ancient/Modern), resequence Display Position; if cat_id was
+    # blank, mint a fresh one for the new group.
+    if 'date_1' in updates:
+        group = _coin_group_for(coin['property_name'], updates['date_1'])
+        if group:
+            _renumber_coin_groups(db, [group])
+        if not coin['cat_id']:
+            new_cat = next_cat_id(db, coin['property_name'], updates['date_1'])
+            if new_cat:
+                db.execute("UPDATE coins SET cat_id = ? WHERE id = ?",
+                           (new_cat, record_id))
+                updates['cat_id'] = new_cat
+    db.commit()
+    return jsonify({'updated': len(updates), 'fields': list(updates.keys())})
 
 
 @app.route('/<category>/<record_id>/upload-image', methods=['POST'])

@@ -2640,59 +2640,20 @@ document.querySelectorAll('.person-tab').forEach(btn => {
     });
   });
 
-  // ── Region ✓ button: fill missing region/authority/denomination/metal/dates ──
+  // ── Region ✓ button: fill missing region/authority/denomination/
+  //     metal/dates/official. Same checkbox-review modal as the watch
+  //     lookup — pure-fill responses auto-apply with one round-trip,
+  //     responses with overwrites pop the showLookupReview dialog so
+  //     the user can pick which suggestions to accept.
   const specBtn = document.getElementById('coinSpecLookupBtn');
   if (specBtn) {
-    const FIELD_LABELS = {
-      region: 'Region', authority: 'Authority', denomination: 'Denomination',
-      metal: 'Metal', date_1: 'Date 1', date_2: 'Date 2',
-    };
-    function dispDate(n) {
-      const x = parseInt(n);
-      if (isNaN(x)) return String(n);
-      return x < 0 ? Math.abs(x) + ' BC' : String(x);
-    }
-    function applyToForm(field, value) {
-      const form = document.getElementById('mainForm');
-      if (field === 'cat_id') {
-        const catInp = form.querySelector('input[name="cat_id"]');
-        if (catInp) catInp.value = value;
-        return;
-      }
-      if (field === 'date_1' || field === 'date_2') {
-        const inp = document.getElementById(field === 'date_1' ? 'dateFrom' : 'dateTo');
-        if (!inp) return;
-        const n = parseInt(value);
-        const disp = isNaN(n) ? '' : dispDate(n);
-        inp.dataset.raw = String(n);
-        inp.value = disp;
-        inp.setAttribute('value', String(n));
-        const hidden = document.getElementById(field === 'date_1' ? 'hDate1Text' : 'hDate2Text');
-        if (hidden) hidden.value = disp;
-        return;
-      }
-      const el = form.querySelector(`[name="${field}"]`);
-      if (!el) return;
-      el.value = value;
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-    function persist(field, value, saveUrl) {
-      // Per-field save endpoint expects {field, value}. Dates store the
-      // raw signed integer in the date_1/date_2 column.
-      return fetch(saveUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field, value }),
-      }).then(r => r.json()).catch(() => null);
-    }
     specBtn.addEventListener('click', async () => {
       if (specBtn.classList.contains('busy')) return;
       const url = specBtn.dataset.url;
-      const saveUrl = specBtn.dataset.saveUrl;
       if (!url) return;
       specBtn.classList.add('busy');
       const prevText = specBtn.textContent;
-      specBtn.textContent = '';
+      specBtn.textContent = '⏳';
       try {
         const resp = await fetch(url, {
           method: 'POST',
@@ -2703,43 +2664,33 @@ document.querySelectorAll('.person-tab').forEach(btn => {
           alert(data.error || 'Lookup failed');
           return;
         }
-        const fills = data.updated || {};
-        const overwrites = data.overwrites || {};
-
-        // Auto-applied fills: write straight to the form (server already
-        // persisted them).
-        for (const [k, v] of Object.entries(fills)) {
-          applyToForm(k, v);
-        }
-
-        // Overwrites: prompt per field. Accepted ones get written to the
-        // form AND persisted via save-field (which handles date_1 group
-        // resequencing for us).
-        const accepted = [];
-        for (const [k, info] of Object.entries(overwrites)) {
-          const label = FIELD_LABELS[k] || k;
-          const cur = (k === 'date_1' || k === 'date_2') ? dispDate(info.current) : info.current;
-          const sug = (k === 'date_1' || k === 'date_2') ? dispDate(info.suggested) : info.suggested;
-          if (window.confirm(`${label} is currently "${cur}". Web search suggests "${sug}". Replace?`)) {
-            applyToForm(k, info.suggested);
-            if (saveUrl) await persist(k, info.suggested, saveUrl);
-            accepted.push(k);
-          }
-        }
-
-        const totalChanged = Object.keys(fills).length + accepted.length;
-        if (!totalChanged) {
-          alert('No new information found.');
+        const filled = data.filled || {};
+        const overwritten = data.overwritten || {};
+        if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
+          alert('No new information found.'
+                + (data.sources ? '\n\nChecked: ' + data.sources : ''));
           return;
         }
-        specBtn.textContent = '✓';
-        specBtn.style.background = '#d8edd8';
-        setTimeout(() => { specBtn.style.background = ''; }, 1500);
+        const applyUrl = url.replace('/lookup-specs', '/apply-lookup-specs');
+        // Pure-fill: nothing to second-guess, so apply directly.
+        if (!Object.keys(overwritten).length) {
+          const res2 = await fetch(applyUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ updates: filled }),
+          });
+          const d = await res2.json();
+          if (!res2.ok) throw new Error(d.error || 'Apply failed');
+          if (d.updated) window.location.reload();
+          return;
+        }
+        // Anything to overwrite → checkbox review modal.
+        showLookupReview(applyUrl, filled, overwritten, data.sources || '');
       } catch (err) {
         alert('Lookup failed: ' + (err.message || err));
       } finally {
         specBtn.classList.remove('busy');
-        if (!specBtn.textContent) specBtn.textContent = prevText;
+        specBtn.textContent = prevText;
       }
     });
   }
