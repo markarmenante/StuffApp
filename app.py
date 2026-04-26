@@ -163,6 +163,19 @@ FIELD_ALIASES = {
     ('watches', 'dial_color'): {
         'skeleton': 'Open',
     },
+    # Coin grade abbreviations the value list uses (cEF / aEF / cVF /
+    # aVF / gVF) — map natural-language equivalents back to the
+    # canonical short form so a description that says "Choice EF"
+    # snaps to the value-list entry "cEF" on save.
+    ('coins', 'grade'): {
+        'choice ef':  'cEF',
+        'choice vf':  'cVF',
+        'about ef':   'aEF',
+        'almost ef':  'aEF',
+        'about vf':   'aVF',
+        'almost vf':  'aVF',
+        'good vf':    'gVF',
+    },
 }
 
 
