@@ -1902,12 +1902,15 @@ document.querySelectorAll('.comp-item').forEach(item => {
     }).catch(err => console.warn('Auto-save failed:', err));
   }
 
-  // Text / textarea — save on blur. For inputs that maintain a canonical
-  // raw value on data-raw (e.g. coin date fields whose `.value` is the
-  // formatted display "625 BC"), prefer that so the server receives the
-  // real signed integer, not the formatted display.
+  // Text / textarea — save on blur. We used to prefer el.dataset.raw
+  // when present (coin date inputs render "175 BC" but stash "-175"
+  // there), but the autosave blur handler runs *before* the
+  // date-input wire() handler that refreshes data-raw, so a freshly-
+  // typed value was being shadowed by the stale render-time data-raw.
+  // The server already accepts both raw signed integers ("-180") and
+  // formatted display strings ("180 BC", "1952 AD"), so just send
+  // el.value and let the server parse it.
   function valueFor(el) {
-    if (el.dataset && 'raw' in el.dataset && el.dataset.raw !== '') return el.dataset.raw;
     return el.value;
   }
   form.querySelectorAll('input[name]:not([type=file]):not([type=radio]):not([type=checkbox]):not([type=date]), textarea[name]').forEach(el => {
