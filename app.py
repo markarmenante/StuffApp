@@ -559,6 +559,7 @@ def init_db():
         'ALTER TABLE art ADD COLUMN object_notes TEXT',
         'ALTER TABLE art ADD COLUMN art_searched_at TEXT',
         'ALTER TABLE coins ADD COLUMN official TEXT',
+        'ALTER TABLE coins ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE watches ADD COLUMN container_1 TEXT',
         'ALTER TABLE watches ADD COLUMN container_2 TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
@@ -3008,10 +3009,18 @@ def coin_lookup_specs(record_id):
         elif not _equivalent(f, cur, v):
             overwritten[f] = {'current': cur, 'new': v}
 
+    # Stamp that the lookup ran successfully — used to mark the Check
+    # pill green on subsequent visits to this coin.
+    now = datetime.utcnow().isoformat()
+    db.execute("UPDATE coins SET specs_searched_at = ? WHERE id = ?",
+               (now, record_id))
+    db.commit()
+
     return jsonify({
         'filled': filled,
         'overwritten': overwritten,
         'sources': suggestions.get('sources', ''),
+        'specs_searched_at': now,
     })
 
 

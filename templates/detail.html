@@ -133,10 +133,18 @@
       </button>
       {% endif %}
       {% if category == 'coins' %}
-      <button type="button" class="coin-lookup-btn"
+      <button type="button"
+              id="coinSpecLookupBtn"
+              class="coin-lookup-btn coin-check-btn{% if r['specs_searched_at'] %} done{% endif %}"
+              data-url="{{ url_for('coin_lookup_specs', record_id=r['id']) }}"
+              title="{% if r['specs_searched_at'] %}Specs lookup last run {{ r['specs_searched_at'][:10] }} — click to re-run{% else %}Check region / authority / denomination / metal / date / official against reputable numismatic sources{% endif %}">
+        🔎 Check
+      </button>
+      <button type="button"
+              class="coin-lookup-btn coin-history-btn{% if r['history_searched_at'] %} done{% endif %}"
               data-url="{{ url_for('coin_fetch_context', record_id=r['id']) }}"
-              title="Look up the historical environment at this mint, combining region, authority, mint, date, and description">
-        🔎 Lookup
+              title="{% if r['history_searched_at'] %}History last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Look up the historical environment at this mint, combining region, authority, mint, date, and description{% endif %}">
+        🔎 History
       </button>
       {% endif %}
       {% if category == 'art' %}
@@ -378,12 +386,6 @@
     <div class="dcell ta-wrap coin-region-cell">
       <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700"
              {% if is_new and not val('region') %}placeholder="Region"{% endif %}>
-      {% if not is_new %}
-      <button type="button" class="coin-spec-lookup-btn" id="coinSpecLookupBtn"
-              data-url="{{ url_for('coin_lookup_specs', record_id=r['id']) }}"
-              data-save-url="{{ url_for('save_field', category='coins', record_id=r['id']) }}"
-              title="Look up missing region/authority/denomination/metal/date/official from web">✓</button>
-      {% endif %}
       <span class="clabel">Reg</span>
     </div>
     <div class="dcell">
@@ -2666,6 +2668,9 @@ document.querySelectorAll('.person-tab').forEach(btn => {
         }
         const filled = data.filled || {};
         const overwritten = data.overwritten || {};
+        // Lookup ran successfully — flip Check pill to green for this
+        // session (server has also persisted specs_searched_at).
+        if (data.specs_searched_at) specBtn.classList.add('done');
         if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
           alert('No new information found.'
                 + (data.sources ? '\n\nChecked: ' + data.sources : ''));
@@ -2695,8 +2700,11 @@ document.querySelectorAll('.person-tab').forEach(btn => {
     });
   }
 
-  // ── Coin-wide Lookup: combined historical context ──
-  document.querySelectorAll('.coin-lookup-btn').forEach(btn => {
+  // ── Coin-wide History pill: combined historical context ──
+  // Selector is .coin-history-btn now (not .coin-lookup-btn) so this
+  // handler doesn't double-fire on the Check pill, which shares the
+  // .coin-lookup-btn class for pill styling only.
+  document.querySelectorAll('.coin-history-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const url = btn.dataset.url;
       if (!url) return;
@@ -2739,6 +2747,9 @@ document.querySelectorAll('.person-tab').forEach(btn => {
           stamp.textContent = 'as of ' + d.toLocaleDateString('en-US',
             {month: 'short', day: 'numeric', year: 'numeric'});
         }
+        // History fetched successfully — flip to the green done state
+        // immediately (server has also persisted history_searched_at).
+        if (data.searched_at) btn.classList.add('done');
       } catch (err) {
         if (body) body.innerHTML = '<p style="color:#c00">Error: ' + (err.message || 'unknown') + '</p>';
       } finally {

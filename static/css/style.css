@@ -454,13 +454,17 @@ input[type="number"]::-webkit-outer-spin-button {
 .coin-lookup-btn:hover:not(:disabled) { background: rgba(0,0,0,.05); }
 .watch-lookup-btn:disabled,
 .coin-lookup-btn:disabled { opacity: .6; cursor: progress; }
-/* Green tint once a lookup has been recorded for this record. */
-.watch-lookup-btn.done {
+/* Green tint once a lookup has been recorded for this record. Shared
+   by every floating-nav lookup pill (watches, coins Check + History,
+   art). */
+.watch-lookup-btn.done,
+.coin-lookup-btn.done {
   background: #e6f6ea;
   border-color: #5fb872;
   color: #1f6b34;
 }
-.watch-lookup-btn.done:hover:not(:disabled) { background: #d6efdc; }
+.watch-lookup-btn.done:hover:not(:disabled),
+.coin-lookup-btn.done:hover:not(:disabled) { background: #d6efdc; }
 
 .card-share-btn {
   display: inline-flex; align-items: center; justify-content: center;
