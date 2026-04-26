@@ -1175,6 +1175,15 @@ input[type="date"] { -webkit-appearance: none; }
 .watch-doc-row .file-cell img { max-width: 100% !important; max-height: 130px !important; }
 .watch-doc-row .file-cell-name { font-size: 12px; }
 .watch-doc-row .doc-link { display: flex; align-items: center; justify-content: center; }
+
+/* Art detail: Receipt + Doc 2 row mirrors the watch doc panels — gives
+   each document a real preview area so an image or PDF thumbnail
+   renders inline rather than collapsing to a tiny "View" link. */
+.art-doc-row { min-height: 180px; }
+.art-doc-row .file-cell { padding: 12px; min-height: 180px; gap: 6px; justify-content: flex-start; }
+.art-doc-row .file-cell img { max-width: 100% !important; max-height: 130px !important; }
+.art-doc-row .file-cell-name { font-size: 12px; }
+.art-doc-row .doc-link { display: flex; align-items: center; justify-content: center; }
 .file-upload-lbl { font-size: 11px; color: var(--blue); cursor: pointer; }
 .file-upload-lbl input { display: none; }
 

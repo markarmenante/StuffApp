@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS art (
     status TEXT,
     image TEXT,
     receipt TEXT,
+    doc_2 TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

@@ -942,7 +942,10 @@
            the image instead of leaving an empty band below. -->
       <div class="dgrid dg1 art-notes-grow">{{ cell('notes','Artist Notes',rows=8) }}</div>
       <div class="dgrid dg1 art-notes-grow">{{ cell('object_notes','Object Notes',rows=8) }}</div>
-      <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
+      <div class="dgrid dg2 art-doc-row">
+        {{ doccell('receipt','Receipt') }}
+        {{ doccell('doc_2','Doc 2') }}
+      </div>
     </div>
   </div>
 

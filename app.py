@@ -360,6 +360,7 @@ FIELDS = {
          'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
         {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
+        {'name': 'doc_2',           'label': 'Doc 2',             'type': 'file'},
     ],
     'vehicles': [
         {'name': 'make',            'label': 'Make',              'type': 'text'},
@@ -583,6 +584,7 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE watches ADD COLUMN container_1 TEXT',
         'ALTER TABLE watches ADD COLUMN container_2 TEXT',
+        'ALTER TABLE art ADD COLUMN doc_2 TEXT',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
         'ALTER TABLE topics ADD COLUMN image TEXT',
