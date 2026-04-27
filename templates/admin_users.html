@@ -45,11 +45,35 @@
             {% else %}
               <div class="user-cats-grid">
                 {% for slug, name in cat_choices %}
-                <label class="user-cat-chk">
-                  <input type="checkbox" name="categories" value="{{ slug }}"
-                         {% if slug in u.cat_set %}checked{% endif %}>
-                  {{ name }}
-                </label>
+                <div class="user-cat-block">
+                  <label class="user-cat-chk">
+                    <input type="checkbox" name="categories" value="{{ slug }}"
+                           {% if slug in u.cat_set %}checked{% endif %}>
+                    {{ name }}
+                  </label>
+                  {# Row-level filter chips: pick which owner values
+                     this user is restricted to within this category.
+                     Empty selection = sees ALL rows in the category. #}
+                  {% if slug in row_filter_fields %}
+                  {% set _cf = u.row_filters_dict.get(slug, {}) %}
+                  {% for field in row_filter_fields[slug] %}
+                    {% set vlist_key = row_filter_value_lists[field] %}
+                    {% set _allowed = _cf.get(field, []) %}
+                    <div class="user-rf">
+                      <span class="user-rf-label">{{ field }}:</span>
+                      {% for v in vlists[vlist_key] if v %}
+                      <label class="user-rf-chk">
+                        <input type="checkbox"
+                               name="rfilter_{{ slug }}_{{ field }}"
+                               value="{{ v }}"
+                               {% if v in _allowed %}checked{% endif %}>
+                        {{ v }}
+                      </label>
+                      {% endfor %}
+                    </div>
+                  {% endfor %}
+                  {% endif %}
+                </div>
                 {% endfor %}
               </div>
             {% endif %}
@@ -84,14 +108,33 @@
     </div>
     <div class="user-cats-grid user-cats-add">
       {% for slug, name in cat_choices %}
-      <label class="user-cat-chk">
-        <input type="checkbox" name="categories" value="{{ slug }}">
-        {{ name }}
-      </label>
+      <div class="user-cat-block">
+        <label class="user-cat-chk">
+          <input type="checkbox" name="categories" value="{{ slug }}">
+          {{ name }}
+        </label>
+        {% if slug in row_filter_fields %}
+        {% for field in row_filter_fields[slug] %}
+          {% set vlist_key = row_filter_value_lists[field] %}
+          <div class="user-rf">
+            <span class="user-rf-label">{{ field }}:</span>
+            {% for v in vlists[vlist_key] if v %}
+            <label class="user-rf-chk">
+              <input type="checkbox" name="rfilter_{{ slug }}_{{ field }}" value="{{ v }}">
+              {{ v }}
+            </label>
+            {% endfor %}
+          </div>
+        {% endfor %}
+        {% endif %}
+      </div>
       {% endfor %}
     </div>
-    <p class="admin-note">Pick the categories this user gets. Ignored if you
-      choose Owner above (owners always see everything).</p>
+    <p class="admin-note">Pick the categories this user gets. For each
+      checked category, optionally tick which <code>owner</code> values
+      they're restricted to — leave them all unchecked to grant the
+      whole category. Ignored if you choose Owner above (owners always
+      see everything).</p>
   </form>
 </div>
 
@@ -124,6 +167,19 @@
 .user-cats-add { margin-top: 8px; }
 .user-cat-chk { font-size: 12px; display: flex; align-items: center; gap: 4px; }
 .user-cats-all { color: var(--text-secondary); font-style: italic; }
+.user-cat-block { display: flex; flex-direction: column; gap: 2px; }
+.user-rf {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin: 1px 0 4px 18px;
+  font-size: 11px; color: var(--text-secondary);
+}
+.user-rf-label { font-style: italic; opacity: .8; }
+.user-rf-chk {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 0 4px; border-radius: 3px;
+  background: rgba(0, 0, 0, 0.04);
+}
+.user-rf-chk input { transform: scale(0.85); }
 .user-actions { white-space: nowrap; }
 .user-btn {
   padding: 5px 12px; border: 1px solid var(--blue); background: #fff;

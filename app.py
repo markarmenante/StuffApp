@@ -608,6 +608,7 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE vehicles ADD COLUMN auto_title TEXT',
         'ALTER TABLE vehicles ADD COLUMN insurance_label TEXT',
+        'ALTER TABLE users ADD COLUMN row_filters TEXT',
         'ALTER TABLE vehicles ADD COLUMN invoice_label TEXT',
         'ALTER TABLE vehicles ADD COLUMN registration_label TEXT',
         'ALTER TABLE vehicles ADD COLUMN auto_title_label TEXT',
@@ -749,7 +750,14 @@ def get_counts():
     db = get_db()
     counts = {}
     for slug, cat in CATEGORIES.items():
-        row = db.execute(f"SELECT COUNT(*) as c FROM {cat['table']}").fetchone()
+        # Apply the current user's row filter so the nav count
+        # matches what they can actually see in the list.
+        wheres, params = [], []
+        _apply_row_filter_clauses(slug, wheres, params)
+        where = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+        row = db.execute(
+            f"SELECT COUNT(*) as c FROM {cat['table']} {where}", params
+        ).fetchone()
         counts[slug] = row['c']
     return counts
 
@@ -963,6 +971,11 @@ def build_search_query(category, q, dot=False, coin_filter=None):
         clause, extra_params = cat_filters[coin_filter]
         wheres.append(f"({clause})")
         params += list(extra_params)
+
+    # Row-level access enforcement. Owners and unrestricted members
+    # add nothing; restricted members get an extra
+    # "<field> IN (...)" clause per filtered field.
+    _apply_row_filter_clauses(category, wheres, params)
 
     where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
@@ -1805,6 +1818,24 @@ def new_record(category):
             data['coin_id'] = next_coin_id(db)
             data['cat_id'] = next_cat_id(db, data.get('property_name'), data.get('date_1'))
 
+        # Row-filter guard on creation. If the user is restricted on
+        # any field for this category, the new record's value must
+        # land within their allowed set — otherwise they'd create a
+        # record they immediately can't see.
+        cat_filt = _row_filter_for_category(g.get('current_user'), category)
+        for fld, allowed in cat_filt.items():
+            if not allowed:
+                continue
+            v = (data.get(fld) or '')
+            if str(v).strip() not in allowed:
+                err = (f'New record\'s {fld} must be one of: '
+                       + ', '.join(allowed))
+                if request.headers.get('Accept', '').startswith('application/json') \
+                        or request.headers.get('X-Requested-With') == 'fetch':
+                    return jsonify({'ok': False, 'error': err}), 403
+                flash(err, 'error')
+                return redirect(url_for('new_record', category=category))
+
         cols = ', '.join(data.keys())
         placeholders = ', '.join(['?' for _ in data])
         db.execute(f"INSERT INTO {CATEGORIES[category]['table']} ({cols}) VALUES ({placeholders})",
@@ -1867,6 +1898,12 @@ def detail_view(category, record_id):
 
     record = db.execute(f"SELECT * FROM {table} WHERE id = ?", [record_id]).fetchone()
     if record is None:
+        abort(404)
+    # Row-level access: a member with a filter on this category can
+    # only see records whose filtered fields match. Pretend the row
+    # doesn't exist (404) rather than 403 — fewer leaks about what's
+    # there.
+    if not _user_can_see_row(category, record):
         abort(404)
 
     # Prev/Next navigation. If the URL carries the same q / filter the
@@ -2081,6 +2118,25 @@ def save_field(category, record_id):
     if field.get('readonly') or field['type'] == 'file':
         return jsonify({'error': 'Field not auto-saveable'}), 400
 
+    # Row-filter guard. Two checks:
+    #   (1) The user must already be allowed to see the existing row.
+    #   (2) If they're editing a filtered field itself, the new value
+    #       must stay within their allowed set — otherwise they could
+    #       lock themselves out of the record.
+    existing = db.execute(
+        f"SELECT * FROM {table} WHERE id = ?", [record_id]
+    ).fetchone()
+    if existing is None:
+        return jsonify({'error': 'Record not found'}), 404
+    if not _user_can_see_row(category, existing):
+        return jsonify({'error': 'Forbidden'}), 403
+    cat_filt = _row_filter_for_category(g.get('current_user'), category)
+    if field_name in cat_filt and cat_filt[field_name]:
+        if str(value).strip() not in cat_filt[field_name]:
+            return jsonify({
+                'error': f'Cannot set {field_name} outside your allowed values'
+            }), 403
+
     # Strip currency/comma formatting for numeric fields
     if field['type'] == 'number' or field_name in ('price', 'beat', 'reserve', 'value'):
         value = str(value).replace('$', '').replace(',', '').strip()
@@ -2151,14 +2207,19 @@ def delete_record(category, record_id):
         abort(404)
     db = get_db()
     table = CATEGORIES[category]['table']
+    # Row-filter guard: don't let a member delete a record whose
+    # filtered field is outside their allowed set.
+    existing = db.execute(
+        f"SELECT * FROM {table} WHERE id = ?", [record_id]
+    ).fetchone()
+    if existing is None:
+        abort(404)
+    if not _user_can_see_row(category, existing):
+        abort(404)
     # Capture the coin's group before deleting so we can close the gap.
     gap_group = None
     if category == 'coins':
-        row = db.execute(
-            "SELECT property_name, date_1 FROM coins WHERE id = ?",
-            [record_id]).fetchone()
-        if row:
-            gap_group = _coin_group_for(row['property_name'], row['date_1'])
+        gap_group = _coin_group_for(existing['property_name'], existing['date_1'])
     db.execute(f"DELETE FROM {table} WHERE id = ?", [record_id])
     if gap_group:
         _renumber_coin_groups(db, [gap_group])
@@ -3603,6 +3664,90 @@ def _expand_categories(raw, role):
     return {c.strip() for c in (raw or '').split(',') if c.strip() in CATEGORIES}
 
 
+# Row-level filtering. Per category, which fields can a member be
+# restricted on, and where does the value list for each field come
+# from in VALUE_LISTS. Add an entry here to enable filtering on a
+# new field — UI + enforcement pick it up automatically.
+ROW_FILTER_FIELDS = {
+    'watches':      ['owner'],
+    'coins':        ['owner'],
+    'cameras':      ['owner'],
+    'lenses':       ['owner'],
+    'pens':         ['owner'],
+    'art':          ['owner'],
+    'vehicles':     ['owner'],
+    'recordings':   ['owner'],
+    'audio':        ['owner'],
+    'rifles':       ['owner'],
+    'credit_cards': ['owner'],
+    'properties':   ['owner'],
+}
+# field name → VALUE_LISTS key for picking allowed values in the UI.
+ROW_FILTER_VALUE_LISTS = {
+    'owner': 'owner',
+}
+
+
+def _parse_row_filters_json(raw):
+    """Decode a users.row_filters JSON blob; tolerant of NULL / bad
+    input (returns {})."""
+    if not raw:
+        return {}
+    try:
+        d = json.loads(raw) if isinstance(raw, str) else raw
+        return d if isinstance(d, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _user_row_filters(user):
+    """Effective per-category row filters for a user dict. Owners have
+    no row restrictions; everyone else gets whatever JSON they have."""
+    if not user or user.get('role') == 'owner':
+        return {}
+    return _parse_row_filters_json(user.get('row_filters'))
+
+
+def _row_filter_for_category(user, category):
+    """Return {field: [allowed_values, …]} for one category, or {}."""
+    f = _user_row_filters(user).get(category)
+    return f if isinstance(f, dict) else {}
+
+
+def _user_can_see_row(category, row):
+    """Does the current user pass the row filter for this record? True
+    when there's no filter or the row's filtered fields are all in the
+    allowed lists."""
+    user = g.get('current_user')
+    filt = _row_filter_for_category(user, category)
+    if not filt:
+        return True
+    for field, allowed in filt.items():
+        if not allowed:
+            continue
+        try:
+            v = row[field] if hasattr(row, 'keys') and field in row.keys() else None
+        except (KeyError, IndexError):
+            v = None
+        if v not in allowed:
+            return False
+    return True
+
+
+def _apply_row_filter_clauses(category, wheres, params):
+    """Mutate a build_search_query-style (wheres, params) pair to
+    add `(<field> IN (?, ?...))` clauses for each filtered field on
+    the current user."""
+    user = g.get('current_user')
+    filt = _row_filter_for_category(user, category)
+    for field, allowed in filt.items():
+        if not allowed:
+            continue
+        ph = ','.join(['?' for _ in allowed])
+        wheres.append(f'({field} IN ({ph}))')
+        params.extend(allowed)
+
+
 # Endpoints that everyone gets to hit regardless of category access.
 # (The static handler also bypasses; checked separately below.)
 _AUTH_EXEMPT_ENDPOINTS = {'static', 'uploaded_file', 'file_thumb'}
@@ -4058,13 +4203,14 @@ def admin_users():
     per-category authorization once they're past the edge."""
     db = get_db()
     rows = db.execute(
-        "SELECT id, email, display_name, role, categories, created_at "
-        "FROM users ORDER BY role DESC, LOWER(email)"
+        "SELECT id, email, display_name, role, categories, row_filters, "
+        "       created_at FROM users ORDER BY role DESC, LOWER(email)"
     ).fetchall()
     users = []
     for r in rows:
         d = dict(r)
         d['cat_set'] = _expand_categories(d['categories'], d['role'])
+        d['row_filters_dict'] = _parse_row_filters_json(d.get('row_filters'))
         users.append(d)
     cat_choices = [(slug, info['name']) for slug, info in CATEGORIES.items()]
     return render_template('admin_users.html',
@@ -4073,7 +4219,30 @@ def admin_users():
                            owner_email=OWNER_EMAIL,
                            current_category='__admin__',
                            categories=CATEGORIES,
-                           counts=get_counts())
+                           counts=get_counts(),
+                           row_filter_fields=ROW_FILTER_FIELDS,
+                           row_filter_value_lists=ROW_FILTER_VALUE_LISTS,
+                           vlists=VALUE_LISTS)
+
+
+def _collect_row_filters_from_form(cats_list):
+    """Read rfilter_<cat>_<field> checkboxes from the current request
+    and return a JSON string suitable for users.row_filters (or None
+    when nothing is restricted)."""
+    filters = {}
+    for cat, fields in ROW_FILTER_FIELDS.items():
+        if cat not in cats_list:
+            continue  # category not granted at all → no row filter to record
+        cat_filters = {}
+        for field in fields:
+            vals = request.form.getlist(f'rfilter_{cat}_{field}')
+            allowed = VALUE_LISTS.get(ROW_FILTER_VALUE_LISTS.get(field, ''), [])
+            kept = [v for v in vals if v in allowed]
+            if kept:
+                cat_filters[field] = kept
+        if cat_filters:
+            filters[cat] = cat_filters
+    return json.dumps(filters) if filters else None
 
 
 @app.route('/admin/users/add', methods=['POST'])
@@ -4090,11 +4259,15 @@ def admin_users_add():
     cats_list = request.form.getlist('categories')
     cats_csv = '*' if role == 'owner' else \
         ','.join(c for c in cats_list if c in CATEGORIES)
+    row_filters_json = None if role == 'owner' else \
+        _collect_row_filters_from_form(set(cats_list))
     try:
         db.execute(
-            "INSERT INTO users (id, email, display_name, role, categories) "
-            "VALUES (?, ?, ?, ?, ?)",
-            [str(uuid.uuid4()), email, display or None, role, cats_csv]
+            "INSERT INTO users (id, email, display_name, role, "
+            "                   categories, row_filters) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [str(uuid.uuid4()), email, display or None, role, cats_csv,
+             row_filters_json]
         )
         db.commit()
         flash(f'Added {email}.', 'success')
@@ -4116,6 +4289,8 @@ def admin_users_update(user_id):
     cats_list = request.form.getlist('categories')
     cats_csv = '*' if role == 'owner' else \
         ','.join(c for c in cats_list if c in CATEGORIES)
+    row_filters_json = None if role == 'owner' else \
+        _collect_row_filters_from_form(set(cats_list))
     # Don't allow demoting the very last owner — would lock everyone out.
     if row['role'] == 'owner' and role != 'owner':
         owner_count = db.execute(
@@ -4126,8 +4301,8 @@ def admin_users_update(user_id):
             return redirect(url_for('admin_users'))
     db.execute(
         "UPDATE users SET display_name = ?, role = ?, categories = ?, "
-        "updated_at = datetime('now') WHERE id = ?",
-        [display or None, role, cats_csv, user_id]
+        "       row_filters = ?, updated_at = datetime('now') WHERE id = ?",
+        [display or None, role, cats_csv, row_filters_json, user_id]
     )
     db.commit()
     flash(f"Updated {row['email']}.", 'success')
