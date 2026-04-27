@@ -68,7 +68,11 @@
      title="Watches with status Ordered">Ordered</a>
   {% endif %}
   {% endif %}
-  {% if category == 'audio' %}
+  {# When the user came from the Property tab via ?at=, hide the
+     redundant Carp / Martis location pills — they target the same
+     filter, build URLs without ?at=, and would silently break the
+     navigation chain back to the originating Property. #}
+  {% if category == 'audio' and not at_property %}
   <a href="{{ url_for('list_view', category='audio', q=q or None, filter=None if coin_filter == 'carp' else 'carp') }}"
      class="toolbar-btn pill {% if coin_filter == 'carp' %}active{% endif %}"
      title="Audio at Carpinteria">Carp</a>
@@ -76,7 +80,7 @@
      class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
      title="Audio at Truckee (Martis)">Martis</a>
   {% endif %}
-  {% if category == 'recordings' %}
+  {% if category == 'recordings' and not at_property %}
   <a href="{{ url_for('list_view', category='recordings', q=q or None, filter=None if coin_filter == 'carp' else 'carp') }}"
      class="toolbar-btn pill {% if coin_filter == 'carp' %}active{% endif %}"
      title="Music at Carpinteria">Carp</a>
