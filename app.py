@@ -4600,6 +4600,22 @@ def admin_index():
             'kind':  'download',
         },
         {
+            'label': "Scan orphan upload files (dry run)",
+            'desc':  "Reports how many files in uploads/ aren't referenced "
+                     "by any DB row, total bytes, and a sample. Doesn't "
+                     "delete anything. Run this first.",
+            'url':   url_for('admin_orphan_uploads'),
+            'extra': {'dry': '1'},
+        },
+        {
+            'label': "DELETE orphan upload files",
+            'desc':  "Actually removes every file in uploads/ that isn't "
+                     "referenced by any DB row. Also deletes the matching "
+                     "PDF/HEIC thumbnail cache. Run the dry scan first.",
+            'url':   url_for('admin_orphan_uploads'),
+            'extra': {'dry': '0'},
+        },
+        {
             'label': "Coins: set every owner to 'Mark'",
             'desc':  "Sets owner='Mark' on every coin whose owner is NULL, "
                      "blank, or anything other than 'Mark'.",
@@ -4661,6 +4677,97 @@ def admin_backup():
     fname = f"stuffapp-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype='application/zip')
+
+
+def _collect_referenced_uploads(db):
+    """Walk every table's file-typed columns and collect the set of
+    filenames currently referenced by at least one row. Also scoops up
+    the topics.image column which lives outside the FIELDS map."""
+    referenced = set()
+    for cat, fields in FIELDS.items():
+        table = CATEGORIES[cat]['table']
+        file_cols = [f['name'] for f in fields if f.get('type') == 'file']
+        if not file_cols:
+            continue
+        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        present = [c for c in file_cols if c in cols]
+        if not present:
+            continue
+        sel = ', '.join(present)
+        for row in db.execute(f"SELECT {sel} FROM {table}").fetchall():
+            for c in present:
+                v = (row[c] or '').strip()
+                if v:
+                    referenced.add(v)
+    # topics.image isn't in FIELDS but lives in UPLOAD_FOLDER too.
+    try:
+        for row in db.execute("SELECT image FROM topics").fetchall():
+            v = (row['image'] or '').strip()
+            if v:
+                referenced.add(v)
+    except sqlite3.OperationalError:
+        pass
+    return referenced
+
+
+@app.route('/admin/orphan-uploads', methods=['POST'])
+def admin_orphan_uploads():
+    """Find (and optionally delete) files in UPLOAD_FOLDER that aren't
+    referenced by any DB row. Pass `dry=0` to actually delete; any
+    other value (including absent) is a dry-run that only reports.
+
+    Skips the .thumbs cache directory (regenerable) and any
+    .DS_Store crud."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.form.get('dry', '1') != '0'
+    db = get_db()
+    referenced = _collect_referenced_uploads(db)
+
+    if not os.path.isdir(UPLOAD_FOLDER):
+        return jsonify(total=0, referenced=len(referenced),
+                       orphan_count=0, orphan_size_bytes=0,
+                       deleted=0, dry_run=dry, sample=[])
+
+    orphans = []           # list of (filename, size_bytes)
+    total_files = 0
+    for name in os.listdir(UPLOAD_FOLDER):
+        full = os.path.join(UPLOAD_FOLDER, name)
+        if not os.path.isfile(full):
+            continue
+        if name == '.DS_Store':
+            continue
+        total_files += 1
+        if name not in referenced:
+            try:
+                sz = os.path.getsize(full)
+            except OSError:
+                sz = 0
+            orphans.append((name, sz))
+
+    deleted = 0
+    if not dry:
+        for name, _ in orphans:
+            try:
+                os.unlink(os.path.join(UPLOAD_FOLDER, name))
+                deleted += 1
+                # Also nuke the cached PDF/HEIC thumbnail if present.
+                thumb = os.path.join(_FILE_THUMB_DIR, name + '.jpg')
+                if os.path.exists(thumb):
+                    try: os.unlink(thumb)
+                    except OSError: pass
+            except OSError:
+                pass
+
+    return jsonify(
+        total=total_files,
+        referenced=len(referenced),
+        orphan_count=len(orphans),
+        orphan_size_bytes=sum(sz for _, sz in orphans),
+        deleted=deleted,
+        dry_run=dry,
+        sample=[n for n, _ in orphans[:10]],
+    )
 
 
 @app.route('/admin/coins-owner-mark', methods=['POST'])

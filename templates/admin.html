@@ -10,7 +10,12 @@
 
   <ul class="admin-list">
     {% for action in actions %}
-    <li class="admin-action" data-url="{{ action.url }}" data-kind="{{ action.kind|default('post') }}">
+    <li class="admin-action"
+        data-url="{{ action.url }}"
+        data-kind="{{ action.kind|default('post') }}"
+        data-extra="{{ (action.extra or {})|tojson }}"
+        data-action-key="{{ action.url }}|{{ (action.extra or {})|tojson }}"
+        data-confirm="{{ 'true' if action.confirm or (action.extra and action.extra.get('dry') == '0') else 'false' }}">
       <div class="admin-action-text">
         <strong>{{ action.label }}</strong>
         <span class="admin-action-desc">{{ action.desc }}</span>
@@ -42,11 +47,14 @@ function loadHidden() {
 function saveHidden(set) {
   localStorage.setItem(HIDE_KEY, JSON.stringify([...set]));
 }
+function actionKey(li) {
+  return li.dataset.actionKey || li.dataset.url;
+}
 function applyHidden() {
   const hidden = loadHidden();
   let count = 0;
   document.querySelectorAll('.admin-action').forEach(li => {
-    if (hidden.has(li.dataset.url)) { li.style.display = 'none'; count++; }
+    if (hidden.has(actionKey(li))) { li.style.display = 'none'; count++; }
     else                            { li.style.display = ''; }
   });
   const bar = document.getElementById('adminHiddenBar');
@@ -65,7 +73,7 @@ document.querySelectorAll('.admin-hide-btn').forEach(btn => {
     e.stopPropagation();
     const li = btn.closest('.admin-action');
     const hidden = loadHidden();
-    hidden.add(li.dataset.url);
+    hidden.add(actionKey(li));
     saveHidden(hidden);
     applyHidden();
   });
@@ -91,8 +99,15 @@ document.querySelectorAll('.admin-action').forEach(li => {
   const out = li.querySelector('.admin-result');
   const url = li.dataset.url;
   const kind = li.dataset.kind;
+  let extra = {};
+  try { extra = JSON.parse(li.dataset.extra || '{}'); } catch (_) {}
+  const needsConfirm = li.dataset.confirm === 'true';
 
   btn.addEventListener('click', async () => {
+    if (needsConfirm) {
+      const lbl = li.querySelector('strong')?.textContent || 'this action';
+      if (!confirm(`Run "${lbl}"? This is destructive.`)) return;
+    }
     btn.disabled = true;
     out.textContent = kind === 'download' ? 'Building…' : 'Running…';
     out.className = 'admin-result running';
@@ -151,7 +166,7 @@ document.querySelectorAll('.admin-action').forEach(li => {
           out.className = 'admin-result ok';
         }
       } else {
-        const fd = new URLSearchParams({secret: SECRET});
+        const fd = new URLSearchParams({secret: SECRET, ...extra});
         const r = await fetch(url, {method: 'POST', body: fd});
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {
