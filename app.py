@@ -381,6 +381,7 @@ FIELDS = {
         {'name': 'insurance',       'label': 'Insurance',         'type': 'file'},
         {'name': 'invoice',         'label': 'Invoice',           'type': 'file'},
         {'name': 'registration',    'label': 'Registration',      'type': 'file'},
+        {'name': 'auto_title',      'label': 'Auto Title',        'type': 'file'},
     ],
     'recordings': [
         {'name': 'title',           'label': 'Title',             'type': 'text'},
@@ -601,6 +602,7 @@ def init_db():
         'ALTER TABLE art ADD COLUMN art_searched_at TEXT',
         'ALTER TABLE coins ADD COLUMN official TEXT',
         'ALTER TABLE coins ADD COLUMN specs_searched_at TEXT',
+        'ALTER TABLE vehicles ADD COLUMN auto_title TEXT',
         'ALTER TABLE watches ADD COLUMN container_1 TEXT',
         'ALTER TABLE watches ADD COLUMN container_2 TEXT',
         'ALTER TABLE art ADD COLUMN doc_2 TEXT',

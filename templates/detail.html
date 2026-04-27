@@ -995,7 +995,7 @@
   </div>
 
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg3">{{ doccell('insurance','Insurance') }}{{ doccell('invoice','Invoice') }}{{ doccell('registration','Registration') }}</div>
+  <div class="dgrid dg4">{{ doccell('insurance','Insurance') }}{{ doccell('invoice','Invoice') }}{{ doccell('registration','Registration') }}{{ doccell('auto_title','Auto Title') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell">
