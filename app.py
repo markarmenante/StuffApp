@@ -974,12 +974,18 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
 
     # "?at=<property name>" — narrow to items physically located at
     # that property. Only meaningful for categories that store a
-    # property name on each row (see CATEGORY_PROPERTY_FIELD).
+    # property name on each row (see CATEGORY_PROPERTY_FIELD). The
+    # alias group expands "Carpinteria" to also match "Carp", etc.
     if at_property:
         prop_col = CATEGORY_PROPERTY_FIELD.get(category)
         if prop_col:
-            wheres.append(f"(LOWER(TRIM(COALESCE({prop_col},''))) = LOWER(TRIM(?)))")
-            params.append(at_property)
+            aliases = _property_alias_group(at_property)
+            if aliases:
+                ph = ','.join(['?' for _ in aliases])
+                wheres.append(
+                    f"(LOWER(TRIM(COALESCE({prop_col},''))) IN ({ph}))"
+                )
+                params.extend(aliases)
 
     # Row-level access enforcement. Owners and unrestricted members
     # add nothing; restricted members get an extra
@@ -1766,16 +1772,21 @@ def list_view(category):
     # When ?at=<name> is set, resolve the matching Property's id so
     # the list page can render a "← back to <Property>" pill that
     # jumps to its detail directly (browser back also works, this
-    # is just a one-tap shortcut).
+    # is just a one-tap shortcut). Alias-aware: "Carp" or
+    # "Carpinteria" both find the same property record.
     at_property_url = None
     if at_property:
-        prop_row = db.execute(
-            "SELECT id FROM properties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
-            (at_property,)
-        ).fetchone()
-        if prop_row:
-            at_property_url = url_for('detail_view', category='properties',
-                                      record_id=prop_row['id'])
+        aliases = _property_alias_group(at_property)
+        if aliases:
+            ph = ','.join(['?' for _ in aliases])
+            prop_row = db.execute(
+                f"SELECT id FROM properties "
+                f"WHERE LOWER(TRIM(name)) IN ({ph}) LIMIT 1",
+                aliases
+            ).fetchone()
+            if prop_row:
+                at_property_url = url_for('detail_view', category='properties',
+                                          record_id=prop_row['id'])
     counts = get_counts()
     cat_info = CATEGORIES[category]
     extra_fields = LIST_EXTRA_FIELDS.get(category, [])
@@ -3730,6 +3741,31 @@ def _expand_categories(raw, role):
     if role == 'owner' or (raw or '').strip() == '*':
         return set(CATEGORIES.keys())
     return {c.strip() for c in (raw or '').split(',') if c.strip() in CATEGORIES}
+
+
+# Property name aliases — different ways the same physical property
+# is recorded across categories (Carp / Carpinteria, Truckee / Martis
+# Camp / Martis). Filtering by any one form matches all of them.
+# Keys + values are lowercase. Adding a new alias here is the only
+# change needed to make the at-property filter and the back-pill
+# lookup recognise it.
+PROPERTY_ALIASES = {
+    'carpinteria': ['carpinteria', 'carp'],
+    'carp':        ['carpinteria', 'carp'],
+    'truckee':     ['truckee', 'martis camp', 'martis'],
+    'martis camp': ['truckee', 'martis camp', 'martis'],
+    'martis':      ['truckee', 'martis camp', 'martis'],
+}
+
+
+def _property_alias_group(name):
+    """Return every equivalent form for a property name (lowercased,
+    trimmed). Falls back to a single-element list with the input
+    when the name has no known aliases."""
+    n = (name or '').strip().lower()
+    if not n:
+        return []
+    return PROPERTY_ALIASES.get(n, [n])
 
 
 # Per-category mapping of which column stores the owning Property's
