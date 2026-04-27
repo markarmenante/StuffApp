@@ -1593,7 +1593,20 @@ input[type="date"] { -webkit-appearance: none; }
   .people-table .people-row {
     /* Name | Phone (with call/sms icons) fill the viewport;
        Role / Email / Notes scroll into view. */
-    grid-template-columns: 35vw 65vw 30vw 50vw 50vw 22px;
+    grid-template-columns: 35vw 65vw 30vw 50vw 50vw 28px;
+    position: relative;
+  }
+  /* Pin the × delete button to the right edge of the visible
+     viewport even when the row is scrolled horizontally — otherwise
+     it lives at the trailing edge of a 742px-wide row that's mostly
+     off-screen on iPhone. Solid background + shadow keeps it
+     legible over scrolled content underneath. */
+  .people-table .people-del-btn {
+    position: sticky;
+    right: 4px;
+    z-index: 2;
+    opacity: 1;
+    box-shadow: -6px 0 6px -4px rgba(255, 255, 255, 0.9);
   }
 
   /* Topics on iPhone: surface the "click row for more" hint in the
