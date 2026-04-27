@@ -114,19 +114,6 @@ input[type="number"]::-webkit-outer-spin-button {
 .nav-admin:hover { color: var(--text); background: rgba(0,0,0,.07); }
 .nav-admin.active { background: var(--nav-active-bg); color: var(--text); }
 
-/* Identity chip in the right slot. */
-.nav-user {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 0 10px; font-size: 11px; color: var(--text-secondary);
-  border-left: 1px solid var(--nav-border);
-}
-.nav-user-name { font-weight: 600; color: var(--text); }
-.nav-user-role {
-  font-size: 9px; text-transform: uppercase; letter-spacing: .5px;
-  padding: 1px 5px; border-radius: 3px;
-  background: #e8f0ff; color: var(--blue);
-}
-
 /* ── FLASH MESSAGES ── */
 .flash-messages {
   position: fixed; top: calc(var(--nav-height) + 8px); right: 12px;
@@ -1623,14 +1610,11 @@ input[type="date"] { -webkit-appearance: none; }
     margin-left: 4px;
   }
 
-  /* iPhone: hide admin-y / owner-attribution chrome that's only
-     useful on desktop / iPad. The Admin gear handles app-wide
-     management; the .nav-user pill restates "Mark Armenante OWNER"
-     on every screen even though there's only one user on the phone;
-     the Owner select on the bottom bar reads "Mark" on every record
-     for the same reason. All three are visual noise on a phone. */
-  .nav-admin,
-  .nav-user { display: none; }
+  /* iPhone: hide admin-y chrome that's only useful on desktop / iPad.
+     The Admin gear handles app-wide management; the Owner select on
+     the bottom bar reads "Mark" on every record because there's only
+     one user on the phone. Both are visual noise on a phone. */
+  .nav-admin { display: none; }
   .detail-bottom .bottom-cell:has(select[name="owner"]) { display: none; }
 
   /* Thumbnails: wider on phones so photos read well at a glance. */

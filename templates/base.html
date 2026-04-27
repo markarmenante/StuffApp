@@ -52,12 +52,6 @@
       <span class="lbl">Admin</span>
     </a>
     {% endif %}
-    {% if current_user %}
-    <span class="nav-user" title="Signed in as {{ current_user.email }}">
-      <span class="nav-user-name">{{ current_user.display_name or current_user.email.split('@')[0] }}</span>
-      {% if current_user.role == 'owner' %}<span class="nav-user-role">owner</span>{% endif %}
-    </span>
-    {% endif %}
   </div>
 </nav>
 <script>
