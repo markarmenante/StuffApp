@@ -698,6 +698,21 @@ def init_db():
                 )
             except sqlite3.OperationalError:
                 pass
+
+    # One-time consolidation: every item record stored under either
+    # "Truckee" or "Martis Camp" snaps to the short form "Martis"
+    # going forward. Idempotent — re-running this migration on an
+    # already-Martis row updates 0 rows.
+    for cat, field in CATEGORY_PROPERTY_FIELD.items():
+        table = CATEGORIES[cat]['table']
+        try:
+            db.execute(
+                f"UPDATE {table} SET {field} = 'Martis' "
+                f"WHERE LOWER(TRIM(COALESCE({field}, ''))) "
+                f"      IN ('truckee', 'martis camp')"
+            )
+        except sqlite3.OperationalError:
+            pass
     db.commit()
 
 
