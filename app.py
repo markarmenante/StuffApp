@@ -1878,22 +1878,30 @@ def new_record(category):
                         val = m.group(1)
                 data[fname] = val if val else None
 
-        # Coins must have a property + date before they can save (both
-        # drive Display Position numbering downstream).
-        if category == 'coins':
-            missing = []
-            if not (data.get('property_name') or '').strip():
+        # Required fields on create. Owner is required for every
+        # category. Property is required for everything except
+        # credit_cards and persons (neither has a property field).
+        # Coins additionally need a date — Property + Date drive
+        # Display Position numbering downstream.
+        missing = []
+        if not (data.get('owner') or '').strip():
+            missing.append('Owner')
+        if category not in ('credit_cards', 'persons'):
+            prop_field = 'property_name' if category == 'coins' else 'property'
+            if not (data.get(prop_field) or '').strip():
                 missing.append('Property')
+        if category == 'coins':
             if data.get('date_1') in (None, '') and not (data.get('date_1_text') or '').strip():
                 missing.append('Date')
-            if missing:
-                err = 'Missing required field(s): ' + ', '.join(missing)
-                # AJAX autosave-on-/new flow: client expects JSON.
-                if request.headers.get('Accept', '').startswith('application/json') \
-                        or request.headers.get('X-Requested-With') == 'fetch':
-                    return jsonify({'ok': False, 'error': err}), 400
-                flash(err, 'error')
-                return redirect(url_for('new_record', category=category))
+        if missing:
+            err = 'Missing required field(s): ' + ', '.join(missing)
+            # AJAX autosave-on-/new flow: client expects JSON.
+            if request.headers.get('Accept', '').startswith('application/json') \
+                    or request.headers.get('X-Requested-With') == 'fetch':
+                return jsonify({'ok': False, 'error': err}), 400
+            flash(err, 'error')
+            return redirect(url_for('new_record', category=category))
+        if category == 'coins':
             data['coin_id'] = next_coin_id(db)
             data['cat_id'] = next_cat_id(db, data.get('property_name'), data.get('date_1'))
 
