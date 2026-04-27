@@ -1348,12 +1348,17 @@
   {% if property_topics %}
   <div class="property-topics">
     {% for t in property_topics %}
-    <a class="topic-row" href="{{ url_for('topic_detail', topic_id=t['id']) }}">
-      <div class="topic-subject">{{ t['subject'] or '' }}</div>
-      <div class="topic-body">
-        <span class="topic-body-text">{{ t['body'] or '' }}</span>
-      </div>
-    </a>
+    <div class="topic-row-wrap">
+      <a class="topic-row" href="{{ url_for('topic_detail', topic_id=t['id']) }}">
+        <div class="topic-subject">{{ t['subject'] or '' }}</div>
+        <div class="topic-body">
+          <span class="topic-body-text">{{ t['body'] or '' }}</span>
+        </div>
+      </a>
+      <button type="button" class="topic-del-btn" title="Delete this topic"
+              data-delete-url="{{ url_for('topic_delete', topic_id=t['id']) }}"
+              data-subject="{{ t['subject'] or 'this topic' }}">×</button>
+    </div>
     {% endfor %}
   </div>
   {% endif %}
@@ -2765,6 +2770,39 @@ _wireRowDelete(
   '.people-row[data-people-idx]', 'people-del-btn',
   'people-row-empty', 'peopleIdx',
   ['people_name', 'people_role', 'people_phone', 'people_email', 'people_note'], 10, 4);
+
+// Property > Topics — per-row × button: confirm, DELETE via fetch,
+// fade the row out on success. Each topic is its own DB row in the
+// topics table, so this is a real delete (not a clear-and-shift like
+// the people / medications tables above).
+document.querySelectorAll('.topic-del-btn').forEach(btn => {
+  btn.addEventListener('click', async (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const url = btn.dataset.deleteUrl;
+    if (!url) return;
+    const subj = btn.dataset.subject || 'this topic';
+    if (!window.confirm(`Delete "${subj}"? This can't be undone.`)) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Delete failed');
+      const wrap = btn.closest('.topic-row-wrap');
+      if (wrap) {
+        wrap.style.transition = 'opacity .15s';
+        wrap.style.opacity = '0';
+        setTimeout(() => wrap.remove(), 160);
+      }
+    } catch (err) {
+      btn.disabled = false;
+      alert('Delete failed: ' + (err.message || err));
+    }
+  });
+});
 
 // Property > People: tel:/sms:/mailto: action icons. Clicking grabs
 // the live value from the target input and opens the OS handler.

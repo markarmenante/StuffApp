@@ -2226,6 +2226,11 @@ def topic_delete(topic_id):
     ).fetchone()
     db.execute('DELETE FROM topics WHERE id = ?', [topic_id])
     db.commit()
+    # AJAX path (per-row × button on the property detail) — return
+    # JSON so the row can be removed in place without a navigation.
+    if request.headers.get('Accept', '').startswith('application/json') \
+            or request.headers.get('X-Requested-With') == 'fetch':
+        return jsonify({'ok': True, 'id': topic_id})
     flash('Topic deleted.', 'info')
     if row and row['property_id']:
         return redirect(url_for('detail_view', category='properties',
