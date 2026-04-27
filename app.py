@@ -1010,7 +1010,7 @@ CATEGORY_ORDER_BY = {
     'properties': ("CASE "
                    "  WHEN LOWER(COALESCE(name,'')) = 'carpinteria'    THEN 0 "
                    "  WHEN LOWER(COALESCE(name,'')) = 'martis camp'    THEN 1 "
-                   "  WHEN LOWER(COALESCE(name,'')) LIKE '%56 leonard%'  THEN 2 "
+                   "  WHEN LOWER(COALESCE(name,'')) = 'nyc'            THEN 2 "
                    "  WHEN LOWER(COALESCE(name,'')) LIKE '%42 hotaling%' THEN 3 "
                    "  WHEN LOWER(COALESCE(name,'')) LIKE '%glass house%' THEN 4 "
                    "  WHEN LOWER(COALESCE(name,'')) = 'paris'          THEN 5 "
