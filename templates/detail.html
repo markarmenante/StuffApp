@@ -513,7 +513,7 @@
              {% if is_new and not val('size') %}placeholder="Diameter"{% endif %}>
       <span class="clabel">mm</span>
     </div>
-    <div class="dcell"><select name="die_axis" style="text-align:center"><option value=""></option>{% for o in ['12','1','2','3','4','5','6','7','8','9','10','11'] %}<option value="{{ o }}" {{ 'selected' if val('die_axis')==o }}>{{ o }}h</option>{% endfor %}</select><span class="clabel">axis</span></div>
+    <div class="dcell"><select name="die_axis" style="text-align:center"><option value=""></option>{% for o in ['11','12','1','2','3','4','5','6','7','8','9','10'] %}<option value="{{ o }}" {{ 'selected' if val('die_axis')==o }}>{{ o }}h</option>{% endfor %}</select><span class="clabel">axis</span></div>
     <div class="dcell"><select name="grade" style="text-align:center"><option value=""></option>{% for o in vlists.coin_grade %}<option value="{{ o }}" {{ 'selected' if val('grade')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Grade</span></div>
     {{ numcell('strike','Strike') }}
     {{ numcell('surface','Surf') }}
