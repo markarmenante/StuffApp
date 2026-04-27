@@ -1540,9 +1540,12 @@ input[type="date"] { -webkit-appearance: none; }
 
   /* iPhone: hide admin-y / owner-attribution chrome that's only
      useful on desktop / iPad. The Admin gear handles app-wide
-     management; the Owner select reads "Mark" on every record so
-     it's visual noise on a single-user phone. */
-  .nav-admin { display: none; }
+     management; the .nav-user pill restates "Mark Armenante OWNER"
+     on every screen even though there's only one user on the phone;
+     the Owner select on the bottom bar reads "Mark" on every record
+     for the same reason. All three are visual noise on a phone. */
+  .nav-admin,
+  .nav-user { display: none; }
   .detail-bottom .bottom-cell:has(select[name="owner"]) { display: none; }
 
   /* Thumbnails: wider on phones so photos read well at a glance. */
