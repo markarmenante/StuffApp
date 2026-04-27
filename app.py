@@ -2125,15 +2125,19 @@ def detail_view(category, record_id):
         ).fetchall()
 
     # Property detail: row of pills linking to "<Items> at this
-     # property" lists. Each pill is a category the user is allowed
-     # to see AND that has a property field per CATEGORY_PROPERTY_FIELD.
+    # property" lists. Each pill is a category the user is allowed
+    # to see AND that has a property field per CATEGORY_PROPERTY_FIELD.
+    # Coins and Watches are excluded — they're stored at the property
+    # level but the user navigates them by other axes (era, brand,
+    # etc.), so the pill would just clutter the Property page.
+    PROPERTY_PILL_EXCLUDE = {'coins', 'watches'}
     property_pill_categories = []
     if category == 'properties' and record and record['name']:
         allowed = g.get('allowed_cats') or set(CATEGORIES.keys())
         property_pill_categories = [
             (slug, CATEGORIES[slug]['name'])
             for slug in CATEGORY_PROPERTY_FIELD
-            if slug in allowed
+            if slug in allowed and slug not in PROPERTY_PILL_EXCLUDE
         ]
 
     service_overdue = False
