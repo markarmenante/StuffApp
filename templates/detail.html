@@ -2664,9 +2664,24 @@ async function shareDocFiles(ev, btn) {
   const fields = (btn.dataset.fields || '').split(',').filter(Boolean);
   const form = document.getElementById('mainForm');
   const urls = [];
+  let docTitle = '';
   for (const f of fields) {
     const cell = form.querySelector(`.drop-zone[data-field="${f}"]`);
     if (!cell) continue;
+    // Pick up the cell's title for the message subject. Property docs
+    // use a .property-doc-title sibling input above the cell; ID docs
+    // use the .file-cell-name span inside.
+    if (!docTitle) {
+      const propTile = cell.closest('.property-doc');
+      if (propTile) {
+        const t = propTile.querySelector('.property-doc-title');
+        if (t && t.value.trim()) docTitle = t.value.trim();
+      }
+      if (!docTitle) {
+        const lbl = cell.querySelector('.file-cell-name');
+        if (lbl && lbl.textContent.trim()) docTitle = lbl.textContent.trim();
+      }
+    }
     const img = cell.querySelector('a.doc-link img');
     if (img && img.src) { urls.push(img.src); continue; }
     const link = cell.querySelector('a.doc-link');
@@ -2676,6 +2691,15 @@ async function shareDocFiles(ev, btn) {
     alert('Nothing to share — no files uploaded yet.');
     return;
   }
+  // Parent record name (Property name / Person name / etc.) from the
+  // form's primary "name" input — present on every detail page.
+  const recordName = (form.querySelector('input[name="name"]')?.value || '').trim();
+  if (!docTitle) docTitle = 'Document';
+  const subject = recordName ? `${recordName} — ${docTitle}` : docTitle;
+  const body = recordName
+    ? `Sharing "${docTitle}" for ${recordName}.`
+    : `Sharing "${docTitle}".`;
+
   btn.disabled = true;
   try {
     const files = [];
@@ -2685,21 +2709,34 @@ async function shareDocFiles(ev, btn) {
       const name = url.split('/').pop() || 'file';
       files.push(new File([blob], name, { type: blob.type || 'application/octet-stream' }));
     }
+    // Native share sheet (iOS, recent macOS Safari): file(s) get
+    // attached AND title/text pre-fill the draft when the user picks
+    // Mail or Messages.
     if (navigator.canShare && navigator.canShare({ files })) {
-      try { await navigator.share({ files }); }
-      catch (err) { if (err.name !== 'AbortError') throw err; }
-    } else {
-      // Desktop fallback: trigger download for each file
-      files.forEach(f => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(f);
-        a.download = f.name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      });
+      try {
+        await navigator.share({ files, title: subject, text: body });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        // Otherwise fall through to the mailto fallback.
+      }
     }
+    // Desktop / non-share-capable fallback: download each file so the
+    // user can attach manually, then open Mail with subject + body
+    // pre-filled.
+    files.forEach(f => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(f);
+      a.download = f.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    const mailto = 'mailto:?subject=' + encodeURIComponent(subject) +
+                   '&body=' + encodeURIComponent(body +
+                   '\n\n(File downloaded — attach it from your Downloads folder.)');
+    window.location.href = mailto;
   } catch (err) {
     alert('Share failed: ' + (err.message || err));
   } finally {
