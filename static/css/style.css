@@ -1397,9 +1397,16 @@ input[type="date"] { -webkit-appearance: none; }
    has an editable title input above the drop-zone so the user labels
    them per record. Mobile collapses to a 2-column tile layout — see
    the @media (max-width: 640px) block far below. */
-.property-doc { display: flex; flex-direction: column; }
+.property-doc {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
 .property-doc-title {
-  border: 1px solid var(--border); border-bottom: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
   background: #f7f7f9;
   padding: 6px 8px; font-size: 12px; font-weight: 600;
   font-family: var(--font); color: var(--text);
@@ -1408,10 +1415,17 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .property-doc-title:focus { background: #fffde8; }
 .property-doc-title::placeholder { color: #b8b8b8; font-weight: 400; }
-.property-doc-row { min-height: 150px; }
+.property-doc-row {
+  min-height: 150px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: none;
+}
 .property-doc-row .file-cell {
   padding: 8px; min-height: 150px; gap: 4px;
   justify-content: flex-start; min-width: 0;
+  border-right: none;          /* parent .property-doc carries the border */
+  border-bottom: none;
 }
 .property-doc-row .file-cell img { max-width: 100% !important; max-height: 100px !important; }
 .property-doc-row .file-cell-name { display: none; }   /* title input replaces it */
