@@ -3,7 +3,7 @@
 
 {% block content %}
 <!-- Toolbar -->
-<div class="list-toolbar list-toolbar-{{ category }}">
+<div class="list-toolbar list-toolbar-{{ category }}{% if at_property %} list-toolbar-at-prop{% endif %}">
   <span class="list-count">{{ result_count }}</span>
   <span class="list-cat-title">{{ cat_info.name }}{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
   {# When drilled in from a Property, the toolbar collapses to just
