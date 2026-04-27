@@ -410,6 +410,18 @@ CREATE TABLE IF NOT EXISTS persons (
     med_name_5 TEXT, med_dose_5 TEXT, med_note_5 TEXT,
     med_name_6 TEXT, med_dose_6 TEXT, med_note_6 TEXT,
     med_name_7 TEXT, med_dose_7 TEXT, med_note_7 TEXT,
+    id_doc_3 TEXT, id_doc_3_title TEXT,
+    id_doc_4 TEXT, id_doc_4_title TEXT,
+    id_doc_5 TEXT, id_doc_5_title TEXT,
+    id_doc_6 TEXT, id_doc_6_title TEXT,
+    id_doc_7 TEXT, id_doc_7_title TEXT,
+    id_doc_8 TEXT, id_doc_8_title TEXT,
+    health_doc_3 TEXT, health_doc_3_title TEXT,
+    health_doc_4 TEXT, health_doc_4_title TEXT,
+    health_doc_5 TEXT, health_doc_5_title TEXT,
+    health_doc_6 TEXT, health_doc_6_title TEXT,
+    health_doc_7 TEXT, health_doc_7_title TEXT,
+    health_doc_8 TEXT, health_doc_8_title TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

@@ -553,6 +553,20 @@ FIELDS = {
         *[{'name': f'med_name_{i}', 'label': f'Medication {i}', 'type': 'text'} for i in range(1, 8)],
         *[{'name': f'med_dose_{i}', 'label': f'Dosage {i}',     'type': 'text'} for i in range(1, 8)],
         *[{'name': f'med_note_{i}', 'label': f'Med Note {i}',   'type': 'text'} for i in range(1, 8)],
+        # Persons IDs tab — slots 1+2 reuse the existing license_obverse /
+        # license_reverse columns with a hardwired "License Front/Back"
+        # title; slots 3..8 are user-supplied (file + editable title).
+        *[v for i in range(3, 9) for v in (
+            {'name': f'id_doc_{i}',       'label': f'ID Doc {i}',       'type': 'file'},
+            {'name': f'id_doc_{i}_title', 'label': f'ID Doc {i} Title', 'type': 'text'},
+        )],
+        # Persons Health tab — slots 1+2 reuse health_card_obv/rev with
+        # a hardwired "Health Card Front/Back" title; slots 3..8 are
+        # user-supplied (file + editable title).
+        *[v for i in range(3, 9) for v in (
+            {'name': f'health_doc_{i}',       'label': f'Health Doc {i}',       'type': 'file'},
+            {'name': f'health_doc_{i}_title', 'label': f'Health Doc {i} Title', 'type': 'text'},
+        )],
     ],
 }
 
@@ -678,6 +692,11 @@ def init_db():
         *[f'ALTER TABLE persons ADD COLUMN med_name_{i} TEXT' for i in range(1, 8)],
         *[f'ALTER TABLE persons ADD COLUMN med_dose_{i} TEXT' for i in range(1, 8)],
         *[f'ALTER TABLE persons ADD COLUMN med_note_{i} TEXT' for i in range(1, 8)],
+        # IDs / Health 8-tile docs (slots 3..8 are user-titled)
+        *[f'ALTER TABLE persons ADD COLUMN id_doc_{i} TEXT'           for i in range(3, 9)],
+        *[f'ALTER TABLE persons ADD COLUMN id_doc_{i}_title TEXT'     for i in range(3, 9)],
+        *[f'ALTER TABLE persons ADD COLUMN health_doc_{i} TEXT'       for i in range(3, 9)],
+        *[f'ALTER TABLE persons ADD COLUMN health_doc_{i}_title TEXT' for i in range(3, 9)],
     ):
         try:
             db.execute(stmt)
@@ -687,6 +706,8 @@ def init_db():
     _ensure_owner_user(db)
     db.commit()
     _backfill_meds_from_prescriptions(db)
+    _backfill_persons_doc_slots(db)
+    db.commit()
     # Apply field-alias normalizations to legacy rows so the UI never has to
     # handle synonym values. Runs every boot — cheap (small table, indexed
     # by the rewritten column being equal to a constant) and idempotent.
@@ -737,6 +758,65 @@ def _parse_prescription_lines(text):
         else:
             out.append((' '.join(tokens[:split_at]), ' '.join(tokens[split_at:])))
     return out
+
+
+def _backfill_persons_doc_slots(db):
+    """One-time copy of the legacy single-purpose persons file fields
+    (passport / global_entry / medicare / eye_prescription /
+    other_health_1 / other_health_2) into the new id_doc_3..8 and
+    health_doc_3..8 slots so the data shows in the new tile layout.
+
+    Idempotent: only writes a slot when it's currently empty, so
+    re-running on a row whose target slot has been edited by hand
+    leaves the user's edit alone."""
+    # IDs tab — slots 3 (passport), 4 (global_entry).
+    plan_ids = [
+        (3, 'passport',     'passport_number',     'Passport'),
+        (4, 'global_entry', 'global_entry_number', 'Global Entry'),
+    ]
+    # Health tab — slots 3..6
+    plan_health = [
+        (3, 'medicare',         'medicare_number', 'Medicare Card'),
+        (4, 'eye_prescription', None,              'Eye Prescription'),
+        (5, 'other_health_1',   None,              'Other Health 1'),
+        (6, 'other_health_2',   None,              'Other Health 2'),
+    ]
+
+    def existing_cols():
+        return {r['name'] for r in db.execute("PRAGMA table_info(persons)").fetchall()}
+    cols = existing_cols()
+
+    def copy_one(slot_prefix, slot_idx, src_col, num_col, base_label):
+        if src_col not in cols: return
+        dst_file = f'{slot_prefix}_doc_{slot_idx}'
+        dst_title = f'{slot_prefix}_doc_{slot_idx}_title'
+        if dst_file not in cols or dst_title not in cols: return
+        sel = f"SELECT id, {src_col}"
+        if num_col and num_col in cols:
+            sel += f", {num_col}"
+        rows = db.execute(
+            f"{sel} FROM persons WHERE {src_col} IS NOT NULL "
+            f"AND TRIM({src_col}) != ''"
+        ).fetchall()
+        for row in rows:
+            cur = db.execute(
+                f"SELECT {dst_file}, {dst_title} FROM persons WHERE id = ?",
+                [row['id']]
+            ).fetchone()
+            if cur[dst_file]:    # slot already has a file → skip
+                continue
+            num_val = row[num_col] if (num_col and num_col in row.keys()) else ''
+            label = (base_label + (' ' + num_val if num_val else '')).strip()
+            db.execute(
+                f"UPDATE persons SET {dst_file} = ?, {dst_title} = COALESCE(NULLIF({dst_title},''), ?) "
+                f"WHERE id = ?",
+                [row[src_col], label, row['id']]
+            )
+
+    for slot, src, numc, lbl in plan_ids:
+        copy_one('id', slot, src, numc, lbl)
+    for slot, src, numc, lbl in plan_health:
+        copy_one('health', slot, src, numc, lbl)
 
 
 def _backfill_meds_from_prescriptions(db):

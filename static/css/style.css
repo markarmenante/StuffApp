@@ -1438,6 +1438,47 @@ input[type="date"] { -webkit-appearance: none; }
 .property-doc-row .file-cell img { max-width: 100% !important; max-height: 100px !important; }
 .property-doc-row .file-cell-name { display: none; }   /* title input replaces it */
 .property-doc-row .doc-link { display: flex; align-items: center; justify-content: center; }
+
+/* Persons IDs / Health docs — same bordered-tile pattern as property
+   docs. 4 across × 2 rows. Slots 1+2 of each tab use a hardwired
+   non-editable title (fixed grey label); slots 3..8 use an editable
+   input. */
+.persons-doc {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+.persons-doc-title {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: #f7f7f9;
+  padding: 6px 8px; font-size: 12px; font-weight: 600;
+  font-family: var(--font); color: var(--text);
+  outline: none;
+  text-align: left;
+}
+.persons-doc-title:focus { background: #fffde8; }
+.persons-doc-title::placeholder { color: #b8b8b8; font-weight: 400; }
+.persons-doc-title-fixed {
+  /* Hardwired-title cells: read-only label, lighter font weight to
+     distinguish from the editable inputs. */
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: default;
+}
+.persons-doc-row { gap: 8px; padding: 6px 10px; min-height: 150px; }
+.persons-doc-row .file-cell {
+  padding: 8px; min-height: 150px; gap: 4px;
+  justify-content: flex-start; min-width: 0;
+  border-right: none;
+  border-bottom: none;
+}
+.persons-doc-row .file-cell img { max-width: 100% !important; max-height: 100px !important; }
+.persons-doc-row .file-cell-name { display: none; }   /* title above replaces this */
+.persons-doc-row .doc-link { display: flex; align-items: center; justify-content: center; }
+.persons-doc-row .doc-empty-icon { font-size: 38px; }
 .file-upload-lbl { font-size: 11px; color: var(--blue); cursor: pointer; }
 .file-upload-lbl input { display: none; }
 
@@ -1698,24 +1739,25 @@ input[type="date"] { -webkit-appearance: none; }
   .dgrid.dg3 { grid-template-columns: repeat(2, 1fr); }
   .dgrid.dg2 { grid-template-columns: 1fr; }
 
-  /* Property document tiles on iPhone: 2-up cards with rounded corners,
-     soft shadow, and a generous tap target. The title input becomes the
-     card header; the drop zone fills the rest. */
-  .property-doc-row {
+  /* Property + persons document tiles on iPhone: 2-up cards with
+     rounded corners, soft shadow, and a generous tap target. The
+     title input becomes the card header; the drop zone fills the rest. */
+  .property-doc-row,
+  .persons-doc-row {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
     padding: 8px 10px;
     background: transparent;
     border-bottom: none;
   }
-  .property-doc {
+  .property-doc, .persons-doc {
     border-radius: 12px;
     overflow: hidden;
     background: #fff;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
     border: 1px solid #ececef;
   }
-  .property-doc-title {
+  .property-doc-title, .persons-doc-title {
     border: none;
     background: linear-gradient(180deg, #fafbfc, #f1f3f6);
     padding: 8px 10px;
@@ -1723,14 +1765,17 @@ input[type="date"] { -webkit-appearance: none; }
     text-align: center;
     border-bottom: 1px solid #ececef;
   }
-  .property-doc-row .file-cell {
+  .property-doc-row .file-cell,
+  .persons-doc-row .file-cell {
     border-right: none;
     background: #fff;
     min-height: 130px;
     padding: 14px 10px;
   }
-  .property-doc-row .file-cell img { max-height: 110px !important; }
-  .property-doc-row .doc-empty-icon { font-size: 38px; }
+  .property-doc-row .file-cell img,
+  .persons-doc-row .file-cell img { max-height: 110px !important; }
+  .property-doc-row .doc-empty-icon,
+  .persons-doc-row .doc-empty-icon { font-size: 38px; }
 
   /* Keep the property Purchase Date / Purchase Price inline side-by-side
      even on narrow viewports so they read as a single "when + how much". */
