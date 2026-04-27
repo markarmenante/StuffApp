@@ -58,14 +58,16 @@
   </label>
 </div>
 {% endmacro %}
-{% macro doccell(field, label, num_field='', num_label='', num_static='', share_with=None) %}
+{% macro doccell(field, label, num_field='', num_label='', num_static='', share_with=None, no_share=False) %}
 {% set f = r[field] if r else none %}
 <div class="dcell file-cell drop-zone" data-field="{{ field }}"
      data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
   {# Apple-style share icon — appears whenever there's a file to
      share (or when share_with is set, in which case it also bundles
-     the linked field's file in the same share). #}
-  {% if f or share_with is not none %}
+     the linked field's file in the same share). Suppressed entirely
+     by no_share=True (e.g. on License Back / Health Card Back —
+     shared by their Front sibling's button). #}
+  {% if (f or share_with is not none) and not no_share %}
   <button type="button" class="doc-share-btn" title="Share via Messages / Mail"
           data-fields="{{ ([field] + (share_with or []))|join(',') }}"
           onclick="shareDocFiles(event, this)" aria-label="Share">
@@ -1536,7 +1538,7 @@
     </div>
     <div class="persons-doc">
       <div class="persons-doc-title persons-doc-title-fixed">License Back</div>
-      {{ doccell('license_reverse', '') }}
+      {{ doccell('license_reverse', '', no_share=True) }}
     </div>
     {% for i in range(3, 9) %}
     <div class="persons-doc">
@@ -1559,7 +1561,7 @@
     </div>
     <div class="persons-doc">
       <div class="persons-doc-title persons-doc-title-fixed">Health Card Back</div>
-      {{ doccell('health_card_rev', '') }}
+      {{ doccell('health_card_rev', '', no_share=True) }}
     </div>
     {% for i in range(3, 9) %}
     <div class="persons-doc">
@@ -2700,10 +2702,13 @@ async function shareDocFiles(ev, btn) {
     // use a .property-doc-title sibling input above the cell; ID docs
     // use the .file-cell-name span inside.
     if (!docTitle) {
-      const propTile = cell.closest('.property-doc');
-      if (propTile) {
-        const t = propTile.querySelector('.property-doc-title');
-        if (t && t.value.trim()) docTitle = t.value.trim();
+      const tile = cell.closest('.property-doc, .persons-doc');
+      if (tile) {
+        const t = tile.querySelector('.property-doc-title, .persons-doc-title');
+        if (t) {
+          const v = t.value !== undefined ? t.value : t.textContent;
+          if (v && v.trim()) docTitle = v.trim();
+        }
       }
       if (!docTitle) {
         const lbl = cell.querySelector('.file-cell-name');
@@ -2721,12 +2726,12 @@ async function shareDocFiles(ev, btn) {
   }
   // Parent record name (Property name / Person name / etc.) from the
   // form's primary "name" input — present on every detail page.
+  // The shared message body is just the name; no subject elaboration,
+  // no "Sharing X for Y" sentence — the attached files speak for
+  // themselves. (User: "Just use my name as the text in addition to
+  // the images.")
   const recordName = (form.querySelector('input[name="name"]')?.value || '').trim();
-  if (!docTitle) docTitle = 'Document';
-  const subject = recordName ? `${recordName} — ${docTitle}` : docTitle;
-  const body = recordName
-    ? `Sharing "${docTitle}" for ${recordName}.`
-    : `Sharing "${docTitle}".`;
+  const messageText = recordName || docTitle || '';
 
   btn.disabled = true;
   try {
@@ -2742,7 +2747,7 @@ async function shareDocFiles(ev, btn) {
     // Mail or Messages.
     if (navigator.canShare && navigator.canShare({ files })) {
       try {
-        await navigator.share({ files, title: subject, text: body });
+        await navigator.share({ files, text: messageText });
         return;
       } catch (err) {
         if (err.name === 'AbortError') return;
@@ -2750,8 +2755,8 @@ async function shareDocFiles(ev, btn) {
       }
     }
     // Desktop / non-share-capable fallback: download each file so the
-    // user can attach manually, then open Mail with subject + body
-    // pre-filled.
+    // user can attach manually, then open Mail with the name as both
+    // subject and (very short) body.
     files.forEach(f => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(f);
@@ -2761,9 +2766,8 @@ async function shareDocFiles(ev, btn) {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     });
-    const mailto = 'mailto:?subject=' + encodeURIComponent(subject) +
-                   '&body=' + encodeURIComponent(body +
-                   '\n\n(File downloaded — attach it from your Downloads folder.)');
+    const mailto = 'mailto:?subject=' + encodeURIComponent(messageText) +
+                   '&body=' + encodeURIComponent(messageText);
     window.location.href = mailto;
   } catch (err) {
     alert('Share failed: ' + (err.message || err));
