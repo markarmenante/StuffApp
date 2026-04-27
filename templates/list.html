@@ -121,14 +121,6 @@
      class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
      title="Sold vehicles">Sold</a>
   {% endif %}
-  {% if category == 'cameras' and not at_property %}
-  <a href="{{ url_for('list_view', category=category, q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
-     class="toolbar-btn pill {% if coin_filter == 'own' %}active{% endif %}"
-     title="Status: Own">Own</a>
-  <a href="{{ url_for('list_view', category=category, q=q or None, filter=None if coin_filter == 'other' else 'other') }}"
-     class="toolbar-btn pill {% if coin_filter == 'other' %}active{% endif %}"
-     title="Status: anything but Own">Other</a>
-  {% endif %}
   {# Hide the search bar on lists short enough to scan visually
      (rifles / audio / vehicles / pens / persons / credit_cards).
      The other categories are large enough that search earns its
