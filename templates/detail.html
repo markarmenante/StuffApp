@@ -81,7 +81,7 @@
   <span class="file-cell-name">{{ label }}</span>
   {% if f %}
     {% if f|is_image %}
-      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" class="doc-link" onclick="event.stopPropagation()">
+      <a href="{{ url_for('uploaded_file', filename=f) }}" class="doc-link" onclick="event.stopPropagation()">
         <img src="{{ url_for('uploaded_file', filename=f) }}" style="max-height:50px">
       </a>
     {% elif f.lower().endswith('.pdf') %}

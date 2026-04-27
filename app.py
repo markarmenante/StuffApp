@@ -1685,17 +1685,40 @@ def index():
 
 @app.route('/persons-default')
 def persons_default():
-    """Entry point used by the People nav tab — opens Mark's detail
-    page directly so the tab lands on the most-used record instead of
-    the full list. Back / search / direct list URLs still route
+    """Entry point used by the People nav tab — opens the most relevant
+    person detail directly so the tab lands on a useful record instead
+    of the full list. Back / search / direct list URLs still route
     through list_view normally.
+
+    Resolution order:
+      1. The current user's display_name (set in admin/users) — match
+         it as a name fragment against persons.name. Lets young.sohn@…
+         with display_name "Young Sohn" land on the Sohn record.
+      2. Fall back to "Mark Armenante" — the historical default and
+         what most users want when there's no display_name set.
     """
     db = get_db()
-    row = db.execute(
-        "SELECT id FROM persons "
-        "WHERE name LIKE 'Mark%Armenante%' "
-        "ORDER BY length(name) DESC LIMIT 1"
-    ).fetchone()
+    row = None
+    user = g.get('current_user') or {}
+    display = (user.get('display_name') or '').strip()
+    if display:
+        # Build a fragment pattern: "Young Sohn" → "%Young%Sohn%".
+        # Matches even if the persons.name has a middle name in
+        # between (e.g. "Young A. Sohn").
+        parts = [p for p in display.split() if p]
+        if parts:
+            pattern = '%' + '%'.join(parts) + '%'
+            row = db.execute(
+                "SELECT id FROM persons WHERE name LIKE ? "
+                "ORDER BY length(name) DESC LIMIT 1",
+                (pattern,)
+            ).fetchone()
+    if not row:
+        row = db.execute(
+            "SELECT id FROM persons "
+            "WHERE name LIKE 'Mark%Armenante%' "
+            "ORDER BY length(name) DESC LIMIT 1"
+        ).fetchone()
     if row:
         return redirect(url_for('detail_view', category='persons', record_id=row['id']))
     return redirect(url_for('list_view', category='persons'))
