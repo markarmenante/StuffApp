@@ -111,7 +111,7 @@ VALUE_LISTS = {
     'strap_color': ['Black','Blue','Blue/Gray','Brown','Burgundy','Dk Brown','Eggplant','Gold','Gray','Green','Lt Brown','Navy Blue','Red','Rose Gold','Stainless','Tan','Titanium','White Gold'],
     'owner': ['YM','Mark','Young'],
     'property': [
-        'Carp','Carpinteria','NYC','SF','Truckee',
+        'Carp','Carpinteria','NYC','SF','Truckee','Martis',
         '770 Ladera','Paris','Paris Saint-Guillaume',
         'Ghent: Pond House','Ghent: Glass House',
         'Ghent: Rec Center','Ghent: Rec Center/Arena','Ghent: Harlemville',
