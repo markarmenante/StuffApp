@@ -5,8 +5,12 @@
 <!-- Toolbar -->
 <div class="list-toolbar list-toolbar-{{ category }}">
   <span class="list-count">{{ result_count }}</span>
-  <span class="list-cat-title">{{ cat_info.name }}</span>
+  <span class="list-cat-title">{{ cat_info.name }}{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
   <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
+  {# Drilled in from a Property — give a one-tap way back. #}
+  {% if at_property and at_property_url %}
+  <a class="list-at-back" href="{{ at_property_url }}" title="Back to {{ at_property }}">&larr; {{ at_property }}</a>
+  {% endif %}
   {% if category == 'coins' %}
   {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
   <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} pgs</a>
@@ -135,7 +139,7 @@
 {% if rows %}
 <div class="item-list item-list-{{ category }}">
   {% for row in rows %}
-  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None) }}">
+  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None) }}">
 
     <!-- Thumbnail -->
     <div class="item-thumb"

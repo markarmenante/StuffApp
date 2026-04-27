@@ -1422,6 +1422,21 @@
     {% endfor %}
   </div>
 
+  {# Pill row: jump to a filtered list of every category-item that
+     lives at this property (e.g. all Art at Carpinteria). Only
+     categories the current user is allowed to see render here. #}
+  {% if property_pill_categories and val('name') %}
+  <div class="section-bar">Items at this property</div>
+  <div class="property-items-pills">
+    {% for slug, name in property_pill_categories %}
+    <a class="property-item-pill"
+       href="{{ url_for('list_view', category=slug, at=val('name')) }}">
+      {{ name }}
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <!-- Ten freeform document slots (deeds / insurance / warranties / …)
        in a 5 x 2 grid on desktop; mobile collapses to a 2-column grid
        (see .property-doc-row in style.css). Each has its own editable

@@ -1113,6 +1113,39 @@ input[type="date"] { -webkit-appearance: none; }
 .property-topics .topic-row-wrap:nth-child(even) .topic-row:hover {
   background: #e6ecf4;
 }
+/* Pill row of category links sitting under the People table on the
+   Property detail. Each pill is a tap-target that jumps to that
+   category's list filtered to "items at this property". */
+.property-items-pills {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 10px 12px;
+  background: var(--surface);
+}
+.property-item-pill {
+  display: inline-flex; align-items: center;
+  padding: 5px 12px; border-radius: 13px;
+  border: 1px solid var(--border); background: #fff;
+  color: var(--text); font-size: 12px; font-weight: 500;
+  text-decoration: none; white-space: nowrap;
+}
+.property-item-pill:hover {
+  background: rgba(0, 96, 223, 0.06);
+  border-color: var(--blue); color: var(--blue);
+  text-decoration: none;
+}
+
+/* "← back to <Property>" pill at the top of a list filtered by
+   ?at= so the user can return to the originating Property detail
+   without juggling the browser's back stack. */
+.list-at-back {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 0 12px; height: 26px; border-radius: 13px;
+  border: 1px solid var(--border); background: #fff;
+  color: var(--text); font-size: 12px; font-weight: 500;
+  text-decoration: none; white-space: nowrap;
+}
+.list-at-back:hover { background: rgba(0,0,0,.05); text-decoration: none; }
+
 .topic-del-btn {
   position: absolute;
   right: 6px; top: 50%; transform: translateY(-50%);

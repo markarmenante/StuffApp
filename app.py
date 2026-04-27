@@ -926,7 +926,7 @@ def _normalize_numeric_term(term):
     return s or term
 
 
-def build_search_query(category, q, dot=False, coin_filter=None):
+def build_search_query(category, q, dot=False, coin_filter=None, at_property=None):
     """Build a SELECT with optional text search and/or dot (unresolved) filter."""
     table = CATEGORIES[category]['table']
     text_fields = [f['name'] for f in FIELDS[category]
@@ -971,6 +971,15 @@ def build_search_query(category, q, dot=False, coin_filter=None):
         clause, extra_params = cat_filters[coin_filter]
         wheres.append(f"({clause})")
         params += list(extra_params)
+
+    # "?at=<property name>" — narrow to items physically located at
+    # that property. Only meaningful for categories that store a
+    # property name on each row (see CATEGORY_PROPERTY_FIELD).
+    if at_property:
+        prop_col = CATEGORY_PROPERTY_FIELD.get(category)
+        if prop_col:
+            wheres.append(f"(LOWER(TRIM(COALESCE({prop_col},''))) = LOWER(TRIM(?)))")
+            params.append(at_property)
 
     # Row-level access enforcement. Owners and unrestricted members
     # add nothing; restricted members get an extra
@@ -1737,6 +1746,8 @@ def list_view(category):
     dot = request.args.get('dot', '') == '1'
     raw_filter = request.args.get('filter')
     coin_filter = (raw_filter or '').strip() or None
+    # ?at=<property name> — drill in from a Property's pill row.
+    at_property = (request.args.get('at') or '').strip() or None
     # Default filters apply on a fresh visit (no explicit ?filter= and no
     # search query). An active search bypasses the default so users don't
     # have to click Other / clear filter just to find a sold/loaned item.
@@ -1748,8 +1759,23 @@ def list_view(category):
             coin_filter = 'own'
         if category in ('cameras', 'lenses') and raw_filter is None:
             coin_filter = 'own'
-    sql, params = build_search_query(category, q, dot=dot, coin_filter=coin_filter)
+    sql, params = build_search_query(category, q, dot=dot,
+                                     coin_filter=coin_filter,
+                                     at_property=at_property)
     rows = db.execute(sql, params).fetchall()
+    # When ?at=<name> is set, resolve the matching Property's id so
+    # the list page can render a "← back to <Property>" pill that
+    # jumps to its detail directly (browser back also works, this
+    # is just a one-tap shortcut).
+    at_property_url = None
+    if at_property:
+        prop_row = db.execute(
+            "SELECT id FROM properties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
+            (at_property,)
+        ).fetchone()
+        if prop_row:
+            at_property_url = url_for('detail_view', category='properties',
+                                      record_id=prop_row['id'])
     counts = get_counts()
     cat_info = CATEGORIES[category]
     extra_fields = LIST_EXTRA_FIELDS.get(category, [])
@@ -1776,6 +1802,8 @@ def list_view(category):
                            q=q,
                            dot=dot,
                            coin_filter=coin_filter,
+                           at_property=at_property,
+                           at_property_url=at_property_url,
                            prop_status=prop_status,
                            prop_type=prop_type,
                            result_count=len(rows),
@@ -1901,6 +1929,7 @@ def new_record(category):
                            property_topics=None,
                            camera_compatible_lenses=None,
                            lens_compatible_cameras=None,
+                           property_pill_categories=None,
                            back_href=None,
                            service_overdue=None,
                            service_years=None,
@@ -1936,10 +1965,12 @@ def detail_view(category, record_id):
     # not the entire collection.
     nav_q = (request.args.get('q') or '').strip()
     nav_filter = (request.args.get('filter') or '').strip() or None
-    if nav_q or nav_filter:
+    nav_at = (request.args.get('at') or '').strip() or None
+    if nav_q or nav_filter or nav_at:
         try:
             nav_sql, nav_params = build_search_query(
-                category, nav_q, dot=False, coin_filter=nav_filter)
+                category, nav_q, dot=False, coin_filter=nav_filter,
+                at_property=nav_at)
         except Exception:
             nav_sql, nav_params = None, None
         if nav_sql:
@@ -2039,9 +2070,10 @@ def detail_view(category, record_id):
     if back_href is None:
         back_q = (request.args.get('q') or '').strip() or None
         back_filter = (request.args.get('filter') or '').strip() or None
-        if back_q or back_filter:
+        back_at = (request.args.get('at') or '').strip() or None
+        if back_q or back_filter or back_at:
             back_href = url_for('list_view', category=category,
-                                q=back_q, filter=back_filter) \
+                                q=back_q, filter=back_filter, at=back_at) \
                         + f'#item-{record_id}'
 
     # Camera detail: list every lens with the same mount and property,
@@ -2081,6 +2113,18 @@ def detail_view(category, record_id):
             [record['mount'], record['property'], mount_brand],
         ).fetchall()
 
+    # Property detail: row of pills linking to "<Items> at this
+     # property" lists. Each pill is a category the user is allowed
+     # to see AND that has a property field per CATEGORY_PROPERTY_FIELD.
+    property_pill_categories = []
+    if category == 'properties' and record and record['name']:
+        allowed = g.get('allowed_cats') or set(CATEGORIES.keys())
+        property_pill_categories = [
+            (slug, CATEGORIES[slug]['name'])
+            for slug in CATEGORY_PROPERTY_FIELD
+            if slug in allowed
+        ]
+
     service_overdue = False
     service_years = None
     if category == 'watches' and record['service_date']:
@@ -2110,6 +2154,7 @@ def detail_view(category, record_id):
                            coin_age_val=coin_age_val,
                            property_topics=property_topics,
                            camera_compatible_lenses=camera_compatible_lenses,
+                           property_pill_categories=property_pill_categories,
                            lens_compatible_cameras=lens_compatible_cameras,
                            back_href=back_href,
                            service_overdue=service_overdue,
@@ -3685,6 +3730,24 @@ def _expand_categories(raw, role):
     if role == 'owner' or (raw or '').strip() == '*':
         return set(CATEGORIES.keys())
     return {c.strip() for c in (raw or '').split(',') if c.strip() in CATEGORIES}
+
+
+# Per-category mapping of which column stores the owning Property's
+# name. Categories not listed here can't be filtered "at <property>"
+# (e.g. credit cards, persons). Used by the Property detail's pill
+# row and by /<cat>?at=<name> list filtering.
+CATEGORY_PROPERTY_FIELD = {
+    'watches':    'property',
+    'coins':      'property_name',
+    'cameras':    'property',
+    'lenses':     'property',
+    'pens':       'property',
+    'art':        'property',
+    'vehicles':   'property',
+    'recordings': 'property',
+    'audio':      'property',
+    'rifles':     'property',
+}
 
 
 # Row-level filtering. Per category, which fields can a member be
