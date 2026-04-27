@@ -2142,10 +2142,10 @@ def detail_view(category, record_id):
     # Property detail: row of pills linking to "<Items> at this
     # property" lists. Each pill is a category the user is allowed
     # to see AND that has a property field per CATEGORY_PROPERTY_FIELD.
-    # Coins and Watches are excluded — they're stored at the property
-    # level but the user navigates them by other axes (era, brand,
-    # etc.), so the pill would just clutter the Property page.
-    PROPERTY_PILL_EXCLUDE = {'coins', 'watches'}
+    # Coins is excluded — they're navigated by era and the Coins map
+    # already covers location. Watches is included so users with
+    # watch access can drill into watches at this property.
+    PROPERTY_PILL_EXCLUDE = {'coins'}
     property_pill_categories = []
     if category == 'properties' and record and record['name']:
         allowed = g.get('allowed_cats') or set(CATEGORIES.keys())
