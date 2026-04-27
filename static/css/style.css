@@ -280,6 +280,14 @@ input[type="number"]::-webkit-outer-spin-button {
    own 120px width from the @media (max-width: 640px) block below. */
 .item-list-properties .item-thumb     { width: 125px; }
 .item-list-properties .item-thumb img { max-width: 125px; }
+
+/* Hard divider between the Residential and Commercial blocks on the
+   property list. Bold dark line so it reads as a section break. */
+.property-type-divider {
+  height: 0;
+  border-top: 3px solid var(--text);
+  margin: 4px 0;
+}
 .row-share-btn {
   position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
   display: inline-flex; align-items: center; justify-content: center;

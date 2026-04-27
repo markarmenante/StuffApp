@@ -101,17 +101,11 @@
      title="Music at Truckee (Martis)">Martis</a>
   {% endif %}
   {% if category == 'properties' and not at_property %}
-  {# Each pill cycles its own axis; the other axis stays put so they combine. #}
-  {%- set next_status = {None: 'own', 'own': 'sold', 'sold': None}[prop_status] -%}
-  {%- set next_type   = {None: 'commercial', 'commercial': 'residential', 'residential': None}[prop_type] -%}
-  {%- set status_url_filter = ((next_status or '') + (('_' + prop_type) if (next_status and prop_type) else (prop_type or ''))) or None -%}
-  {%- set type_url_filter   = ((prop_status or '') + (('_' + next_type) if (prop_status and next_type) else (next_type or '')) if prop_status else (next_type or None)) -%}
-  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=status_url_filter) }}"
-     class="toolbar-btn pill {% if prop_status %}active{% endif %}"
-     title="Cycle: Own → Sold → all">{% if prop_status == 'own' %}Own{% elif prop_status == 'sold' %}Sold{% else %}Own / Sold{% endif %}</a>
-  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=type_url_filter) }}"
-     class="toolbar-btn pill {% if prop_type %}active{% endif %}"
-     title="Cycle: Commercial → Residential → all">{% if prop_type == 'commercial' %}Commercial{% elif prop_type == 'residential' %}Residential{% else %}Comm / Res{% endif %}</a>
+  {# Single pill flips between Own and Sold. Default = own. #}
+  {%- set next_status = 'sold' if prop_status == 'own' else 'own' -%}
+  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=next_status) }}"
+     class="toolbar-btn pill active"
+     title="Toggle: Own ↔ Sold">{{ 'Own' if prop_status == 'own' else 'Sold' }}</a>
   {% endif %}
   {% if category == 'vehicles' and not at_property %}
   <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
@@ -146,7 +140,14 @@
 <!-- List -->
 {% if rows %}
 <div class="item-list item-list-{{ category }}">
+  {# Properties: bold divider where the Residential block ends and the
+     Commercial block begins. ns.prev tracks the prior row's type so we
+     can detect the boundary mid-loop. #}
+  {% set ns = namespace(prev=None) %}
   {% for row in rows %}
+  {% if category == 'properties' and ns.prev == 'Residential' and (row['type'] or '') == 'Commercial' %}
+  <div class="property-type-divider" aria-hidden="true"></div>
+  {% endif %}
   <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None) }}">
 
     <!-- Thumbnail -->
@@ -472,6 +473,7 @@
 
     </div><!-- /item-body -->
   </div>
+  {% if category == 'properties' %}{% set ns.prev = row['type'] %}{% endif %}
   {% endfor %}
 </div>
 

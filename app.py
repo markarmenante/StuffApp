@@ -1017,9 +1017,14 @@ CATEGORY_ORDER_BY = {
                 "COALESCE(NULLIF(description, ''), 'zzz')"),
     'vehicles': ("COALESCE(NULLIF(make, ''), 'zzz'), "
                  "COALESCE(NULLIF(model, ''), 'zzz')"),
-    # Featured-first sort for the six primary homes, then Residential
-    # before Commercial, then alphabetical (case-insensitive).
-    'properties': ("CASE "
+    # Type first (Residential block, then Commercial block, with a
+    # bold divider rendered between them in the template), then the
+    # six primary homes featured-first within each type, then alpha.
+    'properties': ("CASE COALESCE(type,'') "
+                   "WHEN 'Residential' THEN 0 "
+                   "WHEN 'Commercial'  THEN 1 "
+                   "ELSE 2 END, "
+                   "CASE "
                    "  WHEN LOWER(COALESCE(name,'')) = 'carpinteria'    THEN 0 "
                    "  WHEN LOWER(COALESCE(name,'')) = 'nyc'            THEN 1 "
                    "  WHEN LOWER(COALESCE(name,'')) = 'martis'         THEN 2 "
@@ -1028,10 +1033,6 @@ CATEGORY_ORDER_BY = {
                    "  WHEN LOWER(COALESCE(name,'')) = 'paris'          THEN 5 "
                    "  ELSE 99 "
                    "END, "
-                   "CASE COALESCE(type,'') "
-                   "WHEN 'Residential' THEN 0 "
-                   "WHEN 'Commercial'  THEN 1 "
-                   "ELSE 2 END, "
                    "LOWER(COALESCE(name,''))"),
     # Cards: sort by description (the bank/issuer name shown next to
     # each card) descending so heavier-use families group together.
@@ -1772,7 +1773,7 @@ def list_view(category):
     # An explicit empty ?filter= still clears all filters.
     if not q:
         if category == 'properties' and raw_filter is None:
-            coin_filter = 'own_residential'
+            coin_filter = 'own'
         if category == 'vehicles' and raw_filter is None:
             coin_filter = 'own'
     sql, params = build_search_query(category, q, dot=dot,
