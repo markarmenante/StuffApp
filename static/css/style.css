@@ -906,6 +906,23 @@ input[type="date"] { -webkit-appearance: none; }
 .doc-share-btn:focus { outline: none; }
 .doc-share-btn:disabled { opacity: 0.4; cursor: default; }
 
+/* Per-file delete button — sits at the upper-LEFT so it can't be
+   confused with the share button on the right. Muted by default,
+   reddens on hover. */
+.doc-delete-btn {
+  position: absolute; top: 4px; left: 4px;
+  width: 22px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.92);
+  color: var(--text-label); border-radius: 50%;
+  font-size: 14px; line-height: 1; cursor: pointer; z-index: 2;
+  opacity: 0.55; transition: opacity .12s, background .12s, color .12s, border-color .12s;
+}
+.doc-delete-btn:hover {
+  opacity: 1; background: #ffe9e6; color: #c0392b; border-color: #e6b6ad;
+}
+.doc-delete-btn:disabled { opacity: 0.3; cursor: wait; }
+
 /* Medications table inside the Health pill panel */
 .med-table { padding: 6px 10px 4px; position: relative; }
 .med-table .med-row {

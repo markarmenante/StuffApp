@@ -80,6 +80,14 @@
     </svg>
   </button>
   {% endif %}
+  {# Per-file delete (× upper-left) — only when a file is present and
+     the record exists. Clears the column on the server; the on-disk
+     file is left in place (cleanup is a separate admin concern). #}
+  {% if f and not is_new %}
+  <button type="button" class="doc-delete-btn" title="Remove this file"
+          data-field="{{ field }}"
+          onclick="deleteDocFile(event, this)" aria-label="Remove">×</button>
+  {% endif %}
   <span class="file-cell-name">{{ label }}</span>
   {% if f %}
     {% if f|is_image %}
@@ -2685,6 +2693,55 @@ async function shareCardDetails(ev) {
     } catch (_) {
       prompt('Copy this text:', text);
     }
+  }
+}
+
+async function deleteDocFile(ev, btn) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (!confirm('Remove this file? The cell will be empty after this.')) return;
+  const cell = btn.closest('.drop-zone');
+  if (!cell) return;
+  const field = btn.dataset.field;
+  const uploadUrl = cell.dataset.uploadUrl || '';
+  if (!uploadUrl) {
+    alert('Cannot delete: record not saved yet.');
+    return;
+  }
+  const deleteUrl = uploadUrl.replace(/\/upload-image$/, '/delete-file');
+  btn.disabled = true;
+  try {
+    const resp = await fetch(deleteUrl, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({field}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      alert('Delete failed: ' + (data.error || 'HTTP ' + resp.status));
+      btn.disabled = false;
+      return;
+    }
+    // Strip the file preview, share, and delete from the cell; restore
+    // the empty-state placeholder so the cell still reads as a drop
+    // target.
+    cell.querySelectorAll('a.doc-link, .doc-share-btn, .doc-delete-btn, img:not([src=""])')
+        .forEach(el => el.remove());
+    if (!cell.querySelector('.doc-empty-icon')) {
+      const ph = document.createElement('span');
+      ph.className = 'doc-empty-icon';
+      ph.setAttribute('aria-hidden', 'true');
+      ph.textContent = '📄';
+      const lbl = cell.querySelector('.file-cell-name');
+      if (lbl) lbl.after(ph); else cell.insertBefore(ph, cell.firstChild);
+    }
+    // Reset the local file input so a re-upload via picker isn't
+    // pre-filled with the just-deleted selection.
+    const input = cell.querySelector('input[type="file"]');
+    if (input) input.value = '';
+  } catch (err) {
+    alert('Delete failed: ' + (err.message || err));
+    btn.disabled = false;
   }
 }
 

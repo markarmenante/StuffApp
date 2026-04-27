@@ -3617,6 +3617,31 @@ def upload_image(category, record_id):
     return jsonify({'url': url_for('uploaded_file', filename=stored)})
 
 
+@app.route('/<category>/<record_id>/delete-file', methods=['POST'])
+def delete_file_field(category, record_id):
+    """Clear a single file column on a record (NULL it out). Leaves
+    the file on disk; only removes the DB reference. Validated against
+    FIELDS so only declared file fields can be cleared."""
+    if category not in CATEGORIES:
+        return jsonify({'error': 'Unknown category'}), 400
+    payload = request.get_json(silent=True) or {}
+    field_name = (payload.get('field') or '').strip()
+    valid = {f['name']: f for f in FIELDS[category]}
+    if field_name not in valid or valid[field_name].get('type') != 'file':
+        return jsonify({'error': 'Invalid file field'}), 400
+    db = get_db()
+    table = CATEGORIES[category]['table']
+    cols = [row['name'] for row in db.execute(f"PRAGMA table_info({table})").fetchall()]
+    if field_name not in cols:
+        return jsonify({'error': 'Column not in table'}), 400
+    db.execute(
+        f"UPDATE {table} SET {field_name} = NULL, updated_at = ? WHERE id = ?",
+        [datetime.utcnow().isoformat(), record_id],
+    )
+    db.commit()
+    return jsonify({'ok': True})
+
+
 # ---------------------------------------------------------------------------
 # Template filters
 # ---------------------------------------------------------------------------
