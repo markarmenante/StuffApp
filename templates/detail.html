@@ -995,7 +995,35 @@
   </div>
 
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  <div class="dgrid dg4">{{ doccell('insurance','Insurance') }}{{ doccell('invoice','Invoice') }}{{ doccell('registration','Registration') }}{{ doccell('auto_title','Auto Title') }}</div>
+  {# Each vehicle doc gets an editable title above its drop-zone (same
+     pattern Property docs use). Default-name placeholders so empty
+     titles still read as the slot's purpose. #}
+  <div class="dgrid dg4 vehicle-doc-row">
+    <div class="property-doc">
+      <input type="text" name="insurance_label"
+             value="{{ val('insurance_label') }}"
+             class="property-doc-title" placeholder="Insurance">
+      {{ doccell('insurance', '') }}
+    </div>
+    <div class="property-doc">
+      <input type="text" name="invoice_label"
+             value="{{ val('invoice_label') }}"
+             class="property-doc-title" placeholder="Invoice">
+      {{ doccell('invoice', '') }}
+    </div>
+    <div class="property-doc">
+      <input type="text" name="registration_label"
+             value="{{ val('registration_label') }}"
+             class="property-doc-title" placeholder="Registration">
+      {{ doccell('registration', '') }}
+    </div>
+    <div class="property-doc">
+      <input type="text" name="auto_title_label"
+             value="{{ val('auto_title_label') }}"
+             class="property-doc-title" placeholder="Auto Title">
+      {{ doccell('auto_title', '') }}
+    </div>
+  </div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell">
