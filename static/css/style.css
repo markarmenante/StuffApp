@@ -1001,7 +1001,8 @@ input[type="date"] { -webkit-appearance: none; }
 .people-table { padding: 6px 10px 4px; position: relative; }
 .people-table .people-row {
   display: grid;
-  grid-template-columns: 20% 14% 23% 18% 25% 22px;
+  /* Columns: Name | Phone | Role | Email | Notes | × */
+  grid-template-columns: 20% 23% 14% 18% 25% 22px;
   align-items: stretch;
 }
 .people-cell-phone, .people-cell-email {
@@ -1520,6 +1521,22 @@ input[type="date"] { -webkit-appearance: none; }
   .item-cat-id { font-size: 14px; }
   .ropt        { font-size: 15px; }
   .rdot        { width: 12px; height: 12px; }
+
+  /* Property tables on iPhone: keep the most useful columns in view
+     and let the rest scroll horizontally. Alarm codes shows
+     Entry+Code; People shows Name+Phone+Role. Total row width
+     intentionally exceeds the viewport so Email / Notes scroll. */
+  .alarm-codes-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .alarm-codes-table .alarm-codes-row {
+    grid-template-columns: 130px 130px 240px 22px;
+    min-width: max-content;
+  }
+  .people-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .people-table .people-row {
+    /* Name | Phone | Role | Email | Notes | × */
+    grid-template-columns: 110px 150px 100px 180px 180px 22px;
+    min-width: max-content;
+  }
 
   /* Thumbnails: wider on phones so photos read well at a glance. */
   .item-thumb        { width: 120px; min-height: 120px; }

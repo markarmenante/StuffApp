@@ -1398,17 +1398,17 @@
   <div class="section-bar">People</div>
   <div class="people-table dcell">
     <div class="people-row people-head">
-      <span>Name</span><span>Role</span><span>Phone</span><span>Email</span><span>Notes</span><span></span>
+      <span>Name</span><span>Phone</span><span>Role</span><span>Email</span><span>Notes</span><span></span>
     </div>
     {% for i in range(1, 11) %}
     <div class="people-row" data-people-idx="{{ i }}">
       <input type="text" name="people_name_{{ i }}"  value="{{ val('people_name_'  ~ i) }}">
-      <input type="text" name="people_role_{{ i }}"  value="{{ val('people_role_'  ~ i) }}">
       <div class="people-cell-phone">
         <input type="text" inputmode="tel" name="people_phone_{{ i }}" value="{{ val('people_phone_' ~ i) }}">
         <button type="button" class="ppl-act" data-action="tel" data-target="people_phone_{{ i }}" title="Call">📞</button>
         <button type="button" class="ppl-act" data-action="sms" data-target="people_phone_{{ i }}" title="Text">💬</button>
       </div>
+      <input type="text" name="people_role_{{ i }}"  value="{{ val('people_role_'  ~ i) }}">
       <div class="people-cell-email">
         <input type="email" name="people_email_{{ i }}" value="{{ val('people_email_' ~ i) }}">
         <button type="button" class="ppl-act" data-action="mail" data-target="people_email_{{ i }}" title="Email">✉️</button>
