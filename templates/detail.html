@@ -1371,7 +1371,7 @@
   </div>
 
   <div class="section-bar topics-bar">
-    <span>Topics</span>
+    <span>Topics<span class="topics-hint"> &mdash; click row for more</span></span>
     {% if not is_new %}
     <a class="add-topic-link" href="{{ url_for('topic_new', property_id=r['id']) }}">+ Topic</a>
     {% endif %}
