@@ -6,6 +6,37 @@
 
 
 // ---------------------------------------------------------------------------
+// iOS 18 Apple Intelligence: suppress the "Writing Tools" popover
+// (Proofread / Rewrite / Summarize) that appears whenever text is
+// selected in an editable field. The writingsuggestions="false"
+// attribute opts that field out of the AI menu without affecting
+// keyboard, autocorrect, or normal selection. Apply it to every
+// input/textarea once on page load and again whenever new editable
+// elements show up (e.g. modal openers).
+// ---------------------------------------------------------------------------
+function suppressWritingSuggestions(root) {
+  (root || document)
+    .querySelectorAll('input, textarea, [contenteditable]')
+    .forEach(el => el.setAttribute('writingsuggestions', 'false'));
+}
+document.addEventListener('DOMContentLoaded', () => suppressWritingSuggestions());
+// Catch dynamically-inserted inputs (lookup review modal, autosave
+// row inserts, etc.) the same way without rebinding individual code
+// paths.
+new MutationObserver(records => {
+  for (const rec of records) {
+    rec.addedNodes.forEach(n => {
+      if (n.nodeType !== 1) return;
+      if (n.matches && n.matches('input, textarea, [contenteditable]')) {
+        n.setAttribute('writingsuggestions', 'false');
+      }
+      if (n.querySelectorAll) suppressWritingSuggestions(n);
+    });
+  }
+}).observe(document.documentElement, { childList: true, subtree: true });
+
+
+// ---------------------------------------------------------------------------
 // File upload preview
 // ---------------------------------------------------------------------------
 
