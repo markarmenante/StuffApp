@@ -1538,6 +1538,13 @@ input[type="date"] { -webkit-appearance: none; }
     min-width: max-content;
   }
 
+  /* iPhone: hide admin-y / owner-attribution chrome that's only
+     useful on desktop / iPad. The Admin gear handles app-wide
+     management; the Owner select reads "Mark" on every record so
+     it's visual noise on a single-user phone. */
+  .nav-admin { display: none; }
+  .detail-bottom .bottom-cell:has(select[name="owner"]) { display: none; }
+
   /* Thumbnails: wider on phones so photos read well at a glance. */
   .item-thumb        { width: 120px; min-height: 120px; }
   .item-thumb img    { max-width: 120px; max-height: 120px; }

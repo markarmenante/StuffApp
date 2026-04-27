@@ -59,11 +59,15 @@
 </div>
 {% endmacro %}
 {% macro doccell(field, label, num_field='', num_label='', num_static='', share_with=None) %}
+{% set f = r[field] if r else none %}
 <div class="dcell file-cell drop-zone" data-field="{{ field }}"
      data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
-  {% if share_with is not none %}
+  {# Apple-style share icon — appears whenever there's a file to
+     share (or when share_with is set, in which case it also bundles
+     the linked field's file in the same share). #}
+  {% if f or share_with is not none %}
   <button type="button" class="doc-share-btn" title="Share via Messages / Mail"
-          data-fields="{{ ([field] + share_with)|join(',') }}"
+          data-fields="{{ ([field] + (share_with or []))|join(',') }}"
           onclick="shareDocFiles(event, this)" aria-label="Share">
     <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
          stroke="currentColor" stroke-width="2"
@@ -75,7 +79,6 @@
   </button>
   {% endif %}
   <span class="file-cell-name">{{ label }}</span>
-  {% set f = r[field] if r else none %}
   {% if f %}
     {% if f|is_image %}
       <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" class="doc-link" onclick="event.stopPropagation()">
