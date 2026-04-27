@@ -1522,20 +1522,33 @@ input[type="date"] { -webkit-appearance: none; }
   .ropt        { font-size: 15px; }
   .rdot        { width: 12px; height: 12px; }
 
-  /* Property tables on iPhone: keep the most useful columns in view
-     and let the rest scroll horizontally. Alarm codes shows
-     Entry+Code; People shows Name+Phone+Role. Total row width
-     intentionally exceeds the viewport so Email / Notes scroll. */
-  .alarm-codes-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Property tables on iPhone: keep the most useful columns sized
+     to fill the visible viewport (vw units) and let the rest sit
+     just past the right edge, reachable by horizontal swipe.
+     !important on overflow-x because .dcell { overflow: hidden }
+     applies to these tables too — without forcing it, the row
+     gets clipped instead of scrolled. */
+  .alarm-codes-table.dcell { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
   .alarm-codes-table .alarm-codes-row {
-    grid-template-columns: 130px 130px 240px 22px;
-    min-width: max-content;
+    /* Entry | Code fill the viewport; Notes lives past the edge. */
+    grid-template-columns: 50vw 50vw 70vw 22px;
   }
-  .people-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .people-table.dcell { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
   .people-table .people-row {
-    /* Name | Phone | Role | Email | Notes | × */
-    grid-template-columns: 110px 150px 100px 180px 180px 22px;
-    min-width: max-content;
+    /* Name | Phone (with call/sms icons) fill the viewport;
+       Role / Email / Notes scroll into view. */
+    grid-template-columns: 35vw 65vw 30vw 50vw 50vw 22px;
+  }
+
+  /* Topics on iPhone: add a faded hint under each row so it's clear
+     the row is tappable and reveals more. */
+  .property-topics .topic-row::after {
+    content: "Click for more information…";
+    grid-column: 1 / -1;
+    color: var(--text-hint);
+    font-size: 11px;
+    font-style: italic;
+    padding: 1px 10px 4px;
   }
 
   /* iPhone: hide admin-y / owner-attribution chrome that's only
