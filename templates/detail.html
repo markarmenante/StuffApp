@@ -1548,6 +1548,20 @@
     {{ cell('blood_type','Blood Type') }}
   </div>
 
+  {# Owner pinned at the bottom of the Persons detail — same pattern
+     other categories use, so the admin row-filter on persons.owner
+     can scope which user can see whose record. #}
+  <div class="detail-bottom">
+    <div class="bottom-cell">
+      {% set _ow = val('owner') %}
+      <select name="owner">
+        <option value=""></option>
+        {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}
+      </select>
+      <span class="blabel">Owner</span>
+    </div>
+  </div>
+
   {% endif %}{# end category blocks #}
 
   {% if is_new %}

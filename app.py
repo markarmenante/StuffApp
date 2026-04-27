@@ -506,6 +506,7 @@ FIELDS = {
     ],
     'persons': [
         {'name': 'name',                  'label': 'Name',                   'type': 'text'},
+        {'name': 'owner',                 'label': 'Owner',                  'type': 'text'},
         {'name': 'phone',                 'label': 'Phone',                  'type': 'text'},
         {'name': 'home_address',          'label': 'Home Address',           'type': 'textarea'},
         {'name': 'birth_date',            'label': 'Birth Date',             'type': 'date'},
@@ -609,6 +610,7 @@ def init_db():
         'ALTER TABLE vehicles ADD COLUMN auto_title TEXT',
         'ALTER TABLE vehicles ADD COLUMN insurance_label TEXT',
         'ALTER TABLE users ADD COLUMN row_filters TEXT',
+        'ALTER TABLE persons ADD COLUMN owner TEXT',
         'ALTER TABLE vehicles ADD COLUMN invoice_label TEXT',
         'ALTER TABLE vehicles ADD COLUMN registration_label TEXT',
         'ALTER TABLE vehicles ADD COLUMN auto_title_label TEXT',
@@ -3822,6 +3824,7 @@ ROW_FILTER_FIELDS = {
     'rifles':       ['owner'],
     'credit_cards': ['owner'],
     'properties':   ['owner'],
+    'persons':      ['owner'],
 }
 # field name → VALUE_LISTS key for picking allowed values in the UI.
 ROW_FILTER_VALUE_LISTS = {
