@@ -1024,8 +1024,8 @@ CATEGORY_ORDER_BY = {
     # before Commercial, then alphabetical (case-insensitive).
     'properties': ("CASE "
                    "  WHEN LOWER(COALESCE(name,'')) = 'carpinteria'    THEN 0 "
-                   "  WHEN LOWER(COALESCE(name,'')) = 'martis camp'    THEN 1 "
-                   "  WHEN LOWER(COALESCE(name,'')) = 'nyc'            THEN 2 "
+                   "  WHEN LOWER(COALESCE(name,'')) = 'nyc'            THEN 1 "
+                   "  WHEN LOWER(COALESCE(name,'')) = 'martis'         THEN 2 "
                    "  WHEN LOWER(COALESCE(name,'')) LIKE '%42 hotaling%' THEN 3 "
                    "  WHEN LOWER(COALESCE(name,'')) LIKE '%glass house%' THEN 4 "
                    "  WHEN LOWER(COALESCE(name,'')) = 'paris'          THEN 5 "
