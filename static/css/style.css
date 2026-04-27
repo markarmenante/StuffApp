@@ -989,11 +989,14 @@ input[type="date"] { -webkit-appearance: none; }
    alarm codes) always render their cell inputs left-aligned, even
    inside detail pages that center their generic .dcell inputs.
    Tabular data reads as columns of left-aligned strings, not as
-   centered single values. */
+   centered single values. !important is intentional — the page-wide
+   .detail-page-* .dcell input { text-align: center } rule has higher
+   specificity (0,3,1 vs 0,1,1) and would otherwise win. This is
+   exactly the case the page rule is supposed to be overridden for. */
 .people-table input,
 .med-table input,
 .alarm-codes-table input {
-  text-align: left;
+  text-align: left !important;
 }
 .people-table { padding: 6px 10px 4px; position: relative; }
 .people-table .people-row {
