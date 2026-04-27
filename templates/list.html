@@ -6,12 +6,18 @@
 <div class="list-toolbar list-toolbar-{{ category }}">
   <span class="list-count">{{ result_count }}</span>
   <span class="list-cat-title">{{ cat_info.name }}{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
+  {# When drilled in from a Property, the toolbar collapses to just
+     the back-pill + search. The Add button and category-specific
+     filter pills (Own / Sold / Carp / etc.) all build URLs without
+     the ?at= param and would silently break the navigation chain. #}
+  {% if not at_property %}
   <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
+  {% endif %}
   {# Drilled in from a Property — give a one-tap way back. #}
   {% if at_property and at_property_url %}
   <a class="list-at-back" href="{{ at_property_url }}" title="Back to {{ at_property }}">&larr; {{ at_property }}</a>
   {% endif %}
-  {% if category == 'coins' %}
+  {% if category == 'coins' and not at_property %}
   {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
   <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} pgs</a>
   <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
@@ -61,7 +67,7 @@
      title="Coins with status Ordered">Ordered</a>
   {% endif %}
   {% endif %}
-  {% if category == 'watches' %}
+  {% if category == 'watches' and not at_property %}
   {% if has_ordered or coin_filter == 'ordered' %}
   <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
@@ -88,7 +94,7 @@
      class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
      title="Music at Truckee (Martis)">Martis</a>
   {% endif %}
-  {% if category == 'properties' %}
+  {% if category == 'properties' and not at_property %}
   {# Each pill cycles its own axis; the other axis stays put so they combine. #}
   {%- set next_status = {None: 'own', 'own': 'sold', 'sold': None}[prop_status] -%}
   {%- set next_type   = {None: 'commercial', 'commercial': 'residential', 'residential': None}[prop_type] -%}
@@ -101,7 +107,7 @@
      class="toolbar-btn pill {% if prop_type %}active{% endif %}"
      title="Cycle: Commercial → Residential → all">{% if prop_type == 'commercial' %}Commercial{% elif prop_type == 'residential' %}Residential{% else %}Comm / Res{% endif %}</a>
   {% endif %}
-  {% if category == 'vehicles' %}
+  {% if category == 'vehicles' and not at_property %}
   <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
      class="toolbar-btn pill {% if coin_filter == 'own' %}active{% endif %}"
      title="Own vehicles">Own</a>
@@ -109,7 +115,7 @@
      class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
      title="Sold vehicles">Sold</a>
   {% endif %}
-  {% if category == 'cameras' or category == 'lenses' %}
+  {% if (category == 'cameras' or category == 'lenses') and not at_property %}
   <a href="{{ url_for('list_view', category=category, q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
      class="toolbar-btn pill {% if coin_filter == 'own' %}active{% endif %}"
      title="Status: Own">Own</a>

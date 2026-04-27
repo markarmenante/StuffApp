@@ -128,8 +128,12 @@
       </svg>
     </button>
     {% endif %}
+    {# Lookup / Check / History pills are owner-only — they make
+       Anthropic API calls that bill against the owner's account, and
+       members shouldn't be able to spend on someone else's data. #}
+    {%- set _is_owner = g.current_user and g.current_user.role == 'owner' -%}
     {% if not is_new %}
-      {% if category == 'watches' %}
+      {% if category == 'watches' and _is_owner %}
       <button type="button"
               class="watch-lookup-btn{% if r['specs_searched_at'] %} done{% endif %}"
               data-url="{{ url_for('watch_lookup_specs', record_id=r['id']) }}"
@@ -138,7 +142,7 @@
       </button>
       {% endif %}
     {% endif %}
-    {% if category == 'coins' %}
+    {% if category == 'coins' and _is_owner %}
     {# Check + History pills render even on the new-coin form. The
        autosave-on-new path creates the record on first interaction,
        and the Check JS calls ensureRecord() before fetching so the
@@ -158,7 +162,7 @@
     </button>
     {% endif %}
     {% if not is_new %}
-      {% if category == 'art' %}
+      {% if category == 'art' and _is_owner %}
       <button type="button"
               class="watch-lookup-btn art-lookup-btn{% if r['art_searched_at'] %} done{% endif %}"
               data-url="{{ url_for('art_lookup_bio', record_id=r['id']) }}"
