@@ -391,6 +391,7 @@
       </select>
       <span class="blabel">Status</span>
     </div>
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">
       {% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}
       <select name="owner">
@@ -399,6 +400,7 @@
       </select>
       <span class="blabel">Owner</span>
     </div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -736,7 +738,9 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.camera_status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -824,7 +828,9 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -878,7 +884,9 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -941,6 +949,7 @@
       </div>
       <!-- Owner | Status -->
       <div class="dgrid dg2 art-purchase">
+        {% if current_user and current_user.role == 'owner' %}
         {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
         <div class="dcell">
           <select name="owner">
@@ -949,6 +958,7 @@
           </select>
           <span class="clabel">Owner</span>
         </div>
+        {% endif %}
         {{ selcell('status','Status', vlists.status) }}
       </div>
       <!-- Notes + Receipt sit under the data fields, inside the
@@ -1012,10 +1022,11 @@
   </div>
 
   <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
-  {# Each vehicle doc gets an editable title above its drop-zone (same
-     pattern Property docs use). Default-name placeholders so empty
-     titles still read as the slot's purpose. #}
-  <div class="dgrid dg4 vehicle-doc-row">
+  {# Vehicle documents — 4 across × 2 rows = 8 tiles. Slots 1..4 reuse
+     the existing insurance / invoice / registration / auto_title
+     columns (with their _label-driven placeholder hints) so legacy
+     data isn't disturbed. Slots 5..8 are fully user-supplied. #}
+  <div class="dgrid dg4 property-doc-row">
     <div class="property-doc">
       <input type="text" name="insurance_label"
              value="{{ val('insurance_label') }}"
@@ -1041,6 +1052,16 @@
       {{ doccell('auto_title', '') }}
     </div>
   </div>
+  <div class="dgrid dg4 property-doc-row">
+    {% for i in range(5, 9) %}
+    <div class="property-doc">
+      <input type="text" name="vehicle_doc_{{ i }}_title"
+             value="{{ val('vehicle_doc_' ~ i ~ '_title') }}"
+             class="property-doc-title" placeholder="Doc {{ i }}">
+      {{ doccell('vehicle_doc_' ~ i, '') }}
+    </div>
+    {% endfor %}
+  </div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell">
@@ -1051,7 +1072,9 @@
       </select>
       <span class="blabel">Status</span>
     </div>
-    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% if current_user and current_user.role == 'owner' %}
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1137,7 +1160,9 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status">{% for s in ['','Own','Ordered'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1186,7 +1211,9 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1237,7 +1264,9 @@
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1320,7 +1349,9 @@
   <div class="dgrid dg1">{{ cell('billing_address','Billing Address') }}</div>
 
   <div class="detail-bottom">
-    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% if current_user and current_user.role == 'owner' %}
+    <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1472,7 +1503,9 @@
 
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="status">{% for s in ['','Own','Sold'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}<select name="owner">{% for o in ['','YM','Mark','Young'] %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1590,14 +1623,16 @@
      other categories use, so the admin row-filter on persons.owner
      can scope which user can see whose record. #}
   <div class="detail-bottom">
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">
-      {% set _ow = val('owner') %}
+      {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
       <select name="owner">
         <option value=""></option>
         {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}
       </select>
       <span class="blabel">Owner</span>
     </div>
+    {% endif %}
   </div>
 
   {% endif %}{# end category blocks #}

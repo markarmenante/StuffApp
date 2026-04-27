@@ -197,6 +197,27 @@ def normalize_field_value(table, field_name, value):
     return aliases.get(value.strip().lower(), value)
 
 
+# Default owner assigned to brand-new records when the form's owner
+# field is blank (which it always is for member users — the field is
+# hidden in the template for them). Owner-role users see the owner
+# dropdown and can override these defaults at create time.
+DEFAULT_OWNER_BY_CATEGORY = {
+    'watches':      'Mark',
+    'coins':        'Mark',
+    'properties':   'YM',
+    'credit_cards': 'YM',
+    'persons':      'YM',
+    'cameras':      'Mark',
+    'lenses':       'Mark',
+    'pens':         'Mark',
+    'art':          'YM',
+    'vehicles':     'YM',
+    'recordings':   'Mark',
+    'audio':        'Mark',
+    'rifles':       'Mark',
+}
+
+
 FIELDS = {
     'watches': [
         {'name': 'brand',           'label': 'Brand',             'type': 'text'},
@@ -386,6 +407,12 @@ FIELDS = {
         {'name': 'invoice_label',       'label': 'Invoice Title',       'type': 'text'},
         {'name': 'registration_label',  'label': 'Registration Title',  'type': 'text'},
         {'name': 'auto_title_label',    'label': 'Auto Title Label',    'type': 'text'},
+        # Slots 5..8 — fully user-supplied (file + editable title) to
+        # match the property docs pattern.
+        *[v for i in range(5, 9) for v in (
+            {'name': f'vehicle_doc_{i}',       'label': f'Vehicle Doc {i}',       'type': 'file'},
+            {'name': f'vehicle_doc_{i}_title', 'label': f'Vehicle Doc {i} Title', 'type': 'text'},
+        )],
     ],
     'recordings': [
         {'name': 'title',           'label': 'Title',             'type': 'text'},
@@ -628,6 +655,9 @@ def init_db():
         'ALTER TABLE vehicles ADD COLUMN invoice_label TEXT',
         'ALTER TABLE vehicles ADD COLUMN registration_label TEXT',
         'ALTER TABLE vehicles ADD COLUMN auto_title_label TEXT',
+        # Vehicle docs slots 5..8 (full user-supplied title + file)
+        *[f'ALTER TABLE vehicles ADD COLUMN vehicle_doc_{i} TEXT'        for i in range(5, 9)],
+        *[f'ALTER TABLE vehicles ADD COLUMN vehicle_doc_{i}_title TEXT'  for i in range(5, 9)],
         'ALTER TABLE watches ADD COLUMN container_1 TEXT',
         'ALTER TABLE watches ADD COLUMN container_2 TEXT',
         'ALTER TABLE art ADD COLUMN doc_2 TEXT',
@@ -1952,6 +1982,16 @@ def new_record(category):
                         val = m.group(1)
                 data[fname] = val if val else None
 
+        # Owner default — applied whenever the form arrived without an
+        # owner. For member users the owner field is hidden, so this
+        # branch always fires; owners only hit it if they explicitly
+        # cleared the dropdown. Each category has its own canonical
+        # default per the user's preference map.
+        if not (data.get('owner') or '').strip():
+            d = DEFAULT_OWNER_BY_CATEGORY.get(category)
+            if d:
+                data['owner'] = d
+
         # Required fields on create. Owner is required for every
         # category. Property is required for everything except
         # credit_cards and persons (neither has a property field).
@@ -2295,6 +2335,10 @@ def save_field(category, record_id):
     valid_fields = {f['name']: f for f in FIELDS[category]}
     if field_name not in valid_fields:
         return jsonify({'error': f'Unknown field: {field_name}'}), 400
+    # Owner field is owner-only — members can't edit it via the API
+    # even if they hit save_field directly (the UI hides the input).
+    if field_name == 'owner' and (g.get('current_user') or {}).get('role') != 'owner':
+        return jsonify({'error': 'Forbidden'}), 403
 
     field = valid_fields[field_name]
     if field.get('readonly') or field['type'] == 'file':

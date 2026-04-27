@@ -209,6 +209,10 @@ CREATE TABLE IF NOT EXISTS vehicles (
     insurance TEXT,
     invoice TEXT,
     registration TEXT,
+    vehicle_doc_5 TEXT, vehicle_doc_5_title TEXT,
+    vehicle_doc_6 TEXT, vehicle_doc_6_title TEXT,
+    vehicle_doc_7 TEXT, vehicle_doc_7_title TEXT,
+    vehicle_doc_8 TEXT, vehicle_doc_8_title TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
