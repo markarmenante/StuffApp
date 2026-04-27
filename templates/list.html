@@ -426,7 +426,10 @@
         </div>
         <div class="item-detail-rows">
           {% if row['address'] %}<div class="idr property-address-row"><span>{{ row['address'] }}</span></div>{% endif %}
-          {% if row['alarm_code_1'] %}
+          {# Show the first row of the alarm-codes table (Code column).
+             Replaces the old single alarm_code_1 column with the
+             user-curated "primary" alarm in row 1. #}
+          {% if row['alarm_codes_code_1'] %}
           <div class="idr alarm-row">
             <span class="alarm-icon" aria-hidden="true">
               <svg viewBox="0 0 20 22" width="16" height="18" fill="currentColor">
@@ -434,7 +437,7 @@
                 <path fill="#ffffff" d="M8 9V8a2 2 0 1 1 4 0v1h1v5H7V9h1zm1 0h2V8a1 1 0 1 0-2 0v1z"/>
               </svg>
             </span>
-            <span>{{ row['alarm_code_1'] }}</span>
+            <span>{{ row['alarm_codes_code_1'] }}</span>
           </div>
           {% endif %}
           {% if row['wifi_name'] or row['wifi'] %}

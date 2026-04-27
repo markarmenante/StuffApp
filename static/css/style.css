@@ -971,6 +971,12 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .alarm-codes-table .alarm-codes-row.alarm-codes-head > span { padding: 0 4px; text-align: left; }
 .alarm-codes-table .alarm-codes-row:not(.alarm-codes-head):nth-child(odd) { background: var(--cell-bg); }
+/* Row 1 is the "primary" alarm — its Code value is what the
+   property list view surfaces. Tint it pale yellow so the user can
+   see at a glance which row matters most. */
+.alarm-codes-table .alarm-codes-row[data-alarm-idx="1"] {
+  background: #fff8d4 !important;
+}
 .alarm-codes-table .alarm-codes-row:not(.alarm-codes-head) > input {
   border: none; outline: none; background: transparent;
   font-family: var(--font); font-size: 14px; color: #111111;
