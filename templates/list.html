@@ -121,7 +121,7 @@
      class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
      title="Sold vehicles">Sold</a>
   {% endif %}
-  {% if (category == 'cameras' or category == 'lenses') and not at_property %}
+  {% if category == 'cameras' and not at_property %}
   <a href="{{ url_for('list_view', category=category, q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
      class="toolbar-btn pill {% if coin_filter == 'own' %}active{% endif %}"
      title="Status: Own">Own</a>

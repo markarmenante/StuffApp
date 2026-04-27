@@ -890,10 +890,8 @@ CATEGORY_FILTERS = {
         'own':   ("LOWER(TRIM(COALESCE(status,''))) = 'own'",  []),
         'other': ("LOWER(TRIM(COALESCE(status,''))) <> 'own'", []),
     },
-    'lenses': {
-        'own':   ("LOWER(TRIM(COALESCE(status,''))) = 'own'",  []),
-        'other': ("LOWER(TRIM(COALESCE(status,''))) <> 'own'", []),
-    },
+    # Lenses intentionally has no filter map — the list always shows
+    # every record. Toolbar pills removed; default filter removed.
     'properties': {
         # Single-axis filters
         'own':         ("LOWER(TRIM(COALESCE(status,''))) = 'own'", []),
@@ -1780,7 +1778,7 @@ def list_view(category):
             coin_filter = 'own_residential'
         if category == 'vehicles' and raw_filter is None:
             coin_filter = 'own'
-        if category in ('cameras', 'lenses') and raw_filter is None:
+        if category == 'cameras' and raw_filter is None:
             coin_filter = 'own'
     sql, params = build_search_query(category, q, dot=dot,
                                      coin_filter=coin_filter,
