@@ -11,7 +11,13 @@
      filter pills (Own / Sold / Carp / etc.) all build URLs without
      the ?at= param and would silently break the navigation chain. #}
   {% if not at_property %}
+  {% if current_user and current_user.role != 'owner' %}
+  <a href="{{ url_for('new_record', category=category) }}"
+     class="toolbar-btn add add-labeled"
+     title="Add {{ cat_info.singular }}">Add {{ cat_info.singular }}</a>
+  {% else %}
   <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
+  {% endif %}
   {% endif %}
   {# Drilled in from a Property — give a one-tap way back. #}
   {% if at_property and at_property_url %}
