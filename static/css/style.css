@@ -1199,6 +1199,19 @@ input[type="date"] { -webkit-appearance: none; }
    the @media (max-width: 640px) block below flips it to inline. */
 .topics-hint { display: none; }
 
+/* Inline annotation that sits next to a section-bar title (e.g. the
+   Alarm bar's "First row reserved for Alarm Code" hint). Reads as
+   faded helper text without inheriting the section bar's uppercase /
+   tracked-out styling. */
+.section-bar-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  color: var(--text-hint);
+  margin-left: 4px;
+}
+
 /* "+ Topic" pill — sized to fit inside the thin Topics section-bar.
    Resets section-bar's inherited uppercase / letter-spacing / weight
    so the button reads as a button, not a heading. */
