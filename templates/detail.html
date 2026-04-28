@@ -1416,6 +1416,7 @@
 
   <div class="coin-imgs">
     <div class="coin-img-panel drop-zone" data-field="image_front"
+         data-file="{{ r['image_front'] if r and r['image_front'] else '' }}"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_front'] and r['image_front']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_front']) }}" alt="Front">
@@ -1424,6 +1425,7 @@
       <input type="file" name="image_front" accept="image/*" style="display:none">
     </div>
     <div class="coin-img-panel drop-zone" data-field="image_back"
+         data-file="{{ r['image_back'] if r and r['image_back'] else '' }}"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_back'] and r['image_back']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_back']) }}" alt="Back">
@@ -2892,58 +2894,55 @@ async function shareCardDetails(ev) {
   const text = lines.join('\n');
   if (!text) { alert('Nothing to share — fill in some fields first.'); return; }
 
-  // Collect front/back image URLs. Mirrors the working shareDocFiles
-  // pattern below — same fetch → File → navigator.share({files, text})
-  // path, no MIME or filename rewriting (which iOS may treat as a
-  // mismatched attachment and silently drop).
+  // Collect front/back image URLs. Prefer the panel's data-file
+  // attribute (set on render whether or not the browser can preview
+  // the file inline) — that lets HEIC / non-image-extension files
+  // also get attached via /uploads/<filename>. Falls back to the
+  // rendered <img>'s src for older render paths.
   const urls = [];
-  const imgDiag = [];
   for (const field of ['image_front', 'image_back']) {
     const panel = form.querySelector(`.drop-zone[data-field="${field}"]`);
-    const img = panel && panel.querySelector('img');
-    if (img && img.src) {
-      urls.push(img.src);
-      imgDiag.push(`${field}: ${img.src.split('/').pop()}`);
-    } else {
-      imgDiag.push(`${field}: (no <img> rendered — likely unsupported extension or empty)`);
+    if (!panel) continue;
+    const filename = (panel.dataset.file || '').trim();
+    if (filename) {
+      urls.push('/uploads/' + filename);
+      continue;
     }
+    const img = panel.querySelector('img');
+    if (img && img.src) urls.push(img.src);
   }
 
   try {
     const files = [];
     for (const url of urls) {
-      const resp = await fetch(url);
-      const blob = await resp.blob();
-      const name = url.split('/').pop() || 'file';
-      files.push(new File([blob], name, { type: blob.type || 'application/octet-stream' }));
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) continue;
+        const blob = await resp.blob();
+        const name = url.split('/').pop() || 'file';
+        files.push(new File([blob], name, { type: blob.type || 'application/octet-stream' }));
+      } catch (_) { /* skip a bad fetch, keep the others */ }
     }
-    // Diagnostic: surface what we collected so we can see whether the
-    // template rendered the <img> tags, what types/sizes came back, and
-    // whether the OS reports the bundle as shareable. Remove once the
-    // image-attachment behavior is confirmed.
-    const diag = [
-      'Share diagnostic:',
-      ...imgDiag,
-      `files collected: ${files.length}`,
-      ...files.map(f => `  → ${f.name} (${f.type || 'no-mime'}, ${f.size}B)`),
-      `canShare(files): ${!!(files.length && navigator.canShare && navigator.canShare({ files }))}`,
-      `canShare(files+text): ${!!(files.length && navigator.canShare && navigator.canShare({ files, text }))}`,
-    ].join('\n');
-    if (!confirm(diag + '\n\nProceed with share?')) return;
-    if (files.length && navigator.canShare && navigator.canShare({ files })) {
+
+    // Try the native share sheet with files attached.
+    if (files.length && navigator.canShare && navigator.canShare({ files, text })) {
       try {
         await navigator.share({ files, text });
         return;
       } catch (err) {
         if (err.name === 'AbortError') return;
-        // Fall through to text-only / desktop fallback.
+        // Native share with files failed — drop through to download
+        // path so the images aren't silently lost in a text-only share.
       }
     }
-    if (navigator.share) {
+    // No file-share support (or it threw a non-abort error). If
+    // there's nothing to attach, fall back to text-only share. If we
+    // DO have files, prefer downloading them + copying text — never
+    // text-only when files exist.
+    if (!files.length && navigator.share) {
       try { await navigator.share({ text }); return; }
       catch (err) { if (err.name === 'AbortError') return; }
     }
-    // Desktop fallback: download each image + copy text to clipboard.
     files.forEach(f => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(f);
