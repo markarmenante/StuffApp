@@ -51,6 +51,12 @@
       <span class="icon">⬇</span>
       <span class="lbl">Files</span>
     </a>
+    <a href="{{ url_for('sweep_files') }}"
+       class="nav-item nav-sweep {% if current_category == '__sweep__' %}active{% endif %}"
+       title="Upload from a StuffFiles folder (folder picker on desktop, file picker on iOS)">
+      <span class="icon">⬆</span>
+      <span class="lbl">Sweep</span>
+    </a>
     {% endif %}
     {% if current_user and current_user.role == 'owner' %}
     <a href="{{ url_for('admin_index') }}"

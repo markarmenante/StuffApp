@@ -1053,6 +1053,52 @@ def get_file_fields(category):
     return [f['name'] for f in FIELDS[category] if f['type'] == 'file']
 
 
+def _title_field_for(category, file_field):
+    """Return the paired *_title / *_label column for a file field, or
+    None if the field has no companion title column. Source of truth is
+    EXPORT_LAYOUT (defined later); falls back to a name convention
+    when EXPORT_LAYOUT isn't available yet (e.g. early-boot lookups)."""
+    plan = globals().get('EXPORT_LAYOUT', {}).get(category)
+    if plan:
+        for spec in plan['files']:
+            f, _, title_field = spec
+            if f == file_field:
+                return title_field
+    # Fallback convention: try <field>_title then <field>_label.
+    for f in [f['name'] for f in FIELDS.get(category, [])]:
+        if f == file_field + '_title':
+            return f
+    return None
+
+
+def _autofill_title_from_filename(db, table, record_id, category,
+                                  file_field, original_filename):
+    """When a file lands on a slot that has a paired _title/_label
+    column, default that title to the upload's original basename —
+    but only if the column is currently empty. Never overwrites a
+    user-set title. No-op if there's no paired title column."""
+    if not original_filename:
+        return
+    title_field = _title_field_for(category, file_field)
+    if not title_field:
+        return
+    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    if title_field not in cols:
+        return
+    cur = db.execute(
+        f"SELECT {title_field} FROM {table} WHERE id = ?", [record_id]
+    ).fetchone()
+    if cur and (cur[title_field] or '').strip():
+        return
+    base = os.path.splitext(os.path.basename(original_filename))[0].strip()
+    if not base:
+        return
+    db.execute(
+        f"UPDATE {table} SET {title_field} = ? WHERE id = ?",
+        [base, record_id],
+    )
+
+
 EXCLUDED_STATUSES = ('Own', 'Sold', 'Gifted', 'Own')  # dot filter excludes these
 
 CATEGORY_FILTERS = {
@@ -2208,6 +2254,9 @@ def new_record(category):
         now = datetime.utcnow().isoformat()
         data = {'id': record_id, 'created_at': now, 'updated_at': now}
 
+        # Track originals so we can default empty *_title columns to the
+        # uploaded file's basename after the row is parsed.
+        file_originals = {}
         for field in FIELDS[category]:
             fname = field['name']
             if field.get('readonly'):
@@ -2217,6 +2266,8 @@ def new_record(category):
                 stored = save_upload(f)
                 if stored:
                     data[fname] = stored
+                    if f and f.filename:
+                        file_originals[fname] = f.filename
                 else:
                     data[fname] = None
             elif field['type'] == 'checkbox-group':
@@ -2232,6 +2283,17 @@ def new_record(category):
                     if m:
                         val = m.group(1)
                 data[fname] = val if val else None
+
+        # Auto-fill empty *_title / *_label columns with the uploaded
+        # file's basename for each file field that has a paired title
+        # column. Only fills when the user didn't supply a title via
+        # the form — never overwrites.
+        for file_field, original in file_originals.items():
+            title_field = _title_field_for(category, file_field)
+            if title_field and not (data.get(title_field) or '').strip():
+                base = os.path.splitext(os.path.basename(original))[0].strip()
+                if base:
+                    data[title_field] = base
 
         # Owner default — applied whenever the form arrived without an
         # owner. For member users the owner field is hidden, so this
@@ -3960,6 +4022,8 @@ def upload_image(category, record_id):
         return jsonify({'error': 'Invalid field'}), 400
     db.execute(f"UPDATE {table} SET {image_field} = ?, updated_at = ? WHERE id = ?",
                [stored, datetime.utcnow().isoformat(), record_id])
+    _autofill_title_from_filename(db, table, record_id, category,
+                                  image_field, f.filename)
     db.commit()
 
     return jsonify({'url': url_for('uploaded_file', filename=stored)})
@@ -5084,6 +5148,17 @@ def _collect_referenced_uploads(db):
     return referenced
 
 
+def _norm(s):
+    """Aggressive normalization for matching folder/identifier strings
+    across the export ↔ sweep round trip. Lowercased, whitespace
+    collapsed, filesystem-hostile chars stripped (mirrors _safe_path
+    rules so an item written one way matches itself read back)."""
+    bad = set('/\\:*?"<>|\n\r\t')
+    s = ''.join(c for c in (s or '') if c not in bad)
+    s = re.sub(r'\s+', ' ', s).strip(' .').lower()
+    return s
+
+
 def _safe_path(*parts):
     """Strip filesystem-hostile characters from each path segment so the
     zip writes cleanly across macOS / iCloud Drive."""
@@ -5239,6 +5314,8 @@ EXPORT_CATEGORY_LABELS = {
     'lenses': 'Lenses', 'pens': 'Pens', 'art': 'Art', 'vehicles': 'Vehicles',
     'recordings': 'Music', 'audio': 'Audio', 'rifles': 'Rifles',
 }
+# Reverse map for the sweep tool — pretty label → category slug.
+EXPORT_LABEL_TO_CATEGORY = {v: k for k, v in EXPORT_CATEGORY_LABELS.items()}
 
 
 @app.route('/export-files', methods=['GET'])
@@ -5329,6 +5406,235 @@ def admin_export_files():
     fname = f'StuffFiles-{user["email"].split("@")[0]}-{ts}.zip'
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype='application/zip')
+
+
+def _build_record_index(db, category):
+    """Return a list of (norm_group, norm_ident, row) tuples for fast
+    matching during sweep. Pre-normalizes group + ident strings so we
+    can match incoming filenames cheaply."""
+    plan = EXPORT_LAYOUT.get(category)
+    if not plan:
+        return []
+    table = CATEGORIES[category]['table']
+    try:
+        rows = db.execute(f"SELECT * FROM {table}").fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out = []
+    for row in rows:
+        try:
+            g_raw = plan['group'](row)
+            i_raw = plan['ident'](row)
+        except Exception:
+            continue
+        out.append((_norm(g_raw), _norm(i_raw), row))
+    return out
+
+
+def _parse_sweep_path(rel_path):
+    """Pull (category, group, ident, label, ext, original_basename) out
+    of a StuffFiles-style relative path. Returns None on parse failure
+    so the caller can mark the file as unmatched."""
+    parts = [p for p in rel_path.split('/') if p]
+    # Allow either StuffFiles/<Cat>/<Group>/<file> or just <Cat>/<Group>/<file>
+    if parts and parts[0].lower() == 'stufffiles':
+        parts = parts[1:]
+    if len(parts) < 3:
+        return None
+    cat_label, group, fname = parts[0], parts[1], parts[-1]
+    cat = EXPORT_LABEL_TO_CATEGORY.get(cat_label) \
+        or EXPORT_LABEL_TO_CATEGORY.get(cat_label.title())
+    if not cat:
+        return None
+    base, ext = os.path.splitext(fname)
+    # "<Item> — <Label>" — split on the EM-DASH-with-spaces; if absent,
+    # the whole base is the ident and we'll match the first empty slot.
+    if ' — ' in base:
+        ident, _, label = base.rpartition(' — ')
+    else:
+        ident, label = base, ''
+    return {
+        'category': cat,
+        'group':    group,
+        'ident':    ident.strip(),
+        'label':    label.strip(),
+        'ext':      ext,
+        'original_basename': base + ext,
+    }
+
+
+@app.route('/sweep', methods=['GET', 'POST'])
+def sweep_files():
+    """Bulk-import files from a StuffFiles-shaped folder.
+
+    GET → renders the upload form. Two pickers: a webkitdirectory
+    folder picker (desktop) and a multi-file picker (iOS Files app).
+
+    POST → processes each uploaded file:
+      1. Parse its relative path against StuffFiles/<Cat>/<Group>/<f>.
+         iOS multi-file uploads have no relative path; user can
+         override via the `category_hint` form field which gets
+         pre-pended to each file's name to form a synthetic path.
+      2. Match (category, group, ident) → existing record (skip if
+         multiple records match — never auto-pick).
+      3. Match label → file slot. If the label matches one of the
+         category's slot labels (default OR existing user-title),
+         use that. Otherwise pick the first empty slot.
+      4. Skip if the slot is already populated (never overwrite).
+      5. Save file, set the slot column, default the title column to
+         the file's basename if it doesn't have a user title yet.
+
+    Per-user: respects g.allowed_cats (members can sweep into their
+    own categories only).
+
+    Returns a JSON report when `Accept: application/json`, else
+    re-renders the page with the report inline.
+    """
+    user = g.get('current_user')
+    if not user:
+        abort(403)
+    allowed = g.get('allowed_cats') or set()
+
+    if request.method == 'GET':
+        cat_options = [(slug, label) for slug, label in EXPORT_CATEGORY_LABELS.items()
+                       if slug in allowed]
+        return render_template('sweep.html',
+                               cat_options=cat_options,
+                               current_category='__sweep__',
+                               categories=CATEGORIES,
+                               counts=get_counts())
+
+    files = request.files.getlist('files')
+    if not files:
+        return jsonify({'error': 'No files uploaded'}), 400
+    cat_hint = (request.form.get('category_hint') or '').strip()
+    cat_hint_label = EXPORT_CATEGORY_LABELS.get(cat_hint) if cat_hint else None
+    group_hint = (request.form.get('group_hint') or '').strip()
+
+    db = get_db()
+    # Cache record indexes per category so we don't re-scan the table
+    # for every file.
+    indexes = {}
+    def _index_for(cat):
+        if cat not in indexes:
+            indexes[cat] = _build_record_index(db, cat)
+        return indexes[cat]
+
+    report = {'uploaded': [], 'skipped': []}
+    now = datetime.utcnow().isoformat()
+
+    for f in files:
+        if not f or not f.filename:
+            continue
+        # Browser may send the relative path on a webkitdirectory upload
+        # via Werkzeug's `webkitRelativePath` attribute (preserved as
+        # part of the multipart filename in newer browsers).
+        rel = (getattr(f, 'webkit_relative_path', None) or
+               getattr(f, 'webkitRelativePath', None) or
+               request.form.get(f'path_{f.filename}', '') or
+               f.filename)
+        # iOS multi-file picker: no path. Synthesize one from category +
+        # group hints + the bare filename so the parser still works.
+        if '/' not in rel and cat_hint_label:
+            rel = '/'.join(['StuffFiles', cat_hint_label,
+                            group_hint or 'Unknown', f.filename])
+
+        parsed = _parse_sweep_path(rel)
+        if not parsed:
+            report['skipped'].append({'file': rel, 'reason': 'unparsable path (need StuffFiles/<Category>/<Group>/<file> shape, or pick a category)'})
+            continue
+        cat = parsed['category']
+        if cat not in allowed:
+            report['skipped'].append({'file': rel, 'reason': f"no access to category '{cat}'"})
+            continue
+
+        plan = EXPORT_LAYOUT[cat]
+        idx = _index_for(cat)
+        target_group = _norm(parsed['group'])
+        target_ident = _norm(parsed['ident'])
+
+        # Find rows whose (group, ident) match. ident match is exact
+        # after normalization; if no exact match, fall back to a prefix
+        # match so partial idents still land.
+        exact = [(g, i, r) for (g, i, r) in idx if g == target_group and i == target_ident]
+        if not exact:
+            prefix = [(g, i, r) for (g, i, r) in idx
+                      if g == target_group and target_ident and i.startswith(target_ident)]
+            matches = prefix
+        else:
+            matches = exact
+        if not matches:
+            report['skipped'].append({'file': rel, 'reason': f"no record matches group='{parsed['group']}' ident='{parsed['ident']}' in {cat}"})
+            continue
+        if len(matches) > 1:
+            report['skipped'].append({'file': rel, 'reason': f"ambiguous — {len(matches)} records match in {cat} (won't auto-pick)"})
+            continue
+        row = matches[0][2]
+        table = CATEGORIES[cat]['table']
+        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+
+        # Resolve the slot. Try label match first.
+        target_label = _norm(parsed['label'])
+        chosen_field = None
+        for spec in plan['files']:
+            field, default_label, title_field = spec
+            if field not in cols:
+                continue
+            label_candidates = [default_label]
+            if title_field and title_field in cols:
+                t = (row[title_field] or '').strip()
+                if t:
+                    label_candidates.append(t)
+            if any(_norm(c) == target_label for c in label_candidates):
+                # Only use this slot if it's currently empty.
+                if not (row[field] or '').strip():
+                    chosen_field = field
+                    break
+        if not chosen_field:
+            # Label match failed (or matched-but-occupied) — find the
+            # first empty slot in declaration order.
+            for spec in plan['files']:
+                field, _, _ = spec
+                if field not in cols:
+                    continue
+                if not (row[field] or '').strip():
+                    chosen_field = field
+                    break
+
+        if not chosen_field:
+            report['skipped'].append({
+                'file': rel,
+                'reason': f"all file slots full on this record ({_g(row, 'id')[:8]})",
+            })
+            continue
+
+        stored = save_upload(f)
+        if not stored:
+            report['skipped'].append({'file': rel, 'reason': 'save_upload failed (unsupported type?)'})
+            continue
+        db.execute(
+            f"UPDATE {table} SET {chosen_field} = ?, updated_at = ? WHERE id = ?",
+            [stored, now, _g(row, 'id')],
+        )
+        _autofill_title_from_filename(db, table, _g(row, 'id'), cat,
+                                      chosen_field, parsed['original_basename'])
+        report['uploaded'].append({
+            'file':   rel,
+            'record': f"{cat}/{_g(row, 'id')[:8]}",
+            'slot':   chosen_field,
+        })
+    db.commit()
+
+    if request.headers.get('Accept', '').startswith('application/json') \
+            or request.headers.get('X-Requested-With') == 'fetch':
+        return jsonify(report)
+    return render_template('sweep.html',
+                           report=report,
+                           cat_options=[(slug, label) for slug, label in EXPORT_CATEGORY_LABELS.items()
+                                        if slug in allowed],
+                           current_category='__sweep__',
+                           categories=CATEGORIES,
+                           counts=get_counts())
 
 
 @app.route('/admin/orphan-uploads', methods=['POST'])
