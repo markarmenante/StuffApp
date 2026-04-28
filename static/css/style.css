@@ -853,12 +853,23 @@ input[type="date"] { -webkit-appearance: none; }
 .recording-purchase .dcell input,
 .recording-purchase .dcell select { text-align: center; }
 
-/* Title row: italic title fills the row, " — YYYY" trails it (not italic).
-   Year stays a real <input> so it round-trips via per-field autosave. */
+/* Title row: italic title sized to its content, " — YYYY" trails it
+   immediately (not italic, same weight). Year stays a real <input> so
+   it round-trips via per-field autosave.
+   field-sizing: content auto-shrinks each input to its current value
+   so the em-dash hugs the title rather than floating to the row end.
+   Supported in Chrome 123+ / Safari 17.4+; older browsers fall back to
+   the previous "title fills, year on the right" layout. */
 .rec-title-row { display: flex; align-items: baseline; gap: 6px; }
-.rec-title-row .rec-title-input { flex: 1 1 auto; min-width: 0; }
-.rec-title-row .rec-title-year-sep { color: var(--text); font-weight: 600; }
-.rec-title-row .rec-title-year { width: 60px; text-align: left; flex: 0 0 auto; }
+.rec-title-row .rec-title-input {
+  flex: 0 1 auto; min-width: 4ch; max-width: 100%;
+  field-sizing: content;
+}
+.rec-title-row .rec-title-year-sep { color: var(--text); font-weight: normal; }
+.rec-title-row .rec-title-year {
+  flex: 0 0 auto; min-width: 4ch; text-align: left;
+  field-sizing: content;
+}
 
 /* Genre column sized to fit the longest canonical value ("Funk/Soul" /
    "Classical" — 9 chars) with a touch of padding; Genre 2 free-text
