@@ -1409,9 +1409,9 @@
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'credit_cards' %}
   <div class="detail-brand-row">
-    <input type="text" name="name" value="{{ val('name') }}"
+    <input type="text" name="description" value="{{ val('description') }}"
            class="brand-input" autocomplete="off"
-           {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
+           {% if is_new and not val('description') %}placeholder="Description"{% endif %}>
   </div>
 
   <div class="coin-imgs">
@@ -1478,7 +1478,7 @@
       </div>
     </div>
     <div class="dgrid dg1">{{ cell('billing_short','Billing ZIP') }}</div>
-    <div class="dgrid dg1">{{ cell('description','Description') }}</div>
+    <div class="dgrid dg1">{{ cell('name','Name on Card') }}</div>
   </div>
 
   <div class="dgrid dg1">{{ cell('billing_address','Billing Address') }}</div>
