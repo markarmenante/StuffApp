@@ -1067,12 +1067,12 @@ CATEGORY_FILTERS = {
         'ordered':    ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
     },
     'audio': {
-        'carp':   ("property = 'Carpinteria'", []),
-        'martis': ("property = 'Truckee'", []),
+        'carp':   ("property IN ('Carpinteria', 'Carp')", []),
+        'martis': ("property IN ('Martis', 'Truckee', 'Lahontan')", []),
     },
     'recordings': {
-        'carp':   ("property = 'Carpinteria'", []),
-        'martis': ("property = 'Truckee'", []),
+        'carp':   ("property IN ('Carpinteria', 'Carp')", []),
+        'martis': ("property IN ('Martis', 'Truckee', 'Lahontan')", []),
     },
     # status/type comparisons are case- and whitespace-insensitive so data
     # imported with inconsistent casing (e.g. 'commercial' vs 'Commercial')
