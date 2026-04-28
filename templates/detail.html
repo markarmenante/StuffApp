@@ -1175,12 +1175,12 @@
         {{ selcell('genre','Genre', vlists.recording_genre) }}
         {{ cell('genre_2','Genre 2') }}
       </div>
-      <div class="dgrid dg1">{{ cell('players','Players') }}</div>
       <div class="dgrid dg3 recording-purchase">
         {{ datecell('date','Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
       </div>
+      <div class="dgrid dg1 rec-players-grow">{{ cell('players','Players',rows=3) }}</div>
     </div>
   </div>
 

@@ -876,6 +876,14 @@ input[type="date"] { -webkit-appearance: none; }
    fills the rest of the row. */
 .recording-meta { grid-template-columns: 12ch 1fr; }
 
+/* Players cell grows to fill the remaining vertical space in
+   .watch-specs so its bottom aligns with the cover image (and with
+   the top of the Notes block below the body). Mirrors the
+   art-notes-grow pattern. */
+.rec-body .watch-specs .rec-players-grow { flex: 1 1 auto; min-height: 0; display: flex; }
+.rec-body .watch-specs .rec-players-grow .dcell { flex: 1; display: flex; flex-direction: column; }
+.rec-body .watch-specs .rec-players-grow textarea { flex: 1; height: auto; resize: none; }
+
 /* Notes block: full-width below the photo+specs body. Header row
    carries the "Notes" label on the left and the fetch pill on the
    right; URL pills (extracted from the body) sit just below; large
