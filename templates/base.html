@@ -46,10 +46,11 @@
   <div class="nav-right">
     {% if current_user %}
     <a href="{{ url_for('admin_export_files') }}"
-       class="nav-item nav-export"
-       title="Download all your files as a StuffFiles zip">
-      <span class="icon">⬇</span>
-      <span class="lbl">Files</span>
+       class="nav-item nav-export" id="navExportLink"
+       title="Download all your files as a StuffFiles zip"
+       onclick="return startExport(event, this)">
+      <span class="icon" id="navExportIcon">⬇</span>
+      <span class="lbl" id="navExportLabel">Files</span>
     </a>
     <a href="{{ url_for('sweep_files') }}"
        class="nav-item nav-sweep {% if current_category == '__sweep__' %}active{% endif %}"
@@ -68,6 +69,89 @@
     {% endif %}
   </div>
 </nav>
+
+<!-- Toast for export progress / completion -->
+<div id="exportToast" class="export-toast" hidden></div>
+
+<script>
+// Files-export click handler. The export builds a zip server-side
+// (can take 10–60s on a full library), so the bare anchor click was
+// silent — looks like nothing's happening. This intercepts the click,
+// shows a busy state on the nav icon + a toast, then either streams
+// the zip via showSaveFilePicker (Chromium) or downloads via blob
+// (Safari / Firefox / iOS).
+async function startExport(ev, link) {
+  ev.preventDefault();
+  if (link.dataset.busy === '1') return false;
+  link.dataset.busy = '1';
+  const icon  = document.getElementById('navExportIcon');
+  const label = document.getElementById('navExportLabel');
+  const toast = document.getElementById('exportToast');
+  const origIcon = icon.textContent, origLabel = label.textContent;
+  link.classList.add('busy');
+  icon.textContent = '⏳';
+  label.textContent = 'Building…';
+  if (toast) {
+    toast.textContent = 'Building your StuffFiles zip… this can take up to a minute.';
+    toast.className = 'export-toast running';
+    toast.hidden = false;
+  }
+  try {
+    const url = link.getAttribute('href');
+    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+    const suggested = `StuffFiles-${ts}.zip`;
+
+    if (window.showSaveFilePicker) {
+      let handle;
+      try {
+        handle = await window.showSaveFilePicker({
+          suggestedName: suggested,
+          types: [{description: 'StuffFiles', accept: {'application/zip': ['.zip']}}],
+        });
+      } catch (e) {
+        if (toast) { toast.textContent = 'Cancelled.'; toast.className = 'export-toast'; setTimeout(() => { toast.hidden = true; }, 1500); }
+        return false;
+      }
+      if (toast) toast.textContent = 'Streaming to disk…';
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const writable = await handle.createWritable();
+      await r.body.pipeTo(writable);
+    } else {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (toast) toast.textContent = 'Downloading…';
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      const cd = r.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename="?([^";]+)"?/);
+      a.download = m ? m[1] : suggested;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+    icon.textContent  = '✓';
+    label.textContent = 'Done';
+    if (toast) { toast.textContent = 'StuffFiles zip ready.'; toast.className = 'export-toast ok'; }
+  } catch (err) {
+    icon.textContent  = '✗';
+    label.textContent = 'Error';
+    if (toast) { toast.textContent = 'Export failed: ' + (err.message || err); toast.className = 'export-toast err'; }
+  } finally {
+    setTimeout(() => {
+      icon.textContent  = origIcon;
+      label.textContent = origLabel;
+      link.classList.remove('busy');
+      link.dataset.busy = '';
+      if (toast) { toast.hidden = true; }
+    }, 3500);
+  }
+  return false;
+}
+</script>
+
 <script>
   // Persist the horizontal scroll position of the category nav across
   // navigations within the same tab. Restored synchronously here

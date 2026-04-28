@@ -114,6 +114,32 @@ input[type="number"]::-webkit-outer-spin-button {
 .nav-admin:hover { color: var(--text); background: rgba(0,0,0,.07); }
 .nav-admin.active { background: var(--nav-active-bg); color: var(--text); }
 
+/* Files-export busy state on the nav icon — pulsing icon while the
+   server is building the zip. Anchor disabled (pointer-events) so a
+   second click doesn't kick off another build. */
+.nav-export.busy { pointer-events: none; }
+.nav-export.busy .icon {
+  animation: navExportPulse 1.1s ease-in-out infinite;
+  color: var(--blue);
+}
+@keyframes navExportPulse {
+  0%, 100% { opacity: 0.4; transform: translateY(0); }
+  50%      { opacity: 1;   transform: translateY(-1px); }
+}
+
+/* Sticky toast for export progress. Bottom-right; only shown while a
+   build is in flight or for a few seconds after success/failure. */
+.export-toast {
+  position: fixed; bottom: 20px; right: 20px;
+  background: #1f5fa8; color: #fff;
+  padding: 10px 14px; border-radius: 6px;
+  font-size: 13px; font-family: var(--font);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  z-index: 10000; max-width: 360px; line-height: 1.35;
+}
+.export-toast.ok      { background: #2a7a2a; }
+.export-toast.err     { background: #c0392b; }
+
 /* ── FLASH MESSAGES ── */
 .flash-messages {
   position: fixed; top: calc(var(--nav-height) + 8px); right: 12px;
