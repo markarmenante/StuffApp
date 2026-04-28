@@ -216,6 +216,22 @@ async function startSyncUp(ev, link) {
       if (skN) console.warn('StuffSync: some skipped', result.skipped);
     }
     ui.done('ok', msg);
+
+    // After a successful sweep that actually uploaded something,
+    // reload so the page reflects the new file(s) — especially when
+    // the user is staring at a detail page whose doc cells just
+    // received a file. Small delay so the success toast registers.
+    if (upN > 0) {
+      setTimeout(() => {
+        const t = document.getElementById('exportToast');
+        if (t) {
+          t.textContent = 'Refreshing page to show new files…';
+          t.className = 'export-toast running';
+          t.hidden = false;
+        }
+        setTimeout(() => window.location.reload(), 600);
+      }, 1500);
+    }
   } catch (err) {
     if (err && err.name === 'AbortError') {
       ui.done('cancel', 'Cancelled.');
