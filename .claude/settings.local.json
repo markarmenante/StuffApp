@@ -132,7 +132,10 @@
       "Bash(tmutil destinationinfo *)",
       "Bash(grep -n \"'art':\\\\|'art':$\\\\|art.*\\\\\\\\[\" /Users/markarmenante/Desktop/StuffApp/app.py)",
       "Bash(git checkout *)",
-      "Bash(grep -n \"init_db\\(\\)$\\\\|^    return\\\\|init_db.*return\\\\|db.commit\" /Users/markarmenante/Desktop/StuffApp/app.py)"
+      "Bash(grep -n \"init_db\\(\\)$\\\\|^    return\\\\|init_db.*return\\\\|db.commit\" /Users/markarmenante/Desktop/StuffApp/app.py)",
+      "Bash(git commit *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)"
     ]
   }
 }
