@@ -852,6 +852,7 @@ input[type="date"] { -webkit-appearance: none; }
 .rec-radio-block-divider { padding-right: 20px; border-right: 1px solid var(--border); }
 .recording-purchase .dcell input,
 .recording-purchase .dcell select { text-align: center; }
+.recording-meta .dcell input[name="year_recorded"] { text-align: center; }
 
 /* People: Health / IDs section pills sit at the left, then the Name
    input, with space on the right only for the floating Back link
