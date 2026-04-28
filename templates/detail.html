@@ -2897,9 +2897,16 @@ async function shareCardDetails(ev) {
   // path, no MIME or filename rewriting (which iOS may treat as a
   // mismatched attachment and silently drop).
   const urls = [];
+  const imgDiag = [];
   for (const field of ['image_front', 'image_back']) {
-    const img = form.querySelector(`.drop-zone[data-field="${field}"] img`);
-    if (img && img.src) urls.push(img.src);
+    const panel = form.querySelector(`.drop-zone[data-field="${field}"]`);
+    const img = panel && panel.querySelector('img');
+    if (img && img.src) {
+      urls.push(img.src);
+      imgDiag.push(`${field}: ${img.src.split('/').pop()}`);
+    } else {
+      imgDiag.push(`${field}: (no <img> rendered — likely unsupported extension or empty)`);
+    }
   }
 
   try {
@@ -2910,6 +2917,19 @@ async function shareCardDetails(ev) {
       const name = url.split('/').pop() || 'file';
       files.push(new File([blob], name, { type: blob.type || 'application/octet-stream' }));
     }
+    // Diagnostic: surface what we collected so we can see whether the
+    // template rendered the <img> tags, what types/sizes came back, and
+    // whether the OS reports the bundle as shareable. Remove once the
+    // image-attachment behavior is confirmed.
+    const diag = [
+      'Share diagnostic:',
+      ...imgDiag,
+      `files collected: ${files.length}`,
+      ...files.map(f => `  → ${f.name} (${f.type || 'no-mime'}, ${f.size}B)`),
+      `canShare(files): ${!!(files.length && navigator.canShare && navigator.canShare({ files }))}`,
+      `canShare(files+text): ${!!(files.length && navigator.canShare && navigator.canShare({ files, text }))}`,
+    ].join('\n');
+    if (!confirm(diag + '\n\nProceed with share?')) return;
     if (files.length && navigator.canShare && navigator.canShare({ files })) {
       try {
         await navigator.share({ files, text });
