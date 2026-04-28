@@ -15,6 +15,11 @@
   const STORE    = 'handles';
   const KEY      = 'StuffFilesDir';
 
+  // IndexedDB for two things: persisted FileSystemDirectoryHandle, and
+  // a per-path fingerprint map ({path: 'size:mtime'}) so re-runs of
+  // syncUp can skip files that haven't changed since last upload.
+  const STATE_KEY = 'StuffFilesSyncState';
+
   function _openDB() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, 1);
@@ -22,6 +27,33 @@
       req.onsuccess = () => resolve(req.result);
       req.onerror   = () => reject(req.error);
     });
+  }
+
+  async function _loadSyncState() {
+    const db = await _openDB();
+    return new Promise((resolve) => {
+      const tx  = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(STATE_KEY);
+      req.onsuccess = () => resolve(req.result || {});
+      req.onerror   = () => resolve({});
+    });
+  }
+
+  async function _saveSyncState(state) {
+    const db = await _openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(state, STATE_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror    = () => reject(tx.error);
+    });
+  }
+
+  // Public: forget what's been uploaded so the next syncUp re-uploads
+  // everything (server still skips populated slots — this is a client-
+  // side cache reset only).
+  async function resetSyncState() {
+    await _saveSyncState({});
   }
 
   async function _saveHandle(handle) {
@@ -210,7 +242,33 @@
     progress && progress('Walking your folder…');
     await walk(dir, 'StuffFiles/');
     if (!handles.length) return {uploaded: [], skipped: [], note: 'Folder is empty.'};
-    progress && progress(`Found ${handles.length} files; reading + uploading in batches…`);
+
+    // Diff against last sync's per-file fingerprints so we only read +
+    // upload files that are new or changed since last time. Cheap —
+    // just calls getFile() to read size/lastModified, which doesn't
+    // pull file content from iCloud.
+    const lastState = await _loadSyncState();
+    const newState = {};
+    const changed = [];
+    for (const h of handles) {
+      try {
+        const meta = await h.handle.getFile();
+        const fp = `${meta.size}:${meta.lastModified}`;
+        newState[h.path] = fp;
+        if (lastState[h.path] !== fp) changed.push(h);
+      } catch (_) {
+        // If metadata can't be read, force-include and let the read
+        // step decide if the file is reachable.
+        changed.push(h);
+      }
+    }
+    if (!changed.length) {
+      // Persist the fresh state too — even unchanged files; doesn't
+      // hurt and keeps the cache aligned with reality.
+      await _saveSyncState(newState);
+      return {uploaded: [], skipped: [], note: `No new or changed files (scanned ${handles.length}).`};
+    }
+    progress && progress(`Scanned ${handles.length}; ${changed.length} new/changed. Uploading…`);
 
     const uploaded = [];
     const skipped  = [];
@@ -234,17 +292,18 @@
       batchSize = 0;
     }
 
-    for (let i = 0; i < handles.length; i++) {
-      const h = handles[i];
-      progress && progress(`Reading ${i + 1}/${handles.length}: ${h.path.split('/').pop()}`);
+    for (let i = 0; i < changed.length; i++) {
+      const h = changed[i];
+      progress && progress(`Reading ${i + 1}/${changed.length}: ${h.path.split('/').pop()}`);
       let wrapped;
       try {
         const tmp = await _readWithIcloudRetry(h.handle, progress);
-        // Re-wrap so the upload carries the StuffFiles-relative path.
         wrapped = new File([tmp], h.path, {type: tmp.type || ''});
       } catch (e) {
         skipped.push({file: h.path, reason: 'read failed (iCloud not downloaded yet?): ' + (e.message || e)});
         done++;
+        // Don't promote this file in newState — leave it for next run.
+        delete newState[h.path];
         continue;
       }
       batch.push(wrapped);
@@ -255,8 +314,14 @@
       }
     }
     await flush();
-    return {uploaded, skipped};
+
+    // Persist the new fingerprint map. Files that succeeded (or were
+    // skipped server-side because the slot was full — same outcome
+    // either way) won't be re-uploaded next run. Files that errored
+    // mid-read had their entry deleted above so they retry next run.
+    await _saveSyncState(newState);
+    return {uploaded, skipped, scanned: handles.length, changed: changed.length};
   }
 
-  window.StuffSync = {syncDown, syncUp, pickFolder};
+  window.StuffSync = {syncDown, syncUp, pickFolder, resetSyncState};
 })();

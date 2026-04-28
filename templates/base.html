@@ -205,10 +205,15 @@ async function startSyncUp(ev, link) {
     } else if (upN === 0 && skN === 0) {
       msg = 'Nothing new to upload.';
     } else if (upN === 0) {
-      msg = `All ${skN} files already in app (nothing new).`;
+      msg = `All ${skN} files were skipped — see DevTools → Console for the per-file reason. (Hint: refresh the page if your Cloudflare Access cookie may have expired.)`;
+      console.warn('StuffSync: upload skipped', result.skipped);
     } else {
-      msg = `Uploaded ${upN} new file${upN === 1 ? '' : 's'}` +
+      const ctx = result.scanned
+        ? ` (scanned ${result.scanned}, ${result.changed} new/changed)`
+        : '';
+      msg = `Uploaded ${upN} new file${upN === 1 ? '' : 's'}${ctx}` +
             (skN ? ` · skipped ${skN}` : '');
+      if (skN) console.warn('StuffSync: some skipped', result.skipped);
     }
     ui.done('ok', msg);
   } catch (err) {

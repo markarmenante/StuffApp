@@ -5830,6 +5830,21 @@ def sweep_files():
             matches = prefix
         else:
             matches = exact
+        # "Single-record-per-group" fallback. For categories where the
+        # group field IS the record's identity (Properties → name,
+        # Persons → name, Recordings → an artist's record per item),
+        # the path naturally looks like
+        #   StuffFiles/<Cat>/<RecordName>/<DocTitle>.<ext>
+        # with no " — " separator, so target_ident is actually the doc
+        # title. If exactly one record shares the group, treat that as
+        # the match and re-purpose `target_ident` as the slot label
+        # search key.
+        if not matches:
+            same_group = [(g, i, r) for (g, i, r) in idx if g == target_group]
+            if len(same_group) == 1:
+                matches = same_group
+                if not target_label and parsed['ident']:
+                    target_label = _norm(parsed['ident'])
         if not matches:
             # Optional auto-create. Only happens when the user opts in
             # AND the category has a 'create' constructor in the layout.
