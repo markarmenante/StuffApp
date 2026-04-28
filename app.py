@@ -1889,6 +1889,18 @@ def fetch_recording_notes(rec):
     ] if x]
     fmt = ' · '.join(fmt_bits)
 
+    # Only ask Claude to populate Players when the field is empty —
+    # we never want to clobber a user-entered roster.
+    want_players = not players
+    players_block = ("\nAlso return a comma-separated list of the "
+                     "key musicians on this recording (lead artist + "
+                     "sidemen / band members) — first/last names only, "
+                     "no instruments or roles. Wrap that list in a "
+                     "<players>...</players> tag immediately after the "
+                     "<markdown> block. Omit the <players> tag entirely "
+                     "if you can't determine personnel with reasonable "
+                     "confidence.") if want_players else ""
+
     prompt = f"""You are a music critic + recording historian writing a
 brief reference note for a single album / recording in a personal
 collection. Use up to 4 web searches to ground facts.
@@ -1913,7 +1925,7 @@ trailing bare URLs after the bullets that draw on them. Under
 ~1400 chars total.
 
 Reply with ONLY the markdown, wrapped in a <markdown>…</markdown>
-tag. No prose outside the tag, no code fences, no JSON."""
+tag. No prose outside the tag, no code fences, no JSON.{players_block}"""
 
     client = anthropic.Anthropic(api_key=api_key)
     import time as _time
@@ -1962,7 +1974,21 @@ tag. No prose outside the tag, no code fences, no JSON."""
     md = _html.unescape(md).strip()
     # Strip Claude web_search <cite index="...">...</cite> wrappers.
     md = re.sub(r'</?cite\b[^>]*>', '', md, flags=re.IGNORECASE)
-    return {'markdown': md}
+
+    # Optional <players>...</players> block — only meaningful when the
+    # caller asked for it (i.e. the field was empty going in). Strip
+    # the same cite wrappers and HTML escapes the markdown gets.
+    new_players = ''
+    if want_players:
+        pm = re.search(r'<players>(.*?)</players>', text, re.DOTALL | re.IGNORECASE)
+        if pm:
+            new_players = _html.unescape(pm.group(1)).strip()
+            new_players = re.sub(r'</?cite\b[^>]*>', '', new_players, flags=re.IGNORECASE)
+            # Collapse any internal newlines / extra whitespace in the
+            # comma-separated list so it lands clean in the input.
+            new_players = re.sub(r'\s+', ' ', new_players).strip(' ,')
+
+    return {'markdown': md, 'players': new_players}
 
 
 # ---------------------------------------------------------------------------
@@ -3378,7 +3404,10 @@ def recording_fetch_notes(record_id):
         print(traceback.format_exc(), flush=True)
         detail = str(e) or e.__class__.__name__
         return jsonify({'error': f'Notes lookup failed: {detail}'}), 500
-    return jsonify({'notes': data.get('markdown') or ''})
+    return jsonify({
+        'notes': data.get('markdown') or '',
+        'players': data.get('players') or '',
+    })
 
 
 @app.route('/coins/<record_id>/context', methods=['POST'])

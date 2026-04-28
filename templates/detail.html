@@ -1272,6 +1272,14 @@
           // Trigger per-field autosave + refresh the URL pill row.
           ta.dispatchEvent(new Event('blur'));
           renderRefPills();
+          // Fill-if-empty: only populate Players when the user hasn't
+          // typed anything there. Server already gates on the same
+          // condition; this is a defensive client-side guard.
+          const playersEl = document.querySelector('[name="players"]');
+          if (playersEl && data.players && !playersEl.value.trim()) {
+            playersEl.value = data.players;
+            playersEl.dispatchEvent(new Event('blur'));
+          }
           pill.textContent = origLabel;
         } catch (e) {
           pill.classList.remove('active');
