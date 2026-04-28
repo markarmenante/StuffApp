@@ -2903,16 +2903,38 @@ async function shareCardDetails(ev) {
     try {
       const resp = await fetch(src);
       if (!resp.ok) continue;
-      const blob = await resp.blob();
-      const name = src.split('/').pop() || `${field}.jpg`;
-      files.push(new File([blob], name, { type: blob.type || 'image/jpeg' }));
+      let blob = await resp.blob();
+      // Strip query string and force a real image extension so Messages
+      // recognizes the attachment as an image (no extension → quick-look
+      // treats it as a generic file and won't render inline).
+      let bare = src.split('?')[0].split('#')[0].split('/').pop() || field;
+      const m = bare.match(/\.(jpe?g|png|gif|webp|heic|heif)$/i);
+      let type = (blob.type || '').toLowerCase();
+      if (!type.startsWith('image/')) {
+        const extToType = {
+          jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+          gif: 'image/gif', webp: 'image/webp',
+          heic: 'image/heic', heif: 'image/heif',
+        };
+        type = (m && extToType[m[1].toLowerCase()]) || 'image/jpeg';
+        blob = blob.slice(0, blob.size, type);
+      }
+      if (!m) {
+        const ext = type.split('/')[1] === 'jpeg' ? 'jpg' : type.split('/')[1];
+        bare = `${bare || field}.${ext || 'jpg'}`;
+      }
+      files.push(new File([blob], bare, { type }));
     } catch (_) { /* skip unreadable image, share text only */ }
   }
 
+  // iOS Web Share to Messages is finicky about files+text combos: check
+  // canShare on the files-only payload (the doc-share path that already
+  // works does the same), then add text to the actual share call.
   if (navigator.share) {
-    const payload = (files.length && navigator.canShare && navigator.canShare({ files, text }))
-      ? { files, text }
-      : { text };
+    const canShareFiles = files.length
+      && navigator.canShare
+      && navigator.canShare({ files });
+    const payload = canShareFiles ? { files, text } : { text };
     try { await navigator.share(payload); }
     catch (err) { if (err.name !== 'AbortError') alert('Share failed: ' + (err.message || err)); }
   } else {
