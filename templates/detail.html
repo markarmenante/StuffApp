@@ -2892,58 +2892,38 @@ async function shareCardDetails(ev) {
   const text = lines.join('\n');
   if (!text) { alert('Nothing to share — fill in some fields first.'); return; }
 
-  // Attach front + back card images when present so the recipient gets
-  // the visual along with the digits. Same File-blob pattern the doc
-  // share uses below.
-  const files = [];
+  // Collect front/back image URLs. Mirrors the working shareDocFiles
+  // pattern below — same fetch → File → navigator.share({files, text})
+  // path, no MIME or filename rewriting (which iOS may treat as a
+  // mismatched attachment and silently drop).
+  const urls = [];
   for (const field of ['image_front', 'image_back']) {
     const img = form.querySelector(`.drop-zone[data-field="${field}"] img`);
-    const src = img && img.src;
-    if (!src) continue;
-    try {
-      const resp = await fetch(src);
-      if (!resp.ok) continue;
-      let blob = await resp.blob();
-      // Strip query string and force a real image extension so Messages
-      // recognizes the attachment as an image (no extension → quick-look
-      // treats it as a generic file and won't render inline).
-      let bare = src.split('?')[0].split('#')[0].split('/').pop() || field;
-      const m = bare.match(/\.(jpe?g|png|gif|webp|heic|heif)$/i);
-      let type = (blob.type || '').toLowerCase();
-      if (!type.startsWith('image/')) {
-        const extToType = {
-          jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-          gif: 'image/gif', webp: 'image/webp',
-          heic: 'image/heic', heif: 'image/heif',
-        };
-        type = (m && extToType[m[1].toLowerCase()]) || 'image/jpeg';
-        blob = blob.slice(0, blob.size, type);
-      }
-      if (!m) {
-        const ext = type.split('/')[1] === 'jpeg' ? 'jpg' : type.split('/')[1];
-        bare = `${bare || field}.${ext || 'jpg'}`;
-      }
-      files.push(new File([blob], bare, { type }));
-    } catch (_) { /* skip unreadable image, share text only */ }
+    if (img && img.src) urls.push(img.src);
   }
 
-  // Title doubles as the Mail subject line when the user picks Mail
-  // from the share sheet; harmless for Messages (it ignores it).
-  const title = val('name') || val('description') || 'Credit Card';
-
-  // iOS Web Share to Messages is finicky about files+text combos: check
-  // canShare on the files-only payload (the doc-share path that already
-  // works does the same), then add text to the actual share call.
-  if (navigator.share) {
-    const canShareFiles = files.length
-      && navigator.canShare
-      && navigator.canShare({ files });
-    const payload = canShareFiles ? { files, text, title } : { text, title };
-    try { await navigator.share(payload); }
-    catch (err) { if (err.name !== 'AbortError') alert('Share failed: ' + (err.message || err)); }
-  } else {
-    // Desktop fallback: download images for manual attach + copy text
-    // to clipboard so the user can paste into Mail or Messages.
+  try {
+    const files = [];
+    for (const url of urls) {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const name = url.split('/').pop() || 'file';
+      files.push(new File([blob], name, { type: blob.type || 'application/octet-stream' }));
+    }
+    if (files.length && navigator.canShare && navigator.canShare({ files })) {
+      try {
+        await navigator.share({ files, text });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        // Fall through to text-only / desktop fallback.
+      }
+    }
+    if (navigator.share) {
+      try { await navigator.share({ text }); return; }
+      catch (err) { if (err.name === 'AbortError') return; }
+    }
+    // Desktop fallback: download each image + copy text to clipboard.
     files.forEach(f => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(f);
@@ -2961,6 +2941,8 @@ async function shareCardDetails(ev) {
     } catch (_) {
       prompt('Copy this text:', text);
     }
+  } catch (err) {
+    alert('Share failed: ' + (err.message || err));
   }
 }
 
