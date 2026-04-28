@@ -131,7 +131,8 @@ VALUE_LISTS = {
     # Stored in the legacy `reservoir` column; surfaced to the user as "Filling".
     'pen_filling':   ['Cartridge', 'Converter', 'Piston', 'Eyedropper', 'Vacuum'],
     'recording_type': ['Vinyl','CD','SACD','Tape'],
-    'recording_genre': ['Classical','Jazz','Rock','Pop','Blues','Folk','Electronic','World'],
+    'recording_genre': ['Afro-Pop', 'Blues', 'Classical', 'Country', 'Folk', 'Funk/Soul',
+                        'Jazz', 'Pop/Rock', 'R&B', 'Rap', 'Reggae', 'World'],
     'property_type': ['Residential','Commercial','Land'],
     'audio_type': ['Amplifier','CD Player','DAC','Pre-Amp','Scaler','Speakers','Streamer','Tape Deck','Turntable','Phono Stage','Headphones','Cables','Other'],
 }
@@ -785,6 +786,23 @@ def init_db():
         )
     except sqlite3.OperationalError:
         pass
+
+    # Recording genres: fold the strays that don't appear in the canonical
+    # VALUE_LISTS['recording_genre'] dropdown. Each is a small-N tail of
+    # the histogram. Idempotent.
+    for old, new in [
+        ('pop/jazzrock', 'Pop/Rock'),
+        ('folk rock',    'Folk'),
+        ('international','World'),
+    ]:
+        try:
+            db.execute(
+                "UPDATE recordings SET genre = ? "
+                "WHERE LOWER(TRIM(COALESCE(genre, ''))) = ?",
+                [new, old],
+            )
+        except sqlite3.OperationalError:
+            pass
     db.commit()
 
 

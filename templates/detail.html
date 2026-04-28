@@ -1162,10 +1162,10 @@
           <label class="radio-opt rec-cd-only"><input type="radio" name="other" value="SACD"     {{ 'checked' if val('other')=='SACD'     }}> SACD</label>
         </div>
       </div>
-      <div class="dgrid dg3 recording-meta">
+      <div class="dgrid dg2 recording-meta">
         {{ selcell('genre','Genre', vlists.recording_genre) }}
-        {{ cell('genre_2','Genre 2') }}
         {{ cell('year_recorded','Year') }}
+        {{ cell('genre_2','Genre 2', colspan=2) }}
       </div>
       <div class="dgrid dg3 recording-purchase">
         {{ datecell('date','Date') }}
