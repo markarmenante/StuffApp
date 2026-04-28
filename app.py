@@ -1849,6 +1849,113 @@ Reply with ONLY a JSON object, no prose, no code fences:
     return {'markdown': md}
 
 
+def fetch_recording_notes(rec):
+    """Claude-driven review + historical-context summary for a recording.
+    Returns dict {markdown: str}. Raises RuntimeError on missing key
+    or empty model output. Mirrors the coin-context pattern: Sonnet
+    with web_search, output wrapped in <markdown>...</markdown>.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+
+    title  = (rec['title']  or '').strip()
+    artist = (rec['artist'] or '').strip()
+    if not (title or artist):
+        raise RuntimeError('Need a title or artist before fetching notes.')
+
+    year   = (rec['year_recorded'] or '').strip()
+    genre  = ' / '.join(x for x in [
+        (rec['genre'] or '').strip(),
+        (rec['genre_2'] or '').strip(),
+    ] if x)
+    fmt_bits = [x for x in [
+        (rec['type']  or '').strip(),
+        (rec['speed'] or '').strip(),
+        (rec['sound'] or '').strip(),
+        (rec['other'] or '').strip(),
+    ] if x]
+    fmt = ' · '.join(fmt_bits)
+
+    prompt = f"""You are a music critic + recording historian writing a
+brief reference note for a single album / recording in a personal
+collection. Use up to 4 web searches to ground facts.
+
+Title:   {title or '(unknown)'}
+Artist:  {artist or '(unknown)'}
+Year:    {year or '(unknown)'}
+Genre:   {genre or '(unspecified)'}
+Format:  {fmt or '(unspecified)'}
+
+Cover whichever of these are notable for this specific recording:
+- critical reception / canonical status
+- recording history (studio, dates, key personnel beyond the headliner)
+- standout tracks
+- awards or chart performance
+- the artist's career context at the time
+
+Style: 4–8 short bullets starting with "- ". Plain factual prose,
+no headers, no fluff, no marketing copy. Cite 2–3 source URLs as
+trailing bare URLs after the bullets that draw on them. Under
+~1400 chars total.
+
+Reply with ONLY the markdown, wrapped in a <markdown>…</markdown>
+tag. No prose outside the tag, no code fences, no JSON."""
+
+    client = anthropic.Anthropic(api_key=api_key)
+    import time as _time
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = client.messages.create(
+                model='claude-sonnet-4-5',
+                max_tokens=2000,
+                tools=[{
+                    'type': 'web_search_20250305',
+                    'name': 'web_search',
+                    'max_uses': 4,
+                }],
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            break
+        except anthropic.RateLimitError as e:
+            last_err = e
+            wait = 10 * (attempt + 1)
+            try:
+                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
+                if ra: wait = max(wait, int(float(ra)))
+            except Exception:
+                pass
+            _time.sleep(wait)
+    else:
+        raise RuntimeError(f'Rate limited after retries: {last_err}')
+
+    text = ''
+    for block in resp.content:
+        if getattr(block, 'type', None) == 'text':
+            text += block.text
+    text = text.strip()
+
+    md = ''
+    m = re.search(r'<markdown>(.*?)</markdown>', text, re.DOTALL | re.IGNORECASE)
+    if m:
+        md = m.group(1).strip()
+    else:
+        md = text  # last-ditch: use whatever the model returned
+    if not md:
+        raise RuntimeError(f'Empty response from model: {text[:200]}')
+
+    import html as _html
+    md = _html.unescape(md).strip()
+    # Strip Claude web_search <cite index="...">...</cite> wrappers.
+    md = re.sub(r'</?cite\b[^>]*>', '', md, flags=re.IGNORECASE)
+    return {'markdown': md}
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -3239,6 +3346,30 @@ def coins_map_view():
                            coin_filter=coin_filter,
                            current_category='coins',
                            cat_info=CATEGORIES['coins'])
+
+
+@app.route('/recordings/<record_id>/fetch-notes', methods=['POST'])
+def recording_fetch_notes(record_id):
+    """Generate a brief review/historical note for a recording via
+    Claude + web_search. Returns {notes: str} on success. Does NOT
+    write to the DB — the client appends to the existing notes
+    textarea and the per-field autosave persists on blur."""
+    db = get_db()
+    rec = db.execute(
+        "SELECT * FROM recordings WHERE id = ?", (record_id,)
+    ).fetchone()
+    if not rec:
+        return jsonify({'error': 'Recording not found'}), 404
+    try:
+        data = fetch_recording_notes(rec)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        detail = str(e) or e.__class__.__name__
+        return jsonify({'error': f'Notes lookup failed: {detail}'}), 500
+    return jsonify({'notes': data.get('markdown') or ''})
 
 
 @app.route('/coins/<record_id>/context', methods=['POST'])

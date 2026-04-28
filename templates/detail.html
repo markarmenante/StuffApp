@@ -1180,10 +1180,19 @@
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
       </div>
+      <div class="dgrid dg1 rec-notes-grow">
+        <div class="dcell rec-notes-cell">
+          {% if not is_new %}
+          <button type="button" class="rec-notes-pill" id="recNotesPill"
+                  data-fetch-url="{{ url_for('recording_fetch_notes', record_id=r['id']) }}"
+                  title="Pull a brief review / historical note from the web and append below">Notes</button>
+          {% endif %}
+          <textarea name="notes" rows="2" placeholder="Notes">{{ val('notes') }}</textarea>
+        </div>
+      </div>
     </div>
   </div>
 
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
   <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -1192,6 +1201,46 @@
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
   </div>
+  <script>
+  // "Notes" pill: fetch a Claude-generated review/historical note
+  // and append to the existing notes textarea. Pill turns green
+  // while the request is in flight and stays green after success
+  // so the user can see the field has been augmented this session.
+  (function () {
+    const pill = document.getElementById('recNotesPill');
+    const ta   = document.querySelector('textarea[name="notes"]');
+    if (!pill || !ta) return;
+    const url = pill.dataset.fetchUrl;
+    pill.addEventListener('click', async () => {
+      if (pill.disabled) return;
+      pill.classList.add('active');
+      pill.disabled = true;
+      const origLabel = pill.textContent;
+      pill.textContent = 'Loading…';
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' },
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.notes) {
+          throw new Error(data.error || `HTTP ${r.status}`);
+        }
+        const sep = ta.value.trim() ? '\n\n' : '';
+        ta.value = ta.value + sep + data.notes;
+        // Trigger the existing per-field autosave (blur handler).
+        ta.dispatchEvent(new Event('blur'));
+        pill.textContent = origLabel;
+      } catch (e) {
+        pill.classList.remove('active');
+        pill.textContent = origLabel;
+        alert('Notes fetch failed: ' + (e.message || e));
+      } finally {
+        pill.disabled = false;
+      }
+    });
+  })();
+  </script>
 
   <!-- ══════════════════════════════════════════════════════════
        RIFLES
