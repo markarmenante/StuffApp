@@ -4948,6 +4948,15 @@ def admin_index():
             'kind':  'download',
         },
         {
+            'label': "Export StuffFiles (per-user, organized)",
+            'desc':  "Streams a zip with every file you can see, organized "
+                     "as StuffFiles/<Category>/<Group>/<Item> — <Label>.<ext>. "
+                     "Unzip into your iCloud Drive's StuffFiles folder. "
+                     "Also available to members via the ⬇ link in the top nav.",
+            'url':   url_for('admin_export_files'),
+            'kind':  'download_no_secret',
+        },
+        {
             'label': "Scan orphan upload files (dry run)",
             'desc':  "Reports how many files in uploads/ aren't referenced "
                      "by any DB row, total bytes, and a sample. Doesn't "
@@ -5073,6 +5082,253 @@ def _collect_referenced_uploads(db):
     except sqlite3.OperationalError:
         pass
     return referenced
+
+
+def _safe_path(*parts):
+    """Strip filesystem-hostile characters from each path segment so the
+    zip writes cleanly across macOS / iCloud Drive."""
+    bad = set('/\\:*?"<>|\n\r\t')
+    out = []
+    for p in parts:
+        s = ''.join(c for c in (p or '') if c not in bad).strip()
+        # Collapse runs of whitespace, trim trailing dots/spaces.
+        s = re.sub(r'\s+', ' ', s).strip(' .')
+        out.append(s or 'Unknown')
+    return out
+
+
+# Per-category export plan. For each category:
+#   group:  fn(row) → folder name (e.g. brand)
+#   ident:  fn(row) → item identifier (used as filename prefix)
+#   files:  list of (file_field, default_label, optional_title_field)
+#           default_label is used when title_field is missing or empty
+def _g(r, key):
+    """sqlite3.Row.get-equivalent — returns '' for missing columns or
+    NULL values, so the export lambdas don't blow up on tables that
+    are missing optional fields."""
+    try:
+        v = r[key]
+    except (IndexError, KeyError):
+        return ''
+    return v if v is not None else ''
+
+
+EXPORT_LAYOUT = {
+    'watches': {
+        'group': lambda r: _g(r, 'brand') or 'Unknown',
+        'ident': lambda r: ' '.join(filter(None, [
+            str(_g(r, 'year')) if _g(r, 'year') else '',
+            _g(r, 'model'),
+            (f'Ref {_g(r, "reference")}') if _g(r, 'reference') else '',
+        ])).strip() or (_g(r, 'brand'))[:40] or _g(r, 'id')[:8],
+        'files': [
+            ('image_obv', 'Front', None),
+            ('image_rev', 'Back', None),
+            ('receipt',   'Receipt', None),
+            ('container_1', 'Container 1', None),
+            ('container_2', 'Container 2', None),
+        ],
+    },
+    'coins': {
+        'group': lambda r: _g(r, 'region') or 'Unknown',
+        'ident': lambda r: ' '.join(filter(None, [
+            _g(r, 'cat_id') or '',
+            _g(r, 'authority') or '',
+            _g(r, 'denomination') or '',
+        ])).strip() or _g(r, 'id')[:8],
+        'files': [
+            ('image_1', 'Obverse', None),
+            ('image_2', 'Reverse', None),
+        ],
+    },
+    'properties': {
+        'group': lambda r: _g(r, 'name') or 'Unknown',
+        'ident': lambda r: _g(r, 'name') or _g(r, 'id')[:8],
+        'files': [
+            ('image', 'Image', None),
+            *[(f'doc_{i}', f'Doc {i}', f'doc_{i}_title') for i in range(1, 11)],
+        ],
+    },
+    'credit_cards': {
+        'group': lambda r: _g(r, 'name') or 'Cards',
+        'ident': lambda r: ' — '.join(filter(None, [
+            _g(r, 'name') or '',
+            (_g(r, 'description') or '').splitlines()[0] if _g(r, 'description') else '',
+        ])) or _g(r, 'id')[:8],
+        'files': [
+            ('image_front', 'Front', None),
+            ('image_back',  'Back',  None),
+        ],
+    },
+    'persons': {
+        'group': lambda r: _g(r, 'name') or 'Unknown',
+        'ident': lambda r: _g(r, 'name') or _g(r, 'id')[:8],
+        'files': [
+            ('head_shot',       'Head Shot',         None),
+            ('license_obverse', 'License Front',     None),
+            ('license_reverse', 'License Back',      None),
+            ('health_card_obv', 'Health Card Front', None),
+            ('health_card_rev', 'Health Card Back',  None),
+            *[(f'id_doc_{i}',     f'ID Doc {i}',     f'id_doc_{i}_title')     for i in range(3, 9)],
+            *[(f'health_doc_{i}', f'Health Doc {i}', f'health_doc_{i}_title') for i in range(3, 9)],
+        ],
+    },
+    'cameras': {
+        'group': lambda r: _g(r, 'make') or 'Unknown',
+        'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
+        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+    },
+    'lenses': {
+        'group': lambda r: _g(r, 'make') or 'Unknown',
+        'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
+        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+    },
+    'pens': {
+        'group': lambda r: _g(r, 'make') or 'Unknown',
+        'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
+        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+    },
+    'art': {
+        'group': lambda r: _g(r, 'artist') or 'Unknown',
+        'ident': lambda r: ' — '.join(filter(None, [
+            _g(r, 'title') or '',
+            str(_g(r, 'year')) if _g(r, 'year') else '',
+        ])) or _g(r, 'id')[:8],
+        'files': [
+            ('image',   'Image',   None),
+            ('receipt', 'Receipt', None),
+            ('doc_2',   'Doc 2',   None),
+        ],
+    },
+    'vehicles': {
+        'group': lambda r: _g(r, 'make') or 'Unknown',
+        'ident': lambda r: ' '.join(filter(None, [
+            str(_g(r, 'year')) if _g(r, 'year') else '',
+            _g(r, 'model') or '',
+        ])).strip() or _g(r, 'id')[:8],
+        'files': [
+            ('image',        'Image',        None),
+            ('insurance',    'Insurance',    'insurance_label'),
+            ('invoice',      'Invoice',      'invoice_label'),
+            ('registration', 'Registration', 'registration_label'),
+            ('auto_title',   'Auto Title',   'auto_title_label'),
+            *[(f'vehicle_doc_{i}', f'Doc {i}', f'vehicle_doc_{i}_title') for i in range(5, 9)],
+        ],
+    },
+    'recordings': {
+        'group': lambda r: _g(r, 'artist') or 'Unknown',
+        'ident': lambda r: _g(r, 'title') or _g(r, 'id')[:8],
+        'files': [('image', 'Cover', None), ('receipt', 'Receipt', None)],
+    },
+    'audio': {
+        'group': lambda r: _g(r, 'make') or 'Unknown',
+        'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'type') or ''])).strip() or _g(r, 'id')[:8],
+        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+    },
+    'rifles': {
+        'group': lambda r: _g(r, 'make') or 'Unknown',
+        'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
+        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+    },
+}
+
+# Pretty labels for the top-level category folders inside the zip.
+EXPORT_CATEGORY_LABELS = {
+    'watches': 'Watches', 'coins': 'Coins', 'properties': 'Properties',
+    'credit_cards': 'Cards', 'persons': 'People', 'cameras': 'Cameras',
+    'lenses': 'Lenses', 'pens': 'Pens', 'art': 'Art', 'vehicles': 'Vehicles',
+    'recordings': 'Music', 'audio': 'Audio', 'rifles': 'Rifles',
+}
+
+
+@app.route('/export-files', methods=['GET'])
+def admin_export_files():
+    """Stream a zip containing every file the current user has access to,
+    laid out as StuffFiles/<Category>/<Group>/<Item> — <Label>.<ext>.
+
+    Auth: the before_request hook already requires a signed-in user;
+    per-user category filtering via g.allowed_cats limits the export
+    to whatever the user can see. (Members can hit this endpoint;
+    they only get files for their permitted categories.)
+    """
+    user = g.get('current_user')
+    if not user:
+        abort(403)
+    allowed = g.get('allowed_cats') or set()
+    if not allowed:
+        abort(403)
+
+    import io
+    import zipfile
+
+    db = get_db()
+    buf = io.BytesIO()
+    written = 0
+    skipped_missing = 0
+    seen_paths = set()
+
+    def _next_unique(base_dir, ident, label, ext):
+        """Avoid name collisions when two items in the same folder render
+        to the same '<ident> — <label>.<ext>'. Suffix with -2, -3, ..."""
+        cand = f'{ident} — {label}{ext}' if label else f'{ident}{ext}'
+        full = f'{base_dir}/{cand}'
+        if full not in seen_paths:
+            seen_paths.add(full)
+            return cand
+        n = 2
+        while True:
+            cand = f'{ident} — {label} ({n}){ext}' if label else f'{ident} ({n}){ext}'
+            full = f'{base_dir}/{cand}'
+            if full not in seen_paths:
+                seen_paths.add(full)
+                return cand
+            n += 1
+
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for cat, plan in EXPORT_LAYOUT.items():
+            if cat not in allowed:
+                continue
+            table = CATEGORIES[cat]['table']
+            try:
+                rows = db.execute(f"SELECT * FROM {table}").fetchall()
+            except sqlite3.OperationalError:
+                continue
+            cat_label = EXPORT_CATEGORY_LABELS.get(cat, cat.title())
+            cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+
+            for row in rows:
+                ident_raw = plan['ident'](row)
+                group_raw = plan['group'](row)
+                group, ident = _safe_path(group_raw, ident_raw)
+
+                for spec in plan['files']:
+                    field, default_label, title_field = spec
+                    if field not in cols:
+                        continue
+                    fname = (row[field] or '').strip()
+                    if not fname:
+                        continue
+                    src = os.path.join(UPLOAD_FOLDER, fname)
+                    if not os.path.isfile(src):
+                        skipped_missing += 1
+                        continue
+                    label = default_label
+                    if title_field and title_field in cols:
+                        t = (row[title_field] or '').strip()
+                        if t:
+                            label = t
+                    label = _safe_path(label)[0]
+                    ext = os.path.splitext(fname)[1] or ''
+                    base_dir = f'StuffFiles/{cat_label}/{group}'
+                    arcname = f'{base_dir}/{_next_unique(base_dir, ident, label, ext)}'
+                    zf.write(src, arcname=arcname)
+                    written += 1
+
+    buf.seek(0)
+    ts = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    fname = f'StuffFiles-{user["email"].split("@")[0]}-{ts}.zip'
+    return send_file(buf, as_attachment=True, download_name=fname,
+                     mimetype='application/zip')
 
 
 @app.route('/admin/orphan-uploads', methods=['POST'])

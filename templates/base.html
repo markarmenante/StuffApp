@@ -44,6 +44,14 @@
   </div>
 
   <div class="nav-right">
+    {% if current_user %}
+    <a href="{{ url_for('admin_export_files') }}"
+       class="nav-item nav-export"
+       title="Download all your files as a StuffFiles zip">
+      <span class="icon">⬇</span>
+      <span class="lbl">Files</span>
+    </a>
+    {% endif %}
     {% if current_user and current_user.role == 'owner' %}
     <a href="{{ url_for('admin_index') }}"
        class="nav-item nav-admin {% if current_category == '__admin__' %}active{% endif %}"

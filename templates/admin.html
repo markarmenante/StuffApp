@@ -160,12 +160,14 @@ document.querySelectorAll('.admin-action').forEach(li => {
       if (!confirm(`Run "${lbl}"? This is destructive.`)) return;
     }
     btn.disabled = true;
-    out.textContent = kind === 'download' ? 'Building…' : 'Running…';
+    out.textContent = (kind === 'download' || kind === 'download_no_secret') ? 'Building…' : 'Running…';
     out.className = 'admin-result running';
     try {
-      if (kind === 'download') {
+      if (kind === 'download' || kind === 'download_no_secret') {
         // Default name (timestamped server-side via Content-Disposition).
-        const fullUrl = url + '?secret=' + encodeURIComponent(SECRET);
+        const fullUrl = kind === 'download_no_secret'
+          ? url
+          : url + '?secret=' + encodeURIComponent(SECRET);
         const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,15);
         const suggested = `stuffapp-backup-${ts}.zip`;
 
