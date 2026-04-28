@@ -2927,6 +2927,10 @@ async function shareCardDetails(ev) {
     } catch (_) { /* skip unreadable image, share text only */ }
   }
 
+  // Title doubles as the Mail subject line when the user picks Mail
+  // from the share sheet; harmless for Messages (it ignores it).
+  const title = val('name') || val('description') || 'Credit Card';
+
   // iOS Web Share to Messages is finicky about files+text combos: check
   // canShare on the files-only payload (the doc-share path that already
   // works does the same), then add text to the actual share call.
@@ -2934,14 +2938,26 @@ async function shareCardDetails(ev) {
     const canShareFiles = files.length
       && navigator.canShare
       && navigator.canShare({ files });
-    const payload = canShareFiles ? { files, text } : { text };
+    const payload = canShareFiles ? { files, text, title } : { text, title };
     try { await navigator.share(payload); }
     catch (err) { if (err.name !== 'AbortError') alert('Share failed: ' + (err.message || err)); }
   } else {
-    // Desktop fallback: copy to clipboard
+    // Desktop fallback: download images for manual attach + copy text
+    // to clipboard so the user can paste into Mail or Messages.
+    files.forEach(f => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(f);
+      a.download = f.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
     try {
       await navigator.clipboard.writeText(text);
-      alert('Copied to clipboard:\n\n' + text);
+      alert(files.length
+        ? `Card images downloaded; details copied to clipboard:\n\n${text}`
+        : `Copied to clipboard:\n\n${text}`);
     } catch (_) {
       prompt('Copy this text:', text);
     }
