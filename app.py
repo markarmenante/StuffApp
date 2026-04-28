@@ -5188,6 +5188,57 @@ def _g(r, key):
     return v if v is not None else ''
 
 
+# Per-category constructors used by the sweep tool's auto-create path.
+# Each takes (group, ident) parsed from the StuffFiles path and returns
+# a dict of column → value to seed a new row, or None if the category
+# can't safely auto-create (don't guess where guessing would mangle
+# data — e.g. coins, cards). The id column is filled by the caller.
+def _create_watch(g, i):
+    out = {'brand': g}
+    m = re.match(r'^\s*(\d{4})\b\s*', i or '')
+    if m:
+        try:
+            out['year'] = int(m.group(1))
+        except ValueError:
+            pass
+        rest = (i or '')[m.end():].strip()
+    else:
+        rest = (i or '').strip()
+    # "Model name Ref XYZ" → split on " Ref " (case-insensitive)
+    parts = re.split(r'\s+Ref\s+', rest, flags=re.IGNORECASE, maxsplit=1)
+    if parts and parts[0].strip():
+        out['model'] = parts[0].strip()
+    if len(parts) > 1 and parts[1].strip():
+        out['reference'] = parts[1].strip()
+    return out
+
+def _create_property(g, i): return {'name': g}
+def _create_person(g, i):   return {'name': g}
+def _create_art(g, i):
+    out = {'artist': g}
+    if i:
+        # Title — Year (export shape uses ' — ')
+        if ' — ' in i:
+            t, _, y = i.rpartition(' — ')
+            out['title'] = t.strip()
+            try: out['year'] = int(y.strip())
+            except ValueError: pass
+        else:
+            out['title'] = i.strip()
+    return out
+def _create_recording(g, i): return {'artist': g, 'title': (i or '').strip() or None}
+def _create_make_only(g, i): return {'make': g}
+def _create_vehicle(g, i):
+    out = {'make': g}
+    m = re.match(r'^\s*(\d{4})\b\s*(.*)$', i or '')
+    if m:
+        try: out['year'] = int(m.group(1))
+        except ValueError: pass
+        if m.group(2).strip(): out['model'] = m.group(2).strip()
+    elif i:
+        out['model'] = i.strip()
+    return out
+
 EXPORT_LAYOUT = {
     'watches': {
         'group': lambda r: _g(r, 'brand') or 'Unknown',
@@ -5196,6 +5247,7 @@ EXPORT_LAYOUT = {
             _g(r, 'model'),
             (f'Ref {_g(r, "reference")}') if _g(r, 'reference') else '',
         ])).strip() or (_g(r, 'brand'))[:40] or _g(r, 'id')[:8],
+        'create': _create_watch,
         'files': [
             ('image_obv', 'Front', None),
             ('image_rev', 'Back', None),
@@ -5219,6 +5271,7 @@ EXPORT_LAYOUT = {
     'properties': {
         'group': lambda r: _g(r, 'name') or 'Unknown',
         'ident': lambda r: _g(r, 'name') or _g(r, 'id')[:8],
+        'create': _create_property,
         'files': [
             ('image', 'Image', None),
             *[(f'doc_{i}', f'Doc {i}', f'doc_{i}_title') for i in range(1, 11)],
@@ -5238,6 +5291,7 @@ EXPORT_LAYOUT = {
     'persons': {
         'group': lambda r: _g(r, 'name') or 'Unknown',
         'ident': lambda r: _g(r, 'name') or _g(r, 'id')[:8],
+        'create': _create_person,
         'files': [
             ('head_shot',       'Head Shot',         None),
             ('license_obverse', 'License Front',     None),
@@ -5251,16 +5305,19 @@ EXPORT_LAYOUT = {
     'cameras': {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
+        'create': _create_make_only,
         'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
     },
     'lenses': {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
+        'create': _create_make_only,
         'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
     },
     'pens': {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
+        'create': _create_make_only,
         'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
     },
     'art': {
@@ -5269,6 +5326,7 @@ EXPORT_LAYOUT = {
             _g(r, 'title') or '',
             str(_g(r, 'year')) if _g(r, 'year') else '',
         ])) or _g(r, 'id')[:8],
+        'create': _create_art,
         'files': [
             ('image',   'Image',   None),
             ('receipt', 'Receipt', None),
@@ -5281,6 +5339,7 @@ EXPORT_LAYOUT = {
             str(_g(r, 'year')) if _g(r, 'year') else '',
             _g(r, 'model') or '',
         ])).strip() or _g(r, 'id')[:8],
+        'create': _create_vehicle,
         'files': [
             ('image',        'Image',        None),
             ('insurance',    'Insurance',    'insurance_label'),
@@ -5293,16 +5352,19 @@ EXPORT_LAYOUT = {
     'recordings': {
         'group': lambda r: _g(r, 'artist') or 'Unknown',
         'ident': lambda r: _g(r, 'title') or _g(r, 'id')[:8],
+        'create': _create_recording,
         'files': [('image', 'Cover', None), ('receipt', 'Receipt', None)],
     },
     'audio': {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'type') or ''])).strip() or _g(r, 'id')[:8],
+        'create': _create_make_only,
         'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
     },
     'rifles': {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
+        'create': _create_make_only,
         'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
     },
 }
@@ -5510,6 +5572,7 @@ def sweep_files():
     cat_hint = (request.form.get('category_hint') or '').strip()
     cat_hint_label = EXPORT_CATEGORY_LABELS.get(cat_hint) if cat_hint else None
     group_hint = (request.form.get('group_hint') or '').strip()
+    auto_create = request.form.get('auto_create') == '1'
 
     db = get_db()
     # Cache record indexes per category so we don't re-scan the table
@@ -5564,8 +5627,50 @@ def sweep_files():
         else:
             matches = exact
         if not matches:
-            report['skipped'].append({'file': rel, 'reason': f"no record matches group='{parsed['group']}' ident='{parsed['ident']}' in {cat}"})
-            continue
+            # Optional auto-create. Only happens when the user opts in
+            # AND the category has a 'create' constructor in the layout.
+            create_fn = plan.get('create')
+            if auto_create and create_fn:
+                seed = create_fn(parsed['group'], parsed['ident']) or {}
+                if seed:
+                    new_id = str(uuid.uuid4())
+                    seed['id'] = new_id
+                    seed['created_at'] = now
+                    seed['updated_at'] = now
+                    # Owner default for the freshly-created record
+                    if 'owner' not in seed:
+                        d = DEFAULT_OWNER_BY_CATEGORY.get(cat)
+                        if d:
+                            seed['owner'] = d
+                    table = CATEGORIES[cat]['table']
+                    table_cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+                    seed = {k: v for k, v in seed.items() if k in table_cols}
+                    cols_sql = ', '.join(seed.keys())
+                    placeholders = ', '.join(['?'] * len(seed))
+                    db.execute(
+                        f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})",
+                        list(seed.values()),
+                    )
+                    # Refresh the index so subsequent files in the same
+                    # sweep can match this brand-new row.
+                    new_row = db.execute(
+                        f"SELECT * FROM {table} WHERE id = ?", [new_id]
+                    ).fetchone()
+                    g_norm = _norm(plan['group'](new_row))
+                    i_norm = _norm(plan['ident'](new_row))
+                    indexes[cat].append((g_norm, i_norm, new_row))
+                    matches = [(g_norm, i_norm, new_row)]
+                    report['uploaded'].append({
+                        'file':   rel,
+                        'record': f"{cat}/{new_id[:8]} (CREATED)",
+                        'slot':   '(record)',
+                    })
+                else:
+                    report['skipped'].append({'file': rel, 'reason': f"auto-create returned no seed for {cat}"})
+                    continue
+            else:
+                report['skipped'].append({'file': rel, 'reason': f"no record matches group='{parsed['group']}' ident='{parsed['ident']}' in {cat}" + ('' if create_fn else ' (auto-create unavailable for this category)')})
+                continue
         if len(matches) > 1:
             report['skipped'].append({'file': rel, 'reason': f"ambiguous — {len(matches)} records match in {cat} (won't auto-pick)"})
             continue
