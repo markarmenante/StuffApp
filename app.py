@@ -1068,11 +1068,11 @@ CATEGORY_FILTERS = {
     },
     'audio': {
         'carp':   ("property IN ('Carpinteria', 'Carp')", []),
-        'martis': ("property IN ('Martis', 'Truckee', 'Lahontan')", []),
+        'martis': ("property IN ('Martis', 'Truckee')", []),
     },
     'recordings': {
         'carp':   ("property IN ('Carpinteria', 'Carp')", []),
-        'martis': ("property IN ('Martis', 'Truckee', 'Lahontan')", []),
+        'martis': ("property IN ('Martis', 'Truckee')", []),
     },
     # status/type comparisons are case- and whitespace-insensitive so data
     # imported with inconsistent casing (e.g. 'commercial' vs 'Commercial')
