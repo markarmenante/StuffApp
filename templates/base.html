@@ -47,16 +47,17 @@
     {% if current_user %}
     <a href="{{ url_for('admin_export_files') }}"
        class="nav-item nav-export" id="navExportLink"
-       title="Download all your files as a StuffFiles zip"
+       title="Download + auto-extract into your StuffFiles folder. iOS / Safari: gets a zip you save manually."
        onclick="return startExport(event, this)">
       <span class="icon" id="navExportIcon">⬇</span>
       <span class="lbl" id="navExportLabel">Files</span>
     </a>
     <a href="{{ url_for('sweep_files') }}"
-       class="nav-item nav-sweep {% if current_category == '__sweep__' %}active{% endif %}"
-       title="Upload from a StuffFiles folder (folder picker on desktop, file picker on iOS)">
-      <span class="icon">⬆</span>
-      <span class="lbl">Sweep</span>
+       class="nav-item nav-sweep {% if current_category == '__sweep__' %}active{% endif %}" id="navSweepLink"
+       title="Upload changes from your StuffFiles folder back into the app"
+       onclick="return startSyncUp(event, this)">
+      <span class="icon" id="navSweepIcon">⬆</span>
+      <span class="lbl" id="navSweepLabel">Sweep</span>
     </a>
     {% endif %}
     {% if current_user and current_user.role == 'owner' %}
@@ -73,80 +74,137 @@
 <!-- Toast for export progress / completion -->
 <div id="exportToast" class="export-toast" hidden></div>
 
+<!-- JSZip for client-side zip extraction (used by sync.js when the
+     browser supports the File System Access API). -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="{{ url_for('static', filename='js/sync.js') }}"></script>
+
 <script>
-// Files-export click handler. The export builds a zip server-side
-// (can take 10–60s on a full library), so the bare anchor click was
-// silent — looks like nothing's happening. This intercepts the click,
-// shows a busy state on the nav icon + a toast, then either streams
-// the zip via showSaveFilePicker (Chromium) or downloads via blob
-// (Safari / Firefox / iOS).
-async function startExport(ev, link) {
-  ev.preventDefault();
-  if (link.dataset.busy === '1') return false;
+// Set busy state on a nav-pill (icon + label) and render an export
+// toast. Returns a `done` callback to restore the original state.
+function _busy(link, iconId, labelId, busyIcon, busyText) {
+  if (link.dataset.busy === '1') return null;
   link.dataset.busy = '1';
-  const icon  = document.getElementById('navExportIcon');
-  const label = document.getElementById('navExportLabel');
+  const icon  = document.getElementById(iconId);
+  const label = document.getElementById(labelId);
   const toast = document.getElementById('exportToast');
   const origIcon = icon.textContent, origLabel = label.textContent;
   link.classList.add('busy');
-  icon.textContent = '⏳';
-  label.textContent = 'Building…';
+  icon.textContent = busyIcon;
+  label.textContent = busyText;
   if (toast) {
-    toast.textContent = 'Building your StuffFiles zip… this can take up to a minute.';
-    toast.className = 'export-toast running';
-    toast.hidden = false;
+    toast.textContent = busyText + '…';
+    toast.className   = 'export-toast running';
+    toast.hidden      = false;
   }
-  try {
-    const url = link.getAttribute('href');
-    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
-    const suggested = `StuffFiles-${ts}.zip`;
-
-    if (window.showSaveFilePicker) {
-      let handle;
-      try {
-        handle = await window.showSaveFilePicker({
-          suggestedName: suggested,
-          types: [{description: 'StuffFiles', accept: {'application/zip': ['.zip']}}],
-        });
-      } catch (e) {
-        if (toast) { toast.textContent = 'Cancelled.'; toast.className = 'export-toast'; setTimeout(() => { toast.hidden = true; }, 1500); }
-        return false;
-      }
-      if (toast) toast.textContent = 'Streaming to disk…';
-      const r = await fetch(url);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const writable = await handle.createWritable();
-      await r.body.pipeTo(writable);
-    } else {
-      const r = await fetch(url);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      if (toast) toast.textContent = 'Downloading…';
-      const blob = await r.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      const cd = r.headers.get('Content-Disposition') || '';
-      const m = cd.match(/filename="?([^";]+)"?/);
-      a.download = m ? m[1] : suggested;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  function progress(msg) {
+    if (toast) toast.textContent = msg;
+  }
+  function done(state, msg) {
+    if (state === 'ok') {
+      icon.textContent  = '✓'; label.textContent = 'Done';
+      if (toast) { toast.textContent = msg; toast.className = 'export-toast ok'; }
+    } else if (state === 'err') {
+      icon.textContent  = '✗'; label.textContent = 'Error';
+      if (toast) { toast.textContent = msg; toast.className = 'export-toast err'; }
+    } else { // 'cancel'
+      if (toast) { toast.textContent = msg || 'Cancelled.'; toast.className = 'export-toast'; }
     }
-    icon.textContent  = '✓';
-    label.textContent = 'Done';
-    if (toast) { toast.textContent = 'StuffFiles zip ready.'; toast.className = 'export-toast ok'; }
-  } catch (err) {
-    icon.textContent  = '✗';
-    label.textContent = 'Error';
-    if (toast) { toast.textContent = 'Export failed: ' + (err.message || err); toast.className = 'export-toast err'; }
-  } finally {
     setTimeout(() => {
       icon.textContent  = origIcon;
       label.textContent = origLabel;
       link.classList.remove('busy');
       link.dataset.busy = '';
-      if (toast) { toast.hidden = true; }
-    }, 3500);
+      if (toast) toast.hidden = true;
+    }, state === 'err' ? 5000 : 3500);
+  }
+  return {progress, done};
+}
+
+// Files-button click handler. Three paths:
+//   - Chromium (showDirectoryPicker available): zip transmitted, then
+//     unzipped client-side directly into a folder the user picks
+//     (handle persisted in IndexedDB so re-clicks remember it).
+//   - Other browsers: fall back to single-file blob download — user
+//     drags the zip into their StuffFiles folder and unzips manually.
+async function startExport(ev, link) {
+  ev.preventDefault();
+  const ui = _busy(link, 'navExportIcon', 'navExportLabel', '⏳', 'Building');
+  if (!ui) return false;
+
+  if (window.showDirectoryPicker && window.StuffSync && window.JSZip) {
+    try {
+      ui.progress('Pick (or confirm) your StuffFiles folder…');
+      const result = await window.StuffSync.syncDown(ui.progress);
+      ui.done('ok', `Synced ${result.written}/${result.total} files into your folder.`);
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        ui.done('cancel', 'Cancelled.');
+      } else {
+        ui.done('err', 'Sync failed: ' + (err.message || err));
+      }
+    }
+    return false;
+  }
+
+  // Fallback: zip download for Safari / iOS / Firefox.
+  try {
+    const url = link.getAttribute('href');
+    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+    const r  = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    ui.progress('Downloading zip…');
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m  = cd.match(/filename="?([^";]+)"?/);
+    a.download = m ? m[1] : `StuffFiles-${ts}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    ui.done('ok', 'StuffFiles zip downloaded.');
+  } catch (err) {
+    ui.done('err', 'Download failed: ' + (err.message || err));
+  }
+  return false;
+}
+
+// Sweep-button click handler. On Chromium, walks the saved StuffFiles
+// folder and uploads everything to /sweep (server skips slots that
+// are already populated, so re-runs are cheap). On other browsers,
+// just navigates to the existing /sweep page so the user can pick
+// files manually.
+async function startSyncUp(ev, link) {
+  if (!(window.showDirectoryPicker && window.StuffSync)) return true;  // navigate normally
+  ev.preventDefault();
+  const ui = _busy(link, 'navSweepIcon', 'navSweepLabel', '⏳', 'Scanning');
+  if (!ui) return false;
+  try {
+    const result = await window.StuffSync.syncUp(ui.progress);
+    if (result.error) {
+      ui.done('err', result.error);
+      return false;
+    }
+    const upN = (result.uploaded || []).length;
+    const skN = (result.skipped  || []).length;
+    let msg;
+    if (result.note) {
+      msg = result.note;
+    } else if (upN === 0 && skN === 0) {
+      msg = 'Nothing new to upload.';
+    } else if (upN === 0) {
+      msg = `All ${skN} files already in app (nothing new).`;
+    } else {
+      msg = `Uploaded ${upN} new file${upN === 1 ? '' : 's'}` +
+            (skN ? ` · skipped ${skN}` : '');
+    }
+    ui.done('ok', msg);
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      ui.done('cancel', 'Cancelled.');
+    } else {
+      ui.done('err', 'Upload failed: ' + (err.message || err));
+    }
   }
   return false;
 }
