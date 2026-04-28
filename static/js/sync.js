@@ -131,20 +131,77 @@
     return {written, total: entries.length};
   }
 
+  // Read a single iCloud-aware file. macOS keeps iCloud Drive files as
+  // on-disk stubs until accessed; the first .arrayBuffer() call
+  // triggers the download which can take seconds. Retry with backoff
+  // on transient failures or 0-byte reads.
+  async function _readWithIcloudRetry(handle, progress) {
+    let lastErr;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const file = await handle.getFile();
+        const buf = await file.arrayBuffer();
+        if (buf.byteLength === 0 && file.size > 0) {
+          throw new Error('iCloud-stub: 0 bytes read, size says ' + file.size);
+        }
+        return new File([buf], handle.name, {type: file.type || ''});
+      } catch (e) {
+        lastErr = e;
+        if (attempt < 3) {
+          progress && progress(`Waiting on iCloud for ${handle.name}… (try ${attempt + 2}/4)`);
+          await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+        }
+      }
+    }
+    throw lastErr;
+  }
+
+  // POST one batch of files to /sweep with a retry on transient
+  // network failure. Returns parsed JSON or throws with the last
+  // error.
+  async function _uploadBatch(files, autoCreate) {
+    const fd = new FormData();
+    if (autoCreate) fd.append('auto_create', '1');
+    for (const f of files) fd.append('files', f, f.name);
+    let lastErr;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await fetch('/sweep', {
+          method: 'POST',
+          headers: {'Accept': 'application/json'},
+          body: fd,
+          credentials: 'include',
+        });
+        if (!r.ok) throw new Error('Server returned HTTP ' + r.status);
+        return await r.json();
+      } catch (e) {
+        lastErr = e;
+        if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
+      }
+    }
+    throw lastErr;
+  }
+
   // Public: walk the saved folder, upload every file inside via /sweep.
-  // Server-side /sweep skips slots that are already populated, so this
-  // is idempotent — re-runs only land genuinely new files.
+  // Reads files one at a time so iCloud-stub files have a chance to
+  // download, then uploads in batches so a single POST doesn't exceed
+  // Cloudflare's body limit or the server's request timeout.
+  // Idempotent — server skips slots that already have a file, so
+  // re-runs only land genuinely new local files.
   async function syncUp(progress) {
     if (!window.showDirectoryPicker) {
       throw new Error('Browser does not support the directory picker.');
     }
+    const BATCH_FILES = 20;
+    const BATCH_BYTES = 25 * 1024 * 1024;  // 25 MB per POST max
     const dir = await _getOrPickDirectory(false);
-    const files = [];
+
+    const handles = [];
     async function walk(handle, prefix) {
       for await (const [name, child] of handle.entries()) {
         if (name.startsWith('.')) continue;
         if (child.kind === 'file') {
-          files.push({path: prefix + name, handle: child});
+          handles.push({path: prefix + name, handle: child});
         } else if (child.kind === 'directory') {
           await walk(child, prefix + name + '/');
         }
@@ -152,25 +209,53 @@
     }
     progress && progress('Walking your folder…');
     await walk(dir, 'StuffFiles/');
-    if (!files.length) return {uploaded: [], skipped: [], note: 'Folder is empty.'};
-    progress && progress(`Found ${files.length} files. Uploading…`);
+    if (!handles.length) return {uploaded: [], skipped: [], note: 'Folder is empty.'};
+    progress && progress(`Found ${handles.length} files; reading + uploading in batches…`);
 
-    const fd = new FormData();
-    fd.append('auto_create', '1');
-    for (const f of files) {
-      const file = await f.handle.getFile();
-      // Re-wrap the File so its name carries the full relative path
-      // (server's _parse_sweep_path keys off this).
-      fd.append('files', new File([file], f.path, {type: file.type || ''}));
+    const uploaded = [];
+    const skipped  = [];
+    let batch = [];
+    let batchSize = 0;
+    let done = 0;
+
+    async function flush() {
+      if (!batch.length) return;
+      progress && progress(`Sending batch of ${batch.length} (${done}/${handles.length} read)…`);
+      try {
+        const data = await _uploadBatch(batch, true);
+        if (data.uploaded) uploaded.push(...data.uploaded);
+        if (data.skipped)  skipped.push(...data.skipped);
+      } catch (e) {
+        for (const f of batch) {
+          skipped.push({file: f.name, reason: 'batch upload failed: ' + (e.message || e)});
+        }
+      }
+      batch = [];
+      batchSize = 0;
     }
-    progress && progress('Sending to server (this is the slow part)…');
-    const r = await fetch('/sweep', {
-      method: 'POST',
-      headers: {'Accept': 'application/json'},
-      body: fd,
-    });
-    if (!r.ok) throw new Error('Server returned HTTP ' + r.status);
-    return await r.json();
+
+    for (let i = 0; i < handles.length; i++) {
+      const h = handles[i];
+      progress && progress(`Reading ${i + 1}/${handles.length}: ${h.path.split('/').pop()}`);
+      let wrapped;
+      try {
+        const tmp = await _readWithIcloudRetry(h.handle, progress);
+        // Re-wrap so the upload carries the StuffFiles-relative path.
+        wrapped = new File([tmp], h.path, {type: tmp.type || ''});
+      } catch (e) {
+        skipped.push({file: h.path, reason: 'read failed (iCloud not downloaded yet?): ' + (e.message || e)});
+        done++;
+        continue;
+      }
+      batch.push(wrapped);
+      batchSize += wrapped.size;
+      done++;
+      if (batch.length >= BATCH_FILES || batchSize >= BATCH_BYTES) {
+        await flush();
+      }
+    }
+    await flush();
+    return {uploaded, skipped};
   }
 
   window.StuffSync = {syncDown, syncUp, pickFolder};
