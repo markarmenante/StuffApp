@@ -1493,12 +1493,17 @@
        PROPERTIES
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'properties' %}
-  <div class="detail-brand-row">
+  <div class="detail-brand-row property-brand-row">
     <input type="text" name="name" value="{{ val('name') }}"
            class="brand-input" autocomplete="off"
            {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
+    <div class="dcell property-short-name">
+      <input type="text" name="short_name" value="{{ val('short_name') }}"
+             autocomplete="off"
+             {% if is_new and not val('short_name') %}placeholder="Short Name"{% endif %}>
+      <span class="clabel">Short Name</span>
+    </div>
   </div>
-  <input type="hidden" name="short_name" value="{{ val('short_name') }}">
 
   <div class="watch-body properties-body">
     <div class="watch-photo properties-photo drop-zone" data-field="image"

@@ -957,6 +957,13 @@ input[type="date"] { -webkit-appearance: none; }
   padding-right: 80px;
 }
 .person-brand-row .brand-input { flex: 1 1 auto; min-width: 0; }
+
+.property-brand-row {
+  display: flex; align-items: center; gap: 10px;
+  padding-right: 80px;
+}
+.property-brand-row .brand-input { flex: 1 1 auto; min-width: 0; }
+.property-short-name { flex: 0 0 140px; }
 .person-doc-tabs { display: flex; gap: 6px; flex-shrink: 0; }
 .person-tab {
   font-family: var(--font); font-size: 12px; line-height: 1;
