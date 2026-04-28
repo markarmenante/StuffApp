@@ -30,9 +30,14 @@
 {% endmacro %}
 {% macro selcell(field, label, opts) %}
 <div class="dcell">
+  {# val() is a macro: its output goes through Jinja autoescape, so
+     "R&B" comes back as "R&amp;B" and `val(field)==o` mismatches the
+     raw Python option. Compare against the raw cell value instead so
+     values containing '&' (or any other HTML special) round-trip. #}
+  {% set _v = r[field] if r and r[field] is not none else '' %}
   <select name="{{ field }}">
     <option value=""></option>
-    {% for o in opts %}<option value="{{ o }}" {{ 'selected' if val(field)==o }}>{{ o }}</option>{% endfor %}
+    {% for o in opts %}<option value="{{ o }}" {{ 'selected' if _v == o }}>{{ o }}</option>{% endfor %}
   </select>
   <span class="clabel">{{ label }}</span>
 </div>
