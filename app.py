@@ -5450,6 +5450,22 @@ def admin_export_files():
                 group_raw = plan['group'](row)
                 group, ident = _safe_path(group_raw, ident_raw)
 
+                # Owned vs. No longer Owned. Categories without a
+                # status column → always treated as owned. status
+                # null/blank → also treated as owned (default state for
+                # records the user hasn't classified yet). Any other
+                # value (Sold, Loaned, etc.) routes the row's files
+                # under "No longer Owned" inside the category folder.
+                status_val = ''
+                if 'status' in cols:
+                    try:
+                        status_val = (row['status'] or '').strip()
+                    except (KeyError, IndexError):
+                        status_val = ''
+                is_owned = (not status_val) or status_val.lower() in ('own', 'owned')
+                cat_root = f'StuffFiles/{cat_label}' if is_owned \
+                            else f'StuffFiles/{cat_label}/No longer Owned'
+
                 for spec in plan['files']:
                     field, default_label, title_field = spec
                     if field not in cols:
@@ -5468,7 +5484,7 @@ def admin_export_files():
                             label = t
                     label = _safe_path(label)[0]
                     ext = os.path.splitext(fname)[1] or ''
-                    base_dir = f'StuffFiles/{cat_label}/{group}'
+                    base_dir = f'{cat_root}/{group}'
                     arcname = f'{base_dir}/{_next_unique(base_dir, ident, label, ext)}'
                     zf.write(src, arcname=arcname)
                     written += 1
@@ -5522,18 +5538,27 @@ def _build_record_index(db, category):
 def _parse_sweep_path(rel_path):
     """Pull (category, group, ident, label, ext, original_basename) out
     of a StuffFiles-style relative path. Returns None on parse failure
-    so the caller can mark the file as unmatched."""
+    so the caller can mark the file as unmatched.
+
+    Recognises the optional "No longer Owned" interstitial that the
+    export inserts between Category and Group for non-owned items —
+    skipped here so the matching logic doesn't see it as a group name.
+    """
     parts = [p for p in rel_path.split('/') if p]
     # Allow either StuffFiles/<Cat>/<Group>/<file> or just <Cat>/<Group>/<file>
     if parts and parts[0].lower() == 'stufffiles':
         parts = parts[1:]
     if len(parts) < 3:
         return None
-    cat_label, group, fname = parts[0], parts[1], parts[-1]
+    cat_label = parts[0]
     cat = EXPORT_LABEL_TO_CATEGORY.get(cat_label) \
         or EXPORT_LABEL_TO_CATEGORY.get(cat_label.title())
     if not cat:
         return None
+    # Strip the "No longer Owned" routing folder if present.
+    if len(parts) > 3 and parts[1].strip().lower() == 'no longer owned':
+        parts = [parts[0]] + parts[2:]
+    group, fname = parts[1], parts[-1]
     base, ext = os.path.splitext(fname)
     # "<Item> — <Label>" — split on the EM-DASH-with-spaces; if absent,
     # the whole base is the ident and we'll match the first empty slot.
