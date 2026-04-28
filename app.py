@@ -714,6 +714,7 @@ def init_db():
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
         'ALTER TABLE topics ADD COLUMN image TEXT',
         'ALTER TABLE recordings ADD COLUMN players TEXT',
+        'ALTER TABLE recordings ADD COLUMN notes_urls TEXT',
         'ALTER TABLE coins ADD COLUMN history_region TEXT',
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
@@ -805,6 +806,51 @@ def init_db():
             )
         except sqlite3.OperationalError:
             pass
+
+    # Recording notes: extract any embedded http(s) URLs into the new
+    # notes_urls column and strip them out of the prose so the pills
+    # row above the textarea is the only place sources appear.
+    # Gated on notes_urls IS NULL so each row migrates once.
+    try:
+        url_re = re.compile(r'https?://[^\s<>"\']+')
+        # Trailing chunks like "Sources:" / "References:" left dangling
+        # after URL extraction get cleaned out.
+        sources_line_re = re.compile(
+            r'(?im)^[\s\-•*]*(sources?|references?|citations?)\s*:?\s*$\n?'
+        )
+        rows = db.execute(
+            "SELECT id, notes FROM recordings WHERE notes_urls IS NULL"
+        ).fetchall()
+        for row in rows:
+            notes = (row['notes'] or '')
+            urls_found = url_re.findall(notes)
+            if not urls_found:
+                # Mark as processed so re-runs skip it.
+                db.execute(
+                    "UPDATE recordings SET notes_urls = '' WHERE id = ?",
+                    (row['id'],),
+                )
+                continue
+            # Strip URLs + dangling Sources/References headers + collapse
+            # triple+ newlines from the resulting prose.
+            cleaned = url_re.sub('', notes)
+            cleaned = sources_line_re.sub('', cleaned)
+            cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
+            # Dedupe + strip trailing punctuation that often hugs URLs in
+            # prose (commas, parens, periods, brackets, quotes).
+            seen = set()
+            uniq = []
+            for u in urls_found:
+                u = u.rstrip('),.;:!?\\]>"\'')
+                if u and u not in seen:
+                    seen.add(u)
+                    uniq.append(u)
+            db.execute(
+                "UPDATE recordings SET notes = ?, notes_urls = ? WHERE id = ?",
+                (cleaned or None, ','.join(uniq), row['id']),
+            )
+    except sqlite3.OperationalError:
+        pass
     db.commit()
 
 
@@ -1924,12 +1970,14 @@ Cover whichever of these are notable for this specific recording:
 - the artist's career context at the time
 
 Style: 4–8 short bullets starting with "- ". Plain factual prose,
-no headers, no fluff, no marketing copy. Cite 2–3 source URLs as
-trailing bare URLs after the bullets that draw on them. Under
-~1400 chars total.
+no headers, no fluff, no marketing copy. Under ~1400 chars total.
+DO NOT include URLs anywhere in the bullet text — sources go in a
+separate tag below.
 
-Reply with ONLY the markdown, wrapped in a <markdown>…</markdown>
-tag. No prose outside the tag, no code fences, no JSON.{players_block}"""
+Wrap the bullets in <markdown>…</markdown>. Then, immediately
+after, list 2–4 source URLs (bare https://…, comma-separated) in
+a <urls>…</urls> tag. No prose outside these tags, no code
+fences, no JSON.{players_block}"""
 
     client = anthropic.Anthropic(api_key=api_key)
     import time as _time
@@ -1978,10 +2026,30 @@ tag. No prose outside the tag, no code fences, no JSON.{players_block}"""
     md = _html.unescape(md).strip()
     # Strip Claude web_search <cite index="...">...</cite> wrappers.
     md = re.sub(r'</?cite\b[^>]*>', '', md, flags=re.IGNORECASE)
+    # Defensive: if Claude ignored the "no URLs in bullets" rule,
+    # extract them out and feed into the urls list below. Strips
+    # trailing punctuation that hugs URLs in prose.
+    leaked_urls = re.findall(r'https?://[^\s<>"\']+', md)
+    if leaked_urls:
+        md = re.sub(r'https?://[^\s<>"\']+', '', md)
+        md = re.sub(r'(?im)^[\s\-•*]*(sources?|references?|citations?)\s*:?\s*$\n?', '', md)
+        md = re.sub(r'\n{3,}', '\n\n', md).strip()
+
+    # <urls>...</urls> block — comma- or whitespace-separated sources.
+    urls = []
+    um = re.search(r'<urls>(.*?)</urls>', text, re.DOTALL | re.IGNORECASE)
+    raw_urls = (um.group(1) if um else '') + '\n' + ' '.join(leaked_urls)
+    raw_urls = _html.unescape(raw_urls)
+    raw_urls = re.sub(r'</?cite\b[^>]*>', '', raw_urls, flags=re.IGNORECASE)
+    seen = set()
+    for u in re.findall(r'https?://[^\s<>"\',;]+', raw_urls):
+        u = u.rstrip('),.;:!?\\]>"\'')
+        if u and u not in seen:
+            seen.add(u)
+            urls.append(u)
 
     # Optional <players>...</players> block — only meaningful when the
-    # caller asked for it (i.e. the field was empty going in). Strip
-    # the same cite wrappers and HTML escapes the markdown gets.
+    # caller asked for it (i.e. the field was empty going in).
     new_players = ''
     if want_players:
         pm = re.search(r'<players>(.*?)</players>', text, re.DOTALL | re.IGNORECASE)
@@ -1992,7 +2060,7 @@ tag. No prose outside the tag, no code fences, no JSON.{players_block}"""
             # comma-separated list so it lands clean in the input.
             new_players = re.sub(r'\s+', ' ', new_players).strip(' ,')
 
-    return {'markdown': md, 'players': new_players}
+    return {'markdown': md, 'players': new_players, 'urls': urls}
 
 
 # ---------------------------------------------------------------------------
@@ -3408,9 +3476,35 @@ def recording_fetch_notes(record_id):
         print(traceback.format_exc(), flush=True)
         detail = str(e) or e.__class__.__name__
         return jsonify({'error': f'Notes lookup failed: {detail}'}), 500
+
+    # Append new URLs to the persistent notes_urls column (deduped),
+    # so the pill row survives a reload without re-extracting from
+    # textarea content.
+    new_urls = data.get('urls') or []
+    try:
+        existing_csv = (rec['notes_urls'] or '').strip()
+    except (IndexError, KeyError):
+        existing_csv = ''
+    merged = [u for u in (s.strip() for s in existing_csv.split(',')) if u]
+    seen = set(merged)
+    for u in new_urls:
+        if u not in seen:
+            merged.append(u)
+            seen.add(u)
+    if new_urls:
+        try:
+            db.execute(
+                "UPDATE recordings SET notes_urls = ?, updated_at = ? WHERE id = ?",
+                [','.join(merged), datetime.utcnow().isoformat(), record_id],
+            )
+            db.commit()
+        except sqlite3.OperationalError:
+            pass
+
     return jsonify({
         'notes': data.get('markdown') or '',
         'players': data.get('players') or '',
+        'urls': merged,
     })
 
 

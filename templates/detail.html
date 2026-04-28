@@ -1206,7 +1206,8 @@
               title="Pull a brief review / historical note from the web and append below">Notes</button>
       {% endif %}
     </div>
-    <div class="rec-notes-refs" id="recNotesRefs"></div>
+    <div class="rec-notes-refs" id="recNotesRefs"
+         data-urls="{{ val('notes_urls') }}"></div>
     <textarea name="notes" rows="10" placeholder="Notes" class="rec-notes-textarea">{{ val('notes') }}</textarea>
   </div>
   <div class="dgrid dg1">{{ doccell('receipt','Receipt') }}</div>
@@ -1229,24 +1230,16 @@
     const refs   = document.getElementById('recNotesRefs');
     if (!ta) return;
 
-    function renderRefPills() {
+    // Pill source = the persistent notes_urls column (rendered into
+    // a data-urls attribute server-side). Going forward Claude's
+    // sources land here directly; the textarea body stays URL-free.
+    function setPills(urls) {
       if (!refs) return;
-      const text = ta.value || '';
-      // Trailing punctuation (commas, periods, parens, brackets, quotes)
-      // commonly hugs URLs in prose — strip it from the captured tail.
-      const matches = text.match(/https?:\/\/[^\s<>"']+/g) || [];
-      const cleaned = [];
-      const seen = new Set();
-      for (let raw of matches) {
-        raw = raw.replace(/[),.;:!?\]>"']+$/g, '');
-        if (!raw || seen.has(raw)) continue;
-        seen.add(raw);
-        cleaned.push(raw);
-      }
       refs.innerHTML = '';
-      if (!cleaned.length) { refs.style.display = 'none'; return; }
+      const list = (urls || []).filter(Boolean);
+      if (!list.length) { refs.style.display = 'none'; return; }
       refs.style.display = '';
-      cleaned.forEach(u => {
+      list.forEach(u => {
         const a = document.createElement('a');
         a.className = 'rec-notes-ref-pill';
         a.href = u;
@@ -1258,10 +1251,11 @@
         refs.appendChild(a);
       });
     }
-
-    renderRefPills();
-    ta.addEventListener('blur', renderRefPills);
-    ta.addEventListener('input', renderRefPills);
+    if (refs) {
+      const initial = (refs.dataset.urls || '')
+        .split(',').map(s => s.trim()).filter(Boolean);
+      setPills(initial);
+    }
 
     if (pill) {
       const url = pill.dataset.fetchUrl;
@@ -1284,7 +1278,7 @@
           ta.value = ta.value + sep + data.notes;
           // Trigger per-field autosave + refresh the URL pill row.
           ta.dispatchEvent(new Event('blur'));
-          renderRefPills();
+          if (data.urls) setPills(data.urls);
           // Fill-if-empty: only populate Players when the user hasn't
           // typed anything there. Server already gates on the same
           // condition; this is a defensive client-side guard.
