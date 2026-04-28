@@ -396,8 +396,10 @@
                   data-exp="{{ _e_disp }}"
                   data-cvc="{{ row['cvc'] or '' }}"
                   data-zip="{{ row['billing_short'] or '' }}"
+                  data-img-front="{{ row['image_front'] or '' }}"
+                  data-img-back="{{ row['image_back'] or '' }}"
                   onclick="shareCardRow(event, this)"
-                  title="Share card details" aria-label="Share card">
+                  title="Share card details + images" aria-label="Share card">
             <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
                  stroke="currentColor" stroke-width="2"
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -490,8 +492,10 @@
 {% endif %}
 
 <script>
-// Credit card row share button — opens the iOS share sheet (Messages /
-// Mail / AirDrop) with the same payload as the detail-page share button.
+// Credit card row share button — same payload as the detail-page share:
+// front + back images attached, plus the cardholder/number/exp/cvc/zip
+// text. Mirrors the shareCardDetails fallback chain so that when files
+// are collected we never silently fall back to text-only.
 window.shareCardRow = async function (ev, btn) {
   ev.preventDefault();
   ev.stopPropagation();
@@ -504,14 +508,55 @@ window.shareCardRow = async function (ev, btn) {
   if (d.zip) lines.push('Billing zip code: ' + d.zip);
   const text = lines.join('\n');
   if (!text) { alert('Nothing to share — fill in some fields first.'); return; }
-  if (navigator.share) {
-    try { await navigator.share({ text }); }
-    catch (err) { if (err.name !== 'AbortError') alert('Share failed: ' + (err.message || err)); }
-  } else {
+
+  // Pull the file blobs by filename (data-img-front/data-img-back are
+  // rendered server-side from the DB row; present even for HEIC etc.
+  // that don't display inline as <img>).
+  const filenames = [d.imgFront, d.imgBack].filter(Boolean);
+  const files = [];
+  for (const fname of filenames) {
+    try {
+      const resp = await fetch('/uploads/' + fname);
+      if (!resp.ok) continue;
+      const blob = await resp.blob();
+      files.push(new File([blob], fname, { type: blob.type || 'application/octet-stream' }));
+    } catch (_) { /* skip a bad fetch, keep the others */ }
+  }
+
+  try {
+    if (files.length && navigator.canShare && navigator.canShare({ files, text })) {
+      try {
+        await navigator.share({ files, text });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        // Native share with files failed — drop through to download.
+      }
+    }
+    if (!files.length && navigator.share) {
+      try { await navigator.share({ text }); return; }
+      catch (err) { if (err.name === 'AbortError') return; }
+    }
+    // Desktop / no-file-share fallback: download images + copy text.
+    files.forEach(f => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(f);
+      a.download = f.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
     try {
       await navigator.clipboard.writeText(text);
-      alert('Copied to clipboard:\n\n' + text);
-    } catch (_) { prompt('Copy this text:', text); }
+      alert(files.length
+        ? `Card images downloaded; details copied to clipboard:\n\n${text}`
+        : `Copied to clipboard:\n\n${text}`);
+    } catch (_) {
+      prompt('Copy this text:', text);
+    }
+  } catch (err) {
+    alert('Share failed: ' + (err.message || err));
   }
 };
 
