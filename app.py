@@ -124,10 +124,12 @@ VALUE_LISTS = {
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
     'coin_grade': ['BU','FDC','MS','PF','cAU','AU','aAU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
     'clasp_type': ['Tang','Fold Over','Butterfly','Velcro'],
-    'pen_type': ['Ballpoint','Fountain','Rollerball','Mechanical Pencil'],
-    'pen_action': ['Cap','Click','Twist'],
-    'pen_cartridge': ['Proprietary','Standard International'],
-    'pen_reservoir': ['Cartridge','Converter','Piston','Vacuum'],
+    'pen_type':      ['Fountain Pen', 'Ball Point', 'Roller Ball', 'Mechanical Pencil'],
+    'pen_action':    ['Cap', 'Click', 'Twist'],
+    'pen_nib':       ['Extra Fine', 'Fine', 'Medium', 'Broad'],
+    'pen_cartridge': ['International', 'Pilot/Namiki', 'Platinum/Nakaya', 'Sailor', 'Proprietary'],
+    # Stored in the legacy `reservoir` column; surfaced to the user as "Filling".
+    'pen_filling':   ['Cartridge', 'Converter', 'Piston', 'Eyedropper', 'Vacuum'],
     'recording_type': ['Vinyl','CD','SACD','Tape'],
     'recording_genre': ['Classical','Jazz','Rock','Pop','Blues','Folk','Electronic','World'],
     'property_type': ['Residential','Commercial','Land'],
@@ -347,11 +349,17 @@ FIELDS = {
     'pens': [
         {'name': 'make',            'label': 'Make',              'type': 'text'},
         {'name': 'model',           'label': 'Model',             'type': 'text'},
-        {'name': 'type',            'label': 'Type',              'type': 'text'},
-        {'name': 'action',          'label': 'Action',            'type': 'text'},
-        {'name': 'nib',             'label': 'Nib',               'type': 'text'},
-        {'name': 'cartridge',       'label': 'Cartridge',         'type': 'text'},
-        {'name': 'reservoir',       'label': 'Reservoir',         'type': 'text'},
+        {'name': 'type',            'label': 'Type',              'type': 'select',
+         'options': [''] + VALUE_LISTS['pen_type']},
+        {'name': 'action',          'label': 'Action',            'type': 'select',
+         'options': [''] + VALUE_LISTS['pen_action']},
+        {'name': 'nib',             'label': 'Nib',               'type': 'select',
+         'options': [''] + VALUE_LISTS['pen_nib']},
+        {'name': 'cartridge',       'label': 'Cartridge',         'type': 'select',
+         'options': [''] + VALUE_LISTS['pen_cartridge']},
+        # Column is `reservoir` for backwards compat; user sees "Filling".
+        {'name': 'reservoir',       'label': 'Filling',           'type': 'select',
+         'options': [''] + VALUE_LISTS['pen_filling']},
         {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
@@ -766,6 +774,17 @@ def init_db():
             )
         except sqlite3.OperationalError:
             pass
+
+    # Pen cartridges: fold the "Pilot-Namiki" variant into the canonical
+    # "Pilot/Namiki" so the strict select doesn't reject existing rows.
+    # Idempotent — re-running on already-folded data updates 0 rows.
+    try:
+        db.execute(
+            "UPDATE pens SET cartridge = 'Pilot/Namiki' "
+            "WHERE LOWER(TRIM(COALESCE(cartridge, ''))) = 'pilot-namiki'"
+        )
+    except sqlite3.OperationalError:
+        pass
     db.commit()
 
 

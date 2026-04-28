@@ -867,10 +867,10 @@
         {{ selcell('action','Action', vlists.pen_action) }}
       </div>
       <div class="dgrid dg2">
-        {{ cell('nib','Nib') }}
+        {{ selcell('nib','Nib', vlists.pen_nib) }}
         {{ selcell('cartridge','Cartridge', vlists.pen_cartridge) }}
       </div>
-      <div class="dgrid dg1">{{ selcell('reservoir','Reservoir', vlists.pen_reservoir) }}</div>
+      <div class="dgrid dg1">{{ selcell('reservoir','Filling', vlists.pen_filling) }}</div>
       <div class="dgrid dg3">
         {{ datecell('date','Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
