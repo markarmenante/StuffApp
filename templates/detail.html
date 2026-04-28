@@ -2886,8 +2886,29 @@ async function shareCardDetails(ev) {
   if (val('billing_short')) lines.push('Billing zip code: ' + val('billing_short'));
   const text = lines.join('\n');
   if (!text) { alert('Nothing to share — fill in some fields first.'); return; }
+
+  // Attach front + back card images when present so the recipient gets
+  // the visual along with the digits. Same File-blob pattern the doc
+  // share uses below.
+  const files = [];
+  for (const field of ['image_front', 'image_back']) {
+    const img = form.querySelector(`.drop-zone[data-field="${field}"] img`);
+    const src = img && img.src;
+    if (!src) continue;
+    try {
+      const resp = await fetch(src);
+      if (!resp.ok) continue;
+      const blob = await resp.blob();
+      const name = src.split('/').pop() || `${field}.jpg`;
+      files.push(new File([blob], name, { type: blob.type || 'image/jpeg' }));
+    } catch (_) { /* skip unreadable image, share text only */ }
+  }
+
   if (navigator.share) {
-    try { await navigator.share({ text }); }
+    const payload = (files.length && navigator.canShare && navigator.canShare({ files, text }))
+      ? { files, text }
+      : { text };
+    try { await navigator.share(payload); }
     catch (err) { if (err.name !== 'AbortError') alert('Share failed: ' + (err.message || err)); }
   } else {
     // Desktop fallback: copy to clipboard
