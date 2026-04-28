@@ -84,6 +84,57 @@ document.getElementById('adminShowHidden').addEventListener('click', () => {
   applyHidden();
 });
 
+// Pretty-print numbers with thousands separators.
+function fmtNum(n) {
+  return Number(n).toLocaleString('en-US');
+}
+
+// Human-readable byte size: 1.0 GB / 480 MB / 12 KB / 800 B.
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024)        return `${n} B`;
+  if (n < 1024 ** 2)   return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3)   return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
+// Turn an admin endpoint's JSON response into a one-line summary.
+// Known shapes get human formatting; anything else falls back to JSON
+// so we don't silently swallow a response we forgot to handle.
+function formatAdminResult(data) {
+  if (data == null || typeof data !== 'object') return String(data);
+
+  // Orphan-upload scan / delete.
+  if ('orphan_count' in data) {
+    const parts = [];
+    if (data.dry_run) {
+      parts.push(`${fmtNum(data.orphan_count)} orphan file${data.orphan_count === 1 ? '' : 's'}`);
+      parts.push(fmtBytes(data.orphan_size_bytes));
+      if ('referenced' in data) parts.push(`${fmtNum(data.referenced)} referenced`);
+      return parts.join(' · ') + ' (dry run)';
+    } else {
+      if ((data.deleted || 0) === 0) return 'Nothing to delete — all files referenced';
+      parts.push(`Deleted ${fmtNum(data.deleted)} file${data.deleted === 1 ? '' : 's'}`);
+      parts.push(`${fmtBytes(data.orphan_size_bytes)} freed`);
+      return parts.join(' · ');
+    }
+  }
+
+  // UPDATE-style endpoints (coins owner=Mark, etc.) → "Updated X of Y".
+  if ('updated' in data && 'total' in data) {
+    if (data.updated === 0) return `Nothing to update (${fmtNum(data.total)} rows already match)`;
+    return `Updated ${fmtNum(data.updated)} of ${fmtNum(data.total)}`;
+  }
+
+  // Generic count-style responses.
+  if ('updated' in data) return `Updated ${fmtNum(data.updated)}`;
+  if ('count'   in data) return `Count: ${fmtNum(data.count)}`;
+  if ('ok' in data && Object.keys(data).length === 1) return data.ok ? 'OK' : 'Failed';
+
+  // Unknown shape — keep the raw JSON so we notice and add a formatter.
+  return JSON.stringify(data);
+}
+
 function triggerDownload(blob, filenameFallback) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -173,7 +224,8 @@ document.querySelectorAll('.admin-action').forEach(li => {
           out.textContent = `Error ${r.status}: ${data.error || 'failed'}`;
           out.className = 'admin-result err';
         } else {
-          out.textContent = JSON.stringify(data);
+          out.textContent = formatAdminResult(data);
+          out.title = JSON.stringify(data);   // raw JSON on hover
           out.className = 'admin-result ok';
         }
       }
@@ -207,7 +259,7 @@ document.querySelectorAll('.admin-action').forEach(li => {
 }
 .admin-run-btn:hover:not(:disabled) { background: #e8f0ff; }
 .admin-run-btn:disabled { opacity: 0.5; cursor: wait; }
-.admin-result { font-size: 12px; min-width: 120px; text-align: right; }
+.admin-result { font-size: 12px; min-width: 120px; max-width: 320px; text-align: right; line-height: 1.3; }
 .admin-result.ok { color: #2a7a2a; }
 .admin-result.err { color: #c0392b; }
 .admin-result.running { color: var(--text-secondary); font-style: italic; }
