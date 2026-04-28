@@ -129,6 +129,12 @@
 
   <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
   <div class="detail-nav-overlay">
+    {% if not is_new %}
+    <a class="watch-lookup-btn print-pdf-btn"
+       href="{{ url_for('record_print_pdf', category=category, record_id=r['id']) }}"
+       title="Download a one-page PDF of this record"
+       target="_blank">📄 PDF</a>
+    {% endif %}
     {% if category == 'credit_cards' %}
     <button type="button" class="card-share-btn"
             onclick="shareCardDetails(event)"

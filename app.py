@@ -5399,12 +5399,17 @@ def admin_export_files():
 
     import io
     import zipfile
+    import csv as _csv
 
     db = get_db()
     buf = io.BytesIO()
     written = 0
     skipped_missing = 0
     seen_paths = set()
+    # Track per-category rows so we can write one CSV per category at
+    # the top of that category's folder once all files are processed.
+    csv_rows = {}      # category → list[dict-like row]
+    csv_columns = {}   # category → list[column name]
 
     def _next_unique(base_dir, ident, label, ext):
         """Avoid name collisions when two items in the same folder render
@@ -5435,6 +5440,11 @@ def admin_export_files():
             cat_label = EXPORT_CATEGORY_LABELS.get(cat, cat.title())
             cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
 
+            # Stash for the per-category CSV. Capture every column in
+            # column-info order so the CSV is stable across exports.
+            csv_columns[cat] = [r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()]
+            csv_rows[cat] = [dict(r) for r in rows]
+
             for row in rows:
                 ident_raw = plan['ident'](row)
                 group_raw = plan['group'](row)
@@ -5462,6 +5472,22 @@ def admin_export_files():
                     arcname = f'{base_dir}/{_next_unique(base_dir, ident, label, ext)}'
                     zf.write(src, arcname=arcname)
                     written += 1
+
+        # Per-category CSV at the top of each category's folder. Rows
+        # in the same order as the table; columns straight from
+        # PRAGMA table_info so the schema is faithfully captured.
+        for cat, rows in csv_rows.items():
+            if not rows:
+                continue
+            cat_label = EXPORT_CATEGORY_LABELS.get(cat, cat.title())
+            cols = csv_columns[cat]
+            sio = io.StringIO()
+            w = _csv.writer(sio, quoting=_csv.QUOTE_MINIMAL)
+            w.writerow(cols)
+            for r in rows:
+                w.writerow(['' if r.get(c) is None else r.get(c) for c in cols])
+            zf.writestr(f'StuffFiles/{cat_label}/{cat_label}.csv',
+                        sio.getvalue().encode('utf-8'))
 
     buf.seek(0)
     ts = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
@@ -5523,6 +5549,159 @@ def _parse_sweep_path(rel_path):
         'ext':      ext,
         'original_basename': base + ext,
     }
+
+
+@app.route('/<category>/<record_id>/print-pdf', methods=['GET'])
+def record_print_pdf(category, record_id):
+    """Generic per-record PDF: title + a 2-column key/value table of
+    every populated field + the primary image (if any) inline. Works
+    for all categories — uses FIELDS for ordering/labels."""
+    if category not in CATEGORIES:
+        abort(404)
+    db = get_db()
+    table = CATEGORIES[category]['table']
+    row = db.execute(f"SELECT * FROM {table} WHERE id = ?", [record_id]).fetchone()
+    if not row:
+        abort(404)
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                     Paragraph, Spacer, Image, KeepTogether,
+                                     PageBreak)
+    import io as _io
+
+    plan = EXPORT_LAYOUT.get(category, {})
+    cat_label = EXPORT_CATEGORY_LABELS.get(category, category.title())
+
+    # Pretty title for the record — reuse the export ident if available.
+    if plan.get('ident'):
+        try:
+            ident = plan['ident'](row) or row['id'][:8]
+        except Exception:
+            ident = row['id'][:8]
+    else:
+        ident = row['id'][:8]
+    group = ''
+    if plan.get('group'):
+        try:
+            group = plan['group'](row) or ''
+        except Exception:
+            group = ''
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter,
+                            leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+                            topMargin=0.6 * inch, bottomMargin=0.6 * inch)
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontSize=16, spaceAfter=2)
+    sub = ParagraphStyle('sub', parent=styles['Normal'], fontSize=10,
+                         textColor=colors.grey, spaceAfter=10)
+    cell_style = ParagraphStyle('cell', parent=styles['Normal'],
+                                fontSize=9, leading=11)
+
+    story = []
+    story.append(Paragraph(ident or '(untitled)', h1))
+    sub_text = ' · '.join(filter(None, [cat_label, group]))
+    if sub_text:
+        story.append(Paragraph(sub_text, sub))
+
+    # Find a primary image to embed near the top.
+    fields = FIELDS.get(category, [])
+    file_fields = [f['name'] for f in fields if f.get('type') == 'file']
+    primary_img = None
+    for cand in (CATEGORIES[category].get('image_field'),
+                 'image', 'image_obv', 'image_1', 'image_front', 'head_shot'):
+        if not cand: continue
+        v = ''
+        try: v = (row[cand] or '').strip()
+        except (KeyError, IndexError): v = ''
+        if v and is_image_filter(v):
+            p = os.path.join(UPLOAD_FOLDER, v)
+            if os.path.isfile(p):
+                primary_img = p
+                break
+
+    if primary_img:
+        try:
+            ir = ImageReader(primary_img)
+            iw, ih = ir.getSize()
+            max_w, max_h = 4.0 * inch, 3.5 * inch
+            scale = min(max_w / iw, max_h / ih)
+            story.append(Image(primary_img, width=iw * scale, height=ih * scale))
+            story.append(Spacer(1, 8))
+        except Exception:
+            pass
+
+    # Field table — every populated, non-file field. Two columns
+    # (label / value), repeated for compactness.
+    rows_for_table = []
+    for f in fields:
+        name = f['name']
+        if f.get('type') == 'file': continue
+        if name in ('id', 'created_at', 'updated_at'): continue
+        try:
+            v = row[name]
+        except (KeyError, IndexError):
+            continue
+        if v is None or (isinstance(v, str) and not v.strip()):
+            continue
+        label = f.get('label') or name
+        rows_for_table.append((label, str(v)))
+
+    if rows_for_table:
+        # Two-column layout: label/value pairs flowing left-to-right.
+        col_w = (doc.width / 2) - 4
+        data = []
+        for i in range(0, len(rows_for_table), 2):
+            left = rows_for_table[i]
+            right = rows_for_table[i + 1] if i + 1 < len(rows_for_table) else ('', '')
+            data.append([
+                Paragraph(f'<b>{left[0]}</b>', cell_style),
+                Paragraph(left[1], cell_style),
+                Paragraph(f'<b>{right[0]}</b>', cell_style) if right[0] else '',
+                Paragraph(right[1], cell_style) if right[1] else '',
+            ])
+        tbl = Table(data, colWidths=[col_w * 0.35, col_w * 0.65, col_w * 0.35, col_w * 0.65])
+        tbl.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LINEBELOW', (0, 0), (-1, -1), 0.25, colors.lightgrey),
+        ]))
+        story.append(tbl)
+
+    # Append remaining file fields as a small "Documents" list
+    other_files = [f for f in file_fields if not (primary_img and
+                  os.path.basename(primary_img) == (
+                      (lambda v: v if v else '')(row[f] if f in row.keys() else '')))]
+    docs = []
+    for f in other_files:
+        try:
+            v = (row[f] or '').strip()
+        except (KeyError, IndexError):
+            continue
+        if not v:
+            continue
+        docs.append(f'{f}: {v}')
+    if docs:
+        story.append(Spacer(1, 12))
+        story.append(Paragraph('<b>Files on this record</b>', cell_style))
+        for d in docs:
+            story.append(Paragraph(d, cell_style))
+
+    doc.build(story)
+    buf.seek(0)
+    safe_ident = re.sub(r'[^A-Za-z0-9._ -]', '', ident)[:80].strip() or row['id'][:8]
+    return send_file(buf, as_attachment=True,
+                     download_name=f'{cat_label} — {safe_ident}.pdf',
+                     mimetype='application/pdf')
 
 
 @app.route('/sweep', methods=['GET', 'POST'])
