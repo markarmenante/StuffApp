@@ -4702,6 +4702,23 @@ def admin_index():
                      "blank, or anything other than 'Mark'.",
             'url':   url_for('coins_owner_mark'),
         },
+        {
+            'label': "Recordings: clear bare-numeric notes (FM import fix)",
+            'desc':  "The earlier FileMaker import wrote price values into "
+                     "the notes column. Nulls out any recordings.notes that "
+                     "is just an integer or decimal (< 12 chars, no spaces). "
+                     "Run before re-upserting from Recording.csv.",
+            'url':   url_for('clear_recording_numeric_notes'),
+        },
+        {
+            'label': "Recordings: re-upsert from Recording.csv",
+            'desc':  "Refills price + notes (and every other column) from "
+                     "Recording.csv, matching on UUID. Existing in-app edits "
+                     "to non-blank columns are preserved. Pair with the "
+                     "clear-numeric-notes action above to undo the bad "
+                     "import.",
+            'url':   url_for('upsert_recordings'),
+        },
     ]
     return render_template('admin.html', actions=actions,
                            secret=IMPORT_MISSING_SECRET,

@@ -852,7 +852,18 @@ input[type="date"] { -webkit-appearance: none; }
 .rec-radio-block-divider { padding-right: 20px; border-right: 1px solid var(--border); }
 .recording-purchase .dcell input,
 .recording-purchase .dcell select { text-align: center; }
-.recording-meta .dcell input[name="year_recorded"] { text-align: center; }
+
+/* Title row: italic title fills the row, " — YYYY" trails it (not italic).
+   Year stays a real <input> so it round-trips via per-field autosave. */
+.rec-title-row { display: flex; align-items: baseline; gap: 6px; }
+.rec-title-row .rec-title-input { flex: 1 1 auto; min-width: 0; }
+.rec-title-row .rec-title-year-sep { color: var(--text); font-weight: 600; }
+.rec-title-row .rec-title-year { width: 60px; text-align: left; flex: 0 0 auto; }
+
+/* Genre column sized to fit the longest canonical value ("Funk/Soul" /
+   "Classical" — 9 chars) with a touch of padding; Genre 2 free-text
+   fills the rest of the row. */
+.recording-meta { grid-template-columns: 12ch 1fr; }
 
 /* People: Health / IDs section pills sit at the left, then the Name
    input, with space on the right only for the floating Back link
