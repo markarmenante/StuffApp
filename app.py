@@ -430,6 +430,7 @@ FIELDS = {
          'options': ['', 'LP', '45', '78', 'EP', 'CD', 'Cassette', '8-Track', 'Reel', 'Digital', 'Other']},
         {'name': 'genre',           'label': 'Genre',             'type': 'text'},
         {'name': 'genre_2',         'label': 'Genre 2',           'type': 'text'},
+        {'name': 'players',         'label': 'Players',           'type': 'text'},
         {'name': 'year_recorded',   'label': 'Year Recorded',     'type': 'text'},
         {'name': 'speed',           'label': 'Speed',             'type': 'text'},
         {'name': 'sound',           'label': 'Sound',             'type': 'select',
@@ -712,6 +713,7 @@ def init_db():
         'ALTER TABLE properties ADD COLUMN owner TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
         'ALTER TABLE topics ADD COLUMN image TEXT',
+        'ALTER TABLE recordings ADD COLUMN players TEXT',
         'ALTER TABLE coins ADD COLUMN history_region TEXT',
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
@@ -1873,6 +1875,12 @@ def fetch_recording_notes(rec):
         (rec['genre'] or '').strip(),
         (rec['genre_2'] or '').strip(),
     ] if x)
+    # players column may not exist on older DBs that haven't run the
+    # ALTER yet — sqlite3.Row raises IndexError on missing columns.
+    try:
+        players = (rec['players'] or '').strip()
+    except (IndexError, KeyError):
+        players = ''
     fmt_bits = [x for x in [
         (rec['type']  or '').strip(),
         (rec['speed'] or '').strip(),
@@ -1889,6 +1897,7 @@ Title:   {title or '(unknown)'}
 Artist:  {artist or '(unknown)'}
 Year:    {year or '(unknown)'}
 Genre:   {genre or '(unspecified)'}
+Players: {players or '(unspecified)'}
 Format:  {fmt or '(unspecified)'}
 
 Cover whichever of these are notable for this specific recording:
