@@ -1894,12 +1894,16 @@ def fetch_recording_notes(rec):
     want_players = not players
     players_block = ("\nAlso return a comma-separated list of the "
                      "key musicians on this recording (lead artist + "
-                     "sidemen / band members) — first/last names only, "
-                     "no instruments or roles. Wrap that list in a "
-                     "<players>...</players> tag immediately after the "
-                     "<markdown> block. Omit the <players> tag entirely "
-                     "if you can't determine personnel with reasonable "
-                     "confidence.") if want_players else ""
+                     "sidemen / band members), each followed by their "
+                     "primary instrument or role in parentheses — "
+                     "e.g. \"John Coltrane (tenor sax), McCoy Tyner "
+                     "(piano), Jimmy Garrison (bass), Elvin Jones "
+                     "(drums)\". Use short instrument names (sax, not "
+                     "tenor saxophone Selmer Mark VI). Wrap the list "
+                     "in a <players>...</players> tag immediately "
+                     "after the <markdown> block. Omit the <players> "
+                     "tag entirely if you can't determine personnel "
+                     "with reasonable confidence.") if want_players else ""
 
     prompt = f"""You are a music critic + recording historian writing a
 brief reference note for a single album / recording in a personal
