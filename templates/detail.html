@@ -2262,8 +2262,42 @@ document.querySelectorAll('.comp-item').forEach(item => {
   function valueFor(el) {
     return el.value;
   }
+  // Debounced save while the user is still typing — no need to wait for
+  // blur. blur still fires saveNow() to flush any pending change.
+  const SAVE_DEBOUNCE_MS = 600;
+  const pendingTimers = new WeakMap();
+  const lastSaved = new WeakMap();
+  function saveNow(el) {
+    const t = pendingTimers.get(el);
+    if (t) { clearTimeout(t); pendingTimers.delete(el); }
+    const v = valueFor(el);
+    if (lastSaved.get(el) === v) return;
+    lastSaved.set(el, v);
+    saveField(el.name, v);
+  }
+  function scheduleSave(el) {
+    const t = pendingTimers.get(el);
+    if (t) clearTimeout(t);
+    pendingTimers.set(el, setTimeout(() => {
+      pendingTimers.delete(el);
+      const v = valueFor(el);
+      if (lastSaved.get(el) === v) return;
+      lastSaved.set(el, v);
+      saveField(el.name, v);
+    }, SAVE_DEBOUNCE_MS));
+  }
   form.querySelectorAll('input[name]:not([type=file]):not([type=radio]):not([type=checkbox]):not([type=date]), textarea[name]').forEach(el => {
-    el.addEventListener('blur', () => saveField(el.name, valueFor(el)));
+    lastSaved.set(el, el.value);
+    el.addEventListener('input', () => scheduleSave(el));
+    el.addEventListener('blur', () => saveNow(el));
+  });
+  // Flush any pending typed-but-not-saved changes if the page is being
+  // unloaded (back button, tab close) — saveField uses keepalive so the
+  // request still completes.
+  window.addEventListener('pagehide', () => {
+    form.querySelectorAll('input[name]:not([type=file]):not([type=radio]):not([type=checkbox]):not([type=date]), textarea[name]').forEach(el => {
+      if (pendingTimers.has(el)) saveNow(el);
+    });
   });
 
   // Date / month inputs — save on change
