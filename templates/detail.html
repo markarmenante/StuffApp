@@ -864,13 +864,19 @@
     <div class="watch-specs">
       <div class="dgrid dg2">
         {{ selcell('type','Type', vlists.pen_type) }}
-        {{ selcell('action','Action', vlists.pen_action) }}
+        {{ selcell('nib','Nib', vlists.pen_nib) }}
       </div>
       <div class="dgrid dg2">
-        {{ selcell('nib','Nib', vlists.pen_nib) }}
-        {{ selcell('cartridge','Cartridge', vlists.pen_cartridge) }}
+        {{ selcell('reservoir','Filling', vlists.pen_filling) }}
+        {# Cartridge is meaningless for built-in fillings (Piston / Eyedropper)
+           — hide the cell server-side and toggle live on filling change. #}
+        <div class="pen-cartridge-cell"{% if val('reservoir') in ['Piston', 'Eyedropper'] %} hidden{% endif %}>
+          {{ selcell('cartridge','Cartridge', vlists.pen_cartridge) }}
+        </div>
       </div>
-      <div class="dgrid dg1">{{ selcell('reservoir','Filling', vlists.pen_filling) }}</div>
+      {# `action` field is intentionally hidden from the UI but kept in the
+         schema so existing values aren't lost. Reintroduce by adding a
+         selcell back here if needed. #}
       <div class="dgrid dg3">
         {{ datecell('date','Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
@@ -888,6 +894,20 @@
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
   </div>
+  <script>
+  // Hide the Cartridge cell live when the user picks a built-in filling
+  // (Piston / Eyedropper) — those don't take a cartridge brand.
+  (function () {
+    const filling = document.querySelector('select[name="reservoir"]');
+    const cell = document.querySelector('.pen-cartridge-cell');
+    if (!filling || !cell) return;
+    const HIDE = new Set(['Piston', 'Eyedropper']);
+    filling.addEventListener('change', () => {
+      if (HIDE.has(filling.value)) cell.setAttribute('hidden', '');
+      else cell.removeAttribute('hidden');
+    });
+  })();
+  </script>
 
   <!-- ══════════════════════════════════════════════════════════
        ART

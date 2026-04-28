@@ -874,6 +874,7 @@ input[type="date"] { -webkit-appearance: none; }
 .person-tab:focus { outline: none; }
 /* `display: grid` on .dgrid was beating the UA [hidden] rule */
 .person-doc-group[hidden] { display: none; }
+.pen-cartridge-cell[hidden] { display: none; }
 
 /* IDs panel: Home Address (3-line textarea) on the left spans the full
    height of the right column which stacks Phone / Birth Date / SSN. */
