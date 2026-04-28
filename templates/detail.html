@@ -2,7 +2,7 @@
 {% block title %}{{ record[cat_info.label_field] if record else 'New' }} — StuffApp{% endblock %}
 
 {% set r = record %}
-{% macro val(field) %}{{ (r[field] if r and r[field] is not none else '') }}{% endmacro %}
+{% macro val(field) %}{{ (r[field] if r and field in r.keys() and r[field] is not none else '') }}{% endmacro %}
 {% macro cell(field, label, colspan=1, rows=1) %}
 <div class="dcell" style="{% if colspan > 1 %}grid-column: span {{ colspan }};{% endif %}">
   {% set v = val(field) %}

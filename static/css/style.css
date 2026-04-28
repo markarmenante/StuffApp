@@ -887,7 +887,9 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .rec-notes-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding-bottom: 6px;
+  background: var(--cell-bg);
+  border: 1px solid var(--border-light); border-radius: 4px;
+  padding: 4px 8px; margin-bottom: 6px;
 }
 .rec-notes-title {
   font-size: 12px; font-weight: 600; color: var(--text-label);
