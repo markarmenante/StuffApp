@@ -4769,9 +4769,10 @@ def documents_set_file(category, record_id, doc_set, idx):
 
 @app.route('/<category>/<record_id>/documents/<doc_set>/<int:idx>/delete', methods=['POST'])
 def documents_delete(category, record_id, doc_set, idx):
-    """Remove a document tile: drops the JSON entry AND deletes the
-    underlying file from disk. (Special license/health-card cells live
-    in dedicated columns handled by delete_file_field, not here.)"""
+    """Empty a document tile in place: blanks the JSON entry but keeps
+    the slot so the user can drop a new doc into the same bin. The
+    underlying file is deleted from disk. (Special license/health-card
+    cells live in dedicated columns handled by delete_file_field.)"""
     err, col = _docs_guard(category, record_id, doc_set)
     if err: return err
     db = get_db()
@@ -4779,10 +4780,10 @@ def documents_delete(category, record_id, doc_set, idx):
     docs = _docs_load(db, table, record_id, col) or []
     if idx < 0 or idx >= len(docs):
         return jsonify({'error': 'Index out of range'}), 400
-    removed = docs.pop(idx)
+    removed = docs[idx] if isinstance(docs[idx], dict) else {}
+    docs[idx] = {'title': '', 'filename': ''}
     _docs_save(db, table, record_id, docs, col)
-    if isinstance(removed, dict):
-        _unlink_upload(removed.get('filename') or '')
+    _unlink_upload(removed.get('filename') or '')
     return jsonify({'ok': True, 'count': len(docs)})
 
 

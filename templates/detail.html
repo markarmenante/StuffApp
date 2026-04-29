@@ -3669,9 +3669,18 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         const title = titleInp ? titleInp.value.trim() : '';
         await append({ file, title });
       } else {
-        const d = await setFile(idx, file);
-        // Update the tile's preview without a full reload.
         const cell = tile.querySelector('.dyn-doc-cell');
+        // A "preserved bin" — left over from a × delete — has no preview
+        // and no × / share buttons yet. The in-place DOM patch below
+        // doesn't know how to spawn those, so fall back to a full reload
+        // (server re-renders the tile correctly with all the bits).
+        const wasEmptyBin = cell && cell.classList.contains('dyn-doc-empty');
+        const d = await setFile(idx, file);
+        if (wasEmptyBin) {
+          window.location.reload();
+          return;
+        }
+        // Update the tile's preview without a full reload.
         if (cell) {
           const fileInp = cell.querySelector('input[type="file"]');
           cell.querySelectorAll('.doc-link, .doc-empty-icon').forEach(n => n.remove());
