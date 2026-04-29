@@ -1142,7 +1142,12 @@ def _backfill_docs_json(db, table, target_col, sources):
         if existing:
             try:
                 parsed = json.loads(existing)
-                if isinstance(parsed, list) and parsed:
+                # Skip if the column is ANY valid JSON list — including
+                # an empty list. An empty list means the user (or the
+                # phantom-doc cleanup) has explicitly emptied it; the
+                # backfill must not repopulate from legacy *_label
+                # columns or it'll resurrect the phantoms every boot.
+                if isinstance(parsed, list):
                     continue
             except (TypeError, ValueError):
                 pass
