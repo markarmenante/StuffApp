@@ -3389,7 +3389,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   // Refuse to wire up on the new-record form — the API needs a saved
   // record_id, and the autosave-on-new path isn't there for every
   // category yet. The blank tile will start working after first save.
-  if (!base || /\/documents\/[^/]+$/.test(base) === false) return;
+  // When is_new, the template emits `/documents/<set>` with no record
+  // prefix; reject that and any other base that doesn't look like
+  // `/<cat>/<id>/documents/<set>`.
+  if (!base || base.startsWith('/documents/')) return;
+  if (!/\/documents\/[^/]+$/.test(base)) return;
   const placeholderPrefix = row.dataset.docPlaceholder || 'Doc';
 
   function tileAt(idx) {
