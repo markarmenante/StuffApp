@@ -1430,21 +1430,34 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
     return f"SELECT * FROM {table} {where_clause} ORDER BY {order_by}", params
 
 
+# Make-then-model alpha order, used by several gear categories whose
+# list view renders <make> as the brand line and <model> below it.
+# COLLATE NODIACRITIC folds 'Voigtländer' to 'voigtlander' so it
+# sorts in the V block, not as multi-byte UTF-8 garbage.
+_MAKE_MODEL_ORDER = ("COALESCE(NULLIF(make, ''), 'zzz') COLLATE NODIACRITIC, "
+                     "COALESCE(NULLIF(model, ''), 'zzz') COLLATE NODIACRITIC")
+
 CATEGORY_ORDER_BY = {
-    'coins': ("COALESCE(NULLIF(region, ''), 'zzz') ASC, "
-              "COALESCE(NULLIF(authority, ''), 'zzz') ASC, "
+    'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
+              "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
-    'watches': ("COALESCE(NULLIF(brand, ''), 'zzz'), "
-                "COALESCE(NULLIF(description, ''), 'zzz')"),
-    'vehicles': ("COALESCE(NULLIF(make, ''), 'zzz'), "
-                 "COALESCE(NULLIF(model, ''), 'zzz')"),
+    'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
+                "COALESCE(NULLIF(description, ''), 'zzz') COLLATE NODIACRITIC"),
+    'vehicles':   _MAKE_MODEL_ORDER,
+    'cameras':    _MAKE_MODEL_ORDER,
+    'lenses':     _MAKE_MODEL_ORDER,
+    'pens':       _MAKE_MODEL_ORDER,
+    'audio':      _MAKE_MODEL_ORDER,
+    'rifles':     _MAKE_MODEL_ORDER,
     # Art: alpha by artist (records use "Last, First" so this gives
     # surname order), then by title for the same artist's pieces.
-    # Uses the NODIACRITIC collation so 'Roumégoux' sorts inside the
-    # R block and 'Blåder' inside the B block — SQLite's default
-    # LOWER/NOCASE leaves multi-byte UTF-8 in unhelpful positions.
     'art': ("COALESCE(NULLIF(artist, ''), 'zzz') COLLATE NODIACRITIC, "
             "COALESCE(title, '') COLLATE NODIACRITIC"),
+    # Recordings: artist then album/track title, same shape as art.
+    'recordings': ("COALESCE(NULLIF(artist, ''), 'zzz') COLLATE NODIACRITIC, "
+                   "COALESCE(title, '') COLLATE NODIACRITIC"),
+    # Persons: alpha by name (stored "Last, First" by convention).
+    'persons': "COALESCE(NULLIF(name, ''), 'zzz') COLLATE NODIACRITIC",
     # Type first (Residential block, then Commercial block, with a
     # bold divider rendered between them in the template), then the
     # six primary homes featured-first within each type, then alpha.
@@ -1461,11 +1474,11 @@ CATEGORY_ORDER_BY = {
                    "  WHEN LOWER(COALESCE(name,'')) = 'paris'          THEN 5 "
                    "  ELSE 99 "
                    "END, "
-                   "LOWER(COALESCE(name,''))"),
+                   "COALESCE(name,'') COLLATE NODIACRITIC"),
     # Cards: sort by description (the bank/issuer name shown next to
     # each card) descending so heavier-use families group together.
-    'credit_cards': ("LOWER(COALESCE(description, '')) DESC, "
-                     "LOWER(COALESCE(name, ''))"),
+    'credit_cards': ("COALESCE(description, '') COLLATE NODIACRITIC DESC, "
+                     "COALESCE(name, '') COLLATE NODIACRITIC"),
 }
 
 
