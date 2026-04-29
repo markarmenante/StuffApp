@@ -1694,8 +1694,8 @@
   {% if property_pill_categories and val('name') %}
   <div class="section-bar">Items at this property</div>
   <div class="property-items-pills">
-    {% for slug, name in property_pill_categories %}
-    <a class="property-item-pill"
+    {% for slug, name, count in property_pill_categories %}
+    <a class="property-item-pill {{ 'has-items' if count > 0 else 'no-items' }}"
        href="{{ url_for('list_view', category=slug, at=val('name')) }}">
       {{ name }}
     </a>

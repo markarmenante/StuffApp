@@ -1297,6 +1297,18 @@ input[type="date"] { -webkit-appearance: none; }
   border-color: var(--blue); color: var(--blue);
   text-decoration: none;
 }
+/* Green when this category has at least one item at this property,
+   muted red when there are zero. The blue hover state still wins
+   because :hover selectors come after these in source order. */
+.property-item-pill.has-items {
+  border-color: #2e8540; color: #2e8540;
+  background: rgba(46, 133, 64, 0.06);
+}
+.property-item-pill.no-items {
+  border-color: #c0392b; color: #c0392b;
+  background: rgba(192, 57, 43, 0.05);
+  opacity: 0.65;
+}
 
 /* "← back to <Property>" pill at the top of a list filtered by
    ?at= so the user can return to the originating Property detail

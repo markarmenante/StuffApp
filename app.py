@@ -2798,11 +2798,35 @@ def detail_view(category, record_id):
     property_pill_categories = []
     if category == 'properties' and record and record['name']:
         allowed = g.get('allowed_cats') or set(CATEGORIES.keys())
-        property_pill_categories = [
-            (slug, CATEGORIES[slug]['name'])
-            for slug in CATEGORY_PROPERTY_FIELD
-            if slug in allowed and slug not in PROPERTY_PILL_EXCLUDE
-        ]
+        prop_name = record['name']
+        # Owners see every accessible category as a pill (green when
+        # populated, red when zero — useful at-a-glance "what's
+        # missing from this property"). Members only see pills with
+        # at least one item they can actually access; the row-filter
+        # is applied to the count so categories with all-restricted
+        # rows drop off entirely instead of showing a misleading red.
+        viewer = g.get('current_user') or {}
+        is_member_view = viewer.get('role') != 'owner'
+        for slug in CATEGORY_PROPERTY_FIELD:
+            if slug not in allowed or slug in PROPERTY_PILL_EXCLUDE:
+                continue
+            prop_field = CATEGORY_PROPERTY_FIELD[slug]
+            table = CATEGORIES[slug]['table']
+            wheres = [f'{prop_field} = ?']
+            params = [prop_name]
+            _apply_row_filter_clauses(slug, wheres, params)
+            try:
+                cnt = db.execute(
+                    f"SELECT COUNT(*) AS c FROM {table} "
+                    f"WHERE {' AND '.join(wheres)}",
+                    params
+                ).fetchone()['c']
+            except sqlite3.OperationalError:
+                cnt = 0
+            if is_member_view and cnt == 0:
+                continue
+            property_pill_categories.append(
+                (slug, CATEGORIES[slug]['name'], cnt))
 
     service_overdue = False
     service_years = None
@@ -4547,6 +4571,40 @@ def _docs_save(db, table, record_id, docs, col='documents'):
     db.commit()
 
 
+def _auto_title_from_basename(category, record_id, basename):
+    """Compute a sensible default title for a doc tile from its
+    uploaded filename. Drops the extension, then strips a leading
+    '<record-ident> — ' prefix when it matches the record's
+    EXPORT_LAYOUT ident — that prefix duplicates information already
+    attached to the record (e.g. a 'Rec Center — Image.jpg' dropped
+    on the Rec Center property becomes 'Image', not the full
+    redundant string). Falls back to the bare basename if the
+    EXPORT_LAYOUT lookup fails for any reason."""
+    base = os.path.splitext(os.path.basename(basename or ''))[0].strip()
+    if not base:
+        return ''
+    plan = (globals().get('EXPORT_LAYOUT') or {}).get(category) or {}
+    ident_fn = plan.get('ident')
+    if not ident_fn:
+        return base
+    try:
+        db = get_db()
+        row = db.execute(
+            f"SELECT * FROM {CATEGORIES[category]['table']} WHERE id = ?",
+            [record_id]
+        ).fetchone()
+        if not row:
+            return base
+        ident = (ident_fn(row) or '').strip()
+        if ident:
+            prefix = f'{ident} — '
+            if base.startswith(prefix):
+                base = base[len(prefix):].strip() or base
+    except Exception:
+        pass
+    return base
+
+
 def _docs_guard(category, record_id, doc_set):
     """Common pre-flight. Returns (err_response, col): on error
     err_response is a Flask error tuple and col is None; on success
@@ -4590,9 +4648,12 @@ def documents_append(category, record_id, doc_set):
         return jsonify({'error': 'title or file required'}), 400
     # Default title to the dropped file's basename (sans extension) so
     # newly-added tiles render with something readable instead of just
-    # the file preview. The user can rename via the title input.
+    # the file preview. _auto_title_from_basename also strips a
+    # redundant '<record-ident> — ' prefix when the dropped file came
+    # from a Files export of this same record. The user can rename
+    # via the title input.
     if not title and original_basename:
-        title = os.path.splitext(os.path.basename(original_basename))[0].strip()
+        title = _auto_title_from_basename(category, record_id, original_basename)
     docs.append({'title': title, 'filename': filename})
     _docs_save(db, table, record_id, docs, col)
     return jsonify({
@@ -4638,9 +4699,10 @@ def documents_set_file(category, record_id, doc_set, idx):
         return jsonify({'error': 'Upload failed'}), 500
     docs[idx]['filename'] = filename
     # Backfill title from the new file's basename only if this tile is
-    # currently untitled — leave deliberate user titles alone.
+    # currently untitled — leave deliberate user titles alone. Strips
+    # the redundant '<record-ident> — ' prefix the same way as append.
     if not (docs[idx].get('title') or '').strip() and original_basename:
-        docs[idx]['title'] = os.path.splitext(os.path.basename(original_basename))[0].strip()
+        docs[idx]['title'] = _auto_title_from_basename(category, record_id, original_basename)
     _docs_save(db, table, record_id, docs, col)
     return jsonify({
         'ok': True, 'filename': filename, 'title': docs[idx].get('title', ''),
