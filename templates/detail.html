@@ -1579,12 +1579,11 @@
     <input type="text" name="name" value="{{ val('name') }}"
            class="brand-input" autocomplete="off"
            {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
-    <div class="dcell property-short-name">
-      <input type="text" name="short_name" value="{{ val('short_name') }}"
-             autocomplete="off"
-             {% if is_new and not val('short_name') %}placeholder="Short Name"{% endif %}>
-      <span class="clabel">Short Name</span>
-    </div>
+    {# short_name is no longer surfaced in the UI but the column is
+       kept in the schema (and seeded by /property-csv-upsert) so any
+       legacy data and the CSV importer keep working. Render as a
+       hidden input so existing values round-trip on form save. #}
+    <input type="hidden" name="short_name" value="{{ val('short_name') }}">
   </div>
 
   <div class="watch-body properties-body">
