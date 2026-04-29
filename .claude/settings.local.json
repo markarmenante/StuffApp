@@ -135,7 +135,8 @@
       "Bash(grep -n \"init_db\\(\\)$\\\\|^    return\\\\|init_db.*return\\\\|db.commit\" /Users/markarmenante/Desktop/StuffApp/app.py)",
       "Bash(git commit *)",
       "Bash(git merge *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(grep -n \"buf.seek\\(0\\)\\\\s*$\" /Users/markarmenante/Desktop/StuffApp/app.py)"
     ]
   }
 }
