@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.db
+uploads/
+coin_images/
+lens_images/
+art_images/
+.DS_Store
+.env
+stuffapp-backup-*.zip

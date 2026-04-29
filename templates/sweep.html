@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Sweep · StuffApp{% endblock %}
+{% block content %}
+<div class="sweep-page">
+  <h1 class="sweep-title">Sweep StuffFiles</h1>
+  <p class="sweep-note">
+    Upload files from your local <code>StuffFiles</code> folder; the
+    server matches each one to its record and slot. Files already on
+    the matched record aren't overwritten — they're listed as skipped.
+  </p>
+
+  <ul class="sweep-help">
+    <li><strong>Desktop:</strong> click <em>Choose folder</em> and pick your
+        <code>StuffFiles</code> folder. The browser uploads everything inside,
+        keeping the path structure for matching.</li>
+    <li><strong>iPhone / iPad:</strong> the iOS Files app doesn't expose
+        folder upload. Pick a category below, then tap <em>Choose files</em>
+        and select files from one folder at a time. Group is read from the
+        filename when present, otherwise the optional Group hint below.</li>
+  </ul>
+
+  <form method="post" action="{{ url_for('sweep_files') }}"
+        enctype="multipart/form-data" class="sweep-form" id="sweepForm">
+
+    <div class="sweep-row">
+      <label class="sweep-label">Folder (desktop):</label>
+      <input type="file" name="files" multiple webkitdirectory directory
+             class="sweep-input">
+    </div>
+
+    <div class="sweep-row">
+      <label class="sweep-label">Files (iOS / picking individual files):</label>
+      <input type="file" name="files" multiple class="sweep-input">
+    </div>
+
+    <div class="sweep-row sweep-hints">
+      <label>
+        Category hint (iOS):
+        <select name="category_hint" class="sweep-input sweep-input-narrow">
+          <option value="">— folder upload, ignore —</option>
+          {% for slug, label in cat_options %}
+          <option value="{{ slug }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Group hint (iOS):
+        <input type="text" name="group_hint" placeholder="e.g. Carpinteria"
+               class="sweep-input sweep-input-narrow">
+      </label>
+    </div>
+
+    <div class="sweep-row sweep-hints">
+      <label>
+        <input type="checkbox" name="auto_create" value="1">
+        <strong>Auto-create new records</strong> when a folder/item doesn't
+        match an existing one (Watches, Properties, People, Cameras,
+        Lenses, Pens, Art, Vehicles, Music, Audio, Rifles).
+        <br>
+        <span style="font-size:11px;color:var(--text-label)">Coins and Cards aren't auto-created
+        — too many required fields without a folder convention.</span>
+      </label>
+    </div>
+
+    <div class="sweep-row">
+      <button type="submit" class="sweep-submit">Sweep &amp; import</button>
+    </div>
+  </form>
+
+  {% if report %}
+  <div class="sweep-report">
+    <h2>Result</h2>
+    <p>
+      <strong>{{ report.uploaded|length }}</strong> uploaded ·
+      <strong>{{ report.skipped|length }}</strong> skipped
+    </p>
+
+    {% if report.uploaded %}
+    <details open>
+      <summary>Uploaded ({{ report.uploaded|length }})</summary>
+      <ul class="sweep-list sweep-list-ok">
+        {% for u in report.uploaded %}
+        <li><code>{{ u.file }}</code> → {{ u.record }} · {{ u.slot }}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+
+    {% if report.skipped %}
+    <details>
+      <summary>Skipped ({{ report.skipped|length }})</summary>
+      <ul class="sweep-list sweep-list-skip">
+        {% for s in report.skipped %}
+        <li><code>{{ s.file }}</code> — {{ s.reason }}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.sweep-page { max-width: 820px; margin: 24px auto; padding: 0 16px; font-family: var(--font); }
+.sweep-title { font-size: 22px; margin-bottom: 4px; }
+.sweep-note { font-size: 12px; color: var(--text-label); margin-bottom: 12px; }
+.sweep-note code { background: #f4f4f6; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+.sweep-help { font-size: 12px; color: var(--text-secondary); margin-bottom: 16px; padding-left: 18px; }
+.sweep-help li { margin-bottom: 4px; }
+
+.sweep-form {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 14px; margin-bottom: 16px;
+}
+.sweep-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.sweep-row.sweep-hints { gap: 16px; }
+.sweep-row.sweep-hints label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.sweep-label { font-size: 12px; color: var(--text-label); min-width: 220px; }
+.sweep-input { font-size: 13px; }
+.sweep-input-narrow {
+  padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px;
+  font-size: 13px;
+}
+.sweep-submit {
+  padding: 8px 16px; border: 1px solid var(--blue); background: var(--blue);
+  color: #fff; border-radius: 5px; cursor: pointer; font-size: 14px;
+}
+.sweep-submit:hover { filter: brightness(1.08); }
+
+.sweep-report { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
+.sweep-report h2 { font-size: 16px; margin: 0 0 6px; }
+.sweep-list { font-size: 12px; padding-left: 18px; max-height: 320px; overflow: auto; }
+.sweep-list-ok li { color: #2a7a2a; }
+.sweep-list-skip li { color: #c0392b; }
+.sweep-list code { background: #f4f4f6; padding: 1px 4px; border-radius: 3px; }
+</style>
+{% endblock %}

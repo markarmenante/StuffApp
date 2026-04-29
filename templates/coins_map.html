@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block title %}Coin Map — StuffApp{% endblock %}
+
+{% block content %}
+<div class="list-toolbar">
+  <span class="list-count">{{ coins|length }}</span>
+  <span class="list-cat-title">Coin Map — {{ filter_label }}</span>
+  <a href="{{ url_for('list_view', category='coins', filter=coin_filter or None) }}"
+     class="toolbar-btn pill" title="Back to coin list">← List</a>
+</div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<div class="coins-map-wrap">
+  <div id="coinsDistMap" class="coins-dist-map"></div>
+  <div class="coins-dist-caption" id="coinsDistCaption">
+    Loading distribution…
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/coin-geo.js') }}"></script>
+<script id="coinsData" type="application/json">{{ coins|tojson }}</script>
+<script>
+(function coinsDistMap() {
+  if (typeof L === 'undefined') return;
+  const el = document.getElementById('coinsDistMap');
+  const caption = document.getElementById('coinsDistCaption');
+  if (!el) return;
+
+  const coins = JSON.parse(document.getElementById('coinsData').textContent || '[]');
+
+  // Bucket coins by resolved geographic anchor (city > region > fuzzy).
+  const buckets = {}; // key -> {name, latlng, coins:[]}
+  let unresolved = 0;
+  coins.forEach(c => {
+    const hit = window.resolveCoinOrigin(c);
+    if (!hit) { unresolved++; return; }
+    const key = hit.name;
+    if (!buckets[key]) buckets[key] = {name: key, latlng: hit.latlng, coins: []};
+    buckets[key].coins.push(c);
+  });
+  const entries = Object.values(buckets).sort((a,b) => b.coins.length - a.coins.length);
+
+  const map = L.map(el, {
+    center: [37.5, 22.0], zoom: 5, minZoom: 2, maxZoom: 12,
+    scrollWheelZoom: true, dragging: true,
+    worldCopyJump: true,
+  });
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap, © CARTO',
+    subdomains: 'abcd', maxZoom: 20,
+  }).addTo(map);
+
+  // Scale: radius ~ 8 + 4*sqrt(count), clamped.
+  const maxCount = entries.reduce((m,e) => Math.max(m, e.coins.length), 1);
+  entries.forEach(({name, latlng, coins}) => {
+    const n = coins.length;
+    const r = Math.min(40, 8 + 4 * Math.sqrt(n));
+    const circle = L.circleMarker(latlng, {
+      radius: r,
+      color: '#c0392b', weight: 1.5,
+      fillColor: '#e74c3c', fillOpacity: 0.55,
+      className: 'coins-dist-bubble',
+    }).addTo(map);
+    // Always-on count label inside the bubble.
+    L.marker(latlng, {
+      icon: L.divIcon({
+        className: 'coins-dist-count',
+        html: '<span>' + n + '</span>',
+        iconSize: [r*2, r*2], iconAnchor: [r, r],
+      }),
+      interactive: false,
+    }).addTo(map);
+    // Tooltip with city name + sample coin ids.
+    const sample = coins.slice(0, 6).map(c =>
+      (c.coin_id || '(no id)') + (c.denomination ? ' · ' + c.denomination : '')
+        + (c.date_1_text ? ' (' + c.date_1_text + ')' : '')
+    ).join('<br>');
+    const more = coins.length > 6 ? '<br><em>…and ' + (coins.length - 6) + ' more</em>' : '';
+    circle.bindPopup('<strong>' + name + '</strong> — ' + n + ' coin' +
+                     (n === 1 ? '' : 's') + '<br>' + sample + more);
+    circle.bindTooltip(name, {
+      permanent: true, direction: 'right', offset: [r + 2, 0],
+      className: 'coin-city-label',
+    });
+  });
+
+  // Auto-fit viewport so eastern bubbles (Bactria, Indo-Greek, etc.) are visible.
+  if (entries.length > 1) {
+    const bounds = L.latLngBounds(entries.map(e => e.latlng));
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 6 });
+  } else if (entries.length === 1) {
+    map.setView(entries[0].latlng, 6);
+  }
+
+  const placed = coins.length - unresolved;
+  if (caption) {
+    caption.innerHTML = '<strong>' + placed + '</strong> coins placed across <strong>' +
+      entries.length + '</strong> locations' +
+      (unresolved ? ' · <em>' + unresolved + ' unresolved</em>' : '') +
+      ' · scroll to zoom, drag to reposition';
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}Admin · StuffApp{% endblock %}
+{% block content %}
+<div class="admin-page">
+  <h1 class="admin-title">Admin</h1>
+  <p class="admin-note">One-shot maintenance actions. All gated by the
+    server-side secret <code>{{ secret }}</code> and Cloudflare Access.</p>
+
+  <p class="admin-note"><a href="{{ url_for('admin_users') }}">Manage users &amp; access &rsaquo;</a></p>
+
+  <ul class="admin-list">
+    {% for action in actions %}
+    <li class="admin-action"
+        data-url="{{ action.url }}"
+        data-kind="{{ action.kind|default('post') }}"
+        data-extra="{{ (action.extra or {})|tojson }}"
+        data-action-key="{{ action.url }}|{{ (action.extra or {})|tojson }}"
+        data-confirm="{{ 'true' if action.confirm or (action.extra and action.extra.get('dry') == '0') else 'false' }}">
+      <div class="admin-action-text">
+        <strong>{{ action.label }}</strong>
+        <span class="admin-action-desc">{{ action.desc }}</span>
+      </div>
+      <button type="button" class="admin-run-btn">{% if action.kind == 'download' %}Download{% else %}Run{% endif %}</button>
+      <span class="admin-result"></span>
+      <button type="button" class="admin-hide-btn" title="Hide this action">×</button>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <div class="admin-hidden-bar" id="adminHiddenBar" style="display:none">
+    <span class="admin-hidden-count"></span>
+    <button type="button" id="adminShowHidden" class="admin-link-btn">Show all</button>
+  </div>
+</div>
+
+<script>
+const SECRET = {{ secret|tojson }};
+
+// Per-browser hidden-actions list. Keyed by action URL since labels can
+// drift but URLs are stable. localStorage so the list survives reloads
+// without needing a server round-trip.
+const HIDE_KEY = 'stuffapp:admin:hidden';
+function loadHidden() {
+  try { return new Set(JSON.parse(localStorage.getItem(HIDE_KEY) || '[]')); }
+  catch (_) { return new Set(); }
+}
+function saveHidden(set) {
+  localStorage.setItem(HIDE_KEY, JSON.stringify([...set]));
+}
+function actionKey(li) {
+  return li.dataset.actionKey || li.dataset.url;
+}
+function applyHidden() {
+  const hidden = loadHidden();
+  let count = 0;
+  document.querySelectorAll('.admin-action').forEach(li => {
+    if (hidden.has(actionKey(li))) { li.style.display = 'none'; count++; }
+    else                            { li.style.display = ''; }
+  });
+  const bar = document.getElementById('adminHiddenBar');
+  if (count) {
+    bar.style.display = '';
+    bar.querySelector('.admin-hidden-count').textContent =
+      count + ' hidden action' + (count === 1 ? '' : 's');
+  } else {
+    bar.style.display = 'none';
+  }
+}
+applyHidden();
+
+document.querySelectorAll('.admin-hide-btn').forEach(btn => {
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const li = btn.closest('.admin-action');
+    const hidden = loadHidden();
+    hidden.add(actionKey(li));
+    saveHidden(hidden);
+    applyHidden();
+  });
+});
+
+document.getElementById('adminShowHidden').addEventListener('click', () => {
+  saveHidden(new Set());
+  applyHidden();
+});
+
+// Pretty-print numbers with thousands separators.
+function fmtNum(n) {
+  return Number(n).toLocaleString('en-US');
+}
+
+// Human-readable byte size: 1.0 GB / 480 MB / 12 KB / 800 B.
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024)        return `${n} B`;
+  if (n < 1024 ** 2)   return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3)   return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
+// Turn an admin endpoint's JSON response into a one-line summary.
+// Known shapes get human formatting; anything else falls back to JSON
+// so we don't silently swallow a response we forgot to handle.
+function formatAdminResult(data) {
+  if (data == null || typeof data !== 'object') return String(data);
+
+  // Orphan-upload scan / delete.
+  if ('orphan_count' in data) {
+    const parts = [];
+    if (data.dry_run) {
+      parts.push(`${fmtNum(data.orphan_count)} orphan file${data.orphan_count === 1 ? '' : 's'}`);
+      parts.push(fmtBytes(data.orphan_size_bytes));
+      if ('referenced' in data) parts.push(`${fmtNum(data.referenced)} referenced`);
+      return parts.join(' · ') + ' (dry run)';
+    } else {
+      if ((data.deleted || 0) === 0) return 'Nothing to delete — all files referenced';
+      parts.push(`Deleted ${fmtNum(data.deleted)} file${data.deleted === 1 ? '' : 's'}`);
+      parts.push(`${fmtBytes(data.orphan_size_bytes)} freed`);
+      return parts.join(' · ');
+    }
+  }
+
+  // UPDATE-style endpoints (coins owner=Mark, etc.) → "Updated X of Y".
+  if ('updated' in data && 'total' in data) {
+    if (data.updated === 0) return `Nothing to update (${fmtNum(data.total)} rows already match)`;
+    return `Updated ${fmtNum(data.updated)} of ${fmtNum(data.total)}`;
+  }
+
+  // Generic count-style responses.
+  if ('updated' in data) return `Updated ${fmtNum(data.updated)}`;
+  if ('count'   in data) return `Count: ${fmtNum(data.count)}`;
+  if ('ok' in data && Object.keys(data).length === 1) return data.ok ? 'OK' : 'Failed';
+
+  // Unknown shape — keep the raw JSON so we notice and add a formatter.
+  return JSON.stringify(data);
+}
+
+function triggerDownload(blob, filenameFallback) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filenameFallback;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+
+document.querySelectorAll('.admin-action').forEach(li => {
+  const btn = li.querySelector('.admin-run-btn');
+  const out = li.querySelector('.admin-result');
+  const url = li.dataset.url;
+  const kind = li.dataset.kind;
+  let extra = {};
+  try { extra = JSON.parse(li.dataset.extra || '{}'); } catch (_) {}
+  const needsConfirm = li.dataset.confirm === 'true';
+
+  btn.addEventListener('click', async () => {
+    if (needsConfirm) {
+      const lbl = li.querySelector('strong')?.textContent || 'this action';
+      if (!confirm(`Run "${lbl}"? This is destructive.`)) return;
+    }
+    btn.disabled = true;
+    out.textContent = (kind === 'download' || kind === 'download_no_secret') ? 'Building…' : 'Running…';
+    out.className = 'admin-result running';
+    try {
+      if (kind === 'download' || kind === 'download_no_secret') {
+        // Default name (timestamped server-side via Content-Disposition).
+        const fullUrl = kind === 'download_no_secret'
+          ? url
+          : url + '?secret=' + encodeURIComponent(SECRET);
+        const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,15);
+        const suggested = `stuffapp-backup-${ts}.zip`;
+
+        // Chromium-based browsers (Chrome, Edge, Comet, Brave): open a
+        // native Save dialog so the user picks the folder per-file and
+        // we can stream the response straight to disk instead of
+        // buffering 2.3 GB in memory.
+        if (window.showSaveFilePicker) {
+          let handle;
+          try {
+            handle = await window.showSaveFilePicker({
+              suggestedName: suggested,
+              types: [{description: 'StuffApp backup', accept: {'application/zip': ['.zip']}}],
+            });
+          } catch (e) {
+            // User cancelled the Save dialog — bail without erroring.
+            out.textContent = 'Cancelled';
+            out.className = 'admin-result';
+            return;
+          }
+          out.textContent = 'Downloading…';
+          const r = await fetch(fullUrl);
+          if (!r.ok) {
+            out.textContent = `Error ${r.status}`;
+            out.className = 'admin-result err';
+            return;
+          }
+          const writable = await handle.createWritable();
+          await r.body.pipeTo(writable);
+          out.textContent = `Saved ${handle.name}`;
+          out.className = 'admin-result ok';
+        } else {
+          // Safari / Firefox fallback: buffer to a blob and synthesize
+          // a download click. Lands in the browser's default downloads
+          // folder; user can move it after the fact.
+          const r = await fetch(fullUrl);
+          if (!r.ok) {
+            out.textContent = `Error ${r.status}`;
+            out.className = 'admin-result err';
+            return;
+          }
+          const cd = r.headers.get('Content-Disposition') || '';
+          const m = cd.match(/filename="?([^";]+)"?/);
+          const fname = m ? m[1] : suggested;
+          const blob = await r.blob();
+          triggerDownload(blob, fname);
+          const mb = (blob.size / 1048576).toFixed(1);
+          out.textContent = `Downloaded ${fname} (${mb} MB) — to default downloads folder`;
+          out.className = 'admin-result ok';
+        }
+      } else {
+        const fd = new URLSearchParams({secret: SECRET, ...extra});
+        const r = await fetch(url, {method: 'POST', body: fd});
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          out.textContent = `Error ${r.status}: ${data.error || 'failed'}`;
+          out.className = 'admin-result err';
+        } else {
+          out.textContent = formatAdminResult(data);
+          out.title = JSON.stringify(data);   // raw JSON on hover
+          out.className = 'admin-result ok';
+        }
+      }
+    } catch (e) {
+      out.textContent = 'Network error: ' + (e.message || e);
+      out.className = 'admin-result err';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
+</script>
+
+<style>
+.admin-page { max-width: 800px; margin: 24px auto; padding: 0 16px; font-family: var(--font); }
+.admin-title { font-size: 22px; margin-bottom: 4px; }
+.admin-note { font-size: 12px; color: var(--text-label); margin-bottom: 16px; }
+.admin-note code { background: #f4f4f6; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+.admin-list { list-style: none; padding: 0; margin: 0; }
+.admin-action {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 6px; margin-bottom: 8px; background: var(--surface);
+}
+.admin-action-text { flex: 1; display: flex; flex-direction: column; }
+.admin-action-text strong { font-size: 14px; }
+.admin-action-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.admin-run-btn {
+  padding: 6px 14px; border: 1px solid var(--blue); background: #fff;
+  color: var(--blue); border-radius: 5px; cursor: pointer; font-size: 13px;
+}
+.admin-run-btn:hover:not(:disabled) { background: #e8f0ff; }
+.admin-run-btn:disabled { opacity: 0.5; cursor: wait; }
+.admin-result { font-size: 12px; min-width: 120px; max-width: 320px; text-align: right; line-height: 1.3; }
+.admin-result.ok { color: #2a7a2a; }
+.admin-result.err { color: #c0392b; }
+.admin-result.running { color: var(--text-secondary); font-style: italic; }
+.admin-hide-btn {
+  margin-left: 4px; width: 22px; height: 22px; padding: 0;
+  border: 1px solid var(--border); background: #fff;
+  color: var(--text-label); border-radius: 50%;
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.admin-hide-btn:hover { background: #ffe9e6; color: #c0392b; border-color: #e6b6ad; }
+.admin-hidden-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 12px; padding: 6px 12px;
+  font-size: 12px; color: var(--text-secondary);
+  background: #f4f4f6; border-radius: 5px;
+}
+.admin-link-btn {
+  background: none; border: none; padding: 0;
+  color: var(--blue); cursor: pointer; font-size: 12px;
+}
+.admin-link-btn:hover { text-decoration: underline; }
+</style>
+{% endblock %}

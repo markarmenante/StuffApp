@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Stop iOS Safari from turning 7+ digit numbers (e.g. a serial
+       like "2599959") into blue tel: links. Real phone numbers can
+       still be made tappable explicitly via <a href="tel:..."> if
+       we want them to be. -->
+  <meta name="format-detection" content="telephone=no">
+  <title>{% block title %}StuffApp{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?t={{ range(100000,999999)|random }}">
+
+  {# PWA install: lets the user "Install StuffApp" from the browser's
+     address bar (Chromium) or "Add to Home Screen" (iOS Safari) so
+     the app launches in its own standalone window — independent of
+     whatever tabs they have open in the regular browser. #}
+  {# crossorigin="use-credentials" forces the manifest fetch to send
+     cookies. Without it, Cloudflare Access doesn't see the session
+     cookie, redirects to its login (cross-origin), and the browser
+     trips CORS on that redirect. With credentials, CF Access serves
+     the manifest directly under the existing auth. #}
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}" crossorigin="use-credentials">
+  <meta name="theme-color" content="#0f2f66">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="StuffApp">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='img/icon-192.png') }}">
+</head>
+<body ondragover="event.preventDefault()" ondrop="event.preventDefault()">
+
+<nav class="top-nav">
+  <!-- category icons -->
+  <div class="nav-categories">
+    {% set cat_icons = [
+      ('watches',      '⌚', 'Watches'),
+      ('coins',        '🪙', 'Coins'),
+      ('properties',   '🏠', 'Property'),
+      ('credit_cards', '💳', 'Cards'),
+      ('persons',      '👤', 'People'),
+      ('cameras',      '📷', 'Cameras'),
+      ('lenses',       '🔭', 'Lenses'),
+      ('pens',         '✒️', 'Pens'),
+      ('art',          '🎨', 'Art'),
+      ('vehicles',     '🚗', 'Vehicles'),
+      ('recordings',   '🎵', 'Music'),
+      ('audio',        '🔊', 'Audio'),
+      ('rifles',       '🔫', 'Rifles'),
+    ] %}
+    {% for slug, icon, label in cat_icons %}
+    {% if (not current_user) or (current_user.role == 'owner') or (slug in allowed_cats) %}
+    <a href="{% if slug == 'persons' %}{{ url_for('persons_default') }}{% else %}{{ url_for('list_view', category=slug) }}{% endif %}"
+       class="nav-item {% if current_category == slug %}active{% endif %}"
+       title="{{ label }}">
+      <span class="icon">{{ icon }}</span>
+      <span class="lbl">{{ label }}</span>
+    </a>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="nav-right">
+    {% if current_user %}
+    <a href="{{ url_for('admin_export_files') }}"
+       class="nav-item nav-export" id="navExportLink"
+       title="Download + auto-extract into your StuffFiles folder. iOS / Safari: gets a zip you save manually."
+       onclick="return startExport(event, this)">
+      <span class="icon" id="navExportIcon">⬇</span>
+      <span class="lbl" id="navExportLabel">Files</span>
+    </a>
+    <a href="{{ url_for('sweep_files') }}"
+       class="nav-item nav-sweep {% if current_category == '__sweep__' %}active{% endif %}" id="navSweepLink"
+       title="Upload changes from your StuffFiles folder back into the app"
+       onclick="return startSyncUp(event, this)">
+      <span class="icon" id="navSweepIcon">⬆</span>
+      <span class="lbl" id="navSweepLabel">Sweep</span>
+    </a>
+    {% endif %}
+    {% if current_user and current_user.role == 'owner' %}
+    <a href="{{ url_for('admin_index') }}"
+       class="nav-item nav-admin {% if current_category == '__admin__' %}active{% endif %}"
+       title="Admin">
+      <span class="icon">⚙</span>
+      <span class="lbl">Admin</span>
+    </a>
+    {% endif %}
+  </div>
+</nav>
+
+<!-- Toast for export progress / completion -->
+<div id="exportToast" class="export-toast" hidden></div>
+
+<!-- JSZip for client-side zip extraction (used by sync.js when the
+     browser supports the File System Access API). -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="{{ url_for('static', filename='js/sync.js') }}"></script>
+
+<script>
+// Set busy state on a nav-pill (icon + label) and render an export
+// toast. Returns a `done` callback to restore the original state.
+function _busy(link, iconId, labelId, busyIcon, busyText) {
+  if (link.dataset.busy === '1') return null;
+  link.dataset.busy = '1';
+  const icon  = document.getElementById(iconId);
+  const label = document.getElementById(labelId);
+  const toast = document.getElementById('exportToast');
+  const origIcon = icon.textContent, origLabel = label.textContent;
+  link.classList.add('busy');
+  icon.textContent = busyIcon;
+  label.textContent = busyText;
+  if (toast) {
+    toast.textContent = busyText + '…';
+    toast.className   = 'export-toast running';
+    toast.hidden      = false;
+  }
+  function progress(msg) {
+    if (toast) toast.textContent = msg;
+  }
+  function done(state, msg) {
+    if (state === 'ok') {
+      icon.textContent  = '✓'; label.textContent = 'Done';
+      if (toast) { toast.textContent = msg; toast.className = 'export-toast ok'; }
+    } else if (state === 'err') {
+      icon.textContent  = '✗'; label.textContent = 'Error';
+      if (toast) { toast.textContent = msg; toast.className = 'export-toast err'; }
+    } else { // 'cancel'
+      if (toast) { toast.textContent = msg || 'Cancelled.'; toast.className = 'export-toast'; }
+    }
+    setTimeout(() => {
+      icon.textContent  = origIcon;
+      label.textContent = origLabel;
+      link.classList.remove('busy');
+      link.dataset.busy = '';
+      if (toast) toast.hidden = true;
+    }, state === 'err' ? 5000 : 3500);
+  }
+  return {progress, done};
+}
+
+// Files-button click handler. Three paths:
+//   - Chromium (showDirectoryPicker available): zip transmitted, then
+//     unzipped client-side directly into a folder the user picks
+//     (handle persisted in IndexedDB so re-clicks remember it).
+//   - Other browsers: fall back to single-file blob download — user
+//     drags the zip into their StuffFiles folder and unzips manually.
+async function startExport(ev, link) {
+  ev.preventDefault();
+  const ui = _busy(link, 'navExportIcon', 'navExportLabel', '⏳', 'Building');
+  if (!ui) return false;
+
+  if (window.showDirectoryPicker && window.StuffSync && window.JSZip) {
+    try {
+      ui.progress('Pick (or confirm) your StuffFiles folder…');
+      const result = await window.StuffSync.syncDown(ui.progress);
+      ui.done('ok', `Synced ${result.written}/${result.total} files into your folder.`);
+      reloadAfterExport();
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        ui.done('cancel', 'Cancelled.');
+      } else {
+        ui.done('err', 'Sync failed: ' + (err.message || err));
+      }
+    }
+    return false;
+  }
+
+  // Fallback: zip download for Safari / iOS / Firefox.
+  try {
+    const url = link.getAttribute('href');
+    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+    const r  = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    ui.progress('Downloading zip…');
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m  = cd.match(/filename="?([^";]+)"?/);
+    a.download = m ? m[1] : `StuffFiles-${ts}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    ui.done('ok', 'StuffFiles zip downloaded.');
+    reloadAfterExport();
+  } catch (err) {
+    ui.done('err', 'Download failed: ' + (err.message || err));
+  }
+  return false;
+}
+
+// After a successful Files run, give the success toast a moment to
+// register, then reload so the nav indicator picks up its new (green)
+// state from the server. Mirrors the post-sweep reload pattern below.
+function reloadAfterExport() {
+  setTimeout(() => {
+    const t = document.getElementById('exportToast');
+    if (t) {
+      t.textContent = 'Refreshing…';
+      t.className = 'export-toast running';
+      t.hidden = false;
+    }
+    setTimeout(() => window.location.reload(), 500);
+  }, 1500);
+}
+
+// Files nav indicator: red when there's something newer than the user's
+// last export, green when caught up. Called on page load and after a
+// successful export run.
+async function refreshFilesStatus() {
+  const link = document.getElementById('navExportLink');
+  if (!link) return;
+  try {
+    const r = await fetch('/files-status', { credentials: 'same-origin' });
+    if (!r.ok) return;
+    const d = await r.json();
+    link.classList.toggle('stale', !!d.stale);
+    link.classList.toggle('fresh', !d.stale && !!d.last_export_at);
+  } catch (_) { /* network blip — leave indicator neutral */ }
+}
+document.addEventListener('DOMContentLoaded', refreshFilesStatus);
+
+// Sweep-button click handler. On Chromium, walks the saved StuffFiles
+// folder and uploads everything to /sweep (server skips slots that
+// are already populated, so re-runs are cheap). On other browsers,
+// just navigates to the existing /sweep page so the user can pick
+// files manually.
+async function startSyncUp(ev, link) {
+  if (!(window.showDirectoryPicker && window.StuffSync)) return true;  // navigate normally
+  ev.preventDefault();
+  const ui = _busy(link, 'navSweepIcon', 'navSweepLabel', '⏳', 'Scanning');
+  if (!ui) return false;
+  try {
+    const result = await window.StuffSync.syncUp(ui.progress);
+    if (result.error) {
+      ui.done('err', result.error);
+      return false;
+    }
+    const upN = (result.uploaded || []).length;
+    const skN = (result.skipped  || []).length;
+    let msg;
+    if (result.note) {
+      msg = result.note;
+    } else if (upN === 0 && skN === 0) {
+      msg = 'Nothing new to upload.';
+    } else if (upN === 0) {
+      msg = `All ${skN} files were skipped — see DevTools → Console for the per-file reason. (Hint: refresh the page if your Cloudflare Access cookie may have expired.)`;
+      console.warn('StuffSync: upload skipped', result.skipped);
+    } else {
+      const ctx = result.scanned
+        ? ` (scanned ${result.scanned}, ${result.changed} new/changed)`
+        : '';
+      msg = `Uploaded ${upN} new file${upN === 1 ? '' : 's'}${ctx}` +
+            (skN ? ` · skipped ${skN}` : '');
+      if (skN) console.warn('StuffSync: some skipped', result.skipped);
+    }
+    ui.done('ok', msg);
+
+    // After a successful sweep that actually uploaded something,
+    // reload so the page reflects the new file(s) — especially when
+    // the user is staring at a detail page whose doc cells just
+    // received a file. Small delay so the success toast registers.
+    if (upN > 0) {
+      setTimeout(() => {
+        const t = document.getElementById('exportToast');
+        if (t) {
+          t.textContent = 'Refreshing page to show new files…';
+          t.className = 'export-toast running';
+          t.hidden = false;
+        }
+        setTimeout(() => window.location.reload(), 600);
+      }, 1500);
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      ui.done('cancel', 'Cancelled.');
+    } else {
+      ui.done('err', 'Upload failed: ' + (err.message || err));
+    }
+  }
+  return false;
+}
+</script>
+
+<script>
+  // Persist the horizontal scroll position of the category nav across
+  // navigations within the same tab. Restored synchronously here
+  // (before the rest of the body paints) to avoid the bar visibly
+  // snapping back to 0 on load. sessionStorage scopes it per tab.
+  (function () {
+    var KEY = 'stuffapp:navScroll';
+    var nav = document.querySelector('.nav-categories');
+    if (!nav) return;
+    var saved = sessionStorage.getItem(KEY);
+    if (saved !== null) {
+      var x = parseInt(saved, 10);
+      if (!isNaN(x)) nav.scrollLeft = x;
+    }
+    var t;
+    nav.addEventListener('scroll', function () {
+      clearTimeout(t);
+      t = setTimeout(function () {
+        sessionStorage.setItem(KEY, String(nav.scrollLeft));
+      }, 50);
+    }, { passive: true });
+  })();
+</script>
+
+<div class="flash-messages">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+    <div class="flash flash-{{ cat }}">
+      {{ msg }}
+      <button class="flash-close" onclick="this.parentElement.remove()">×</button>
+    </div>
+    {% endfor %}
+  {% endwith %}
+</div>
+
+<main class="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

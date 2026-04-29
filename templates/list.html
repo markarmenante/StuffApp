@@ -1,0 +1,674 @@
+{% extends 'base.html' %}
+{% block title %}{{ cat_info.name }} — StuffApp{% endblock %}
+
+{% block content %}
+<!-- Toolbar -->
+<div class="list-toolbar list-toolbar-{{ category }}{% if at_property %} list-toolbar-at-prop{% endif %}">
+  <span class="list-count">{{ result_count }}</span>
+  <span class="list-cat-title">{{ cat_info.name }}{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
+  {# When drilled in from a Property, the toolbar collapses to just
+     the back-pill + search. The Add button and category-specific
+     filter pills (Own / Sold / Carp / etc.) all build URLs without
+     the ?at= param and would silently break the navigation chain. #}
+  {% if not at_property %}
+  {% if current_user and current_user.role != 'owner' %}
+  <a href="{{ url_for('new_record', category=category) }}"
+     class="toolbar-btn add add-labeled"
+     title="Add {{ cat_info.singular }}">Add {{ cat_info.singular }}</a>
+  {% else %}
+  <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
+  {% endif %}
+  {% endif %}
+  {# Drilled in from a Property — give a one-tap way back. #}
+  {% if at_property and at_property_url %}
+  <a class="list-at-back" href="{{ at_property_url }}" title="Back to {{ at_property }}">&larr; {{ at_property }}</a>
+  {% endif %}
+  {% if category == 'coins' and not at_property %}
+  {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
+  <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} pgs</a>
+  <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
+     title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
+  {# Two era pills, each cycling its own axis:
+     Ancient pill: off -> CA Ancient -> NY Ancient -> off
+     Modern pill : off -> CA Modern  -> NY Modern  -> off
+     When one era is active the other pill is rendered greyed-out
+     and non-interactive. Renumber button appears next to whichever
+     sub-filter is currently active and writes the matching prefix. #}
+  {%- set _ancient_next = {
+        None: 'ca_ancient',
+        'ca_ancient': 'ny_ancient',
+        'ny_ancient': None,
+  } -%}
+  {%- set _modern_next = {
+        None: 'ca_modern',
+        'ca_modern': 'ny_modern',
+        'ny_modern': None,
+  } -%}
+  {%- set _ancient_label = {
+        'ca_ancient': 'CA Ancient',
+        'ny_ancient': 'NY Ancient',
+  }.get(coin_filter, 'CA / NY Ancient') -%}
+  {%- set _modern_label = {
+        'ca_modern': 'CA Modern',
+        'ny_modern': 'NY Modern',
+  }.get(coin_filter, 'CA / NY Modern') -%}
+  {%- set _is_ancient = coin_filter in ('ca_ancient', 'ny_ancient') -%}
+  {%- set _is_modern  = coin_filter in ('ca_modern',  'ny_modern')  -%}
+
+  {# Clicking the opposite-era pill jumps straight into that era
+     (starting at ca_...) rather than being blocked. The greyed
+     style is purely visual — it always stays clickable. #}
+  {% set _ancient_href = _ancient_next.get(coin_filter) if _is_ancient else 'ca_ancient' %}
+  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_ancient_href) }}"
+     class="toolbar-btn pill {% if _is_ancient %}active{% elif _is_modern %}muted{% endif %}"
+     title="Cycle: off → CA Ancient → NY Ancient → off (date_1 &lt; 500)">{{ _ancient_label }}</a>
+
+  {% set _modern_href = _modern_next.get(coin_filter) if _is_modern else 'ca_modern' %}
+  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_modern_href) }}"
+     class="toolbar-btn pill {% if _is_modern %}active{% elif _is_ancient %}muted{% endif %}"
+     title="Cycle: off → CA Modern → NY Modern → off (date_1 ≥ 500)">{{ _modern_label }}</a>
+  {% if has_ordered or coin_filter == 'ordered' %}
+  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
+     class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
+     title="Coins with status Ordered">Ordered</a>
+  {% endif %}
+  {% endif %}
+  {% if category == 'watches' and not at_property %}
+  {% if has_ordered or coin_filter == 'ordered' %}
+  <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
+     class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
+     title="Watches with status Ordered">Ordered</a>
+  {% endif %}
+  {% endif %}
+  {# When the user came from the Property tab via ?at=, hide the
+     redundant Carp / Martis location pills — they target the same
+     filter, build URLs without ?at=, and would silently break the
+     navigation chain back to the originating Property. #}
+  {% if category == 'audio' and not at_property %}
+  <a href="{{ url_for('list_view', category='audio', q=q or None, filter=None if coin_filter == 'carp' else 'carp') }}"
+     class="toolbar-btn pill {% if coin_filter == 'carp' %}active{% endif %}"
+     title="Audio at Carpinteria">Carp</a>
+  <a href="{{ url_for('list_view', category='audio', q=q or None, filter=None if coin_filter == 'martis' else 'martis') }}"
+     class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
+     title="Audio at Truckee (Martis)">Martis</a>
+  {% endif %}
+  {% if category == 'recordings' and not at_property %}
+  <a href="{{ url_for('list_view', category='recordings', q=q or None, filter=None if coin_filter == 'carp' else 'carp') }}"
+     class="toolbar-btn pill {% if coin_filter == 'carp' %}active{% endif %}"
+     title="Music at Carpinteria">Carp</a>
+  <a href="{{ url_for('list_view', category='recordings', q=q or None, filter=None if coin_filter == 'martis' else 'martis') }}"
+     class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
+     title="Music at Truckee (Martis)">Martis</a>
+  {% endif %}
+  {% if category == 'properties' and not at_property %}
+  {# Single pill flips between Own and Sold. Default = own. #}
+  {%- set next_status = 'sold' if prop_status == 'own' else 'own' -%}
+  <a href="{{ url_for('list_view', category='properties', q=q or None, filter=next_status) }}"
+     class="toolbar-btn pill active"
+     title="Toggle: Own ↔ Sold">{{ 'Own' if prop_status == 'own' else 'Sold' }}</a>
+  {% endif %}
+  {% if category == 'vehicles' and not at_property %}
+  <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
+     class="toolbar-btn pill {% if coin_filter == 'own' %}active{% endif %}"
+     title="Own vehicles">Own</a>
+  <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'sold' else 'sold') }}"
+     class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
+     title="Sold vehicles">Sold</a>
+  {% endif %}
+  {# Hide the search bar on lists short enough to scan visually
+     (rifles / audio / vehicles / pens / persons / credit_cards).
+     The other categories are large enough that search earns its
+     spot at the top. #}
+  {% if category not in ('rifles', 'audio', 'vehicles', 'pens', 'persons', 'credit_cards') %}
+  <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
+    <div class="search-wrap">
+      <button type="submit" title="Search">🔍</button>
+      {# Per-category name so browser search-history is scoped to this
+         category (typing in Cameras doesn't surface Watch searches).
+         No autofocus — landing on a list shouldn't pop the keyboard
+         (and with it iOS's form-assistant accessory bar) just to
+         scroll through items. #}
+      <input type="text" name="q_{{ category }}" value="{{ q }}" placeholder="Search…"
+             autocomplete="on"
+             onfocus="this.select()" onclick="this.select()">
+      {% if q %}<a class="search-clear" href="{{ url_for('list_view', category=category) }}">×</a>{% endif %}
+    </div>
+  </form>
+  {% endif %}
+</div>
+
+<!-- List -->
+{% if rows %}
+<div class="item-list item-list-{{ category }}">
+  {# Properties: bold divider where the Residential block ends and the
+     Commercial block begins. ns.prev tracks the prior row's type so we
+     can detect the boundary mid-loop. #}
+  {% set ns = namespace(prev=None) %}
+  {% for row in rows %}
+  {% if category == 'properties' and ns.prev == 'Residential' and (row['type'] or '') == 'Commercial' %}
+  <div class="property-type-divider" aria-hidden="true"></div>
+  {% endif %}
+  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None) }}">
+
+    <!-- Thumbnail -->
+    {% if category != 'persons' %}
+    <div class="item-thumb"
+         data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
+         title="Drop an image here to upload">
+      {% set img = row[cat_info.image_field] if cat_info.image_field else none %}
+      {% if img and img|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=img) }}" alt="" loading="lazy">
+      {% else %}
+        <span class="no-img">{{ cat_info.icon }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {# Reverse thumbnail — only coins. Hidden on mobile to keep the row tight.
+       Has its own upload-url + data-field so dropping on it goes to image_2,
+       not image_1. #}
+    {% if category == 'coins' %}
+    <div class="item-thumb item-thumb-rev"
+         data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
+         data-field="image_2"
+         title="Drop the reverse image here">
+      {% set img2 = row['image_2'] %}
+      {% if img2 and img2|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=img2) }}" alt="" loading="lazy">
+      {% else %}
+        <span class="no-img">{{ cat_info.icon }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Body -->
+    <div class="item-body">
+
+      {# ── WATCHES ── #}
+      {% if category == 'watches' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['brand'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['metal'] %}<span>{{ row['metal'] }}</span>{% endif %}
+            {% if row['reference'] %}<span><span class="lbl">Ref</span> {{ row['reference'] }}</span>{% endif %}
+            {% if row['dial_color'] %}<span><span class="lbl">Dial</span> {{ row['dial_color'] }}</span>{% endif %}
+          </div>
+          <div class="idr">
+            {% if row['case_num'] %}<span><span class="lbl">s/n</span> {{ row['case_num'] }}</span>{% endif %}
+            {% if row['movement_num'] %}<span><span class="lbl">Mvt</span> {{ row['movement_num'] }}</span>{% endif %}
+          </div>
+          {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── COINS ── #}
+      {% elif category == 'coins' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['region'] or row['authority'] or row['mint'] or '—' }}</span>
+          {% if row['region'] and row['authority'] and row['authority'] != row['region'] %}
+          <span class="item-model">{{ row['authority'] }}</span>
+          {% endif %}
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['metal'] %}<span>{{ row['metal'] }}</span>{% endif %}
+            {% if row['denomination'] %}<span>{{ row['denomination'] }}</span>{% endif %}
+            {% if row['mint'] %}<span>{{ row['mint'] }}</span>{% endif %}
+          </div>
+          {% if row['obv_rev'] %}<div class="idr"><span>{{ row['obv_rev'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if row['date_1_text'] %}<span>{{ row['date_1_text'] }}{% if row['date_2_text'] %} – {{ row['date_2_text'] }}{% endif %}</span>{% endif %}
+          </div>
+          <div class="idr">
+            {% if row['weight'] %}<span>{{ '%.2f'|format(row['weight']|float) }} g</span>{% endif %}
+            {% if row['size'] %}<span>{{ '%.1f'|format(row['size']|float) }} mm</span>{% endif %}
+            {% if row['die_axis'] %}<span>{{ row['die_axis'] }}h</span>{% endif %}
+            {% if row['coin_id'] %}<span class="item-cat-id">{{ row['coin_id'] }}</span>{% endif %}
+          </div>
+        </div>
+
+      {# ── CAMERAS ── #}
+      {% elif category == 'cameras' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['digital_film'] %}<span>{{ row['digital_film'] }}</span>{% endif %}
+            {% if row['digital_film'] == 'Film' and row['film_size'] %}<span>{{ row['film_size'] }}</span>{% endif %}
+            {% if row['digital_film'] != 'Film' and row['megapixels'] %}<span>{{ row['megapixels'] }} MP</span>{% endif %}
+            {% if row['digital_film'] != 'Film' and row['sensor'] %}<span>{{ row['sensor'] }}</span>{% endif %}
+          </div>
+          {% if row['lens_mount'] %}
+          <div class="idr"><span>{{ row['lens_mount'] }} Mount</span></div>
+          {% endif %}
+          <div class="idr">
+            {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
+          </div>
+          {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── LENSES ── #}
+      {% elif category == 'lenses' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['mount'] %}<span>{{ row['mount'] }}</span>{% endif %}
+            {% if row['aperture'] %}<span><span class="lbl">ƒ/</span>{{ row['aperture'] }}</span>{% endif %}
+            {% if row['length'] %}<span>{{ row['length']|int }}mm</span>{% endif %}
+            {% if row['filter_size'] %}<span><span class="lbl">Filter</span> {{ row['filter_size']|int }}mm</span>{% endif %}
+          </div>
+          {% if row['serial_number'] %}
+          <div class="idr">
+            <span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>
+          </div>
+          {% endif %}
+          {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── PENS ── #}
+      {% elif category == 'pens' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['type'] %}<span>{{ row['type'] }}</span>{% endif %}
+            {% if row['action'] %}<span>{{ row['action'] }}</span>{% endif %}
+            {% if row['nib'] %}<span><span class="lbl">Nib</span> {{ row['nib'] }}</span>{% endif %}
+            {% if row['cartridge'] %}<span>{{ row['cartridge'] }}</span>{% endif %}
+          </div>
+          {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── ART ── #}
+      {% elif category == 'art' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['artist'] or '—' }}</span>
+        </div>
+        {% if row['title'] %}<div class="art-title">{{ row['title'] }}</div>{% endif %}
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['medium'] %}<span>{{ row['medium'] }}</span>{% endif %}
+            {% if row['year'] %}<span>{{ row['year'] }}</span>{% endif %}
+          </div>
+          <div class="idr">
+            {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
+            {% if row['location'] %}<span>{{ row['location'] }}</span>{% endif %}
+            {% if row['dimensions'] %}<span>{{ row['dimensions'] }}</span>{% endif %}
+          </div>
+        </div>
+
+      {# ── VEHICLES ── #}
+      {% elif category == 'vehicles' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['year'] %}<span><span class="lbl">Yr</span> {{ row['year'] }}</span>{% endif %}
+            {% if row['state'] %}<span><span class="lbl">State</span> {{ row['state'] }}</span>{% endif %}
+            {% if row['tags'] %}<span><span class="lbl">Plate</span> {{ row['tags'] }}</span>{% endif %}
+          </div>
+          {% if row['vin'] %}<div class="idr"><span><span class="lbl">VIN</span> {{ row['vin'] }}</span></div>{% endif %}
+          {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── RECORDINGS ── #}
+      {% elif category == 'recordings' %}
+        {%- set _vinyl_types = ('LP', '45', '78', 'EP') -%}
+        {%- set _tape_types  = ('Cassette', '8-Track', 'Reel') -%}
+        {%- set _is_tape = row['type'] in _tape_types -%}
+        {%- set _fmt = 'Vinyl' if row['type'] in _vinyl_types
+                        else ('Tape' if _is_tape
+                              else (row['type'] or '')) -%}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['artist'] or '—' }}</span>
+        </div>
+        <div class="item-detail-rows rec-detail">
+          {% if row['title'] %}<div class="idr idr-rec-title"><span>{{ row['title'] }}</span></div>{% endif %}
+          <div class="idr idr-rec-format">
+            {% if _fmt %}<span>{{ _fmt }}</span>{% endif %}
+            {% if row['speed'] %}<span>{{ row['speed'] }}</span>{% endif %}
+            {% if row['sound'] %}<span>{{ row['sound'] }}</span>{% endif %}
+            {# `other` holds tape EQ (CCIR/NAB) for reels and pressing
+               weight (140g/180g) for vinyl. Only the tape variant is
+               useful in the list. #}
+            {% if _is_tape and row['other'] %}<span>{{ row['other'] }}</span>{% endif %}
+          </div>
+          {% if row['property'] or row['genre'] or row['year_recorded'] %}
+          <div class="idr">
+            <span>
+              {{ row['property'] }}{% if row['property'] and row['genre'] %} {% endif %}{{ row['genre'] }}{% if (row['property'] or row['genre']) and row['year_recorded'] %} {% endif %}{{ row['year_recorded'] }}
+            </span>
+          </div>
+          {% endif %}
+        </div>
+
+      {# ── AUDIO ── #}
+      {% elif category == 'audio' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          {% if row['type'] %}<div class="idr"><span>{{ row['type'] }}</span></div>{% endif %}
+          {% if row['serial_number'] %}
+          <div class="idr">
+            <span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>
+          </div>
+          {% endif %}
+          {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── RIFLES ── #}
+      {% elif category == 'rifles' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['make'] or '—' }}</span>
+          <span class="item-model">{{ row['model'] or '' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['caliber'] %}<span>{{ row['caliber'] }}</span>{% endif %}
+            {% if row['serial_number'] %}<span><span class="lbl">s/n</span> {{ row['serial_number'] }}</span>{% endif %}
+          </div>
+          {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
+        </div>
+
+      {# ── CREDIT CARDS ── #}
+      {% elif category == 'credit_cards' %}
+        {% set _desc1 = (row['description'] or '').splitlines()[0] if row['description'] else '' %}
+        {%- set _e = row['expiration'] or '' -%}
+        {%- if _e and '-' in _e %}{% set _e_disp = '%s/%s'|format(_e[5:7], _e[:4]) %}
+        {%- elif _e %}{% set _e_disp = _e %}
+        {%- else %}{% set _e_disp = '' %}{% endif %}
+        <div class="item-line1">
+          <span class="item-brand">{{ _desc1 or row['name'] or '—' }}</span>
+          <button type="button" class="row-share-btn"
+                  data-name="{{ row['name'] or '' }}"
+                  data-number="{{ row['number'] or '' }}"
+                  data-exp="{{ _e_disp }}"
+                  data-cvc="{{ row['cvc'] or '' }}"
+                  data-zip="{{ row['billing_short'] or '' }}"
+                  data-img-front="{{ row['image_front'] or '' }}"
+                  data-img-back="{{ row['image_back'] or '' }}"
+                  onclick="shareCardRow(event, this)"
+                  title="Share card details + images" aria-label="Share card">
+            <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+                 stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2 V17"/>
+              <path d="M6 8 L12 2 L18 8"/>
+              <path d="M5 13 H3 V25 H21 V13 H19"/>
+            </svg>
+          </button>
+        </div>
+        <div class="item-detail-rows">
+          {% if row['number'] %}<div class="idr"><span>{{ row['number'] }}</span></div>{% endif %}
+          <div class="idr">
+            {% if _e_disp %}<span><span class="lbl">Exp</span> {{ _e_disp }}</span>{% endif %}
+            {% if row['cvc'] %}<span><span class="lbl">CVC</span> {{ row['cvc'] }}</span>{% endif %}
+          </div>
+          {% if row['billing_short'] %}
+          <div class="idr"><span><span class="lbl">Zip</span> {{ row['billing_short'] }}</span></div>
+          {% endif %}
+        </div>
+
+      {# ── PROPERTIES ── #}
+      {% elif category == 'properties' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['name'] or '—' }}</span>
+        </div>
+        <div class="item-detail-rows">
+          {% if row['address'] %}<div class="idr property-address-row"><span>{{ row['address'] }}</span></div>{% endif %}
+          {# Show the first row of the alarm-codes table (Code column).
+             Replaces the old single alarm_code_1 column with the
+             user-curated "primary" alarm in row 1. #}
+          {% if row['alarm_codes_code_1'] %}
+          <div class="idr alarm-row">
+            <span class="alarm-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 22" width="16" height="18" fill="currentColor">
+                <path d="M10 0L0 3v8c0 6 4 10 10 11 6-1 10-5 10-11V3L10 0z"/>
+                <path fill="#ffffff" d="M8 9V8a2 2 0 1 1 4 0v1h1v5H7V9h1zm1 0h2V8a1 1 0 1 0-2 0v1z"/>
+              </svg>
+            </span>
+            <span>{{ row['alarm_codes_code_1'] }}</span>
+          </div>
+          {% endif %}
+          {% if row['wifi_name'] or row['wifi'] %}
+          <div class="idr wifi-row">
+            <span class="wifi-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 14" width="18" height="13" fill="currentColor">
+                <path d="M10 14a1.6 1.6 0 1 1 0-3.2 1.6 1.6 0 0 1 0 3.2zM3.2 7.5a9.6 9.6 0 0 1 13.6 0l-1.6 1.6a7.3 7.3 0 0 0-10.4 0L3.2 7.5zM0 4.3a14.1 14.1 0 0 1 20 0l-1.6 1.6a11.8 11.8 0 0 0-16.8 0L0 4.3z"/>
+              </svg>
+            </span>
+            {% if row['wifi_name'] %}<span>{{ row['wifi_name'] }}</span>{% endif %}
+            {% if row['wifi'] %}<span>{{ row['wifi'] }}</span>{% endif %}
+          </div>
+          {% endif %}
+        </div>
+
+      {# ── PERSONS ── #}
+      {% elif category == 'persons' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['name'] or '—' }}</span>
+        </div>
+        {% if row['home_address'] %}
+        <div class="item-detail-rows">
+          <div class="idr person-addr-block"><span>{{ row['home_address'] }}</span></div>
+        </div>
+        {% endif %}
+
+      {# ── FALLBACK ── #}
+      {% else %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row[cat_info.label_field] or '—' }}</span>
+          <span class="item-model">{{ row[cat_info.sublabel_field] or '' }}</span>
+        </div>
+      {% endif %}
+
+    </div><!-- /item-body -->
+  </div>
+  {% if category == 'properties' %}{% set ns.prev = row['type'] %}{% endif %}
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="empty-state">
+  <div class="eicon">{{ cat_info.icon }}</div>
+  <h3>No {{ cat_info.name|lower }}{% if q %} matching "{{ q }}"{% endif %}</h3>
+  {% if q %}
+    <p><a href="{{ url_for('list_view', category=category) }}">Clear search</a></p>
+  {% else %}
+    <p><a href="{{ url_for('new_record', category=category) }}">Add your first record</a></p>
+  {% endif %}
+</div>
+{% endif %}
+
+<script>
+// Credit card row share button — same payload as the detail-page share:
+// front + back images attached, plus the cardholder/number/exp/cvc/zip
+// text. Mirrors the shareCardDetails fallback chain so that when files
+// are collected we never silently fall back to text-only.
+window.shareCardRow = async function (ev, btn) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const d = btn.dataset;
+  const lines = [];
+  if (d.name) lines.push(d.name);
+  if (d.number) lines.push('Number: ' + d.number);
+  if (d.exp) lines.push('Exp: ' + d.exp);
+  if (d.cvc) lines.push('CVC: ' + d.cvc);
+  if (d.zip) lines.push('Billing zip code: ' + d.zip);
+  const text = lines.join('\n');
+  if (!text) { alert('Nothing to share — fill in some fields first.'); return; }
+
+  // Pull the file blobs by filename (data-img-front/data-img-back are
+  // rendered server-side from the DB row; present even for HEIC etc.
+  // that don't display inline as <img>).
+  const filenames = [d.imgFront, d.imgBack].filter(Boolean);
+  const files = [];
+  for (const fname of filenames) {
+    try {
+      const resp = await fetch('/uploads/' + fname);
+      if (!resp.ok) continue;
+      const blob = await resp.blob();
+      files.push(new File([blob], fname, { type: blob.type || 'application/octet-stream' }));
+    } catch (_) { /* skip a bad fetch, keep the others */ }
+  }
+
+  try {
+    if (files.length && navigator.canShare && navigator.canShare({ files, text })) {
+      try {
+        await navigator.share({ files, text });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        // Native share with files failed — drop through to download.
+      }
+    }
+    if (!files.length && navigator.share) {
+      try { await navigator.share({ text }); return; }
+      catch (err) { if (err.name === 'AbortError') return; }
+    }
+    // Desktop / no-file-share fallback: download images + copy text.
+    files.forEach(f => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(f);
+      a.download = f.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(files.length
+        ? `Card images downloaded; details copied to clipboard:\n\n${text}`
+        : `Copied to clipboard:\n\n${text}`);
+    } catch (_) {
+      prompt('Copy this text:', text);
+    }
+  } catch (err) {
+    alert('Share failed: ' + (err.message || err));
+  }
+};
+
+(function() {
+  // Prevent browser from opening dropped files
+  document.addEventListener('dragover', function(e) { e.preventDefault(); }, true);
+  document.addEventListener('drop', function(e) { e.preventDefault(); }, true);
+
+  function uploadFile(file, uploadUrl, thumb, field) {
+    if (!file || !file.type.startsWith('image/')) { alert('Please drop an image file.'); return; }
+    thumb.classList.add('uploading');
+    var fd = new FormData();
+    fd.append('image', file);
+    if (field) fd.append('field', field);
+
+    fetch(uploadUrl, { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        thumb.classList.remove('uploading');
+        if (data.url) {
+          var img = thumb.querySelector('img');
+          var noImg = thumb.querySelector('.no-img');
+          if (img) {
+            img.src = data.url;
+          } else {
+            if (noImg) noImg.remove();
+            var newImg = document.createElement('img');
+            newImg.src = data.url;
+            newImg.alt = '';
+            thumb.insertBefore(newImg, thumb.firstChild);
+          }
+        } else {
+          alert('Upload failed: ' + (data.error || 'unknown error'));
+        }
+      })
+      .catch(function() { thumb.classList.remove('uploading'); alert('Upload failed.'); });
+  }
+
+  // Arrive from a detail page's "Back" link with #item-<id> -> scroll to
+  // that row and add a highlight class so the user sees where they were
+  // even if the browser doesn't fire :target (e.g. bf-cache restores).
+  (function focusAnchoredRow() {
+    if (!window.location.hash) return;
+    var target = document.querySelector(window.location.hash.replace(/"/g, ''));
+    if (!target || !target.classList.contains('item-row')) return;
+    // Use scrollIntoView so the scroll-margin-top CSS applies.
+    target.scrollIntoView({ block: 'start', behavior: 'auto' });
+    target.classList.add('just-returned');
+    setTimeout(function() { target.classList.remove('just-returned'); }, 2200);
+  })();
+
+  document.querySelectorAll('.item-row').forEach(function(row) {
+    var rowFileBtn = row.querySelector('.row-upload-btn input[type=file]');
+    var firstThumb = row.querySelector('.item-thumb[data-upload-url]');
+
+    // Click anywhere on the row -> navigate to the detail page (the per-
+    // thumb drop handlers below stop propagation only on drag events,
+    // so click still bubbles up here). Wired unconditionally — categories
+    // without a thumbnail (e.g. persons) still need this to work.
+    row.addEventListener('click', function(e) {
+      if (e.target.closest('.row-upload-btn')) return;
+      window.location = row.dataset.href;
+    });
+
+    // Drag-and-drop image upload only applies to rows that actually
+    // have a thumbnail; bail if there's nothing to drop onto.
+    if (!firstThumb) return;
+    var firstUploadUrl = firstThumb.dataset.uploadUrl;
+    var firstField = firstThumb.dataset.field || null;
+
+    // Per-thumb drag-and-drop. Each thumb is its own drop target so the
+    // correct `field` form param is sent (image_1 vs image_2 for coins)
+    // and the highlight only lights up the cell under the cursor.
+    row.querySelectorAll('.item-thumb[data-upload-url]').forEach(function(thumb) {
+      var uploadUrl = thumb.dataset.uploadUrl;
+      var field = thumb.dataset.field || null;
+      thumb.addEventListener('dragenter', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        // Make sure no other thumb on this row stays highlighted.
+        row.querySelectorAll('.item-thumb.drag-over').forEach(function(t) {
+          if (t !== thumb) t.classList.remove('drag-over');
+        });
+        thumb.classList.add('drag-over');
+      });
+      thumb.addEventListener('dragover', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        row.querySelectorAll('.item-thumb.drag-over').forEach(function(t) {
+          if (t !== thumb) t.classList.remove('drag-over');
+        });
+        thumb.classList.add('drag-over');
+      });
+      thumb.addEventListener('dragleave', function(e) {
+        if (!thumb.contains(e.relatedTarget)) thumb.classList.remove('drag-over');
+      });
+      thumb.addEventListener('drop', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        thumb.classList.remove('drag-over');
+        uploadFile(e.dataTransfer.files[0], uploadUrl, thumb, field);
+      });
+    });
+
+    // Legacy explicit upload button (kept for layouts that opt into it).
+    // Always uploads to the first thumb / image_1.
+    if (!rowFileBtn) return;
+    rowFileBtn.addEventListener('click', function(e) { e.stopPropagation(); });
+    rowFileBtn.addEventListener('change', function() {
+      if (rowFileBtn.files[0]) uploadFile(rowFileBtn.files[0], firstUploadUrl, firstThumb, firstField);
+    });
+  });
+})();
+</script>
+{% endblock %}
