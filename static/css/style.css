@@ -1642,6 +1642,7 @@ input[type="date"] { -webkit-appearance: none; }
   border-radius: 6px;
   overflow: hidden;
   background: #fff;
+  position: relative;
 }
 .persons-doc-title {
   border: none;
