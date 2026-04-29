@@ -1313,6 +1313,10 @@
     <textarea name="notes" rows="10" placeholder="Notes" class="rec-notes-textarea">{{ val('notes') }}</textarea>
   </div>
 
+  {# Tracks block: pills only — the canonical newline-separated list
+     lives in a hidden input so save_field keeps persisting it but
+     the user doesn't see a textarea. The Lookup button is the only
+     way to populate / refresh this list. #}
   <div class="rec-tracks-block">
     <div class="rec-notes-header">
       <span class="rec-notes-title">Tracks</span>
@@ -1321,10 +1325,7 @@
          data-pill-kind="track"
          data-track-artist="{{ val('artist') }}"
          data-track-album="{{ val('title') }}"></div>
-    <textarea name="tracks" id="recTracksInput"
-              class="rec-tracks-input"
-              rows="6"
-              placeholder="Tracks (one per line)">{{ val('tracks') }}</textarea>
+    <input type="hidden" name="tracks" id="recTracksInput" value="{{ val('tracks') }}">
   </div>
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
@@ -1488,7 +1489,6 @@
           if (tracksInp && data.tracks && !tracksInp.value.trim()) {
             tracksInp.value = data.tracks;
             tracksInp.dispatchEvent(new Event('blur'));
-            if (window._autosizeTextarea) window._autosizeTextarea(tracksInp);
             renderTrackPills();
           }
           lookupBtn.textContent = origLabel;

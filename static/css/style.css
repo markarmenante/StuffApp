@@ -984,22 +984,13 @@ input[type="date"] { -webkit-appearance: none; }
 
 /* Tracks block sits as its own full-width section below Notes,
    sharing the same chrome (header, padding, surface) as .rec-notes-
-   block. The pill row is the primary surface; the textarea below
-   it holds the canonical newline-separated list and auto-sizes to
-   its content (capped by the JS auto-grow helper). */
+   block. The pill row is the only visible surface — the canonical
+   newline-separated list is held in a hidden input. */
 .rec-tracks-block {
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   padding: 8px 10px;
 }
-.rec-tracks-input {
-  width: 100%; min-height: 140px; resize: vertical;
-  border: 1px solid var(--border); border-radius: 4px;
-  padding: 6px 8px; font-family: var(--font); font-size: 12px;
-  background: var(--cell-bg); color: var(--text);
-  outline: none;
-}
-.rec-tracks-input:focus { border-color: var(--blue); background: #fff; }
 
 /* Players input — single line under the pill row. */
 .rec-players-input {
