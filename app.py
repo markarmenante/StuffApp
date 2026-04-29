@@ -4389,6 +4389,40 @@ def _docs_cols_for(category):
     return list(DOC_SETS_BY_CATEGORY.get(category, {}).values())
 
 
+# Title keywords used to route a Sweep upload to the right doc-set on
+# multi-set categories (persons). Match is case-insensitive substring.
+# The first matching column wins; otherwise the first declared set is
+# used. Empty for single-set categories — they always land in 'main'.
+SWEEP_DOC_SET_HINTS = {
+    'persons': [
+        ('health_documents', ('health', 'medic', 'medical', 'rx',
+                              'prescription', 'doctor', 'eye', 'dental',
+                              'insurance')),
+        ('id_documents',     ('id', 'license', 'passport', 'visa',
+                              'global entry', 'birth', 'social')),
+    ],
+}
+
+
+def _route_sweep_doc_set(category, label):
+    """Pick the JSON column for a sweep-uploaded file. Single-set
+    categories always return their lone column; multi-set ones run
+    SWEEP_DOC_SET_HINTS against the file's parsed label and fall back
+    to the first declared set if nothing matches."""
+    cols = _docs_cols_for(category)
+    if not cols:
+        return 'documents'
+    if len(cols) == 1:
+        return cols[0]
+    label_l = (label or '').lower()
+    for col, keywords in SWEEP_DOC_SET_HINTS.get(category, []):
+        if col not in cols:
+            continue
+        if any(k in label_l for k in keywords):
+            return col
+    return cols[0]
+
+
 def _docs_load(db, table, record_id, col='documents'):
     """Read the documents JSON for a record from `col`, normalizing to
     a list of {title, filename} dicts. Returns None if record missing,
@@ -6399,11 +6433,12 @@ def sweep_files():
                 })
             else:
                 # DOCUMENTS_CATEGORIES path — append to the JSON column.
-                # For categories with multiple doc-sets (persons: ids +
-                # health), pick the first declared set as the landing
-                # zone; the user can drag tiles between sets in the UI.
-                json_cols = _docs_cols_for(cat)
-                docs_col = json_cols[0] if json_cols else 'documents'
+                # For multi-set categories (persons: ids + health), use
+                # a title-based heuristic to route between sets so a
+                # round-trip Files-export → Sweep keeps user-titled docs
+                # roughly in their original tab. Misroutes can be fixed
+                # by deleting + re-uploading on the right tab.
+                docs_col = _route_sweep_doc_set(cat, parsed.get('label') or '')
                 try:
                     docs = json.loads(row[docs_col] or '[]') if docs_col in row.keys() else []
                 except (TypeError, ValueError):
