@@ -3017,13 +3017,19 @@ def detail_view(category, record_id):
         # rows drop off entirely instead of showing a misleading red.
         viewer = g.get('current_user') or {}
         is_member_view = viewer.get('role') != 'owner'
+        # Match the alias group so a pill for "Carpinteria" counts items
+        # still tagged with the legacy short form "Carp" — same lookup
+        # the /<cat>?at=<name> filter uses, so the pill count never
+        # disagrees with the list it links to.
+        aliases = _property_alias_group(prop_name) or [prop_name.strip().lower()]
         for slug in CATEGORY_PROPERTY_FIELD:
             if slug not in allowed or slug in PROPERTY_PILL_EXCLUDE:
                 continue
             prop_field = CATEGORY_PROPERTY_FIELD[slug]
             table = CATEGORIES[slug]['table']
-            wheres = [f'{prop_field} = ?']
-            params = [prop_name]
+            ph = ','.join(['?'] * len(aliases))
+            wheres = [f"LOWER(TRIM(COALESCE({prop_field}, ''))) IN ({ph})"]
+            params = list(aliases)
             _apply_row_filter_clauses(slug, wheres, params)
             try:
                 cnt = db.execute(
