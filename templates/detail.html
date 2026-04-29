@@ -3272,6 +3272,25 @@ document.querySelectorAll('.person-tab').forEach(btn => {
   if (h === 'ids' || h === 'health') activatePersonTab(h);
 })();
 
+// Property "Items at this property" pills: clicking a red (.no-items)
+// pill skips the navigation to an empty list and briefly flashes
+// "No Inventory Items" in the pill, then restores the original
+// label. Avoids a dead-end round-trip for a category we already know
+// has nothing at this property.
+document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
+  pill.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    if (pill.dataset.flashing === '1') return;
+    const original = pill.textContent;
+    pill.dataset.flashing = '1';
+    pill.textContent = 'No Inventory Items';
+    setTimeout(() => {
+      pill.textContent = original;
+      delete pill.dataset.flashing;
+    }, 1800);
+  });
+});
+
 // People > Health > Medications: per-row × button.
 // Clicking deletes the row by shifting all rows below it up by one and
 // clearing the last slot. Each affected slot's input fires a blur
