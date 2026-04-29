@@ -1767,10 +1767,11 @@
     </div>
   </div>
 
-  {# IDs tab — 8 doc tiles (4 across, 2 rows). Slots 1+2 are hardwired
-     License Front / License Back; the share button on slot 1 bundles
-     both files in one email/text. Slots 3..8 are user-titled. #}
-  <div class="dgrid dg4 person-doc-group persons-doc-row" data-group="ids" hidden>
+  {# IDs tab — License Front/Back stay as fixed tiles (their semantic
+     license_number field is bound to the front; share button on the
+     front bundles both files). Everything else moves into the
+     `id_documents` JSON column rendered by dyndocrow below. #}
+  <div class="dgrid dg2 person-doc-group persons-doc-row" data-group="ids" hidden>
     <div class="persons-doc">
       <div class="persons-doc-title persons-doc-title-fixed">License Front</div>
       {{ doccell('license_obverse', '', num_field='license_number', num_label='License Number', share_with=['license_reverse']) }}
@@ -1779,21 +1780,20 @@
       <div class="persons-doc-title persons-doc-title-fixed">License Back</div>
       {{ doccell('license_reverse', '', no_share=True) }}
     </div>
-    {% for i in range(3, 9) %}
-    <div class="persons-doc">
-      <input type="text" name="id_doc_{{ i }}_title"
-             value="{{ val('id_doc_' ~ i ~ '_title') }}"
-             class="persons-doc-title"
-             placeholder="Doc {{ i }}">
-      {{ doccell('id_doc_' ~ i, '', share_with=[]) }}
-    </div>
-    {% endfor %}
+  </div>
+  <div class="person-doc-group" data-group="ids" hidden>
+    {% set _id_documents = ((r['id_documents'] if r and 'id_documents' in r.keys() else None) or '')|from_json %}
+    {{ dyndocrow(_id_documents, set='ids',
+                 css_classes='dgrid dg4 persons-doc-row',
+                 tile_class='persons-doc',
+                 title_class='persons-doc-title') }}
   </div>
 
-  {# Health tab — 8 doc tiles. Slots 1+2 hardwired Health Card Front /
-     Health Card Back; share on slot 1 bundles both. Slots 3..8 are
-     user-titled. #}
-  <div class="dgrid dg4 person-doc-group persons-doc-row" data-group="health">
+  {# Health tab — Health Card Front/Back stay fixed (semantic
+     health_insurance_number field bound to the front; share button
+     bundles both). Everything else moves into the `health_documents`
+     JSON column rendered by dyndocrow below. #}
+  <div class="dgrid dg2 person-doc-group persons-doc-row" data-group="health">
     <div class="persons-doc">
       <div class="persons-doc-title persons-doc-title-fixed">Health Card Front</div>
       {{ doccell('health_card_obv', '', num_field='health_insurance_number', num_label='Health Insurance Number', share_with=['health_card_rev']) }}
@@ -1802,15 +1802,13 @@
       <div class="persons-doc-title persons-doc-title-fixed">Health Card Back</div>
       {{ doccell('health_card_rev', '', no_share=True) }}
     </div>
-    {% for i in range(3, 9) %}
-    <div class="persons-doc">
-      <input type="text" name="health_doc_{{ i }}_title"
-             value="{{ val('health_doc_' ~ i ~ '_title') }}"
-             class="persons-doc-title"
-             placeholder="Doc {{ i }}">
-      {{ doccell('health_doc_' ~ i, '', share_with=[]) }}
-    </div>
-    {% endfor %}
+  </div>
+  <div class="person-doc-group" data-group="health">
+    {% set _health_documents = ((r['health_documents'] if r and 'health_documents' in r.keys() else None) or '')|from_json %}
+    {{ dyndocrow(_health_documents, set='health',
+                 css_classes='dgrid dg4 persons-doc-row',
+                 tile_class='persons-doc',
+                 title_class='persons-doc-title') }}
   </div>
 
   <div class="dgrid dg1 person-doc-group" data-group="health">
