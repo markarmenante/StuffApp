@@ -1062,6 +1062,16 @@ input[type="date"] { -webkit-appearance: none; }
   opacity: 1; background: #ffe9e6; color: #c0392b; border-color: #e6b6ad;
 }
 .doc-delete-btn:disabled { opacity: 0.3; cursor: wait; }
+/* Armed = first click landed; widen to fit "OK?" and switch to the
+   warning palette so the user knows the next click commits. */
+.doc-delete-btn.armed {
+  opacity: 1;
+  width: auto; padding: 0 8px;
+  border-radius: 11px;
+  background: #c0392b; color: #fff; border-color: #c0392b;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+}
+.doc-delete-btn.armed:hover { background: #a52a1f; border-color: #a52a1f; }
 
 /* Medications table inside the Health pill panel */
 .med-table { padding: 6px 10px 4px; position: relative; }
@@ -1333,6 +1343,12 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .topic-row-wrap:hover .topic-del-btn { opacity: 0.85; }
 .topic-del-btn:hover { background: #ffe9e6; color: #c0392b; border-color: #e6b6ad; opacity: 1; }
+.topic-del-btn.armed {
+  opacity: 1; width: auto; padding: 0 8px; border-radius: 11px;
+  background: #c0392b; color: #fff; border-color: #c0392b;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+}
+.topic-del-btn.armed:hover { background: #a52a1f; border-color: #a52a1f; }
 .property-topics .topic-subject,
 .property-topics .topic-body {
   /* Match the padding / typography of a standard .dcell input so
@@ -1674,6 +1690,14 @@ input[type="date"] { -webkit-appearance: none; }
   color: var(--text-secondary);
   cursor: default;
 }
+.persons-doc-title-hint {
+  /* Inline hint after the fixed label (e.g. " - share sends Front and
+     Back" on License/Health Card Front). Visually muted so it reads as
+     a parenthetical rather than competing with the label. */
+  font-weight: 400;
+  font-size: 11px;
+  opacity: 0.7;
+}
 .persons-doc-row { gap: 8px; padding: 6px 10px; min-height: 150px; }
 .persons-doc-row .file-cell {
   padding: 8px; min-height: 150px; gap: 4px;
@@ -1738,6 +1762,11 @@ input[type="date"] { -webkit-appearance: none; }
   font-size: 13px; cursor: pointer; font-family: var(--font);
 }
 .btn-delete:hover { background: #fff0f0; }
+.btn-delete.armed {
+  background: #c0392b; color: #fff; border-color: #c0392b;
+  font-weight: 600;
+}
+.btn-delete.armed:hover { background: #a52a1f; border-color: #a52a1f; }
 
 /* Person headshot */
 .headshot-wrap { display: flex; justify-content: center; padding: 16px; border-bottom: 1px solid var(--border); background: var(--cell-bg); }

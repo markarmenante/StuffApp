@@ -1805,7 +1805,7 @@
      `id_documents` JSON column rendered by dyndocrow below. #}
   <div class="dgrid dg2 person-doc-group persons-doc-row" data-group="ids" hidden>
     <div class="persons-doc">
-      <div class="persons-doc-title persons-doc-title-fixed">License Front</div>
+      <div class="persons-doc-title persons-doc-title-fixed">License Front<span class="persons-doc-title-hint"> - share sends Front and Back</span></div>
       {{ doccell('license_obverse', '', num_field='license_number', num_label='License Number', share_with=['license_reverse']) }}
     </div>
     <div class="persons-doc">
@@ -1827,7 +1827,7 @@
      JSON column rendered by dyndocrow below. #}
   <div class="dgrid dg2 person-doc-group persons-doc-row" data-group="health">
     <div class="persons-doc">
-      <div class="persons-doc-title persons-doc-title-fixed">Health Card Front</div>
+      <div class="persons-doc-title persons-doc-title-fixed">Health Card Front<span class="persons-doc-title-hint"> - share sends Front and Back</span></div>
       {{ doccell('health_card_obv', '', num_field='health_insurance_number', num_label='Health Insurance Number', share_with=['health_card_rev']) }}
     </div>
     <div class="persons-doc">
@@ -1877,6 +1877,7 @@
     <button type="button" class="btn-delete" style="margin-left:auto"
             data-delete-url="{{ url_for('delete_record', category=category, record_id=r['id']) }}"
             data-redirect-url="{{ url_for('list_view', category=category) }}"
+            data-armed-text="OK to Delete?"
             onclick="confirmDelete(this)">Delete</button>
   </div>
   {% endif %}
@@ -1886,7 +1887,13 @@
 
 <script>
 function confirmDelete(btn) {
-  if (!confirm('Delete this record? This cannot be undone.')) return;
+  // Two-click confirm using the shared arm/disarm helpers (defined
+  // further down in this template).
+  if (!btn.classList.contains('armed')) {
+    _armDelBtn(btn);
+    return;
+  }
+  _disarmDelBtn(btn);
   fetch(btn.dataset.deleteUrl, {method: 'POST'})
     .then(r => { window.location.href = btn.dataset.redirectUrl; })
     .catch(() => alert('Delete failed.'));
@@ -3070,7 +3077,12 @@ async function shareCardDetails(ev) {
 async function deleteDocFile(ev, btn) {
   ev.preventDefault();
   ev.stopPropagation();
-  if (!confirm('Remove this file? The cell will be empty after this.')) return;
+  // Two-click confirm: first click arms (shows "OK?"), second commits.
+  if (!btn.classList.contains('armed')) {
+    _armDelBtn(btn);
+    return;
+  }
+  _disarmDelBtn(btn);
   const cell = btn.closest('.drop-zone');
   if (!cell) return;
   const field = btn.dataset.field;
@@ -3416,8 +3428,12 @@ document.querySelectorAll('.topic-del-btn').forEach(btn => {
     ev.stopPropagation();
     const url = btn.dataset.deleteUrl;
     if (!url) return;
-    const subj = btn.dataset.subject || 'this topic';
-    if (!window.confirm(`Delete "${subj}"? This can't be undone.`)) return;
+    // Two-click confirm using the shared arm/disarm helpers.
+    if (!btn.classList.contains('armed')) {
+      _armDelBtn(btn);
+      return;
+    }
+    _disarmDelBtn(btn);
     btn.disabled = true;
     try {
       const res = await fetch(url, {
@@ -3493,6 +3509,37 @@ _wireRowDelete(
 //
 // Runs per-row so a single page can host multiple independent sets
 // (persons has IDs + Health side-by-side).
+// Inline two-click delete-confirm helpers, shared by every delete
+// button in the app. First click "arms" the button (swaps its label to
+// data-armed-text or 'OK?', adds .armed so per-button-class CSS can
+// switch to a warning palette); second click within 3s commits the
+// delete. Any click elsewhere or the timer expiring disarms.
+function _armDelBtn(btn) {
+  document.querySelectorAll('.armed').forEach(b => {
+    if (b !== btn) _disarmDelBtn(b);
+  });
+  btn.dataset.origText = btn.textContent;
+  btn.textContent = btn.dataset.armedText || 'OK?';
+  btn.classList.add('armed');
+  btn._disarmTimer = setTimeout(() => _disarmDelBtn(btn), 3000);
+}
+function _disarmDelBtn(btn) {
+  if (btn._disarmTimer) { clearTimeout(btn._disarmTimer); btn._disarmTimer = null; }
+  if (btn.dataset.origText !== undefined) {
+    btn.textContent = btn.dataset.origText;
+    delete btn.dataset.origText;
+  }
+  btn.classList.remove('armed');
+}
+// Document-level click disarms any armed button when the click lands
+// outside it. Capture phase so we run before the button's own listener
+// (which would otherwise re-arm on the same click).
+document.addEventListener('click', function (ev) {
+  document.querySelectorAll('.armed').forEach(b => {
+    if (!b.contains(ev.target)) _disarmDelBtn(b);
+  });
+}, true);
+
 document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   const base = row.dataset.docsBase || '';
   // Refuse to wire up on the new-record form — the API needs a saved
@@ -3714,23 +3761,29 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     inp.value = '';
   });
 
-  // × delete on existing tiles
+  // × delete on existing tiles — two-click arm + confirm pattern.
+  // First click swaps "×" to "OK?" and reddens the button; a second
+  // click within 3s commits the delete. Anything else (timer expiry
+  // or click elsewhere) disarms. Helpers _armDelBtn / _disarmDelBtn
+  // are defined at module scope below.
   row.addEventListener('click', async (ev) => {
     const btn = ev.target.closest('.dyn-doc-del');
     if (!btn) return;
     ev.preventDefault();
     ev.stopPropagation();
-    if (!confirm('Remove this document?')) return;
     const idx = parseInt(btn.dataset.docIdx, 10);
     if (isNaN(idx) || idx < 0) return;
-    try {
-      await deleteTile(idx);
-      // Easiest correct behavior: full reload so the remaining tiles
-      // pick up their new (decremented) indexes from the server.
-      window.location.reload();
-    } catch (err) {
-      alert('Delete failed: ' + (err.message || err));
+    if (btn.classList.contains('armed')) {
+      _disarmDelBtn(btn);
+      try {
+        await deleteTile(idx);
+        window.location.reload();
+      } catch (err) {
+        alert('Delete failed: ' + (err.message || err));
+      }
+      return;
     }
+    _armDelBtn(btn);
   });
 
   // Click outside the file label / × button → open the file picker.
