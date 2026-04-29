@@ -746,10 +746,14 @@ def init_db():
         # that previously had 1-2 fixed user-doc slots. Receipts stay
         # as their own fixed column on each — only the "free" doc slots
         # move into JSON. Backfilled at boot from the legacy columns.
-        'ALTER TABLE watches  ADD COLUMN documents TEXT',
-        'ALTER TABLE coins    ADD COLUMN documents TEXT',
-        'ALTER TABLE art      ADD COLUMN documents TEXT',
-        'ALTER TABLE vehicles ADD COLUMN documents TEXT',
+        'ALTER TABLE watches    ADD COLUMN documents TEXT',
+        'ALTER TABLE coins      ADD COLUMN documents TEXT',
+        'ALTER TABLE art        ADD COLUMN documents TEXT',
+        'ALTER TABLE vehicles   ADD COLUMN documents TEXT',
+        'ALTER TABLE pens       ADD COLUMN documents TEXT',
+        'ALTER TABLE recordings ADD COLUMN documents TEXT',
+        'ALTER TABLE rifles     ADD COLUMN documents TEXT',
+        'ALTER TABLE audio      ADD COLUMN documents TEXT',
         # Persons has TWO independent doc-rows (IDs and Health) because
         # the tabs are semantically distinct. License front/back +
         # health card front/back stay as fixed columns (their semantic
@@ -828,10 +832,10 @@ def init_db():
     _backfill_docs_json(db, 'art', 'documents', [
         ('doc_2', None, 'Doc 2'),
     ])
-    # Art + coins used to have receipt as a fixed cell next to the
-    # doc tiles; both now fold receipt into the dynamic docs row.
-    _migrate_receipt_into_documents(db, 'art')
-    _migrate_receipt_into_documents(db, 'coins')
+    # All item categories now fold receipt into the dynamic docs row
+    # instead of rendering it as a fixed cell.
+    for _t in ('art', 'coins', 'watches', 'pens', 'recordings', 'rifles', 'audio'):
+        _migrate_receipt_into_documents(db, _t)
     _backfill_docs_json(db, 'vehicles', 'documents', [
         ('insurance',     'insurance_label',     'Insurance'),
         ('invoice',       'invoice_label',       'Invoice'),
