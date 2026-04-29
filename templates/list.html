@@ -189,6 +189,11 @@
         <div class="item-line1">
           <span class="item-brand">{{ row['brand'] or '—' }}</span>
           <span class="item-model">{{ row['model'] or '' }}</span>
+          <button type="button" class="row-delete-btn"
+                  data-delete-url="{{ url_for('delete_record', category='watches', record_id=row['id']) }}"
+                  data-armed-text="Delete?"
+                  onclick="confirmRowDelete(event, this)"
+                  title="Delete this watch" aria-label="Delete">×</button>
         </div>
         <div class="item-detail-rows">
           <div class="idr">
@@ -562,6 +567,62 @@ window.shareCardRow = async function (ev, btn) {
   }
 };
 
+// Per-row delete pill. Two-click confirm: first click flips the button
+// red ("Delete?"), second click within 3s actually fires the POST. Stops
+// propagation so the row's navigate-on-click doesn't also fire. On
+// success, the row fades out and is removed in place — no full reload.
+window.confirmRowDelete = function (ev, btn) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (!btn.classList.contains('armed')) {
+    // Disarm any other armed delete button on the page.
+    document.querySelectorAll('.row-delete-btn.armed').forEach(b => {
+      if (b !== btn) {
+        b.classList.remove('armed');
+        b.textContent = '×';
+        if (b._disarmTimer) { clearTimeout(b._disarmTimer); b._disarmTimer = null; }
+      }
+    });
+    btn.classList.add('armed');
+    btn.textContent = btn.dataset.armedText || 'Delete?';
+    btn._disarmTimer = setTimeout(() => {
+      btn.classList.remove('armed');
+      btn.textContent = '×';
+      btn._disarmTimer = null;
+    }, 3000);
+    return;
+  }
+  if (btn._disarmTimer) { clearTimeout(btn._disarmTimer); btn._disarmTimer = null; }
+  btn.disabled = true;
+  fetch(btn.dataset.deleteUrl, {method: 'POST', redirect: 'manual'})
+    .then(() => {
+      const row = btn.closest('.item-row');
+      if (row) {
+        row.style.transition = 'opacity 0.25s';
+        row.style.opacity = '0';
+        setTimeout(() => row.remove(), 260);
+      }
+    })
+    .catch(() => {
+      btn.disabled = false;
+      btn.classList.remove('armed');
+      btn.textContent = '×';
+      alert('Delete failed.');
+    });
+};
+
+// Click outside any armed delete button disarms it (capture phase so we
+// run before the button's own click handler re-arms it on the same click).
+document.addEventListener('click', function (ev) {
+  document.querySelectorAll('.row-delete-btn.armed').forEach(b => {
+    if (!b.contains(ev.target)) {
+      b.classList.remove('armed');
+      b.textContent = '×';
+      if (b._disarmTimer) { clearTimeout(b._disarmTimer); b._disarmTimer = null; }
+    }
+  });
+}, true);
+
 (function() {
   // Prevent browser from opening dropped files
   document.addEventListener('dragover', function(e) { e.preventDefault(); }, true);
@@ -619,7 +680,7 @@ window.shareCardRow = async function (ev, btn) {
     // so click still bubbles up here). Wired unconditionally — categories
     // without a thumbnail (e.g. persons) still need this to work.
     row.addEventListener('click', function(e) {
-      if (e.target.closest('.row-upload-btn')) return;
+      if (e.target.closest('.row-upload-btn, .row-delete-btn')) return;
       window.location = row.dataset.href;
     });
 

@@ -6090,17 +6090,22 @@ def dedupe_watches():
             continue
         groups.setdefault(key, []).append(r)
 
+    def fancy_count(s):
+        """Diacritics + ampersands — markers of the canonical spelling."""
+        s = s or ''
+        return sum(1 for c in s if (not c.isascii()) or c == '&')
+
     def score(m):
         """Higher = better winner."""
         non_null = sum(1 for c in cols
                        if m.get(c) not in (None, '', 0))
         brand = m.get('brand') or ''
-        fancy = sum(1 for c in brand if (not c.isascii()) or c == '&')
-        return (non_null, fancy, len(brand))
+        return (non_null, fancy_count(brand), len(brand))
 
     actions = []
     rows_deleted = 0
     fields_filled = 0
+    brands_canonicalized = 0
     for key, members in groups.items():
         if len(members) < 2:
             continue
@@ -6108,7 +6113,23 @@ def dedupe_watches():
         winner = members[0]
         siblings = members[1:]
 
+        # Canonical brand for the group = the spelling with the most
+        # diacritics + ampersands across ALL members. Picks
+        # "A. Lange & Söhne" over "A. Lange Sohne" even when the
+        # richest-data row carries the impoverished spelling.
+        canonical_brand = max(
+            (m.get('brand') or '' for m in members),
+            key=lambda b: (fancy_count(b), len(b)),
+        )
+        brand_change = None
+        if canonical_brand and (winner.get('brand') or '') != canonical_brand:
+            brand_change = {'from': winner.get('brand'), 'to': canonical_brand}
+            winner['brand'] = canonical_brand
+            brands_canonicalized += 1
+
         merge_updates = {}
+        if brand_change:
+            merge_updates['brand'] = canonical_brand
         for sib in siblings:
             for c in cols:
                 if c in ('id', 'created_at'):
@@ -6119,14 +6140,15 @@ def dedupe_watches():
                     winner[c] = sib[c]  # prevent later siblings overwriting
 
         actions.append({
-            'norm_key':    ' | '.join(key),
-            'winner_id':   winner['id'],
-            'winner_brand': winner.get('brand'),
-            'winner_model': winner.get('model'),
-            'winner_ref':  winner.get('reference'),
-            'sibling_ids': [s['id'] for s in siblings],
+            'norm_key':       ' | '.join(key),
+            'winner_id':      winner['id'],
+            'winner_brand':   winner.get('brand'),
+            'winner_model':   winner.get('model'),
+            'winner_ref':     winner.get('reference'),
+            'sibling_ids':    [s['id'] for s in siblings],
             'sibling_brands': [s.get('brand') for s in siblings],
-            'fields_filled': sorted(merge_updates.keys()),
+            'brand_change':   brand_change,
+            'fields_filled':  sorted(merge_updates.keys()),
         })
         rows_deleted += len(siblings)
         fields_filled += len(merge_updates)
@@ -6146,11 +6168,170 @@ def dedupe_watches():
         db.commit()
 
     return jsonify({
-        'dry_run':            dry,
-        'groups_with_dupes':  len(actions),
-        'rows_would_delete':  rows_deleted,
-        'fields_would_fill':  fields_filled,
-        'actions':            actions,
+        'dry_run':              dry,
+        'groups_with_dupes':    len(actions),
+        'rows_would_delete':    rows_deleted,
+        'fields_would_fill':    fields_filled,
+        'brands_canonicalized': brands_canonicalized,
+        'actions':              actions,
+    })
+
+
+@app.route('/admin/canonicalize-watch-brands', methods=['POST'])
+def canonicalize_watch_brands():
+    """Standalone brand-spelling cleanup for watches that already
+    DON'T have duplicates — i.e., a single row whose brand is spelled
+    "A. Lange Sohne" when the canonical name is "A. Lange & Söhne".
+
+    Groups every watch by _norm(brand). For each normalized group,
+    picks the spelling with the most diacritics + ampersands as
+    canonical and rewrites every row in the group to use it.
+
+    Defaults to dry-run; pass ?dry=0 to apply.
+
+    Note: dedupe-watches already canonicalizes brand for groups it
+    collapses; this endpoint covers the rest."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.args.get('dry', '1') != '0'
+    db = get_db()
+    rows = [dict(r) for r in db.execute(
+        "SELECT id, brand FROM watches WHERE COALESCE(brand, '') != ''"
+    ).fetchall()]
+
+    def fancy_count(s):
+        s = s or ''
+        return sum(1 for c in s if (not c.isascii()) or c == '&')
+
+    groups = {}
+    for r in rows:
+        groups.setdefault(_norm(r['brand']), []).append(r)
+
+    actions = []
+    rows_changed = 0
+    for nb, members in groups.items():
+        if not nb:
+            continue
+        canonical = max(
+            (m['brand'] for m in members),
+            key=lambda b: (fancy_count(b), len(b)),
+        )
+        affected = [m for m in members if m['brand'] != canonical]
+        if not affected:
+            continue
+        actions.append({
+            'norm_brand':     nb,
+            'canonical':      canonical,
+            'rows_changed':   len(affected),
+            'sample_changes': sorted({(m['brand'], canonical) for m in affected}),
+        })
+        rows_changed += len(affected)
+        if not dry:
+            for m in affected:
+                db.execute(
+                    "UPDATE watches SET brand = ?, updated_at = ? WHERE id = ?",
+                    [canonical, datetime.utcnow().isoformat(), m['id']],
+                )
+    if not dry:
+        db.commit()
+    return jsonify({
+        'dry_run':       dry,
+        'groups_fixed':  len(actions),
+        'rows_changed':  rows_changed,
+        'actions':       actions,
+    })
+
+
+@app.route('/admin/coins-fix-missing-cat-id', methods=['POST'])
+def coins_fix_missing_cat_id():
+    """Assign cat_id to any coin missing one. _cat_id_prefix wants both
+    a mappable property and a date; if date_1 is empty we fall back to
+    era='M' (modern) — safe for US Mint coins, the typical case where
+    this gap shows up. Rows whose property isn't mappable are reported
+    but skipped so the caller can fix them by hand.
+
+    Defaults to dry-run; pass ?dry=0 to actually apply."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.args.get('dry', '1') != '0'
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, property_name, date_1, region, authority, "
+        "       denomination FROM coins WHERE COALESCE(cat_id, '') = ''"
+    ).fetchall()
+
+    # Per-prefix counter so multiple rows in this batch don't all get
+    # the same next-number; works correctly in dry-run too.
+    prefix_counters = {}
+
+    def _seed_counter(prefix):
+        cur = db.execute(
+            "SELECT cat_id FROM coins WHERE cat_id LIKE ? "
+            "ORDER BY CAST(SUBSTR(cat_id, 3) AS INTEGER) DESC LIMIT 1",
+            [f'{prefix}%']
+        ).fetchone()
+        n = 1
+        if cur and cur['cat_id']:
+            try:
+                n = int(cur['cat_id'][2:]) + 1
+            except ValueError:
+                n = 1
+        prefix_counters[prefix] = n
+
+    actions = []
+    skipped = []
+    for r in rows:
+        prop = r['property_name']
+        date = r['date_1']
+        prefix = _cat_id_prefix(prop, date) if (date not in (None, '')) else None
+        used_fallback = False
+        if prefix is None:
+            p = (prop or '').strip().lower()
+            if p in ('carp', 'carpinteria'):
+                prefix = 'CM'
+                used_fallback = True
+            elif p in ('nyc', 'new york', 'ny'):
+                prefix = 'NM'
+                used_fallback = True
+            else:
+                skipped.append({
+                    'id': r['id'],
+                    'reason': f"property '{prop}' not mappable",
+                    'region': r['region'],
+                    'denomination': r['denomination'],
+                })
+                continue
+        if prefix not in prefix_counters:
+            _seed_counter(prefix)
+        n = prefix_counters[prefix]
+        prefix_counters[prefix] = n + 1
+        new_cat_id = f'{prefix}{n:03d}'
+        actions.append({
+            'id':                r['id'],
+            'region':            r['region'],
+            'authority':         r['authority'],
+            'denomination':      r['denomination'],
+            'property':          prop,
+            'date_1':            date,
+            'cat_id':            new_cat_id,
+            'used_fallback_era': used_fallback,
+        })
+        if not dry:
+            db.execute(
+                "UPDATE coins SET cat_id = ?, updated_at = ? WHERE id = ?",
+                [new_cat_id, datetime.utcnow().isoformat(), r['id']]
+            )
+
+    if not dry:
+        db.commit()
+
+    return jsonify({
+        'dry_run':                  dry,
+        'rows_with_missing_cat_id': len(rows),
+        'assigned':                 len(actions),
+        'skipped':                  len(skipped),
+        'actions':                  actions,
+        'skipped_rows':             skipped,
     })
 
 
