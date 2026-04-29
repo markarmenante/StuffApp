@@ -113,8 +113,8 @@ VALUE_LISTS = {
     'property': [
         'Carp','Carpinteria','NYC','SF','Truckee','Martis','Lahontan',
         '770 Ladera','Paris','Paris Saint-Guillaume',
-        'Ghent: Pond House','Ghent: Glass House',
-        'Ghent: Rec Center','Ghent: Rec Center/Arena','Ghent: Harlemville',
+        'Pond House','Glass House',
+        'Rec Center','Rec Center/Arena','Harlemville',
         'Dolby Chadwick','Storage','Archived','Missing','Gifted',
     ],
     'status': ['Own','Ordered','Sold','Loaned','Gifted','Consigned','Lost'],
