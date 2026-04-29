@@ -4585,9 +4585,31 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     ta.addEventListener('input', () => resize(ta));
   }
 
+  // Resolve line-height to pixels regardless of how it was authored.
+  // WebKit returns unitless multipliers (e.g. "1.5") from getComputedStyle
+  // while Chrome returns the resolved px value ("19.5px"); "normal" needs
+  // the font-default 1.2 multiplier. Without this, parseFloat("1.5")
+  // would treat 1.5 as the pixels-per-line and the cap math collapses.
+  function _resolveLineHeightPx(cs) {
+    const fs = parseFloat(cs.fontSize) || 14;
+    const lh = cs.lineHeight;
+    if (!lh || lh === 'normal') return fs * 1.2;
+    if (typeof lh === 'string' && lh.endsWith('px')) {
+      return parseFloat(lh) || fs * 1.2;
+    }
+    const num = parseFloat(lh);
+    if (!isNaN(num)) {
+      // Unitless multiplier (Safari returns "1.5" as-is). If it's a
+      // tiny number like 1.5, treat as multiplier × font-size; if it's
+      // already a believable pixel value (>= ~6px), trust it.
+      return num >= 6 ? num : num * fs;
+    }
+    return fs * 1.2;
+  }
+
   function resize(ta) {
     const cs    = window.getComputedStyle(ta);
-    const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 18;
+    const lineH = _resolveLineHeightPx(cs);
     const padT  = parseFloat(cs.paddingTop)    || 0;
     const padB  = parseFloat(cs.paddingBottom) || 0;
     const chrome = padT + padB;
