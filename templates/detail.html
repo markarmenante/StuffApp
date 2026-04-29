@@ -71,6 +71,18 @@
 <div class="dcell file-cell drop-zone dyn-doc-cell{% if not filename %} dyn-doc-empty{% endif %}"
      data-doc-idx="{{ idx }}">
   {% if filename %}
+  <button type="button" class="doc-share-btn dyn-doc-share"
+          data-doc-idx="{{ idx }}"
+          onclick="shareDynDocFile(event, this)"
+          title="Share via Messages / Mail" aria-label="Share">
+    <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+         stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 2 V17"/>
+      <path d="M6 8 L12 2 L18 8"/>
+      <path d="M5 13 H3 V25 H21 V13 H19"/>
+    </svg>
+  </button>
   <button type="button" class="doc-delete-btn dyn-doc-del"
           data-doc-idx="{{ idx }}"
           title="Remove this document" aria-label="Remove">×</button>
@@ -3081,52 +3093,14 @@ async function deleteDocFile(ev, btn) {
   }
 }
 
-async function shareDocFiles(ev, btn) {
-  ev.preventDefault();
-  ev.stopPropagation();
-  const fields = (btn.dataset.fields || '').split(',').filter(Boolean);
-  const form = document.getElementById('mainForm');
-  const urls = [];
-  let docTitle = '';
-  for (const f of fields) {
-    const cell = form.querySelector(`.drop-zone[data-field="${f}"]`);
-    if (!cell) continue;
-    // Pick up the cell's title for the message subject. Property docs
-    // use a .property-doc-title sibling input above the cell; ID docs
-    // use the .file-cell-name span inside.
-    if (!docTitle) {
-      const tile = cell.closest('.property-doc, .persons-doc');
-      if (tile) {
-        const t = tile.querySelector('.property-doc-title, .persons-doc-title');
-        if (t) {
-          const v = t.value !== undefined ? t.value : t.textContent;
-          if (v && v.trim()) docTitle = v.trim();
-        }
-      }
-      if (!docTitle) {
-        const lbl = cell.querySelector('.file-cell-name');
-        if (lbl && lbl.textContent.trim()) docTitle = lbl.textContent.trim();
-      }
-    }
-    const img = cell.querySelector('a.doc-link img');
-    if (img && img.src) { urls.push(img.src); continue; }
-    const link = cell.querySelector('a.doc-link');
-    if (link && link.href) urls.push(link.href);
-  }
-  if (urls.length === 0) {
+// Shared share-sheet helper — fetches each URL as a File and hands it
+// to navigator.share, falling back to a per-file download + mailto.
+async function _shareUrls(urls, messageText, btn) {
+  if (!urls || urls.length === 0) {
     alert('Nothing to share — no files uploaded yet.');
     return;
   }
-  // Parent record name (Property name / Person name / etc.) from the
-  // form's primary "name" input — present on every detail page.
-  // The shared message body is just the name; no subject elaboration,
-  // no "Sharing X for Y" sentence — the attached files speak for
-  // themselves. (User: "Just use my name as the text in addition to
-  // the images.")
-  const recordName = (form.querySelector('input[name="name"]')?.value || '').trim();
-  const messageText = recordName || docTitle || '';
-
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
   try {
     const files = [];
     for (const url of urls) {
@@ -3165,8 +3139,76 @@ async function shareDocFiles(ev, btn) {
   } catch (err) {
     alert('Share failed: ' + (err.message || err));
   } finally {
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
   }
+}
+
+async function shareDocFiles(ev, btn) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const fields = (btn.dataset.fields || '').split(',').filter(Boolean);
+  const form = document.getElementById('mainForm');
+  const urls = [];
+  let docTitle = '';
+  for (const f of fields) {
+    const cell = form.querySelector(`.drop-zone[data-field="${f}"]`);
+    if (!cell) continue;
+    // Pick up the cell's title for the message subject. Property docs
+    // use a .property-doc-title sibling input above the cell; ID docs
+    // use the .file-cell-name span inside.
+    if (!docTitle) {
+      const tile = cell.closest('.property-doc, .persons-doc');
+      if (tile) {
+        const t = tile.querySelector('.property-doc-title, .persons-doc-title');
+        if (t) {
+          const v = t.value !== undefined ? t.value : t.textContent;
+          if (v && v.trim()) docTitle = v.trim();
+        }
+      }
+      if (!docTitle) {
+        const lbl = cell.querySelector('.file-cell-name');
+        if (lbl && lbl.textContent.trim()) docTitle = lbl.textContent.trim();
+      }
+    }
+    const img = cell.querySelector('a.doc-link img');
+    if (img && img.src) { urls.push(img.src); continue; }
+    const link = cell.querySelector('a.doc-link');
+    if (link && link.href) urls.push(link.href);
+  }
+  // Parent record name (Property name / Person name / etc.) from the
+  // form's primary "name" input — present on every detail page.
+  // The shared message body is just the name; no subject elaboration,
+  // no "Sharing X for Y" sentence — the attached files speak for
+  // themselves. (User: "Just use my name as the text in addition to
+  // the images.")
+  const recordName = (form.querySelector('input[name="name"]')?.value || '').trim();
+  await _shareUrls(urls, recordName || docTitle || '', btn);
+}
+
+// Share the file attached to a single dynamic-doc tile. Picks up the
+// file URL from the tile's <a class="doc-link"> and the title from
+// the tile's title input. No bundle support — JSON-backed docs aren't
+// paired the way License Front + License Back are.
+async function shareDynDocFile(ev, btn) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const tile = btn.closest('.dyn-doc');
+  if (!tile) return;
+  const cell = tile.querySelector('.dyn-doc-cell');
+  let url = '';
+  if (cell) {
+    const img = cell.querySelector('a.doc-link img');
+    if (img && img.src) url = img.src;
+    if (!url) {
+      const link = cell.querySelector('a.doc-link');
+      if (link && link.href) url = link.href;
+    }
+  }
+  const titleInp = tile.querySelector('.dyn-doc-title');
+  const docTitle = titleInp && titleInp.value ? titleInp.value.trim() : '';
+  const form = document.getElementById('mainForm');
+  const recordName = (form?.querySelector('input[name="name"]')?.value || '').trim();
+  await _shareUrls(url ? [url] : [], recordName || docTitle || '', btn);
 }
 
 // People: IDs / Health section pills
@@ -3491,8 +3533,17 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       // Wipe the empty-state placeholder, leave only the file <input>
       // so we can rebuild around it.
       const fileInp = cell.querySelector('input[type="file"]');
-      cell.querySelectorAll('.doc-empty-icon, .doc-link, .doc-delete-btn').forEach(n => n.remove());
-      // Insert × button + new file preview ahead of the file <input>.
+      cell.querySelectorAll('.doc-empty-icon, .doc-link, .doc-delete-btn, .dyn-doc-share').forEach(n => n.remove());
+      // Insert share + × buttons + new file preview ahead of the file <input>.
+      const share = document.createElement('button');
+      share.type = 'button';
+      share.className = 'doc-share-btn dyn-doc-share';
+      share.dataset.docIdx = String(idx);
+      share.title = 'Share via Messages / Mail';
+      share.setAttribute('aria-label', 'Share');
+      share.setAttribute('onclick', 'shareDynDocFile(event, this)');
+      share.innerHTML = '<svg viewBox="0 0 24 28" width="14" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 V17"/><path d="M6 8 L12 2 L18 8"/><path d="M5 13 H3 V25 H21 V13 H19"/></svg>';
+      cell.insertBefore(share, fileInp ? fileInp.parentElement : null);
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'doc-delete-btn dyn-doc-del';
