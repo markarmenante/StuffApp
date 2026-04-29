@@ -431,8 +431,15 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">Svc</span>
         </div>
         <div class="dcell {% if service_overdue %}service-overdue{% endif %}">
-          <input type="text" value="{{ ('%d yrs'|format(service_years)) if service_years is not none else '' }}" readonly style="color:#888">
-          <span class="clabel">Since</span>
+          {# Years-since-service is derived from Svc date; clicking it
+             explains rather than silently no-op'ing. #}
+          <input type="text"
+                 value="{{ ('%d yrs'|format(service_years)) if service_years is not none else '' }}"
+                 readonly
+                 title="Calculated from the Svc date. Edit the Svc field to change."
+                 onclick="alert('Years since service is calculated from the Svc date and can’t be entered directly. Set the Svc date instead.')"
+                 style="color:#888;cursor:not-allowed">
+          <span class="clabel">Since (calc)</span>
         </div>
       </div>
     </div>
@@ -768,8 +775,14 @@ document.addEventListener('DOMContentLoaded', function () {
       <span class="blabel">Display Position</span>
     </div>
     <div class="bottom-cell">
-      <input type="text" name="cat_id" value="{{ val('cat_id') }}" readonly style="text-align:center">
-      <span class="blabel">Cat ID</span>
+      {# cat_id is auto-assigned at row creation from Property + Date,
+         not a user-entered field. Click → alert to explain. #}
+      <input type="text" name="cat_id" value="{{ val('cat_id') }}"
+             readonly
+             title="Auto-assigned from Property + Date when the coin is first created."
+             onclick="alert('Cat ID is auto-assigned from this coin’s Property and Date when the row is created. To change it, edit Property or Date and the next renumber pass will update Cat ID.')"
+             style="text-align:center;cursor:not-allowed;color:#888">
+      <span class="blabel">Cat ID (auto)</span>
     </div>
     <div class="bottom-cell">
       {% set _pn = val('property_name') if val('property_name') else ('Carpinteria' if is_new else '') %}
@@ -2420,7 +2433,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
 // ── Auto-save on field change/blur ──────────────────────────────────────────
 (function () {
-  {% set _autosave_on_new = category in ('credit_cards', 'coins') %}
+  {# Autosave-on-new now runs for every category that uses the new_record
+     route, so a user who types a few fields and hits Back leaves a real
+     row behind instead of losing everything. The server's required-field
+     check no longer blocks creation when Property is empty (see app.py
+     comment in new_record), so the first blur just creates the row. #}
+  {% set _autosave_on_new = category not in ('persons',) %}
   {% if not is_new or _autosave_on_new %}
   let SAVE_URL = "{% if not is_new %}{{ url_for('save_field', category=category, record_id=r['id']) }}{% endif %}";
   let recordExists = {{ 'true' if not is_new else 'false' }};
