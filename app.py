@@ -692,6 +692,13 @@ def init_db():
         'ALTER TABLE properties ADD COLUMN doc_9_title TEXT',
         'ALTER TABLE properties ADD COLUMN doc_10 TEXT',
         'ALTER TABLE properties ADD COLUMN doc_10_title TEXT',
+        # Flexible documents column — JSON array of {title, filename}
+        # objects, replacing the fixed doc_1..10 + doc_N_title slots.
+        # The legacy columns above are kept dual-populated during the
+        # transition so older code paths and the export/sweep flows
+        # don't break mid-deploy. They'll be dropped once every read
+        # path moves to the JSON column.
+        'ALTER TABLE properties ADD COLUMN documents TEXT',
         # Alarm-codes list (8 rows × {entry, code, note})
         *[f'ALTER TABLE properties ADD COLUMN alarm_codes_entry_{i} TEXT' for i in range(1, 9)],
         *[f'ALTER TABLE properties ADD COLUMN alarm_codes_code_{i} TEXT' for i in range(1, 9)],
@@ -750,6 +757,7 @@ def init_db():
     db.commit()
     _backfill_meds_from_prescriptions(db)
     _backfill_persons_doc_slots(db)
+    _backfill_properties_documents_json(db)
     db.commit()
     # Apply field-alias normalizations to legacy rows so the UI never has to
     # handle synonym values. Runs every boot — cheap (small table, indexed
@@ -933,6 +941,52 @@ def _backfill_persons_doc_slots(db):
         copy_one('id', slot, src, numc, lbl)
     for slot, src, numc, lbl in plan_health:
         copy_one('health', slot, src, numc, lbl)
+
+
+def _backfill_properties_documents_json(db):
+    """Compact the legacy doc_1..10 + doc_N_title columns on properties
+    into a single JSON array stored in `documents`.
+
+    JSON shape: list of {"title": str, "filename": str} preserving the
+    original slot order (1..10). Slots with no filename are skipped so
+    the array length matches "real" documents only.
+
+    Idempotent: a row whose `documents` is already populated (non-null,
+    non-empty array) is left alone — re-running won't clobber edits
+    made through the new dynamic UI."""
+    cols = {r['name'] for r in db.execute("PRAGMA table_info(properties)").fetchall()}
+    if 'documents' not in cols:
+        return
+    selectable = ['id', 'documents']
+    for i in range(1, 11):
+        if f'doc_{i}' in cols:
+            selectable.append(f'doc_{i}')
+        if f'doc_{i}_title' in cols:
+            selectable.append(f'doc_{i}_title')
+    rows = db.execute(
+        f"SELECT {', '.join(selectable)} FROM properties"
+    ).fetchall()
+    for row in rows:
+        existing = row['documents'] if 'documents' in row.keys() else None
+        if existing:
+            try:
+                parsed = json.loads(existing)
+                if isinstance(parsed, list) and parsed:
+                    continue  # already migrated
+            except (TypeError, ValueError):
+                pass  # malformed → rebuild from columns
+        docs = []
+        for i in range(1, 11):
+            fn_col, title_col = f'doc_{i}', f'doc_{i}_title'
+            fn = row[fn_col] if fn_col in row.keys() else None
+            title = row[title_col] if title_col in row.keys() else None
+            if not fn:
+                continue
+            docs.append({'title': (title or '').strip(), 'filename': fn})
+        db.execute(
+            'UPDATE properties SET documents = ? WHERE id = ?',
+            (json.dumps(docs), row['id']),
+        )
 
 
 def _backfill_meds_from_prescriptions(db):
