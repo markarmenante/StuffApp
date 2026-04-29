@@ -4559,53 +4559,61 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 </script>
 
 {# ── Universal textarea auto-grow ────────────────────────────────
-   Every textarea on a detail page shrinks to fit its content but
-   never exceeds the natural height it would have rendered at under
-   the existing CSS / rows attribute. That natural height is sampled
-   once on first paint (clientHeight) and kept as the per-textarea
-   cap. Adding `data-no-autogrow` to a textarea opts it out (kept as
-   an escape hatch, not currently used). #}
+   Every <textarea> on a detail page sizes to its content with these
+   rules:
+     - empty           → exactly 1 visible line
+     - populated       → content lines + 1 blank line below
+     - cap             → 15 lines, then internal scroll
+   Manual drag-resize is disabled (resize: none) so the user can't
+   fight the auto-sizer. `data-no-autogrow` opts out (escape hatch). #}
 <script>
 (function setupAutogrow() {
+  const MAX_LINES = 15;
+
   function init(ta) {
     if (ta.dataset.no_autogrow !== undefined ||
         ta.dataset.noAutogrow !== undefined) return;
     if (ta._autogrowReady) return;
     ta._autogrowReady = true;
-    // Sample the natural height BEFORE we change anything. This is
-    // the user's "current size" cap referenced in the design — for
-    // most textareas it's exactly the CSS `min-height` (which is set
-    // per rows= attribute in style.css).
-    const natural = ta.clientHeight;
-    if (natural <= 0) {
-      // Hidden ancestor (e.g. unmounted person tab). Defer.
-      requestAnimationFrame(() => {
-        ta._autogrowReady = false;
-        init(ta);
-      });
-      return;
-    }
-    ta._maxH = natural;
     ta.style.boxSizing = 'border-box';
-    // Override the CSS min-height so the JS can shrink the textarea
-    // below that floor when the content is short. The natural height
-    // we captured above keeps acting as the upper cap.
+    // Override any CSS-driven min-height / max-height / resize so
+    // the JS sizing is authoritative.
     ta.style.minHeight = '0';
+    ta.style.maxHeight = '';
+    ta.style.resize    = 'none';
     resize(ta);
     ta.addEventListener('input', () => resize(ta));
   }
+
   function resize(ta) {
-    if (!ta._maxH) return;
-    // Set to auto so scrollHeight reflects the content's true height
-    // independent of the current style.height.
+    const cs    = window.getComputedStyle(ta);
+    const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 18;
+    const padT  = parseFloat(cs.paddingTop)    || 0;
+    const padB  = parseFloat(cs.paddingBottom) || 0;
+    const chrome = padT + padB;
+    const maxH = lineH * MAX_LINES + chrome;
+
+    // Empty textarea → exactly 1 line of content + padding.
+    if (!ta.value.trim()) {
+      ta.style.height = (lineH + chrome) + 'px';
+      ta.style.overflowY = 'hidden';
+      return;
+    }
+
+    // Reset to auto so scrollHeight reflects the content's true
+    // intrinsic height (otherwise it's clamped to the current
+    // style.height value).
     ta.style.height = 'auto';
-    const want = Math.min(ta.scrollHeight, ta._maxH);
-    ta.style.height = want + 'px';
-    ta.style.overflowY = ta.scrollHeight > ta._maxH ? 'auto' : 'hidden';
+    const contentH = ta.scrollHeight;     // content + padding
+    const desired  = contentH + lineH;    // one breathing line below
+    const target   = Math.min(desired, maxH);
+    ta.style.height = target + 'px';
+    ta.style.overflowY = desired > maxH ? 'auto' : 'hidden';
   }
+
   document.querySelectorAll('textarea').forEach(init);
   // Re-evaluate when tabs swap (persons IDs ↔ Health) — textareas
-  // hidden at first paint had clientHeight=0 and got deferred.
+  // hidden at first paint can't be measured until they're shown.
   document.querySelectorAll('.person-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       requestAnimationFrame(() => {
