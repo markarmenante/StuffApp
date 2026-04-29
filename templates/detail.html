@@ -4441,7 +4441,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     if (ta._autogrowReady) return;
     ta._autogrowReady = true;
     // Sample the natural height BEFORE we change anything. This is
-    // the user's "current size" cap referenced in the design.
+    // the user's "current size" cap referenced in the design — for
+    // most textareas it's exactly the CSS `min-height` (which is set
+    // per rows= attribute in style.css).
     const natural = ta.clientHeight;
     if (natural <= 0) {
       // Hidden ancestor (e.g. unmounted person tab). Defer.
@@ -4453,6 +4455,10 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     }
     ta._maxH = natural;
     ta.style.boxSizing = 'border-box';
+    // Override the CSS min-height so the JS can shrink the textarea
+    // below that floor when the content is short. The natural height
+    // we captured above keeps acting as the upper cap.
+    ta.style.minHeight = '0';
     resize(ta);
     ta.addEventListener('input', () => resize(ta));
   }
