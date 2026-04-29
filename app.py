@@ -5107,11 +5107,36 @@ def _expand_categories(raw, role):
 # change needed to make the at-property filter and the back-pill
 # lookup recognise it.
 PROPERTY_ALIASES = {
-    'carpinteria': ['carpinteria', 'carp'],
-    'carp':        ['carpinteria', 'carp'],
+    'carpinteria': ['carpinteria', 'carp', 'montecito'],
+    'carp':        ['carpinteria', 'carp', 'montecito'],
     'truckee':     ['truckee', 'martis camp', 'martis'],
     'martis camp': ['truckee', 'martis camp', 'martis'],
     'martis':      ['truckee', 'martis camp', 'martis'],
+    # 42 Hotaling absorbed the old "SF" / "San Francisco" tag set after
+    # the 3450 Washington property was retired (kept as Sold record).
+    '42 hotaling':   ['42 hotaling', 'sf', 'san francisco'],
+    # Ghent campus — strip the legacy "Ghent: " prefix from each
+    # building. Bidirectional so a stray "Ghent: Pond House" item still
+    # surfaces under the Pond House pill until the boot migration
+    # rewrites it.
+    'pond house':    ['pond house', 'ghent: pond house'],
+    'glass house':   ['glass house', 'ghent: glass house'],
+    'harlemville':   ['harlemville', 'ghent: harlemville'],
+    'party barn':    ['party barn', 'ghent: party barn'],
+    'rec center':    ['rec center', 'ghent: rec center',
+                      'ghent: rec center/arena', 'rec center/arena'],
+    'rigor hill':    ['rigor hill', 'ghent: rigor hill'],
+    '223 rigor':     ['223 rigor', 'ghent: 223 rigor'],
+    # NYC: prefix strip
+    '1 white st':       ['1 white st', 'nyc: 1 white st'],
+    '357 w broadway':   ['357 w broadway', 'nyc: 357 w broadway'],
+    '67 engert':        ['67 engert', 'nyc: 67 engert'],
+    # The "NYC" property record was previously named "56 Leonard"
+    'nyc':           ['nyc', '56 leonard', 'nyc: 56 leonard'],
+    # SF: prefix strip
+    '432 jackson':   ['432 jackson', 'sf: 432 jackson'],
+    # Address typo correction
+    '3956 fifth':    ['3956 fifth', '4956 fifth'],
 }
 
 
