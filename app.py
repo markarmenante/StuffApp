@@ -1166,19 +1166,27 @@ def _backfill_docs_json(db, table, target_col, sources):
 
 
 def _strip_phantom_cover_image_docs(db):
-    """Remove doc tiles whose filename is identical to the value of any
-    OTHER file-typed column on the same record. These come from legacy
-    FileMaker imports that wrote the same image into multiple columns
-    (cover image + receipt + registration + auto_title + …); the
-    doc-row backfill / receipt-fold then turned each one into a
-    separate doc tile rendering the same image.
+    """Remove phantom doc tiles created by legacy FileMaker imports.
+    Two patterns get caught:
 
-    Match logic walks every file-typed column declared in FIELDS for
-    each category, so the sweep catches duplicates of the cover image
-    AND of secondary file slots (watch image_rev, credit-card
-    image_back, etc.) — whatever happens to be the same file. The
-    fixed file columns themselves are never touched; only the JSON
-    documents arrays are filtered. Idempotent."""
+      1. Filename match — the tile's filename is identical to any
+         OTHER file-typed column on the same record (cover image,
+         secondary image slot, etc.). The legacy import wrote the
+         same file into multiple columns and the doc-row backfill
+         turned each into its own tile.
+
+      2. Title match — the tile's title starts with the record's
+         EXPORT_LAYOUT ident (e.g. "2013 Global 6000 — Image" on a
+         vehicle, "Adele — Receipt" on a recording). These titles
+         come from `*_label` columns that the backfill copied
+         verbatim. Even when the filename is a separate UUID (so
+         the filename-match path misses them), the title gives them
+         away as redundant auto-generated tiles re-rendering the
+         cover.
+
+    Fixed file columns are never touched; only JSON documents
+    arrays are filtered. Idempotent."""
+    layout = globals().get('EXPORT_LAYOUT') or {}
     for cat, fields in FIELDS.items():
         table = CATEGORIES.get(cat, {}).get('table')
         if not table:
@@ -1195,23 +1203,28 @@ def _strip_phantom_cover_image_docs(db):
             continue
         present_files = [c for c in file_cols if c in present]
         present_jsons = [c for c in json_cols if c in present]
-        if not present_files or not present_jsons:
+        if not present_jsons:
             continue
-        select_cols = ', '.join(['id'] + present_files + present_jsons)
+        ident_fn = (layout.get(cat) or {}).get('ident')
+        select_cols = ', '.join(['*'])
         try:
-            rows = db.execute(
-                f"SELECT {select_cols} FROM {table}"
-            ).fetchall()
+            rows = db.execute(f"SELECT {select_cols} FROM {table}").fetchall()
         except sqlite3.OperationalError:
             continue
         for row in rows:
             other_files = {
                 (row[c] or '').strip()
                 for c in present_files
-                if (row[c] or '').strip()
+                if c in row.keys() and (row[c] or '').strip()
             }
-            if not other_files:
-                continue
+            ident_prefix = ''
+            if ident_fn:
+                try:
+                    ident = (ident_fn(row) or '').strip()
+                    if ident:
+                        ident_prefix = f'{ident} — '
+                except Exception:
+                    ident_prefix = ''
             for jc in present_jsons:
                 try:
                     docs = json.loads(row[jc] or '[]')
@@ -1219,13 +1232,20 @@ def _strip_phantom_cover_image_docs(db):
                     continue
                 if not isinstance(docs, list):
                     continue
-                kept = [
-                    d for d in docs
-                    if not (
-                        isinstance(d, dict)
-                        and (d.get('filename') or '').strip() in other_files
-                    )
-                ]
+                kept = []
+                for d in docs:
+                    if not isinstance(d, dict):
+                        continue
+                    fn = (d.get('filename') or '').strip()
+                    title = (d.get('title') or '').strip()
+                    # Drop pattern 1: filename matches another file column
+                    if fn and fn in other_files:
+                        continue
+                    # Drop pattern 2: title starts with the auto-generated
+                    # ident prefix
+                    if ident_prefix and title.startswith(ident_prefix):
+                        continue
+                    kept.append(d)
                 if len(kept) != len(docs):
                     try:
                         db.execute(
