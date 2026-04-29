@@ -500,6 +500,13 @@
       <span class="blabel">Owner</span>
     </div>
     {% endif %}
+    <div class="bottom-cell">
+      <select name="location_status">
+        <option value=""></option>
+        {% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}
+      </select>
+      <span class="blabel">Status</span>
+    </div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -844,6 +851,7 @@
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
+    <div class="bottom-cell"><select name="location_status"><option value=""></option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -934,6 +942,7 @@
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
+    <div class="bottom-cell"><select name="location_status"><option value=""></option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -996,6 +1005,7 @@
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
+    <div class="bottom-cell"><select name="location_status"><option value=""></option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
   </div>
   <script>
   // Hide the Cartridge cell live when the user picks a built-in filling
@@ -1070,8 +1080,8 @@
           <span class="clabel">Location</span>
         </div>
       </div>
-      <!-- Owner | Status -->
-      <div class="dgrid dg2 art-purchase">
+      <!-- Owner | Status | Status (location) -->
+      <div class="dgrid dg3 art-purchase">
         {% if current_user and current_user.role == 'owner' %}
         {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
         <div class="dcell">
@@ -1083,6 +1093,7 @@
         </div>
         {% endif %}
         {{ selcell('status','Status', vlists.status) }}
+        {{ selcell('location_status','Status', vlists.location_status) }}
       </div>
       <!-- Notes + Receipt sit under the data fields, inside the
            specs column so they share the right-half on desktop.
@@ -1168,6 +1179,7 @@
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
+    <div class="bottom-cell"><select name="location_status"><option value=""></option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1285,6 +1297,7 @@
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
+    <div class="bottom-cell"><select name="location_status"><option value=""></option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
   </div>
   <script>
   // "Notes" pill + URL-pill rendering for the recordings detail page.
@@ -1417,6 +1430,7 @@
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
+    <div class="bottom-cell"><select name="location_status"><option value=""></option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1470,6 +1484,7 @@
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
+    <div class="bottom-cell"><select name="location_status"><option value=""></option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
