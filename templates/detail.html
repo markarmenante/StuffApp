@@ -519,9 +519,10 @@ document.addEventListener('DOMContentLoaded', function () {
   <!-- Bottom: Property | Status | Owner -->
   <div class="detail-bottom">
     <div class="bottom-cell">
+      {% set _prop = val('property') if val('property') else ('Carpinteria' if is_new else '') %}
       <select name="property">
         <option value=""></option>
-        {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}
+        {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if _prop==o }}>{{ o }}</option>{% endfor %}
       </select>
       <span class="blabel">Location</span>
     </div>
@@ -2474,10 +2475,15 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (recordExists) return Promise.resolve();
     if (creatingPromise) return creatingPromise;
     const fd = new FormData(form);
+    // keepalive so a Back-button before the response lands still
+    // creates the row server-side. The form's pre-filled defaults
+    // (status, date, owner) are in the FormData, so even a single
+    // typed character produces a complete row.
     creatingPromise = fetch(form.action, {
       method: 'POST',
       headers: { 'Accept': 'application/json' },
-      body: fd
+      body: fd,
+      keepalive: true,
     })
       .then(r => r.json())
       .then(d => {
