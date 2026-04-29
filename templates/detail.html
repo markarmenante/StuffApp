@@ -2858,6 +2858,12 @@ function previewInZone(zone, file) {
 }
 
 document.querySelectorAll('.drop-zone').forEach(zone => {
+  // Dynamic-documents cells handle their own drag/drop/click via
+  // dynDocs() — they keep the .drop-zone class for the visual style
+  // but must not be wired to the generic per-field upload path
+  // (which calls previewInZone and stopPropagation, swallowing the
+  // event before the row-level handler can call /documents/append).
+  if (zone.classList.contains('dyn-doc-cell')) return;
   // Read uploadUrl fresh inside each handler — credit_cards/new can switch
   // from "no URL" to "real URL" mid-session once the record is created.
   zone.style.cursor = 'pointer';
@@ -3584,6 +3590,17 @@ _wireRowDelete(
     } catch (err) {
       alert('Delete failed: ' + (err.message || err));
     }
+  });
+
+  // Click outside the file label / × button → open the file picker.
+  // Generic .drop-zone click handling skips dyn-doc cells now, so we
+  // re-implement the click-to-pick here.
+  row.addEventListener('click', (ev) => {
+    const cell = ev.target.closest('.dyn-doc-cell');
+    if (!cell) return;
+    if (ev.target.closest('a, input, label, button')) return;
+    const input = cell.querySelector('input[type="file"]');
+    if (input) input.click();
   });
 
   // Drag-and-drop onto a tile
