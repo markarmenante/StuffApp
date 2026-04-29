@@ -149,7 +149,7 @@ async function startExport(ev, link) {
       ui.progress('Pick (or confirm) your StuffFiles folder…');
       const result = await window.StuffSync.syncDown(ui.progress);
       ui.done('ok', `Synced ${result.written}/${result.total} files into your folder.`);
-      refreshFilesStatus();
+      reloadAfterExport();
     } catch (err) {
       if (err && err.name === 'AbortError') {
         ui.done('cancel', 'Cancelled.');
@@ -176,11 +176,26 @@ async function startExport(ev, link) {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     ui.done('ok', 'StuffFiles zip downloaded.');
-    refreshFilesStatus();
+    reloadAfterExport();
   } catch (err) {
     ui.done('err', 'Download failed: ' + (err.message || err));
   }
   return false;
+}
+
+// After a successful Files run, give the success toast a moment to
+// register, then reload so the nav indicator picks up its new (green)
+// state from the server. Mirrors the post-sweep reload pattern below.
+function reloadAfterExport() {
+  setTimeout(() => {
+    const t = document.getElementById('exportToast');
+    if (t) {
+      t.textContent = 'Refreshing…';
+      t.className = 'export-toast running';
+      t.hidden = false;
+    }
+    setTimeout(() => window.location.reload(), 500);
+  }, 1500);
 }
 
 // Files nav indicator: red when there's something newer than the user's
