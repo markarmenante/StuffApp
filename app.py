@@ -442,6 +442,7 @@ FIELDS = {
         {'name': 'genre',           'label': 'Genre',             'type': 'text'},
         {'name': 'genre_2',         'label': 'Genre 2',           'type': 'text'},
         {'name': 'players',         'label': 'Players',           'type': 'text'},
+        {'name': 'tracks',          'label': 'Tracks',            'type': 'textarea'},
         {'name': 'year_recorded',   'label': 'Year Recorded',     'type': 'text'},
         {'name': 'speed',           'label': 'Speed',             'type': 'text'},
         {'name': 'sound',           'label': 'Sound',             'type': 'select',
@@ -800,6 +801,7 @@ def init_db():
         'ALTER TABLE topics ADD COLUMN image TEXT',
         'ALTER TABLE recordings ADD COLUMN players TEXT',
         'ALTER TABLE recordings ADD COLUMN notes_urls TEXT',
+        'ALTER TABLE recordings ADD COLUMN tracks TEXT',
         'ALTER TABLE coins ADD COLUMN history_region TEXT',
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
@@ -847,9 +849,14 @@ def init_db():
         ('doc_2', None, 'Doc 2'),
     ])
     # All item categories now fold receipt into the dynamic docs row
-    # instead of rendering it as a fixed cell.
-    for _t in ('art', 'coins', 'watches', 'pens', 'recordings', 'rifles', 'audio'):
+    # instead of rendering it as a fixed cell. Recordings excluded:
+    # FileMaker historically reused the receipt slot to hold the album
+    # cover, so folding it produced phantom "Receipt" tiles showing
+    # the cover image again. _strip_phantom_recording_receipts (below)
+    # cleans up the existing data.
+    for _t in ('art', 'coins', 'watches', 'pens', 'rifles', 'audio'):
         _migrate_receipt_into_documents(db, _t)
+    _strip_phantom_recording_receipts(db)
     _backfill_docs_json(db, 'vehicles', 'documents', [
         ('insurance',     'insurance_label',     'Insurance'),
         ('invoice',       'invoice_label',       'Invoice'),
@@ -1156,6 +1163,49 @@ def _backfill_docs_json(db, table, target_col, sources):
             f'UPDATE {table} SET {target_col} = ? WHERE id = ?',
             (json.dumps(docs), row['id']),
         )
+
+
+def _strip_phantom_recording_receipts(db):
+    """Remove "Receipt"-titled doc tiles from recordings whose filename
+    matches the recording's cover image. Those came from a one-shot
+    fold of the legacy receipt column into the documents JSON, but
+    FileMaker had reused the receipt slot to store the album cover —
+    so the fold produced phantom tiles that just rerendered the cover.
+    Idempotent."""
+    try:
+        rows = db.execute(
+            "SELECT id, image, documents FROM recordings "
+            "WHERE documents IS NOT NULL"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return
+    for row in rows:
+        image = (row['image'] or '').strip()
+        if not image:
+            continue
+        try:
+            docs = json.loads(row['documents'] or '[]')
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(docs, list):
+            continue
+        kept = [
+            d for d in docs
+            if not (
+                isinstance(d, dict)
+                and (d.get('title') or '').strip().lower() == 'receipt'
+                and (d.get('filename') or '').strip() == image
+            )
+        ]
+        if len(kept) != len(docs):
+            try:
+                db.execute(
+                    "UPDATE recordings SET documents = ? WHERE id = ?",
+                    (json.dumps(kept), row['id']),
+                )
+            except sqlite3.OperationalError:
+                pass
+    db.commit()
 
 
 def _compact_empty_doc_slots(db):
@@ -2474,6 +2524,24 @@ def fetch_recording_notes(rec):
                      "tag entirely if you can't determine personnel "
                      "with reasonable confidence.") if want_players else ""
 
+    # Always ask for the tracklist when the DB doesn't have one yet —
+    # Claude's track names feed the per-track Spotify pill row in the
+    # UI. Each track on its own line (no numbering, no quotes), wrapped
+    # in <tracks>...</tracks>. Skip the tag if track-level data isn't
+    # findable for this recording.
+    try:
+        existing_tracks = (rec['tracks'] or '').strip()
+    except (IndexError, KeyError):
+        existing_tracks = ''
+    want_tracks = not existing_tracks
+    tracks_block = ("\nAlso return the tracklist for the recording, "
+                    "one track title per line, in album order, no "
+                    "numbering and no surrounding quotes. Wrap the "
+                    "list in a <tracks>...</tracks> tag (after any "
+                    "<players> tag if present). Omit the <tracks> "
+                    "tag entirely if you can't recover the tracklist "
+                    "with reasonable confidence.") if want_tracks else ""
+
     prompt = f"""You are a music critic + recording historian writing a
 brief reference note for a single album / recording in a personal
 collection. Use up to 4 web searches to ground facts.
@@ -2500,7 +2568,7 @@ separate tag below.
 Wrap the bullets in <markdown>…</markdown>. Then, immediately
 after, list 2–4 source URLs (bare https://…, comma-separated) in
 a <urls>…</urls> tag. No prose outside these tags, no code
-fences, no JSON.{players_block}"""
+fences, no JSON.{players_block}{tracks_block}"""
 
     client = anthropic.Anthropic(api_key=api_key)
     import time as _time
@@ -2583,7 +2651,29 @@ fences, no JSON.{players_block}"""
             # comma-separated list so it lands clean in the input.
             new_players = re.sub(r'\s+', ' ', new_players).strip(' ,')
 
-    return {'markdown': md, 'players': new_players, 'urls': urls}
+    # Optional <tracks>...</tracks> block. One title per line; we
+    # normalize to a newline-separated string so the UI can split on
+    # \n to render Spotify-search pills.
+    new_tracks = ''
+    if want_tracks:
+        tm = re.search(r'<tracks>(.*?)</tracks>', text, re.DOTALL | re.IGNORECASE)
+        if tm:
+            raw = _html.unescape(tm.group(1)).strip()
+            raw = re.sub(r'</?cite\b[^>]*>', '', raw, flags=re.IGNORECASE)
+            lines = []
+            for line in raw.splitlines():
+                t = line.strip()
+                # Strip leading numbering ("1.", "1)", "1 -") and
+                # surrounding quotes the model sometimes adds despite
+                # the prompt asking it not to.
+                t = re.sub(r'^[\s\-•*]*\d+[\.\)]\s*', '', t)
+                t = t.strip(' "\'')
+                if t:
+                    lines.append(t)
+            new_tracks = '\n'.join(lines)
+
+    return {'markdown': md, 'players': new_players,
+            'tracks': new_tracks, 'urls': urls}
 
 
 # ---------------------------------------------------------------------------
@@ -4082,9 +4172,41 @@ def recording_fetch_notes(record_id):
         except sqlite3.OperationalError:
             pass
 
+    # Persist players + tracks if the model returned them and the
+    # column is currently empty. fetch_recording_notes already gates
+    # the model request on emptiness, so this is just the write side
+    # of the same condition.
+    new_players = data.get('players') or ''
+    new_tracks = data.get('tracks') or ''
+    try:
+        existing_players = (rec['players'] or '').strip()
+    except (IndexError, KeyError):
+        existing_players = ''
+    try:
+        existing_tracks = (rec['tracks'] or '').strip()
+    except (IndexError, KeyError):
+        existing_tracks = ''
+    sets, params = [], []
+    if new_players and not existing_players:
+        sets.append('players = ?'); params.append(new_players)
+    if new_tracks and not existing_tracks:
+        sets.append('tracks = ?'); params.append(new_tracks)
+    if sets:
+        sets.append('updated_at = ?'); params.append(datetime.utcnow().isoformat())
+        params.append(record_id)
+        try:
+            db.execute(
+                f"UPDATE recordings SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+            db.commit()
+        except sqlite3.OperationalError:
+            pass
+
     return jsonify({
         'notes': data.get('markdown') or '',
-        'players': data.get('players') or '',
+        'players': new_players,
+        'tracks': new_tracks,
         'urls': merged,
     })
 

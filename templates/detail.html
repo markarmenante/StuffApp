@@ -277,6 +277,16 @@
         🔎 Lookup
       </button>
       {% endif %}
+      {% if category == 'recordings' and _is_owner %}
+      {%- set _rec_searched = (val('notes_urls')|trim) or (val('players')|trim) or (val('tracks')|trim) -%}
+      <button type="button"
+              id="recLookupBtn"
+              class="watch-lookup-btn rec-lookup-btn{% if _rec_searched %} done{% endif %}"
+              data-url="{{ url_for('recording_fetch_notes', record_id=r['id']) }}"
+              title="{% if _rec_searched %}Lookup already run — click to re-run and append{% else %}Pull review + tracklist + personnel via Claude web search{% endif %}">
+        🔎 Lookup
+      </button>
+      {% endif %}
       {% if category != 'persons' %}
       {%- set _nav_q = request.args.get('q') or None -%}
       {%- set _nav_filter = request.args.get('filter') or None -%}
@@ -1258,35 +1268,65 @@
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
       </div>
-      <div class="dgrid dg1 rec-players-grow">{{ cell('players','Players',rows=3) }}</div>
+      {# Players row: pills (one per name, click → Claude search) sit
+         above the editable text input that holds the canonical
+         comma-separated list. The pill row re-renders on input blur
+         and after a Lookup. #}
+      <div class="dgrid dg1 rec-players-grow rec-players-block">
+        <div class="dcell">
+          <div class="rec-pill-row" id="recPlayersPills" data-pill-kind="player"></div>
+          <input type="text" name="players" id="recPlayersInput"
+                 value="{{ val('players') }}"
+                 class="rec-players-input"
+                 placeholder="Players (comma-separated)">
+          <span class="clabel">Players</span>
+        </div>
+      </div>
     </div>
   </div>
 
-  <div class="rec-notes-block">
-    <div class="rec-notes-header">
-      <div class="rec-notes-header-left">
-        {% if r and (r['artist'] or r['title']) %}
-        {% set _sq = ((r['artist'] or '') ~ ' ' ~ (r['title'] or ''))|trim %}
-        <a class="rec-spotify-link"
-           href="https://open.spotify.com/search/{{ _sq|urlencode }}"
-           target="_blank" rel="noopener noreferrer"
-           title="Search &quot;{{ _sq }}&quot; on Spotify">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path fill="#1DB954" d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.521 17.34c-.224.359-.69.481-1.05.255-2.832-1.74-6.4-2.135-10.6-1.193-.413.094-.825-.18-.92-.594-.094-.413.18-.825.594-.92 4.594-1.05 8.546-.6 11.728 1.395.358.224.479.69.247 1.057zm1.47-3.272c-.281.453-.86.591-1.314.31-3.243-1.99-8.183-2.575-12.013-1.41-.51.156-1.05-.135-1.205-.645-.155-.51.135-1.05.645-1.205 4.42-1.34 9.825-.683 13.583 1.628.452.28.59.86.304 1.322zm.123-3.396c-3.882-2.305-10.295-2.515-13.985-1.39-.616.187-1.265-.16-1.452-.778-.187-.616.16-1.266.778-1.452 4.244-1.292 11.355-1.043 15.82 1.583.554.327.736 1.04.41 1.594-.327.554-1.04.737-1.594.41z"/>
-          </svg>
-        </a>
-        {% endif %}
-        <span class="rec-notes-title">Notes</span>
+  {# Notes (left half) + Tracks (right half) side-by-side. Tracks
+     pills open a Spotify search for "<title> <artist>" so a click
+     lands on the right entry quickly; the canonical newline-separated
+     list lives in a hidden textarea so save_field still persists. #}
+  <div class="rec-notes-tracks-row">
+    <div class="rec-notes-block rec-notes-block-half">
+      <div class="rec-notes-header">
+        <div class="rec-notes-header-left">
+          {% if r and (r['artist'] or r['title']) %}
+          {% set _sq = ((r['artist'] or '') ~ ' ' ~ (r['title'] or ''))|trim %}
+          <a class="rec-spotify-link"
+             href="https://open.spotify.com/search/{{ _sq|urlencode }}"
+             target="_blank" rel="noopener noreferrer"
+             title="Search &quot;{{ _sq }}&quot; on Spotify">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path fill="#1DB954" d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.521 17.34c-.224.359-.69.481-1.05.255-2.832-1.74-6.4-2.135-10.6-1.193-.413.094-.825-.18-.92-.594-.094-.413.18-.825.594-.92 4.594-1.05 8.546-.6 11.728 1.395.358.224.479.69.247 1.057zm1.47-3.272c-.281.453-.86.591-1.314.31-3.243-1.99-8.183-2.575-12.013-1.41-.51.156-1.05-.135-1.205-.645-.155-.51.135-1.05.645-1.205 4.42-1.34 9.825-.683 13.583 1.628.452.28.59.86.304 1.322zm.123-3.396c-3.882-2.305-10.295-2.515-13.985-1.39-.616.187-1.265-.16-1.452-.778-.187-.616.16-1.266.778-1.452 4.244-1.292 11.355-1.043 15.82 1.583.554.327.736 1.04.41 1.594-.327.554-1.04.737-1.594.41z"/>
+            </svg>
+          </a>
+          {% endif %}
+          <span class="rec-notes-title">Notes</span>
+        </div>
       </div>
-      {% if not is_new %}
-      <button type="button" class="rec-notes-pill" id="recNotesPill"
-              data-fetch-url="{{ url_for('recording_fetch_notes', record_id=r['id']) }}"
-              title="Pull a brief review / historical note from the web and append below">Notes</button>
-      {% endif %}
+      <div class="rec-notes-refs" id="recNotesRefs"
+           data-urls="{{ val('notes_urls') }}"></div>
+      <textarea name="notes" rows="10" placeholder="Notes" class="rec-notes-textarea">{{ val('notes') }}</textarea>
     </div>
-    <div class="rec-notes-refs" id="recNotesRefs"
-         data-urls="{{ val('notes_urls') }}"></div>
-    <textarea name="notes" rows="10" placeholder="Notes" class="rec-notes-textarea">{{ val('notes') }}</textarea>
+    <div class="rec-tracks-block rec-notes-block-half">
+      <div class="rec-notes-header">
+        <span class="rec-notes-title">Tracks</span>
+      </div>
+      <div class="rec-pill-row rec-tracks-pills" id="recTracksPills"
+           data-pill-kind="track"
+           data-track-artist="{{ val('artist') }}"
+           data-track-album="{{ val('title') }}"></div>
+      {# Hidden — canonical newline-separated list. Pills are derived
+         from this value; Lookup writes to it and dispatches blur to
+         trigger the per-field autosave. #}
+      <textarea name="tracks" id="recTracksInput"
+                class="rec-tracks-input"
+                rows="6"
+                placeholder="Tracks (one per line)">{{ val('tracks') }}</textarea>
+    </div>
   </div>
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
@@ -1299,21 +1339,30 @@
     <div class="bottom-cell"><select name="location_status"><option value=""></option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
   </div>
   <script>
-  // "Notes" pill + URL-pill rendering for the recordings detail page.
-  // - Pill click → POST /recordings/<id>/fetch-notes, append result.
-  // - Any URL in the notes textarea is also surfaced as a clickable
-  //   pill in the .rec-notes-refs row so the user doesn't have to
-  //   scroll the textarea to find sources.
+  // Recordings detail wiring:
+  //   - Lookup button (top floating-nav) → POST /recordings/<id>/fetch-notes,
+  //     append notes, populate players + tracks if empty, refresh the
+  //     URL-source pill row.
+  //   - Players field renders one pill per comma-separated entry.
+  //     Pill click opens a Claude.ai chat seeded with a query about
+  //     that player in a new tab.
+  //   - Tracks field renders one pill per newline-separated entry.
+  //     Pill click opens a Spotify search ("<track> <artist>") in a
+  //     new tab.
+  //   - URL sources from the notes_urls column also render as pills
+  //     under the Notes column header.
   (function () {
-    const pill   = document.getElementById('recNotesPill');
-    const ta     = document.querySelector('textarea[name="notes"]');
-    const refs   = document.getElementById('recNotesRefs');
-    if (!ta) return;
+    const lookupBtn   = document.getElementById('recLookupBtn');
+    const notesTa     = document.querySelector('textarea[name="notes"]');
+    const refs        = document.getElementById('recNotesRefs');
+    const playersInp  = document.getElementById('recPlayersInput');
+    const playersRow  = document.getElementById('recPlayersPills');
+    const tracksInp   = document.getElementById('recTracksInput');
+    const tracksRow   = document.getElementById('recTracksPills');
+    if (!notesTa) return;
 
-    // Pill source = the persistent notes_urls column (rendered into
-    // a data-urls attribute server-side). Going forward Claude's
-    // sources land here directly; the textarea body stays URL-free.
-    function setPills(urls) {
+    // ── Source-URL pills (under the Notes column) ──
+    function setSourcePills(urls) {
       if (!refs) return;
       refs.innerHTML = '';
       const list = (urls || []).filter(Boolean);
@@ -1334,17 +1383,89 @@
     if (refs) {
       const initial = (refs.dataset.urls || '')
         .split(',').map(s => s.trim()).filter(Boolean);
-      setPills(initial);
+      setSourcePills(initial);
     }
 
-    if (pill) {
-      const url = pill.dataset.fetchUrl;
-      pill.addEventListener('click', async () => {
-        if (pill.disabled) return;
-        pill.classList.add('active');
-        pill.disabled = true;
-        const origLabel = pill.textContent;
-        pill.textContent = 'Loading…';
+    // ── Player pills ──
+    // "John Coltrane (tenor sax)" → pill labeled "John Coltrane",
+    // tooltip shows the full string with instrument. Click opens
+    // claude.ai/new with a seeded query.
+    function renderPlayerPills() {
+      if (!playersRow || !playersInp) return;
+      playersRow.innerHTML = '';
+      const raw = (playersInp.value || '').trim();
+      if (!raw) return;
+      raw.split(',').forEach(piece => {
+        const full = piece.trim();
+        if (!full) return;
+        const name = full.replace(/\s*\(.*?\)\s*$/, '').trim() || full;
+        const a = document.createElement('a');
+        a.className = 'rec-pill rec-pill-player';
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.title = full;
+        a.textContent = name;
+        const album = (tracksRow && tracksRow.dataset.trackAlbum) || '';
+        const artist = (tracksRow && tracksRow.dataset.trackArtist) || '';
+        const ctx = [name, artist, album, 'musician'].filter(Boolean).join(' ');
+        a.href = 'https://claude.ai/new?q=' + encodeURIComponent(
+          'Tell me about ' + name + ' — their role on "' +
+          (album || 'this recording') + '"' +
+          (artist ? ' by ' + artist : '') + '. Career highlights, ' +
+          'instruments, notable collaborations.'
+        );
+        playersRow.appendChild(a);
+      });
+    }
+
+    // ── Track pills ──
+    // Newline-separated track titles → pill per line. Click opens
+    // open.spotify.com/search/<track + artist>, which lands on the
+    // best match nearly every time.
+    function renderTrackPills() {
+      if (!tracksRow || !tracksInp) return;
+      tracksRow.innerHTML = '';
+      const raw = (tracksInp.value || '').trim();
+      if (!raw) return;
+      const artist = tracksRow.dataset.trackArtist || '';
+      raw.split(/\r?\n/).forEach(line => {
+        const t = line.trim();
+        if (!t) return;
+        const a = document.createElement('a');
+        a.className = 'rec-pill rec-pill-track';
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.title = 'Open "' + t + '" on Spotify';
+        a.textContent = t;
+        const q = (t + ' ' + artist).trim();
+        a.href = 'https://open.spotify.com/search/' + encodeURIComponent(q);
+        tracksRow.appendChild(a);
+      });
+    }
+
+    renderPlayerPills();
+    renderTrackPills();
+    // Re-render when the user edits either source. The per-field
+    // autosave already fires on blur, so we don't have to also save
+    // here — just keep the pill UI in sync.
+    if (playersInp) {
+      playersInp.addEventListener('input', renderPlayerPills);
+      playersInp.addEventListener('blur', renderPlayerPills);
+    }
+    if (tracksInp) {
+      tracksInp.addEventListener('input', renderTrackPills);
+      tracksInp.addEventListener('blur', renderTrackPills);
+    }
+
+    // ── Lookup button ──
+    if (lookupBtn) {
+      const url = lookupBtn.dataset.url;
+      lookupBtn.addEventListener('click', async () => {
+        if (lookupBtn.disabled) return;
+        lookupBtn.classList.add('active');
+        lookupBtn.disabled = true;
+        const origLabel = lookupBtn.textContent;
+        lookupBtn.textContent = 'Loading…';
         try {
           const r = await fetch(url, {
             method: 'POST',
@@ -1354,26 +1475,29 @@
           if (!r.ok || !data.notes) {
             throw new Error(data.error || `HTTP ${r.status}`);
           }
-          const sep = ta.value.trim() ? '\n\n' : '';
-          ta.value = ta.value + sep + data.notes;
-          // Trigger per-field autosave + refresh the URL pill row.
-          ta.dispatchEvent(new Event('blur'));
-          if (data.urls) setPills(data.urls);
-          // Fill-if-empty: only populate Players when the user hasn't
-          // typed anything there. Server already gates on the same
-          // condition; this is a defensive client-side guard.
-          const playersEl = document.querySelector('[name="players"]');
-          if (playersEl && data.players && !playersEl.value.trim()) {
-            playersEl.value = data.players;
-            playersEl.dispatchEvent(new Event('blur'));
+          const sep = notesTa.value.trim() ? '\n\n' : '';
+          notesTa.value = notesTa.value + sep + data.notes;
+          notesTa.dispatchEvent(new Event('blur'));
+          if (data.urls) setSourcePills(data.urls);
+          // Fill-if-empty for both players and tracks. Server already
+          // gates on the same condition; this is a defensive guard.
+          if (playersInp && data.players && !playersInp.value.trim()) {
+            playersInp.value = data.players;
+            playersInp.dispatchEvent(new Event('blur'));
+            renderPlayerPills();
           }
-          pill.textContent = origLabel;
+          if (tracksInp && data.tracks && !tracksInp.value.trim()) {
+            tracksInp.value = data.tracks;
+            tracksInp.dispatchEvent(new Event('blur'));
+            renderTrackPills();
+          }
+          lookupBtn.textContent = origLabel;
         } catch (e) {
-          pill.classList.remove('active');
-          pill.textContent = origLabel;
-          alert('Notes fetch failed: ' + (e.message || e));
+          lookupBtn.classList.remove('active');
+          lookupBtn.textContent = origLabel;
+          alert('Lookup failed: ' + (e.message || e));
         } finally {
-          pill.disabled = false;
+          lookupBtn.disabled = false;
         }
       });
     }
