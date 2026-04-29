@@ -4286,11 +4286,41 @@ def upload_image(category, record_id):
     return jsonify({'url': url_for('uploaded_file', filename=stored)})
 
 
+# File-typed columns whose underlying file we INTENTIONALLY keep on disk
+# after a UI delete. These four power record-specific lookups (license OCR,
+# health-card auto-fill) and may be re-attached after a mistaken delete; the
+# orphan-uploads admin can still sweep them later if truly abandoned.
+_PRESERVE_FILE_FIELDS = frozenset({
+    'license_obverse', 'license_reverse',
+    'health_card_obv', 'health_card_rev',
+})
+
+
+def _unlink_upload(filename):
+    """Best-effort delete of an uploaded file (and its cached thumbnail)
+    from UPLOAD_FOLDER. Filename must be the bare basename written by
+    save_upload (uuid.ext); anything with a path separator or leading
+    dot is rejected to prevent traversal or hitting the .thumbs cache."""
+    name = (filename or '').strip()
+    if not name or '/' in name or '\\' in name or name.startswith('.'):
+        return
+    try:
+        os.unlink(os.path.join(UPLOAD_FOLDER, name))
+    except OSError:
+        pass
+    try:
+        os.unlink(os.path.join(_FILE_THUMB_DIR, name + '.jpg'))
+    except OSError:
+        pass
+
+
 @app.route('/<category>/<record_id>/delete-file', methods=['POST'])
 def delete_file_field(category, record_id):
-    """Clear a single file column on a record (NULL it out). Leaves
-    the file on disk; only removes the DB reference. Validated against
-    FIELDS so only declared file fields can be cleared."""
+    """Clear a single file column on a record (NULL it out) and delete the
+    underlying file from disk, EXCEPT for the four ID/health card fields
+    in _PRESERVE_FILE_FIELDS — those keep the file so the special OCR /
+    auto-fill flows can still reach it. Validated against FIELDS so only
+    declared file fields can be cleared."""
     if category not in CATEGORIES:
         return jsonify({'error': 'Unknown category'}), 400
     payload = request.get_json(silent=True) or {}
@@ -4303,6 +4333,10 @@ def delete_file_field(category, record_id):
     cols = [row['name'] for row in db.execute(f"PRAGMA table_info({table})").fetchall()]
     if field_name not in cols:
         return jsonify({'error': 'Column not in table'}), 400
+    existing = db.execute(
+        f"SELECT {field_name} FROM {table} WHERE id = ?", [record_id]
+    ).fetchone()
+    old_filename = existing[field_name] if existing else None
     # Clear the paired title/label column too so the tile doesn't keep
     # showing a leftover auto-fill from a since-removed file.
     title_field = _title_field_for(category, field_name)
@@ -4316,6 +4350,8 @@ def delete_file_field(category, record_id):
         [datetime.utcnow().isoformat(), record_id],
     )
     db.commit()
+    if old_filename and field_name not in _PRESERVE_FILE_FIELDS:
+        _unlink_upload(old_filename)
     return jsonify({'ok': True, 'cleared_title': cleared_title})
 
 
@@ -4733,9 +4769,9 @@ def documents_set_file(category, record_id, doc_set, idx):
 
 @app.route('/<category>/<record_id>/documents/<doc_set>/<int:idx>/delete', methods=['POST'])
 def documents_delete(category, record_id, doc_set, idx):
-    """Remove a document tile (drops the JSON entry; on-disk file is
-    left in place for the orphan-uploads admin to clean up later, same
-    as the per-column delete-file endpoint)."""
+    """Remove a document tile: drops the JSON entry AND deletes the
+    underlying file from disk. (Special license/health-card cells live
+    in dedicated columns handled by delete_file_field, not here.)"""
     err, col = _docs_guard(category, record_id, doc_set)
     if err: return err
     db = get_db()
@@ -4743,8 +4779,10 @@ def documents_delete(category, record_id, doc_set, idx):
     docs = _docs_load(db, table, record_id, col) or []
     if idx < 0 or idx >= len(docs):
         return jsonify({'error': 'Index out of range'}), 400
-    docs.pop(idx)
+    removed = docs.pop(idx)
     _docs_save(db, table, record_id, docs, col)
+    if isinstance(removed, dict):
+        _unlink_upload(removed.get('filename') or '')
     return jsonify({'ok': True, 'count': len(docs)})
 
 
