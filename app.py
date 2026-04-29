@@ -5824,6 +5824,10 @@ def sweep_files():
             idx = _index_for(cat)
             target_group = _norm(parsed['group'])
             target_ident = _norm(parsed['ident'])
+            # Initialized here (not at the slot-resolve step below) so the
+            # single-record-per-group fallback can read it without
+            # tripping UnboundLocalError.
+            target_label = _norm(parsed['label'])
 
             # Find rows whose (group, ident) match. ident match is exact
             # after normalization; if no exact match, fall back to a prefix
@@ -5903,7 +5907,6 @@ def sweep_files():
             cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
 
             # Resolve the slot. Try label match first.
-            target_label = _norm(parsed['label'])
             chosen_field = None
             for spec in plan['files']:
                 field, default_label, title_field = spec
