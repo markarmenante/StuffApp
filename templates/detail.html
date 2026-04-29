@@ -1684,7 +1684,9 @@
        template) appends to /documents/append on first interaction
        with the blank tile and slides a fresh blank in behind it. -->
   <div class="section-bar">Documents</div>
-  {% set _documents = (val('documents'))|from_json %}
+  {# Read directly off `r` so the JSON isn't HTML-escaped by the val()
+     macro on its way to the filter (escaped quotes break json.loads). #}
+  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
   <div class="dgrid dg5 property-doc-row" id="dynDocRow"
        data-docs-base="{% if not is_new %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}/documents">
     {% for d in _documents %}
