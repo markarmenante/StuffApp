@@ -1076,27 +1076,32 @@ def _autofill_title_from_filename(db, table, record_id, category,
     """When a file lands on a slot that has a paired _title/_label
     column, default that title to the upload's original basename —
     but only if the column is currently empty. Never overwrites a
-    user-set title. No-op if there's no paired title column."""
+    user-set title. No-op if there's no paired title column.
+
+    Returns (title_field, new_value) when a write happened so callers
+    keeping an in-memory copy of the row can stay in sync; returns
+    None otherwise."""
     if not original_filename:
-        return
+        return None
     title_field = _title_field_for(category, file_field)
     if not title_field:
-        return
+        return None
     cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
     if title_field not in cols:
-        return
+        return None
     cur = db.execute(
         f"SELECT {title_field} FROM {table} WHERE id = ?", [record_id]
     ).fetchone()
     if cur and (cur[title_field] or '').strip():
-        return
+        return None
     base = os.path.splitext(os.path.basename(original_filename))[0].strip()
     if not base:
-        return
+        return None
     db.execute(
         f"UPDATE {table} SET {title_field} = ? WHERE id = ?",
         [base, record_id],
     )
+    return (title_field, base)
 
 
 EXCLUDED_STATUSES = ('Own', 'Sold', 'Gifted', 'Own')  # dot filter excludes these
@@ -5531,7 +5536,11 @@ def _build_record_index(db, category):
             i_raw = plan['ident'](row)
         except Exception:
             continue
-        out.append((_norm(g_raw), _norm(i_raw), row))
+        # Store as dict (not sqlite3.Row) so the sweep loop can mutate
+        # it after each save. Without this, `row[chosen_field]` keeps
+        # reporting the start-of-request value and multiple files in the
+        # same record collapse onto the same first-empty slot.
+        out.append((_norm(g_raw), _norm(i_raw), dict(row)))
     return out
 
 
@@ -5880,10 +5889,11 @@ def sweep_files():
                             list(seed.values()),
                         )
                         # Refresh the index so subsequent files in the same
-                        # sweep can match this brand-new row.
-                        new_row = db.execute(
+                        # sweep can match this brand-new row. dict() so
+                        # the loop can mutate slot fields after saves.
+                        new_row = dict(db.execute(
                             f"SELECT * FROM {table} WHERE id = ?", [new_id]
-                        ).fetchone()
+                        ).fetchone())
                         g_norm = _norm(plan['group'](new_row))
                         i_norm = _norm(plan['ident'](new_row))
                         indexes[cat].append((g_norm, i_norm, new_row))
@@ -5948,8 +5958,15 @@ def sweep_files():
                 f"UPDATE {table} SET {chosen_field} = ?, updated_at = ? WHERE id = ?",
                 [stored, now, _g(row, 'id')],
             )
-            _autofill_title_from_filename(db, table, _g(row, 'id'), cat,
-                                          chosen_field, parsed['original_basename'])
+            # Keep the cached row in sync so the next file targeting
+            # this record sees the slot as filled (and any auto-titled
+            # column shows up in subsequent label-match candidates).
+            row[chosen_field] = stored
+            row['updated_at'] = now
+            wrote = _autofill_title_from_filename(db, table, _g(row, 'id'), cat,
+                                                  chosen_field, parsed['original_basename'])
+            if wrote:
+                row[wrote[0]] = wrote[1]
             report['uploaded'].append({
                 'file':   rel,
                 'record': f"{cat}/{_g(row, 'id')[:8]}",
