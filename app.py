@@ -1166,66 +1166,74 @@ def _backfill_docs_json(db, table, target_col, sources):
 
 
 def _strip_phantom_cover_image_docs(db):
-    """Remove doc tiles whose filename is identical to the record's
-    cover image, across every item category. These come from legacy
-    FileMaker imports that wrote the cover image filename into multiple
-    columns (receipt, registration, auto_title, etc.); the doc-row
-    backfill / receipt-fold then turned each one into a separate doc
-    tile rendering the same cover image. The intent of those tiles
-    was never user-facing — they should all collapse out. Idempotent."""
-    targets = [
-        # (table, cover_image_field, documents_json_field)
-        ('watches',    'image_obv',  'documents'),
-        ('coins',      'image_1',    'documents'),
-        ('art',        'image',      'documents'),
-        ('vehicles',   'image',      'documents'),
-        ('pens',       'image',      'documents'),
-        ('recordings', 'image',      'documents'),
-        ('rifles',     'image',      'documents'),
-        ('audio',      'image',      'documents'),
-        ('properties', 'image',      'documents'),
-    ]
-    for table, cover_col, docs_col in targets:
+    """Remove doc tiles whose filename is identical to the value of any
+    OTHER file-typed column on the same record. These come from legacy
+    FileMaker imports that wrote the same image into multiple columns
+    (cover image + receipt + registration + auto_title + …); the
+    doc-row backfill / receipt-fold then turned each one into a
+    separate doc tile rendering the same image.
+
+    Match logic walks every file-typed column declared in FIELDS for
+    each category, so the sweep catches duplicates of the cover image
+    AND of secondary file slots (watch image_rev, credit-card
+    image_back, etc.) — whatever happens to be the same file. The
+    fixed file columns themselves are never touched; only the JSON
+    documents arrays are filtered. Idempotent."""
+    for cat, fields in FIELDS.items():
+        table = CATEGORIES.get(cat, {}).get('table')
+        if not table:
+            continue
+        json_cols = list(DOC_SETS_BY_CATEGORY.get(cat, {}).values())
+        if not json_cols:
+            continue
+        file_cols = [f['name'] for f in fields if f.get('type') == 'file']
         try:
-            cols = {r['name'] for r in db.execute(
+            present = {r['name'] for r in db.execute(
                 f"PRAGMA table_info({table})"
             ).fetchall()}
         except sqlite3.OperationalError:
             continue
-        if cover_col not in cols or docs_col not in cols:
+        present_files = [c for c in file_cols if c in present]
+        present_jsons = [c for c in json_cols if c in present]
+        if not present_files or not present_jsons:
             continue
+        select_cols = ', '.join(['id'] + present_files + present_jsons)
         try:
             rows = db.execute(
-                f"SELECT id, {cover_col} AS cover, {docs_col} AS docs "
-                f"FROM {table} WHERE {docs_col} IS NOT NULL"
+                f"SELECT {select_cols} FROM {table}"
             ).fetchall()
         except sqlite3.OperationalError:
             continue
         for row in rows:
-            cover = (row['cover'] or '').strip()
-            if not cover:
+            other_files = {
+                (row[c] or '').strip()
+                for c in present_files
+                if (row[c] or '').strip()
+            }
+            if not other_files:
                 continue
-            try:
-                docs = json.loads(row['docs'] or '[]')
-            except (TypeError, ValueError):
-                continue
-            if not isinstance(docs, list):
-                continue
-            kept = [
-                d for d in docs
-                if not (
-                    isinstance(d, dict)
-                    and (d.get('filename') or '').strip() == cover
-                )
-            ]
-            if len(kept) != len(docs):
+            for jc in present_jsons:
                 try:
-                    db.execute(
-                        f"UPDATE {table} SET {docs_col} = ? WHERE id = ?",
-                        (json.dumps(kept), row['id']),
+                    docs = json.loads(row[jc] or '[]')
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(docs, list):
+                    continue
+                kept = [
+                    d for d in docs
+                    if not (
+                        isinstance(d, dict)
+                        and (d.get('filename') or '').strip() in other_files
                     )
-                except sqlite3.OperationalError:
-                    pass
+                ]
+                if len(kept) != len(docs):
+                    try:
+                        db.execute(
+                            f"UPDATE {table} SET {jc} = ? WHERE id = ?",
+                            (json.dumps(kept), row['id']),
+                        )
+                    except sqlite3.OperationalError:
+                        pass
     db.commit()
 
 
