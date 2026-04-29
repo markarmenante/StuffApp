@@ -4631,10 +4631,14 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       return;
     }
 
-    // Reset to auto so scrollHeight reflects the content's true
-    // intrinsic height (otherwise it's clamped to the current
-    // style.height value).
-    ta.style.height = 'auto';
+    // Force the box to 0 first so scrollHeight reflects the CONTENT's
+    // intrinsic height instead of the rows-attribute default. On a
+    // textarea, `height: auto` defaults to the rows-implied size, so
+    // scrollHeight comes back as that pinned value (e.g. 156px for
+    // rows=8 + line-height 1.5) regardless of how much text is in
+    // the box. Pinning to 0 collapses the box; reading scrollHeight
+    // then gives the true content size.
+    ta.style.height = '0px';
     const contentH = ta.scrollHeight;     // content + padding
     const desired  = contentH + lineH;    // one breathing line below
     const target   = Math.min(desired, maxH);
