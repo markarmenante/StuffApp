@@ -323,16 +323,19 @@ document.addEventListener('DOMContentLoaded', function () {
   {% if category == 'watches' %}
 
   <!-- Brand row (editable, large) -->
-  <div class="detail-brand-row">
+  <div class="detail-brand-row header-row-with-label">
     <input type="text" name="brand" value="{{ r['brand'] if r and r['brand'] else '' }}" class="brand-input ta-input" autocomplete="off"
-           {% if is_new and not (r and r['brand']) %}placeholder="Brand"{% endif %}
+           placeholder="Brand"
            data-ta="{{ ta.get('brand', [])|join('||') }}">
+    <span class="header-row-label">Brand</span>
   </div>
 
   <!-- Model name row -->
-  <div class="detail-model">
+  <div class="detail-model header-row-with-label">
     <input type="text" name="model" value="{{ val('model') }}"
+           placeholder="Model"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+    <span class="header-row-label">Model</span>
   </div>
 
   <!-- Row 1: Metal, Case Diameter, Reference, Dial Color -->

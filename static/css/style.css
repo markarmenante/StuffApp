@@ -528,6 +528,22 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .detail-model { font-size: 15px; font-weight: 500; padding: 5px 10px 5px; border-bottom: 1px solid var(--border); background: var(--cell-bg); color: var(--text-secondary); }
 
+/* Header rows (Brand, Model, etc.) get a persistent right-aligned
+   label so the user can always tell what each big input is for —
+   placeholder text vanishes the moment they type, but this label
+   stays. Same muted small-caps style as .clabel / .blabel. */
+.header-row-with-label {
+  display: flex; align-items: center; gap: 8px;
+}
+.header-row-with-label > input { flex: 1 1 auto; min-width: 0; }
+.header-row-label {
+  flex: 0 0 auto;
+  font-size: 11px; font-weight: 500;
+  color: var(--text-label); text-transform: uppercase;
+  letter-spacing: .5px;
+  white-space: nowrap;
+}
+
 /* Lookup button sits inside the floating nav overlay. */
 .watch-lookup-btn,
 .coin-lookup-btn {
