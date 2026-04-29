@@ -613,17 +613,21 @@ window.shareCardRow = async function (ev, btn) {
   document.querySelectorAll('.item-row').forEach(function(row) {
     var rowFileBtn = row.querySelector('.row-upload-btn input[type=file]');
     var firstThumb = row.querySelector('.item-thumb[data-upload-url]');
-    if (!firstThumb) return;
-    var firstUploadUrl = firstThumb.dataset.uploadUrl;
-    var firstField = firstThumb.dataset.field || null;
 
     // Click anywhere on the row -> navigate to the detail page (the per-
     // thumb drop handlers below stop propagation only on drag events,
-    // so click still bubbles up here).
+    // so click still bubbles up here). Wired unconditionally — categories
+    // without a thumbnail (e.g. persons) still need this to work.
     row.addEventListener('click', function(e) {
       if (e.target.closest('.row-upload-btn')) return;
       window.location = row.dataset.href;
     });
+
+    // Drag-and-drop image upload only applies to rows that actually
+    // have a thumbnail; bail if there's nothing to drop onto.
+    if (!firstThumb) return;
+    var firstUploadUrl = firstThumb.dataset.uploadUrl;
+    var firstField = firstThumb.dataset.field || null;
 
     // Per-thumb drag-and-drop. Each thumb is its own drop target so the
     // correct `field` form param is sent (image_1 vs image_2 for coins)
