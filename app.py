@@ -628,11 +628,37 @@ LIST_EXTRA_FIELDS = {
 # Database helpers
 # ---------------------------------------------------------------------------
 
+def _strip_diacritics(s):
+    """Fold a string to ASCII lowercase, dropping diacritical marks so
+    'Roumégoux' compares as 'roumegoux' and 'Blåder' as 'blader'.
+    SQLite's built-in LOWER() / NOCASE only handles ASCII A-Z, which
+    leaves multi-byte UTF-8 characters in odd positions in a sort.
+    """
+    import unicodedata as _ud
+    if s is None:
+        return ''
+    return _ud.normalize('NFKD', str(s)).encode('ascii', 'ignore').decode('ascii').lower()
+
+
+def _nodiacritic_collation(a, b):
+    """Custom SQLite collation: lexicographic order on the diacritic-
+    folded, lowercased forms. Used in CATEGORY_ORDER_BY for art (and
+    anywhere else humans expect 'café' to sort next to 'cafe')."""
+    a = _strip_diacritics(a)
+    b = _strip_diacritics(b)
+    if a < b: return -1
+    if a > b: return 1
+    return 0
+
+
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        # Register the diacritic-folding collation on every fresh
+        # connection — collations are per-connection in sqlite3.
+        g.db.create_collation('NODIACRITIC', _nodiacritic_collation)
     return g.db
 
 
@@ -1413,8 +1439,11 @@ CATEGORY_ORDER_BY = {
                  "COALESCE(NULLIF(model, ''), 'zzz')"),
     # Art: alpha by artist (records use "Last, First" so this gives
     # surname order), then by title for the same artist's pieces.
-    'art': ("LOWER(COALESCE(NULLIF(artist, ''), 'zzz')), "
-            "LOWER(COALESCE(title, ''))"),
+    # Uses the NODIACRITIC collation so 'Roumégoux' sorts inside the
+    # R block and 'Blåder' inside the B block — SQLite's default
+    # LOWER/NOCASE leaves multi-byte UTF-8 in unhelpful positions.
+    'art': ("COALESCE(NULLIF(artist, ''), 'zzz') COLLATE NODIACRITIC, "
+            "COALESCE(title, '') COLLATE NODIACRITIC"),
     # Type first (Residential block, then Commercial block, with a
     # bold divider rendered between them in the template), then the
     # six primary homes featured-first within each type, then alpha.
