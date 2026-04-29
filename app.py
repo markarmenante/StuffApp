@@ -2495,20 +2495,27 @@ def new_record(category):
                 if base:
                     data[title_field] = base
 
-        # Owner default — applied whenever the form arrived without an
-        # owner. The owner field is hidden for member users (the form
-        # is gated by current_user.role == 'owner' in the template),
-        # so this branch always fires for them. Members always get
-        # 'YM' regardless of category; owners get the per-category
-        # canonical default from the preference map.
+        # Owner default — applied whenever the form arrived without
+        # an owner. The owner field is hidden for member users (the
+        # form is gated by current_user.role == 'owner' in the
+        # template), so this branch always fires for them.
+        #
+        # Coins always seed Mark regardless of who creates them — the
+        # coin collection is his. Watches default to Mark only for
+        # owner-role creators; members creating a watch get the
+        # standard 'YM' default. All other categories: members get
+        # 'YM', owners get DEFAULT_OWNER_BY_CATEGORY.
         if not (data.get('owner') or '').strip():
-            user = g.get('current_user') or {}
-            if user.get('role') != 'owner':
-                data['owner'] = 'YM'
+            if category == 'coins':
+                data['owner'] = 'Mark'
             else:
-                d = DEFAULT_OWNER_BY_CATEGORY.get(category)
-                if d:
-                    data['owner'] = d
+                user = g.get('current_user') or {}
+                if user.get('role') != 'owner':
+                    data['owner'] = 'YM'
+                else:
+                    d = DEFAULT_OWNER_BY_CATEGORY.get(category)
+                    if d:
+                        data['owner'] = d
 
         # Required fields on create. Owner is required for every
         # category. Property is required for everything except
@@ -6455,10 +6462,13 @@ def sweep_files():
                         seed['created_at'] = now
                         seed['updated_at'] = now
                         # Owner default for the freshly-created record.
-                        # Members always get 'YM'; owners get the
-                        # per-category canonical default.
+                        # Coins always seed Mark; otherwise members get
+                        # 'YM', owners get the per-category canonical
+                        # default.
                         if 'owner' not in seed:
-                            if user.get('role') != 'owner':
+                            if cat == 'coins':
+                                seed['owner'] = 'Mark'
+                            elif user.get('role') != 'owner':
                                 seed['owner'] = 'YM'
                             else:
                                 d = DEFAULT_OWNER_BY_CATEGORY.get(cat)
