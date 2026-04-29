@@ -4305,24 +4305,45 @@ def from_json_filter(value):
 
 
 # ---------------------------------------------------------------------------
-# Documents JSON helpers + endpoints (properties pilot)
+# Documents JSON helpers + endpoints
 # ---------------------------------------------------------------------------
-# Categories whose detail page renders documents from the JSON `documents`
-# column instead of the legacy doc_N + doc_N_title slots. Other categories
-# still use the fixed-column path; they'll move over once verified.
-DOCUMENTS_CATEGORIES = {'properties'}
+# Per-category map of doc-set name → JSON column name. The set name
+# appears in the route URL so categories with multiple independent
+# doc-rows (persons: ids + health) can route through the same handlers.
+# Categories with a single row use 'main' → 'documents' by convention.
+DOC_SETS_BY_CATEGORY = {
+    'properties': {'main': 'documents'},
+    'watches':    {'main': 'documents'},
+    'coins':      {'main': 'documents'},
+    'art':        {'main': 'documents'},
+    'vehicles':   {'main': 'documents'},
+    'persons':    {'ids': 'id_documents', 'health': 'health_documents'},
+}
+DOCUMENTS_CATEGORIES = set(DOC_SETS_BY_CATEGORY.keys())
 
 
-def _docs_load(db, table, record_id):
-    """Read the documents JSON for a record, normalizing to a list of
-    {title, filename} dicts. Returns [] when null/malformed."""
+def _docs_col(category, doc_set):
+    """Return the JSON column name for (category, doc_set), or None if
+    the pair isn't enabled."""
+    return DOC_SETS_BY_CATEGORY.get(category, {}).get(doc_set)
+
+
+def _docs_cols_for(category):
+    """All JSON columns this category uses for documents (zero or more)."""
+    return list(DOC_SETS_BY_CATEGORY.get(category, {}).values())
+
+
+def _docs_load(db, table, record_id, col='documents'):
+    """Read the documents JSON for a record from `col`, normalizing to
+    a list of {title, filename} dicts. Returns None if record missing,
+    [] when the column is null/malformed."""
     row = db.execute(
-        f"SELECT documents FROM {table} WHERE id = ?", [record_id]
+        f"SELECT {col} FROM {table} WHERE id = ?", [record_id]
     ).fetchone()
     if not row:
         return None
     try:
-        docs = json.loads(row['documents'] or '[]')
+        docs = json.loads(row[col] or '[]')
     except (TypeError, ValueError):
         docs = []
     if not isinstance(docs, list):
@@ -4332,38 +4353,42 @@ def _docs_load(db, table, record_id):
     return [d for d in docs if isinstance(d, dict)]
 
 
-def _docs_save(db, table, record_id, docs):
+def _docs_save(db, table, record_id, docs, col='documents'):
     db.execute(
-        f"UPDATE {table} SET documents = ?, updated_at = ? WHERE id = ?",
+        f"UPDATE {table} SET {col} = ?, updated_at = ? WHERE id = ?",
         [json.dumps(docs), datetime.utcnow().isoformat(), record_id],
     )
     db.commit()
 
 
-def _docs_guard(category, record_id):
-    """Common pre-flight: category must be enabled, record must exist
-    and the current user must be allowed to see it."""
-    if category not in DOCUMENTS_CATEGORIES:
-        return jsonify({'error': 'Documents not enabled for this category'}), 400
+def _docs_guard(category, record_id, doc_set):
+    """Common pre-flight. Returns (err_response, col): on error
+    err_response is a Flask error tuple and col is None; on success
+    err_response is None and col is the JSON column to operate on."""
+    col = _docs_col(category, doc_set)
+    if not col:
+        return (jsonify({'error': 'Unknown documents set'}), 400), None
     table = CATEGORIES[category]['table']
     db = get_db()
-    row = db.execute(f"SELECT * FROM {table} WHERE id = ?", [record_id]).fetchone()
+    row = db.execute(
+        f"SELECT * FROM {table} WHERE id = ?", [record_id]
+    ).fetchone()
     if not row:
-        return jsonify({'error': 'Record not found'}), 404
+        return (jsonify({'error': 'Record not found'}), 404), None
     if not _user_can_see_row(category, row):
-        return jsonify({'error': 'Forbidden'}), 403
-    return None
+        return (jsonify({'error': 'Forbidden'}), 403), None
+    return None, col
 
 
-@app.route('/<category>/<record_id>/documents/append', methods=['POST'])
-def documents_append(category, record_id):
+@app.route('/<category>/<record_id>/documents/<doc_set>/append', methods=['POST'])
+def documents_append(category, record_id, doc_set):
     """Append a new document. Accepts multipart with optional `file`
     and optional `title`. At least one must be present."""
-    err = _docs_guard(category, record_id)
+    err, col = _docs_guard(category, record_id, doc_set)
     if err: return err
     db = get_db()
     table = CATEGORIES[category]['table']
-    docs = _docs_load(db, table, record_id) or []
+    docs = _docs_load(db, table, record_id, col) or []
     title = (request.form.get('title') or '').strip()
     upload = request.files.get('file') or request.files.get('image')
     filename = ''
@@ -4383,7 +4408,7 @@ def documents_append(category, record_id):
     if not title and original_basename:
         title = os.path.splitext(os.path.basename(original_basename))[0].strip()
     docs.append({'title': title, 'filename': filename})
-    _docs_save(db, table, record_id, docs)
+    _docs_save(db, table, record_id, docs, col)
     return jsonify({
         'ok': True, 'idx': len(docs) - 1,
         'title': title, 'filename': filename,
@@ -4391,29 +4416,29 @@ def documents_append(category, record_id):
     })
 
 
-@app.route('/<category>/<record_id>/documents/<int:idx>/title', methods=['POST'])
-def documents_set_title(category, record_id, idx):
-    err = _docs_guard(category, record_id)
+@app.route('/<category>/<record_id>/documents/<doc_set>/<int:idx>/title', methods=['POST'])
+def documents_set_title(category, record_id, doc_set, idx):
+    err, col = _docs_guard(category, record_id, doc_set)
     if err: return err
     db = get_db()
     table = CATEGORIES[category]['table']
-    docs = _docs_load(db, table, record_id) or []
+    docs = _docs_load(db, table, record_id, col) or []
     if idx < 0 or idx >= len(docs):
         return jsonify({'error': 'Index out of range'}), 400
     payload = request.get_json(silent=True) or {}
     docs[idx]['title'] = (payload.get('title') or '').strip()
-    _docs_save(db, table, record_id, docs)
+    _docs_save(db, table, record_id, docs, col)
     return jsonify({'ok': True})
 
 
-@app.route('/<category>/<record_id>/documents/<int:idx>/file', methods=['POST'])
-def documents_set_file(category, record_id, idx):
+@app.route('/<category>/<record_id>/documents/<doc_set>/<int:idx>/file', methods=['POST'])
+def documents_set_file(category, record_id, doc_set, idx):
     """Replace the file on an existing document tile."""
-    err = _docs_guard(category, record_id)
+    err, col = _docs_guard(category, record_id, doc_set)
     if err: return err
     db = get_db()
     table = CATEGORIES[category]['table']
-    docs = _docs_load(db, table, record_id) or []
+    docs = _docs_load(db, table, record_id, col) or []
     if idx < 0 or idx >= len(docs):
         return jsonify({'error': 'Index out of range'}), 400
     upload = request.files.get('file') or request.files.get('image')
@@ -4430,40 +4455,40 @@ def documents_set_file(category, record_id, idx):
     # currently untitled — leave deliberate user titles alone.
     if not (docs[idx].get('title') or '').strip() and original_basename:
         docs[idx]['title'] = os.path.splitext(os.path.basename(original_basename))[0].strip()
-    _docs_save(db, table, record_id, docs)
+    _docs_save(db, table, record_id, docs, col)
     return jsonify({
         'ok': True, 'filename': filename, 'title': docs[idx].get('title', ''),
         'url': url_for('uploaded_file', filename=filename),
     })
 
 
-@app.route('/<category>/<record_id>/documents/<int:idx>/delete', methods=['POST'])
-def documents_delete(category, record_id, idx):
+@app.route('/<category>/<record_id>/documents/<doc_set>/<int:idx>/delete', methods=['POST'])
+def documents_delete(category, record_id, doc_set, idx):
     """Remove a document tile (drops the JSON entry; on-disk file is
     left in place for the orphan-uploads admin to clean up later, same
     as the per-column delete-file endpoint)."""
-    err = _docs_guard(category, record_id)
+    err, col = _docs_guard(category, record_id, doc_set)
     if err: return err
     db = get_db()
     table = CATEGORIES[category]['table']
-    docs = _docs_load(db, table, record_id) or []
+    docs = _docs_load(db, table, record_id, col) or []
     if idx < 0 or idx >= len(docs):
         return jsonify({'error': 'Index out of range'}), 400
     docs.pop(idx)
-    _docs_save(db, table, record_id, docs)
+    _docs_save(db, table, record_id, docs, col)
     return jsonify({'ok': True, 'count': len(docs)})
 
 
-@app.route('/<category>/<record_id>/documents/reorder', methods=['POST'])
-def documents_reorder(category, record_id):
+@app.route('/<category>/<record_id>/documents/<doc_set>/reorder', methods=['POST'])
+def documents_reorder(category, record_id, doc_set):
     """Reorder the documents JSON array. Body: {"order": [old_idx, ...]}
     must be a permutation of 0..N-1; the new array is built by reading
     the old one in the order given."""
-    err = _docs_guard(category, record_id)
+    err, col = _docs_guard(category, record_id, doc_set)
     if err: return err
     db = get_db()
     table = CATEGORIES[category]['table']
-    docs = _docs_load(db, table, record_id) or []
+    docs = _docs_load(db, table, record_id, col) or []
     payload = request.get_json(silent=True) or {}
     order = payload.get('order')
     if (not isinstance(order, list)
@@ -4471,7 +4496,7 @@ def documents_reorder(category, record_id):
             or sorted(order) != list(range(len(docs)))):
         return jsonify({'error': 'order must be a permutation of 0..N-1'}), 400
     docs = [docs[i] for i in order]
-    _docs_save(db, table, record_id, docs)
+    _docs_save(db, table, record_id, docs, col)
     return jsonify({'ok': True, 'count': len(docs)})
 
 
@@ -5745,33 +5770,37 @@ def admin_export_files():
                     zf.write(src, arcname=arcname)
                     written += 1
 
-                # JSON documents column — unbounded user-titled docs.
-                # Each entry exports as "<ident> — <title>.<ext>" same
-                # as a fixed slot, so the round-trip with sweep stays
-                # symmetric.
-                if cat in DOCUMENTS_CATEGORIES and 'documents' in cols:
+                # JSON documents columns — unbounded user-titled docs.
+                # Walk every doc-set declared for this category (e.g.
+                # persons has 'ids' + 'health'). Each entry exports as
+                # "<ident> — <title>.<ext>" same as a fixed slot, so
+                # the round-trip with sweep stays symmetric.
+                for json_col in _docs_cols_for(cat):
+                    if json_col not in cols:
+                        continue
                     try:
-                        json_docs = json.loads(row['documents'] or '[]')
+                        json_docs = json.loads(row[json_col] or '[]')
                     except (TypeError, ValueError):
                         json_docs = []
-                    if isinstance(json_docs, list):
-                        for i, d in enumerate(json_docs, 1):
-                            if not isinstance(d, dict):
-                                continue
-                            fname = (d.get('filename') or '').strip()
-                            if not fname:
-                                continue
-                            src = os.path.join(UPLOAD_FOLDER, fname)
-                            if not os.path.isfile(src):
-                                skipped_missing += 1
-                                continue
-                            label = (d.get('title') or '').strip() or f'Doc {i}'
-                            label = _safe_path(label)[0]
-                            ext = os.path.splitext(fname)[1] or ''
-                            base_dir = f'{cat_root}/{group}'
-                            arcname = f'{base_dir}/{_next_unique(base_dir, ident, label, ext)}'
-                            zf.write(src, arcname=arcname)
-                            written += 1
+                    if not isinstance(json_docs, list):
+                        continue
+                    for i, d in enumerate(json_docs, 1):
+                        if not isinstance(d, dict):
+                            continue
+                        fname = (d.get('filename') or '').strip()
+                        if not fname:
+                            continue
+                        src = os.path.join(UPLOAD_FOLDER, fname)
+                        if not os.path.isfile(src):
+                            skipped_missing += 1
+                            continue
+                        label = (d.get('title') or '').strip() or f'Doc {i}'
+                        label = _safe_path(label)[0]
+                        ext = os.path.splitext(fname)[1] or ''
+                        base_dir = f'{cat_root}/{group}'
+                        arcname = f'{base_dir}/{_next_unique(base_dir, ident, label, ext)}'
+                        zf.write(src, arcname=arcname)
+                        written += 1
 
         # Per-category CSV at the top of each category's folder. Rows
         # in the same order as the table; columns straight from
@@ -6310,8 +6339,13 @@ def sweep_files():
                 })
             else:
                 # DOCUMENTS_CATEGORIES path — append to the JSON column.
+                # For categories with multiple doc-sets (persons: ids +
+                # health), pick the first declared set as the landing
+                # zone; the user can drag tiles between sets in the UI.
+                json_cols = _docs_cols_for(cat)
+                docs_col = json_cols[0] if json_cols else 'documents'
                 try:
-                    docs = json.loads(row['documents'] or '[]') if 'documents' in row.keys() else []
+                    docs = json.loads(row[docs_col] or '[]') if docs_col in row.keys() else []
                 except (TypeError, ValueError):
                     docs = []
                 if not isinstance(docs, list):
@@ -6321,15 +6355,15 @@ def sweep_files():
                     'filename': stored,
                 })
                 db.execute(
-                    f"UPDATE {table} SET documents = ?, updated_at = ? WHERE id = ?",
+                    f"UPDATE {table} SET {docs_col} = ?, updated_at = ? WHERE id = ?",
                     [json.dumps(docs), now, _g(row, 'id')],
                 )
-                row['documents'] = json.dumps(docs)
+                row[docs_col] = json.dumps(docs)
                 row['updated_at'] = now
                 report['uploaded'].append({
                     'file':   rel,
                     'record': f"{cat}/{_g(row, 'id')[:8]}",
-                    'slot':   f'documents[{len(docs) - 1}]',
+                    'slot':   f'{docs_col}[{len(docs) - 1}]',
                 })
         except Exception as exc:
             app.logger.exception('sweep: failed on %s', getattr(f, 'filename', '?'))

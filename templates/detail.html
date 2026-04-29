@@ -1687,8 +1687,8 @@
   {# Read directly off `r` so the JSON isn't HTML-escaped by the val()
      macro on its way to the filter (escaped quotes break json.loads). #}
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
-  <div class="dgrid dg5 property-doc-row" id="dynDocRow"
-       data-docs-base="{% if not is_new %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}/documents">
+  <div class="dgrid dg5 property-doc-row dyn-doc-row" id="dynDocRow"
+       data-docs-base="{% if not is_new %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}/documents/main">
     {% for d in _documents %}
     <div class="property-doc dyn-doc" data-doc-idx="{{ loop.index0 }}">
       <span class="dyn-doc-grip" draggable="true"
@@ -3384,19 +3384,24 @@ _wireRowDelete(
   'alarm-codes-row-empty', 'alarmIdx',
   ['alarm_codes_entry', 'alarm_codes_code', 'alarm_codes_note'], 8, 4);
 
-// ── Dynamic documents (properties pilot) ──────────────────────────
+// ── Dynamic documents ─────────────────────────────────────────────
 // Always one trailing blank tile. Drop a file or type a title in it
-// → POST /documents/append → tile becomes a real doc and a fresh
-// blank tile slides in behind it. Title edits / file replacements /
-// × deletes on existing tiles call /documents/<idx>/{title,file,delete}.
-(function dynDocs() {
-  const row = document.getElementById('dynDocRow');
-  if (!row) return;
+// → POST <base>/append → tile becomes a real doc and a fresh blank
+// tile slides in behind it. Title edits / file replacements / × deletes
+// on existing tiles call <base>/<idx>/{title,file,delete}. Reorder via
+// the ⋮⋮ grip in the top-right of each existing tile POSTs to
+// <base>/reorder. <base> ends with `/documents/<set>` where <set> is
+// 'main' for single-row categories or e.g. 'ids'/'health' for persons.
+//
+// Runs per-row so a single page can host multiple independent sets
+// (persons has IDs + Health side-by-side).
+document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   const base = row.dataset.docsBase || '';
   // Refuse to wire up on the new-record form — the API needs a saved
-  // record_id, and the property detail page has no autosave-on-new
-  // path yet. The blank tile will start working after first save.
-  if (!base || base === '/documents') return;
+  // record_id, and the autosave-on-new path isn't there for every
+  // category yet. The blank tile will start working after first save.
+  if (!base || /\/documents\/[^/]+$/.test(base) === false) return;
+  const placeholderPrefix = row.dataset.docPlaceholder || 'Doc';
 
   function tileAt(idx) {
     return row.querySelector(`.dyn-doc[data-doc-idx="${idx}"]`);
@@ -3484,7 +3489,7 @@ _wireRowDelete(
     if (titleInp) {
       titleInp.dataset.docIdx = String(idx);
       titleInp.value = title;
-      titleInp.placeholder = `Doc ${idx + 1}`;
+      titleInp.placeholder = `${placeholderPrefix} ${idx + 1}`;
     }
     const cell = tile.querySelector('.dyn-doc-cell');
     if (cell) {
@@ -3513,13 +3518,15 @@ _wireRowDelete(
   }
 
   function spawnEmptyTile() {
-    const nextIdx = row.querySelectorAll('.dyn-doc:not(.dyn-doc-row-empty)').length;
+    const tileClass = row.dataset.tileClass || 'property-doc';
+    const titleClass = row.dataset.tileTitleClass || 'property-doc-title';
+    const emptyText = row.dataset.docEmptyPlaceholder || '+ Add document';
     const tile = document.createElement('div');
-    tile.className = 'property-doc dyn-doc dyn-doc-row-empty';
+    tile.className = `${tileClass} dyn-doc dyn-doc-row-empty`;
     tile.dataset.docIdx = '-1';
     tile.innerHTML = `
-      <input type="text" class="property-doc-title dyn-doc-title"
-             data-doc-idx="-1" placeholder="+ Add document">
+      <input type="text" class="${titleClass} dyn-doc-title"
+             data-doc-idx="-1" placeholder="${emptyText}">
       <div class="dcell file-cell drop-zone dyn-doc-cell dyn-doc-empty"
            data-doc-idx="-1">
         <span class="doc-empty-icon" aria-hidden="true">📄</span>
@@ -3716,7 +3723,7 @@ _wireRowDelete(
       alert('Upload failed: ' + (err.message || err));
     }
   });
-})();
+});
 </script>
 
 {% if category == 'coins' %}
