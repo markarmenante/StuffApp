@@ -4203,11 +4203,59 @@ def recording_fetch_notes(record_id):
         except sqlite3.OperationalError:
             pass
 
+    # Propagate the lookup-derived content to any sibling copies of
+    # the same album (matched on artist + title, case-insensitive,
+    # excluding this record). Each field is written only if the
+    # sibling's column is currently empty — never clobbering user
+    # edits on another copy. Saves the user from re-running Lookup
+    # on every pressing in their collection.
+    siblings_updated = 0
+    title_norm = (rec['title']  or '').strip()
+    artist_norm = (rec['artist'] or '').strip()
+    new_notes = data.get('markdown') or ''
+    new_urls_csv = ','.join(merged) if merged else ''
+    if title_norm and artist_norm and (
+        new_notes or new_players or new_tracks or new_urls_csv
+    ):
+        sib_rows = db.execute(
+            "SELECT id, notes, players, tracks, notes_urls FROM recordings "
+            "WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) "
+            "  AND LOWER(TRIM(artist)) = LOWER(TRIM(?)) "
+            "  AND id != ?",
+            (title_norm, artist_norm, record_id),
+        ).fetchall()
+        for sib in sib_rows:
+            sib_sets, sib_params = [], []
+            if new_notes and not (sib['notes'] or '').strip():
+                sib_sets.append('notes = ?'); sib_params.append(new_notes)
+            if new_players and not (sib['players'] or '').strip():
+                sib_sets.append('players = ?'); sib_params.append(new_players)
+            if new_tracks and not (sib['tracks'] or '').strip():
+                sib_sets.append('tracks = ?'); sib_params.append(new_tracks)
+            if new_urls_csv and not (sib['notes_urls'] or '').strip():
+                sib_sets.append('notes_urls = ?'); sib_params.append(new_urls_csv)
+            if sib_sets:
+                sib_sets.append('updated_at = ?')
+                sib_params.append(datetime.utcnow().isoformat())
+                sib_params.append(sib['id'])
+                try:
+                    db.execute(
+                        f"UPDATE recordings SET {', '.join(sib_sets)} "
+                        f"WHERE id = ?",
+                        sib_params,
+                    )
+                    siblings_updated += 1
+                except sqlite3.OperationalError:
+                    pass
+        if siblings_updated:
+            db.commit()
+
     return jsonify({
         'notes': data.get('markdown') or '',
         'players': new_players,
         'tracks': new_tracks,
         'urls': merged,
+        'siblings_updated': siblings_updated,
     })
 
 

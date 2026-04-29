@@ -1491,7 +1491,17 @@
             tracksInp.dispatchEvent(new Event('blur'));
             renderTrackPills();
           }
-          lookupBtn.textContent = origLabel;
+          // Brief inline hint when the same lookup propagated to other
+          // copies of this album (matched on artist + title). The
+          // server only writes empty sibling columns so this never
+          // clobbers user edits on another copy.
+          const n = data.siblings_updated || 0;
+          if (n > 0) {
+            lookupBtn.textContent = '✓ ' + n + ' cop' + (n === 1 ? 'y' : 'ies');
+            setTimeout(() => { lookupBtn.textContent = origLabel; }, 4000);
+          } else {
+            lookupBtn.textContent = origLabel;
+          }
         } catch (e) {
           lookupBtn.classList.remove('active');
           lookupBtn.textContent = origLabel;
