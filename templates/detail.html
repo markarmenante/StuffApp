@@ -809,7 +809,7 @@ document.addEventListener('DOMContentLoaded', function () {
   <div class="detail-brand-row">
     <input type="text" name="make" value="{{ val('make') }}"
            class="brand-input ta-input" autocomplete="off"
-           {% if is_new and not val('make') %}placeholder="Make"{% endif %}
+           {% if is_new and not val('make') %}placeholder="Brand"{% endif %}
            data-ta="{{ ta.get('make', [])|join('||') }}">
   </div>
   <div class="detail-model">

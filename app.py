@@ -4,6 +4,7 @@ import os
 import json
 import re
 import base64
+import unicodedata
 from datetime import datetime, date
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response,
@@ -311,7 +312,7 @@ FIELDS = {
         {'name': 'document_2',      'label': 'Document 2',        'type': 'file'},
     ],
     'cameras': [
-        {'name': 'make',            'label': 'Make',              'type': 'text'},
+        {'name': 'make',            'label': 'Brand',             'type': 'text'},
         {'name': 'model',           'label': 'Model',             'type': 'text'},
         {'name': 'digital_film',    'label': 'Digital / Film',    'type': 'select',
          'options': ['', 'Digital', 'Film', 'Both']},
@@ -1595,7 +1596,7 @@ TYPEAHEAD_FIELDS = {
     'watches':      ('brand', 'dial_color', 'strap_color', 'vendor'),
     'coins':        ('region', 'mint', 'denomination', 'vendor'),
     'art':          ('artist', 'medium', 'vendor', 'property', 'location'),
-    'cameras':      ('make', 'vendor'),
+    'cameras':      ('make', 'lens_mount', 'vendor'),
     'lenses':       ('make', 'mount', 'vendor'),
     'pens':         ('make', 'vendor'),
     'vehicles':     ('make', 'vendor'),
@@ -6056,6 +6057,103 @@ def status_owned_to_own():
     return jsonify(updated=total, per_table=per_table)
 
 
+@app.route('/admin/dedupe-watches', methods=['POST'])
+def dedupe_watches():
+    """Collapse watch duplicates created by sweep auto-create when the
+    matcher couldn't see "A. Lange & Söhne" and "A. Lange Sohne" as the
+    same brand. Groups rows by (_norm(brand), _norm(model), _norm(ref))
+    so spelling drift (diacritics, ampersands, dots) collapses into one
+    bucket.
+
+    Winner per group = the row with the most non-NULL fields (the
+    "original" rich record). Tiebreaker: the spelling with more
+    diacritics + ampersands. Sibling fields fill in where the winner
+    is NULL — never overwrites real data — and siblings are deleted.
+
+    Default: dry-run. Pass ?dry=0 to actually merge + delete.
+    Always returns a JSON report of what was (or would be) done."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.args.get('dry', '1') != '0'
+    db = get_db()
+    cols = [c['name'] for c in db.execute("PRAGMA table_info(watches)").fetchall()]
+    rows = [dict(r) for r in db.execute("SELECT * FROM watches").fetchall()]
+
+    groups = {}
+    for r in rows:
+        key = (_norm(r.get('brand') or ''),
+               _norm(r.get('model') or ''),
+               _norm(r.get('reference') or ''))
+        # Skip empty-brand rows — too risky to merge blind, the user
+        # should look at those manually.
+        if not key[0]:
+            continue
+        groups.setdefault(key, []).append(r)
+
+    def score(m):
+        """Higher = better winner."""
+        non_null = sum(1 for c in cols
+                       if m.get(c) not in (None, '', 0))
+        brand = m.get('brand') or ''
+        fancy = sum(1 for c in brand if (not c.isascii()) or c == '&')
+        return (non_null, fancy, len(brand))
+
+    actions = []
+    rows_deleted = 0
+    fields_filled = 0
+    for key, members in groups.items():
+        if len(members) < 2:
+            continue
+        members.sort(key=score, reverse=True)
+        winner = members[0]
+        siblings = members[1:]
+
+        merge_updates = {}
+        for sib in siblings:
+            for c in cols:
+                if c in ('id', 'created_at'):
+                    continue
+                w = winner.get(c)
+                if w in (None, '') and sib.get(c) not in (None, ''):
+                    merge_updates[c] = sib[c]
+                    winner[c] = sib[c]  # prevent later siblings overwriting
+
+        actions.append({
+            'norm_key':    ' | '.join(key),
+            'winner_id':   winner['id'],
+            'winner_brand': winner.get('brand'),
+            'winner_model': winner.get('model'),
+            'winner_ref':  winner.get('reference'),
+            'sibling_ids': [s['id'] for s in siblings],
+            'sibling_brands': [s.get('brand') for s in siblings],
+            'fields_filled': sorted(merge_updates.keys()),
+        })
+        rows_deleted += len(siblings)
+        fields_filled += len(merge_updates)
+
+        if not dry:
+            if merge_updates:
+                set_sql = ', '.join(f"{c} = ?" for c in merge_updates)
+                db.execute(
+                    f"UPDATE watches SET {set_sql}, updated_at = ? WHERE id = ?",
+                    list(merge_updates.values())
+                    + [datetime.utcnow().isoformat(), winner['id']]
+                )
+            for sib in siblings:
+                db.execute("DELETE FROM watches WHERE id = ?", [sib['id']])
+
+    if not dry:
+        db.commit()
+
+    return jsonify({
+        'dry_run':            dry,
+        'groups_with_dupes':  len(actions),
+        'rows_would_delete':  rows_deleted,
+        'fields_would_fill':  fields_filled,
+        'actions':            actions,
+    })
+
+
 @app.route('/admin/pens-owner-mark', methods=['POST'])
 def pens_owner_mark():
     """Set owner='Mark' for all pens records."""
@@ -6359,11 +6457,20 @@ def _collect_referenced_uploads(db):
 def _norm(s):
     """Aggressive normalization for matching folder/identifier strings
     across the export ↔ sweep round trip. Lowercased, whitespace
-    collapsed, filesystem-hostile chars stripped (mirrors _safe_path
-    rules so an item written one way matches itself read back)."""
+    collapsed, filesystem-hostile chars stripped, diacritics folded,
+    and punctuation softened so spelling drift like "A. Lange & Söhne"
+    vs "A. Lange Sohne" doesn't fragment a record into duplicates."""
+    if not s:
+        return ''
     bad = set('/\\:*?"<>|\n\r\t')
-    s = ''.join(c for c in (s or '') if c not in bad)
-    s = re.sub(r'\s+', ' ', s).strip(' .').lower()
+    s = ''.join(c for c in s if c not in bad)
+    # Fold diacritics — "Söhne" → "Sohne", "Eulèr" → "Euler".
+    s = unicodedata.normalize('NFKD', s)
+    s = ''.join(c for c in s if not unicodedata.combining(c))
+    # Treat any non-alphanumeric as soft whitespace so "&", ".", "-" etc.
+    # collapse: "A. Lange & Söhne" and "A Lange Sohne" hash the same.
+    s = re.sub(r'[^0-9A-Za-z\s]', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip().lower()
     return s
 
 
