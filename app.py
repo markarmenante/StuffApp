@@ -1411,6 +1411,10 @@ CATEGORY_ORDER_BY = {
                 "COALESCE(NULLIF(description, ''), 'zzz')"),
     'vehicles': ("COALESCE(NULLIF(make, ''), 'zzz'), "
                  "COALESCE(NULLIF(model, ''), 'zzz')"),
+    # Art: alpha by artist (records use "Last, First" so this gives
+    # surname order), then by title for the same artist's pieces.
+    'art': ("LOWER(COALESCE(NULLIF(artist, ''), 'zzz')), "
+            "LOWER(COALESCE(title, ''))"),
     # Type first (Residential block, then Commercial block, with a
     # bold divider rendered between them in the template), then the
     # six primary homes featured-first within each type, then alpha.
