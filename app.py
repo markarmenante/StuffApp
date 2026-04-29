@@ -699,6 +699,22 @@ def init_db():
         # don't break mid-deploy. They'll be dropped once every read
         # path moves to the JSON column.
         'ALTER TABLE properties ADD COLUMN documents TEXT',
+        # Same JSON-backed documents column for the simpler categories
+        # that previously had 1-2 fixed user-doc slots. Receipts stay
+        # as their own fixed column on each — only the "free" doc slots
+        # move into JSON. Backfilled at boot from the legacy columns.
+        'ALTER TABLE watches  ADD COLUMN documents TEXT',
+        'ALTER TABLE coins    ADD COLUMN documents TEXT',
+        'ALTER TABLE art      ADD COLUMN documents TEXT',
+        'ALTER TABLE vehicles ADD COLUMN documents TEXT',
+        # Persons has TWO independent doc-rows (IDs and Health) because
+        # the tabs are semantically distinct. License front/back +
+        # health card front/back stay as fixed columns (their semantic
+        # number fields — license_number, health_insurance_number —
+        # are tied to those slots). Only the user-titled id_doc_3..8
+        # and health_doc_3..8 slots compact into these JSON columns.
+        'ALTER TABLE persons  ADD COLUMN id_documents TEXT',
+        'ALTER TABLE persons  ADD COLUMN health_documents TEXT',
         # Alarm-codes list (8 rows × {entry, code, note})
         *[f'ALTER TABLE properties ADD COLUMN alarm_codes_entry_{i} TEXT' for i in range(1, 9)],
         *[f'ALTER TABLE properties ADD COLUMN alarm_codes_code_{i} TEXT' for i in range(1, 9)],
@@ -758,6 +774,35 @@ def init_db():
     _backfill_meds_from_prescriptions(db)
     _backfill_persons_doc_slots(db)
     _backfill_properties_documents_json(db)
+    _backfill_docs_json(db, 'watches', 'documents', [
+        ('container_1', None, 'Document 1'),
+        ('container_2', None, 'Document 2'),
+    ])
+    _backfill_docs_json(db, 'coins', 'documents', [
+        ('document_1', None, 'Doc 1'),
+        ('document_2', None, 'Doc 2'),
+    ])
+    _backfill_docs_json(db, 'art', 'documents', [
+        ('doc_2', None, 'Doc 2'),
+    ])
+    _backfill_docs_json(db, 'vehicles', 'documents', [
+        ('insurance',     'insurance_label',     'Insurance'),
+        ('invoice',       'invoice_label',       'Invoice'),
+        ('registration',  'registration_label',  'Registration'),
+        ('auto_title',    'auto_title_label',    'Auto Title'),
+        ('vehicle_doc_5', 'vehicle_doc_5_title', 'Doc 5'),
+        ('vehicle_doc_6', 'vehicle_doc_6_title', 'Doc 6'),
+        ('vehicle_doc_7', 'vehicle_doc_7_title', 'Doc 7'),
+        ('vehicle_doc_8', 'vehicle_doc_8_title', 'Doc 8'),
+    ])
+    _backfill_docs_json(db, 'persons', 'id_documents', [
+        (f'id_doc_{i}', f'id_doc_{i}_title', f'ID Doc {i}')
+        for i in range(3, 9)
+    ])
+    _backfill_docs_json(db, 'persons', 'health_documents', [
+        (f'health_doc_{i}', f'health_doc_{i}_title', f'Health Doc {i}')
+        for i in range(3, 9)
+    ])
     db.commit()
     # Apply field-alias normalizations to legacy rows so the UI never has to
     # handle synonym values. Runs every boot — cheap (small table, indexed
@@ -945,46 +990,57 @@ def _backfill_persons_doc_slots(db):
 
 def _backfill_properties_documents_json(db):
     """Compact the legacy doc_1..10 + doc_N_title columns on properties
-    into a single JSON array stored in `documents`.
-
-    JSON shape: list of {"title": str, "filename": str} preserving the
-    original slot order (1..10). Slots with no filename are skipped so
-    the array length matches "real" documents only.
-
-    Idempotent: a row whose `documents` is already populated (non-null,
-    non-empty array) is left alone — re-running won't clobber edits
-    made through the new dynamic UI."""
-    cols = {r['name'] for r in db.execute("PRAGMA table_info(properties)").fetchall()}
-    if 'documents' not in cols:
-        return
-    selectable = ['id', 'documents']
+    into a single JSON array stored in `documents`. See
+    `_backfill_docs_json` for the general pattern."""
+    sources = []
     for i in range(1, 11):
-        if f'doc_{i}' in cols:
-            selectable.append(f'doc_{i}')
-        if f'doc_{i}_title' in cols:
-            selectable.append(f'doc_{i}_title')
+        sources.append((f'doc_{i}', f'doc_{i}_title', ''))
+    _backfill_docs_json(db, 'properties', 'documents', sources)
+
+
+def _backfill_docs_json(db, table, target_col, sources):
+    """Compact legacy fixed doc columns into a JSON array stored in
+    `target_col`. `sources` is a list of (filename_col, title_col,
+    default_title) tuples in desired order — title_col may be None to
+    fall back to the default. Idempotent: a row whose `target_col` is
+    already populated is left alone, so re-running doesn't clobber
+    edits made through the dynamic UI."""
+    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    if target_col not in cols:
+        return
+    selectable = {'id', target_col}
+    for fn_col, title_col, _ in sources:
+        if fn_col in cols:
+            selectable.add(fn_col)
+        if title_col and title_col in cols:
+            selectable.add(title_col)
     rows = db.execute(
-        f"SELECT {', '.join(selectable)} FROM properties"
+        f"SELECT {', '.join(selectable)} FROM {table}"
     ).fetchall()
     for row in rows:
-        existing = row['documents'] if 'documents' in row.keys() else None
+        existing = row[target_col] if target_col in row.keys() else None
         if existing:
             try:
                 parsed = json.loads(existing)
                 if isinstance(parsed, list) and parsed:
-                    continue  # already migrated
+                    continue
             except (TypeError, ValueError):
-                pass  # malformed → rebuild from columns
+                pass
         docs = []
-        for i in range(1, 11):
-            fn_col, title_col = f'doc_{i}', f'doc_{i}_title'
-            fn = row[fn_col] if fn_col in row.keys() else None
-            title = row[title_col] if title_col in row.keys() else None
+        for fn_col, title_col, default_title in sources:
+            if fn_col not in row.keys():
+                continue
+            fn = row[fn_col]
             if not fn:
                 continue
-            docs.append({'title': (title or '').strip(), 'filename': fn})
+            title = ''
+            if title_col and title_col in row.keys():
+                title = (row[title_col] or '').strip()
+            if not title:
+                title = default_title or ''
+            docs.append({'title': title, 'filename': fn})
         db.execute(
-            'UPDATE properties SET documents = ? WHERE id = ?',
+            f'UPDATE {table} SET {target_col} = ? WHERE id = ?',
             (json.dumps(docs), row['id']),
         )
 
@@ -5525,12 +5581,13 @@ EXPORT_LAYOUT = {
             (f'Ref {_g(r, "reference")}') if _g(r, 'reference') else '',
         ])).strip() or (_g(r, 'brand'))[:40] or _g(r, 'id')[:8],
         'create': _create_watch,
+        # User-titled docs (container_1, container_2) moved into the
+        # JSON `documents` column; export walks them separately. Image
+        # + receipt remain fixed columns.
         'files': [
             ('image_obv', 'Front', None),
             ('image_rev', 'Back', None),
             ('receipt',   'Receipt', None),
-            ('container_1', 'Container 1', None),
-            ('container_2', 'Container 2', None),
         ],
     },
     'coins': {
@@ -5540,6 +5597,7 @@ EXPORT_LAYOUT = {
             _g(r, 'authority') or '',
             _g(r, 'denomination') or '',
         ])).strip() or _g(r, 'id')[:8],
+        # User-titled docs (document_1, document_2) moved into JSON.
         'files': [
             ('image_1', 'Obverse', None),
             ('image_2', 'Reverse', None),
@@ -5573,14 +5631,18 @@ EXPORT_LAYOUT = {
         'group': lambda r: _g(r, 'name') or 'Unknown',
         'ident': lambda r: _g(r, 'name') or _g(r, 'id')[:8],
         'create': _create_person,
+        # User-titled id_doc_3..8 + health_doc_3..8 moved to the
+        # `id_documents` and `health_documents` JSON columns. The four
+        # license/health-card front+back tiles keep their fixed columns
+        # because they're bound to the semantic number fields
+        # (license_number, health_insurance_number) used by the
+        # share/lookup buttons.
         'files': [
             ('head_shot',       'Head Shot',         None),
             ('license_obverse', 'License Front',     None),
             ('license_reverse', 'License Back',      None),
             ('health_card_obv', 'Health Card Front', None),
             ('health_card_rev', 'Health Card Back',  None),
-            *[(f'id_doc_{i}',     f'ID Doc {i}',     f'id_doc_{i}_title')     for i in range(3, 9)],
-            *[(f'health_doc_{i}', f'Health Doc {i}', f'health_doc_{i}_title') for i in range(3, 9)],
         ],
     },
     'cameras': {
@@ -5608,10 +5670,10 @@ EXPORT_LAYOUT = {
             str(_g(r, 'year')) if _g(r, 'year') else '',
         ])) or _g(r, 'id')[:8],
         'create': _create_art,
+        # doc_2 moved to JSON `documents` column.
         'files': [
             ('image',   'Image',   None),
             ('receipt', 'Receipt', None),
-            ('doc_2',   'Doc 2',   None),
         ],
     },
     'vehicles': {
@@ -5621,13 +5683,11 @@ EXPORT_LAYOUT = {
             _g(r, 'model') or '',
         ])).strip() or _g(r, 'id')[:8],
         'create': _create_vehicle,
+        # All eight user-titled doc slots (insurance / invoice /
+        # registration / auto_title + vehicle_doc_5..8) moved to the
+        # JSON `documents` column; only the image stays fixed.
         'files': [
-            ('image',        'Image',        None),
-            ('insurance',    'Insurance',    'insurance_label'),
-            ('invoice',      'Invoice',      'invoice_label'),
-            ('registration', 'Registration', 'registration_label'),
-            ('auto_title',   'Auto Title',   'auto_title_label'),
-            *[(f'vehicle_doc_{i}', f'Doc {i}', f'vehicle_doc_{i}_title') for i in range(5, 9)],
+            ('image', 'Image', None),
         ],
     },
     'recordings': {
