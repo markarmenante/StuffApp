@@ -4051,12 +4051,20 @@ def delete_file_field(category, record_id):
     cols = [row['name'] for row in db.execute(f"PRAGMA table_info({table})").fetchall()]
     if field_name not in cols:
         return jsonify({'error': 'Column not in table'}), 400
+    # Clear the paired title/label column too so the tile doesn't keep
+    # showing a leftover auto-fill from a since-removed file.
+    title_field = _title_field_for(category, field_name)
+    cleared_title = title_field if title_field and title_field in cols else None
+    sets = [f"{field_name} = NULL"]
+    if cleared_title:
+        sets.append(f"{cleared_title} = NULL")
+    sets.append("updated_at = ?")
     db.execute(
-        f"UPDATE {table} SET {field_name} = NULL, updated_at = ? WHERE id = ?",
+        f"UPDATE {table} SET {', '.join(sets)} WHERE id = ?",
         [datetime.utcnow().isoformat(), record_id],
     )
     db.commit()
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'cleared_title': cleared_title})
 
 
 # ---------------------------------------------------------------------------

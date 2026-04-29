@@ -3026,6 +3026,13 @@ async function deleteDocFile(ev, btn) {
     // pre-filled with the just-deleted selection.
     const input = cell.querySelector('input[type="file"]');
     if (input) input.value = '';
+    // Clear the paired title input too if the server cleared one.
+    if (data.cleared_title) {
+      const form = document.getElementById('mainForm');
+      const titleInput = form && form.querySelector(
+        `input[name="${data.cleared_title}"]`);
+      if (titleInput) titleInput.value = '';
+    }
   } catch (err) {
     alert('Delete failed: ' + (err.message || err));
     btn.disabled = false;
