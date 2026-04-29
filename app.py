@@ -754,6 +754,20 @@ def init_db():
         'ALTER TABLE recordings ADD COLUMN documents TEXT',
         'ALTER TABLE rifles     ADD COLUMN documents TEXT',
         'ALTER TABLE audio      ADD COLUMN documents TEXT',
+        # location_status (Storage / Consigned / Missing / Gifted) is a
+        # second status axis distinct from the lifecycle `status` field.
+        # Declared in FIELDS with type='select', so the search builder
+        # references it in WHERE — must exist on every item table or
+        # any text search 500s.
+        'ALTER TABLE watches    ADD COLUMN location_status TEXT',
+        'ALTER TABLE cameras    ADD COLUMN location_status TEXT',
+        'ALTER TABLE lenses     ADD COLUMN location_status TEXT',
+        'ALTER TABLE pens       ADD COLUMN location_status TEXT',
+        'ALTER TABLE art        ADD COLUMN location_status TEXT',
+        'ALTER TABLE vehicles   ADD COLUMN location_status TEXT',
+        'ALTER TABLE recordings ADD COLUMN location_status TEXT',
+        'ALTER TABLE rifles     ADD COLUMN location_status TEXT',
+        'ALTER TABLE audio      ADD COLUMN location_status TEXT',
         # Persons has TWO independent doc-rows (IDs and Health) because
         # the tabs are semantically distinct. License front/back +
         # health card front/back stay as fixed columns (their semantic
