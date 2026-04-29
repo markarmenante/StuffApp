@@ -1752,19 +1752,7 @@
            {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
   </div>
 
-  <div class="watch-body">
-    <div class="watch-photo drop-zone" data-field="head_shot"
-         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
-      {% if r and r['head_shot'] and r['head_shot']|is_image %}
-        <img src="{{ url_for('uploaded_file', filename=r['head_shot']) }}" alt="{{ val('name') }}">
-      {% else %}
-        <span class="no-img">👤</span>
-      {% endif %}
-      <label class="file-upload-lbl watch-photo-upload">
-        <input type="file" name="head_shot" accept="image/*" style="display:none"
-               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'head_shot')">
-      </label>
-    </div>
+  <div class="watch-body person-body-no-photo">
     <div class="watch-specs">
       <div class="person-doc-group" data-group="ids" hidden>
         <div class="dgrid person-id-top">

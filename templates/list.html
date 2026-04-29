@@ -151,6 +151,7 @@
   <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None) }}">
 
     <!-- Thumbnail -->
+    {% if category != 'persons' %}
     <div class="item-thumb"
          data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
          title="Drop an image here to upload">
@@ -161,6 +162,7 @@
         <span class="no-img">{{ cat_info.icon }}</span>
       {% endif %}
     </div>
+    {% endif %}
 
     {# Reverse thumbnail — only coins. Hidden on mobile to keep the row tight.
        Has its own upload-url + data-field so dropping on it goes to image_2,
