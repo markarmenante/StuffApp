@@ -4526,11 +4526,21 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 
   function applyOverflow() {
     restoreInline();
-    // Snapshot the inline collapsibles in their natural left-to-right
-    // order. Move them into the popover one at a time until no
-    // overlap remains.
-    const buttons = Array.from(overlay.querySelectorAll(COLLAPSIBLE_SELECTOR));
-    for (const btn of buttons) {
+    if (!isOverlapping()) {
+      kebab.hidden = true;
+      return;
+    }
+    // Tier 1 — secondary actions (PDF / Check / History / Lookup /
+    // share). Move them as a GROUP the moment any overlap is detected
+    // so the kebab presents a coherent "more actions" menu instead of
+    // half-collapsed (one in popover, the rest still inline).
+    const tier1 = Array.from(overlay.querySelectorAll(TIER1_SELECTOR));
+    tier1.forEach(btn => popover.appendChild(btn));
+    // Tier 2 — prev/next arrows. Only fold in if tier-1 wasn't
+    // enough; navigation is more painful to lose, so we move them
+    // one at a time and only as much as needed.
+    const tier2 = Array.from(overlay.querySelectorAll(TIER2_SELECTOR));
+    for (const btn of tier2) {
       if (!isOverlapping()) break;
       popover.appendChild(btn);
     }
