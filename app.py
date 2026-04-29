@@ -906,6 +906,12 @@ def init_db():
     # already in canonical form is left alone.
     _apply_property_renames(db)
 
+    # Compact any fully-empty entries left behind by the brief window
+    # when documents_delete blanked entries in place instead of popping.
+    # The trailing "+ Add document" slot is rendered by the macro, so
+    # an in-array empty has no purpose and just wastes screen space.
+    _compact_empty_doc_slots(db)
+
     # Pen cartridges: fold the "Pilot-Namiki" variant into the canonical
     # "Pilot/Namiki" so the strict select doesn't reject existing rows.
     # Idempotent — re-running on already-folded data updates 0 rows.
@@ -1150,6 +1156,57 @@ def _backfill_docs_json(db, table, target_col, sources):
             f'UPDATE {table} SET {target_col} = ? WHERE id = ?',
             (json.dumps(docs), row['id']),
         )
+
+
+def _compact_empty_doc_slots(db):
+    """Strip fully-empty {title:'', filename:''} entries from every JSON
+    documents-style column. Idempotent — a row whose JSON has no
+    empties is rewritten to itself."""
+    targets = [
+        ('properties', 'documents'),
+        ('watches',    'documents'),
+        ('coins',      'documents'),
+        ('art',        'documents'),
+        ('vehicles',   'documents'),
+        ('pens',       'documents'),
+        ('recordings', 'documents'),
+        ('rifles',     'documents'),
+        ('audio',      'documents'),
+        ('persons',    'id_documents'),
+        ('persons',    'health_documents'),
+    ]
+    for table, col in targets:
+        try:
+            cols = {r['name'] for r in db.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()}
+        except sqlite3.OperationalError:
+            continue
+        if col not in cols:
+            continue
+        rows = db.execute(
+            f"SELECT id, {col} FROM {table} WHERE {col} IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            try:
+                docs = json.loads(row[col] or '[]')
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(docs, list):
+                continue
+            kept = [
+                d for d in docs
+                if isinstance(d, dict) and (
+                    (d.get('title') or '').strip()
+                    or (d.get('filename') or '').strip()
+                )
+            ]
+            if len(kept) != len(docs):
+                db.execute(
+                    f"UPDATE {table} SET {col} = ? WHERE id = ?",
+                    (json.dumps(kept), row['id']),
+                )
+    db.commit()
 
 
 def _apply_property_renames(db):
@@ -4964,10 +5021,11 @@ def documents_set_file(category, record_id, doc_set, idx):
 
 @app.route('/<category>/<record_id>/documents/<doc_set>/<int:idx>/delete', methods=['POST'])
 def documents_delete(category, record_id, doc_set, idx):
-    """Empty a document tile in place: blanks the JSON entry but keeps
-    the slot so the user can drop a new doc into the same bin. The
-    underlying file is deleted from disk. (Special license/health-card
-    cells live in dedicated columns handled by delete_file_field.)"""
+    """Remove a document tile and the underlying file. The row's
+    always-present trailing '+ Add document' slot is the empty drop
+    zone; we don't preserve a bin in the deleted slot's place. (Special
+    license/health-card cells live in dedicated columns handled by
+    delete_file_field.)"""
     err, col = _docs_guard(category, record_id, doc_set)
     if err: return err
     db = get_db()
@@ -4975,10 +5033,10 @@ def documents_delete(category, record_id, doc_set, idx):
     docs = _docs_load(db, table, record_id, col) or []
     if idx < 0 or idx >= len(docs):
         return jsonify({'error': 'Index out of range'}), 400
-    removed = docs[idx] if isinstance(docs[idx], dict) else {}
-    docs[idx] = {'title': '', 'filename': ''}
+    removed = docs.pop(idx)
     _docs_save(db, table, record_id, docs, col)
-    _unlink_upload(removed.get('filename') or '')
+    if isinstance(removed, dict):
+        _unlink_upload(removed.get('filename') or '')
     return jsonify({'ok': True, 'count': len(docs)})
 
 
