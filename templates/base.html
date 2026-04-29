@@ -15,7 +15,12 @@
      address bar (Chromium) or "Add to Home Screen" (iOS Safari) so
      the app launches in its own standalone window — independent of
      whatever tabs they have open in the regular browser. #}
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+  {# crossorigin="use-credentials" forces the manifest fetch to send
+     cookies. Without it, Cloudflare Access doesn't see the session
+     cookie, redirects to its login (cross-origin), and the browser
+     trips CORS on that redirect. With credentials, CF Access serves
+     the manifest directly under the existing auth. #}
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}" crossorigin="use-credentials">
   <meta name="theme-color" content="#0f2f66">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
