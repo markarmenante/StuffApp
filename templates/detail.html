@@ -71,35 +71,23 @@
 <div class="dcell file-cell drop-zone dyn-doc-cell{% if not filename %} dyn-doc-empty{% endif %}"
      data-doc-idx="{{ idx }}">
   {% if filename %}
-  <button type="button" class="doc-share-btn dyn-doc-share"
-          data-doc-idx="{{ idx }}"
-          onclick="shareDynDocFile(event, this)"
-          title="Share via Messages / Mail" aria-label="Share">
-    <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
-         stroke="currentColor" stroke-width="2"
-         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M12 2 V17"/>
-      <path d="M6 8 L12 2 L18 8"/>
-      <path d="M5 13 H3 V25 H21 V13 H19"/>
-    </svg>
-  </button>
   <button type="button" class="doc-delete-btn dyn-doc-del"
           data-doc-idx="{{ idx }}"
           title="Remove this document" aria-label="Remove">×</button>
   {% endif %}
   {% if filename %}
     {% if filename|is_image %}
-      <a href="{{ url_for('uploaded_file', filename=filename) }}" class="doc-link" onclick="event.stopPropagation()">
+      <a href="{{ url_for('uploaded_file', filename=filename) }}" target="_blank" rel="noopener noreferrer" class="doc-link" onclick="event.stopPropagation()">
         <img src="{{ url_for('uploaded_file', filename=filename) }}" style="max-height:50px">
       </a>
     {% elif filename.lower().endswith('.pdf') %}
-      <a href="{{ url_for('uploaded_file', filename=filename) }}" target="_blank" class="doc-link doc-pdf-link" onclick="event.stopPropagation()">
+      <a href="{{ url_for('uploaded_file', filename=filename) }}" target="_blank" rel="noopener noreferrer" class="doc-link doc-pdf-link" onclick="event.stopPropagation()">
         <img src="{{ url_for('file_thumb', filename=filename) }}" alt="PDF preview" class="doc-pdf-thumb"
              style="max-height:72px;border:1px solid var(--border-light);background:#fff"
              onerror="this.parentNode.innerHTML='📄 View';this.parentNode.style.fontSize='11px';">
       </a>
     {% else %}
-      <a href="{{ url_for('uploaded_file', filename=filename) }}" target="_blank" class="doc-link" onclick="event.stopPropagation()" style="font-size:11px">📄 View</a>
+      <a href="{{ url_for('uploaded_file', filename=filename) }}" target="_blank" rel="noopener noreferrer" class="doc-link" onclick="event.stopPropagation()" style="font-size:11px">📄 View</a>
     {% endif %}
   {% else %}
     <span class="doc-empty-icon" aria-hidden="true">📄</span>
@@ -135,6 +123,20 @@
            data-doc-idx="{{ loop.index0 }}"
            value="{{ d.title or '' }}"
            placeholder="{{ placeholder_prefix }} {{ loop.index }}">
+    {% if d.filename %}
+    <button type="button" class="doc-share-btn dyn-doc-share"
+            data-doc-idx="{{ loop.index0 }}"
+            onclick="shareDynDocFile(event, this)"
+            title="Share via Messages / Mail" aria-label="Share">
+      <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 2 V17"/>
+        <path d="M6 8 L12 2 L18 8"/>
+        <path d="M5 13 H3 V25 H21 V13 H19"/>
+      </svg>
+    </button>
+    {% endif %}
     {{ dyndoccell(loop.index0, d.filename or '') }}
   </div>
   {% endfor %}
@@ -180,16 +182,16 @@
   <span class="file-cell-name">{{ label }}</span>
   {% if f %}
     {% if f|is_image %}
-      <a href="{{ url_for('uploaded_file', filename=f) }}" class="doc-link" onclick="event.stopPropagation()">
+      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" rel="noopener noreferrer" class="doc-link" onclick="event.stopPropagation()">
         <img src="{{ url_for('uploaded_file', filename=f) }}" style="max-height:50px">
       </a>
     {% elif f.lower().endswith('.pdf') %}
-      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" class="doc-link doc-pdf-link" onclick="event.stopPropagation()">
+      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" rel="noopener noreferrer" class="doc-link doc-pdf-link" onclick="event.stopPropagation()">
         <img src="{{ url_for('file_thumb', filename=f) }}" alt="PDF preview" class="doc-pdf-thumb" style="max-height:72px;border:1px solid var(--border-light);background:#fff"
              onerror="this.parentNode.innerHTML='📄 View';this.parentNode.style.fontSize='11px';">
       </a>
     {% else %}
-      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" style="font-size:11px" class="doc-link" onclick="event.stopPropagation()">📄 View</a>
+      <a href="{{ url_for('uploaded_file', filename=f) }}" target="_blank" rel="noopener noreferrer" style="font-size:11px" class="doc-link" onclick="event.stopPropagation()">📄 View</a>
     {% endif %}
   {% else %}
     <span class="doc-empty-icon" aria-hidden="true">📄</span>
@@ -2778,10 +2780,14 @@ function uploadFileToZone(zone, file) {
         const oldImg = zone.querySelector('img');
         if (oldImg) oldImg.closest('a.doc-link')?.remove();
         let link = zone.querySelector('a.doc-link');
-        if (link) { link.href = data.url; link.textContent = '📄 View'; link.style.fontSize = '11px'; }
+        if (link) {
+          link.href = data.url; link.textContent = '📄 View';
+          link.style.fontSize = '11px';
+          link.target = '_blank'; link.rel = 'noopener noreferrer';
+        }
         else {
           link = document.createElement('a');
-          link.href = data.url; link.target = '_blank';
+          link.href = data.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
           link.className = 'doc-link'; link.style.fontSize = '11px';
           link.textContent = '📄 View';
           link.addEventListener('click', ev => ev.stopPropagation());
@@ -2790,14 +2796,20 @@ function uploadFileToZone(zone, file) {
       } else {
         let img = zone.querySelector('img');
         const placeholder = zone.querySelector('span:not(.panel-lbl):not(.file-cell-name)');
-        if (img) { img.src = data.url; }
+        if (img) {
+          img.src = data.url;
+          // Ensure the surrounding link opens in a new tab even when
+          // updating an image already wrapped in <a>.
+          const a = img.closest('a.doc-link');
+          if (a) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        }
         else {
           if (placeholder) placeholder.remove();
           img = document.createElement('img');
           img.src = data.url; img.alt = '';
           if (zone.classList.contains('file-cell')) {
             const wrap = document.createElement('a');
-            wrap.href = data.url; wrap.target = '_blank';
+            wrap.href = data.url; wrap.target = '_blank'; wrap.rel = 'noopener noreferrer';
             wrap.className = 'doc-link';
             wrap.addEventListener('click', ev => ev.stopPropagation());
             img.style.maxHeight = '50px';
@@ -3493,16 +3505,16 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const lower = filename.toLowerCase();
     const isImg = /\.(png|jpe?g|gif|webp|tiff?)$/i.test(lower);
     if (isImg) {
-      return `<a href="${url}" class="doc-link" onclick="event.stopPropagation()">
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="doc-link" onclick="event.stopPropagation()">
         <img src="${url}" style="max-height:50px"></a>`;
     }
     if (lower.endsWith('.pdf')) {
-      return `<a href="${url}" target="_blank" class="doc-link doc-pdf-link" onclick="event.stopPropagation()">
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="doc-link doc-pdf-link" onclick="event.stopPropagation()">
         <img src="/file-thumb/${encodeURIComponent(filename)}" alt="PDF preview" class="doc-pdf-thumb"
              style="max-height:72px;border:1px solid var(--border-light);background:#fff"
              onerror="this.parentNode.innerHTML='📄 View';this.parentNode.style.fontSize='11px';"></a>`;
     }
-    return `<a href="${url}" target="_blank" class="doc-link" onclick="event.stopPropagation()" style="font-size:11px">📄 View</a>`;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="doc-link" onclick="event.stopPropagation()" style="font-size:11px">📄 View</a>`;
   }
 
   function promoteEmptyTile(idx, title, filename) {
@@ -3527,15 +3539,12 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       titleInp.value = title;
       titleInp.placeholder = `${placeholderPrefix} ${idx + 1}`;
     }
-    const cell = tile.querySelector('.dyn-doc-cell');
-    if (cell) {
-      cell.dataset.docIdx = String(idx);
-      cell.classList.remove('dyn-doc-empty');
-      // Wipe the empty-state placeholder, leave only the file <input>
-      // so we can rebuild around it.
-      const fileInp = cell.querySelector('input[type="file"]');
-      cell.querySelectorAll('.doc-empty-icon, .doc-link, .doc-delete-btn, .dyn-doc-share').forEach(n => n.remove());
-      // Insert share + × buttons + new file preview ahead of the file <input>.
+    // Share button lives in the title-bar area (sibling of the title
+    // input on the .dyn-doc tile), not inside the cell. Only show
+    // when the tile actually has a file to share — title-only entries
+    // get no share button until a file's added.
+    const existingShare = tile.querySelector('.dyn-doc-share');
+    if (filename && !existingShare) {
       const share = document.createElement('button');
       share.type = 'button';
       share.className = 'doc-share-btn dyn-doc-share';
@@ -3544,7 +3553,20 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       share.setAttribute('aria-label', 'Share');
       share.setAttribute('onclick', 'shareDynDocFile(event, this)');
       share.innerHTML = '<svg viewBox="0 0 24 28" width="14" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 V17"/><path d="M6 8 L12 2 L18 8"/><path d="M5 13 H3 V25 H21 V13 H19"/></svg>';
-      cell.insertBefore(share, fileInp ? fileInp.parentElement : null);
+      tile.appendChild(share);
+    } else if (existingShare) {
+      existingShare.dataset.docIdx = String(idx);
+      if (!filename) existingShare.remove();
+    }
+    const cell = tile.querySelector('.dyn-doc-cell');
+    if (cell) {
+      cell.dataset.docIdx = String(idx);
+      cell.classList.remove('dyn-doc-empty');
+      // Wipe the empty-state placeholder, leave only the file <input>
+      // so we can rebuild around it.
+      const fileInp = cell.querySelector('input[type="file"]');
+      cell.querySelectorAll('.doc-empty-icon, .doc-link, .doc-delete-btn').forEach(n => n.remove());
+      // Insert × button + new file preview ahead of the file <input>.
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'doc-delete-btn dyn-doc-del';
@@ -3668,11 +3690,27 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     if (input) input.click();
   });
 
-  // Tile reorder via the ⋮⋮ grip handle. Drag a tile by its grip and
-  // drop on another tile to insert before it. We track the source idx
-  // in module-level state because dataTransfer.getData isn't readable
-  // during dragover (only on drop in some browsers).
-  let dragSrcIdx = null;
+  // Tile reorder via the ⋮⋮ grip handle. Drag a tile by its grip:
+  //   - drop on another tile in THIS row → reorder within the set
+  //   - drop on a tile in ANOTHER row     → move between sets
+  //                                        (e.g. persons IDs ↔ Health)
+  // The drag state lives at module scope (window.__dynDocDrag) so the
+  // destination row's drop handler can read the source row's identity.
+  // dataTransfer.getData isn't reliable mid-dragover so we can't use
+  // it as the only channel.
+  if (!window.__dynDocDrag) {
+    window.__dynDocDrag = { sourceRow: null, sourceIdx: null };
+  }
+  const drag = window.__dynDocDrag;
+
+  // The destination set name is the last `/`-segment of the row's
+  // base URL (e.g. ".../documents/health" → "health"). Used to build
+  // the move-to URL when crossing rows.
+  function dstSetFromBase(b) {
+    if (!b) return '';
+    const parts = b.split('/').filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : '';
+  }
 
   row.addEventListener('dragstart', (ev) => {
     const grip = ev.target.closest('.dyn-doc-grip');
@@ -3686,7 +3724,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     if (!tile || tile.classList.contains('dyn-doc-row-empty')) return;
     const idx = parseInt(tile.dataset.docIdx, 10);
     if (isNaN(idx) || idx < 0) return;
-    dragSrcIdx = idx;
+    drag.sourceRow = row;
+    drag.sourceIdx = idx;
     ev.dataTransfer.effectAllowed = 'move';
     try { ev.dataTransfer.setData('text/x-dyn-doc-idx', String(idx)); } catch (e) {}
     if (ev.dataTransfer.setDragImage) {
@@ -3696,21 +3735,34 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   });
 
   row.addEventListener('dragend', () => {
-    row.querySelectorAll('.is-dragging, .is-drop-target').forEach(el => {
+    // Clear lingering visual state on every row, since cross-row
+    // drops can leave is-drop-target on a different row than the
+    // source.
+    document.querySelectorAll('.is-dragging, .is-drop-target').forEach(el => {
       el.classList.remove('is-dragging', 'is-drop-target');
     });
-    dragSrcIdx = null;
+    if (drag.sourceRow === row) {
+      drag.sourceRow = null;
+      drag.sourceIdx = null;
+    }
   });
 
-  // Combined dragover: tile-reorder takes priority over file-drop.
+  // Combined dragover: tile-reorder/move takes priority over file-drop.
   row.addEventListener('dragover', (ev) => {
-    if (dragSrcIdx !== null) {
+    if (drag.sourceRow !== null) {
       const tile = ev.target.closest('.dyn-doc');
-      if (!tile || tile.classList.contains('dyn-doc-row-empty')) return;
+      // Drop target is ANY non-empty tile in any row (including the
+      // row body itself for cross-row moves to a row with no tiles).
       ev.preventDefault();
       ev.dataTransfer.dropEffect = 'move';
-      row.querySelectorAll('.is-drop-target').forEach(el => el.classList.remove('is-drop-target'));
-      tile.classList.add('is-drop-target');
+      document.querySelectorAll('.is-drop-target').forEach(el => el.classList.remove('is-drop-target'));
+      if (tile && !tile.classList.contains('dyn-doc-row-empty')) {
+        tile.classList.add('is-drop-target');
+      } else if (drag.sourceRow !== row) {
+        // Hovering over the empty space of a different row — still a
+        // valid drop target for cross-set moves; mark the row itself.
+        row.classList.add('is-drop-target');
+      }
       return;
     }
     if (ev.target.closest('.dyn-doc-cell')) {
@@ -3719,32 +3771,48 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     }
   });
 
-  // Combined drop: tile-reorder POSTs new order and reloads; otherwise
-  // fall through to the existing file-drop upload path.
+  // Combined drop: same-row → reorder; different-row → move-to.
+  // Falls through to file-drop only when there's no active tile drag.
   row.addEventListener('drop', async (ev) => {
-    if (dragSrcIdx !== null) {
+    if (drag.sourceRow !== null) {
       ev.preventDefault();
-      const tile = ev.target.closest('.dyn-doc');
-      const src = dragSrcIdx;
-      dragSrcIdx = null;
-      row.querySelectorAll('.is-dragging, .is-drop-target').forEach(el => {
+      const srcRow = drag.sourceRow;
+      const srcIdx = drag.sourceIdx;
+      const srcBase = srcRow ? srcRow.dataset.docsBase : '';
+      drag.sourceRow = null;
+      drag.sourceIdx = null;
+      document.querySelectorAll('.is-dragging, .is-drop-target').forEach(el => {
         el.classList.remove('is-dragging', 'is-drop-target');
       });
-      if (!tile || tile.classList.contains('dyn-doc-row-empty')) return;
-      const dst = parseInt(tile.dataset.docIdx, 10);
-      if (isNaN(dst) || dst < 0 || dst === src) return;
-      const tiles = Array.from(row.querySelectorAll('.dyn-doc:not(.dyn-doc-row-empty)'));
-      const order = tiles.map(t => parseInt(t.dataset.docIdx, 10));
-      const fromPos = order.indexOf(src);
-      const toPos = order.indexOf(dst);
-      if (fromPos < 0 || toPos < 0) return;
-      order.splice(fromPos, 1);
-      order.splice(toPos, 0, src);
+      const tile = ev.target.closest('.dyn-doc');
+      if (srcRow === row) {
+        // Same-row reorder.
+        if (!tile || tile.classList.contains('dyn-doc-row-empty')) return;
+        const dst = parseInt(tile.dataset.docIdx, 10);
+        if (isNaN(dst) || dst < 0 || dst === srcIdx) return;
+        const tiles = Array.from(row.querySelectorAll('.dyn-doc:not(.dyn-doc-row-empty)'));
+        const order = tiles.map(t => parseInt(t.dataset.docIdx, 10));
+        const fromPos = order.indexOf(srcIdx);
+        const toPos = order.indexOf(dst);
+        if (fromPos < 0 || toPos < 0) return;
+        order.splice(fromPos, 1);
+        order.splice(toPos, 0, srcIdx);
+        try {
+          await postJSON(`${srcBase}/reorder`, { order });
+          window.location.reload();
+        } catch (err) {
+          alert('Reorder failed: ' + (err.message || err));
+        }
+        return;
+      }
+      // Cross-row → move between doc-sets.
+      const dstSet = dstSetFromBase(row.dataset.docsBase || '');
+      if (!dstSet) return;
       try {
-        await postJSON(`${base}/reorder`, { order });
+        await postJSON(`${srcBase}/${srcIdx}/move-to/${dstSet}`, {});
         window.location.reload();
       } catch (err) {
-        alert('Reorder failed: ' + (err.message || err));
+        alert('Move failed: ' + (err.message || err));
       }
       return;
     }

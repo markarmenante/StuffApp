@@ -4606,6 +4606,43 @@ def documents_delete(category, record_id, doc_set, idx):
     return jsonify({'ok': True, 'count': len(docs)})
 
 
+@app.route('/<category>/<record_id>/documents/<doc_set>/<int:idx>/move-to/<dst_set>', methods=['POST'])
+def documents_move(category, record_id, doc_set, idx, dst_set):
+    """Move a document entry from one doc-set to another within the
+    same record. Used by the UI when the user drags a tile from one
+    persons row (e.g. ids) onto the other (e.g. health). The entry is
+    appended to the end of the destination set so it lands in a
+    visible position; the source set is reindexed by the natural pop.
+    Returns counts for both sets so the caller can refresh.
+
+    Single-set categories never invoke this — DOC_SETS_BY_CATEGORY
+    only declares one column for them, and _docs_guard rejects
+    unknown set names. Same-set moves are also rejected (use the
+    /reorder endpoint instead)."""
+    err, src_col = _docs_guard(category, record_id, doc_set)
+    if err: return err
+    dst_col = _docs_col(category, dst_set)
+    if not dst_col:
+        return jsonify({'error': 'Unknown destination set'}), 400
+    if dst_col == src_col:
+        return jsonify({'error': 'Use reorder for same-set moves'}), 400
+    db = get_db()
+    table = CATEGORIES[category]['table']
+    src_docs = _docs_load(db, table, record_id, src_col) or []
+    if idx < 0 or idx >= len(src_docs):
+        return jsonify({'error': 'Index out of range'}), 400
+    dst_docs = _docs_load(db, table, record_id, dst_col) or []
+    entry = src_docs.pop(idx)
+    dst_docs.append(entry)
+    _docs_save(db, table, record_id, src_docs, src_col)
+    _docs_save(db, table, record_id, dst_docs, dst_col)
+    return jsonify({
+        'ok': True,
+        'src_count': len(src_docs),
+        'dst_count': len(dst_docs),
+    })
+
+
 @app.route('/<category>/<record_id>/documents/<doc_set>/reorder', methods=['POST'])
 def documents_reorder(category, record_id, doc_set):
     """Reorder the documents JSON array. Body: {"order": [old_idx, ...]}

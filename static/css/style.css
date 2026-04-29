@@ -1571,13 +1571,14 @@ input[type="date"] { -webkit-appearance: none; }
   position: relative;
 }
 
-/* Drag-handle for reordering JSON-backed document tiles. Sits in the
-   top-right corner of each existing tile (skipped on the trailing
-   "+ Add document" tile). Reorder POSTs a new order to the server,
-   then reloads to renumber indices. */
+/* Drag-handle for reordering / cross-set moving JSON-backed document
+   tiles. Sits at the top-LEFT of the title bar. Skipped on the
+   trailing "+ Add document" tile (nothing to reorder). Same-row drop
+   reorders, cross-row drop on a multi-set category (persons) moves
+   the entry between sets. */
 .dyn-doc-grip {
   position: absolute;
-  top: 3px; right: 4px;
+  top: 5px; left: 5px;
   font-size: 13px; line-height: 1;
   color: #b8b8b8;
   cursor: grab;
@@ -1592,6 +1593,18 @@ input[type="date"] { -webkit-appearance: none; }
 .dyn-doc-grip:active { cursor: grabbing; }
 .dyn-doc.is-dragging { opacity: 0.4; }
 .dyn-doc.is-drop-target { outline: 2px dashed var(--blue); outline-offset: -2px; }
+/* Share button on dynamic doc tiles — sits at top-RIGHT of the title
+   bar, opposite the grip. Reuses .doc-share-btn's color/hover/svg
+   sizing but overrides position so it lands in the title strip
+   (above the file cell) instead of inside the cell like doccell does. */
+.dyn-doc .dyn-doc-share {
+  top: 1px; right: 1px;
+  width: 22px; height: 22px;
+  z-index: 3;
+}
+/* Reserve room on the title input for the grip (left) and share
+   (right) so typed text doesn't run under either icon. */
+.dyn-doc .dyn-doc-title { padding-left: 24px; padding-right: 26px; }
 .property-doc-title {
   border: none;
   border-bottom: 1px solid var(--border);
