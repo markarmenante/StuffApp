@@ -851,12 +851,12 @@ def init_db():
     # All item categories now fold receipt into the dynamic docs row
     # instead of rendering it as a fixed cell. Recordings excluded:
     # FileMaker historically reused the receipt slot to hold the album
-    # cover, so folding it produced phantom "Receipt" tiles showing
-    # the cover image again. _strip_phantom_recording_receipts (below)
-    # cleans up the existing data.
+    # cover. Same issue happens elsewhere too (vehicles' Auto Title
+    # column got the cover image, etc.), so the strip-phantom helper
+    # below sweeps every item table for cover-image duplicates.
     for _t in ('art', 'coins', 'watches', 'pens', 'rifles', 'audio'):
         _migrate_receipt_into_documents(db, _t)
-    _strip_phantom_recording_receipts(db)
+    _strip_phantom_cover_image_docs(db)
     _backfill_docs_json(db, 'vehicles', 'documents', [
         ('insurance',     'insurance_label',     'Insurance'),
         ('invoice',       'invoice_label',       'Invoice'),
@@ -1165,46 +1165,67 @@ def _backfill_docs_json(db, table, target_col, sources):
         )
 
 
-def _strip_phantom_recording_receipts(db):
-    """Remove "Receipt"-titled doc tiles from recordings whose filename
-    matches the recording's cover image. Those came from a one-shot
-    fold of the legacy receipt column into the documents JSON, but
-    FileMaker had reused the receipt slot to store the album cover —
-    so the fold produced phantom tiles that just rerendered the cover.
-    Idempotent."""
-    try:
-        rows = db.execute(
-            "SELECT id, image, documents FROM recordings "
-            "WHERE documents IS NOT NULL"
-        ).fetchall()
-    except sqlite3.OperationalError:
-        return
-    for row in rows:
-        image = (row['image'] or '').strip()
-        if not image:
+def _strip_phantom_cover_image_docs(db):
+    """Remove doc tiles whose filename is identical to the record's
+    cover image, across every item category. These come from legacy
+    FileMaker imports that wrote the cover image filename into multiple
+    columns (receipt, registration, auto_title, etc.); the doc-row
+    backfill / receipt-fold then turned each one into a separate doc
+    tile rendering the same cover image. The intent of those tiles
+    was never user-facing — they should all collapse out. Idempotent."""
+    targets = [
+        # (table, cover_image_field, documents_json_field)
+        ('watches',    'image_obv',  'documents'),
+        ('coins',      'image_1',    'documents'),
+        ('art',        'image',      'documents'),
+        ('vehicles',   'image',      'documents'),
+        ('pens',       'image',      'documents'),
+        ('recordings', 'image',      'documents'),
+        ('rifles',     'image',      'documents'),
+        ('audio',      'image',      'documents'),
+        ('properties', 'image',      'documents'),
+    ]
+    for table, cover_col, docs_col in targets:
+        try:
+            cols = {r['name'] for r in db.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()}
+        except sqlite3.OperationalError:
+            continue
+        if cover_col not in cols or docs_col not in cols:
             continue
         try:
-            docs = json.loads(row['documents'] or '[]')
-        except (TypeError, ValueError):
+            rows = db.execute(
+                f"SELECT id, {cover_col} AS cover, {docs_col} AS docs "
+                f"FROM {table} WHERE {docs_col} IS NOT NULL"
+            ).fetchall()
+        except sqlite3.OperationalError:
             continue
-        if not isinstance(docs, list):
-            continue
-        kept = [
-            d for d in docs
-            if not (
-                isinstance(d, dict)
-                and (d.get('title') or '').strip().lower() == 'receipt'
-                and (d.get('filename') or '').strip() == image
-            )
-        ]
-        if len(kept) != len(docs):
+        for row in rows:
+            cover = (row['cover'] or '').strip()
+            if not cover:
+                continue
             try:
-                db.execute(
-                    "UPDATE recordings SET documents = ? WHERE id = ?",
-                    (json.dumps(kept), row['id']),
+                docs = json.loads(row['docs'] or '[]')
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(docs, list):
+                continue
+            kept = [
+                d for d in docs
+                if not (
+                    isinstance(d, dict)
+                    and (d.get('filename') or '').strip() == cover
                 )
-            except sqlite3.OperationalError:
-                pass
+            ]
+            if len(kept) != len(docs):
+                try:
+                    db.execute(
+                        f"UPDATE {table} SET {docs_col} = ? WHERE id = ?",
+                        (json.dumps(kept), row['id']),
+                    )
+                except sqlite3.OperationalError:
+                    pass
     db.commit()
 
 

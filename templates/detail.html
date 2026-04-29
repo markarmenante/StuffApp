@@ -4450,10 +4450,15 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   if (!overlay) return;
 
   // Selectors for buttons that may collapse into the kebab. Order
-  // matters: we move LEFT-most first so the most recently added
-  // action is the last to disappear.
-  const COLLAPSIBLE_SELECTOR =
+  // matters within each tier: we move LEFT-most first so the most
+  // recently added action is the last to disappear. Tier 1 = the
+  // "secondary" actions (PDF, Check, History, Lookup). Tier 2 =
+  // prev/next nav arrows; only collapsed when tier 1 isn't enough.
+  // ← Back is never collapsed.
+  const TIER1_SELECTOR =
     '.print-pdf-btn, .watch-lookup-btn, .coin-lookup-btn, .card-share-btn';
+  const TIER2_SELECTOR = '.detail-nav-btn';
+  const COLLAPSIBLE_SELECTOR = TIER1_SELECTOR + ', ' + TIER2_SELECTOR;
 
   // Build the kebab + popover once, hidden by default. Popover is
   // appended to <body> so it isn't trapped by the overlay's own
