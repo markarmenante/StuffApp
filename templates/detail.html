@@ -3553,6 +3553,12 @@ _wireRowDelete(
             cell.insertBefore(wrap.firstChild, fileInp ? fileInp.parentElement : null);
           }
         }
+        // If the server backfilled a default title (untitled tile got a
+        // file dropped on it), reflect it in the input.
+        if (d.title) {
+          const titleInp = tile.querySelector('.dyn-doc-title');
+          if (titleInp && !titleInp.value.trim()) titleInp.value = d.title;
+        }
       }
     } catch (err) {
       alert('Upload failed: ' + (err.message || err));

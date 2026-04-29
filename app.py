@@ -4367,14 +4367,21 @@ def documents_append(category, record_id):
     title = (request.form.get('title') or '').strip()
     upload = request.files.get('file') or request.files.get('image')
     filename = ''
+    original_basename = ''
     if upload and upload.filename:
         if not allowed_file(upload.filename):
             return jsonify({'error': 'File type not allowed'}), 400
+        original_basename = upload.filename
         filename = save_upload(upload) or ''
         if not filename:
             return jsonify({'error': 'Upload failed'}), 500
     if not title and not filename:
         return jsonify({'error': 'title or file required'}), 400
+    # Default title to the dropped file's basename (sans extension) so
+    # newly-added tiles render with something readable instead of just
+    # the file preview. The user can rename via the title input.
+    if not title and original_basename:
+        title = os.path.splitext(os.path.basename(original_basename))[0].strip()
     docs.append({'title': title, 'filename': filename})
     _docs_save(db, table, record_id, docs)
     return jsonify({
@@ -4414,13 +4421,18 @@ def documents_set_file(category, record_id, idx):
         return jsonify({'error': 'No file'}), 400
     if not allowed_file(upload.filename):
         return jsonify({'error': 'File type not allowed'}), 400
+    original_basename = upload.filename
     filename = save_upload(upload)
     if not filename:
         return jsonify({'error': 'Upload failed'}), 500
     docs[idx]['filename'] = filename
+    # Backfill title from the new file's basename only if this tile is
+    # currently untitled — leave deliberate user titles alone.
+    if not (docs[idx].get('title') or '').strip() and original_basename:
+        docs[idx]['title'] = os.path.splitext(os.path.basename(original_basename))[0].strip()
     _docs_save(db, table, record_id, docs)
     return jsonify({
-        'ok': True, 'filename': filename,
+        'ok': True, 'filename': filename, 'title': docs[idx].get('title', ''),
         'url': url_for('uploaded_file', filename=filename),
     })
 
