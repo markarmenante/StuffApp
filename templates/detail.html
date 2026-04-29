@@ -301,6 +301,22 @@
 
   {% if is_new %}<div class="new-record-bar">Add a New {{ cat_info.singular }}</div>{% endif %}
 
+{% if focus_field %}
+<script>
+// Server-side validation re-rendered the form because a required
+// field was empty — focus that field so the user can fill it in.
+document.addEventListener('DOMContentLoaded', function () {
+  var f = document.querySelector('[name="{{ focus_field }}"]');
+  if (f) {
+    f.focus();
+    if (typeof f.scrollIntoView === 'function') {
+      f.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+});
+</script>
+{% endif %}
+
   <!-- ══════════════════════════════════════════════════════════
        WATCHES
   ══════════════════════════════════════════════════════════ -->

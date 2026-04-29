@@ -3009,7 +3009,16 @@ def new_record(category):
                     or request.headers.get('X-Requested-With') == 'fetch':
                 return jsonify({'ok': False, 'error': err}), 400
             flash(err, 'error')
-            return redirect(url_for('new_record', category=category))
+            # Re-render the same new-record form with the data the user
+            # already entered (preserves their work) and focus the first
+            # missing field. A redirect here would wipe everything.
+            focus_map = {
+                'Property': 'property_name' if category == 'coins' else 'property',
+                'Owner': 'owner',
+                'Date': 'date_1' if category == 'coins' else 'date',
+            }
+            focus_field = focus_map.get(missing[0])
+            return _render_new_form(category, data=data, focus_field=focus_field)
         if category == 'coins':
             data['coin_id'] = next_coin_id(db)
             data['cat_id'] = next_cat_id(db, data.get('property_name'), data.get('date_1'))
@@ -3030,7 +3039,7 @@ def new_record(category):
                         or request.headers.get('X-Requested-With') == 'fetch':
                     return jsonify({'ok': False, 'error': err}), 403
                 flash(err, 'error')
-                return redirect(url_for('new_record', category=category))
+                return _render_new_form(category, data=data, focus_field=fld)
 
         cols = ', '.join(data.keys())
         placeholders = ', '.join(['?' for _ in data])
@@ -3058,11 +3067,22 @@ def new_record(category):
         return redirect(detail_url)
 
     # GET - blank form
+    return _render_new_form(category)
+
+
+def _render_new_form(category, data=None, focus_field=None):
+    """Render the /<category>/new form. Used both for the bare GET and
+    for re-rendering after a server-side validation failure on POST so
+    the user's already-entered data isn't lost. Pass `data` (a dict
+    keyed by field name) to repopulate inputs; pass `focus_field` to
+    auto-focus a specific field on load (e.g. the missing required
+    field that triggered the re-render)."""
+    cat_info = CATEGORIES[category]
     return render_template('detail.html',
                            category=category,
                            cat_info=cat_info,
-                           record=None,
-                           counts=counts,
+                           record=data,
+                           counts=get_counts(),
                            current_category=category,
                            categories=CATEGORIES,
                            fields=FIELDS[category],
@@ -3081,6 +3101,7 @@ def new_record(category):
                            today_iso=date.today().isoformat(),
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=VALUE_LISTS,
+                           focus_field=focus_field,
                            ta=build_typeahead(category))
 
 
