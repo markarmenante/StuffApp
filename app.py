@@ -2987,18 +2987,18 @@ def new_record(category):
                     if d:
                         data['owner'] = d
 
-        # Required fields on create. Owner is required for every
-        # category. Property is required for everything except
-        # credit_cards and persons (neither has a property field).
-        # Coins additionally need a date — Property + Date drive
-        # Display Position numbering downstream.
+        # Required fields on create. Owner only — needed for the
+        # row-filter / per-user access check from the moment the
+        # record exists. Property is intentionally NOT required here:
+        # the autosave-on-new flow would silently 400 every keystroke
+        # for users who hadn't filled Property yet, and nothing got
+        # persisted. Property can be filled in afterwards via the
+        # normal save_field path.
+        # Coins still need a Date — Property + Date drive Display
+        # Position numbering for cat_id assignment below.
         missing = []
         if not (data.get('owner') or '').strip():
             missing.append('Owner')
-        if category not in ('credit_cards', 'persons'):
-            prop_field = 'property_name' if category == 'coins' else 'property'
-            if not (data.get(prop_field) or '').strip():
-                missing.append('Property')
         if category == 'coins':
             if data.get('date_1') in (None, '') and not (data.get('date_1_text') or '').strip():
                 missing.append('Date')
