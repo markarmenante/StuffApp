@@ -1187,6 +1187,8 @@ def _strip_phantom_cover_image_docs(db):
     Fixed file columns are never touched; only JSON documents
     arrays are filtered. Idempotent."""
     layout = globals().get('EXPORT_LAYOUT') or {}
+    total_dropped = 0
+    sample_dropped = []
     for cat, fields in FIELDS.items():
         table = CATEGORIES.get(cat, {}).get('table')
         if not table:
@@ -1254,6 +1256,19 @@ def _strip_phantom_cover_image_docs(db):
                         continue
                     kept.append(d)
                 if len(kept) != len(docs):
+                    dropped_now = [
+                        d for d in docs
+                        if d not in kept
+                    ]
+                    total_dropped += len(dropped_now)
+                    if len(sample_dropped) < 8:
+                        for d in dropped_now:
+                            if isinstance(d, dict) and len(sample_dropped) < 8:
+                                sample_dropped.append({
+                                    'cat': cat,
+                                    'title': (d.get('title') or '')[:60],
+                                    'filename': (d.get('filename') or '')[:40],
+                                })
                     try:
                         db.execute(
                             f"UPDATE {table} SET {jc} = ? WHERE id = ?",
@@ -1262,6 +1277,11 @@ def _strip_phantom_cover_image_docs(db):
                     except sqlite3.OperationalError:
                         pass
     db.commit()
+    print(
+        f'[phantom-doc-cleanup] dropped {total_dropped} tile(s); '
+        f'sample={sample_dropped}',
+        flush=True,
+    )
 
 
 def _compact_empty_doc_slots(db):
