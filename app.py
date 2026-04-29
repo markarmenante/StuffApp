@@ -5491,9 +5491,13 @@ EXPORT_LAYOUT = {
         'group': lambda r: _g(r, 'name') or 'Unknown',
         'ident': lambda r: _g(r, 'name') or _g(r, 'id')[:8],
         'create': _create_property,
+        # `image` is the only fixed file slot — generic documents move
+        # into the JSON `documents` column, walked separately below
+        # because they're unbounded. Legacy doc_1..10 + doc_N_title
+        # columns still exist (dual-write migration), but we no longer
+        # export from them: documents is now the source of truth.
         'files': [
             ('image', 'Image', None),
-            *[(f'doc_{i}', f'Doc {i}', f'doc_{i}_title') for i in range(1, 11)],
         ],
     },
     'credit_cards': {
@@ -5707,6 +5711,34 @@ def admin_export_files():
                     arcname = f'{base_dir}/{_next_unique(base_dir, ident, label, ext)}'
                     zf.write(src, arcname=arcname)
                     written += 1
+
+                # JSON documents column — unbounded user-titled docs.
+                # Each entry exports as "<ident> — <title>.<ext>" same
+                # as a fixed slot, so the round-trip with sweep stays
+                # symmetric.
+                if cat in DOCUMENTS_CATEGORIES and 'documents' in cols:
+                    try:
+                        json_docs = json.loads(row['documents'] or '[]')
+                    except (TypeError, ValueError):
+                        json_docs = []
+                    if isinstance(json_docs, list):
+                        for i, d in enumerate(json_docs, 1):
+                            if not isinstance(d, dict):
+                                continue
+                            fname = (d.get('filename') or '').strip()
+                            if not fname:
+                                continue
+                            src = os.path.join(UPLOAD_FOLDER, fname)
+                            if not os.path.isfile(src):
+                                skipped_missing += 1
+                                continue
+                            label = (d.get('title') or '').strip() or f'Doc {i}'
+                            label = _safe_path(label)[0]
+                            ext = os.path.splitext(fname)[1] or ''
+                            base_dir = f'{cat_root}/{group}'
+                            arcname = f'{base_dir}/{_next_unique(base_dir, ident, label, ext)}'
+                            zf.write(src, arcname=arcname)
+                            written += 1
 
         # Per-category CSV at the top of each category's folder. Rows
         # in the same order as the table; columns straight from
@@ -6197,7 +6229,12 @@ def sweep_files():
                     if not (row[field] or '').strip():
                         chosen_field = field
                         break
-            if not chosen_field:
+            # For DOCUMENTS_CATEGORIES, never fall through to "first
+            # empty slot" — the documents JSON column is unbounded so
+            # every file that didn't match a named slot becomes a new
+            # entry in there. Categories with only fixed slots keep
+            # the original behavior.
+            if not chosen_field and cat not in DOCUMENTS_CATEGORIES:
                 # Label match failed (or matched-but-occupied) — find the
                 # first empty slot in declaration order.
                 for spec in plan['files']:
@@ -6208,7 +6245,7 @@ def sweep_files():
                         chosen_field = field
                         break
 
-            if not chosen_field:
+            if not chosen_field and cat not in DOCUMENTS_CATEGORIES:
                 report['skipped'].append({
                     'file': rel,
                     'reason': f"all file slots full on this record ({_g(row, 'id')[:8]})",
@@ -6219,24 +6256,48 @@ def sweep_files():
             if not stored:
                 report['skipped'].append({'file': rel, 'reason': 'save_upload failed (unsupported type?)'})
                 continue
-            db.execute(
-                f"UPDATE {table} SET {chosen_field} = ?, updated_at = ? WHERE id = ?",
-                [stored, now, _g(row, 'id')],
-            )
-            # Keep the cached row in sync so the next file targeting
-            # this record sees the slot as filled (and any auto-titled
-            # column shows up in subsequent label-match candidates).
-            row[chosen_field] = stored
-            row['updated_at'] = now
-            wrote = _autofill_title_from_filename(db, table, _g(row, 'id'), cat,
-                                                  chosen_field, parsed['original_basename'])
-            if wrote:
-                row[wrote[0]] = wrote[1]
-            report['uploaded'].append({
-                'file':   rel,
-                'record': f"{cat}/{_g(row, 'id')[:8]}",
-                'slot':   chosen_field,
-            })
+            if chosen_field:
+                db.execute(
+                    f"UPDATE {table} SET {chosen_field} = ?, updated_at = ? WHERE id = ?",
+                    [stored, now, _g(row, 'id')],
+                )
+                # Keep the cached row in sync so the next file targeting
+                # this record sees the slot as filled (and any auto-titled
+                # column shows up in subsequent label-match candidates).
+                row[chosen_field] = stored
+                row['updated_at'] = now
+                wrote = _autofill_title_from_filename(db, table, _g(row, 'id'), cat,
+                                                      chosen_field, parsed['original_basename'])
+                if wrote:
+                    row[wrote[0]] = wrote[1]
+                report['uploaded'].append({
+                    'file':   rel,
+                    'record': f"{cat}/{_g(row, 'id')[:8]}",
+                    'slot':   chosen_field,
+                })
+            else:
+                # DOCUMENTS_CATEGORIES path — append to the JSON column.
+                try:
+                    docs = json.loads(row['documents'] or '[]') if 'documents' in row.keys() else []
+                except (TypeError, ValueError):
+                    docs = []
+                if not isinstance(docs, list):
+                    docs = []
+                docs.append({
+                    'title':    (parsed.get('label') or '').strip(),
+                    'filename': stored,
+                })
+                db.execute(
+                    f"UPDATE {table} SET documents = ?, updated_at = ? WHERE id = ?",
+                    [json.dumps(docs), now, _g(row, 'id')],
+                )
+                row['documents'] = json.dumps(docs)
+                row['updated_at'] = now
+                report['uploaded'].append({
+                    'file':   rel,
+                    'record': f"{cat}/{_g(row, 'id')[:8]}",
+                    'slot':   f'documents[{len(docs) - 1}]',
+                })
         except Exception as exc:
             app.logger.exception('sweep: failed on %s', getattr(f, 'filename', '?'))
             report['skipped'].append({
