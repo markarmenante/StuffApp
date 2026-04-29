@@ -1159,9 +1159,13 @@ def _backfill_docs_json(db, table, target_col, sources):
 
 
 def _compact_empty_doc_slots(db):
-    """Strip fully-empty {title:'', filename:''} entries from every JSON
-    documents-style column. Idempotent — a row whose JSON has no
-    empties is rewritten to itself."""
+    """Strip empty entries from every JSON documents-style column. An
+    entry is "empty" if it has no filename AND the title is either
+    blank or a placeholder-like 'Doc <N>' / 'Document <N>' / 'Receipt'-
+    when-it-came-from-an-auto-migration string. Real user-typed titles
+    on a still-empty filename slot are preserved (the user might be
+    about to upload to it). Idempotent."""
+    placeholder_re = re.compile(r'^(doc|document)\s*\d*$', re.IGNORECASE)
     targets = [
         ('properties', 'documents'),
         ('watches',    'documents'),
@@ -1194,13 +1198,19 @@ def _compact_empty_doc_slots(db):
                 continue
             if not isinstance(docs, list):
                 continue
-            kept = [
-                d for d in docs
-                if isinstance(d, dict) and (
-                    (d.get('title') or '').strip()
-                    or (d.get('filename') or '').strip()
-                )
-            ]
+            kept = []
+            for d in docs:
+                if not isinstance(d, dict):
+                    continue
+                fn = (d.get('filename') or '').strip()
+                title = (d.get('title') or '').strip()
+                if fn:
+                    kept.append(d)
+                    continue
+                # No filename. Drop if title is also missing/placeholder.
+                if not title or placeholder_re.match(title):
+                    continue
+                kept.append(d)
             if len(kept) != len(docs):
                 db.execute(
                     f"UPDATE {table} SET {col} = ? WHERE id = ?",
