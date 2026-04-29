@@ -1217,14 +1217,19 @@ def _strip_phantom_cover_image_docs(db):
                 for c in present_files
                 if c in row.keys() and (row[c] or '').strip()
             }
-            ident_prefix = ''
+            ident_prefixes = []
             if ident_fn:
                 try:
                     ident = (ident_fn(row) or '').strip()
                     if ident:
-                        ident_prefix = f'{ident} — '
+                        # Match all three dash variants: em (—), en (–),
+                        # and hyphen (-). Different FileMaker exporters
+                        # used different glyphs; the current upload
+                        # path strips all three.
+                        for dash in ('—', '–', '-'):
+                            ident_prefixes.append(f'{ident} {dash} ')
                 except Exception:
-                    ident_prefix = ''
+                    pass
             for jc in present_jsons:
                 try:
                     docs = json.loads(row[jc] or '[]')
@@ -1242,8 +1247,10 @@ def _strip_phantom_cover_image_docs(db):
                     if fn and fn in other_files:
                         continue
                     # Drop pattern 2: title starts with the auto-generated
-                    # ident prefix
-                    if ident_prefix and title.startswith(ident_prefix):
+                    # ident prefix (any dash variant).
+                    if ident_prefixes and any(
+                        title.startswith(p) for p in ident_prefixes
+                    ):
                         continue
                     kept.append(d)
                 if len(kept) != len(docs):
