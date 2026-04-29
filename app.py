@@ -4454,6 +4454,27 @@ def documents_delete(category, record_id, idx):
     return jsonify({'ok': True, 'count': len(docs)})
 
 
+@app.route('/<category>/<record_id>/documents/reorder', methods=['POST'])
+def documents_reorder(category, record_id):
+    """Reorder the documents JSON array. Body: {"order": [old_idx, ...]}
+    must be a permutation of 0..N-1; the new array is built by reading
+    the old one in the order given."""
+    err = _docs_guard(category, record_id)
+    if err: return err
+    db = get_db()
+    table = CATEGORIES[category]['table']
+    docs = _docs_load(db, table, record_id) or []
+    payload = request.get_json(silent=True) or {}
+    order = payload.get('order')
+    if (not isinstance(order, list)
+            or len(order) != len(docs)
+            or sorted(order) != list(range(len(docs)))):
+        return jsonify({'error': 'order must be a permutation of 0..N-1'}), 400
+    docs = [docs[i] for i in order]
+    _docs_save(db, table, record_id, docs)
+    return jsonify({'ok': True, 'count': len(docs)})
+
+
 @app.template_filter('is_image')
 def is_image_filter(filename):
     if not filename:

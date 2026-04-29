@@ -1568,7 +1568,30 @@ input[type="date"] { -webkit-appearance: none; }
   border-radius: 6px;
   overflow: hidden;
   background: #fff;
+  position: relative;
 }
+
+/* Drag-handle for reordering JSON-backed document tiles. Sits in the
+   top-right corner of each existing tile (skipped on the trailing
+   "+ Add document" tile). Reorder POSTs a new order to the server,
+   then reloads to renumber indices. */
+.dyn-doc-grip {
+  position: absolute;
+  top: 3px; right: 4px;
+  font-size: 13px; line-height: 1;
+  color: #b8b8b8;
+  cursor: grab;
+  user-select: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  z-index: 3;
+  letter-spacing: -2px;
+  transition: color .15s, background .15s;
+}
+.dyn-doc-grip:hover { color: var(--text); background: rgba(0,0,0,0.06); }
+.dyn-doc-grip:active { cursor: grabbing; }
+.dyn-doc.is-dragging { opacity: 0.4; }
+.dyn-doc.is-drop-target { outline: 2px dashed var(--blue); outline-offset: -2px; }
 .property-doc-title {
   border: none;
   border-bottom: 1px solid var(--border);

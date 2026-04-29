@@ -1691,6 +1691,8 @@
        data-docs-base="{% if not is_new %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}/documents">
     {% for d in _documents %}
     <div class="property-doc dyn-doc" data-doc-idx="{{ loop.index0 }}">
+      <span class="dyn-doc-grip" draggable="true"
+            title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</span>
       <input type="text" class="property-doc-title dyn-doc-title"
              data-doc-idx="{{ loop.index0 }}"
              value="{{ d.title or '' }}"
@@ -3467,6 +3469,17 @@ _wireRowDelete(
     if (!tile) return;
     tile.dataset.docIdx = String(idx);
     tile.classList.remove('dyn-doc-row-empty');
+    // Promoted tile becomes reorder-able — give it a drag grip if one
+    // wasn't already injected by the server-rendered template.
+    if (!tile.querySelector('.dyn-doc-grip')) {
+      const grip = document.createElement('span');
+      grip.className = 'dyn-doc-grip';
+      grip.setAttribute('draggable', 'true');
+      grip.title = 'Drag to reorder';
+      grip.setAttribute('aria-label', 'Drag to reorder');
+      grip.textContent = '⋮⋮';
+      tile.insertBefore(grip, tile.firstChild);
+    }
     const titleInp = tile.querySelector('.dyn-doc-title');
     if (titleInp) {
       titleInp.dataset.docIdx = String(idx);
@@ -3603,14 +3616,86 @@ _wireRowDelete(
     if (input) input.click();
   });
 
-  // Drag-and-drop onto a tile
+  // Tile reorder via the ⋮⋮ grip handle. Drag a tile by its grip and
+  // drop on another tile to insert before it. We track the source idx
+  // in module-level state because dataTransfer.getData isn't readable
+  // during dragover (only on drop in some browsers).
+  let dragSrcIdx = null;
+
+  row.addEventListener('dragstart', (ev) => {
+    const grip = ev.target.closest('.dyn-doc-grip');
+    if (!grip) {
+      // Drags that don't start on the grip are not tile-reorders. We
+      // don't preventDefault here because text-selection drags from
+      // inside the title input still need their default behavior.
+      return;
+    }
+    const tile = grip.closest('.dyn-doc');
+    if (!tile || tile.classList.contains('dyn-doc-row-empty')) return;
+    const idx = parseInt(tile.dataset.docIdx, 10);
+    if (isNaN(idx) || idx < 0) return;
+    dragSrcIdx = idx;
+    ev.dataTransfer.effectAllowed = 'move';
+    try { ev.dataTransfer.setData('text/x-dyn-doc-idx', String(idx)); } catch (e) {}
+    if (ev.dataTransfer.setDragImage) {
+      ev.dataTransfer.setDragImage(tile, 20, 20);
+    }
+    tile.classList.add('is-dragging');
+  });
+
+  row.addEventListener('dragend', () => {
+    row.querySelectorAll('.is-dragging, .is-drop-target').forEach(el => {
+      el.classList.remove('is-dragging', 'is-drop-target');
+    });
+    dragSrcIdx = null;
+  });
+
+  // Combined dragover: tile-reorder takes priority over file-drop.
   row.addEventListener('dragover', (ev) => {
+    if (dragSrcIdx !== null) {
+      const tile = ev.target.closest('.dyn-doc');
+      if (!tile || tile.classList.contains('dyn-doc-row-empty')) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      row.querySelectorAll('.is-drop-target').forEach(el => el.classList.remove('is-drop-target'));
+      tile.classList.add('is-drop-target');
+      return;
+    }
     if (ev.target.closest('.dyn-doc-cell')) {
       ev.preventDefault();
       ev.dataTransfer.dropEffect = 'copy';
     }
   });
+
+  // Combined drop: tile-reorder POSTs new order and reloads; otherwise
+  // fall through to the existing file-drop upload path.
   row.addEventListener('drop', async (ev) => {
+    if (dragSrcIdx !== null) {
+      ev.preventDefault();
+      const tile = ev.target.closest('.dyn-doc');
+      const src = dragSrcIdx;
+      dragSrcIdx = null;
+      row.querySelectorAll('.is-dragging, .is-drop-target').forEach(el => {
+        el.classList.remove('is-dragging', 'is-drop-target');
+      });
+      if (!tile || tile.classList.contains('dyn-doc-row-empty')) return;
+      const dst = parseInt(tile.dataset.docIdx, 10);
+      if (isNaN(dst) || dst < 0 || dst === src) return;
+      const tiles = Array.from(row.querySelectorAll('.dyn-doc:not(.dyn-doc-row-empty)'));
+      const order = tiles.map(t => parseInt(t.dataset.docIdx, 10));
+      const fromPos = order.indexOf(src);
+      const toPos = order.indexOf(dst);
+      if (fromPos < 0 || toPos < 0) return;
+      order.splice(fromPos, 1);
+      order.splice(toPos, 0, src);
+      try {
+        await postJSON(`${base}/reorder`, { order });
+        window.location.reload();
+      } catch (err) {
+        alert('Reorder failed: ' + (err.message || err));
+      }
+      return;
+    }
     const cell = ev.target.closest('.dyn-doc-cell');
     if (!cell) return;
     ev.preventDefault();
