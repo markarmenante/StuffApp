@@ -63,6 +63,41 @@
   </label>
 </div>
 {% endmacro %}
+{# Dynamic-documents tile: renders one entry of the JSON `documents`
+   column. idx=-1 marks the trailing always-blank tile that becomes a
+   real document on first drop/type (handled in JS, see "Dynamic
+   documents" block at the bottom of this template). #}
+{% macro dyndoccell(idx, filename) %}
+<div class="dcell file-cell drop-zone dyn-doc-cell{% if not filename %} dyn-doc-empty{% endif %}"
+     data-doc-idx="{{ idx }}">
+  {% if filename %}
+  <button type="button" class="doc-delete-btn dyn-doc-del"
+          data-doc-idx="{{ idx }}"
+          title="Remove this document" aria-label="Remove">×</button>
+  {% endif %}
+  {% if filename %}
+    {% if filename|is_image %}
+      <a href="{{ url_for('uploaded_file', filename=filename) }}" class="doc-link" onclick="event.stopPropagation()">
+        <img src="{{ url_for('uploaded_file', filename=filename) }}" style="max-height:50px">
+      </a>
+    {% elif filename.lower().endswith('.pdf') %}
+      <a href="{{ url_for('uploaded_file', filename=filename) }}" target="_blank" class="doc-link doc-pdf-link" onclick="event.stopPropagation()">
+        <img src="{{ url_for('file_thumb', filename=filename) }}" alt="PDF preview" class="doc-pdf-thumb"
+             style="max-height:72px;border:1px solid var(--border-light);background:#fff"
+             onerror="this.parentNode.innerHTML='📄 View';this.parentNode.style.fontSize='11px';">
+      </a>
+    {% else %}
+      <a href="{{ url_for('uploaded_file', filename=filename) }}" target="_blank" class="doc-link" onclick="event.stopPropagation()" style="font-size:11px">📄 View</a>
+    {% endif %}
+  {% else %}
+    <span class="doc-empty-icon" aria-hidden="true">📄</span>
+  {% endif %}
+  <label class="file-upload-lbl" onclick="event.stopPropagation()">
+    <input type="file" class="dyn-doc-file" data-doc-idx="{{ idx }}" accept="image/*,application/pdf">
+  </label>
+</div>
+{% endmacro %}
+
 {% macro doccell(field, label, num_field='', num_label='', num_static='', share_with=None, no_share=False) %}
 {% set f = r[field] if r else none %}
 <div class="dcell file-cell drop-zone" data-field="{{ field }}"
@@ -1642,24 +1677,32 @@
   </div>
   {% endif %}
 
-  <!-- Ten freeform document slots (deeds / insurance / warranties / …)
-       in a 5 x 2 grid on desktop; mobile collapses to a 2-column grid
-       (see .property-doc-row in style.css). Each has its own editable
-       title above the drop-zone so the user can label them per record. -->
+  <!-- Dynamic documents — JSON-backed, unbounded. Each existing entry
+       gets a tile; a permanent trailing blank tile lets the user drop
+       a new file or type a title to create the next document. The JS
+       handler (see "Dynamic documents" block near the end of this
+       template) appends to /documents/append on first interaction
+       with the blank tile and slides a fresh blank in behind it. -->
   <div class="section-bar">Documents</div>
-  {% for row in [[1,2,3,4,5], [6,7,8,9,10]] %}
-  <div class="dgrid dg5 property-doc-row">
-    {% for i in row %}
-    <div class="property-doc">
-      <input type="text" name="doc_{{ i }}_title"
-             value="{{ val('doc_' ~ i ~ '_title') }}"
-             class="property-doc-title"
-             placeholder="Doc {{ i }}">
-      {{ doccell('doc_' ~ i, '') }}
+  {% set _documents = (val('documents'))|from_json %}
+  <div class="dgrid dg5 property-doc-row" id="dynDocRow"
+       data-docs-base="{% if not is_new %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}/documents">
+    {% for d in _documents %}
+    <div class="property-doc dyn-doc" data-doc-idx="{{ loop.index0 }}">
+      <input type="text" class="property-doc-title dyn-doc-title"
+             data-doc-idx="{{ loop.index0 }}"
+             value="{{ d.title or '' }}"
+             placeholder="Doc {{ loop.index }}">
+      {{ dyndoccell(loop.index0, d.filename or '') }}
     </div>
     {% endfor %}
+    <div class="property-doc dyn-doc dyn-doc-row-empty" data-doc-idx="-1">
+      <input type="text" class="property-doc-title dyn-doc-title"
+             data-doc-idx="-1"
+             placeholder="+ Add document">
+      {{ dyndoccell(-1, '') }}
+    </div>
   </div>
-  {% endfor %}
 
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="status">{% for s in ['','Own','Sold'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -3330,6 +3373,240 @@ _wireRowDelete(
   '.alarm-codes-row[data-alarm-idx]', 'alarm-del-btn',
   'alarm-codes-row-empty', 'alarmIdx',
   ['alarm_codes_entry', 'alarm_codes_code', 'alarm_codes_note'], 8, 4);
+
+// ── Dynamic documents (properties pilot) ──────────────────────────
+// Always one trailing blank tile. Drop a file or type a title in it
+// → POST /documents/append → tile becomes a real doc and a fresh
+// blank tile slides in behind it. Title edits / file replacements /
+// × deletes on existing tiles call /documents/<idx>/{title,file,delete}.
+(function dynDocs() {
+  const row = document.getElementById('dynDocRow');
+  if (!row) return;
+  const base = row.dataset.docsBase || '';
+  // Refuse to wire up on the new-record form — the API needs a saved
+  // record_id, and the property detail page has no autosave-on-new
+  // path yet. The blank tile will start working after first save.
+  if (!base || base === '/documents') return;
+
+  function tileAt(idx) {
+    return row.querySelector(`.dyn-doc[data-doc-idx="${idx}"]`);
+  }
+  function emptyTile() {
+    return row.querySelector('.dyn-doc-row-empty');
+  }
+  async function postFD(url, fd) {
+    const r = await fetch(url, { method: 'POST', body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    return d;
+  }
+  async function postJSON(url, body) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    return d;
+  }
+
+  // Append a brand-new doc (file and/or title from the blank tile),
+  // then promote the blank tile to its real index and re-spawn an
+  // empty blank tile after it. We rebuild the promoted tile's file
+  // cell from the server's response so the preview / × button render
+  // correctly without a full page reload.
+  async function append({ file, title }) {
+    const fd = new FormData();
+    if (title) fd.append('title', title);
+    if (file)  fd.append('file',  file);
+    const d = await postFD(`${base}/append`, fd);
+    promoteEmptyTile(d.idx, d.title || '', d.filename || '');
+    spawnEmptyTile();
+  }
+  async function setTitle(idx, title) {
+    return postJSON(`${base}/${idx}/title`, { title });
+  }
+  async function setFile(idx, file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    return postFD(`${base}/${idx}/file`, fd);
+  }
+  async function deleteTile(idx) {
+    return postJSON(`${base}/${idx}/delete`, {});
+  }
+
+  function fileCellHTML(idx, filename) {
+    if (!filename) return `<span class="doc-empty-icon" aria-hidden="true">📄</span>`;
+    const url = `/uploads/${encodeURIComponent(filename)}`;
+    const lower = filename.toLowerCase();
+    const isImg = /\.(png|jpe?g|gif|webp|tiff?)$/i.test(lower);
+    if (isImg) {
+      return `<a href="${url}" class="doc-link" onclick="event.stopPropagation()">
+        <img src="${url}" style="max-height:50px"></a>`;
+    }
+    if (lower.endsWith('.pdf')) {
+      return `<a href="${url}" target="_blank" class="doc-link doc-pdf-link" onclick="event.stopPropagation()">
+        <img src="/file-thumb/${encodeURIComponent(filename)}" alt="PDF preview" class="doc-pdf-thumb"
+             style="max-height:72px;border:1px solid var(--border-light);background:#fff"
+             onerror="this.parentNode.innerHTML='📄 View';this.parentNode.style.fontSize='11px';"></a>`;
+    }
+    return `<a href="${url}" target="_blank" class="doc-link" onclick="event.stopPropagation()" style="font-size:11px">📄 View</a>`;
+  }
+
+  function promoteEmptyTile(idx, title, filename) {
+    const tile = emptyTile();
+    if (!tile) return;
+    tile.dataset.docIdx = String(idx);
+    tile.classList.remove('dyn-doc-row-empty');
+    const titleInp = tile.querySelector('.dyn-doc-title');
+    if (titleInp) {
+      titleInp.dataset.docIdx = String(idx);
+      titleInp.value = title;
+      titleInp.placeholder = `Doc ${idx + 1}`;
+    }
+    const cell = tile.querySelector('.dyn-doc-cell');
+    if (cell) {
+      cell.dataset.docIdx = String(idx);
+      cell.classList.remove('dyn-doc-empty');
+      // Wipe the empty-state placeholder, leave only the file <input>
+      // so we can rebuild around it.
+      const fileInp = cell.querySelector('input[type="file"]');
+      cell.querySelectorAll('.doc-empty-icon, .doc-link, .doc-delete-btn').forEach(n => n.remove());
+      // Insert × button + new file preview ahead of the file <input>.
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'doc-delete-btn dyn-doc-del';
+      del.dataset.docIdx = String(idx);
+      del.title = 'Remove this document';
+      del.setAttribute('aria-label', 'Remove');
+      del.textContent = '×';
+      cell.insertBefore(del, fileInp ? fileInp.parentElement : null);
+      const wrap = document.createElement('span');
+      wrap.innerHTML = fileCellHTML(idx, filename);
+      while (wrap.firstChild) {
+        cell.insertBefore(wrap.firstChild, fileInp ? fileInp.parentElement : null);
+      }
+      if (fileInp) fileInp.dataset.docIdx = String(idx);
+    }
+  }
+
+  function spawnEmptyTile() {
+    const nextIdx = row.querySelectorAll('.dyn-doc:not(.dyn-doc-row-empty)').length;
+    const tile = document.createElement('div');
+    tile.className = 'property-doc dyn-doc dyn-doc-row-empty';
+    tile.dataset.docIdx = '-1';
+    tile.innerHTML = `
+      <input type="text" class="property-doc-title dyn-doc-title"
+             data-doc-idx="-1" placeholder="+ Add document">
+      <div class="dcell file-cell drop-zone dyn-doc-cell dyn-doc-empty"
+           data-doc-idx="-1">
+        <span class="doc-empty-icon" aria-hidden="true">📄</span>
+        <label class="file-upload-lbl" onclick="event.stopPropagation()">
+          <input type="file" class="dyn-doc-file" data-doc-idx="-1" accept="image/*,application/pdf">
+        </label>
+      </div>`;
+    row.appendChild(tile);
+  }
+
+  // Title input — blur saves. On the empty tile, blur with a non-empty
+  // title creates a new doc.
+  row.addEventListener('blur', async (ev) => {
+    const inp = ev.target.closest('.dyn-doc-title');
+    if (!inp) return;
+    const idx = parseInt(inp.dataset.docIdx, 10);
+    const title = inp.value.trim();
+    try {
+      if (idx === -1) {
+        if (!title) return;
+        await append({ title });
+      } else {
+        await setTitle(idx, title);
+      }
+    } catch (err) { console.warn('doc title save failed:', err); }
+  }, true);
+
+  // File picker (clicked through the drop-zone label)
+  row.addEventListener('change', async (ev) => {
+    const inp = ev.target.closest('.dyn-doc-file');
+    if (!inp || !inp.files || !inp.files[0]) return;
+    const file = inp.files[0];
+    const tile = inp.closest('.dyn-doc');
+    const idx = parseInt(tile.dataset.docIdx, 10);
+    try {
+      if (idx === -1) {
+        const titleInp = tile.querySelector('.dyn-doc-title');
+        const title = titleInp ? titleInp.value.trim() : '';
+        await append({ file, title });
+      } else {
+        const d = await setFile(idx, file);
+        // Update the tile's preview without a full reload.
+        const cell = tile.querySelector('.dyn-doc-cell');
+        if (cell) {
+          const fileInp = cell.querySelector('input[type="file"]');
+          cell.querySelectorAll('.doc-link, .doc-empty-icon').forEach(n => n.remove());
+          const wrap = document.createElement('span');
+          wrap.innerHTML = fileCellHTML(idx, d.filename);
+          while (wrap.firstChild) {
+            cell.insertBefore(wrap.firstChild, fileInp ? fileInp.parentElement : null);
+          }
+        }
+      }
+    } catch (err) {
+      alert('Upload failed: ' + (err.message || err));
+    }
+    // Reset the file input so picking the same file twice still fires.
+    inp.value = '';
+  });
+
+  // × delete on existing tiles
+  row.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('.dyn-doc-del');
+    if (!btn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (!confirm('Remove this document?')) return;
+    const idx = parseInt(btn.dataset.docIdx, 10);
+    if (isNaN(idx) || idx < 0) return;
+    try {
+      await deleteTile(idx);
+      // Easiest correct behavior: full reload so the remaining tiles
+      // pick up their new (decremented) indexes from the server.
+      window.location.reload();
+    } catch (err) {
+      alert('Delete failed: ' + (err.message || err));
+    }
+  });
+
+  // Drag-and-drop onto a tile
+  row.addEventListener('dragover', (ev) => {
+    if (ev.target.closest('.dyn-doc-cell')) {
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'copy';
+    }
+  });
+  row.addEventListener('drop', async (ev) => {
+    const cell = ev.target.closest('.dyn-doc-cell');
+    if (!cell) return;
+    ev.preventDefault();
+    const file = ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if (!file) return;
+    const tile = cell.closest('.dyn-doc');
+    const idx = parseInt(tile.dataset.docIdx, 10);
+    try {
+      if (idx === -1) {
+        const titleInp = tile.querySelector('.dyn-doc-title');
+        const title = titleInp ? titleInp.value.trim() : '';
+        await append({ file, title });
+      } else {
+        await setFile(idx, file);
+        window.location.reload();
+      }
+    } catch (err) {
+      alert('Upload failed: ' + (err.message || err));
+    }
+  });
+})();
 </script>
 
 {% if category == 'coins' %}

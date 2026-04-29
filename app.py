@@ -4291,6 +4291,157 @@ def format_results_filter(value):
     return Markup(''.join(out))
 
 
+@app.template_filter('from_json')
+def from_json_filter(value):
+    """Parse a JSON string in templates. Returns [] on null / invalid
+    input so callers can iterate without guarding."""
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+# ---------------------------------------------------------------------------
+# Documents JSON helpers + endpoints (properties pilot)
+# ---------------------------------------------------------------------------
+# Categories whose detail page renders documents from the JSON `documents`
+# column instead of the legacy doc_N + doc_N_title slots. Other categories
+# still use the fixed-column path; they'll move over once verified.
+DOCUMENTS_CATEGORIES = {'properties'}
+
+
+def _docs_load(db, table, record_id):
+    """Read the documents JSON for a record, normalizing to a list of
+    {title, filename} dicts. Returns [] when null/malformed."""
+    row = db.execute(
+        f"SELECT documents FROM {table} WHERE id = ?", [record_id]
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        docs = json.loads(row['documents'] or '[]')
+    except (TypeError, ValueError):
+        docs = []
+    if not isinstance(docs, list):
+        docs = []
+    # Defensive: drop any stray entries that aren't dicts so the
+    # endpoints can assume shape.
+    return [d for d in docs if isinstance(d, dict)]
+
+
+def _docs_save(db, table, record_id, docs):
+    db.execute(
+        f"UPDATE {table} SET documents = ?, updated_at = ? WHERE id = ?",
+        [json.dumps(docs), datetime.utcnow().isoformat(), record_id],
+    )
+    db.commit()
+
+
+def _docs_guard(category, record_id):
+    """Common pre-flight: category must be enabled, record must exist
+    and the current user must be allowed to see it."""
+    if category not in DOCUMENTS_CATEGORIES:
+        return jsonify({'error': 'Documents not enabled for this category'}), 400
+    table = CATEGORIES[category]['table']
+    db = get_db()
+    row = db.execute(f"SELECT * FROM {table} WHERE id = ?", [record_id]).fetchone()
+    if not row:
+        return jsonify({'error': 'Record not found'}), 404
+    if not _user_can_see_row(category, row):
+        return jsonify({'error': 'Forbidden'}), 403
+    return None
+
+
+@app.route('/<category>/<record_id>/documents/append', methods=['POST'])
+def documents_append(category, record_id):
+    """Append a new document. Accepts multipart with optional `file`
+    and optional `title`. At least one must be present."""
+    err = _docs_guard(category, record_id)
+    if err: return err
+    db = get_db()
+    table = CATEGORIES[category]['table']
+    docs = _docs_load(db, table, record_id) or []
+    title = (request.form.get('title') or '').strip()
+    upload = request.files.get('file') or request.files.get('image')
+    filename = ''
+    if upload and upload.filename:
+        if not allowed_file(upload.filename):
+            return jsonify({'error': 'File type not allowed'}), 400
+        filename = save_upload(upload) or ''
+        if not filename:
+            return jsonify({'error': 'Upload failed'}), 500
+    if not title and not filename:
+        return jsonify({'error': 'title or file required'}), 400
+    docs.append({'title': title, 'filename': filename})
+    _docs_save(db, table, record_id, docs)
+    return jsonify({
+        'ok': True, 'idx': len(docs) - 1,
+        'title': title, 'filename': filename,
+        'url': url_for('uploaded_file', filename=filename) if filename else '',
+    })
+
+
+@app.route('/<category>/<record_id>/documents/<int:idx>/title', methods=['POST'])
+def documents_set_title(category, record_id, idx):
+    err = _docs_guard(category, record_id)
+    if err: return err
+    db = get_db()
+    table = CATEGORIES[category]['table']
+    docs = _docs_load(db, table, record_id) or []
+    if idx < 0 or idx >= len(docs):
+        return jsonify({'error': 'Index out of range'}), 400
+    payload = request.get_json(silent=True) or {}
+    docs[idx]['title'] = (payload.get('title') or '').strip()
+    _docs_save(db, table, record_id, docs)
+    return jsonify({'ok': True})
+
+
+@app.route('/<category>/<record_id>/documents/<int:idx>/file', methods=['POST'])
+def documents_set_file(category, record_id, idx):
+    """Replace the file on an existing document tile."""
+    err = _docs_guard(category, record_id)
+    if err: return err
+    db = get_db()
+    table = CATEGORIES[category]['table']
+    docs = _docs_load(db, table, record_id) or []
+    if idx < 0 or idx >= len(docs):
+        return jsonify({'error': 'Index out of range'}), 400
+    upload = request.files.get('file') or request.files.get('image')
+    if not upload or not upload.filename:
+        return jsonify({'error': 'No file'}), 400
+    if not allowed_file(upload.filename):
+        return jsonify({'error': 'File type not allowed'}), 400
+    filename = save_upload(upload)
+    if not filename:
+        return jsonify({'error': 'Upload failed'}), 500
+    docs[idx]['filename'] = filename
+    _docs_save(db, table, record_id, docs)
+    return jsonify({
+        'ok': True, 'filename': filename,
+        'url': url_for('uploaded_file', filename=filename),
+    })
+
+
+@app.route('/<category>/<record_id>/documents/<int:idx>/delete', methods=['POST'])
+def documents_delete(category, record_id, idx):
+    """Remove a document tile (drops the JSON entry; on-disk file is
+    left in place for the orphan-uploads admin to clean up later, same
+    as the per-column delete-file endpoint)."""
+    err = _docs_guard(category, record_id)
+    if err: return err
+    db = get_db()
+    table = CATEGORIES[category]['table']
+    docs = _docs_load(db, table, record_id) or []
+    if idx < 0 or idx >= len(docs):
+        return jsonify({'error': 'Index out of range'}), 400
+    docs.pop(idx)
+    _docs_save(db, table, record_id, docs)
+    return jsonify({'ok': True, 'count': len(docs)})
+
+
 @app.template_filter('is_image')
 def is_image_filter(filename):
     if not filename:
