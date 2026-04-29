@@ -1188,6 +1188,9 @@ def _strip_phantom_cover_image_docs(db):
     arrays are filtered. Idempotent."""
     layout = globals().get('EXPORT_LAYOUT') or {}
     total_dropped = 0
+    per_cat_dropped = {}
+    per_cat_kept = {}
+    suspicious_kept = []  # tiles we LEFT IN that look like potential phantoms
     sample_dropped = []
     for cat, fields in FIELDS.items():
         table = CATEGORIES.get(cat, {}).get('table')
@@ -1255,15 +1258,26 @@ def _strip_phantom_cover_image_docs(db):
                     ):
                         continue
                     kept.append(d)
+                    # Diagnostic: tiles LEFT IN whose title looks like
+                    # it could be a phantom (contains a dash), so we
+                    # can spot what the matcher is missing.
+                    if (' — ' in title or ' – ' in title or ' - ' in title) \
+                            and len(suspicious_kept) < 16:
+                        suspicious_kept.append({
+                            'cat': cat,
+                            'title': title[:80],
+                            'ident_first': (ident_prefixes[0] if ident_prefixes else None),
+                        })
                 if len(kept) != len(docs):
                     dropped_now = [
                         d for d in docs
                         if d not in kept
                     ]
                     total_dropped += len(dropped_now)
-                    if len(sample_dropped) < 8:
+                    per_cat_dropped[cat] = per_cat_dropped.get(cat, 0) + len(dropped_now)
+                    if len(sample_dropped) < 16:
                         for d in dropped_now:
-                            if isinstance(d, dict) and len(sample_dropped) < 8:
+                            if isinstance(d, dict) and len(sample_dropped) < 16:
                                 sample_dropped.append({
                                     'cat': cat,
                                     'title': (d.get('title') or '')[:60],
@@ -1279,7 +1293,15 @@ def _strip_phantom_cover_image_docs(db):
     db.commit()
     print(
         f'[phantom-doc-cleanup] dropped {total_dropped} tile(s); '
-        f'sample={sample_dropped}',
+        f'per_cat={per_cat_dropped}',
+        flush=True,
+    )
+    print(
+        f'[phantom-doc-cleanup] dropped sample={sample_dropped}',
+        flush=True,
+    )
+    print(
+        f'[phantom-doc-cleanup] kept-with-dash={suspicious_kept}',
         flush=True,
     )
 
