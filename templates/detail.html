@@ -4569,6 +4569,12 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 <script>
 (function setupAutogrow() {
   const MAX_LINES = 15;
+  // Diagnostic: each call to resize() pushes a row here so DevTools
+  // can inspect what the JS computed for every textarea on the page.
+  // In console:    window._autogrowDebug
+  // To inspect the description's last computation:
+  //   window._autogrowDebug.filter(d => d.name === 'description').pop()
+  window._autogrowDebug = [];
 
   function init(ta) {
     if (ta.dataset.no_autogrow !== undefined ||
@@ -4619,6 +4625,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     if (!ta.value.trim()) {
       ta.style.height = (lineH + chrome) + 'px';
       ta.style.overflowY = 'hidden';
+      window._autogrowDebug && window._autogrowDebug.push({
+        name: ta.name, empty: true, lineH, chrome, set: lineH + chrome,
+      });
       return;
     }
 
@@ -4631,6 +4640,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const target   = Math.min(desired, maxH);
     ta.style.height = target + 'px';
     ta.style.overflowY = desired > maxH ? 'auto' : 'hidden';
+    window._autogrowDebug && window._autogrowDebug.push({
+      name: ta.name, lineH, chrome, contentH, desired, maxH, target,
+      finalClientH: ta.clientHeight,
+      cssMinH: cs.minHeight, cssLineH: cs.lineHeight,
+    });
   }
 
   document.querySelectorAll('textarea').forEach(init);
