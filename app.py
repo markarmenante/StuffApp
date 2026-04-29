@@ -5003,6 +5003,10 @@ DOC_SETS_BY_CATEGORY = {
     'coins':      {'main': 'documents'},
     'art':        {'main': 'documents'},
     'vehicles':   {'main': 'documents'},
+    'pens':       {'main': 'documents'},
+    'recordings': {'main': 'documents'},
+    'rifles':     {'main': 'documents'},
+    'audio':      {'main': 'documents'},
     'persons':    {'ids': 'id_documents', 'health': 'health_documents'},
 }
 DOCUMENTS_CATEGORIES = set(DOC_SETS_BY_CATEGORY.keys())
