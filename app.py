@@ -2496,14 +2496,19 @@ def new_record(category):
                     data[title_field] = base
 
         # Owner default — applied whenever the form arrived without an
-        # owner. For member users the owner field is hidden, so this
-        # branch always fires; owners only hit it if they explicitly
-        # cleared the dropdown. Each category has its own canonical
-        # default per the user's preference map.
+        # owner. The owner field is hidden for member users (the form
+        # is gated by current_user.role == 'owner' in the template),
+        # so this branch always fires for them. Members always get
+        # 'YM' regardless of category; owners get the per-category
+        # canonical default from the preference map.
         if not (data.get('owner') or '').strip():
-            d = DEFAULT_OWNER_BY_CATEGORY.get(category)
-            if d:
-                data['owner'] = d
+            user = g.get('current_user') or {}
+            if user.get('role') != 'owner':
+                data['owner'] = 'YM'
+            else:
+                d = DEFAULT_OWNER_BY_CATEGORY.get(category)
+                if d:
+                    data['owner'] = d
 
         # Required fields on create. Owner is required for every
         # category. Property is required for everything except
@@ -6449,11 +6454,16 @@ def sweep_files():
                         seed['id'] = new_id
                         seed['created_at'] = now
                         seed['updated_at'] = now
-                        # Owner default for the freshly-created record
+                        # Owner default for the freshly-created record.
+                        # Members always get 'YM'; owners get the
+                        # per-category canonical default.
                         if 'owner' not in seed:
-                            d = DEFAULT_OWNER_BY_CATEGORY.get(cat)
-                            if d:
-                                seed['owner'] = d
+                            if user.get('role') != 'owner':
+                                seed['owner'] = 'YM'
+                            else:
+                                d = DEFAULT_OWNER_BY_CATEGORY.get(cat)
+                                if d:
+                                    seed['owner'] = d
                         table = CATEGORIES[cat]['table']
                         table_cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
                         seed = {k: v for k, v in seed.items() if k in table_cols}

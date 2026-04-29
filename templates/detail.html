@@ -735,11 +735,13 @@
       </select>
       <span class="blabel">Location</span>
     </div>
+    {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">
       {% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}
       <select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select>
       <span class="blabel">Owner</span>
     </div>
+    {% endif %}
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
