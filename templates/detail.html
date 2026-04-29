@@ -3224,18 +3224,36 @@ async function shareDynDocFile(ev, btn) {
   await _shareUrls(url ? [url] : [], recordName || docTitle || '', btn);
 }
 
-// People: IDs / Health section pills
+// People: IDs / Health section pills. The active tab is mirrored
+// into the URL hash so a full page reload (e.g. after deleting a doc
+// tile) restores the user's tab instead of always falling back to
+// the server-rendered default.
+function activatePersonTab(tab) {
+  if (tab !== 'ids' && tab !== 'health') return;
+  document.querySelectorAll('.person-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  document.querySelectorAll('.person-doc-group').forEach(g => {
+    g.hidden = g.dataset.group !== tab;
+  });
+}
+
 document.querySelectorAll('.person-tab').forEach(btn => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
-    document.querySelectorAll('.person-tab').forEach(b => {
-      b.classList.toggle('active', b === btn);
-    });
-    document.querySelectorAll('.person-doc-group').forEach(g => {
-      g.hidden = g.dataset.group !== tab;
-    });
+    activatePersonTab(tab);
+    // replaceState (vs assigning location.hash) avoids stacking
+    // history entries every time the user clicks between tabs.
+    history.replaceState(null, '', '#' + tab);
   });
 });
+
+// Restore tab from URL hash on initial page load (and on the reload
+// that follows a doc-tile delete / reorder / move).
+(function restorePersonTab() {
+  const h = (window.location.hash || '').replace(/^#/, '');
+  if (h === 'ids' || h === 'health') activatePersonTab(h);
+})();
 
 // People > Health > Medications: per-row × button.
 // Clicking deletes the row by shifting all rows below it up by one and
