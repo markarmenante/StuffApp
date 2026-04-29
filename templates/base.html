@@ -149,6 +149,7 @@ async function startExport(ev, link) {
       ui.progress('Pick (or confirm) your StuffFiles folder…');
       const result = await window.StuffSync.syncDown(ui.progress);
       ui.done('ok', `Synced ${result.written}/${result.total} files into your folder.`);
+      refreshFilesStatus();
     } catch (err) {
       if (err && err.name === 'AbortError') {
         ui.done('cancel', 'Cancelled.');
@@ -175,11 +176,28 @@ async function startExport(ev, link) {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     ui.done('ok', 'StuffFiles zip downloaded.');
+    refreshFilesStatus();
   } catch (err) {
     ui.done('err', 'Download failed: ' + (err.message || err));
   }
   return false;
 }
+
+// Files nav indicator: red when there's something newer than the user's
+// last export, green when caught up. Called on page load and after a
+// successful export run.
+async function refreshFilesStatus() {
+  const link = document.getElementById('navExportLink');
+  if (!link) return;
+  try {
+    const r = await fetch('/files-status', { credentials: 'same-origin' });
+    if (!r.ok) return;
+    const d = await r.json();
+    link.classList.toggle('stale', !!d.stale);
+    link.classList.toggle('fresh', !d.stale && !!d.last_export_at);
+  } catch (_) { /* network blip — leave indicator neutral */ }
+}
+document.addEventListener('DOMContentLoaded', refreshFilesStatus);
 
 // Sweep-button click handler. On Chromium, walks the saved StuffFiles
 // folder and uploads everything to /sweep (server skips slots that

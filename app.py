@@ -661,6 +661,7 @@ def init_db():
         'ALTER TABLE vehicles ADD COLUMN auto_title TEXT',
         'ALTER TABLE vehicles ADD COLUMN insurance_label TEXT',
         'ALTER TABLE users ADD COLUMN row_filters TEXT',
+        'ALTER TABLE users ADD COLUMN last_export_at TEXT',
         'ALTER TABLE persons ADD COLUMN owner TEXT',
         'ALTER TABLE vehicles ADD COLUMN invoice_label TEXT',
         'ALTER TABLE vehicles ADD COLUMN registration_label TEXT',
@@ -5521,8 +5522,59 @@ def admin_export_files():
     buf.seek(0)
     ts = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
     fname = f'StuffFiles-{user["email"].split("@")[0]}-{ts}.zip'
+    # Mark this user's Files export as fresh — the nav indicator turns
+    # green once the zip is delivered. Any record edited after this
+    # timestamp will flip the indicator back to red on the next page
+    # load (see _files_export_stale + /files-status below).
+    db.execute(
+        'UPDATE users SET last_export_at = ? WHERE id = ?',
+        (datetime.utcnow().isoformat(timespec='seconds'), user['id']),
+    )
+    db.commit()
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype='application/zip')
+
+
+def _files_export_stale(db, user, allowed):
+    """True when at least one record in the user's allowed categories
+    has been touched (updated_at) since the user's last successful
+    /export-files run, OR when the export has never run for this user.
+    Returns (stale, last_export_at, latest_update)."""
+    last = (user['last_export_at'] if 'last_export_at' in user.keys() else None) or None
+    latest = None
+    for cat in allowed:
+        info = CATEGORIES.get(cat)
+        if not info:
+            continue
+        try:
+            row = db.execute(
+                f"SELECT MAX(updated_at) AS m FROM {info['table']}"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            continue
+        m = row and row['m']
+        if m and (latest is None or m > latest):
+            latest = m
+    if latest is None:
+        # No data yet → not stale. Avoid a permanent red indicator on
+        # an empty account.
+        return (False, last, None)
+    if not last:
+        return (True, None, latest)
+    return (latest > last, last, latest)
+
+
+@app.route('/files-status', methods=['GET'])
+def files_status():
+    """JSON status for the nav Files indicator. Cheap query — runs on
+    every page load via base.html."""
+    user = g.get('current_user')
+    if not user:
+        return jsonify(stale=False), 200
+    allowed = g.get('allowed_cats') or set()
+    db = get_db()
+    stale, last, latest = _files_export_stale(db, user, allowed)
+    return jsonify(stale=stale, last_export_at=last, latest_update=latest)
 
 
 def _build_record_index(db, category):

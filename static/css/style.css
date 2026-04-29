@@ -127,6 +127,13 @@ input[type="number"]::-webkit-outer-spin-button {
   50%      { opacity: 1;   transform: translateY(-1px); }
 }
 
+/* Files-export freshness indicator. Red icon when at least one record
+   was edited since the last successful export (something to download);
+   green icon once the user has run the export and is caught up. The
+   busy state above wins while a build is in flight. */
+.nav-export.stale:not(.busy) .icon { color: #c0392b; }
+.nav-export.fresh:not(.busy) .icon { color: #2a7a2a; }
+
 /* Sticky toast for export progress. Bottom-right; only shown while a
    build is in flight or for a few seconds after success/failure. */
 .export-toast {
