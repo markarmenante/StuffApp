@@ -111,9 +111,9 @@ VALUE_LISTS = {
     'strap_color': ['Black','Blue','Blue/Gray','Brown','Burgundy','Dk Brown','Eggplant','Gold','Gray','Green','Lt Brown','Navy Blue','Red','Rose Gold','Stainless','Tan','Titanium','White Gold'],
     'owner': ['YM','Mark','Young'],
     'property': [
-        '223 Rigor','2929 EVR','42 Hotaling','780 Ladera',
-        'Carpinteria','Glass House','Harlemville','Lahontan','Martis Camp',
-        'NYC','Paris Saint-Guillaume','Party Barn','Pond House','Rec Center',
+        '42 Hotaling',
+        'Carpinteria','Glass House','Harlemville','Lahontan','Martis',
+        'NYC','Paris','Party Barn','Pond House','Rec Center',
     ],
     'status': ['Own','Ordered','Sold','Loaned','Gifted','Consigned','Lost'],
     'location_status': ['Storage','Consigned','Missing','Gifted'],
