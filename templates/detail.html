@@ -397,8 +397,17 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">Beat</span>
         </div>
         <div class="dcell">
-          <input type="text" value="{{ '%.2g Hz'|format(r['beat']|float / 7200) if r and r['beat'] else '' }}" readonly style="color:#888">
-          <span class="clabel">Hz</span>
+          {# Hz is derived from beat (vph ÷ 7200). Marked read-only +
+             onclick alert so a user who tries to type into it gets a
+             clear explanation rather than a silently-unresponsive
+             field. #}
+          <input type="text"
+                 value="{{ '%.2g Hz'|format(r['beat']|float / 7200) if r and r['beat'] else '' }}"
+                 readonly
+                 title="Calculated from Beat (vph ÷ 7200). Edit Beat to change."
+                 onclick="alert('Hz is calculated from Beat (vph ÷ 7200) and can’t be entered directly. Pick a Beat value above instead.')"
+                 style="color:#888;cursor:not-allowed">
+          <span class="clabel">Hz (calc)</span>
         </div>
       </div>
       <div class="dgrid dg2">
