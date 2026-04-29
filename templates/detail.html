@@ -4436,6 +4436,113 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 </script>
 {% endif %}
 
+{# ── Floating-nav overflow → kebab ────────────────────────────────
+   The detail page's floating action bar (PDF / Check / History /
+   Lookup / prev / next / Back) sits over the top-nav row. On narrow
+   viewports it covers the rightmost category icons. This script
+   measures the overlap and progressively moves the optional
+   "secondary" actions (PDF, lookup-style buttons) into a popover
+   reachable via a ⋮ kebab. Prev / next / Back never move. #}
+<script>
+(function setupActionsKebab() {
+  const overlay = document.querySelector('.detail-nav-overlay');
+  const nav     = document.querySelector('.nav-categories');
+  if (!overlay) return;
+
+  // Selectors for buttons that may collapse into the kebab. Order
+  // matters: we move LEFT-most first so the most recently added
+  // action is the last to disappear.
+  const COLLAPSIBLE_SELECTOR =
+    '.print-pdf-btn, .watch-lookup-btn, .coin-lookup-btn, .card-share-btn';
+
+  // Build the kebab + popover once, hidden by default. Popover is
+  // appended to <body> so it isn't trapped by the overlay's own
+  // bounds / shadow.
+  const kebab = document.createElement('button');
+  kebab.type = 'button';
+  kebab.className = 'detail-actions-kebab';
+  kebab.setAttribute('aria-label', 'More actions');
+  kebab.title = 'More actions';
+  kebab.textContent = '⋮';
+  kebab.hidden = true;
+  // Insert at the LEFT of the overlay so the kebab sits next to the
+  // category icons instead of next to the back-link.
+  overlay.insertBefore(kebab, overlay.firstChild);
+
+  const popover = document.createElement('div');
+  popover.className = 'detail-actions-popover';
+  popover.hidden = true;
+  document.body.appendChild(popover);
+
+  function positionPopover() {
+    const r = kebab.getBoundingClientRect();
+    popover.style.top  = (r.bottom + 6) + 'px';
+    popover.style.left = (r.left) + 'px';
+  }
+  kebab.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (popover.hidden) {
+      popover.hidden = false;
+      positionPopover();
+    } else {
+      popover.hidden = true;
+    }
+  });
+  document.addEventListener('click', (ev) => {
+    if (popover.hidden) return;
+    if (kebab.contains(ev.target) || popover.contains(ev.target)) return;
+    popover.hidden = true;
+  });
+  // Hide popover when a button inside it is clicked (so the user
+  // sees the immediate feedback on the page, not a stale popover).
+  popover.addEventListener('click', (ev) => {
+    if (ev.target.closest('.print-pdf-btn, .watch-lookup-btn, .coin-lookup-btn, .card-share-btn')) {
+      popover.hidden = true;
+    }
+  });
+
+  function isOverlapping() {
+    if (!nav) return false;
+    // The right edge of the rightmost category icon vs. the left
+    // edge of the floating overlay. If the icon extends past the
+    // overlay's left, they overlap.
+    const last = nav.lastElementChild;
+    if (!last) return false;
+    return last.getBoundingClientRect().right > overlay.getBoundingClientRect().left;
+  }
+
+  function restoreInline() {
+    // Move everything from the popover back into the overlay,
+    // before the kebab. Preserves left-to-right order.
+    while (popover.firstChild) {
+      overlay.insertBefore(popover.firstChild, kebab.nextSibling);
+    }
+  }
+
+  function applyOverflow() {
+    restoreInline();
+    // Snapshot the inline collapsibles in their natural left-to-right
+    // order. Move them into the popover one at a time until no
+    // overlap remains.
+    const buttons = Array.from(overlay.querySelectorAll(COLLAPSIBLE_SELECTOR));
+    for (const btn of buttons) {
+      if (!isOverlapping()) break;
+      popover.appendChild(btn);
+    }
+    kebab.hidden = popover.children.length === 0;
+    if (popover.hidden === false) positionPopover();
+  }
+
+  // Run after the page settles (fonts may shift widths). Re-run on
+  // viewport resize and when the user toggles the nav scroll position.
+  window.addEventListener('load', applyOverflow);
+  window.addEventListener('resize', applyOverflow);
+  if (nav) nav.addEventListener('scroll', applyOverflow, { passive: true });
+  // Also re-evaluate immediately so the first paint is correct.
+  requestAnimationFrame(applyOverflow);
+})();
+</script>
+
 {# ── Universal textarea auto-grow ────────────────────────────────
    Every textarea on a detail page shrinks to fit its content but
    never exceeds the natural height it would have rendered at under
