@@ -5793,160 +5793,171 @@ def sweep_files():
     for f in files:
         if not f or not f.filename:
             continue
-        # Browser may send the relative path on a webkitdirectory upload
-        # via Werkzeug's `webkitRelativePath` attribute (preserved as
-        # part of the multipart filename in newer browsers).
-        rel = (getattr(f, 'webkit_relative_path', None) or
-               getattr(f, 'webkitRelativePath', None) or
-               request.form.get(f'path_{f.filename}', '') or
-               f.filename)
-        # iOS multi-file picker: no path. Synthesize one from category +
-        # group hints + the bare filename so the parser still works.
-        if '/' not in rel and cat_hint_label:
-            rel = '/'.join(['StuffFiles', cat_hint_label,
-                            group_hint or 'Unknown', f.filename])
+        # Per-file try/except so a single bad file becomes a skipped
+        # entry instead of taking the whole 20-file batch down with a
+        # 500. The "server error:" prefix is matched client-side to
+        # decide which entries should retry on the next sweep.
+        try:
+            # Browser may send the relative path on a webkitdirectory upload
+            # via Werkzeug's `webkitRelativePath` attribute (preserved as
+            # part of the multipart filename in newer browsers).
+            rel = (getattr(f, 'webkit_relative_path', None) or
+                   getattr(f, 'webkitRelativePath', None) or
+                   request.form.get(f'path_{f.filename}', '') or
+                   f.filename)
+            # iOS multi-file picker: no path. Synthesize one from category +
+            # group hints + the bare filename so the parser still works.
+            if '/' not in rel and cat_hint_label:
+                rel = '/'.join(['StuffFiles', cat_hint_label,
+                                group_hint or 'Unknown', f.filename])
 
-        parsed = _parse_sweep_path(rel)
-        if not parsed:
-            report['skipped'].append({'file': rel, 'reason': 'unparsable path (need StuffFiles/<Category>/<Group>/<file> shape, or pick a category)'})
-            continue
-        cat = parsed['category']
-        if cat not in allowed:
-            report['skipped'].append({'file': rel, 'reason': f"no access to category '{cat}'"})
-            continue
+            parsed = _parse_sweep_path(rel)
+            if not parsed:
+                report['skipped'].append({'file': rel, 'reason': 'unparsable path (need StuffFiles/<Category>/<Group>/<file> shape, or pick a category)'})
+                continue
+            cat = parsed['category']
+            if cat not in allowed:
+                report['skipped'].append({'file': rel, 'reason': f"no access to category '{cat}'"})
+                continue
 
-        plan = EXPORT_LAYOUT[cat]
-        idx = _index_for(cat)
-        target_group = _norm(parsed['group'])
-        target_ident = _norm(parsed['ident'])
+            plan = EXPORT_LAYOUT[cat]
+            idx = _index_for(cat)
+            target_group = _norm(parsed['group'])
+            target_ident = _norm(parsed['ident'])
 
-        # Find rows whose (group, ident) match. ident match is exact
-        # after normalization; if no exact match, fall back to a prefix
-        # match so partial idents still land.
-        exact = [(g, i, r) for (g, i, r) in idx if g == target_group and i == target_ident]
-        if not exact:
-            prefix = [(g, i, r) for (g, i, r) in idx
-                      if g == target_group and target_ident and i.startswith(target_ident)]
-            matches = prefix
-        else:
-            matches = exact
-        # "Single-record-per-group" fallback. For categories where the
-        # group field IS the record's identity (Properties → name,
-        # Persons → name, Recordings → an artist's record per item),
-        # the path naturally looks like
-        #   StuffFiles/<Cat>/<RecordName>/<DocTitle>.<ext>
-        # with no " — " separator, so target_ident is actually the doc
-        # title. If exactly one record shares the group, treat that as
-        # the match and re-purpose `target_ident` as the slot label
-        # search key.
-        if not matches:
-            same_group = [(g, i, r) for (g, i, r) in idx if g == target_group]
-            if len(same_group) == 1:
-                matches = same_group
-                if not target_label and parsed['ident']:
-                    target_label = _norm(parsed['ident'])
-        if not matches:
-            # Optional auto-create. Only happens when the user opts in
-            # AND the category has a 'create' constructor in the layout.
-            create_fn = plan.get('create')
-            if auto_create and create_fn:
-                seed = create_fn(parsed['group'], parsed['ident']) or {}
-                if seed:
-                    new_id = str(uuid.uuid4())
-                    seed['id'] = new_id
-                    seed['created_at'] = now
-                    seed['updated_at'] = now
-                    # Owner default for the freshly-created record
-                    if 'owner' not in seed:
-                        d = DEFAULT_OWNER_BY_CATEGORY.get(cat)
-                        if d:
-                            seed['owner'] = d
-                    table = CATEGORIES[cat]['table']
-                    table_cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
-                    seed = {k: v for k, v in seed.items() if k in table_cols}
-                    cols_sql = ', '.join(seed.keys())
-                    placeholders = ', '.join(['?'] * len(seed))
-                    db.execute(
-                        f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})",
-                        list(seed.values()),
-                    )
-                    # Refresh the index so subsequent files in the same
-                    # sweep can match this brand-new row.
-                    new_row = db.execute(
-                        f"SELECT * FROM {table} WHERE id = ?", [new_id]
-                    ).fetchone()
-                    g_norm = _norm(plan['group'](new_row))
-                    i_norm = _norm(plan['ident'](new_row))
-                    indexes[cat].append((g_norm, i_norm, new_row))
-                    matches = [(g_norm, i_norm, new_row)]
-                    report['uploaded'].append({
-                        'file':   rel,
-                        'record': f"{cat}/{new_id[:8]} (CREATED)",
-                        'slot':   '(record)',
-                    })
-                else:
-                    report['skipped'].append({'file': rel, 'reason': f"auto-create returned no seed for {cat}"})
-                    continue
+            # Find rows whose (group, ident) match. ident match is exact
+            # after normalization; if no exact match, fall back to a prefix
+            # match so partial idents still land.
+            exact = [(g, i, r) for (g, i, r) in idx if g == target_group and i == target_ident]
+            if not exact:
+                prefix = [(g, i, r) for (g, i, r) in idx
+                          if g == target_group and target_ident and i.startswith(target_ident)]
+                matches = prefix
             else:
-                report['skipped'].append({'file': rel, 'reason': f"no record matches group='{parsed['group']}' ident='{parsed['ident']}' in {cat}" + ('' if create_fn else ' (auto-create unavailable for this category)')})
+                matches = exact
+            # "Single-record-per-group" fallback. For categories where the
+            # group field IS the record's identity (Properties → name,
+            # Persons → name, Recordings → an artist's record per item),
+            # the path naturally looks like
+            #   StuffFiles/<Cat>/<RecordName>/<DocTitle>.<ext>
+            # with no " — " separator, so target_ident is actually the doc
+            # title. If exactly one record shares the group, treat that as
+            # the match and re-purpose `target_ident` as the slot label
+            # search key.
+            if not matches:
+                same_group = [(g, i, r) for (g, i, r) in idx if g == target_group]
+                if len(same_group) == 1:
+                    matches = same_group
+                    if not target_label and parsed['ident']:
+                        target_label = _norm(parsed['ident'])
+            if not matches:
+                # Optional auto-create. Only happens when the user opts in
+                # AND the category has a 'create' constructor in the layout.
+                create_fn = plan.get('create')
+                if auto_create and create_fn:
+                    seed = create_fn(parsed['group'], parsed['ident']) or {}
+                    if seed:
+                        new_id = str(uuid.uuid4())
+                        seed['id'] = new_id
+                        seed['created_at'] = now
+                        seed['updated_at'] = now
+                        # Owner default for the freshly-created record
+                        if 'owner' not in seed:
+                            d = DEFAULT_OWNER_BY_CATEGORY.get(cat)
+                            if d:
+                                seed['owner'] = d
+                        table = CATEGORIES[cat]['table']
+                        table_cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+                        seed = {k: v for k, v in seed.items() if k in table_cols}
+                        cols_sql = ', '.join(seed.keys())
+                        placeholders = ', '.join(['?'] * len(seed))
+                        db.execute(
+                            f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})",
+                            list(seed.values()),
+                        )
+                        # Refresh the index so subsequent files in the same
+                        # sweep can match this brand-new row.
+                        new_row = db.execute(
+                            f"SELECT * FROM {table} WHERE id = ?", [new_id]
+                        ).fetchone()
+                        g_norm = _norm(plan['group'](new_row))
+                        i_norm = _norm(plan['ident'](new_row))
+                        indexes[cat].append((g_norm, i_norm, new_row))
+                        matches = [(g_norm, i_norm, new_row)]
+                        report['uploaded'].append({
+                            'file':   rel,
+                            'record': f"{cat}/{new_id[:8]} (CREATED)",
+                            'slot':   '(record)',
+                        })
+                    else:
+                        report['skipped'].append({'file': rel, 'reason': f"auto-create returned no seed for {cat}"})
+                        continue
+                else:
+                    report['skipped'].append({'file': rel, 'reason': f"no record matches group='{parsed['group']}' ident='{parsed['ident']}' in {cat}" + ('' if create_fn else ' (auto-create unavailable for this category)')})
+                    continue
+            if len(matches) > 1:
+                report['skipped'].append({'file': rel, 'reason': f"ambiguous — {len(matches)} records match in {cat} (won't auto-pick)"})
                 continue
-        if len(matches) > 1:
-            report['skipped'].append({'file': rel, 'reason': f"ambiguous — {len(matches)} records match in {cat} (won't auto-pick)"})
-            continue
-        row = matches[0][2]
-        table = CATEGORIES[cat]['table']
-        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+            row = matches[0][2]
+            table = CATEGORIES[cat]['table']
+            cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
 
-        # Resolve the slot. Try label match first.
-        target_label = _norm(parsed['label'])
-        chosen_field = None
-        for spec in plan['files']:
-            field, default_label, title_field = spec
-            if field not in cols:
-                continue
-            label_candidates = [default_label]
-            if title_field and title_field in cols:
-                t = (row[title_field] or '').strip()
-                if t:
-                    label_candidates.append(t)
-            if any(_norm(c) == target_label for c in label_candidates):
-                # Only use this slot if it's currently empty.
-                if not (row[field] or '').strip():
-                    chosen_field = field
-                    break
-        if not chosen_field:
-            # Label match failed (or matched-but-occupied) — find the
-            # first empty slot in declaration order.
+            # Resolve the slot. Try label match first.
+            target_label = _norm(parsed['label'])
+            chosen_field = None
             for spec in plan['files']:
-                field, _, _ = spec
+                field, default_label, title_field = spec
                 if field not in cols:
                     continue
-                if not (row[field] or '').strip():
-                    chosen_field = field
-                    break
+                label_candidates = [default_label]
+                if title_field and title_field in cols:
+                    t = (row[title_field] or '').strip()
+                    if t:
+                        label_candidates.append(t)
+                if any(_norm(c) == target_label for c in label_candidates):
+                    # Only use this slot if it's currently empty.
+                    if not (row[field] or '').strip():
+                        chosen_field = field
+                        break
+            if not chosen_field:
+                # Label match failed (or matched-but-occupied) — find the
+                # first empty slot in declaration order.
+                for spec in plan['files']:
+                    field, _, _ = spec
+                    if field not in cols:
+                        continue
+                    if not (row[field] or '').strip():
+                        chosen_field = field
+                        break
 
-        if not chosen_field:
-            report['skipped'].append({
-                'file': rel,
-                'reason': f"all file slots full on this record ({_g(row, 'id')[:8]})",
+            if not chosen_field:
+                report['skipped'].append({
+                    'file': rel,
+                    'reason': f"all file slots full on this record ({_g(row, 'id')[:8]})",
+                })
+                continue
+
+            stored = save_upload(f)
+            if not stored:
+                report['skipped'].append({'file': rel, 'reason': 'save_upload failed (unsupported type?)'})
+                continue
+            db.execute(
+                f"UPDATE {table} SET {chosen_field} = ?, updated_at = ? WHERE id = ?",
+                [stored, now, _g(row, 'id')],
+            )
+            _autofill_title_from_filename(db, table, _g(row, 'id'), cat,
+                                          chosen_field, parsed['original_basename'])
+            report['uploaded'].append({
+                'file':   rel,
+                'record': f"{cat}/{_g(row, 'id')[:8]}",
+                'slot':   chosen_field,
             })
-            continue
-
-        stored = save_upload(f)
-        if not stored:
-            report['skipped'].append({'file': rel, 'reason': 'save_upload failed (unsupported type?)'})
-            continue
-        db.execute(
-            f"UPDATE {table} SET {chosen_field} = ?, updated_at = ? WHERE id = ?",
-            [stored, now, _g(row, 'id')],
-        )
-        _autofill_title_from_filename(db, table, _g(row, 'id'), cat,
-                                      chosen_field, parsed['original_basename'])
-        report['uploaded'].append({
-            'file':   rel,
-            'record': f"{cat}/{_g(row, 'id')[:8]}",
-            'slot':   chosen_field,
-        })
+        except Exception as exc:
+            app.logger.exception('sweep: failed on %s', getattr(f, 'filename', '?'))
+            report['skipped'].append({
+                'file':   getattr(f, 'filename', '?'),
+                'reason': f'server error: {exc.__class__.__name__}: {exc}',
+            })
     db.commit()
 
     if request.headers.get('Accept', '').startswith('application/json') \

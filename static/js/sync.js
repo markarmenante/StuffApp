@@ -282,10 +282,25 @@
       try {
         const data = await _uploadBatch(batch, true);
         if (data.uploaded) uploaded.push(...data.uploaded);
-        if (data.skipped)  skipped.push(...data.skipped);
+        if (data.skipped) {
+          skipped.push(...data.skipped);
+          // Per-file server errors (try/except path on the server) are
+          // transient — drop them from newState so the next syncUp retries.
+          // Deterministic skips (slot-full, no-record-match, …) stay in
+          // newState so we don't keep re-uploading the same junk.
+          for (const s of data.skipped) {
+            if (typeof s.reason === 'string' && s.reason.startsWith('server error:')) {
+              delete newState[s.file];
+            }
+          }
+        }
       } catch (e) {
         for (const f of batch) {
           skipped.push({file: f.name, reason: 'batch upload failed: ' + (e.message || e)});
+          // Whole batch lost — leave entries out of newState so they
+          // retry next run. f.name === h.path because we wrap with
+          // `new File([tmp], h.path, …)` above.
+          delete newState[f.name];
         }
       }
       batch = [];
