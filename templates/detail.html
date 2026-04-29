@@ -1090,11 +1090,12 @@
            the image instead of leaving an empty band below. -->
       <div class="dgrid dg1 art-notes-grow">{{ cell('notes','Artist Notes',rows=8) }}</div>
       <div class="dgrid dg1 art-notes-grow">{{ cell('object_notes','Object Notes',rows=8) }}</div>
-      <div class="dgrid dg1 art-doc-row">
-        {{ doccell('receipt','Receipt') }}
-      </div>
-      {# Unbounded JSON-backed docs row. Legacy doc_2 column was
-         folded into `documents` at boot. #}
+      {# Unbounded JSON-backed docs row. Legacy doc_2 + receipt
+         columns were folded into `documents` at boot via
+         _backfill_docs_json + _migrate_art_receipt_into_documents
+         (idempotent — see app.py). Receipt is no longer a fixed cell
+         on art; it lives as a normal doc tile with title "Receipt"
+         that the user can rename, reorder, or delete. #}
       {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
       {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
     </div>

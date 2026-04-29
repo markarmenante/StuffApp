@@ -785,6 +785,9 @@ def init_db():
     _backfill_docs_json(db, 'art', 'documents', [
         ('doc_2', None, 'Doc 2'),
     ])
+    # Art used to have receipt as a fixed cell next to doc_2; now it
+    # lives inside the same dynamic-docs row as a normal tile.
+    _migrate_art_receipt_into_documents(db)
     _backfill_docs_json(db, 'vehicles', 'documents', [
         ('insurance',     'insurance_label',     'Insurance'),
         ('invoice',       'invoice_label',       'Invoice'),
@@ -996,6 +999,40 @@ def _backfill_properties_documents_json(db):
     for i in range(1, 11):
         sources.append((f'doc_{i}', f'doc_{i}_title', ''))
     _backfill_docs_json(db, 'properties', 'documents', sources)
+
+
+def _migrate_art_receipt_into_documents(db):
+    """One-shot: for each art row with a populated `receipt` column,
+    ensure a corresponding entry exists in the `documents` JSON array
+    with title 'Receipt'. Idempotent: matched by filename, so
+    re-running on a row that already has the receipt represented in
+    JSON is a no-op. Inserts at index 0 so receipts retain their
+    historical "first" position in the row.
+
+    The legacy `receipt` column is left populated — old code paths and
+    existing exports that still reference it keep working. The detail
+    template no longer renders it as a fixed cell."""
+    cols = {r['name'] for r in db.execute("PRAGMA table_info(art)").fetchall()}
+    if 'documents' not in cols or 'receipt' not in cols:
+        return
+    rows = db.execute("SELECT id, receipt, documents FROM art").fetchall()
+    for row in rows:
+        receipt = (row['receipt'] or '').strip()
+        if not receipt:
+            continue
+        try:
+            docs = json.loads(row['documents'] or '[]')
+        except (TypeError, ValueError):
+            docs = []
+        if not isinstance(docs, list):
+            docs = []
+        if any(isinstance(d, dict) and (d.get('filename') or '') == receipt for d in docs):
+            continue
+        docs.insert(0, {'title': 'Receipt', 'filename': receipt})
+        db.execute(
+            'UPDATE art SET documents = ? WHERE id = ?',
+            (json.dumps(docs), row['id']),
+        )
 
 
 def _backfill_docs_json(db, table, target_col, sources):
@@ -5704,10 +5741,11 @@ EXPORT_LAYOUT = {
             str(_g(r, 'year')) if _g(r, 'year') else '',
         ])) or _g(r, 'id')[:8],
         'create': _create_art,
-        # doc_2 moved to JSON `documents` column.
+        # doc_2 + receipt moved to JSON `documents` column. Image is
+        # the only fixed file slot for art now — receipts are exported
+        # as a normal doc entry via the JSON-column walk below.
         'files': [
-            ('image',   'Image',   None),
-            ('receipt', 'Receipt', None),
+            ('image', 'Image', None),
         ],
     },
     'vehicles': {
