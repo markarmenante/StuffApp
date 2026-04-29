@@ -898,6 +898,14 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+    # Apr 2026 property cleanup, applied once at boot. Strips legacy
+    # FileMaker-era prefixes (Ghent:, NYC:, SF:), folds short-form
+    # abbreviations (Carp, SF, Montecito) to canonical names, and
+    # migrates status-like values out of the property column into
+    # the new location_status axis. Each UPDATE is idempotent — a row
+    # already in canonical form is left alone.
+    _apply_property_renames(db)
+
     # Pen cartridges: fold the "Pilot-Namiki" variant into the canonical
     # "Pilot/Namiki" so the strict select doesn't reject existing rows.
     # Idempotent — re-running on already-folded data updates 0 rows.
@@ -1142,6 +1150,173 @@ def _backfill_docs_json(db, table, target_col, sources):
             f'UPDATE {table} SET {target_col} = ? WHERE id = ?',
             (json.dumps(docs), row['id']),
         )
+
+
+def _apply_property_renames(db):
+    """Apply the Apr 2026 property/item-property cleanup. Strips legacy
+    FileMaker-era prefixes (Ghent:, NYC:, SF:), folds short-form
+    abbreviations to canonical names (Carp→Carpinteria, SF→42 Hotaling,
+    Montecito→Carpinteria), splits the Paris properties (the old Sold
+    one becomes its address; the active Saint-Guillaume one becomes
+    just Paris), and migrates status-like values out of the property
+    column into location_status. Each step is idempotent."""
+
+    # --- Paris split (must run before any other 'Paris' rename) ---
+    # OLD state: properties has both 'Paris' (Sold, 77 rue de Lille) and
+    # 'Paris Saint-Guillaume' (Own). 5 items reference 'Paris', 23
+    # reference 'Paris Saint-Guillaume'. NEW state: 'Paris' becomes
+    # '77 rue de Lille', 'Paris Saint-Guillaume' becomes 'Paris',
+    # items follow. We detect "not yet applied" by the existence of
+    # the Saint-Guillaume property record — once it's gone, the rename
+    # has happened (or this DB never had FileMaker's split).
+    needs_paris = False
+    try:
+        needs_paris = db.execute(
+            "SELECT 1 FROM properties WHERE name='Paris Saint-Guillaume' LIMIT 1"
+        ).fetchone() is not None
+    except sqlite3.OperationalError:
+        pass
+    if needs_paris:
+        for cat, field in CATEGORY_PROPERTY_FIELD.items():
+            table = CATEGORIES[cat]['table']
+            try:
+                db.execute(
+                    f"UPDATE {table} SET {field} = '77 rue de Lille' "
+                    f"WHERE {field} = 'Paris'"
+                )
+                db.execute(
+                    f"UPDATE {table} SET {field} = 'Paris' "
+                    f"WHERE {field} = 'Paris Saint-Guillaume'"
+                )
+            except sqlite3.OperationalError:
+                pass
+        try:
+            db.execute(
+                "UPDATE properties SET name='77 rue de Lille' WHERE name='Paris'"
+            )
+            db.execute(
+                "UPDATE properties SET name='Paris' WHERE name='Paris Saint-Guillaume'"
+            )
+        except sqlite3.OperationalError:
+            pass
+
+    # --- Property record renames (idempotent unilateral renames) ---
+    record_renames = (
+        ('Ghent: Pond House',    'Pond House'),
+        ('Ghent: Glass House',   'Glass House'),
+        ('Ghent: Harlemville',   'Harlemville'),
+        ('Ghent: Party Barn',    'Party Barn'),
+        ('Ghent: Rec Center',    'Rec Center'),
+        ('Ghent: Rigor Hill',    'Rigor Hill'),
+        ('Ghent: 223 Rigor',     '223 Rigor'),
+        ('NYC: 1 White St',      '1 White St'),
+        ('NYC: 357 W Broadway',  '357 W Broadway'),
+        ('NYC: 67 Engert',       '67 Engert'),
+        ('SF: 432 Jackson',      '432 Jackson'),
+        ('4956 Fifth',           '3956 Fifth'),
+        ('56 Leonard',           'NYC'),
+        ('Truckee',              'Lahontan'),
+        ('San Francisco',        '3450 Washington'),
+        ('Martis Camp',          'Martis'),
+    )
+    for old, new in record_renames:
+        try:
+            db.execute(
+                "UPDATE properties SET name=? WHERE name=?", (new, old)
+            )
+        except sqlite3.OperationalError:
+            pass
+
+    # --- 6790 Rincon address typo fix (street number transposed) ---
+    try:
+        db.execute(
+            "UPDATE properties "
+            "SET address = REPLACE(address, '6970 Rincon Road', '6790 Rincon Road') "
+            "WHERE name='6790 Rincon' AND address LIKE '%6970 Rincon Road%'"
+        )
+    except sqlite3.OperationalError:
+        pass
+
+    # --- Item-side property value rewrites ---
+    item_renames = (
+        # Strip legacy prefixes
+        ('Ghent: Pond House',     'Pond House'),
+        ('Ghent: Glass House',    'Glass House'),
+        ('Ghent: Harlemville',    'Harlemville'),
+        ('Ghent: Party Barn',     'Party Barn'),
+        ('Ghent: Rec Center',     'Rec Center'),
+        ('Ghent: Rec Center/Arena', 'Rec Center'),
+        ('Ghent: Rigor Hill',     'Rigor Hill'),
+        ('Ghent: 223 Rigor',      '223 Rigor'),
+        ('NYC: 1 White St',       '1 White St'),
+        ('NYC: 357 W Broadway',   '357 W Broadway'),
+        ('NYC: 67 Engert',        '67 Engert'),
+        ('SF: 432 Jackson',       '432 Jackson'),
+        # Short-form expansions
+        ('Carp',                  'Carpinteria'),
+        ('Montecito',             'Carpinteria'),
+        ('Rec Center/Arena',      'Rec Center'),
+        # Old San Francisco / SF → 42 Hotaling
+        ('San Francisco',         '42 Hotaling'),
+        ('SF',                    '42 Hotaling'),
+    )
+    for cat, field in CATEGORY_PROPERTY_FIELD.items():
+        table = CATEGORIES[cat]['table']
+        for old, new in item_renames:
+            try:
+                db.execute(
+                    f"UPDATE {table} SET {field} = ? WHERE {field} = ?",
+                    (new, old),
+                )
+            except sqlite3.OperationalError:
+                pass
+
+    # --- Move status-like property values into location_status ---
+    # (Storage / Archived / Missing / Gifted / Dolby Chadwick used to
+    # be valid property values; now they live in the location_status
+    # axis. Archived was later folded into Gifted, so skip it as a
+    # destination value.)
+    status_bucket_map = {
+        'Storage':         'Storage',
+        'Archived':        'Gifted',
+        'Missing':         'Missing',
+        'Gifted':          'Gifted',
+        'Dolby Chadwick':  'Consigned',
+    }
+    for cat, field in CATEGORY_PROPERTY_FIELD.items():
+        table = CATEGORIES[cat]['table']
+        # location_status only exists on item tables (added by the boot
+        # ALTER block). Skip if missing for some reason.
+        try:
+            cols = {r['name'] for r in db.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()}
+        except sqlite3.OperationalError:
+            continue
+        if 'location_status' not in cols:
+            continue
+        for prop_value, loc_status in status_bucket_map.items():
+            try:
+                db.execute(
+                    f"UPDATE {table} SET location_status = ?, "
+                    f"{field} = NULL WHERE {field} = ?",
+                    (loc_status, prop_value),
+                )
+            except sqlite3.OperationalError:
+                pass
+
+    # --- Drop Archived from location_status (folded into Gifted) ---
+    for cat in CATEGORY_PROPERTY_FIELD:
+        table = CATEGORIES[cat]['table']
+        try:
+            db.execute(
+                f"UPDATE {table} SET location_status = 'Gifted' "
+                f"WHERE location_status = 'Archived'"
+            )
+        except sqlite3.OperationalError:
+            pass
+
+    db.commit()
 
 
 def _backfill_meds_from_prescriptions(db):
