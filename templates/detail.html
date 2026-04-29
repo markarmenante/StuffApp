@@ -699,12 +699,12 @@
   </div>
   {% endif %}
 
-  <!-- Receipt (fixed) + unbounded JSON-backed documents row. The
-       legacy document_1/2 columns were folded into `documents` at
-       boot via _backfill_docs_json — see app.py. -->
-  <div class="dgrid dg1 watch-doc-row">
-    {{ doccell('receipt','Receipt') }}
-  </div>
+  {# Unbounded JSON-backed docs row. Legacy document_1 / document_2
+     and the legacy receipt column all fold into `documents` at boot
+     (see _backfill_docs_json + _migrate_coins_receipt_into_documents
+     in app.py). Receipt is no longer a fixed cell; it lives as a
+     normal doc tile titled "Receipt" that the user can rename,
+     reorder, share, or delete. #}
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
 

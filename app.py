@@ -811,9 +811,10 @@ def init_db():
     _backfill_docs_json(db, 'art', 'documents', [
         ('doc_2', None, 'Doc 2'),
     ])
-    # Art used to have receipt as a fixed cell next to doc_2; now it
-    # lives inside the same dynamic-docs row as a normal tile.
-    _migrate_art_receipt_into_documents(db)
+    # Art + coins used to have receipt as a fixed cell next to the
+    # doc tiles; both now fold receipt into the dynamic docs row.
+    _migrate_receipt_into_documents(db, 'art')
+    _migrate_receipt_into_documents(db, 'coins')
     _backfill_docs_json(db, 'vehicles', 'documents', [
         ('insurance',     'insurance_label',     'Insurance'),
         ('invoice',       'invoice_label',       'Invoice'),
@@ -1027,21 +1028,21 @@ def _backfill_properties_documents_json(db):
     _backfill_docs_json(db, 'properties', 'documents', sources)
 
 
-def _migrate_art_receipt_into_documents(db):
-    """One-shot: for each art row with a populated `receipt` column,
-    ensure a corresponding entry exists in the `documents` JSON array
-    with title 'Receipt'. Idempotent: matched by filename, so
-    re-running on a row that already has the receipt represented in
-    JSON is a no-op. Inserts at index 0 so receipts retain their
-    historical "first" position in the row.
+def _migrate_receipt_into_documents(db, table):
+    """One-shot: for each row of `table` with a populated `receipt`
+    column, ensure a corresponding entry exists in the `documents`
+    JSON array titled 'Receipt'. Idempotent (matched by filename) so
+    re-running on rows whose receipt is already in JSON is a no-op.
+    Inserts at index 0 so receipts retain their historical "first"
+    position in the row.
 
-    The legacy `receipt` column is left populated — old code paths and
-    existing exports that still reference it keep working. The detail
-    template no longer renders it as a fixed cell."""
-    cols = {r['name'] for r in db.execute("PRAGMA table_info(art)").fetchall()}
+    The legacy `receipt` column is left populated so old code paths
+    and existing exports that still reference it keep working. The
+    detail templates no longer render it as a fixed cell."""
+    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
     if 'documents' not in cols or 'receipt' not in cols:
         return
-    rows = db.execute("SELECT id, receipt, documents FROM art").fetchall()
+    rows = db.execute(f"SELECT id, receipt, documents FROM {table}").fetchall()
     for row in rows:
         receipt = (row['receipt'] or '').strip()
         if not receipt:
@@ -1056,7 +1057,7 @@ def _migrate_art_receipt_into_documents(db):
             continue
         docs.insert(0, {'title': 'Receipt', 'filename': receipt})
         db.execute(
-            'UPDATE art SET documents = ? WHERE id = ?',
+            f'UPDATE {table} SET documents = ? WHERE id = ?',
             (json.dumps(docs), row['id']),
         )
 
