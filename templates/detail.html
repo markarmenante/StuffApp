@@ -2142,10 +2142,14 @@ document.getElementById('resultsRaw')?.addEventListener('input', (e) => {
   if (disp) disp.innerHTML = formatResultsHtml(e.target.value);
 });
 
-// Watch "Lookup" button: fetch missing spec fields from reputable sources.
-// Server returns the proposed changes WITHOUT applying them; we render a
-// checkbox review modal and POST the user's selection to /apply-lookup.
-document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e) => {
+// Watch / Art / Recording "Lookup" buttons share the .watch-lookup-btn
+// class for styling. The PDF link in the same nav row also carries the
+// class to inherit pill styling, so we filter it out — querySelector
+// (singular) would have grabbed the PDF link first and the real lookup
+// buttons would never wire up. Server returns proposed changes WITHOUT
+// applying them; we render a checkbox review modal and POST the user's
+// selection to /apply-lookup.
+document.querySelectorAll('.watch-lookup-btn:not(.print-pdf-btn)').forEach(btn => btn.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   const url = btn.dataset.url;
   if (!url) return;
@@ -2208,7 +2212,7 @@ document.querySelector('.watch-lookup-btn')?.addEventListener('click', async (e)
     btn.disabled = false;
     btn.textContent = original;
   }
-});
+}));
 
 function showLookupReview(applyUrl, filled, overwritten, sources) {
   // Build the modal.
