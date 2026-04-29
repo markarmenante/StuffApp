@@ -1285,48 +1285,46 @@
     </div>
   </div>
 
-  {# Notes (left half) + Tracks (right half) side-by-side. Tracks
-     pills open a Spotify search for "<title> <artist>" so a click
-     lands on the right entry quickly; the canonical newline-separated
-     list lives in a hidden textarea so save_field still persists. #}
-  <div class="rec-notes-tracks-row">
-    <div class="rec-notes-block rec-notes-block-half">
-      <div class="rec-notes-header">
-        <div class="rec-notes-header-left">
-          {% if r and (r['artist'] or r['title']) %}
-          {% set _sq = ((r['artist'] or '') ~ ' ' ~ (r['title'] or ''))|trim %}
-          <a class="rec-spotify-link"
-             href="https://open.spotify.com/search/{{ _sq|urlencode }}"
-             target="_blank" rel="noopener noreferrer"
-             title="Search &quot;{{ _sq }}&quot; on Spotify">
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path fill="#1DB954" d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.521 17.34c-.224.359-.69.481-1.05.255-2.832-1.74-6.4-2.135-10.6-1.193-.413.094-.825-.18-.92-.594-.094-.413.18-.825.594-.92 4.594-1.05 8.546-.6 11.728 1.395.358.224.479.69.247 1.057zm1.47-3.272c-.281.453-.86.591-1.314.31-3.243-1.99-8.183-2.575-12.013-1.41-.51.156-1.05-.135-1.205-.645-.155-.51.135-1.05.645-1.205 4.42-1.34 9.825-.683 13.583 1.628.452.28.59.86.304 1.322zm.123-3.396c-3.882-2.305-10.295-2.515-13.985-1.39-.616.187-1.265-.16-1.452-.778-.187-.616.16-1.266.778-1.452 4.244-1.292 11.355-1.043 15.82 1.583.554.327.736 1.04.41 1.594-.327.554-1.04.737-1.594.41z"/>
-            </svg>
-          </a>
-          {% endif %}
-          <span class="rec-notes-title">Notes</span>
-        </div>
+  {# Notes spans the full width; Tracks sits below it with pills (one
+     per track, click → Spotify search) above an editable textarea
+     holding the canonical newline-separated list. Both textareas use
+     the auto-grow helper at the bottom of this template so they only
+     occupy as much height as their content needs (capped at the
+     original CSS-defined size). #}
+  <div class="rec-notes-block">
+    <div class="rec-notes-header">
+      <div class="rec-notes-header-left">
+        {% if r and (r['artist'] or r['title']) %}
+        {% set _sq = ((r['artist'] or '') ~ ' ' ~ (r['title'] or ''))|trim %}
+        <a class="rec-spotify-link"
+           href="https://open.spotify.com/search/{{ _sq|urlencode }}"
+           target="_blank" rel="noopener noreferrer"
+           title="Search &quot;{{ _sq }}&quot; on Spotify">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="#1DB954" d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.521 17.34c-.224.359-.69.481-1.05.255-2.832-1.74-6.4-2.135-10.6-1.193-.413.094-.825-.18-.92-.594-.094-.413.18-.825.594-.92 4.594-1.05 8.546-.6 11.728 1.395.358.224.479.69.247 1.057zm1.47-3.272c-.281.453-.86.591-1.314.31-3.243-1.99-8.183-2.575-12.013-1.41-.51.156-1.05-.135-1.205-.645-.155-.51.135-1.05.645-1.205 4.42-1.34 9.825-.683 13.583 1.628.452.28.59.86.304 1.322zm.123-3.396c-3.882-2.305-10.295-2.515-13.985-1.39-.616.187-1.265-.16-1.452-.778-.187-.616.16-1.266.778-1.452 4.244-1.292 11.355-1.043 15.82 1.583.554.327.736 1.04.41 1.594-.327.554-1.04.737-1.594.41z"/>
+          </svg>
+        </a>
+        {% endif %}
+        <span class="rec-notes-title">Notes</span>
       </div>
-      <div class="rec-notes-refs" id="recNotesRefs"
-           data-urls="{{ val('notes_urls') }}"></div>
-      <textarea name="notes" rows="10" placeholder="Notes" class="rec-notes-textarea">{{ val('notes') }}</textarea>
     </div>
-    <div class="rec-tracks-block rec-notes-block-half">
-      <div class="rec-notes-header">
-        <span class="rec-notes-title">Tracks</span>
-      </div>
-      <div class="rec-pill-row rec-tracks-pills" id="recTracksPills"
-           data-pill-kind="track"
-           data-track-artist="{{ val('artist') }}"
-           data-track-album="{{ val('title') }}"></div>
-      {# Hidden — canonical newline-separated list. Pills are derived
-         from this value; Lookup writes to it and dispatches blur to
-         trigger the per-field autosave. #}
-      <textarea name="tracks" id="recTracksInput"
-                class="rec-tracks-input"
-                rows="6"
-                placeholder="Tracks (one per line)">{{ val('tracks') }}</textarea>
+    <div class="rec-notes-refs" id="recNotesRefs"
+         data-urls="{{ val('notes_urls') }}"></div>
+    <textarea name="notes" rows="10" placeholder="Notes" class="rec-notes-textarea">{{ val('notes') }}</textarea>
+  </div>
+
+  <div class="rec-tracks-block">
+    <div class="rec-notes-header">
+      <span class="rec-notes-title">Tracks</span>
     </div>
+    <div class="rec-pill-row rec-tracks-pills" id="recTracksPills"
+         data-pill-kind="track"
+         data-track-artist="{{ val('artist') }}"
+         data-track-album="{{ val('title') }}"></div>
+    <textarea name="tracks" id="recTracksInput"
+              class="rec-tracks-input"
+              rows="6"
+              placeholder="Tracks (one per line)">{{ val('tracks') }}</textarea>
   </div>
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
@@ -1478,6 +1476,7 @@
           const sep = notesTa.value.trim() ? '\n\n' : '';
           notesTa.value = notesTa.value + sep + data.notes;
           notesTa.dispatchEvent(new Event('blur'));
+          if (window._autosizeTextarea) window._autosizeTextarea(notesTa);
           if (data.urls) setSourcePills(data.urls);
           // Fill-if-empty for both players and tracks. Server already
           // gates on the same condition; this is a defensive guard.
@@ -1489,6 +1488,7 @@
           if (tracksInp && data.tracks && !tracksInp.value.trim()) {
             tracksInp.value = data.tracks;
             tracksInp.dispatchEvent(new Event('blur'));
+            if (window._autosizeTextarea) window._autosizeTextarea(tracksInp);
             renderTrackPills();
           }
           lookupBtn.textContent = origLabel;
@@ -4425,4 +4425,59 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 })();
 </script>
 {% endif %}
+
+{# ── Universal textarea auto-grow ────────────────────────────────
+   Every textarea on a detail page shrinks to fit its content but
+   never exceeds the natural height it would have rendered at under
+   the existing CSS / rows attribute. That natural height is sampled
+   once on first paint (clientHeight) and kept as the per-textarea
+   cap. Adding `data-no-autogrow` to a textarea opts it out (kept as
+   an escape hatch, not currently used). #}
+<script>
+(function setupAutogrow() {
+  function init(ta) {
+    if (ta.dataset.no_autogrow !== undefined ||
+        ta.dataset.noAutogrow !== undefined) return;
+    if (ta._autogrowReady) return;
+    ta._autogrowReady = true;
+    // Sample the natural height BEFORE we change anything. This is
+    // the user's "current size" cap referenced in the design.
+    const natural = ta.clientHeight;
+    if (natural <= 0) {
+      // Hidden ancestor (e.g. unmounted person tab). Defer.
+      requestAnimationFrame(() => {
+        ta._autogrowReady = false;
+        init(ta);
+      });
+      return;
+    }
+    ta._maxH = natural;
+    ta.style.boxSizing = 'border-box';
+    resize(ta);
+    ta.addEventListener('input', () => resize(ta));
+  }
+  function resize(ta) {
+    if (!ta._maxH) return;
+    // Set to auto so scrollHeight reflects the content's true height
+    // independent of the current style.height.
+    ta.style.height = 'auto';
+    const want = Math.min(ta.scrollHeight, ta._maxH);
+    ta.style.height = want + 'px';
+    ta.style.overflowY = ta.scrollHeight > ta._maxH ? 'auto' : 'hidden';
+  }
+  document.querySelectorAll('textarea').forEach(init);
+  // Re-evaluate when tabs swap (persons IDs ↔ Health) — textareas
+  // hidden at first paint had clientHeight=0 and got deferred.
+  document.querySelectorAll('.person-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      requestAnimationFrame(() => {
+        document.querySelectorAll('textarea').forEach(init);
+      });
+    });
+  });
+  // Expose so other scripts (e.g. recording Lookup that programmatically
+  // sets textarea values) can trigger a resize after they assign .value.
+  window._autosizeTextarea = resize;
+})();
+</script>
 {% endblock %}
