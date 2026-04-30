@@ -338,23 +338,7 @@ document.addEventListener('DOMContentLoaded', function () {
     <span class="header-row-label">Model</span>
   </div>
 
-  <!-- Row 1: Metal, Case Diameter, Reference, Dial Color -->
-  <div class="dgrid dg4">
-    {{ selcell('metal','Metal', vlists.metal_watch) }}
-    <div class="dcell"><input type="text" name="case_diameter" value="{{ '%s mm'|format(val('case_diameter')) if val('case_diameter') else '' }}" class="coin-unit-input" data-suffix=" mm" inputmode="decimal" style="text-align:center"><span class="clabel">Width</span></div>
-    <div class="dcell"><input type="text" name="reference" value="{{ val('reference') }}" style="text-align:center"><span class="clabel">Ref</span></div>
-    <div class="dcell ta-wrap"><input type="text" name="dial_color" value="{{ val('dial_color') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('dial_color', [])|join('||') }}" data-ta-aliases='{"skeleton":"Open"}' style="text-align:center"><span class="clabel">Dial</span></div>
-  </div>
-
-  <!-- Row 2: Case#, Movement#, Edition, Year -->
-  <div class="dgrid dg4">
-    <div class="dcell"><input type="text" name="case_num" value="{{ val('case_num') }}" style="text-align:center"><span class="clabel">Case#</span></div>
-    <div class="dcell"><input type="text" name="movement_num" value="{{ val('movement_num') }}" style="text-align:center"><span class="clabel">Mvt#</span></div>
-    {{ cell('edition','Edition') }}
-    <div class="dcell"><input type="text" name="year" value="{{ val('year') }}" style="text-align:center"><span class="clabel">Yr Mfg</span></div>
-  </div>
-
-  <!-- Photo + right specs -->
+  <!-- Photo + brand specs (Metal/Width, Ref/Dial, Case#/Mvt#, Edition/Year) -->
   <div class="watch-body watch-body-watch">
     <div class="watch-photo drop-zone" data-field="image_obv"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
@@ -369,79 +353,97 @@ document.addEventListener('DOMContentLoaded', function () {
       </label>
     </div>
     <div class="watch-specs">
-      <div class="dgrid dg3">
-        <div class="dcell">
-          <input type="text" name="calibre" value="{{ val('calibre') }}">
-          <span class="clabel">Calibre</span>
-        </div>
-        <div class="dcell">
-          <input type="number" name="movement_jewels" value="{{ val('movement_jewels') }}" inputmode="numeric" min="0">
-          <span class="clabel">Jewels</span>
-        </div>
-        <div class="dcell">
-          <select name="movement_origin">
-            <option value=""></option>
-            {% for o in vlists.movement_origin %}<option value="{{ o }}" {{ 'selected' if val('movement_origin')==o }}>{{ o }}</option>{% endfor %}
-          </select>
-          <span class="clabel">Origin</span>
-        </div>
-      </div>
-      <div class="dgrid dg2 watch-vph-hz">
-        <div class="dcell">
-          <select name="beat">
-            <option value=""></option>
-            {% for b in [18000,19800,21600,25200,28800,36000] %}
-            <option value="{{ b }}" {{ 'selected' if val('beat')|string == b|string }}>{{ '{:,}'.format(b) }} vph</option>
-            {% endfor %}
-          </select>
-          <span class="clabel">Beat</span>
-        </div>
-        <div class="dcell">
-          {# Hz is derived from beat (vph ÷ 7200). Marked read-only +
-             onclick alert so a user who tries to type into it gets a
-             clear explanation rather than a silently-unresponsive
-             field. #}
-          <input type="text"
-                 value="{{ '%.2g Hz'|format(r['beat']|float / 7200) if r and r['beat'] else '' }}"
-                 readonly
-                 title="Calculated from Beat (vph ÷ 7200). Edit Beat to change."
-                 onclick="alert('Hz is calculated from Beat (vph ÷ 7200) and can’t be entered directly. Pick a Beat value above instead.')"
-                 style="color:#888;cursor:not-allowed">
-          <span class="clabel">Hz (calc)</span>
-        </div>
+      <div class="dgrid dg2">
+        {{ selcell('metal','Metal', vlists.metal_watch) }}
+        <div class="dcell"><input type="text" name="case_diameter" value="{{ '%s mm'|format(val('case_diameter')) if val('case_diameter') else '' }}" class="coin-unit-input" data-suffix=" mm" inputmode="decimal" style="text-align:center"><span class="clabel">Width</span></div>
       </div>
       <div class="dgrid dg2">
-        <div class="dcell">
-          <select name="movement_type">
-            <option value=""></option>
-            <option value="Manual" {{ 'selected' if val('movement_type')=='Manual' }}>Manual</option>
-            <option value="Automatic" {{ 'selected' if val('movement_type')=='Automatic' }}>Automatic</option>
-          </select>
-          <span class="clabel">Winding</span>
-        </div>
-        <div class="dcell">
-          <input type="text" name="reserve" value="{{ '%s hrs'|format(val('reserve')|fmt_int) if val('reserve') else '' }}" class="coin-unit-input" data-suffix=" hrs" inputmode="numeric">
-          <span class="clabel">Reserve</span>
-        </div>
+        <div class="dcell"><input type="text" name="reference" value="{{ val('reference') }}" style="text-align:center"><span class="clabel">Ref</span></div>
+        <div class="dcell ta-wrap"><input type="text" name="dial_color" value="{{ val('dial_color') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('dial_color', [])|join('||') }}" data-ta-aliases='{"skeleton":"Open"}' style="text-align:center"><span class="clabel">Dial</span></div>
       </div>
       <div class="dgrid dg2">
-        <div class="dcell svc-date-cell">
-          <input type="date" name="service_date" value="{{ val('service_date') }}" class="svc-date-input">
-          <span class="svc-date-compact">{% if val('service_date') %}{{ val('service_date')[5:7] }}/{{ val('service_date')[2:4] }}{% endif %}</span>
-          <span class="clabel">Svc</span>
-        </div>
-        <div class="dcell {% if service_overdue %}service-overdue{% endif %}">
-          {# Years-since-service is derived from Svc date; clicking it
-             explains rather than silently no-op'ing. #}
-          <input type="text"
-                 value="{{ ('%d yrs'|format(service_years)) if service_years is not none else '' }}"
-                 readonly
-                 title="Calculated from the Svc date. Edit the Svc field to change."
-                 onclick="alert('Years since service is calculated from the Svc date and can’t be entered directly. Set the Svc date instead.')"
-                 style="color:#888;cursor:not-allowed">
-          <span class="clabel">Since (calc)</span>
-        </div>
+        <div class="dcell"><input type="text" name="case_num" value="{{ val('case_num') }}" style="text-align:center"><span class="clabel">Case#</span></div>
+        <div class="dcell"><input type="text" name="movement_num" value="{{ val('movement_num') }}" style="text-align:center"><span class="clabel">Mvt#</span></div>
       </div>
+      <div class="dgrid dg2">
+        {{ cell('edition','Edition') }}
+        <div class="dcell"><input type="text" name="year" value="{{ val('year') }}" style="text-align:center"><span class="clabel">Yr Mfg</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Movement specs (was on the right of the photo) -->
+  <div class="dgrid dg3">
+    <div class="dcell">
+      <input type="text" name="calibre" value="{{ val('calibre') }}">
+      <span class="clabel">Calibre</span>
+    </div>
+    <div class="dcell">
+      <input type="number" name="movement_jewels" value="{{ val('movement_jewels') }}" inputmode="numeric" min="0">
+      <span class="clabel">Jewels</span>
+    </div>
+    <div class="dcell">
+      <select name="movement_origin">
+        <option value=""></option>
+        {% for o in vlists.movement_origin %}<option value="{{ o }}" {{ 'selected' if val('movement_origin')==o }}>{{ o }}</option>{% endfor %}
+      </select>
+      <span class="clabel">Origin</span>
+    </div>
+  </div>
+  <div class="dgrid dg2 watch-vph-hz">
+    <div class="dcell">
+      <select name="beat">
+        <option value=""></option>
+        {% for b in [18000,19800,21600,25200,28800,36000] %}
+        <option value="{{ b }}" {{ 'selected' if val('beat')|string == b|string }}>{{ '{:,}'.format(b) }} vph</option>
+        {% endfor %}
+      </select>
+      <span class="clabel">Beat</span>
+    </div>
+    <div class="dcell">
+      {# Hz is derived from beat (vph ÷ 7200). Marked read-only +
+         onclick alert so a user who tries to type into it gets a
+         clear explanation rather than a silently-unresponsive
+         field. #}
+      <input type="text"
+             value="{{ '%.2g Hz'|format(r['beat']|float / 7200) if r and r['beat'] else '' }}"
+             readonly
+             title="Calculated from Beat (vph ÷ 7200). Edit Beat to change."
+             onclick="alert('Hz is calculated from Beat (vph ÷ 7200) and can’t be entered directly. Pick a Beat value above instead.')"
+             style="color:#888;cursor:not-allowed">
+      <span class="clabel">Hz (calc)</span>
+    </div>
+  </div>
+  <div class="dgrid dg2">
+    <div class="dcell">
+      <select name="movement_type">
+        <option value=""></option>
+        <option value="Manual" {{ 'selected' if val('movement_type')=='Manual' }}>Manual</option>
+        <option value="Automatic" {{ 'selected' if val('movement_type')=='Automatic' }}>Automatic</option>
+      </select>
+      <span class="clabel">Winding</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="reserve" value="{{ '%s hrs'|format(val('reserve')|fmt_int) if val('reserve') else '' }}" class="coin-unit-input" data-suffix=" hrs" inputmode="numeric">
+      <span class="clabel">Reserve</span>
+    </div>
+  </div>
+  <div class="dgrid dg2">
+    <div class="dcell svc-date-cell">
+      <input type="date" name="service_date" value="{{ val('service_date') }}" class="svc-date-input">
+      <span class="svc-date-compact">{% if val('service_date') %}{{ val('service_date')[5:7] }}/{{ val('service_date')[2:4] }}{% endif %}</span>
+      <span class="clabel">Svc</span>
+    </div>
+    <div class="dcell {% if service_overdue %}service-overdue{% endif %}">
+      {# Years-since-service is derived from Svc date; clicking it
+         explains rather than silently no-op'ing. #}
+      <input type="text"
+             value="{{ ('%d yrs'|format(service_years)) if service_years is not none else '' }}"
+             readonly
+             title="Calculated from the Svc date. Edit the Svc field to change."
+             onclick="alert('Years since service is calculated from the Svc date and can’t be entered directly. Set the Svc date instead.')"
+             style="color:#888;cursor:not-allowed">
+      <span class="clabel">Since (calc)</span>
     </div>
   </div>
 
