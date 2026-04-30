@@ -7695,6 +7695,23 @@ def coins_owner_mark():
                    total=db.execute('SELECT COUNT(*) FROM coins').fetchone()[0])
 
 
+@app.route('/admin/audio-owner-ym', methods=['POST'])
+def audio_owner_ym():
+    """Set owner='YM' on every audio row whose owner isn't already 'YM'."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    now = datetime.utcnow().isoformat()
+    r = db.execute(
+        "UPDATE audio SET owner='YM', updated_at=? "
+        "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'YM'",
+        [now],
+    )
+    db.commit()
+    return jsonify(updated=r.rowcount,
+                   total=db.execute('SELECT COUNT(*) FROM audio').fetchone()[0])
+
+
 @app.route('/admin/vehicles-default-sold', methods=['POST'])
 def vehicles_default_sold():
     """Set any vehicle with null/empty status to 'Sold'. Safe to re-run."""
