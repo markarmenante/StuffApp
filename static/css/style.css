@@ -333,25 +333,6 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .row-share-btn:hover { background: rgba(0,0,0,.05); }
 
-/* Per-row delete pill. Disarmed: a faint × that sits to the right of
-   the row title. Armed: turns red and reads "Delete?" — width grows
-   to fit. The list-watches rule below gives .item-line1 the
-   position-relative + right-padding the absolute layout needs. */
-.row-delete-btn {
-  position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 24px; height: 22px; padding: 0 6px;
-  border: 1px solid var(--border); border-radius: 11px;
-  background: #fff; color: #c0392b;
-  font-size: 14px; line-height: 1; cursor: pointer;
-}
-.row-delete-btn:hover { background: #fff5f5; border-color: #e8b4b4; }
-.row-delete-btn.armed {
-  background: #c0392b; color: #fff; border-color: #a02818;
-  font-size: 11px; font-weight: 600; padding: 0 8px;
-}
-.item-list-watches .item-line1 { position: relative; padding-right: 56px; }
-
 .row-upload-btn {
   display: flex; align-items: center; justify-content: center;
   width: 60px; flex-shrink: 0;
