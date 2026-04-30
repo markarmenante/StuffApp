@@ -5950,18 +5950,33 @@ def coins_print_pdf():
                     headers={'Content-Disposition': 'inline; filename="coins.pdf"'})
 
 
-COIN_BIN_RE = re.compile(r'^C\s*(\d+)\s*([a-z]*)$', re.IGNORECASE)
+COIN_BIN_PREFIXES = ('CA', 'CM', 'NA', 'NM')
+COIN_BIN_RE = re.compile(
+    r'^(CA|CM|NA|NM)\s*(\d+)\s*([a-z]*)$',
+    re.IGNORECASE,
+)
 
 
 def _parse_coin_bin(s):
-    """Return (numeric, letter_suffix_lower) for a 'C\\d+\\w*' bin, else None.
-    Whitespace inside the bin is tolerated so legacy 'C 1' parses as (1, '')."""
+    """Return (prefix, numeric, letter_suffix_lower) for a bin matching
+    the CA/CM/NA/NM scheme; None for any other shape (legacy 'C 1',
+    blank, free-form text)."""
     if not s:
         return None
     m = COIN_BIN_RE.match(s.strip())
     if not m:
         return None
-    return (int(m.group(1)), (m.group(2) or '').lower())
+    return (m.group(1).upper(), int(m.group(2)), (m.group(3) or '').lower())
+
+
+def _coin_bin_prefix(coin):
+    """Two-letter bin prefix for a coin — taken from its cat_id so the
+    bin shares the cat_id's location/era partition (CA, CM, NA, NM).
+    None when the coin has no recognisable cat_id prefix."""
+    cid = (coin['cat_id'] or '').strip().upper()
+    if len(cid) >= 2 and cid[:2] in COIN_BIN_PREFIXES:
+        return cid[:2]
+    return None
 
 
 def _coin_renumber_sort_key(row):
@@ -5976,66 +5991,93 @@ def _coin_renumber_sort_key(row):
 
 
 def _recompute_coin_bins(db, rows, total=False):
-    """Assign C-prefixed display-position bins to a set of coin rows in
-    region / authority / mint / cat_id order.
+    """Assign display-position bins partitioned by the cat_id prefix
+    (CA / CM / NA / NM). Each prefix has its own 1..n sequence — e.g.
+    Carpinteria Ancient coins are CA1, CA2, CA3, …; New York Modern
+    coins are NM1, NM2, ….
 
-    `total=False` (incremental, the default for the print route): any
-    coin already labelled 'C<n>' or 'C<n><letters>' keeps its bin. Coins
-    without a conforming bin get inserted between their neighbours with
-    a letter suffix tied to the previous numeric anchor — e.g. a coin
-    that sorts between C15 and C16 becomes C15a; a second one C15b.
+    `total=True`: clean reassignment within each prefix group, ordered
+    by region / authority / mint / cat_id. Letter suffixes are wiped.
 
-    `total=True` (admin renumber): clean reassignment from C1..Cn in
-    sort order, dropping all letter suffixes.
+    `total=False` (default — what the print route calls): preserve any
+    coin already labelled with a conforming `<prefix><n>(<letters>)?`
+    bin. New coins (no bin or non-conforming bin) slot between their
+    neighbours with a letter suffix tied to the previous numeric
+    anchor in the same prefix group — so a Carpinteria-Ancient coin
+    that sorts between CA15 and CA16 becomes CA15a, a second one CA15b.
 
-    Returns (sorted_rows_as_dicts, updates_count). Each returned dict has
-    its `bin` field set to the new value so callers can render without
-    re-fetching."""
-    sorted_rows = sorted(rows, key=_coin_renumber_sort_key)
-    out = [dict(r) for r in sorted_rows]
+    Special case: when a prefix group has zero conforming bins (first
+    run on that group, or after a scheme change) the group is treated
+    as a fresh total renumber so coins start at 1 instead of 0a.
+
+    Returns (sorted_rows_as_dicts, updates_count). Coins whose cat_id
+    has no recognised prefix appear in the returned list (in sort
+    order) with their existing bin untouched."""
+    by_prefix = {p: [] for p in COIN_BIN_PREFIXES}
+    no_prefix = []
+    for r in rows:
+        p = _coin_bin_prefix(r)
+        if p:
+            by_prefix[p].append(r)
+        else:
+            no_prefix.append(r)
+
+    out = []
     updates = []
     now = datetime.utcnow().isoformat()
 
-    if total:
-        for i, r in enumerate(out, start=1):
-            new_bin = f'C{i}'
-            if (r.get('bin') or '').strip() != new_bin:
-                updates.append((r['id'], new_bin))
-                r['bin'] = new_bin
-    else:
-        prev_anchor = None       # int — last numeric Cn seen
-        used_letters = set()     # letters already used at prev_anchor
-        for r in out:
-            parsed = _parse_coin_bin(r.get('bin'))
-            if parsed:
-                num, letters = parsed
-                canonical = f'C{num}{letters}'
-                if (r.get('bin') or '').strip() != canonical:
-                    updates.append((r['id'], canonical))
-                    r['bin'] = canonical
-                if letters:
-                    # Existing letter-suffixed insert. Track it so a new
-                    # coin at the same anchor gets the next letter.
-                    if num == prev_anchor and len(letters) == 1:
-                        used_letters.add(letters)
+    for prefix in COIN_BIN_PREFIXES:
+        group = sorted(by_prefix[prefix], key=_coin_renumber_sort_key)
+        if not group:
+            continue
+        has_conforming = any(
+            _parse_coin_bin(r['bin']) and _parse_coin_bin(r['bin'])[0] == prefix
+            for r in group
+        )
+        if total or not has_conforming:
+            for i, r in enumerate(group, start=1):
+                d = dict(r)
+                new_bin = f'{prefix}{i}'
+                if (d.get('bin') or '').strip() != new_bin:
+                    updates.append((d['id'], new_bin))
+                    d['bin'] = new_bin
+                out.append(d)
+        else:
+            prev_anchor = None    # int — last numeric anchor in this prefix
+            used_letters = set()  # letters already used at prev_anchor
+            for r in group:
+                d = dict(r)
+                parsed = _parse_coin_bin(d.get('bin'))
+                if parsed and parsed[0] == prefix:
+                    _, num, letters = parsed
+                    canonical = f'{prefix}{num}{letters}'
+                    if (d.get('bin') or '').strip() != canonical:
+                        updates.append((d['id'], canonical))
+                        d['bin'] = canonical
+                    if letters:
+                        if num == prev_anchor and len(letters) == 1:
+                            used_letters.add(letters)
+                    else:
+                        prev_anchor = num
+                        used_letters = set()
                 else:
-                    prev_anchor = num
-                    used_letters = set()
-            else:
-                # Find next available letter at the current anchor.
-                letter = None
-                for i in range(26):
-                    cand = chr(ord('a') + i)
-                    if cand not in used_letters:
-                        letter = cand
-                        break
-                if letter is None:
-                    letter = 'z'  # ran past 26 — fallback rather than crash
-                base = prev_anchor if prev_anchor is not None else 0
-                new_bin = f'C{base}{letter}'
-                updates.append((r['id'], new_bin))
-                used_letters.add(letter)
-                r['bin'] = new_bin
+                    letter = None
+                    for i in range(26):
+                        cand = chr(ord('a') + i)
+                        if cand not in used_letters:
+                            letter = cand
+                            break
+                    if letter is None:
+                        letter = 'z'
+                    base = prev_anchor if prev_anchor is not None else 0
+                    new_bin = f'{prefix}{base}{letter}'
+                    updates.append((d['id'], new_bin))
+                    used_letters.add(letter)
+                    d['bin'] = new_bin
+                out.append(d)
+
+    for r in sorted(no_prefix, key=_coin_renumber_sort_key):
+        out.append(dict(r))
 
     if updates:
         db.executemany(
