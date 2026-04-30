@@ -6071,8 +6071,9 @@ def _draw_coin_card(c, coin, x, y, w, h):
         c.setFont('Helvetica', 6)
         c.drawString(x + pad, desc_y, _fit_text(c, obv, inner_w, 'Helvetica', 6))
 
-    # Bottom-left ident: "<bin> - <cat_id>" (e.g. "C1 - CA001"). Whitespace
-    # inside the bin is squashed so "C 1" prints as "C1".
+    # Bottom-right ident: "<bin> - <cat_id>" (e.g. "C1 - CA001"). Whitespace
+    # inside the bin is squashed so "C 1" prints as "C1". Anchored bottom-
+    # right so the larger image on the left isn't pushed off-card.
     bin_label = (coin['bin'] or '').strip()
     if bin_label:
         bin_label = re.sub(r'\s+', '', bin_label)
@@ -6084,20 +6085,21 @@ def _draw_coin_card(c, coin, x, y, w, h):
 
     bottom_y = y + pad
     if ident:
-        c.setFont('Helvetica-Bold', 6)
-        c.drawString(x + pad,
-                     bottom_y,
-                     _fit_text(c, ident, inner_w, 'Helvetica-Bold', 6))
+        c.setFont('Helvetica-Bold', 7)
+        c.drawRightString(x + w - pad,
+                          bottom_y,
+                          _fit_text(c, ident, inner_w, 'Helvetica-Bold', 7))
 
     # Middle area: image (left) + specs stack (right). Bottom row holds the
     # ident, so the image bottom must clear it.
     mid_top = desc_y - 3
-    mid_bottom = bottom_y + 8
+    mid_bottom = bottom_y + 9
     mid_h = mid_top - mid_bottom
     if mid_h < 10:
         return
-    # Slightly wider image; spec column gets ~42% of card width.
-    img_w = w * 0.58
+    # Image takes ~62% of card width — coin renders ~58pt across, up
+    # from ~52pt before. Spec column still has ~38% (≈34pt).
+    img_w = w * 0.62
 
     # Image
     img_path = None
@@ -6117,7 +6119,9 @@ def _draw_coin_card(c, coin, x, y, w, h):
             except Exception:
                 pass
 
-    # Right-side specs (top-down): denomination, metal, mint, weight, mm, die axis
+    # Right-side specs (top-down): denomination, metal, mint, weight, mm, die axis.
+    # Font bumps to 7pt; "Tetradrachm" is the widest typical denomination
+    # and still fits the 34pt spec column at this size.
     specs = []
     if coin['denomination']: specs.append(coin['denomination'].strip())
     m = _metal_short(coin['metal'])
@@ -6128,14 +6132,14 @@ def _draw_coin_card(c, coin, x, y, w, h):
     da = _format_die_axis(coin['die_axis'])
     if da: specs.append(da)
 
-    spec_font_size = 6
+    spec_font_size = 7
     c.setFont('Helvetica', spec_font_size)
     spec_count = len(specs)
     if spec_count:
         spec_w = w - img_w - pad
         # Squeeze line-height when there are many specs.
-        step = min(8, max(6, mid_h / max(spec_count, 1)))
-        sy = mid_top - 6
+        step = min(9, max(7, mid_h / max(spec_count, 1)))
+        sy = mid_top - spec_font_size
         for s in specs:
             c.drawRightString(x + w - pad,
                               sy,
