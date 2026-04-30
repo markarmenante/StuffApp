@@ -497,7 +497,8 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="dcell value-fetch-row">
       <span class="value-fetch-label">Value Estimate from Retailers and Recent Auctions<span id="valueSearchedAt" class="value-fetch-stamp">{% if r and r['value_searched_at'] %} as of {{ r['value_searched_at']|short_date }}{% endif %}</span></span>
       <button type="button" id="valueBtn" class="toolbar-btn pill"
-              {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"{% endif %}>
+              {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"
+              data-searched-at="{{ r['value_searched_at'] if r and r['value_searched_at'] else '' }}"{% endif %}>
         Search Value
       </button>
     </div>
@@ -2360,12 +2361,31 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
       });
     }
     btn.textContent = 'Fetched ✓';
+    btn.classList.remove('pill-stale');
+    btn.classList.add('pill-fresh');
+    btn.dataset.searchedAt = data.searched_at || new Date().toISOString();
   } catch (err) {
     btn.textContent = 'Error';
     alert('Valuation failed: ' + err.message);
   }
   setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
 });
+
+// Colour the Search Value pill based on how long ago the lookup last
+// ran: green within a year of the last run, yellow after a year, no
+// tint when it's never run. Re-runs flip it back to green via the
+// fetch handler above.
+(function colourValueSearchPill() {
+  const btn = document.getElementById('valueBtn');
+  if (!btn) return;
+  const ts = btn.dataset.searchedAt;
+  if (!ts) return;
+  const t = new Date(ts);
+  if (isNaN(t)) return;
+  const ageMs = Date.now() - t.getTime();
+  const oneYearMs = 365 * 24 * 60 * 60 * 1000;
+  btn.classList.add(ageMs > oneYearMs ? 'pill-stale' : 'pill-fresh');
+})();
 
 // Recordings: heart toggle for Like, and auto-fill Type=LP when Speed set.
 (function recordingsExtras() {
