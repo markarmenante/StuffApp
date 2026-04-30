@@ -5916,9 +5916,19 @@ def coins_print_pdf():
 
     where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     rows = db.execute(
-        f"SELECT * FROM coins {where_sql} "
-        "ORDER BY (coin_id IS NULL OR TRIM(coin_id) = ''), CAST(SUBSTR(coin_id, 3) AS INTEGER), coin_id",
-        params).fetchall()
+        f"SELECT * FROM coins {where_sql}", params).fetchall()
+    # Print order = display position (bin), parsed as (alpha-prefix, integer).
+    # Empty bins sink to the end so they print after the positioned coins.
+    bin_re = re.compile(r'^([A-Za-z]+)\s*(\d+)$')
+    def _bin_key(coin):
+        b = (coin['bin'] or '').strip()
+        if not b:
+            return (1, 'zzz', 0, '')
+        m = bin_re.match(b)
+        if m:
+            return (0, m.group(1).upper(), int(m.group(2)), b)
+        return (0, 'zzz', 0, b)
+    rows = sorted(rows, key=_bin_key)
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
@@ -5985,6 +5995,22 @@ def _card_image_reader(path):
         return None
 
 
+def _coin_date_range_text(d1, d2):
+    """Format a coin date range tightly. When both dates share an era
+    suffix (BC / BCE / AD / CE), the suffix appears only on the second
+    date with no space — e.g. '480 - 440BC' instead of '480 BC - 440 BC'."""
+    d1 = (d1 or '').strip()
+    d2 = (d2 or '').strip()
+    if d1 and d2:
+        for era in ('BCE', 'BC', 'CE', 'AD'):
+            if d1.upper().endswith(era) and d2.upper().endswith(era):
+                d1 = d1[:-len(era)].rstrip()
+                d2 = d2[:-len(era)].rstrip() + era
+                break
+        return f'{d1} - {d2}'
+    return d1 or d2
+
+
 def _draw_coin_card(c, coin, x, y, w, h):
     c.setStrokeColorRGB(0.25, 0.25, 0.25)
     c.setLineWidth(0.9)
@@ -5993,17 +6019,26 @@ def _draw_coin_card(c, coin, x, y, w, h):
     pad = 3
     inner_w = w - 2 * pad
 
-    # Top row: region (bold, left) + date range (right)
-    title = (coin['region'] or coin['authority'] or '').strip()
-    date_from = (coin['date_1_text'] or '').strip()
-    date_to = (coin['date_2_text'] or '').strip()
-    date_range = f'{date_from} - {date_to}' if date_from and date_to else (date_from or date_to)
+    # Top-left: <bin> - <cat_id>, e.g. "C1 - CA001". Bin's internal
+    # whitespace is squashed so "C 1" prints as "C1" to fit the line.
+    bin_label = (coin['bin'] or '').strip()
+    if bin_label:
+        bin_label = re.sub(r'\s+', '', bin_label)
+    cat_id = (coin['cat_id'] or '').strip()
+    if bin_label and cat_id:
+        ident = f'{bin_label} - {cat_id}'
+    else:
+        ident = bin_label or cat_id or (coin['coin_id'] or '').strip()
+
+    # Top-right: tight date range — shared era folds onto the trailing date
+    date_range = _coin_date_range_text(coin['date_1_text'], coin['date_2_text'])
 
     top_y = y + h - pad - 7
     c.setFont('Helvetica-Bold', 7)
-    c.drawString(x + pad, top_y, _fit_text(c, title, inner_w * 0.55, 'Helvetica-Bold', 7))
+    c.drawString(x + pad, top_y, _fit_text(c, ident, inner_w * 0.5, 'Helvetica-Bold', 7))
     c.setFont('Helvetica', 6)
-    c.drawRightString(x + w - pad, top_y, _fit_text(c, date_range, inner_w * 0.45, 'Helvetica', 6))
+    # Wider date allowance so the BC tail isn't truncated.
+    c.drawRightString(x + w - pad, top_y, _fit_text(c, date_range, inner_w * 0.55, 'Helvetica', 6))
 
     # Description (obv_rev), full-width under title
     obv = (coin['obv_rev'] or '').strip()
@@ -6012,22 +6047,15 @@ def _draw_coin_card(c, coin, x, y, w, h):
         c.setFont('Helvetica', 6)
         c.drawString(x + pad, desc_y, _fit_text(c, obv, inner_w, 'Helvetica', 6))
 
-    # Bottom row: coin_id (left), weight (right)
-    bottom_y = y + pad
-    if coin['coin_id']:
-        c.setFont('Helvetica-Bold', 6)
-        c.drawString(x + pad, bottom_y, coin['coin_id'])
-    if coin['weight'] is not None:
-        c.setFont('Helvetica', 6)
-        c.drawRightString(x + w - pad, bottom_y, f'{coin["weight"]:.2f} g')
-
-    # Middle area: image (left) + specs stack (right)
+    # Middle area: image (left) + specs stack (right). Bottom row removed
+    # — coin_id moved up next to the bin, weight moved into the spec stack.
     mid_top = desc_y - 3
-    mid_bottom = bottom_y + 8
+    mid_bottom = y + pad
     mid_h = mid_top - mid_bottom
     if mid_h < 10:
         return
-    img_w = w * 0.5
+    # Slightly wider image; spec column gets ~42% of card width.
+    img_w = w * 0.58
 
     # Image
     img_path = None
@@ -6047,23 +6075,28 @@ def _draw_coin_card(c, coin, x, y, w, h):
             except Exception:
                 pass
 
-    # Right-side specs: denomination, mint, metal (short), size
+    # Right-side specs (top-down): denomination, metal, mint, weight, mm, die axis
     specs = []
     if coin['denomination']: specs.append(coin['denomination'].strip())
-    if coin['mint']: specs.append(coin['mint'].strip())
     m = _metal_short(coin['metal'])
     if m: specs.append(m)
-    if coin['size'] is not None: specs.append(f"{coin['size']:.1f} mm")
+    if coin['mint']: specs.append(coin['mint'].strip())
+    if coin['weight'] is not None: specs.append(f"{coin['weight']:.2f}g")
+    if coin['size'] is not None: specs.append(f"{coin['size']:.1f}mm")
+    if coin['die_axis']: specs.append(str(coin['die_axis']).strip())
 
-    c.setFont('Helvetica', 6)
+    spec_font_size = 6
+    c.setFont('Helvetica', spec_font_size)
     spec_count = len(specs)
     if spec_count:
-        step = min(8, mid_h / max(spec_count, 1))
+        spec_w = w - img_w - pad
+        # Squeeze line-height when there are many specs.
+        step = min(8, max(6, mid_h / max(spec_count, 1)))
         sy = mid_top - 6
         for s in specs:
             c.drawRightString(x + w - pad,
                               sy,
-                              _fit_text(c, s, w * 0.5 - pad, 'Helvetica', 6))
+                              _fit_text(c, s, spec_w, 'Helvetica', spec_font_size))
             sy -= step
 
 
