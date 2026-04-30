@@ -6451,6 +6451,44 @@ def coins_fix_missing_cat_id():
     })
 
 
+@app.route('/admin/coins-cat-id-audit', methods=['POST'])
+def coins_cat_id_audit():
+    """Report cat_id health: total rows, missing count, duplicate IDs.
+    Read-only — no writes. Use the cat-id fixer to populate gaps."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    total = db.execute('SELECT COUNT(*) FROM coins').fetchone()[0]
+    missing = db.execute(
+        "SELECT id, property_name, region, denomination FROM coins "
+        "WHERE COALESCE(cat_id, '') = '' OR TRIM(cat_id) = ''"
+    ).fetchall()
+    dup_rows = db.execute(
+        "SELECT cat_id, COUNT(*) AS n FROM coins "
+        "WHERE COALESCE(cat_id, '') != '' "
+        "GROUP BY cat_id HAVING n > 1 ORDER BY n DESC, cat_id"
+    ).fetchall()
+    duplicates = []
+    for d in dup_rows:
+        members = db.execute(
+            "SELECT id, property_name, region, denomination, date_1 "
+            "FROM coins WHERE cat_id = ?",
+            [d['cat_id']]
+        ).fetchall()
+        duplicates.append({
+            'cat_id': d['cat_id'],
+            'count':  d['n'],
+            'rows':   [dict(m) for m in members],
+        })
+    return jsonify({
+        'total':           total,
+        'missing_count':   len(missing),
+        'missing_rows':    [dict(r) for r in missing],
+        'duplicate_count': len(duplicates),
+        'duplicates':      duplicates,
+    })
+
+
 @app.route('/admin/pens-owner-mark', methods=['POST'])
 def pens_owner_mark():
     """Set owner='Mark' for all pens records."""
