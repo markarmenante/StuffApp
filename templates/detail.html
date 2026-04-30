@@ -1640,13 +1640,20 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
     <div class="watch-specs">
       <div class="dgrid dg1">
-        {{ selcell('type','Type', vlists.audio_type) }}
+        {% set _v = r['type'] if r and r['type'] is not none else '' %}
+        <div class="dcell">
+          <select name="type" style="text-align:left">
+            <option value=""></option>
+            {% for o in vlists.audio_type %}<option value="{{ o }}" {{ 'selected' if _v == o }}>{{ o }}</option>{% endfor %}
+          </select>
+          <span class="clabel">Type</span>
+        </div>
       </div>
       <div class="dgrid dg1">
         {{ cell('serial_number','Serial #') }}
       </div>
-      <div class="dgrid dg1">{{ datecell('date','Date') }}</div>
-      <div class="dgrid dg2">
+      <div class="dgrid dg3">
+        {{ datecell('date','Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
       </div>
