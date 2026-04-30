@@ -5978,6 +5978,10 @@ def _card_image_reader(path):
 
     Why: the card prints at 35mm (~414px at 300dpi). Decoding a full-resolution
     source JPEG per coin is the PDF's bottleneck.
+
+    Transparent source images (RGBA / palette-with-alpha) are flattened onto
+    a WHITE background — without this, PIL's RGBA→RGB conversion fills
+    transparent pixels with black, painting a black square behind every coin.
     """
     from io import BytesIO
     from PIL import Image
@@ -5985,7 +5989,16 @@ def _card_image_reader(path):
     try:
         im = Image.open(path)
         im.thumbnail((512, 512))
-        if im.mode not in ('RGB', 'L'):
+        # Promote palette-with-transparency to RGBA so the alpha-aware
+        # branch below catches it.
+        if im.mode == 'P' and 'transparency' in im.info:
+            im = im.convert('RGBA')
+        if im.mode in ('RGBA', 'LA'):
+            bg = Image.new('RGB', im.size, (255, 255, 255))
+            alpha = im.split()[-1]
+            bg.paste(im.convert('RGB'), mask=alpha)
+            im = bg
+        elif im.mode not in ('RGB', 'L'):
             im = im.convert('RGB')
         buf = BytesIO()
         im.save(buf, format='JPEG', quality=85)
@@ -6011,6 +6024,25 @@ def _coin_date_range_text(d1, d2):
     return d1 or d2
 
 
+def _format_die_axis(v):
+    """Render die axis as '<n>h'. Accepts numeric strings, ints, floats,
+    or already-formatted '12h'. Returns '' for blank/unparseable input."""
+    if v is None:
+        return ''
+    s = str(v).strip()
+    if not s:
+        return ''
+    if s.lower().endswith('h'):
+        return s
+    try:
+        f = float(s)
+        if f.is_integer():
+            return f'{int(f)}h'
+        return f'{f:g}h'
+    except (TypeError, ValueError):
+        return s
+
+
 def _draw_coin_card(c, coin, x, y, w, h):
     c.setStrokeColorRGB(0.25, 0.25, 0.25)
     c.setLineWidth(0.9)
@@ -6019,23 +6051,15 @@ def _draw_coin_card(c, coin, x, y, w, h):
     pad = 3
     inner_w = w - 2 * pad
 
-    # Top-left: <bin> - <cat_id>, e.g. "C1 - CA001". Bin's internal
-    # whitespace is squashed so "C 1" prints as "C1" to fit the line.
-    bin_label = (coin['bin'] or '').strip()
-    if bin_label:
-        bin_label = re.sub(r'\s+', '', bin_label)
-    cat_id = (coin['cat_id'] or '').strip()
-    if bin_label and cat_id:
-        ident = f'{bin_label} - {cat_id}'
-    else:
-        ident = bin_label or cat_id or (coin['coin_id'] or '').strip()
+    # Top-left: region (bold). Falls back to authority when region is blank.
+    title = (coin['region'] or coin['authority'] or '').strip()
 
     # Top-right: tight date range — shared era folds onto the trailing date
     date_range = _coin_date_range_text(coin['date_1_text'], coin['date_2_text'])
 
     top_y = y + h - pad - 7
     c.setFont('Helvetica-Bold', 7)
-    c.drawString(x + pad, top_y, _fit_text(c, ident, inner_w * 0.5, 'Helvetica-Bold', 7))
+    c.drawString(x + pad, top_y, _fit_text(c, title, inner_w * 0.5, 'Helvetica-Bold', 7))
     c.setFont('Helvetica', 6)
     # Wider date allowance so the BC tail isn't truncated.
     c.drawRightString(x + w - pad, top_y, _fit_text(c, date_range, inner_w * 0.55, 'Helvetica', 6))
@@ -6047,10 +6071,28 @@ def _draw_coin_card(c, coin, x, y, w, h):
         c.setFont('Helvetica', 6)
         c.drawString(x + pad, desc_y, _fit_text(c, obv, inner_w, 'Helvetica', 6))
 
-    # Middle area: image (left) + specs stack (right). Bottom row removed
-    # — coin_id moved up next to the bin, weight moved into the spec stack.
+    # Bottom-left ident: "<bin> - <cat_id>" (e.g. "C1 - CA001"). Whitespace
+    # inside the bin is squashed so "C 1" prints as "C1".
+    bin_label = (coin['bin'] or '').strip()
+    if bin_label:
+        bin_label = re.sub(r'\s+', '', bin_label)
+    cat_id = (coin['cat_id'] or '').strip()
+    if bin_label and cat_id:
+        ident = f'{bin_label} - {cat_id}'
+    else:
+        ident = bin_label or cat_id or (coin['coin_id'] or '').strip()
+
+    bottom_y = y + pad
+    if ident:
+        c.setFont('Helvetica-Bold', 6)
+        c.drawString(x + pad,
+                     bottom_y,
+                     _fit_text(c, ident, inner_w, 'Helvetica-Bold', 6))
+
+    # Middle area: image (left) + specs stack (right). Bottom row holds the
+    # ident, so the image bottom must clear it.
     mid_top = desc_y - 3
-    mid_bottom = y + pad
+    mid_bottom = bottom_y + 8
     mid_h = mid_top - mid_bottom
     if mid_h < 10:
         return
@@ -6083,7 +6125,8 @@ def _draw_coin_card(c, coin, x, y, w, h):
     if coin['mint']: specs.append(coin['mint'].strip())
     if coin['weight'] is not None: specs.append(f"{coin['weight']:.2f}g")
     if coin['size'] is not None: specs.append(f"{coin['size']:.1f}mm")
-    if coin['die_axis']: specs.append(str(coin['die_axis']).strip())
+    da = _format_die_axis(coin['die_axis'])
+    if da: specs.append(da)
 
     spec_font_size = 6
     c.setFont('Helvetica', spec_font_size)
