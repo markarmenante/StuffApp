@@ -1171,6 +1171,24 @@ def _backfill_docs_json(db, table, target_col, sources):
         )
 
 
+# File columns whose values are the LEGITIMATE source of a JSON
+# documents array (populated by the various backfill helpers below).
+# Phantom-strip pattern 1 must NOT count these as "other files" when
+# evaluating the matching JSON column — the tile and its slot column
+# point at the same file BY DESIGN, not because the legacy importer
+# accidentally duplicated a cover image. Without this exclusion the
+# strip nukes every legitimate persons health/id document on every
+# boot (slot file present + JSON tile referencing it = both true).
+DOC_JSON_BACKFILL_SOURCES = {
+    ('persons',    'id_documents'):     {f'id_doc_{i}'     for i in range(3, 9)},
+    ('persons',    'health_documents'): {f'health_doc_{i}' for i in range(3, 9)},
+    ('vehicles',   'documents'):        {'insurance', 'invoice', 'registration', 'auto_title',
+                                         'vehicle_doc_5', 'vehicle_doc_6',
+                                         'vehicle_doc_7', 'vehicle_doc_8'},
+    ('properties', 'documents'):        {f'doc_{i}' for i in range(1, 11)},
+}
+
+
 def _strip_phantom_cover_image_docs(db):
     """Remove phantom doc tiles created by legacy FileMaker imports.
     Two patterns get caught:
@@ -1180,6 +1198,11 @@ def _strip_phantom_cover_image_docs(db):
          secondary image slot, etc.). The legacy import wrote the
          same file into multiple columns and the doc-row backfill
          turned each into its own tile.
+
+         Exception: columns declared in DOC_JSON_BACKFILL_SOURCES
+         for the JSON column under evaluation are excluded — those
+         file columns ARE the legitimate source of the tile, not a
+         redundant copy.
 
       2. Title match — the tile's title starts with the record's
          EXPORT_LAYOUT ident (e.g. "2013 Global 6000 — Image" on a
@@ -1223,11 +1246,6 @@ def _strip_phantom_cover_image_docs(db):
         except sqlite3.OperationalError:
             continue
         for row in rows:
-            other_files = {
-                (row[c] or '').strip()
-                for c in present_files
-                if c in row.keys() and (row[c] or '').strip()
-            }
             ident_prefixes = []
             if ident_fn:
                 try:
@@ -1248,6 +1266,18 @@ def _strip_phantom_cover_image_docs(db):
                     continue
                 if not isinstance(docs, list):
                     continue
+                # Per-JSON-column "other_files" set. Excludes the file
+                # columns declared as the legitimate backfill source for
+                # `jc` — otherwise the strip nukes every tile that points
+                # at its own slot column (e.g. persons health_documents
+                # tile referencing health_doc_3).
+                exclude = DOC_JSON_BACKFILL_SOURCES.get((cat, jc), set())
+                other_files = {
+                    (row[c] or '').strip()
+                    for c in present_files
+                    if c not in exclude and c in row.keys()
+                    and (row[c] or '').strip()
+                }
                 kept = []
                 for d in docs:
                     if not isinstance(d, dict):
@@ -7727,6 +7757,71 @@ def cameras_owner_mark():
     db.commit()
     return jsonify(updated=r.rowcount,
                    total=db.execute('SELECT COUNT(*) FROM cameras').fetchone()[0])
+
+
+@app.route('/admin/persons-restore-docs', methods=['POST'])
+def persons_restore_docs():
+    """Repopulate id_documents / health_documents JSON columns from the
+    per-slot id_doc_3..8 / health_doc_3..8 file columns when the JSON
+    column is currently empty. Recovers data nuked by an earlier overly
+    aggressive phantom-doc strip — the slot columns themselves were
+    never modified, so we still have the source of truth.
+
+    Idempotent: rows whose JSON already has tiles are skipped (no
+    deduping, no merging). Returns a per-set count of rows restored."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    cols = {r['name'] for r in db.execute("PRAGMA table_info(persons)").fetchall()}
+    plans = [
+        ('id_documents', [
+            (f'id_doc_{i}', f'id_doc_{i}_title', f'ID Doc {i}')
+            for i in range(3, 9)
+        ]),
+        ('health_documents', [
+            (f'health_doc_{i}', f'health_doc_{i}_title', f'Health Doc {i}')
+            for i in range(3, 9)
+        ]),
+    ]
+    out = {}
+    rows = db.execute("SELECT * FROM persons").fetchall()
+    for json_col, sources in plans:
+        if json_col not in cols:
+            out[json_col] = 0
+            continue
+        restored = 0
+        for row in rows:
+            try:
+                existing = json.loads(row[json_col] or '[]')
+            except (TypeError, ValueError):
+                existing = []
+            if isinstance(existing, list) and existing:
+                continue  # JSON already has tiles — leave alone
+            docs = []
+            for fn_col, title_col, default_title in sources:
+                if fn_col not in cols:
+                    continue
+                fn = row[fn_col] if fn_col in row.keys() else None
+                if not fn:
+                    continue
+                title = ''
+                if title_col in cols and title_col in row.keys():
+                    title = (row[title_col] or '').strip()
+                if not title:
+                    title = default_title
+                docs.append({'title': title, 'filename': fn})
+            if not docs:
+                continue
+            db.execute(
+                f"UPDATE persons SET {json_col} = ?, updated_at = ? "
+                f"WHERE id = ?",
+                [json.dumps(docs), datetime.utcnow().isoformat(), row['id']],
+            )
+            restored += 1
+        out[json_col] = restored
+    db.commit()
+    return jsonify(restored=out,
+                   total=db.execute('SELECT COUNT(*) FROM persons').fetchone()[0])
 
 
 @app.route('/admin/lenses-owner-mark', methods=['POST'])
