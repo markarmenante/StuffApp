@@ -6060,16 +6060,17 @@ def _draw_coin_card(c, coin, x, y, w, h):
     top_y = y + h - pad - 7
     c.setFont('Helvetica-Bold', 7)
     c.drawString(x + pad, top_y, _fit_text(c, title, inner_w * 0.5, 'Helvetica-Bold', 7))
-    c.setFont('Helvetica', 6)
+    c.setFont('Helvetica', 7)
     # Wider date allowance so the BC tail isn't truncated.
-    c.drawRightString(x + w - pad, top_y, _fit_text(c, date_range, inner_w * 0.55, 'Helvetica', 6))
+    c.drawRightString(x + w - pad, top_y, _fit_text(c, date_range, inner_w * 0.55, 'Helvetica', 7))
 
-    # Description (obv_rev), full-width under title
+    # Description (obv_rev), full-width under title — 7pt to match the
+    # date and the right-side spec stack.
     obv = (coin['obv_rev'] or '').strip()
-    desc_y = top_y - 8
+    desc_y = top_y - 9
     if obv:
-        c.setFont('Helvetica', 6)
-        c.drawString(x + pad, desc_y, _fit_text(c, obv, inner_w, 'Helvetica', 6))
+        c.setFont('Helvetica', 7)
+        c.drawString(x + pad, desc_y, _fit_text(c, obv, inner_w, 'Helvetica', 7))
 
     # Bottom-right ident: "<bin> - <cat_id>" (e.g. "C1 - CA001"). Whitespace
     # inside the bin is squashed so "C 1" prints as "C1". Anchored bottom-
