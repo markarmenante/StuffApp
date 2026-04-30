@@ -6888,6 +6888,25 @@ def admin_index():
             'url':   url_for('coins_owner_mark'),
         },
         {
+            'label': "Coins: total renumber display position (bins)",
+            'desc':  "Wipes every letter-suffix insert and reassigns "
+                     "C/CM/N/NM bins from 1..n within each "
+                     "location/era group, ordered by region / authority "
+                     "/ mint / cat_id. Card-print routine adds suffixes "
+                     "back as new coins land between existing positions.",
+            'url':   url_for('coins_renumber_bins'),
+            'confirm': True,
+        },
+        {
+            'label': "Coins: total renumber cat_ids (C001..Cn)",
+            'desc':  "Reassigns every coin's cat_id to the flat C-prefix "
+                     "global serial. Destroys the prior CA/CM/NA/NM "
+                     "partition. Cat_ids are meant to be unchanging — "
+                     "only run this for a one-time scheme switch.",
+            'url':   url_for('coins_renumber_cat_ids'),
+            'confirm': True,
+        },
+        {
             'label': "Recordings: clear bare-numeric notes (FM import fix)",
             'desc':  "The earlier FileMaker import wrote price values into "
                      "the notes column. Nulls out any recordings.notes that "
