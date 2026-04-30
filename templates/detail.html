@@ -2806,10 +2806,14 @@ function _escHtml(s) {
 function _setupTaGhost(inp) {
   const parent = inp.parentElement;
   if (!parent) return null;
-  // Inline ghosts only line up against left-aligned text. Force left so the
-  // mirror's "typed | ghost" sequence overlays the input's typed portion
-  // exactly, even when the surrounding stylesheet centers the cell.
-  inp.style.textAlign = 'left';
+  // Inline ghost suggestions only line up cleanly against left-aligned
+  // text — but if the cell's inline style explicitly centers the input
+  // (e.g. Dial, Vendor, watch-detail strap color), respect that. The
+  // ghost overlay degrades gracefully: it just trails after the
+  // centered value instead of seamlessly continuing it.
+  if (!inp.style.textAlign) {
+    inp.style.textAlign = 'left';
+  }
   const cs = getComputedStyle(inp);
   if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
   const wrap = document.createElement('span');
