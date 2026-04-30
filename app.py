@@ -6140,7 +6140,12 @@ def _draw_coin_card(c, coin, x, y, w, h):
         spec_w = w - img_w - pad
         # Squeeze line-height when there are many specs.
         step = min(9, max(7, mid_h / max(spec_count, 1)))
-        sy = mid_top - spec_font_size
+        # Vertically center the stack on the image. Total visible height ≈
+        # last-baseline → first-cap = (count-1)*step + font_size; the empty
+        # band above gets half the leftover so the column visually balances.
+        stack_height = (spec_count - 1) * step + spec_font_size
+        top_offset = max(0, (mid_h - stack_height) / 2)
+        sy = mid_top - top_offset - spec_font_size
         for s in specs:
             c.drawRightString(x + w - pad,
                               sy,
