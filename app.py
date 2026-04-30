@@ -5917,18 +5917,10 @@ def coins_print_pdf():
     where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     rows = db.execute(
         f"SELECT * FROM coins {where_sql}", params).fetchall()
-    # Print order = display position (bin), parsed as (alpha-prefix, integer).
-    # Empty bins sink to the end so they print after the positioned coins.
-    bin_re = re.compile(r'^([A-Za-z]+)\s*(\d+)$')
-    def _bin_key(coin):
-        b = (coin['bin'] or '').strip()
-        if not b:
-            return (1, 'zzz', 0, '')
-        m = bin_re.match(b)
-        if m:
-            return (0, m.group(1).upper(), int(m.group(2)), b)
-        return (0, 'zzz', 0, b)
-    rows = sorted(rows, key=_bin_key)
+    # Recompute display-position bins for the print set: existing C\d+(\w*)
+    # bins are preserved; new (no-bin / non-conforming) coins get a letter
+    # suffix slotted between their neighbours per region/authority/mint.
+    rows, _ = _recompute_coin_bins(db, rows, total=False)
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
@@ -5956,6 +5948,102 @@ def coins_print_pdf():
     buf.seek(0)
     return Response(buf.read(), mimetype='application/pdf',
                     headers={'Content-Disposition': 'inline; filename="coins.pdf"'})
+
+
+COIN_BIN_RE = re.compile(r'^C\s*(\d+)\s*([a-z]*)$', re.IGNORECASE)
+
+
+def _parse_coin_bin(s):
+    """Return (numeric, letter_suffix_lower) for a 'C\\d+\\w*' bin, else None.
+    Whitespace inside the bin is tolerated so legacy 'C 1' parses as (1, '')."""
+    if not s:
+        return None
+    m = COIN_BIN_RE.match(s.strip())
+    if not m:
+        return None
+    return (int(m.group(1)), (m.group(2) or '').lower())
+
+
+def _coin_renumber_sort_key(row):
+    """Sort key for display-position renumbering. Empty fields sort last
+    so positioned-up coins lead. Case-insensitive on the text fields."""
+    return (
+        ((row['region'] or '').strip().lower() or 'zzz'),
+        ((row['authority'] or '').strip().lower() or 'zzz'),
+        ((row['mint'] or '').strip().lower() or 'zzz'),
+        ((row['cat_id'] or '').strip().lower() or 'zzz'),
+    )
+
+
+def _recompute_coin_bins(db, rows, total=False):
+    """Assign C-prefixed display-position bins to a set of coin rows in
+    region / authority / mint / cat_id order.
+
+    `total=False` (incremental, the default for the print route): any
+    coin already labelled 'C<n>' or 'C<n><letters>' keeps its bin. Coins
+    without a conforming bin get inserted between their neighbours with
+    a letter suffix tied to the previous numeric anchor — e.g. a coin
+    that sorts between C15 and C16 becomes C15a; a second one C15b.
+
+    `total=True` (admin renumber): clean reassignment from C1..Cn in
+    sort order, dropping all letter suffixes.
+
+    Returns (sorted_rows_as_dicts, updates_count). Each returned dict has
+    its `bin` field set to the new value so callers can render without
+    re-fetching."""
+    sorted_rows = sorted(rows, key=_coin_renumber_sort_key)
+    out = [dict(r) for r in sorted_rows]
+    updates = []
+    now = datetime.utcnow().isoformat()
+
+    if total:
+        for i, r in enumerate(out, start=1):
+            new_bin = f'C{i}'
+            if (r.get('bin') or '').strip() != new_bin:
+                updates.append((r['id'], new_bin))
+                r['bin'] = new_bin
+    else:
+        prev_anchor = None       # int — last numeric Cn seen
+        used_letters = set()     # letters already used at prev_anchor
+        for r in out:
+            parsed = _parse_coin_bin(r.get('bin'))
+            if parsed:
+                num, letters = parsed
+                canonical = f'C{num}{letters}'
+                if (r.get('bin') or '').strip() != canonical:
+                    updates.append((r['id'], canonical))
+                    r['bin'] = canonical
+                if letters:
+                    # Existing letter-suffixed insert. Track it so a new
+                    # coin at the same anchor gets the next letter.
+                    if num == prev_anchor and len(letters) == 1:
+                        used_letters.add(letters)
+                else:
+                    prev_anchor = num
+                    used_letters = set()
+            else:
+                # Find next available letter at the current anchor.
+                letter = None
+                for i in range(26):
+                    cand = chr(ord('a') + i)
+                    if cand not in used_letters:
+                        letter = cand
+                        break
+                if letter is None:
+                    letter = 'z'  # ran past 26 — fallback rather than crash
+                base = prev_anchor if prev_anchor is not None else 0
+                new_bin = f'C{base}{letter}'
+                updates.append((r['id'], new_bin))
+                used_letters.add(letter)
+                r['bin'] = new_bin
+
+    if updates:
+        db.executemany(
+            "UPDATE coins SET bin = ?, updated_at = ? WHERE id = ?",
+            [(b, now, i) for (i, b) in updates]
+        )
+        db.commit()
+    return out, len(updates)
 
 
 def _metal_short(metal):
@@ -6072,24 +6160,34 @@ def _draw_coin_card(c, coin, x, y, w, h):
         c.setFont('Helvetica', 7)
         c.drawString(x + pad, desc_y, _fit_text(c, obv, inner_w, 'Helvetica', 7))
 
-    # Bottom-right ident: "<bin> - <cat_id>" (e.g. "C1 - CA001"). Whitespace
-    # inside the bin is squashed so "C 1" prints as "C1". Anchored bottom-
-    # right so the larger image on the left isn't pushed off-card.
+    # Bottom-right ident: "<cat_id> / <bin>" — cat_id regular, bin bold.
+    # The display-position bin is the visually distinguishing handle when
+    # locating a card in a tray, so it gets the weight.
+    from reportlab.pdfbase.pdfmetrics import stringWidth
     bin_label = (coin['bin'] or '').strip()
     if bin_label:
         bin_label = re.sub(r'\s+', '', bin_label)
     cat_id = (coin['cat_id'] or '').strip()
-    if bin_label and cat_id:
-        ident = f'{bin_label} - {cat_id}'
-    else:
-        ident = bin_label or cat_id or (coin['coin_id'] or '').strip()
 
     bottom_y = y + pad
-    if ident:
-        c.setFont('Helvetica-Bold', 7)
-        c.drawRightString(x + w - pad,
-                          bottom_y,
-                          _fit_text(c, ident, inner_w, 'Helvetica-Bold', 7))
+    ident_font_size = 7
+    right_x = x + w - pad
+    if bin_label and cat_id:
+        c.setFont('Helvetica-Bold', ident_font_size)
+        c.drawRightString(right_x, bottom_y, bin_label)
+        bold_w = stringWidth(bin_label, 'Helvetica-Bold', ident_font_size)
+        prefix = f'{cat_id} / '
+        c.setFont('Helvetica', ident_font_size)
+        c.drawRightString(right_x - bold_w, bottom_y,
+                          _fit_text(c, prefix, inner_w - bold_w,
+                                    'Helvetica', ident_font_size))
+    else:
+        fallback = bin_label or cat_id or (coin['coin_id'] or '').strip()
+        if fallback:
+            c.setFont('Helvetica-Bold', ident_font_size)
+            c.drawRightString(right_x, bottom_y,
+                              _fit_text(c, fallback, inner_w,
+                                        'Helvetica-Bold', ident_font_size))
 
     # Middle area: image (left) + specs stack (right). Bottom row holds the
     # ident, so the image bottom must clear it.
@@ -6449,6 +6547,33 @@ def coins_fix_missing_cat_id():
         'actions':                  actions,
         'skipped_rows':             skipped,
     })
+
+
+@app.route('/admin/coins-renumber-bins', methods=['POST'])
+def coins_renumber_bins():
+    """Total renumber of coin display-position bins. Sorts every coin by
+    region, authority, mint, cat_id and reassigns C1..Cn from scratch.
+    Wipes any letter-suffix inserts the print-time incremental routine
+    has added since the last total renumber.
+
+    Optional `?filter=<key>` to scope the renumber to a coin filter
+    (matches CATEGORY_FILTERS['coins'] keys: ca_ancient, ny_ancient,
+    ca_modern, ny_modern, ordered). Without `filter`, every coin row
+    is renumbered into a single C1..Cn sequence."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    coin_filter = (request.args.get('filter') or '').strip() or None
+    cat_filters = CATEGORY_FILTERS.get('coins', {})
+    if coin_filter and coin_filter in cat_filters:
+        clause, extra = cat_filters[coin_filter]
+        rows = db.execute(
+            f"SELECT * FROM coins WHERE ({clause})", list(extra)
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM coins").fetchall()
+    out, updated = _recompute_coin_bins(db, rows, total=True)
+    return jsonify(filter=coin_filter, total=len(out), updated=updated)
 
 
 @app.route('/admin/coins-cat-id-audit', methods=['POST'])
