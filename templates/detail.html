@@ -920,12 +920,13 @@ document.addEventListener('DOMContentLoaded', function () {
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
   </div>
 
-  <!-- Aperture | Length sit directly under the model description.
+  <!-- Mount | Aperture | Length sit directly under the model description.
        Aperture renders its value with a ƒ/ prefix; Length with a mm
        suffix. The .coin-unit-input handler strips/re-applies the
        prefix or suffix on focus / blur so the saved value is just
        the raw number. -->
-  <div class="dgrid dg2 lens-purchase">
+  <div class="dgrid dg3 lens-purchase">
+    {{ cell('mount','Mount') }}
     <div class="dcell">
       <input type="text" name="aperture"
              value="{{ 'ƒ/%g'|format(val('aperture')|float) if val('aperture') else '' }}"
@@ -936,12 +937,11 @@ document.addEventListener('DOMContentLoaded', function () {
       <input type="text" name="length"
              value="{{ '%g mm'|format(val('length')|float) if val('length') else '' }}"
              class="coin-unit-input" data-suffix=" mm" inputmode="decimal">
-      <span class="clabel">Length</span>
+      <span class="clabel">mm</span>
     </div>
   </div>
-  <!-- Mount | Filter mm -->
-  <div class="dgrid dg2 lens-purchase">
-    {{ cell('mount','Mount') }}
+  <!-- Filter mm -->
+  <div class="dgrid dg1 lens-purchase">
     {{ numcell('filter_size','Filter mm') }}
   </div>
   <!-- Full-width lens photo -->
