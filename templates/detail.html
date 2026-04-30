@@ -831,7 +831,7 @@ document.addEventListener('DOMContentLoaded', function () {
       </label>
     </div>
     <div class="watch-specs">
-      <div class="dgrid dg2 cam-type-row">
+      <div class="dgrid dg3 cam-type-row">
         <div class="dcell" id="camType">
           <select name="digital_film">
             <option value=""></option>
@@ -854,13 +854,13 @@ document.addEventListener('DOMContentLoaded', function () {
           <input type="number" step="any" name="megapixels" value="{{ val('megapixels') }}">
           <span class="clabel">Megapixels</span>
         </div>
-      </div>
-      <div class="dgrid dg3 cam-lens-sensor-serial">
-        {{ cell('lens_mount','Mount') }}
         <div class="dcell cam-digital-only">
           <input type="text" name="sensor" value="{{ val('sensor') }}">
           <span class="clabel">Sensor</span>
         </div>
+      </div>
+      <div class="dgrid dg2 cam-mount-serial-row">
+        {{ cell('lens_mount','Mount') }}
         <div class="dcell cam-serial-cell">
           <input type="text" name="serial_number" value="{{ val('serial_number') }}">
           <span class="clabel">Serial #</span>
@@ -2419,12 +2419,6 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     });
     document.querySelectorAll('.cam-digital-only').forEach(el => {
       el.style.display = isFilm ? 'none' : '';
-    });
-    // When Sensor is hidden (Film), Serial # fills the freed two
-    // columns next to Lens Mount; on Digital it takes its natural
-    // third-of-row slot alongside the visible Sensor.
-    document.querySelectorAll('.cam-serial-cell').forEach(el => {
-      el.style.gridColumn = isFilm ? '2 / span 2' : '';
     });
   }
   sel.addEventListener('change', apply);

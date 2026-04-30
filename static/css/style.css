@@ -2225,7 +2225,7 @@ input[type="date"] { -webkit-appearance: none; }
   /* Camera Type/Format radios crowded four options (35mm/120/Sheet/Other)
      into a ~170px half-width cell and overlapped. Let the row go full
      width on mobile so each radio-group has room to flow cleanly. */
-  .watch-specs .dgrid.dg2.cam-type-row { grid-template-columns: 1fr; }
+  .watch-specs .dgrid.cam-type-row { grid-template-columns: 1fr; }
 
   /* 16px inputs so iOS Safari doesn't auto-zoom on focus. Cell height
      stays at the desktop default (min-height: 22px on .dcell) — the
