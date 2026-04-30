@@ -1956,46 +1956,33 @@ def next_coin_id(db):
     return f"C {count + 1}"
 
 
-def _cat_id_prefix(property_name, date_1):
-    """Two-letter prefix for a coin's cat_id: <location><era>.
-
-    Location: C = Carpinteria, N = New York. Anything else is unmapped.
-    Era:      A = minted before 500 AD, M = minted 500 AD or later.
-    Returns None if either axis can't be determined.
-    """
-    p = (property_name or '').strip().lower()
-    if p in ('carp', 'carpinteria'):
-        loc = 'C'
-    elif p in ('nyc', 'new york', 'ny'):
-        loc = 'N'
-    else:
-        return None
-    if date_1 is None or date_1 == '':
-        return None
-    try:
-        d = int(date_1)
-    except (TypeError, ValueError):
-        return None
-    return loc + ('A' if d < 500 else 'M')
+CAT_ID_PREFIX = 'C'
+CAT_ID_RE = re.compile(r'^C(\d+)$', re.IGNORECASE)
 
 
-def next_cat_id(db, property_name, date_1):
-    """Next sequential cat_id for a coin at this property / era,
-    zero-padded to 3 digits (e.g. 'CA001'). None if unassignable."""
-    prefix = _cat_id_prefix(property_name, date_1)
-    if not prefix:
-        return None
+def _cat_id_prefix(property_name=None, date_1=None):
+    """Cat ID is a flat global serial — every coin gets a 'C' prefix
+    regardless of location or era. Arguments preserved for caller
+    backwards-compat (next_cat_id is invoked from a few places that
+    still pass them); they're ignored."""
+    return CAT_ID_PREFIX
+
+
+def next_cat_id(db, property_name=None, date_1=None):
+    """Next sequential cat_id, zero-padded to 3 digits (e.g. 'C001').
+    Single global series — no location/era partition. Always returns
+    a value; the legacy `None` path no longer triggers."""
     row = db.execute(
-        "SELECT cat_id FROM coins WHERE cat_id LIKE ? "
-        "ORDER BY CAST(SUBSTR(cat_id, 3) AS INTEGER) DESC LIMIT 1",
-        [f'{prefix}%']).fetchone()
+        "SELECT cat_id FROM coins "
+        "WHERE cat_id GLOB 'C[0-9]*' "
+        "ORDER BY CAST(SUBSTR(cat_id, 2) AS INTEGER) DESC LIMIT 1"
+    ).fetchone()
     n = 1
     if row and row['cat_id']:
-        try:
-            n = int(row['cat_id'][2:]) + 1
-        except ValueError:
-            n = 1
-    return f'{prefix}{n:03d}'
+        m = CAT_ID_RE.match(row['cat_id'])
+        if m:
+            n = int(m.group(1)) + 1
+    return f'C{n:03d}'
 
 
 def coin_age(date_1):
@@ -5951,13 +5938,8 @@ def coins_print_pdf():
 
 
 COIN_BIN_PREFIXES = ('C', 'CM', 'N', 'NM')
-# Map cat_id prefix → bin prefix. Ancient cat_ids drop the 'A' in their
-# bin label so Carpinteria Ancient bins read C1, C2, C2a (not CA1…),
-# while Carpinteria Modern keeps the 'M' as CM1, CM2, CM2a. NYC follows
-# the same pattern (NA → N, NM → NM).
-CAT_TO_BIN_PREFIX = {'CA': 'C', 'CM': 'CM', 'NA': 'N', 'NM': 'NM'}
-# Alternation order matters for the regex: longer prefixes first so
-# "CM5" doesn't match the "C" branch with "M5" left over.
+# Alternation order: longer prefixes first so "CM5" hits the CM branch
+# instead of C with leftover M5.
 COIN_BIN_RE = re.compile(
     r'^(CM|NM|C|N)\s*(\d+)\s*([a-z]*)$',
     re.IGNORECASE,
@@ -5966,8 +5948,7 @@ COIN_BIN_RE = re.compile(
 
 def _parse_coin_bin(s):
     """Return (prefix, numeric, letter_suffix_lower) for a bin matching
-    the C/CM/N/NM scheme; None for any other shape (legacy 'C 1' parses
-    as ('C', 1, ''), blank or free-form returns None)."""
+    the C / CM / N / NM scheme; None otherwise."""
     if not s:
         return None
     m = COIN_BIN_RE.match(s.strip())
@@ -5977,14 +5958,29 @@ def _parse_coin_bin(s):
 
 
 def _coin_bin_prefix(coin):
-    """Bin prefix for a coin — derived from its cat_id's two-letter
-    location/era code. Ancient cat_ids (CA, NA) drop the 'A' in their
-    bin so the printed label reads C1 / N1 instead of CA1 / NA1.
-    None when the coin has no recognisable cat_id prefix."""
-    cid = (coin['cat_id'] or '').strip().upper()
-    if len(cid) >= 2:
-        return CAT_TO_BIN_PREFIX.get(cid[:2])
-    return None
+    """Bin prefix from property + date_1 — Carp/NY × Ancient/Modern.
+    Ancient drops the 'A': Carp Ancient → C, Carp Modern → CM,
+    NYC Ancient → N, NYC Modern → NM. None when either axis is
+    unmappable (no recognisable property, or no date_1).
+
+    Reads property+date_1 directly rather than parsing cat_id — the
+    flat C001..Cn cat_id no longer carries location/era info."""
+    p = (coin['property_name'] or '').strip().lower()
+    if p in ('carp', 'carpinteria'):
+        loc = 'C'
+    elif p in ('nyc', 'new york', 'ny'):
+        loc = 'N'
+    else:
+        return None
+    d = coin['date_1']
+    if d in (None, ''):
+        # No date → assume modern (mirrors the cat-id-fixer fallback).
+        return loc + 'M'
+    try:
+        n = int(d)
+    except (TypeError, ValueError):
+        return None
+    return loc if n < 500 else loc + 'M'
 
 
 def _coin_renumber_sort_key(row):
@@ -5999,28 +5995,30 @@ def _coin_renumber_sort_key(row):
 
 
 def _recompute_coin_bins(db, rows, total=False):
-    """Assign display-position bins partitioned by the cat_id prefix
-    (CA / CM / NA / NM). Each prefix has its own 1..n sequence — e.g.
-    Carpinteria Ancient coins are CA1, CA2, CA3, …; New York Modern
-    coins are NM1, NM2, ….
+    """Assign display-position bins partitioned by location/era prefix
+    (C / CM / N / NM, derived from property + date_1). Each prefix has
+    its own 1..n sequence — Carpinteria Ancient coins are C1, C2, C2a;
+    Carpinteria Modern are CM1, CM2, CM2a; NYC follows the same shape
+    with N / NM.
 
     `total=True`: clean reassignment within each prefix group, ordered
     by region / authority / mint / cat_id. Letter suffixes are wiped.
 
     `total=False` (default — what the print route calls): preserve any
     coin already labelled with a conforming `<prefix><n>(<letters>)?`
-    bin. New coins (no bin or non-conforming bin) slot between their
-    neighbours with a letter suffix tied to the previous numeric
-    anchor in the same prefix group — so a Carpinteria-Ancient coin
-    that sorts between CA15 and CA16 becomes CA15a, a second one CA15b.
+    bin. Coins without a conforming bin slot between their neighbours
+    with a letter suffix tied to the previous numeric anchor in the
+    same prefix group — a Carp-Ancient coin between C15 and C16
+    becomes C15a, a second one C15b.
 
     Special case: when a prefix group has zero conforming bins (first
     run on that group, or after a scheme change) the group is treated
-    as a fresh total renumber so coins start at 1 instead of 0a.
+    as a fresh total renumber so coins start at <prefix>1 instead of
+    <prefix>0a.
 
-    Returns (sorted_rows_as_dicts, updates_count). Coins whose cat_id
-    has no recognised prefix appear in the returned list (in sort
-    order) with their existing bin untouched."""
+    Returns (sorted_rows_as_dicts, updates_count). Coins with no
+    mappable prefix appear in the returned list (in sort order) with
+    their existing bin untouched."""
     by_prefix = {p: [] for p in COIN_BIN_PREFIXES}
     no_prefix = []
     for r in rows:
@@ -6597,6 +6595,37 @@ def coins_fix_missing_cat_id():
         'actions':                  actions,
         'skipped_rows':             skipped,
     })
+
+
+@app.route('/admin/coins-renumber-cat-ids', methods=['POST'])
+def coins_renumber_cat_ids():
+    """Total renumber of every coin's cat_id to a flat C001..Cn series.
+
+    cat_id is the unchanging serial — once assigned to a coin it stays
+    with that coin. This endpoint exists for the one-time switch from
+    the old per-(location,era) partition (CA/CM/NA/NM) to the unified
+    'C' prefix. After this runs, NEW coins pick up via next_cat_id().
+
+    Order: region / authority / mint / existing-cat_id, so the new
+    serial roughly tracks the printed-card reading order at renumber
+    time. Coins where every sort field is blank go to the end."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    rows = db.execute("SELECT * FROM coins").fetchall()
+    sorted_rows = sorted(rows, key=_coin_renumber_sort_key)
+    updated = 0
+    now = datetime.utcnow().isoformat()
+    for i, r in enumerate(sorted_rows, start=1):
+        new_cat = f'C{i:03d}'
+        if (r['cat_id'] or '').strip() != new_cat:
+            db.execute(
+                "UPDATE coins SET cat_id = ?, updated_at = ? WHERE id = ?",
+                [new_cat, now, r['id']]
+            )
+            updated += 1
+    db.commit()
+    return jsonify(total=len(sorted_rows), updated=updated)
 
 
 @app.route('/admin/coins-renumber-bins', methods=['POST'])
