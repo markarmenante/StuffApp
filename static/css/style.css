@@ -593,6 +593,12 @@ input[type="number"]::-webkit-outer-spin-button {
 .detail-page-watches .dcell input:not([type=file]):not([type=checkbox]):not([type=radio]),
 .detail-page-watches .dcell select { text-align: center; }
 
+/* Watch movement rows (Calibre / Jewels / Origin, Beat / Hz, Winding /
+   Reserve) — visually muted with a soft grey background so they read
+   as a sub-group separated from the brand specs above and the service
+   rows below. */
+.dgrid.watch-movement .dcell { background: #f4f4f6; }
+
 /* Service date: desktop shows native date, compact overlay hidden. */
 .svc-date-compact { display: none; }
 /* The MM/DD/YYYY overlay span is mobile-only; hidden on desktop where
