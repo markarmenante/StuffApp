@@ -2205,8 +2205,11 @@ input[type="date"] { -webkit-appearance: none; }
     pointer-events: none;
   }
 
-  /* Watches complications: keep 3 columns even on narrow viewports. */
+  /* Watches complications: keep 3 columns even on narrow viewports.
+     comp-name bumps to 16px to match the iOS-zoom-safe input size on
+     phones; the desktop 14px stays via the rule outside the @media. */
   .comp-grid { grid-template-columns: repeat(3, 1fr); }
+  .comp-name { font-size: 16px; }
 
   /* Bottom action row: wrap into 2-up. */
   .detail-bottom { grid-template-columns: repeat(2, 1fr); gap: 6px; }
