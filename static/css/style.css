@@ -678,6 +678,12 @@ input[type="number"]::-webkit-outer-spin-button {
   font-size: 13px;
   color: #111111;
 }
+/* Coin detail font consistency on desktop: drop inputs/selects from
+   14px → 13px so they read as the same size as the description /
+   pedigree / notes textareas (already 13px). */
+.detail-page-coins .dcell input,
+.detail-page-coins .dcell select,
+.detail-page-coins .dcell textarea { font-size: 13px; }
 .dcell-notes textarea {
   min-height: 90px;
 }
@@ -2145,10 +2151,19 @@ input[type="date"] { -webkit-appearance: none; }
      — keep them two-up on phones instead of stacking. */
   .dgrid.dg2.person-doc-group { grid-template-columns: 1fr 1fr; }
 
-  /* Coin detail's description | official row pairs the two by intent
-     (the official often appears in the obv/rev description), so keep
-     them side-by-side on phones too. */
-  .dgrid.dg2.coin-desc-official { grid-template-columns: 1fr 1fr; }
+  /* Coin detail top rows (Region|Authority, Mint|Official, then the
+     full-width Obv/Rev) — keep the dg2 pairs side-by-side on phones
+     instead of stacking. */
+  .dgrid.dg2.coin-top-row { grid-template-columns: 1fr 1fr; }
+
+  /* Coin detail font consistency: every input/select/textarea inside
+     the coin form drops to 15px on iPhone. The blanket .dcell 16px
+     rule above prevents iOS auto-zoom on focus; 15px will trigger
+     the zoom when a field is tapped, but the user explicitly asked
+     for a smaller, consistent size on the coin detail. */
+  .detail-page-coins .dcell input,
+  .detail-page-coins .dcell select,
+  .detail-page-coins .dcell textarea { font-size: 15px; }
 
   /* Watch spec rows: keep two-up even on narrow viewports. */
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }

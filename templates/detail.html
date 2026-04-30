@@ -564,8 +564,8 @@ document.addEventListener('DOMContentLoaded', function () {
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'coins' %}
 
-  <!-- Row 1: Region | Authority | Mint -->
-  <div class="dgrid dg3">
+  <!-- Row 1: Region | Authority -->
+  <div class="dgrid dg2 coin-top-row">
     <div class="dcell ta-wrap coin-region-cell">
       <input type="text" name="region" value="{{ val('region') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('region', [])|join('||') }}" style="font-weight:700"
              {% if is_new and not val('region') %}placeholder="Region"{% endif %}>
@@ -576,17 +576,21 @@ document.addEventListener('DOMContentLoaded', function () {
              {% if is_new and not val('authority') %}placeholder="Authority"{% endif %}>
       <span class="clabel">Auth</span>
     </div>
-    {{ tacell('mint','Mint', ta.get('mint', [])) }}
   </div>
 
-  <!-- Row 2: Obv/Rev one-liner (description) | Official -->
-  <div class="dgrid dg2 coin-desc-official">
-    {{ cell('obv_rev','Obv/Rev one-liner') }}
+  <!-- Row 2: Mint | Official -->
+  <div class="dgrid dg2 coin-top-row">
+    {{ tacell('mint','Mint', ta.get('mint', [])) }}
     <div class="dcell">
       <input type="text" name="official" value="{{ val('official') }}"
              {% if is_new and not val('official') %}placeholder="Name, role"{% endif %}>
       <span class="clabel">Official</span>
     </div>
+  </div>
+
+  <!-- Row 3: Obv/Rev one-liner (description) — full width -->
+  <div class="dgrid dg1 coin-top-row">
+    {{ cell('obv_rev','Obv/Rev one-liner') }}
   </div>
 
   <!-- Coin images (obverse + reverse) — pinned near the top so the
