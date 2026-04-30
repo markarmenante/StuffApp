@@ -4523,25 +4523,23 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
    The detail page's floating action bar (PDF / Check / History /
    Lookup / prev / next / Back) sits over the top-nav row. On narrow
    viewports it covers the rightmost category icons. This script
-   measures the overlap and progressively moves the optional
-   "secondary" actions (PDF, lookup-style buttons) into a popover
-   reachable via a ⋮ kebab. Prev / next / Back never move. #}
+   measures the overlap and moves the optional "secondary" actions
+   (PDF, lookup-style buttons) into a popover reachable via a ⋮
+   kebab. Prev / next / Back are always visible — losing one-click
+   navigation hurts more than the lookup pills hiding. #}
 <script>
 (function setupActionsKebab() {
   const overlay = document.querySelector('.detail-nav-overlay');
   const nav     = document.querySelector('.nav-categories');
   if (!overlay) return;
 
-  // Selectors for buttons that may collapse into the kebab. Order
-  // matters within each tier: we move LEFT-most first so the most
-  // recently added action is the last to disappear. Tier 1 = the
-  // "secondary" actions (PDF, Check, History, Lookup). Tier 2 =
-  // prev/next nav arrows; only collapsed when tier 1 isn't enough.
-  // ← Back is never collapsed.
+  // Selectors for buttons that may collapse into the kebab. Tier 1 =
+  // the "secondary" actions (PDF, Check, History, Lookup). Prev/next
+  // nav arrows and ← Back never collapse — losing one-click
+  // navigation is more disruptive than a hidden lookup pill.
   const TIER1_SELECTOR =
     '.print-pdf-btn, .watch-lookup-btn, .coin-lookup-btn, .card-share-btn';
-  const TIER2_SELECTOR = '.detail-nav-btn';
-  const COLLAPSIBLE_SELECTOR = TIER1_SELECTOR + ', ' + TIER2_SELECTOR;
+  const COLLAPSIBLE_SELECTOR = TIER1_SELECTOR;
 
   // Build the kebab + popover once, hidden by default. Popover is
   // appended to <body> so it isn't trapped by the overlay's own
@@ -4616,17 +4614,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     // Tier 1 — secondary actions (PDF / Check / History / Lookup /
     // share). Move them as a GROUP the moment any overlap is detected
     // so the kebab presents a coherent "more actions" menu instead of
-    // half-collapsed (one in popover, the rest still inline).
+    // half-collapsed (one in popover, the rest still inline). Prev /
+    // next / Back stay inline regardless of how tight the viewport
+    // gets — the user has chosen to always have those one click away.
     const tier1 = Array.from(overlay.querySelectorAll(TIER1_SELECTOR));
     tier1.forEach(btn => popover.appendChild(btn));
-    // Tier 2 — prev/next arrows. Only fold in if tier-1 wasn't
-    // enough; navigation is more painful to lose, so we move them
-    // one at a time and only as much as needed.
-    const tier2 = Array.from(overlay.querySelectorAll(TIER2_SELECTOR));
-    for (const btn of tier2) {
-      if (!isOverlapping()) break;
-      popover.appendChild(btn);
-    }
     kebab.hidden = popover.children.length === 0;
     if (popover.hidden === false) positionPopover();
   }
