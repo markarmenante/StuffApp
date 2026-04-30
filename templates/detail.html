@@ -1642,7 +1642,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <div class="dgrid dg1">
         {% set _v = r['type'] if r and r['type'] is not none else '' %}
         <div class="dcell">
-          <select name="type" style="text-align:left">
+          <select name="type" style="text-align:left;text-align-last:left">
             <option value=""></option>
             {% for o in vlists.audio_type %}<option value="{{ o }}" {{ 'selected' if _v == o }}>{{ o }}</option>{% endfor %}
           </select>
