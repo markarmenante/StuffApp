@@ -5950,17 +5950,24 @@ def coins_print_pdf():
                     headers={'Content-Disposition': 'inline; filename="coins.pdf"'})
 
 
-COIN_BIN_PREFIXES = ('CA', 'CM', 'NA', 'NM')
+COIN_BIN_PREFIXES = ('C', 'CM', 'N', 'NM')
+# Map cat_id prefix → bin prefix. Ancient cat_ids drop the 'A' in their
+# bin label so Carpinteria Ancient bins read C1, C2, C2a (not CA1…),
+# while Carpinteria Modern keeps the 'M' as CM1, CM2, CM2a. NYC follows
+# the same pattern (NA → N, NM → NM).
+CAT_TO_BIN_PREFIX = {'CA': 'C', 'CM': 'CM', 'NA': 'N', 'NM': 'NM'}
+# Alternation order matters for the regex: longer prefixes first so
+# "CM5" doesn't match the "C" branch with "M5" left over.
 COIN_BIN_RE = re.compile(
-    r'^(CA|CM|NA|NM)\s*(\d+)\s*([a-z]*)$',
+    r'^(CM|NM|C|N)\s*(\d+)\s*([a-z]*)$',
     re.IGNORECASE,
 )
 
 
 def _parse_coin_bin(s):
     """Return (prefix, numeric, letter_suffix_lower) for a bin matching
-    the CA/CM/NA/NM scheme; None for any other shape (legacy 'C 1',
-    blank, free-form text)."""
+    the C/CM/N/NM scheme; None for any other shape (legacy 'C 1' parses
+    as ('C', 1, ''), blank or free-form returns None)."""
     if not s:
         return None
     m = COIN_BIN_RE.match(s.strip())
@@ -5970,12 +5977,13 @@ def _parse_coin_bin(s):
 
 
 def _coin_bin_prefix(coin):
-    """Two-letter bin prefix for a coin — taken from its cat_id so the
-    bin shares the cat_id's location/era partition (CA, CM, NA, NM).
+    """Bin prefix for a coin — derived from its cat_id's two-letter
+    location/era code. Ancient cat_ids (CA, NA) drop the 'A' in their
+    bin so the printed label reads C1 / N1 instead of CA1 / NA1.
     None when the coin has no recognisable cat_id prefix."""
     cid = (coin['cat_id'] or '').strip().upper()
-    if len(cid) >= 2 and cid[:2] in COIN_BIN_PREFIXES:
-        return cid[:2]
+    if len(cid) >= 2:
+        return CAT_TO_BIN_PREFIX.get(cid[:2])
     return None
 
 
