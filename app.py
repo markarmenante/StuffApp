@@ -7712,6 +7712,40 @@ def audio_owner_ym():
                    total=db.execute('SELECT COUNT(*) FROM audio').fetchone()[0])
 
 
+@app.route('/admin/cameras-owner-mark', methods=['POST'])
+def cameras_owner_mark():
+    """Set owner='Mark' on every camera whose owner isn't already 'Mark'."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    now = datetime.utcnow().isoformat()
+    r = db.execute(
+        "UPDATE cameras SET owner='Mark', updated_at=? "
+        "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'Mark'",
+        [now],
+    )
+    db.commit()
+    return jsonify(updated=r.rowcount,
+                   total=db.execute('SELECT COUNT(*) FROM cameras').fetchone()[0])
+
+
+@app.route('/admin/lenses-owner-mark', methods=['POST'])
+def lenses_owner_mark():
+    """Set owner='Mark' on every lens whose owner isn't already 'Mark'."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    now = datetime.utcnow().isoformat()
+    r = db.execute(
+        "UPDATE lenses SET owner='Mark', updated_at=? "
+        "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'Mark'",
+        [now],
+    )
+    db.commit()
+    return jsonify(updated=r.rowcount,
+                   total=db.execute('SELECT COUNT(*) FROM lenses').fetchone()[0])
+
+
 @app.route('/admin/vehicles-default-sold', methods=['POST'])
 def vehicles_default_sold():
     """Set any vehicle with null/empty status to 'Sold'. Safe to re-run."""
