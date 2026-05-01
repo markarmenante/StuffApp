@@ -8474,6 +8474,144 @@ def admin_dedupe_doc_lists():
                    per_category=summary)
 
 
+@app.route('/admin/heal-doc-lists', methods=['POST'])
+def admin_heal_doc_lists():
+    """One-shot cleanup for the damage caused by today's sweep + orphan
+    bugs. For every record in every DOCUMENTS_CATEGORIES table, walk
+    each docs JSON column and classify each entry:
+
+      - dead_pointer: filename references a file that's no longer in
+        UPLOAD_FOLDER → removed.
+      - named_slot_dup_orphan: title matches a filled named-slot label
+        AND the entry's filename is also missing → removed (the named
+        slot is canonical and the duplicate's file is gone anyway).
+      - named_slot_dup_with_file: title matches a filled named-slot
+        label but the file still exists on disk → KEPT and reported,
+        because it might be a distinct user-uploaded photo and we
+        don't want to silently lose it.
+      - kept: everything else.
+
+    Dry-run by default; pass dry=0 to actually write changes.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.form.get('dry', '1') != '0'
+    db = get_db()
+
+    summary = []
+    total_dead_pointer = 0
+    total_dup_orphan = 0
+    total_dup_with_file = 0
+    review = []  # records where a named-slot duplicate has its own real file
+
+    for cat in sorted(DOCUMENTS_CATEGORIES):
+        table = CATEGORIES[cat]['table']
+        plan = EXPORT_LAYOUT.get(cat, {})
+        named_slots = []  # list of (field, default_label, title_field)
+        for spec in plan.get('files', []):
+            named_slots.append(spec)
+        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        json_cols = [c for c in DOC_SETS_BY_CATEGORY[cat].values() if c in cols]
+        if not json_cols:
+            continue
+        # Pull the named-slot fields too so we can read each row's
+        # current named-slot labels and occupancy.
+        named_select = [f for (f, _, _) in named_slots if f in cols]
+        named_title_cols = [t for (_, _, t) in named_slots if t and t in cols]
+        all_select = list({'id', *json_cols, *named_select, *named_title_cols})
+        sel = ', '.join(all_select)
+        try:
+            rows = db.execute(f"SELECT {sel} FROM {table}").fetchall()
+        except sqlite3.OperationalError:
+            continue
+        cat_dead = 0
+        cat_dup_orphan = 0
+        cat_dup_with_file = 0
+        for row in rows:
+            # Build the set of filled named-slot labels for THIS row,
+            # using both the default label and the user's title column
+            # if present.
+            filled_labels = set()
+            for (field, default_label, title_field) in named_slots:
+                if field not in cols:
+                    continue
+                slot_val = (row[field] or '').strip() if field in row.keys() else ''
+                if not slot_val:
+                    continue
+                filled_labels.add(_norm(default_label))
+                if title_field and title_field in cols and title_field in row.keys():
+                    t = (row[title_field] or '').strip()
+                    if t:
+                        filled_labels.add(_norm(t))
+
+            updates = {}
+            for col in json_cols:
+                raw = row[col] if col in row.keys() else None
+                if not raw:
+                    continue
+                try:
+                    docs = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(docs, list) or not docs:
+                    continue
+                kept = []
+                for d in docs:
+                    if not isinstance(d, dict):
+                        kept.append(d)
+                        continue
+                    fn = (d.get('filename') or '').strip()
+                    title = (d.get('title') or '').strip()
+                    file_exists = bool(fn) and os.path.exists(
+                        os.path.join(UPLOAD_FOLDER, fn))
+                    is_named_slot_dup = (
+                        bool(title) and _norm(title) in filled_labels)
+                    if not file_exists:
+                        if is_named_slot_dup:
+                            cat_dup_orphan += 1
+                            total_dup_orphan += 1
+                        else:
+                            cat_dead += 1
+                            total_dead_pointer += 1
+                        continue  # drop
+                    if is_named_slot_dup:
+                        cat_dup_with_file += 1
+                        total_dup_with_file += 1
+                        review.append({
+                            'category': cat,
+                            'record_id': row['id'],
+                            'col': col,
+                            'title': title,
+                            'filename': fn,
+                        })
+                        # Keep the entry — needs human review.
+                    kept.append(d)
+                if len(kept) != len(docs):
+                    updates[col] = kept
+            if updates and not dry:
+                set_sql = ', '.join(f"{c} = ?" for c in updates) + ", updated_at = ?"
+                params = [json.dumps(v) for v in updates.values()]
+                params.append(datetime.utcnow().isoformat())
+                params.append(row['id'])
+                db.execute(f"UPDATE {table} SET {set_sql} WHERE id = ?", params)
+        if cat_dead or cat_dup_orphan or cat_dup_with_file:
+            summary.append({
+                'category': cat,
+                'dead_pointer_removed': cat_dead,
+                'named_slot_dup_orphan_removed': cat_dup_orphan,
+                'named_slot_dup_with_file_kept': cat_dup_with_file,
+            })
+    if not dry:
+        db.commit()
+    return jsonify(dry_run=dry,
+                   total_dead_pointer_removed=total_dead_pointer,
+                   total_named_slot_dup_orphan_removed=total_dup_orphan,
+                   total_named_slot_dup_with_file_kept=total_dup_with_file,
+                   per_category=summary,
+                   review_sample=review[:30],
+                   review_count=len(review))
+
+
 @app.route('/admin/orphan-uploads', methods=['POST'])
 def admin_orphan_uploads():
     """Find (and optionally delete) files in UPLOAD_FOLDER that aren't
