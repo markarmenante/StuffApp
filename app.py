@@ -7282,6 +7282,38 @@ def _collect_referenced_uploads(db):
                 referenced.add(v)
     except sqlite3.OperationalError:
         pass
+    # Documents JSON columns: every DOCUMENTS_CATEGORIES table has one or
+    # more JSON columns holding [{title, filename}, …] arrays. Files
+    # referenced only via these arrays were getting marked as orphans
+    # because the FIELDS-driven walk above misses them.
+    for cat, sets in DOC_SETS_BY_CATEGORY.items():
+        table = CATEGORIES[cat]['table']
+        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        json_cols = [c for c in sets.values() if c in cols]
+        if not json_cols:
+            continue
+        sel = ', '.join(json_cols)
+        try:
+            rows = db.execute(f"SELECT {sel} FROM {table}").fetchall()
+        except sqlite3.OperationalError:
+            continue
+        for row in rows:
+            for c in json_cols:
+                raw = row[c]
+                if not raw:
+                    continue
+                try:
+                    docs = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(docs, list):
+                    continue
+                for d in docs:
+                    if not isinstance(d, dict):
+                        continue
+                    fn = (d.get('filename') or '').strip()
+                    if fn:
+                        referenced.add(fn)
     return referenced
 
 
@@ -8201,8 +8233,12 @@ def sweep_files():
             table = CATEGORIES[cat]['table']
             cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
 
-            # Resolve the slot. Try label match first.
+            # Resolve the slot. Try label match first. Also track whether
+            # we matched a label whose slot is already filled — that's a
+            # duplicate, and we want to skip the file outright instead of
+            # falling through to "first empty slot" or "JSON append".
             chosen_field = None
+            matched_filled_slot = None
             for spec in plan['files']:
                 field, default_label, title_field = spec
                 if field not in cols:
@@ -8212,19 +8248,36 @@ def sweep_files():
                     t = (row[title_field] or '').strip()
                     if t:
                         label_candidates.append(t)
-                if any(_norm(c) == target_label for c in label_candidates):
-                    # Only use this slot if it's currently empty.
+                matched_label = next(
+                    (c for c in label_candidates if _norm(c) == target_label),
+                    None)
+                if matched_label is not None:
                     if not (row[field] or '').strip():
                         chosen_field = field
                         break
+                    elif matched_filled_slot is None:
+                        matched_filled_slot = (field, matched_label)
+
+            # Label matched a named slot but the slot is occupied → the
+            # incoming file is a duplicate of the existing one. Skip
+            # before save_upload so we don't write an orphan or add a
+            # parallel JSON entry on the docs path.
+            if not chosen_field and matched_filled_slot is not None:
+                field_name, matched_label = matched_filled_slot
+                report['skipped'].append({
+                    'file':   rel,
+                    'reason': f"already in named slot {field_name} ('{matched_label}')",
+                })
+                continue
+
             # For DOCUMENTS_CATEGORIES, never fall through to "first
             # empty slot" — the documents JSON column is unbounded so
             # every file that didn't match a named slot becomes a new
             # entry in there. Categories with only fixed slots keep
             # the original behavior.
             if not chosen_field and cat not in DOCUMENTS_CATEGORIES:
-                # Label match failed (or matched-but-occupied) — find the
-                # first empty slot in declaration order.
+                # Label match failed entirely — find the first empty
+                # slot in declaration order.
                 for spec in plan['files']:
                     field, _, _ = spec
                     if field not in cols:

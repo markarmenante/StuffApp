@@ -315,17 +315,25 @@
       stale.length ? '(first 5 paths: ' + stale.slice(0, 5).map(s => s.path).join(' | ') + ')' : '');
 
     staleCount = stale.length;
+    // Stash the candidate list on the global so a curious user can
+    // review it from the console before deciding to delete anything
+    // by hand. We deliberately do NOT auto-prompt for deletion: a
+    // misclick or a corrupted server-side reference list (e.g. an
+    // orphan-uploads run that deleted referenced files) can cause
+    // legitimate local files to land here, and removeEntry() is a
+    // hard delete with no Trash. Users who want to clean up should
+    // do so manually in Finder after reviewing the list.
+    window.StuffSync = window.StuffSync || {};
+    window.StuffSync._lastStale = stale.map(s => s.path);
     if (stale.length > 0) {
-      const sample = stale.slice(0, 12).map(s => s.path).join('\n');
-      const more = stale.length > 12 ? `\n…and ${stale.length - 12} more` : '';
-      const ok = window.confirm(
-        `Delete ${stale.length} stale file(s) from your StuffFiles folder?\n\n` +
-        `These files exist locally but aren't in the latest export — usually ` +
-        `because the underlying record was renamed (e.g. cat_id changed) and ` +
-        `the new file already landed under the new name. Empty directories ` +
-        `left behind will be removed too.\n\n` +
-        sample + more
+      console.warn(`[StuffSync] ${stale.length} local file(s) not in this export. ` +
+                   `Review window.StuffSync._lastStale; nothing was deleted.`);
+      progress && progress(
+        `${stale.length} local file(s) flagged but NOT deleted. ` +
+        `Review window.StuffSync._lastStale in console.`
       );
+      // Skip the destructive path entirely.
+      const ok = false;
       if (ok) {
         for (const s of stale) {
           try {
