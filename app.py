@@ -8530,11 +8530,16 @@ def recordings_canonicalize_artists():
     and The Wailers" vs "Bob Marley and the Wailers" each get their
     own folder otherwise).
 
-    Defaults to dry-run; pass ?dry=0 to apply. Returns a per-group
-    report of the chosen canonical and what got rewritten."""
+    Defaults to dry-run; pass dry=0 (form OR query) to apply. Returns
+    a per-group report of the chosen canonical and what got rewritten."""
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
         abort(403)
-    dry = request.args.get('dry', '1') != '0'
+    # Admin-page buttons send `dry` as form data; curl callers tend to
+    # use ?dry=0 in the query string. Accept either so both paths work.
+    dry_raw = (request.form.get('dry')
+               or request.args.get('dry')
+               or '1')
+    dry = dry_raw != '0'
     db = get_db()
     rows = db.execute(
         "SELECT id, artist FROM recordings "
