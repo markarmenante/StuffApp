@@ -1540,6 +1540,26 @@ document.addEventListener('DOMContentLoaded', function () {
             tracksInp.dispatchEvent(new Event('blur'));
             renderTrackPills();
           }
+          // Genre + sub-genre verification: the server returns its
+          // verified values whenever the model is confident, and writes
+          // them on the record (overwriting any prior classification —
+          // Lookup IS the user's "verify" action). Reflect those
+          // changes in the form so the user sees the correction
+          // without a reload.
+          if (data.genre) {
+            const genreSel = document.querySelector('select[name="genre"]');
+            if (genreSel && genreSel.value !== data.genre) {
+              genreSel.value = data.genre;
+              genreSel.dispatchEvent(new Event('change'));
+            }
+          }
+          if (data.genre_2) {
+            const genre2Inp = document.querySelector('input[name="genre_2"]');
+            if (genre2Inp && genre2Inp.value !== data.genre_2) {
+              genre2Inp.value = data.genre_2;
+              genre2Inp.dispatchEvent(new Event('blur'));
+            }
+          }
           // Brief inline hint when the same lookup propagated to other
           // copies of this album (matched on artist + title). The
           // server only writes empty sibling columns so this never

@@ -2663,6 +2663,23 @@ def fetch_recording_notes(rec):
                     "tag entirely if you can't recover the tracklist "
                     "with reasonable confidence.") if want_tracks else ""
 
+    # Always verify genre + sub-genre on Lookup. The model returns its
+    # best assessment regardless of whether the DB already has values,
+    # so a wrong existing genre gets corrected. Genre is constrained to
+    # the recording_genre dropdown values; sub-genre is free text.
+    allowed_genres = list(VALUE_LISTS.get('recording_genre', []))
+    genres_csv = ', '.join(allowed_genres)
+    genre_block = (
+        f"\nAlso classify the recording. Return the primary genre in a "
+        f"<genre>...</genre> tag — it MUST be exactly one of: "
+        f"{genres_csv}. Pick the closest fit; if you can't decide with "
+        f"reasonable confidence, omit the <genre> tag entirely. Then "
+        f"return a more specific sub-genre in a <genre_2>...</genre_2> "
+        f"tag (free text — e.g. \"Bebop\", \"Hard Rock\", \"Bossa Nova\", "
+        f"\"Soul-Jazz\"). Omit the <genre_2> tag if no useful "
+        f"sub-classification fits."
+    )
+
     prompt = f"""You are a music critic + recording historian writing a
 brief reference note for a single album / recording in a personal
 collection. Use up to 4 web searches to ground facts.
@@ -2689,7 +2706,7 @@ separate tag below.
 Wrap the bullets in <markdown>…</markdown>. Then, immediately
 after, list 2–4 source URLs (bare https://…, comma-separated) in
 a <urls>…</urls> tag. No prose outside these tags, no code
-fences, no JSON.{players_block}{tracks_block}"""
+fences, no JSON.{players_block}{tracks_block}{genre_block}"""
 
     client = anthropic.Anthropic(api_key=api_key)
     import time as _time
@@ -2793,8 +2810,29 @@ fences, no JSON.{players_block}{tracks_block}"""
                     lines.append(t)
             new_tracks = '\n'.join(lines)
 
+    # Optional <genre>...</genre> + <genre_2>...</genre_2> blocks. Genre
+    # is validated against the recording_genre dropdown (case-
+    # insensitive); a model-returned value not in the list is dropped.
+    new_genre = ''
+    gm = re.search(r'<genre>(.*?)</genre>', text, re.DOTALL | re.IGNORECASE)
+    if gm:
+        cand = _html.unescape(gm.group(1)).strip()
+        cand = re.sub(r'</?cite\b[^>]*>', '', cand, flags=re.IGNORECASE).strip()
+        cand_l = cand.lower()
+        for allowed in allowed_genres:
+            if allowed.lower() == cand_l:
+                new_genre = allowed
+                break
+    new_genre_2 = ''
+    g2m = re.search(r'<genre_2>(.*?)</genre_2>', text, re.DOTALL | re.IGNORECASE)
+    if g2m:
+        cand = _html.unescape(g2m.group(1)).strip()
+        cand = re.sub(r'</?cite\b[^>]*>', '', cand, flags=re.IGNORECASE).strip()
+        new_genre_2 = re.sub(r'\s+', ' ', cand).strip(' ,"\'')
+
     return {'markdown': md, 'players': new_players,
-            'tracks': new_tracks, 'urls': urls}
+            'tracks': new_tracks, 'urls': urls,
+            'genre': new_genre, 'genre_2': new_genre_2}
 
 
 # ---------------------------------------------------------------------------
@@ -4317,9 +4355,13 @@ def recording_fetch_notes(record_id):
     # Persist players + tracks if the model returned them and the
     # column is currently empty. fetch_recording_notes already gates
     # the model request on emptiness, so this is just the write side
-    # of the same condition.
+    # of the same condition. Genre + genre_2 always overwrite when the
+    # model returns a value — Lookup is the user's "verify" trigger,
+    # so a wrong existing classification gets corrected.
     new_players = data.get('players') or ''
     new_tracks = data.get('tracks') or ''
+    new_genre = data.get('genre') or ''
+    new_genre_2 = data.get('genre_2') or ''
     try:
         existing_players = (rec['players'] or '').strip()
     except (IndexError, KeyError):
@@ -4328,11 +4370,23 @@ def recording_fetch_notes(record_id):
         existing_tracks = (rec['tracks'] or '').strip()
     except (IndexError, KeyError):
         existing_tracks = ''
+    try:
+        existing_genre = (rec['genre'] or '').strip()
+    except (IndexError, KeyError):
+        existing_genre = ''
+    try:
+        existing_genre_2 = (rec['genre_2'] or '').strip()
+    except (IndexError, KeyError):
+        existing_genre_2 = ''
     sets, params = [], []
     if new_players and not existing_players:
         sets.append('players = ?'); params.append(new_players)
     if new_tracks and not existing_tracks:
         sets.append('tracks = ?'); params.append(new_tracks)
+    if new_genre and new_genre != existing_genre:
+        sets.append('genre = ?'); params.append(new_genre)
+    if new_genre_2 and new_genre_2 != existing_genre_2:
+        sets.append('genre_2 = ?'); params.append(new_genre_2)
     if sets:
         sets.append('updated_at = ?'); params.append(datetime.utcnow().isoformat())
         params.append(record_id)
@@ -4358,9 +4412,11 @@ def recording_fetch_notes(record_id):
     new_urls_csv = ','.join(merged) if merged else ''
     if title_norm and artist_norm and (
         new_notes or new_players or new_tracks or new_urls_csv
+        or new_genre or new_genre_2
     ):
         sib_rows = db.execute(
-            "SELECT id, notes, players, tracks, notes_urls FROM recordings "
+            "SELECT id, notes, players, tracks, notes_urls, genre, genre_2 "
+            "FROM recordings "
             "WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) "
             "  AND LOWER(TRIM(artist)) = LOWER(TRIM(?)) "
             "  AND id != ?",
@@ -4376,6 +4432,10 @@ def recording_fetch_notes(record_id):
                 sib_sets.append('tracks = ?'); sib_params.append(new_tracks)
             if new_urls_csv and not (sib['notes_urls'] or '').strip():
                 sib_sets.append('notes_urls = ?'); sib_params.append(new_urls_csv)
+            if new_genre and not (sib['genre'] or '').strip():
+                sib_sets.append('genre = ?'); sib_params.append(new_genre)
+            if new_genre_2 and not (sib['genre_2'] or '').strip():
+                sib_sets.append('genre_2 = ?'); sib_params.append(new_genre_2)
             if sib_sets:
                 sib_sets.append('updated_at = ?')
                 sib_params.append(datetime.utcnow().isoformat())
@@ -4397,6 +4457,8 @@ def recording_fetch_notes(record_id):
         'players': new_players,
         'tracks': new_tracks,
         'urls': merged,
+        'genre': new_genre,
+        'genre_2': new_genre_2,
         'siblings_updated': siblings_updated,
     })
 
