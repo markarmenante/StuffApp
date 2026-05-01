@@ -217,6 +217,11 @@
     } catch (e) {
       console.warn('Stale-file scan failed:', e);
     }
+    console.log('[StuffSync] purge scan',
+      'managed top-level:', [...managedTopLevel],
+      'expected files:', expectedPaths.size,
+      'stale found:', stale.length,
+      stale.length ? '(first 5 paths: ' + stale.slice(0, 5).map(s => s.path).join(' | ') + ')' : '');
 
     let purged = 0;
     let purgedDirs = 0;
