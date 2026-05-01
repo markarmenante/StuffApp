@@ -3253,11 +3253,19 @@ def detail_view(category, record_id):
             id_sql = re.sub(r'^SELECT \*', 'SELECT id', nav_sql, count=1)
             all_ids = [r['id'] for r in db.execute(id_sql, nav_params).fetchall()]
         else:
+            nav_wheres, nav_params2 = [], []
+            _apply_row_filter_clauses(category, nav_wheres, nav_params2)
+            nav_where = f"WHERE {' AND '.join(nav_wheres)}" if nav_wheres else ''
             all_ids = [r['id'] for r in db.execute(
-                f"SELECT id FROM {table} ORDER BY created_at DESC").fetchall()]
+                f"SELECT id FROM {table} {nav_where} ORDER BY created_at DESC",
+                nav_params2).fetchall()]
     else:
+        nav_wheres, nav_params2 = [], []
+        _apply_row_filter_clauses(category, nav_wheres, nav_params2)
+        nav_where = f"WHERE {' AND '.join(nav_wheres)}" if nav_wheres else ''
         all_ids = [r['id'] for r in db.execute(
-            f"SELECT id FROM {table} ORDER BY created_at DESC").fetchall()]
+            f"SELECT id FROM {table} {nav_where} ORDER BY created_at DESC",
+            nav_params2).fetchall()]
     idx = all_ids.index(record_id) if record_id in all_ids else -1
     prev_id = all_ids[idx - 1] if idx > 0 else None
     next_id = all_ids[idx + 1] if idx < len(all_ids) - 1 else None
@@ -7593,8 +7601,14 @@ def admin_export_files():
             if cat not in allowed:
                 continue
             table = CATEGORIES[cat]['table']
+            # Apply per-user row filters so members only export the
+            # records they can actually see (e.g., owner ∈ {YM, Young}).
+            wheres, params = [], []
+            _apply_row_filter_clauses(cat, wheres, params)
+            where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
             try:
-                rows = db.execute(f"SELECT * FROM {table}").fetchall()
+                rows = db.execute(
+                    f"SELECT * FROM {table} {where_clause}", params).fetchall()
             except sqlite3.OperationalError:
                 continue
             cat_label = EXPORT_CATEGORY_LABELS.get(cat, cat.title())
@@ -7779,13 +7793,17 @@ def files_status():
 def _build_record_index(db, category):
     """Return a list of (norm_group, norm_ident, row) tuples for fast
     matching during sweep. Pre-normalizes group + ident strings so we
-    can match incoming filenames cheaply."""
+    can match incoming filenames cheaply. Honors the current user's
+    row filters so members can't sweep into records they can't see."""
     plan = EXPORT_LAYOUT.get(category)
     if not plan:
         return []
     table = CATEGORIES[category]['table']
+    wheres, params = [], []
+    _apply_row_filter_clauses(category, wheres, params)
+    where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     try:
-        rows = db.execute(f"SELECT * FROM {table}").fetchall()
+        rows = db.execute(f"SELECT * FROM {table} {where_clause}", params).fetchall()
     except sqlite3.OperationalError:
         return []
     out = []
