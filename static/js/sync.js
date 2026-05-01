@@ -202,33 +202,47 @@
     // the StuffFiles root that aren't ours stay untouched.
     progress && progress('Checking for stale files…');
     const stale = [];
+    let scanErrors = 0;
     async function findStale(parentHandle, prefix, inManaged) {
-      for await (const [name, child] of parentHandle.entries()) {
-        if (name.startsWith('.')) continue;  // dotfiles are user-owned
-        // Compare in NFC so umlauts / accents on disk (NFD) match the
-        // composed form in expectedPaths (NFC). The on-disk `name` is
-        // kept as-is for the eventual removeEntry() call.
-        const normName = NFC(name);
-        const path = prefix ? `${prefix}/${normName}` : normName;
-        if (child.kind === 'file') {
-          if (inManaged && !expectedPaths.has(path)) {
-            stale.push({path, parent: parentHandle, name});
-          }
-        } else if (child.kind === 'directory') {
-          // Top-level dirs only count as managed if the export wrote
-          // into them this run. Below the top level, every subdir is
-          // app-territory and gets recursed.
-          const childManaged = inManaged || managedTopLevel.has(normName);
-          if (childManaged) {
-            await findStale(child, path, true);
+      // Each iteration is wrapped in try/catch so a single entry that
+      // can't be read (typically an iCloud stub or a permission glitch
+      // on one file) doesn't abort the whole purge walk and bubble up
+      // as "Sync failed: file could not be read".
+      try {
+        for await (const [name, child] of parentHandle.entries()) {
+          try {
+            if (name.startsWith('.')) continue;  // dotfiles are user-owned
+            // Compare in NFC so umlauts / accents on disk (NFD) match
+            // the composed form in expectedPaths (NFC). The on-disk
+            // `name` is kept as-is for the eventual removeEntry() call.
+            const normName = NFC(name);
+            const path = prefix ? `${prefix}/${normName}` : normName;
+            if (child.kind === 'file') {
+              if (inManaged && !expectedPaths.has(path)) {
+                stale.push({path, parent: parentHandle, name});
+              }
+            } else if (child.kind === 'directory') {
+              // Top-level dirs only count as managed if the export
+              // wrote into them this run. Below the top level, every
+              // subdir is app-territory and gets recursed.
+              const childManaged = inManaged || managedTopLevel.has(normName);
+              if (childManaged) {
+                await findStale(child, path, true);
+              }
+            }
+          } catch (e) {
+            scanErrors++;
+            console.warn('[StuffSync] skip entry', prefix + '/' + name, e);
           }
         }
+      } catch (e) {
+        scanErrors++;
+        console.warn('[StuffSync] iterator failed at', prefix || '<root>', e);
       }
     }
-    try {
-      await findStale(dir, '', false);
-    } catch (e) {
-      console.warn('Stale-file scan failed:', e);
+    await findStale(dir, '', false);
+    if (scanErrors) {
+      console.warn(`[StuffSync] purge scan completed with ${scanErrors} entry-level error(s)`);
     }
     console.log('[StuffSync] purge scan',
       'managed top-level:', [...managedTopLevel],
@@ -262,28 +276,40 @@
         // directory that's now empty. Goes depth-first so the deepest
         // empty dirs go before their (newly-empty) parents.
         async function pruneEmpty(parentHandle, prefix, inManaged) {
+          // Same per-entry resilience as findStale: one bad entry
+          // shouldn't abort the whole prune.
           const dirsHere = [];
-          for await (const [name, child] of parentHandle.entries()) {
-            if (name.startsWith('.')) continue;
-            if (child.kind !== 'directory') continue;
-            const normName = NFC(name);
-            const path = prefix ? `${prefix}/${normName}` : normName;
-            const childManaged = inManaged || managedTopLevel.has(normName);
-            if (!childManaged) continue;
-            await pruneEmpty(child, path, true);
-            dirsHere.push({name, normName, child, path});
+          try {
+            for await (const [name, child] of parentHandle.entries()) {
+              try {
+                if (name.startsWith('.')) continue;
+                if (child.kind !== 'directory') continue;
+                const normName = NFC(name);
+                const path = prefix ? `${prefix}/${normName}` : normName;
+                const childManaged = inManaged || managedTopLevel.has(normName);
+                if (!childManaged) continue;
+                await pruneEmpty(child, path, true);
+                dirsHere.push({name, normName, child, path});
+              } catch (e) {
+                console.warn('[StuffSync] skip prune entry',
+                             prefix + '/' + name, e);
+              }
+            }
+          } catch (e) {
+            console.warn('[StuffSync] prune iterator failed at',
+                         prefix || '<root>', e);
           }
           for (const {name, normName, child, path} of dirsHere) {
-            // Don't blow away a top-level managed dir even if empty —
-            // re-creating it on the next sync just hits the same
-            // permission prompts. Only prune below the top level.
-            if (managedTopLevel.has(normName) && !inManaged) continue;
-            let isEmpty = true;
-            for await (const _entry of child.entries()) {  // eslint-disable-line no-unused-vars
-              isEmpty = false; break;
-            }
-            if (!isEmpty) continue;
             try {
+              // Don't blow away a top-level managed dir even if empty —
+              // re-creating it on the next sync just hits the same
+              // permission prompts. Only prune below the top level.
+              if (managedTopLevel.has(normName) && !inManaged) continue;
+              let isEmpty = true;
+              for await (const _entry of child.entries()) {  // eslint-disable-line no-unused-vars
+                isEmpty = false; break;
+              }
+              if (!isEmpty) continue;
               await parentHandle.removeEntry(name);
               purgedDirs++;
             } catch (e) {
