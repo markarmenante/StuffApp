@@ -2199,14 +2199,19 @@ document.getElementById('resultsRaw')?.addEventListener('input', (e) => {
   if (disp) disp.innerHTML = formatResultsHtml(e.target.value);
 });
 
-// Watch / Art / Recording "Lookup" buttons share the .watch-lookup-btn
-// class for styling. The PDF link in the same nav row also carries the
-// class to inherit pill styling, so we filter it out — querySelector
-// (singular) would have grabbed the PDF link first and the real lookup
-// buttons would never wire up. Server returns proposed changes WITHOUT
-// applying them; we render a checkbox review modal and POST the user's
-// selection to /apply-lookup.
-document.querySelectorAll('.watch-lookup-btn:not(.print-pdf-btn)').forEach(btn => btn.addEventListener('click', async (e) => {
+// Watch / Art "Lookup" buttons share the .watch-lookup-btn class for
+// styling. The PDF link in the same nav row also carries the class to
+// inherit pill styling — filtered via :not(.print-pdf-btn). Recording
+// Lookup buttons ALSO carry .watch-lookup-btn for the same styling
+// reason but route through a different endpoint (/recordings/<id>/
+// fetch-notes) with a different response shape (notes/players/tracks
+// instead of filled/overwritten); they have their own handler above
+// and must NOT match this selector — otherwise this handler runs too,
+// sees no filled/overwritten in the response, and pops up "Already up
+// to date" on top of the music handler's correct apply path.
+// Server returns proposed changes WITHOUT applying them; we render a
+// checkbox review modal and POST the user's selection to /apply-lookup.
+document.querySelectorAll('.watch-lookup-btn:not(.print-pdf-btn):not(.rec-lookup-btn)').forEach(btn => btn.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   const url = btn.dataset.url;
   if (!url) return;
