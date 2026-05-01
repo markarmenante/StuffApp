@@ -156,12 +156,21 @@
     const expectedPaths = new Set();
     const managedTopLevel = new Set();
 
+    // Unicode normalization fix: macOS stores filenames in NFD
+    // (decomposed — "ö" is "o" + combining "¨"), while the zip and
+    // the rest of our world ship NFC ("ö" as a single code point).
+    // Without normalizing on the comparison side, every brand with a
+    // diacritic (A. Lange & Söhne, Jules Jürgensen, …) gets flagged
+    // as stale even though the on-disk file is the SAME file. We
+    // normalize both ends to NFC before insertion / lookup.
+    const NFC = (s) => s.normalize('NFC');
+
     let done = 0;
     let written = 0;
     for (const [name, entry] of entries) {
       // Strip the "StuffFiles/" prefix — the user already picked the
       // StuffFiles directory, so the zip's contents land relative to it.
-      const rel = name.replace(/^StuffFiles\//, '');
+      const rel = NFC(name.replace(/^StuffFiles\//, ''));
       if (!rel) continue;
       expectedPaths.add(rel);
       const top = rel.split('/')[0];
@@ -196,7 +205,11 @@
     async function findStale(parentHandle, prefix, inManaged) {
       for await (const [name, child] of parentHandle.entries()) {
         if (name.startsWith('.')) continue;  // dotfiles are user-owned
-        const path = prefix ? `${prefix}/${name}` : name;
+        // Compare in NFC so umlauts / accents on disk (NFD) match the
+        // composed form in expectedPaths (NFC). The on-disk `name` is
+        // kept as-is for the eventual removeEntry() call.
+        const normName = NFC(name);
+        const path = prefix ? `${prefix}/${normName}` : normName;
         if (child.kind === 'file') {
           if (inManaged && !expectedPaths.has(path)) {
             stale.push({path, parent: parentHandle, name});
@@ -205,7 +218,7 @@
           // Top-level dirs only count as managed if the export wrote
           // into them this run. Below the top level, every subdir is
           // app-territory and gets recursed.
-          const childManaged = inManaged || managedTopLevel.has(name);
+          const childManaged = inManaged || managedTopLevel.has(normName);
           if (childManaged) {
             await findStale(child, path, true);
           }
@@ -253,17 +266,18 @@
           for await (const [name, child] of parentHandle.entries()) {
             if (name.startsWith('.')) continue;
             if (child.kind !== 'directory') continue;
-            const path = prefix ? `${prefix}/${name}` : name;
-            const childManaged = inManaged || managedTopLevel.has(name);
+            const normName = NFC(name);
+            const path = prefix ? `${prefix}/${normName}` : normName;
+            const childManaged = inManaged || managedTopLevel.has(normName);
             if (!childManaged) continue;
             await pruneEmpty(child, path, true);
-            dirsHere.push({name, child, path});
+            dirsHere.push({name, normName, child, path});
           }
-          for (const {name, child, path} of dirsHere) {
+          for (const {name, normName, child, path} of dirsHere) {
             // Don't blow away a top-level managed dir even if empty —
             // re-creating it on the next sync just hits the same
             // permission prompts. Only prune below the top level.
-            if (managedTopLevel.has(name) && !inManaged) continue;
+            if (managedTopLevel.has(normName) && !inManaged) continue;
             let isEmpty = true;
             for await (const _entry of child.entries()) {  // eslint-disable-line no-unused-vars
               isEmpty = false; break;
