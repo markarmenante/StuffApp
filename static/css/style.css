@@ -468,12 +468,14 @@ input[type="number"]::-webkit-outer-spin-button {
 .detail-page { max-width: 100%; margin: 0; background: var(--surface); min-height: calc(100vh - var(--nav-height)); position: relative; }
 
 .detail-nav-overlay {
-  /* Sit inside the top-nav strip (left of the Admin gear) instead of
-     hanging below it, so the floating Lookup / prev / next / Back
-     bar doesn't cover the right-most form cells underneath. The
-     ~80px right offset clears the Admin gear; the overlay's own
-     background keeps it readable against the categories row. */
-  position: fixed; top: 10px; right: 80px;
+  /* Drop below the top nav so the bar doesn't cover Files / Sweep /
+     Admin in the nav-right group (and so its clicks don't get
+     intercepted by the underlying nav links). Sitting just under the
+     nav puts the overlay in the brand-row area on every detail
+     screen — on the property page that's the "house name" line, on
+     watches the brand line, etc. — where it has empty horizontal
+     space to claim. */
+  position: fixed; top: calc(var(--nav-height) + 6px); right: 12px;
   display: flex; align-items: center; gap: 6px;
   z-index: 110;
   background: rgba(255, 255, 255, 0.94);
