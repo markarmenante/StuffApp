@@ -1321,6 +1321,16 @@ def _strip_phantom_cover_image_docs(db):
                     if c not in exclude and c in row.keys()
                     and (row[c] or '').strip()
                 }
+                # If this JSON column has declared backfill sources, the
+                # title-prefix heuristic must be skipped too — the
+                # backfill writes titles like "<property-name> — Deed"
+                # (legitimate user data) which the heuristic would
+                # otherwise treat as auto-generated cover-image phantoms
+                # and nuke. The phantom-strip is meant to catch the
+                # FileMaker pattern where a SEPARATE file column got
+                # populated with the cover; declared sources are not
+                # that pattern.
+                use_ident_prefix = (cat, jc) not in DOC_JSON_BACKFILL_SOURCES
                 kept = []
                 for d in docs:
                     if not isinstance(d, dict):
@@ -1331,8 +1341,9 @@ def _strip_phantom_cover_image_docs(db):
                     if fn and fn in other_files:
                         continue
                     # Drop pattern 2: title starts with the auto-generated
-                    # ident prefix (any dash variant).
-                    if ident_prefixes and any(
+                    # ident prefix (any dash variant) — only for columns
+                    # without declared backfill sources.
+                    if use_ident_prefix and ident_prefixes and any(
                         title.startswith(p) for p in ident_prefixes
                     ):
                         continue
@@ -7120,6 +7131,39 @@ def admin_index():
             'confirm': True,
         },
         {
+            'label': "Properties: restore lost docs from doc_1..10",
+            'desc':  "Repopulates properties.documents JSON from the "
+                     "legacy doc_1..10 columns when the JSON is empty. "
+                     "Recovers any property docs the phantom-strip nuked "
+                     "via the title-prefix heuristic (titles like "
+                     "\"Carpinteria — Deed\" looked like auto-generated "
+                     "phantoms). Idempotent — skips rows whose JSON "
+                     "already has tiles.",
+            'url':   url_for('properties_restore_docs'),
+        },
+        {
+            'label': "Music: canonicalize artist spellings (dry run)",
+            'desc':  "Reports which recordings.artist values differ "
+                     "only by case / whitespace and would be collapsed "
+                     "to a single canonical spelling. Does NOT write — "
+                     "review the JSON action list before running the "
+                     "apply variant below. Prevents Files from creating "
+                     "duplicate artist folders ("
+                     "\"Bob Marley and The Wailers\" vs \"and the\").",
+            'url':   url_for('recordings_canonicalize_artists'),
+            'extra': {'dry': '1'},
+        },
+        {
+            'label': "Music: canonicalize artist spellings (apply)",
+            'desc':  "Actually rewrites differing artist spellings to "
+                     "the most-common variant within each case-insensitive "
+                     "group. Run the dry-run above first to verify the "
+                     "merges look right.",
+            'url':   url_for('recordings_canonicalize_artists'),
+            'extra': {'dry': '0'},
+            'confirm': True,
+        },
+        {
             'label': "Recordings: clear bare-numeric notes (FM import fix)",
             'desc':  "The earlier FileMaker import wrote price values into "
                      "the notes column. Nulls out any recordings.notes that "
@@ -8416,6 +8460,134 @@ def persons_restore_docs():
     db.commit()
     return jsonify(restored=out,
                    total=db.execute('SELECT COUNT(*) FROM persons').fetchone()[0])
+
+
+@app.route('/admin/properties-restore-docs', methods=['POST'])
+def properties_restore_docs():
+    """Repopulate properties.documents JSON from the legacy doc_1..10
+    file columns when the JSON is currently empty. Mirrors the persons
+    restore endpoint — recovers data nuked by the phantom-strip's
+    title-prefix path on rows whose doc titles started with the
+    property name (e.g. "Carpinteria — Deed").
+
+    Idempotent: rows whose JSON already has tiles are skipped."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    cols = {r['name'] for r in db.execute(
+        "PRAGMA table_info(properties)"
+    ).fetchall()}
+    sources = [
+        (f'doc_{i}', f'doc_{i}_title', f'Doc {i}')
+        for i in range(1, 11)
+    ]
+    if 'documents' not in cols:
+        return jsonify(restored=0, total=0)
+    rows = db.execute("SELECT * FROM properties").fetchall()
+    restored = 0
+    for row in rows:
+        try:
+            existing = json.loads(row['documents'] or '[]')
+        except (TypeError, ValueError):
+            existing = []
+        if isinstance(existing, list) and existing:
+            continue
+        docs = []
+        for fn_col, title_col, default_title in sources:
+            if fn_col not in cols:
+                continue
+            fn = row[fn_col] if fn_col in row.keys() else None
+            if not fn:
+                continue
+            title = ''
+            if title_col in cols and title_col in row.keys():
+                title = (row[title_col] or '').strip()
+            if not title:
+                title = default_title
+            docs.append({'title': title, 'filename': fn})
+        if not docs:
+            continue
+        db.execute(
+            "UPDATE properties SET documents = ?, updated_at = ? "
+            "WHERE id = ?",
+            [json.dumps(docs), datetime.utcnow().isoformat(), row['id']],
+        )
+        restored += 1
+    db.commit()
+    return jsonify(restored=restored,
+                   total=db.execute(
+                       'SELECT COUNT(*) FROM properties'
+                   ).fetchone()[0])
+
+
+@app.route('/admin/recordings-canonicalize-artists', methods=['POST'])
+def recordings_canonicalize_artists():
+    """Collapse case / whitespace variants of the same artist into a
+    single canonical spelling. For each group of recordings whose
+    artist matches case-insensitively (after trim + collapse-spaces),
+    pick the most-used spelling as the canonical and rewrite the
+    others. Avoids orphan-folder churn after Files runs ("Bob Marley
+    and The Wailers" vs "Bob Marley and the Wailers" each get their
+    own folder otherwise).
+
+    Defaults to dry-run; pass ?dry=0 to apply. Returns a per-group
+    report of the chosen canonical and what got rewritten."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.args.get('dry', '1') != '0'
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, artist FROM recordings "
+        "WHERE artist IS NOT NULL AND TRIM(artist) != ''"
+    ).fetchall()
+
+    # Bucket by normalized key (lowercase, single-spaced, trimmed).
+    buckets = {}  # key → {variant_text: [row_ids]}
+    for r in rows:
+        a = (r['artist'] or '').strip()
+        if not a:
+            continue
+        key = re.sub(r'\s+', ' ', a).lower()
+        buckets.setdefault(key, {}).setdefault(a, []).append(r['id'])
+
+    actions = []
+    rewritten = 0
+    now = datetime.utcnow().isoformat()
+    for key, variants in buckets.items():
+        if len(variants) < 2:
+            continue
+        # Canonical = highest-count variant; tiebreaker = lexicographic
+        # sort so the run is deterministic across calls.
+        ranked = sorted(
+            variants.items(),
+            key=lambda kv: (-len(kv[1]), kv[0]),
+        )
+        canonical, _ = ranked[0]
+        merged_ids = []
+        for variant, ids in ranked[1:]:
+            merged_ids.extend(ids)
+        if not merged_ids:
+            continue
+        actions.append({
+            'canonical': canonical,
+            'merged_from': [v for v, _ in ranked[1:]],
+            'rows_rewritten': len(merged_ids),
+        })
+        if not dry:
+            db.executemany(
+                "UPDATE recordings SET artist = ?, updated_at = ? "
+                "WHERE id = ?",
+                [(canonical, now, rid) for rid in merged_ids],
+            )
+            rewritten += len(merged_ids)
+    if not dry:
+        db.commit()
+    return jsonify(
+        dry_run=dry,
+        groups_collapsed=len(actions),
+        rows_rewritten=rewritten,
+        actions=actions,
+    )
 
 
 @app.route('/admin/lenses-owner-mark', methods=['POST'])
