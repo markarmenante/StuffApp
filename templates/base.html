@@ -94,7 +94,7 @@
 <!-- JSZip for client-side zip extraction (used by sync.js when the
      browser supports the File System Access API). -->
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="{{ url_for('static', filename='js/sync.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sync.js') }}?v={{ asset_v('js/sync.js') }}"></script>
 
 <script>
 // Set busy state on a nav-pill (icon + label) and render an export

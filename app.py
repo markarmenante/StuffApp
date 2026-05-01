@@ -5587,6 +5587,20 @@ def is_image_filter(filename):
     return ext in ('png', 'jpg', 'jpeg', 'gif', 'webp', 'tif', 'tiff')
 
 
+def _asset_v(rel_path):
+    """Cache-bust token for a static asset — its mtime as an int. Lets
+    base.html hand `?v=…` to <script>/<link> URLs so a fresh deploy
+    invalidates the browser's 12-hour static-asset cache the moment
+    the underlying file changes (and stays stable across requests
+    when nothing has)."""
+    try:
+        return int(os.path.getmtime(
+            os.path.join(app.static_folder or 'static', rel_path)
+        ))
+    except OSError:
+        return 0
+
+
 @app.context_processor
 def inject_globals():
     return {
@@ -5594,6 +5608,7 @@ def inject_globals():
         'now': datetime.utcnow(),
         'current_user': g.get('current_user'),
         'allowed_cats': g.get('allowed_cats', set()),
+        'asset_v': _asset_v,
     }
 
 
