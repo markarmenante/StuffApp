@@ -114,6 +114,14 @@
   // Public: download the export zip and extract it into the saved
   // (or freshly picked) StuffFiles folder. Calls progress(msg) at
   // milestones so the caller can update UI.
+  //
+  // After writing the zip's contents, runs a purge pass: walks the
+  // directories the export wrote into and prompts the user to delete
+  // any local file whose path isn't in the new export. Catches
+  // renamed-away leftovers (e.g. cat_id "CA001 …" when the new
+  // scheme wrote "C001 …" — the rename produces a duplicate-looking
+  // pair without the purge). Skipped on dotfiles and on subtrees the
+  // export didn't touch, so the user's private subdirs are safe.
   async function syncDown(progress) {
     if (!window.showDirectoryPicker) {
       throw new Error('Browser does not support the directory picker; falling back to zip download.');
@@ -135,6 +143,15 @@
     zip.forEach((relPath, entry) => {
       if (!entry.dir) entries.push([relPath, entry]);
     });
+
+    // Track every path the export wrote so the purge pass below can
+    // diff against what's currently on disk. `expectedPaths` holds the
+    // file paths relative to the picked StuffFiles dir; `touchedDirs`
+    // holds every parent dir the export reached so we know which
+    // subtrees are in scope for the purge.
+    const expectedPaths = new Set();
+    const touchedDirs   = new Set();
+
     let done = 0;
     let written = 0;
     for (const [name, entry] of entries) {
@@ -142,6 +159,11 @@
       // StuffFiles directory, so the zip's contents land relative to it.
       const rel = name.replace(/^StuffFiles\//, '');
       if (!rel) continue;
+      expectedPaths.add(rel);
+      const parts = rel.split('/');
+      for (let i = 1; i < parts.length; i++) {
+        touchedDirs.add(parts.slice(0, i).join('/'));
+      }
       try {
         const [parent, fname] = await _ensurePath(dir, rel);
         const file = await parent.getFileHandle(fname, {create: true});
@@ -160,7 +182,60 @@
         progress && progress(`Wrote ${written}/${entries.length} files…`);
       }
     }
-    return {written, total: entries.length};
+
+    // Purge pass: walk only the directories the export touched, and
+    // collect any file whose path isn't in `expectedPaths`. Then ask
+    // the user once before deleting — destructive ops always confirm.
+    progress && progress('Checking for stale files…');
+    const stale = [];
+    async function findStale(parentHandle, prefix) {
+      for await (const [name, child] of parentHandle.entries()) {
+        if (name.startsWith('.')) continue;  // dotfiles are user-owned
+        const path = prefix ? `${prefix}/${name}` : name;
+        if (child.kind === 'file') {
+          if (!expectedPaths.has(path)) {
+            stale.push({path, parent: parentHandle, name});
+          }
+        } else if (child.kind === 'directory') {
+          // Only recurse into dirs the export wrote into. Leaves any
+          // user-private subtree untouched.
+          if (touchedDirs.has(path)) {
+            await findStale(child, path);
+          }
+        }
+      }
+    }
+    try {
+      await findStale(dir, '');
+    } catch (e) {
+      console.warn('Stale-file scan failed:', e);
+    }
+
+    let purged = 0;
+    if (stale.length > 0) {
+      const sample = stale.slice(0, 12).map(s => s.path).join('\n');
+      const more = stale.length > 12 ? `\n…and ${stale.length - 12} more` : '';
+      const ok = window.confirm(
+        `Delete ${stale.length} stale file(s) from your StuffFiles folder?\n\n` +
+        `These files exist locally but aren't in the latest export — usually ` +
+        `because the underlying record was renamed (e.g. cat_id changed) and ` +
+        `the new file already landed under the new name.\n\n` +
+        sample + more
+      );
+      if (ok) {
+        for (const s of stale) {
+          try {
+            await s.parent.removeEntry(s.name);
+            purged++;
+          } catch (e) {
+            console.warn('Failed to purge', s.path, e);
+          }
+        }
+      }
+    }
+
+    return {written, total: entries.length,
+            stale: stale.length, purged};
   }
 
   // Read a single iCloud-aware file. macOS keeps iCloud Drive files as

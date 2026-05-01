@@ -153,7 +153,13 @@ async function startExport(ev, link) {
     try {
       ui.progress('Pick (or confirm) your StuffFiles folder…');
       const result = await window.StuffSync.syncDown(ui.progress);
-      ui.done('ok', `Synced ${result.written}/${result.total} files into your folder.`);
+      let msg = `Synced ${result.written}/${result.total} files into your folder.`;
+      if (result.purged) {
+        msg += ` Purged ${result.purged} stale.`;
+      } else if (result.stale && !result.purged) {
+        msg += ` ${result.stale} stale file${result.stale === 1 ? '' : 's'} kept (purge declined).`;
+      }
+      ui.done('ok', msg);
       reloadAfterExport();
     } catch (err) {
       if (err && err.name === 'AbortError') {
