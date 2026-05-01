@@ -4306,6 +4306,49 @@ def coins_map_view():
                            cat_info=CATEGORIES['coins'])
 
 
+def _merge_recording_genres(existing_genre, existing_genre_2,
+                            new_genre, new_genre_2):
+    """Merge lookup-derived genre + sub-genre into the DB values without
+    overwriting. Returns (final_genre, final_genre_2).
+
+    Rules:
+      - Existing genre wins if non-empty. If it's blank, fall back to
+        new_genre so the dropdown gets populated.
+      - genre_2 accumulates: anything from the lookup that isn't
+        already represented in (final_genre, existing_genre_2)
+        (case-insensitive, comma-tokenised) gets appended to genre_2.
+      - Token comparison is case-insensitive and trims whitespace, so
+        "Pop/Rock" and "pop/rock" are treated as the same token.
+    """
+    final_genre = existing_genre or (new_genre or '')
+
+    def _tokens(s):
+        return [t.strip() for t in (s or '').split(',') if t.strip()]
+
+    seen = set()
+    if final_genre:
+        seen.add(final_genre.lower())
+    existing_tokens = _tokens(existing_genre_2)
+    for t in existing_tokens:
+        seen.add(t.lower())
+
+    additions = []
+    for cand in (new_genre, new_genre_2):
+        cand = (cand or '').strip()
+        if not cand:
+            continue
+        if cand.lower() in seen:
+            continue
+        seen.add(cand.lower())
+        additions.append(cand)
+
+    if not additions:
+        return final_genre, existing_genre_2
+
+    final_genre_2 = ', '.join(existing_tokens + additions)
+    return final_genre, final_genre_2
+
+
 @app.route('/recordings/<record_id>/fetch-notes', methods=['POST'])
 def recording_fetch_notes(record_id):
     """Generate a brief review/historical note for a recording via
@@ -4355,9 +4398,17 @@ def recording_fetch_notes(record_id):
     # Persist players + tracks if the model returned them and the
     # column is currently empty. fetch_recording_notes already gates
     # the model request on emptiness, so this is just the write side
-    # of the same condition. Genre + genre_2 always overwrite when the
-    # model returns a value — Lookup is the user's "verify" trigger,
-    # so a wrong existing classification gets corrected.
+    # of the same condition.
+    #
+    # Genre + genre_2 are merged (never overwritten):
+    #   - genre stays whatever's in the DB if non-empty. A blank genre
+    #     is filled with the lookup's primary value, which then counts
+    #     as "already covered" for the genre_2 merge below.
+    #   - any lookup value (primary or sub-genre) that isn't already
+    #     present in genre OR genre_2 (case-insensitive token match)
+    #     gets appended to genre_2 as a comma-separated tail. Re-runs
+    #     are idempotent because everything that landed last time is
+    #     in the existing tokens.
     new_players = data.get('players') or ''
     new_tracks = data.get('tracks') or ''
     new_genre = data.get('genre') or ''
@@ -4378,15 +4429,20 @@ def recording_fetch_notes(record_id):
         existing_genre_2 = (rec['genre_2'] or '').strip()
     except (IndexError, KeyError):
         existing_genre_2 = ''
+
+    final_genre, final_genre_2 = _merge_recording_genres(
+        existing_genre, existing_genre_2, new_genre, new_genre_2
+    )
+
     sets, params = [], []
     if new_players and not existing_players:
         sets.append('players = ?'); params.append(new_players)
     if new_tracks and not existing_tracks:
         sets.append('tracks = ?'); params.append(new_tracks)
-    if new_genre and new_genre != existing_genre:
-        sets.append('genre = ?'); params.append(new_genre)
-    if new_genre_2 and new_genre_2 != existing_genre_2:
-        sets.append('genre_2 = ?'); params.append(new_genre_2)
+    if final_genre != existing_genre:
+        sets.append('genre = ?'); params.append(final_genre)
+    if final_genre_2 != existing_genre_2:
+        sets.append('genre_2 = ?'); params.append(final_genre_2)
     if sets:
         sets.append('updated_at = ?'); params.append(datetime.utcnow().isoformat())
         params.append(record_id)
@@ -4413,9 +4469,10 @@ def recording_fetch_notes(record_id):
     #                 recording, not the copy.
     #   tracks      — OVERWRITE. Same reasoning.
     #   notes_urls  — UNION. Source URLs accumulate across runs.
-    #   genre       — OVERWRITE when the lookup is confident. Lookup
-    #                 IS the user's "verify" trigger.
-    #   genre_2     — OVERWRITE. Same reasoning.
+    #   genre       — fill if blank, never overwrite.
+    #   genre_2     — append any lookup-derived genre / sub-genre that
+    #                 isn't already represented in the sibling's
+    #                 (genre, genre_2) pair.
     siblings_updated = 0
     title_norm = (rec['title']  or '').strip()
     artist_norm = (rec['artist'] or '').strip()
@@ -4457,10 +4514,16 @@ def recording_fetch_notes(record_id):
             if added_any:
                 sib_sets.append('notes_urls = ?'); sib_params.append(','.join(sib_urls))
 
-            if new_genre and (sib['genre'] or '').strip() != new_genre:
-                sib_sets.append('genre = ?'); sib_params.append(new_genre)
-            if new_genre_2 and (sib['genre_2'] or '').strip() != new_genre_2:
-                sib_sets.append('genre_2 = ?'); sib_params.append(new_genre_2)
+            sib_existing_genre = (sib['genre'] or '').strip()
+            sib_existing_genre_2 = (sib['genre_2'] or '').strip()
+            sib_final_genre, sib_final_genre_2 = _merge_recording_genres(
+                sib_existing_genre, sib_existing_genre_2,
+                new_genre, new_genre_2,
+            )
+            if sib_final_genre != sib_existing_genre:
+                sib_sets.append('genre = ?'); sib_params.append(sib_final_genre)
+            if sib_final_genre_2 != sib_existing_genre_2:
+                sib_sets.append('genre_2 = ?'); sib_params.append(sib_final_genre_2)
 
             if sib_sets:
                 sib_sets.append('updated_at = ?')
@@ -4483,8 +4546,12 @@ def recording_fetch_notes(record_id):
         'players': new_players,
         'tracks': new_tracks,
         'urls': merged,
-        'genre': new_genre,
-        'genre_2': new_genre_2,
+        # Merged values (after appending any new lookup-derived
+        # genres / sub-genres to what was already in the DB), so the
+        # client can sync the form fields without re-deriving the
+        # merge itself.
+        'genre': final_genre,
+        'genre_2': final_genre_2,
         'siblings_updated': siblings_updated,
     })
 
