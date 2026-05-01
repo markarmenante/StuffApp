@@ -858,6 +858,7 @@ def init_db():
     for _t in ('art', 'coins', 'watches', 'pens', 'rifles', 'audio'):
         _migrate_receipt_into_documents(db, _t)
     _strip_phantom_cover_image_docs(db)
+    _strip_redundant_receipts(db)
     _backfill_docs_json(db, 'vehicles', 'documents', [
         ('insurance',     'insurance_label',     'Insurance'),
         ('invoice',       'invoice_label',       'Invoice'),
@@ -1083,6 +1084,48 @@ def _backfill_properties_documents_json(db):
     for i in range(1, 11):
         sources.append((f'doc_{i}', f'doc_{i}_title', ''))
     _backfill_docs_json(db, 'properties', 'documents', sources)
+
+
+def _strip_redundant_receipts(db):
+    """Null out the receipt column on rows where it's pointing at the
+    same filename as the cover image. The legacy FileMaker import left
+    the cover filename in BOTH columns on many rows, which made
+    /export-files write the same JPEG twice (once as "<ident> —
+    Cover.jpg", once as "<ident> — Receipt.jpg"). The phantom-doc
+    cleanup catches the JSON-doc form of this; this helper takes the
+    legacy fixed-column form.
+
+    Idempotent — once the receipt is nulled it stays nulled. If the
+    user later uploads a real receipt to that record it'll go in via
+    the documents JSON path, not the legacy column."""
+    targets = [
+        ('recordings', 'image',     'receipt'),
+        ('audio',      'image',     'receipt'),
+        ('rifles',     'image',     'receipt'),
+        ('art',        'image',     'receipt'),
+        ('cameras',    'image',     'receipt'),
+        ('lenses',     'image',     'receipt'),
+        ('pens',       'image',     'receipt'),
+        ('vehicles',   'image',     'receipt'),
+        ('watches',    'image_obv', 'receipt'),
+        ('coins',      'image_1',   'receipt'),
+    ]
+    for table, primary, secondary in targets:
+        try:
+            cols = {r['name'] for r in db.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()}
+            if primary not in cols or secondary not in cols:
+                continue
+            db.execute(
+                f"UPDATE {table} SET {secondary} = NULL "
+                f"WHERE {primary} IS NOT NULL "
+                f"AND TRIM({primary}) != '' "
+                f"AND {primary} = {secondary}"
+            )
+        except sqlite3.OperationalError:
+            pass
+    db.commit()
 
 
 def _migrate_receipt_into_documents(db, table):
@@ -7531,6 +7574,12 @@ def admin_export_files():
                 cat_root = f'StuffFiles/{cat_label}' if is_owned \
                             else f'StuffFiles/{cat_label}/No longer Owned'
 
+                # Per-row dedupe: legacy FileMaker imports often left the
+                # cover-image filename in BOTH the primary file column
+                # (image / image_obv / image_1) AND the receipt column,
+                # so without this guard every record would export the
+                # same JPEG twice — once as "Cover", once as "Receipt".
+                seen_files = set()
                 for spec in plan['files']:
                     field, default_label, title_field = spec
                     if field not in cols:
@@ -7538,6 +7587,9 @@ def admin_export_files():
                     fname = (row[field] or '').strip()
                     if not fname:
                         continue
+                    if fname in seen_files:
+                        continue
+                    seen_files.add(fname)
                     src = os.path.join(UPLOAD_FOLDER, fname)
                     if not os.path.isfile(src):
                         skipped_missing += 1
