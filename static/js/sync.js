@@ -165,8 +165,19 @@
     // normalize both ends to NFC before insertion / lookup.
     const NFC = (s) => s.normalize('NFC');
 
-    let done = 0;
+    // Outer try/catch: from this point on, ANY uncaught error gets
+    // captured and surfaced as a partial-success result instead of
+    // bubbling up as a "Sync failed" rejection. We've already pulled
+    // the zip down successfully — there's no value in throwing away
+    // the writes that did land just because one read mid-walk hit a
+    // transient iCloud-stub or revoked-permission glitch.
+    let syncError = null;
     let written = 0;
+    let purged = 0;
+    let purgedDirs = 0;
+    let staleCount = 0;
+    try {
+    let done = 0;
     for (const [name, entry] of entries) {
       // Strip the "StuffFiles/" prefix — the user already picked the
       // StuffFiles directory, so the zip's contents land relative to it.
@@ -250,8 +261,7 @@
       'stale found:', stale.length,
       stale.length ? '(first 5 paths: ' + stale.slice(0, 5).map(s => s.path).join(' | ') + ')' : '');
 
-    let purged = 0;
-    let purgedDirs = 0;
+    staleCount = stale.length;
     if (stale.length > 0) {
       const sample = stale.slice(0, 12).map(s => s.path).join('\n');
       const more = stale.length > 12 ? `\n…and ${stale.length - 12} more` : '';
@@ -325,8 +335,18 @@
       }
     }
 
+    } catch (e) {
+      // Anything that escaped the per-step try/catches lands here. We
+      // hold onto the message and keep returning whatever progress we
+      // already made — the caller surfaces it as a warning suffix on
+      // the success toast instead of clobbering the result.
+      syncError = e && (e.message || String(e));
+      console.warn('[StuffSync] uncaught syncDown error:', e);
+    }
+
     return {written, total: entries.length,
-            stale: stale.length, purged, purgedDirs};
+            stale: staleCount, purged, purgedDirs,
+            error: syncError};
   }
 
   // Read a single iCloud-aware file. macOS keeps iCloud Drive files as

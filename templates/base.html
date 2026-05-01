@@ -163,7 +163,14 @@ async function startExport(ev, link) {
       } else if (result.stale && !result.purged) {
         msg += ` ${result.stale} stale file${result.stale === 1 ? '' : 's'} kept (purge declined).`;
       }
-      ui.done('ok', msg);
+      // Partial-success path: writes landed but something later (a
+      // single unreadable iCloud-stub mid-walk, etc.) hit an uncaught
+      // error. Show what completed plus a hint to check the console.
+      const state = result.error ? 'err' : 'ok';
+      if (result.error) {
+        msg += ` (warning: ${result.error} — see console)`;
+      }
+      ui.done(state, msg);
       reloadAfterExport();
     } catch (err) {
       if (err && err.name === 'AbortError') {
