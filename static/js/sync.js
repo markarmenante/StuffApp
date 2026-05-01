@@ -145,12 +145,16 @@
     });
 
     // Track every path the export wrote so the purge pass below can
-    // diff against what's currently on disk. `expectedPaths` holds the
-    // file paths relative to the picked StuffFiles dir; `touchedDirs`
-    // holds every parent dir the export reached so we know which
-    // subtrees are in scope for the purge.
+    // diff against what's currently on disk. `expectedPaths` is the
+    // set of file paths relative to the picked StuffFiles dir, and
+    // `managedTopLevel` is the set of first-segment dirs the export
+    // claims (Coins / Properties / Watches / …). Once we're inside
+    // any of those, every subdir is app-managed and a candidate for
+    // purge — that's how a renamed-away record's folder (the property
+    // formerly known as "4956 Fifth") finally gets cleaned up even
+    // though no zip entry pulled the walker into it.
     const expectedPaths = new Set();
-    const touchedDirs   = new Set();
+    const managedTopLevel = new Set();
 
     let done = 0;
     let written = 0;
@@ -160,10 +164,8 @@
       const rel = name.replace(/^StuffFiles\//, '');
       if (!rel) continue;
       expectedPaths.add(rel);
-      const parts = rel.split('/');
-      for (let i = 1; i < parts.length; i++) {
-        touchedDirs.add(parts.slice(0, i).join('/'));
-      }
+      const top = rel.split('/')[0];
+      if (top) managedTopLevel.add(top);
       try {
         const [parent, fname] = await _ensurePath(dir, rel);
         const file = await parent.getFileHandle(fname, {create: true});
@@ -183,35 +185,41 @@
       }
     }
 
-    // Purge pass: walk only the directories the export touched, and
-    // collect any file whose path isn't in `expectedPaths`. Then ask
-    // the user once before deleting — destructive ops always confirm.
+    // Purge pass: walk every subtree under a managed top-level dir
+    // (Coins, Properties, …) and collect files that aren't in the
+    // new export. Once we're inside a managed subtree, recurse all
+    // the way down — that catches a renamed-away record's folder
+    // even though no zip entry pulled the walker into it. Dirs at
+    // the StuffFiles root that aren't ours stay untouched.
     progress && progress('Checking for stale files…');
     const stale = [];
-    async function findStale(parentHandle, prefix) {
+    async function findStale(parentHandle, prefix, inManaged) {
       for await (const [name, child] of parentHandle.entries()) {
         if (name.startsWith('.')) continue;  // dotfiles are user-owned
         const path = prefix ? `${prefix}/${name}` : name;
         if (child.kind === 'file') {
-          if (!expectedPaths.has(path)) {
+          if (inManaged && !expectedPaths.has(path)) {
             stale.push({path, parent: parentHandle, name});
           }
         } else if (child.kind === 'directory') {
-          // Only recurse into dirs the export wrote into. Leaves any
-          // user-private subtree untouched.
-          if (touchedDirs.has(path)) {
-            await findStale(child, path);
+          // Top-level dirs only count as managed if the export wrote
+          // into them this run. Below the top level, every subdir is
+          // app-territory and gets recursed.
+          const childManaged = inManaged || managedTopLevel.has(name);
+          if (childManaged) {
+            await findStale(child, path, true);
           }
         }
       }
     }
     try {
-      await findStale(dir, '');
+      await findStale(dir, '', false);
     } catch (e) {
       console.warn('Stale-file scan failed:', e);
     }
 
     let purged = 0;
+    let purgedDirs = 0;
     if (stale.length > 0) {
       const sample = stale.slice(0, 12).map(s => s.path).join('\n');
       const more = stale.length > 12 ? `\n…and ${stale.length - 12} more` : '';
@@ -219,7 +227,8 @@
         `Delete ${stale.length} stale file(s) from your StuffFiles folder?\n\n` +
         `These files exist locally but aren't in the latest export — usually ` +
         `because the underlying record was renamed (e.g. cat_id changed) and ` +
-        `the new file already landed under the new name.\n\n` +
+        `the new file already landed under the new name. Empty directories ` +
+        `left behind will be removed too.\n\n` +
         sample + more
       );
       if (ok) {
@@ -231,11 +240,48 @@
             console.warn('Failed to purge', s.path, e);
           }
         }
+        // Second pass: walk managed subtrees again and remove any
+        // directory that's now empty. Goes depth-first so the deepest
+        // empty dirs go before their (newly-empty) parents.
+        async function pruneEmpty(parentHandle, prefix, inManaged) {
+          const dirsHere = [];
+          for await (const [name, child] of parentHandle.entries()) {
+            if (name.startsWith('.')) continue;
+            if (child.kind !== 'directory') continue;
+            const path = prefix ? `${prefix}/${name}` : name;
+            const childManaged = inManaged || managedTopLevel.has(name);
+            if (!childManaged) continue;
+            await pruneEmpty(child, path, true);
+            dirsHere.push({name, child, path});
+          }
+          for (const {name, child, path} of dirsHere) {
+            // Don't blow away a top-level managed dir even if empty —
+            // re-creating it on the next sync just hits the same
+            // permission prompts. Only prune below the top level.
+            if (managedTopLevel.has(name) && !inManaged) continue;
+            let isEmpty = true;
+            for await (const _entry of child.entries()) {  // eslint-disable-line no-unused-vars
+              isEmpty = false; break;
+            }
+            if (!isEmpty) continue;
+            try {
+              await parentHandle.removeEntry(name);
+              purgedDirs++;
+            } catch (e) {
+              console.warn('Failed to remove empty dir', path, e);
+            }
+          }
+        }
+        try {
+          await pruneEmpty(dir, '', false);
+        } catch (e) {
+          console.warn('Empty-dir prune failed:', e);
+        }
       }
     }
 
     return {written, total: entries.length,
-            stale: stale.length, purged};
+            stale: stale.length, purged, purgedDirs};
   }
 
   // Read a single iCloud-aware file. macOS keeps iCloud Drive files as

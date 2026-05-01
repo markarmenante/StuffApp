@@ -155,7 +155,11 @@ async function startExport(ev, link) {
       const result = await window.StuffSync.syncDown(ui.progress);
       let msg = `Synced ${result.written}/${result.total} files into your folder.`;
       if (result.purged) {
-        msg += ` Purged ${result.purged} stale.`;
+        msg += ` Purged ${result.purged} stale file${result.purged === 1 ? '' : 's'}`;
+        if (result.purgedDirs) {
+          msg += ` + ${result.purgedDirs} empty folder${result.purgedDirs === 1 ? '' : 's'}`;
+        }
+        msg += '.';
       } else if (result.stale && !result.purged) {
         msg += ` ${result.stale} stale file${result.stale === 1 ? '' : 's'} kept (purge declined).`;
       }
