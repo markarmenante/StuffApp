@@ -1438,13 +1438,32 @@ document.addEventListener('DOMContentLoaded', function () {
     // "John Coltrane (tenor sax)" → pill labeled "John Coltrane",
     // tooltip shows the full string with instrument. Click opens
     // claude.ai/new with a seeded query.
+    // Comma-aware split that respects parens — "Carole King (piano,
+    // vocals), James Taylor (guitar)" should produce two pieces, not
+    // four. Walk the string tracking paren depth; only commas at
+    // depth 0 are separators.
+    function _splitPlayers(s) {
+      const out = [];
+      let depth = 0, buf = '';
+      for (const ch of s) {
+        if (ch === '(') depth++;
+        else if (ch === ')') depth = Math.max(0, depth - 1);
+        if (ch === ',' && depth === 0) {
+          if (buf.trim()) out.push(buf.trim());
+          buf = '';
+        } else {
+          buf += ch;
+        }
+      }
+      if (buf.trim()) out.push(buf.trim());
+      return out;
+    }
     function renderPlayerPills() {
       if (!playersRow || !playersInp) return;
       playersRow.innerHTML = '';
       const raw = (playersInp.value || '').trim();
       if (!raw) return;
-      raw.split(',').forEach(piece => {
-        const full = piece.trim();
+      _splitPlayers(raw).forEach(full => {
         if (!full) return;
         const name = full.replace(/\s*\(.*?\)\s*$/, '').trim() || full;
         const a = document.createElement('a');
@@ -1452,10 +1471,11 @@ document.addEventListener('DOMContentLoaded', function () {
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
         a.title = full;
-        a.textContent = name;
+        // Pill shows the full "Name (instrument)" so the user can read
+        // the role at a glance. CSS truncates with ellipsis past 220px.
+        a.textContent = full;
         const album = (tracksRow && tracksRow.dataset.trackAlbum) || '';
         const artist = (tracksRow && tracksRow.dataset.trackArtist) || '';
-        const ctx = [name, artist, album, 'musician'].filter(Boolean).join(' ');
         a.href = 'https://claude.ai/new?q=' + encodeURIComponent(
           'Tell me about ' + name + ' — their role on "' +
           (album || 'this recording') + '"' +

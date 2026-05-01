@@ -1062,14 +1062,12 @@ input[type="date"] { -webkit-appearance: none; }
   padding: 8px 10px;
 }
 
-/* Players input — single line under the pill row. */
-.rec-players-input {
-  width: 100%; border: 1px solid var(--border); border-radius: 4px;
-  padding: 4px 8px; font-family: var(--font); font-size: 12px;
-  background: var(--cell-bg); color: var(--text);
-  outline: none;
-}
-.rec-players-input:focus { border-color: var(--blue); background: #fff; }
+/* Players input is the canonical comma-separated source of truth for
+   the pill row above; the visible value is redundant with the pills
+   (and overflows the line on long rosters). Keep the field in the
+   form so its value still autosaves and re-renders pills, but hide
+   it visually. Re-population happens via the Lookup button. */
+.rec-players-input { display: none; }
 
 /* Pill rows for Players (Claude-search) and Tracks (Spotify-search).
    Each pill is a chip with a hover lift. The two kinds get a slight
