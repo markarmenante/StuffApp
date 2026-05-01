@@ -4401,17 +4401,27 @@ def recording_fetch_notes(record_id):
 
     # Propagate the lookup-derived content to any sibling copies of
     # the same album (matched on artist + title, case-insensitive,
-    # excluding this record). Each field is written only if the
-    # sibling's column is currently empty — never clobbering user
-    # edits on another copy. Saves the user from re-running Lookup
-    # on every pressing in their collection.
+    # excluding this record). Saves the user from re-running Lookup on
+    # every pressing in their collection.
+    #
+    #   notes       — APPEND the lookup output to each sibling's notes
+    #                 (separated by a blank line) so per-copy notes
+    #                 like "bought 2018 from Shady Records" survive.
+    #                 Skipped if the new notes already appear in the
+    #                 sibling's notes (re-runs are idempotent).
+    #   players     — OVERWRITE. Personnel is a fact about the
+    #                 recording, not the copy.
+    #   tracks      — OVERWRITE. Same reasoning.
+    #   notes_urls  — UNION. Source URLs accumulate across runs.
+    #   genre       — OVERWRITE when the lookup is confident. Lookup
+    #                 IS the user's "verify" trigger.
+    #   genre_2     — OVERWRITE. Same reasoning.
     siblings_updated = 0
     title_norm = (rec['title']  or '').strip()
     artist_norm = (rec['artist'] or '').strip()
     new_notes = data.get('markdown') or ''
-    new_urls_csv = ','.join(merged) if merged else ''
     if title_norm and artist_norm and (
-        new_notes or new_players or new_tracks or new_urls_csv
+        new_notes or new_players or new_tracks or new_urls
         or new_genre or new_genre_2
     ):
         sib_rows = db.execute(
@@ -4424,18 +4434,34 @@ def recording_fetch_notes(record_id):
         ).fetchall()
         for sib in sib_rows:
             sib_sets, sib_params = [], []
-            if new_notes and not (sib['notes'] or '').strip():
-                sib_sets.append('notes = ?'); sib_params.append(new_notes)
-            if new_players and not (sib['players'] or '').strip():
+
+            sib_notes = (sib['notes'] or '').rstrip()
+            if new_notes and new_notes not in sib_notes:
+                appended = (sib_notes + '\n\n' + new_notes) if sib_notes else new_notes
+                sib_sets.append('notes = ?'); sib_params.append(appended)
+
+            if new_players and (sib['players'] or '').strip() != new_players:
                 sib_sets.append('players = ?'); sib_params.append(new_players)
-            if new_tracks and not (sib['tracks'] or '').strip():
+            if new_tracks and (sib['tracks'] or '').strip() != new_tracks:
                 sib_sets.append('tracks = ?'); sib_params.append(new_tracks)
-            if new_urls_csv and not (sib['notes_urls'] or '').strip():
-                sib_sets.append('notes_urls = ?'); sib_params.append(new_urls_csv)
-            if new_genre and not (sib['genre'] or '').strip():
+
+            # Merge URLs: existing sibling URLs first, then any new ones
+            # not already present. Preserves order, dedupes.
+            sib_urls_csv = (sib['notes_urls'] or '').strip()
+            sib_urls = [u for u in (s.strip() for s in sib_urls_csv.split(',')) if u]
+            sib_url_set = set(sib_urls)
+            added_any = False
+            for u in merged:
+                if u not in sib_url_set:
+                    sib_urls.append(u); sib_url_set.add(u); added_any = True
+            if added_any:
+                sib_sets.append('notes_urls = ?'); sib_params.append(','.join(sib_urls))
+
+            if new_genre and (sib['genre'] or '').strip() != new_genre:
                 sib_sets.append('genre = ?'); sib_params.append(new_genre)
-            if new_genre_2 and not (sib['genre_2'] or '').strip():
+            if new_genre_2 and (sib['genre_2'] or '').strip() != new_genre_2:
                 sib_sets.append('genre_2 = ?'); sib_params.append(new_genre_2)
+
             if sib_sets:
                 sib_sets.append('updated_at = ?')
                 sib_params.append(datetime.utcnow().isoformat())
