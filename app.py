@@ -5354,35 +5354,43 @@ def _docs_cols_for(category):
 
 
 # Title keywords used to route a Sweep upload to the right doc-set on
-# multi-set categories (persons). Match is case-insensitive substring.
-# The first matching column wins; otherwise the first declared set is
-# used. Empty for single-set categories — they always land in 'main'.
+# multi-set categories (persons). Match is whole-token (case-insensitive)
+# — the label is split on whitespace + punctuation and a keyword has to
+# equal one of the resulting tokens. Substring matching was too loose:
+# 'id' was a substring of 'covid', so a vaccination card got routed to
+# the IDs tab. Multi-word phrases need to be expressed as their
+# component tokens (e.g. 'global entry' → 'global', 'entry').
 SWEEP_DOC_SET_HINTS = {
     'persons': [
         ('health_documents', ('health', 'medic', 'medical', 'rx',
                               'prescription', 'doctor', 'eye', 'dental',
-                              'insurance')),
+                              'insurance', 'covid', 'vaccine',
+                              'vaccinated', 'vaccination', 'vax',
+                              'fever')),
         ('id_documents',     ('id', 'license', 'passport', 'visa',
-                              'global entry', 'birth', 'social')),
+                              'global', 'entry', 'birth', 'social')),
     ],
 }
+
+
+_LABEL_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
 def _route_sweep_doc_set(category, label):
     """Pick the JSON column for a sweep-uploaded file. Single-set
     categories always return their lone column; multi-set ones run
-    SWEEP_DOC_SET_HINTS against the file's parsed label and fall back
-    to the first declared set if nothing matches."""
+    SWEEP_DOC_SET_HINTS against the file's parsed label (tokenized) and
+    fall back to the first declared set if nothing matches."""
     cols = _docs_cols_for(category)
     if not cols:
         return 'documents'
     if len(cols) == 1:
         return cols[0]
-    label_l = (label or '').lower()
+    tokens = set(_LABEL_TOKEN_RE.findall((label or '').lower()))
     for col, keywords in SWEEP_DOC_SET_HINTS.get(category, []):
         if col not in cols:
             continue
-        if any(k in label_l for k in keywords):
+        if any(k in tokens for k in keywords):
             return col
     return cols[0]
 
@@ -8214,6 +8222,36 @@ def sweep_files():
                 })
                 continue
 
+            # DOCUMENTS_CATEGORIES: check the destination JSON column for
+            # an existing entry with the same normalized title BEFORE
+            # writing the file to disk. Without this, a re-run of sweep
+            # would append a fresh duplicate every time. Title fallback
+            # mirrors the append branch below: parsed label first, then
+            # the bare filename basename.
+            if not chosen_field and cat in DOCUMENTS_CATEGORIES:
+                docs_col_pre = _route_sweep_doc_set(cat, parsed.get('label') or '')
+                try:
+                    existing_docs = json.loads(row[docs_col_pre] or '[]') if docs_col_pre in row.keys() else []
+                except (TypeError, ValueError):
+                    existing_docs = []
+                if not isinstance(existing_docs, list):
+                    existing_docs = []
+                candidate_title = ((parsed.get('label') or '').strip()
+                                   or (parsed.get('original_basename') or '').strip())
+                candidate_norm = _norm(candidate_title)
+                duplicate_of = None
+                if candidate_norm:
+                    for d in existing_docs:
+                        if _norm((d.get('title') or '').strip()) == candidate_norm:
+                            duplicate_of = d.get('title') or candidate_title
+                            break
+                if duplicate_of is not None:
+                    report['skipped'].append({
+                        'file':   rel,
+                        'reason': f"already in {docs_col_pre} as '{duplicate_of}'",
+                    })
+                    continue
+
             stored = save_upload(f)
             if not stored:
                 report['skipped'].append({'file': rel, 'reason': 'save_upload failed (unsupported type?)'})
@@ -8251,8 +8289,14 @@ def sweep_files():
                     docs = []
                 if not isinstance(docs, list):
                     docs = []
+                # Title fallback: when the parsed label is empty (filename
+                # didn't decompose into "<title>.<ext>" cleanly), use the
+                # original basename so the doc renders with a real name
+                # instead of the UI's generic "Doc N" placeholder.
+                doc_title = ((parsed.get('label') or '').strip()
+                             or (parsed.get('original_basename') or '').strip())
                 docs.append({
-                    'title':    (parsed.get('label') or '').strip(),
+                    'title':    doc_title,
                     'filename': stored,
                 })
                 db.execute(
@@ -8284,6 +8328,79 @@ def sweep_files():
                            current_category='__sweep__',
                            categories=CATEGORIES,
                            counts=get_counts())
+
+
+@app.route('/admin/dedupe-doc-lists', methods=['POST'])
+def admin_dedupe_doc_lists():
+    """Walk every record in every DOCUMENTS_CATEGORIES table, parse each
+    docs JSON column, and dedupe entries by normalized title — keep the
+    first occurrence, drop the rest. Doesn't touch upload files; run
+    /admin/orphan-uploads dry=0 afterwards to reclaim the orphaned files
+    on disk.
+
+    Pass `dry=0` to actually write changes; default is a dry-run report.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.form.get('dry', '1') != '0'
+    db = get_db()
+    summary = []
+    total_records_touched = 0
+    total_dupes_removed = 0
+    for cat in sorted(DOCUMENTS_CATEGORIES):
+        table = CATEGORIES[cat]['table']
+        cols = _docs_cols_for(cat)
+        if not cols:
+            continue
+        select_cols = ', '.join(['id'] + cols)
+        rows = db.execute(f"SELECT {select_cols} FROM {table}").fetchall()
+        cat_records = 0
+        cat_dupes = 0
+        for row in rows:
+            updates = {}
+            for col in cols:
+                try:
+                    docs = json.loads(row[col] or '[]')
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(docs, list) or not docs:
+                    continue
+                seen = set()
+                kept = []
+                for d in docs:
+                    if not isinstance(d, dict):
+                        continue
+                    key = _norm((d.get('title') or '').strip())
+                    if not key:
+                        # Untitled entries are kept as-is (we can't
+                        # safely group them).
+                        kept.append(d)
+                        continue
+                    if key in seen:
+                        cat_dupes += 1
+                        continue
+                    seen.add(key)
+                    kept.append(d)
+                if len(kept) != len(docs):
+                    updates[col] = kept
+            if updates:
+                cat_records += 1
+                if not dry:
+                    set_sql = ', '.join(f"{c} = ?" for c in updates) + ", updated_at = ?"
+                    params = [json.dumps(v) for v in updates.values()]
+                    params.append(datetime.utcnow().isoformat())
+                    params.append(row['id'])
+                    db.execute(f"UPDATE {table} SET {set_sql} WHERE id = ?", params)
+        if cat_records:
+            summary.append({'category': cat, 'records_touched': cat_records, 'dupes_removed': cat_dupes})
+            total_records_touched += cat_records
+            total_dupes_removed += cat_dupes
+    if not dry:
+        db.commit()
+    return jsonify(dry_run=dry,
+                   total_records_touched=total_records_touched,
+                   total_dupes_removed=total_dupes_removed,
+                   per_category=summary)
 
 
 @app.route('/admin/orphan-uploads', methods=['POST'])
