@@ -7,8 +7,12 @@
 // Safari/iOS/Firefox: NOT supported — caller should fall back to the
 // existing blob-download path. Detect via window.showDirectoryPicker.
 //
-// Depends on JSZip (loaded via CDN in base.html) for unzipping the
-// server response in the browser.
+// Depends on fflate (loaded via CDN in base.html) for streaming
+// unzip — the response body is piped chunk-by-chunk through
+// fflate.Unzip and each decompressed file is written straight to
+// disk via FileSystemWritableFileStream. JSZip's loadAsync() pulled
+// the whole zip into RAM via FileReader and OOM-crashed Chrome on
+// multi-GB exports.
 
 (function () {
   const DB_NAME  = 'stuffapp-sync';
@@ -126,23 +130,16 @@
     if (!window.showDirectoryPicker) {
       throw new Error('Browser does not support the directory picker; falling back to zip download.');
     }
-    if (typeof JSZip === 'undefined') {
-      throw new Error('JSZip not loaded.');
+    if (typeof fflate === 'undefined') {
+      throw new Error('fflate not loaded.');
     }
     const dir = await _getOrPickDirectory(false);
 
     progress && progress('Building zip on server (can take a minute)…');
     const r = await fetch('/export-files');
     if (!r.ok) throw new Error('Server returned HTTP ' + r.status);
-    const blob = await r.blob();
-    const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
-    progress && progress(`Extracting ${sizeMB} MB into your folder…`);
-
-    const zip = await JSZip.loadAsync(blob);
-    const entries = [];
-    zip.forEach((relPath, entry) => {
-      if (!entry.dir) entries.push([relPath, entry]);
-    });
+    if (!r.body) throw new Error('Streaming response body not supported.');
+    progress && progress('Streaming export into your folder…');
 
     // Track every path the export wrote so the purge pass below can
     // diff against what's currently on disk. `expectedPaths` is the
@@ -173,37 +170,93 @@
     // transient iCloud-stub or revoked-permission glitch.
     let syncError = null;
     let written = 0;
+    let total = 0;
     let purged = 0;
     let purgedDirs = 0;
     let staleCount = 0;
     try {
-    let done = 0;
-    for (const [name, entry] of entries) {
-      // Strip the "StuffFiles/" prefix — the user already picked the
-      // StuffFiles directory, so the zip's contents land relative to it.
-      const rel = NFC(name.replace(/^StuffFiles\//, ''));
-      if (!rel) continue;
+    // Stream the response body through fflate.Unzip — chunks of the
+    // zip flow in, decompressed file chunks come out via onfile/ondata
+    // and get written straight to disk. Strips the leading
+    // "StuffFiles/" prefix because the user already picked that dir.
+    const unzipper = new fflate.Unzip();
+    unzipper.register(fflate.UnzipInflate);
+
+    // All disk writes funnel through one chained promise so the read
+    // loop can apply backpressure (await it between input chunks).
+    // Without this, fflate buffers decompressed chunks faster than
+    // the disk consumes them and we recreate the OOM.
+    let writeChain = Promise.resolve();
+
+    unzipper.onfile = (file) => {
+      // Directory entries arrive with a trailing slash and no data;
+      // _ensurePath creates intermediate dirs lazily so we skip these.
+      if (file.name.endsWith('/')) return;
+      const rel = NFC(file.name.replace(/^StuffFiles\//, ''));
+      if (!rel) return;
       expectedPaths.add(rel);
       const top = rel.split('/')[0];
       if (top) managedTopLevel.add(top);
-      try {
-        const [parent, fname] = await _ensurePath(dir, rel);
-        const file = await parent.getFileHandle(fname, {create: true});
-        const writer = await file.createWritable();
-        const data = await entry.async('uint8array');
-        await writer.write(data);
-        await writer.close();
-        written++;
-      } catch (e) {
-        // Best-effort: skip a file we can't write rather than aborting
-        // the whole sync. Surface the count at the end.
-        console.warn('Skipped', rel, e);
+      total++;
+
+      let writer = null;
+      let aborted = false;
+
+      file.ondata = (err, data, final) => {
+        writeChain = writeChain.then(async () => {
+          if (aborted) return;
+          try {
+            if (err) throw err;
+            if (!writer) {
+              const [parent, fname] = await _ensurePath(dir, rel);
+              const fileHandle = await parent.getFileHandle(fname, {create: true});
+              writer = await fileHandle.createWritable();
+            }
+            if (data && data.length) await writer.write(data);
+            if (final) {
+              await writer.close();
+              written++;
+              if (written % 10 === 0) {
+                progress && progress(`Wrote ${written} files…`);
+              }
+            }
+          } catch (e) {
+            // Best-effort: skip a file we can't write rather than
+            // aborting the whole sync. Surface the count at the end.
+            aborted = true;
+            console.warn('Skipped', rel, e);
+            if (writer) {
+              try { await writer.abort(); } catch (_) {}
+            }
+          }
+        });
+      };
+
+      file.start();
+    };
+
+    const reader = r.body.getReader();
+    let bytesIn = 0;
+    let lastProgressBytes = 0;
+    while (true) {
+      const {done: rDone, value} = await reader.read();
+      if (rDone) {
+        unzipper.push(new Uint8Array(0), true);
+        break;
       }
-      done++;
-      if (done % 10 === 0 || done === entries.length) {
-        progress && progress(`Wrote ${written}/${entries.length} files…`);
+      unzipper.push(value, false);
+      bytesIn += value.length;
+      if (bytesIn - lastProgressBytes > 50 * 1024 * 1024) {
+        const sizeMB = (bytesIn / 1024 / 1024).toFixed(0);
+        progress && progress(`Extracting (${sizeMB} MB read, ${written} files written)…`);
+        lastProgressBytes = bytesIn;
       }
+      // Backpressure: drain the write queue before the next read so
+      // we cap RAM at roughly one input chunk plus its expansion.
+      await writeChain;
     }
+    await writeChain;
+    progress && progress(`Wrote ${written}/${total} files…`);
 
     // Purge pass: walk every subtree under a managed top-level dir
     // (Coins, Properties, …) and collect files that aren't in the
@@ -344,7 +397,7 @@
       console.warn('[StuffSync] uncaught syncDown error:', e);
     }
 
-    return {written, total: entries.length,
+    return {written, total,
             stale: staleCount, purged, purgedDirs,
             error: syncError};
   }

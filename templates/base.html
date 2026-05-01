@@ -91,9 +91,11 @@
 <!-- Toast for export progress / completion -->
 <div id="exportToast" class="export-toast" hidden></div>
 
-<!-- JSZip for client-side zip extraction (used by sync.js when the
-     browser supports the File System Access API). -->
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<!-- fflate for streaming zip extraction (used by sync.js when the
+     browser supports the File System Access API). Streaming so a
+     multi-GB export doesn't OOM the tab — JSZip's loadAsync()
+     pulled the whole zip into RAM via FileReader and crashed. -->
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
 <script src="{{ url_for('static', filename='js/sync.js') }}?v={{ asset_v('js/sync.js') }}"></script>
 
 <script>
@@ -149,7 +151,7 @@ async function startExport(ev, link) {
   const ui = _busy(link, 'navExportIcon', 'navExportLabel', '⏳', 'Building');
   if (!ui) return false;
 
-  if (window.showDirectoryPicker && window.StuffSync && window.JSZip) {
+  if (window.showDirectoryPicker && window.StuffSync && window.fflate) {
     try {
       ui.progress('Pick (or confirm) your StuffFiles folder…');
       const result = await window.StuffSync.syncDown(ui.progress);
