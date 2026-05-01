@@ -8,7 +8,7 @@ import unicodedata
 from datetime import datetime, date
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response,
-                   send_file)
+                   send_file, after_this_request)
 from werkzeug.utils import secure_filename
 
 try:
@@ -7437,9 +7437,17 @@ def admin_export_files():
     import io
     import zipfile
     import csv as _csv
+    import tempfile
 
     db = get_db()
-    buf = io.BytesIO()
+    # Build the zip on disk instead of in memory: a full StuffFiles
+    # export can reach hundreds of megabytes of cover images, receipts
+    # and docs, and an in-memory BytesIO either OOMs the Railway
+    # container or holds a connection long enough for Cloudflare's
+    # ~100s edge timeout to drop it ("Failed to fetch" client-side).
+    # NamedTemporaryFile keeps the file path stable so send_file can
+    # stream it after we close the ZipFile.
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
     written = 0
     skipped_missing = 0
     seen_paths = set()
@@ -7465,7 +7473,12 @@ def admin_export_files():
                 return cand
             n += 1
 
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+    # ZIP_STORED (no compression) — the vast majority of payload is
+    # already-compressed JPEG / HEIC / PNG / PDF, so DEFLATE just burns
+    # CPU for sub-1% size savings. Storing instead drops build time
+    # roughly 5-10× and keeps each .write() at near-disk speed, well
+    # under Cloudflare's ~100s edge timeout.
+    with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_STORED) as zf:
         for cat, plan in EXPORT_LAYOUT.items():
             if cat not in allowed:
                 continue
@@ -7574,7 +7587,7 @@ def admin_export_files():
             zf.writestr(f'StuffFiles/{cat_label}/{cat_label}.csv',
                         sio.getvalue().encode('utf-8'))
 
-    buf.seek(0)
+    tmp.close()
     ts = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
     fname = f'StuffFiles-{user["email"].split("@")[0]}-{ts}.zip'
     # Mark this user's Files export as fresh — the nav indicator turns
@@ -7586,7 +7599,19 @@ def admin_export_files():
         (datetime.utcnow().isoformat(timespec='seconds'), user['id']),
     )
     db.commit()
-    return send_file(buf, as_attachment=True, download_name=fname,
+    # Delete the tempfile after Flask finishes streaming. send_file
+    # opens its own descriptor for streaming, so unlink-after-response
+    # is safe on POSIX (the open fd keeps the inode alive until the
+    # response finishes).
+    tmp_path = tmp.name
+    @after_this_request
+    def _cleanup(response):
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return response
+    return send_file(tmp_path, as_attachment=True, download_name=fname,
                      mimetype='application/zip')
 
 
