@@ -1514,70 +1514,93 @@ document.addEventListener('DOMContentLoaded', function () {
         lookupBtn.disabled = true;
         const origLabel = lookupBtn.textContent;
         lookupBtn.textContent = 'Loading…';
+
+        // Each post-data UI step runs through this guard so a downstream
+        // throw (autosave handler glitch, missing element, etc.) doesn't
+        // bubble up and trigger the "Lookup failed" alert AFTER the
+        // notes / players / tracks have already landed on the page.
+        const safe = (label, fn) => {
+          try { fn(); }
+          catch (err) { console.warn('[lookup] ' + label + ':', err); }
+        };
+
+        let data;
         try {
           const r = await fetch(url, {
             method: 'POST',
             headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' },
           });
-          const data = await r.json().catch(() => ({}));
+          data = await r.json().catch(() => ({}));
           if (!r.ok || !data.notes) {
             throw new Error(data.error || `HTTP ${r.status}`);
           }
+        } catch (e) {
+          lookupBtn.classList.remove('active');
+          lookupBtn.textContent = origLabel;
+          lookupBtn.disabled = false;
+          alert('Lookup failed: ' + (e.message || e));
+          return;
+        }
+
+        // Network/HTTP succeeded — everything below is best-effort UI
+        // sync. Any error here gets logged to console, never alerted.
+        safe('notes', () => {
           const sep = notesTa.value.trim() ? '\n\n' : '';
           notesTa.value = notesTa.value + sep + data.notes;
           notesTa.dispatchEvent(new Event('blur'));
           if (window._autosizeTextarea) window._autosizeTextarea(notesTa);
-          if (data.urls) setSourcePills(data.urls);
-          // Fill-if-empty for both players and tracks. Server already
-          // gates on the same condition; this is a defensive guard.
+        });
+        safe('source pills', () => { if (data.urls) setSourcePills(data.urls); });
+
+        // Fill-if-empty for both players and tracks. Server already
+        // gates on the same condition; this is a defensive guard.
+        safe('players', () => {
           if (playersInp && data.players && !playersInp.value.trim()) {
             playersInp.value = data.players;
             playersInp.dispatchEvent(new Event('blur'));
             renderPlayerPills();
           }
+        });
+        safe('tracks', () => {
           if (tracksInp && data.tracks && !tracksInp.value.trim()) {
             tracksInp.value = data.tracks;
             tracksInp.dispatchEvent(new Event('blur'));
             renderTrackPills();
           }
-          // Genre + sub-genre verification: the server returns its
-          // verified values whenever the model is confident, and writes
-          // them on the record (overwriting any prior classification —
-          // Lookup IS the user's "verify" action). Reflect those
-          // changes in the form so the user sees the correction
-          // without a reload.
-          if (data.genre) {
-            const genreSel = document.querySelector('select[name="genre"]');
-            if (genreSel && genreSel.value !== data.genre) {
-              genreSel.value = data.genre;
-              genreSel.dispatchEvent(new Event('change'));
-            }
+        });
+
+        // Genre + sub-genre verification: the server returns its
+        // verified values whenever the model is confident, and writes
+        // them on the record (overwriting any prior classification —
+        // Lookup IS the user's "verify" action). Reflect those changes
+        // in the form so the user sees the correction without a reload.
+        safe('genre', () => {
+          if (!data.genre) return;
+          const genreSel = document.querySelector('select[name="genre"]');
+          if (genreSel && genreSel.value !== data.genre) {
+            genreSel.value = data.genre;
+            genreSel.dispatchEvent(new Event('change'));
           }
-          if (data.genre_2) {
-            const genre2Inp = document.querySelector('input[name="genre_2"]');
-            if (genre2Inp && genre2Inp.value !== data.genre_2) {
-              genre2Inp.value = data.genre_2;
-              genre2Inp.dispatchEvent(new Event('blur'));
-            }
+        });
+        safe('genre_2', () => {
+          if (!data.genre_2) return;
+          const genre2Inp = document.querySelector('input[name="genre_2"]');
+          if (genre2Inp && genre2Inp.value !== data.genre_2) {
+            genre2Inp.value = data.genre_2;
+            genre2Inp.dispatchEvent(new Event('blur'));
           }
-          // Brief inline hint when the same lookup propagated to other
-          // copies of this album (matched on artist + title). The
-          // server only writes empty sibling columns so this never
-          // clobbers user edits on another copy.
-          const n = data.siblings_updated || 0;
-          if (n > 0) {
-            lookupBtn.textContent = '✓ ' + n + ' cop' + (n === 1 ? 'y' : 'ies');
-            setTimeout(() => { lookupBtn.textContent = origLabel; }, 4000);
-          } else {
-            lookupBtn.textContent = origLabel;
-          }
-        } catch (e) {
-          lookupBtn.classList.remove('active');
+        });
+
+        // Brief inline hint when the same lookup propagated to other
+        // copies of this album (matched on artist + title).
+        const n = data.siblings_updated || 0;
+        if (n > 0) {
+          lookupBtn.textContent = '✓ ' + n + ' cop' + (n === 1 ? 'y' : 'ies');
+          setTimeout(() => { lookupBtn.textContent = origLabel; }, 4000);
+        } else {
           lookupBtn.textContent = origLabel;
-          alert('Lookup failed: ' + (e.message || e));
-        } finally {
-          lookupBtn.disabled = false;
         }
+        lookupBtn.disabled = false;
       });
     }
   })();
