@@ -23,6 +23,10 @@
   // a per-path fingerprint map ({path: 'size:mtime'}) so re-runs of
   // syncUp can skip files that haven't changed since last upload.
   const STATE_KEY = 'StuffFilesSyncState';
+  // ISO timestamp of the last successful syncDown; sent to the server
+  // as ?since= so the export only includes records modified after it
+  // (plus a _tombstones.json for deletes since that timestamp).
+  const LAST_SYNC_KEY = 'StuffFilesLastSyncAt';
 
   function _openDB() {
     return new Promise((resolve, reject) => {
@@ -58,6 +62,40 @@
   // side cache reset only).
   async function resetSyncState() {
     await _saveSyncState({});
+  }
+
+  async function _loadLastSyncAt() {
+    const db = await _openDB();
+    return new Promise((resolve) => {
+      const tx  = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(LAST_SYNC_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror   = () => resolve(null);
+    });
+  }
+
+  async function _saveLastSyncAt(ts) {
+    const db = await _openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(ts, LAST_SYNC_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror    = () => reject(tx.error);
+    });
+  }
+
+  // Public: clear the last-sync timestamp so the next syncDown pulls
+  // a full export instead of an incremental diff. Useful after a known
+  // server-side bulk operation (mass dedupe, restore, etc.) where the
+  // local folder needs a fresh baseline.
+  async function resetLastSyncAt() {
+    const db = await _openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(LAST_SYNC_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror    = () => reject(tx.error);
+    });
   }
 
   async function _saveHandle(handle) {
@@ -135,8 +173,22 @@
     }
     const dir = await _getOrPickDirectory(false);
 
-    progress && progress('Building zip on server (can take a minute)…');
-    const r = await fetch('/export-files');
+    // Incremental: send the timestamp of the last successful syncDown
+    // so the server only ships records modified since then, plus a
+    // _tombstones.json listing deletions in the same window.
+    const lastSyncAt = await _loadLastSyncAt();
+    // Stamp now, BEFORE the server starts building the zip — anything
+    // updated mid-build will simply land in the next sync's window
+    // rather than being missed. Saved only on full success at the end.
+    const newSyncAt = new Date().toISOString();
+    progress && progress(
+      lastSyncAt
+        ? `Building incremental zip on server (since ${lastSyncAt})…`
+        : 'Building zip on server (can take a minute)…'
+    );
+    const exportUrl = '/export-files'
+      + (lastSyncAt ? '?since=' + encodeURIComponent(lastSyncAt) : '');
+    const r = await fetch(exportUrl);
     if (!r.ok) throw new Error('Server returned HTTP ' + r.status);
     if (!r.body) throw new Error('Streaming response body not supported.');
     progress && progress('Streaming export into your folder…');
@@ -169,6 +221,8 @@
     // the writes that did land just because one read mid-walk hit a
     // transient iCloud-stub or revoked-permission glitch.
     let syncError = null;
+    let tombstoneApplied = 0;
+    let tombstoneFailed = 0;
     let written = 0;
     let total = 0;
     let purged = 0;
@@ -188,12 +242,43 @@
     // the disk consumes them and we recreate the OOM.
     let writeChain = Promise.resolve();
 
+    // _tombstones.json is captured into RAM rather than written to disk
+    // so we can parse it after the unzipper drains and apply local
+    // deletions (with a default-Cancel confirm — never auto-OK).
+    let tombstonesJson = null;
+    const tombstoneChunks = [];
+
     unzipper.onfile = (file) => {
       // Directory entries arrive with a trailing slash and no data;
       // _ensurePath creates intermediate dirs lazily so we skip these.
       if (file.name.endsWith('/')) return;
       const rel = NFC(file.name.replace(/^StuffFiles\//, ''));
       if (!rel) return;
+
+      // Special-case the tombstones manifest: it's metadata, not a
+      // user file — buffer it and process at end.
+      if (rel === '_tombstones.json') {
+        file.ondata = (err, data, final) => {
+          if (err) { console.warn('tombstones read error', err); return; }
+          if (data && data.length) tombstoneChunks.push(data);
+          if (final) {
+            try {
+              let totalLen = 0;
+              for (const c of tombstoneChunks) totalLen += c.length;
+              const merged = new Uint8Array(totalLen);
+              let off = 0;
+              for (const c of tombstoneChunks) { merged.set(c, off); off += c.length; }
+              tombstonesJson = JSON.parse(new TextDecoder().decode(merged));
+            } catch (e) {
+              console.warn('tombstones parse failed', e);
+              tombstonesJson = null;
+            }
+          }
+        };
+        file.start();
+        return;
+      }
+
       expectedPaths.add(rel);
       const top = rel.split('/')[0];
       if (top) managedTopLevel.add(top);
@@ -257,6 +342,54 @@
     }
     await writeChain;
     progress && progress(`Wrote ${written}/${total} files…`);
+
+    // Apply server-side deletions captured in _tombstones.json. These
+    // are authoritative — the server has confirmed each file was
+    // deleted from its DB record — so the user only sees a single
+    // confirm with the count + a sample. Default behavior on Enter is
+    // CANCEL: window.confirm returns true on OK, but we phrase the
+    // message and rely on the user actively pressing OK.
+    if (tombstonesJson && Array.isArray(tombstonesJson.tombstones)
+        && tombstonesJson.tombstones.length) {
+      const list = tombstonesJson.tombstones;
+      const sample = list.slice(0, 20).map(t => t.path).join('\n');
+      const more = list.length > 20 ? `\n…and ${list.length - 20} more` : '';
+      const ok = window.confirm(
+        `Apply ${list.length} server-side deletion(s) to your local ` +
+        `StuffFiles folder?\n\nEach of these files was deleted on the ` +
+        `server (X-button on a tile, record delete, etc.). Click OK to ` +
+        `mirror the deletion locally, or Cancel to keep the local ` +
+        `copies.\n\n` + sample + more
+      );
+      if (ok) {
+        for (const t of list) {
+          const path = (t.path || '').replace(/^StuffFiles\//, '');
+          if (!path) continue;
+          const parts = path.split('/').filter(Boolean);
+          if (!parts.length) continue;
+          try {
+            let cur = dir;
+            for (let i = 0; i < parts.length - 1; i++) {
+              cur = await cur.getDirectoryHandle(parts[i]);
+            }
+            await cur.removeEntry(parts[parts.length - 1]);
+            tombstoneApplied++;
+          } catch (e) {
+            // Most common: file already absent locally → NotFoundError.
+            // Don't count those as failures; everything else is logged.
+            if (e && e.name === 'NotFoundError') continue;
+            tombstoneFailed++;
+            console.warn('tombstone apply failed', t.path, e);
+          }
+        }
+        progress && progress(
+          `Applied ${tombstoneApplied} deletion(s)` +
+          (tombstoneFailed ? `, ${tombstoneFailed} failed` : '') + '.'
+        );
+      } else {
+        console.log('[StuffSync] tombstone deletions skipped by user');
+      }
+    }
 
     // Purge pass: walk every subtree under a managed top-level dir
     // (Coins, Properties, …) and collect files that aren't in the
@@ -405,8 +538,19 @@
       console.warn('[StuffSync] uncaught syncDown error:', e);
     }
 
+    // Persist the new last-sync timestamp so the next syncDown is
+    // incremental. Only save when the run reached the end without a
+    // syncError — a partial failure leaves the timestamp untouched
+    // so the next attempt picks up everything since the previous
+    // successful sync.
+    if (!syncError) {
+      try { await _saveLastSyncAt(newSyncAt); } catch (_) {}
+    }
+
     return {written, total,
             stale: staleCount, purged, purgedDirs,
+            tombstoneApplied, tombstoneFailed,
+            since: lastSyncAt || null, syncedAt: newSyncAt,
             error: syncError};
   }
 
@@ -585,5 +729,6 @@
     return {uploaded, skipped, scanned: handles.length, changed: changed.length};
   }
 
-  window.StuffSync = {syncDown, syncUp, pickFolder, resetSyncState};
+  window.StuffSync = Object.assign(window.StuffSync || {},
+    {syncDown, syncUp, pickFolder, resetSyncState, resetLastSyncAt});
 })();

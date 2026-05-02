@@ -429,3 +429,23 @@ CREATE TABLE IF NOT EXISTS persons (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Tombstones for deletes that the incremental Files sync needs to
+-- propagate to the local StuffFiles folder. Every server-side delete
+-- of a referenced file (UI X-button, record DELETE, etc.) writes a
+-- row capturing enough info to reconstruct the export-shaped local
+-- path: StuffFiles/<cat_label>/<group_path>/<ident_path> — <label>.<ext>.
+-- The /export-files endpoint surfaces deletions newer than the
+-- client's `since` timestamp inside `_tombstones.json` so syncDown
+-- can remove the matching local files.
+CREATE TABLE IF NOT EXISTS tombstones (
+    id TEXT PRIMARY KEY,
+    category TEXT,
+    cat_label TEXT,
+    group_path TEXT,
+    ident_path TEXT,
+    label TEXT,
+    filename TEXT,
+    deleted_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at);

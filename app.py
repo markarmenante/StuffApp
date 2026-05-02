@@ -3610,6 +3610,54 @@ def delete_record(category, record_id):
     gap_group = None
     if category == 'coins':
         gap_group = _coin_group_for(existing['property_name'], existing['date_1'])
+    # Tombstone every file this record owned — both fixed-slot files
+    # and JSON-array document filenames — so the next incremental
+    # syncDown can mirror the deletion locally. We read these from
+    # `existing` (already fetched), not the DB, so they survive the
+    # DELETE below.
+    plan = EXPORT_LAYOUT.get(category, {})
+    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    for spec in plan.get('files', []):
+        field, default_label, t_field = spec
+        if field not in cols:
+            continue
+        try:
+            fn = (existing[field] or '').strip()
+        except (KeyError, IndexError):
+            fn = ''
+        if not fn:
+            continue
+        label = ''
+        if t_field and t_field in cols:
+            try:
+                label = (existing[t_field] or '').strip()
+            except (KeyError, IndexError):
+                label = ''
+        if not label:
+            label = default_label or ''
+        _record_tombstone(db, category, existing, label, fn)
+    for json_col in DOC_SETS_BY_CATEGORY.get(category, {}).values():
+        if json_col not in cols:
+            continue
+        try:
+            raw = existing[json_col]
+        except (KeyError, IndexError):
+            raw = None
+        if not raw:
+            continue
+        try:
+            docs = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(docs, list):
+            continue
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            fn = (d.get('filename') or '').strip()
+            if fn:
+                _record_tombstone(db, category, existing,
+                                  (d.get('title') or '').strip(), fn)
     db.execute(f"DELETE FROM {table} WHERE id = ?", [record_id])
     if gap_group:
         _renumber_coin_groups(db, [gap_group])
@@ -5125,13 +5173,27 @@ def delete_file_field(category, record_id):
     if field_name not in cols:
         return jsonify({'error': 'Column not in table'}), 400
     existing = db.execute(
-        f"SELECT {field_name} FROM {table} WHERE id = ?", [record_id]
+        f"SELECT * FROM {table} WHERE id = ?", [record_id]
     ).fetchone()
     old_filename = existing[field_name] if existing else None
     # Clear the paired title/label column too so the tile doesn't keep
     # showing a leftover auto-fill from a since-removed file.
     title_field = _title_field_for(category, field_name)
     cleared_title = title_field if title_field and title_field in cols else None
+    # Compute the export-shaped label for the tombstone before we NULL
+    # the title column. Prefer the user-supplied title; fall back to
+    # the default label from EXPORT_LAYOUT.
+    tombstone_label = ''
+    if existing and old_filename:
+        plan = EXPORT_LAYOUT.get(category, {})
+        for spec in plan.get('files', []):
+            f, default_label, t_field = spec
+            if f == field_name:
+                if t_field and t_field in cols and existing[t_field]:
+                    tombstone_label = (existing[t_field] or '').strip()
+                if not tombstone_label:
+                    tombstone_label = default_label or ''
+                break
     sets = [f"{field_name} = NULL"]
     if cleared_title:
         sets.append(f"{cleared_title} = NULL")
@@ -5140,6 +5202,8 @@ def delete_file_field(category, record_id):
         f"UPDATE {table} SET {', '.join(sets)} WHERE id = ?",
         [datetime.utcnow().isoformat(), record_id],
     )
+    if old_filename and field_name not in _PRESERVE_FILE_FIELDS:
+        _record_tombstone(db, category, existing, tombstone_label, old_filename)
     db.commit()
     if old_filename and field_name not in _PRESERVE_FILE_FIELDS:
         _unlink_upload(old_filename)
@@ -5585,6 +5649,18 @@ def documents_delete(category, record_id, doc_set, idx):
     if idx < 0 or idx >= len(docs):
         return jsonify({'error': 'Index out of range'}), 400
     removed = docs.pop(idx)
+    # Tombstone the deleted file so the next incremental syncDown can
+    # mirror the deletion locally. Read the row before the save so we
+    # can compute the export-shaped path.
+    if isinstance(removed, dict):
+        rm_filename = (removed.get('filename') or '').strip()
+        rm_title = (removed.get('title') or '').strip()
+        if rm_filename:
+            row = db.execute(
+                f"SELECT * FROM {table} WHERE id = ?", [record_id]
+            ).fetchone()
+            if row:
+                _record_tombstone(db, category, row, rm_title, rm_filename)
     _docs_save(db, table, record_id, docs, col)
     if isinstance(removed, dict):
         _unlink_upload(removed.get('filename') or '')
@@ -7350,6 +7426,35 @@ def _safe_path(*parts):
     return out
 
 
+def _record_tombstone(db, category, row, label, filename):
+    """Record a server-side delete so the next incremental syncDown can
+    remove the matching local file from the user's StuffFiles folder.
+    Computes the same export-shaped path the zip writer uses so the
+    client doesn't need to guess. No-ops if anything's missing — a
+    missed tombstone just leaves a stale local file (the safe miss),
+    which is preferable to a wrong tombstone deleting good local data.
+    """
+    if not (category and row and filename):
+        return
+    plan = EXPORT_LAYOUT.get(category)
+    if not plan:
+        return
+    try:
+        group_raw = plan['group'](row)
+        ident_raw = plan['ident'](row)
+    except Exception:
+        return
+    group, ident = _safe_path(group_raw, ident_raw)
+    cat_label = EXPORT_CATEGORY_LABELS.get(category, category.title())
+    db.execute(
+        "INSERT INTO tombstones (id, category, cat_label, group_path, "
+        "                        ident_path, label, filename, deleted_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [str(uuid.uuid4()), category, cat_label, group, ident,
+         (label or '').strip(), filename, datetime.utcnow().isoformat()]
+    )
+
+
 # Per-category export plan. For each category:
 #   group:  fn(row) → folder name (e.g. brand)
 #   ident:  fn(row) → item identifier (used as filename prefix)
@@ -7584,6 +7689,13 @@ def admin_export_files():
     if not allowed:
         abort(403)
 
+    # Incremental export: when the client passes ?since=<iso>, only
+    # rows updated at or after that timestamp go into the zip, and a
+    # _tombstones.json at the zip root lists files deleted server-side
+    # since the same timestamp. Empty/missing `since` falls back to
+    # the original "everything" behavior so first sync still works.
+    since_param = (request.args.get('since') or '').strip()
+
     import io
     import zipfile
     import csv as _csv
@@ -7637,6 +7749,10 @@ def admin_export_files():
             # records they can actually see (e.g., owner ∈ {YM, Young}).
             wheres, params = [], []
             _apply_row_filter_clauses(cat, wheres, params)
+            # Incremental: only emit records modified at or after `since`.
+            if since_param:
+                wheres.append("(updated_at IS NOT NULL AND updated_at >= ?)")
+                params.append(since_param)
             where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
             try:
                 rows = db.execute(
@@ -7751,6 +7867,55 @@ def admin_export_files():
                 w.writerow(['' if r.get(c) is None else r.get(c) for c in cols])
             zf.writestr(f'StuffFiles/{cat_label}/{cat_label}.csv',
                         sio.getvalue().encode('utf-8'))
+
+        # _tombstones.json: deletions newer than `since` that are in a
+        # category the caller has access to. Each entry carries the
+        # full export-shaped path so the client can `removeEntry()`
+        # the matching local file without recomputing anything.
+        tomb_wheres = []
+        tomb_params = []
+        if since_param:
+            tomb_wheres.append("(deleted_at IS NOT NULL AND deleted_at >= ?)")
+            tomb_params.append(since_param)
+        if allowed:
+            ph = ','.join(['?' for _ in allowed])
+            tomb_wheres.append(f"(category IN ({ph}))")
+            tomb_params.extend(sorted(allowed))
+        tomb_where = (' WHERE ' + ' AND '.join(tomb_wheres)) if tomb_wheres else ''
+        tomb_entries = []
+        try:
+            tomb_rows = db.execute(
+                f"SELECT category, cat_label, group_path, ident_path, "
+                f"       label, filename, deleted_at "
+                f"FROM tombstones {tomb_where} "
+                f"ORDER BY deleted_at",
+                tomb_params,
+            ).fetchall()
+        except sqlite3.OperationalError:
+            tomb_rows = []
+        for t in tomb_rows:
+            cat_label = t['cat_label'] or EXPORT_CATEGORY_LABELS.get(
+                t['category'] or '', '')
+            group = t['group_path'] or ''
+            ident = t['ident_path'] or ''
+            label = t['label'] or ''
+            filename = t['filename'] or ''
+            ext = ''
+            if '.' in filename:
+                ext = '.' + filename.rsplit('.', 1)[-1]
+            base = f'{ident} — {label}{ext}' if label else f'{ident}{ext}'
+            path = f'StuffFiles/{cat_label}/{group}/{base}'
+            tomb_entries.append({
+                'path':       path,
+                'category':   t['category'],
+                'filename':   filename,
+                'deleted_at': t['deleted_at'],
+            })
+        zf.writestr('StuffFiles/_tombstones.json',
+                    json.dumps({'tombstones': tomb_entries,
+                                'since':      since_param or None,
+                                'as_of':      datetime.utcnow().isoformat()
+                                              + 'Z'}, indent=2).encode('utf-8'))
 
     tmp.close()
     ts = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
