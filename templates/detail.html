@@ -443,7 +443,11 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">Hz (calc)</span>
         </div>
       </div>
-      <div class="dgrid dg2 watch-movement">
+      <div class="dgrid dg3 watch-movement">
+        <div class="dcell">
+          <input type="text" name="escape_wheel" value="{{ val('escape_wheel') }}">
+          <span class="clabel">Escape Wheel</span>
+        </div>
         <div class="dcell">
           <select name="movement_type">
             <option value=""></option>
@@ -455,6 +459,18 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="dcell">
           <input type="text" name="reserve" value="{{ '%s hrs'|format(val('reserve')|fmt_int) if val('reserve') else '' }}" class="coin-unit-input" data-suffix=" hrs" inputmode="numeric">
           <span class="clabel">Reserve</span>
+        </div>
+      </div>
+      {# Calibre notes: full-width row spanning the spec column. Sits
+         between the movement rows above and the service rows below.
+         Deliberately NOT given the watch-movement shading class so
+         this row reads as a free-form text panel rather than another
+         spec cell. #}
+      <div class="dgrid dg1">
+        <div class="dcell">
+          <textarea name="calibre_notes" rows="2"
+                    style="width:100%;text-align:left;resize:vertical">{{ val('calibre_notes') }}</textarea>
+          <span class="clabel">Calibre Notes</span>
         </div>
       </div>
       <div class="dgrid dg2">

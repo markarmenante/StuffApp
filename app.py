@@ -242,6 +242,8 @@ FIELDS = {
         {'name': 'movement_jewels', 'label': 'Jewels',            'type': 'number'},
         {'name': 'movement_origin', 'label': 'Movement Origin',   'type': 'text'},
         {'name': 'escapement',      'label': 'Escapement',        'type': 'text'},
+        {'name': 'escape_wheel',    'label': 'Escape Wheel',      'type': 'text'},
+        {'name': 'calibre_notes',   'label': 'Calibre Notes',     'type': 'textarea'},
         {'name': 'beat',            'label': 'Beat (vph)',        'type': 'number'},
         {'name': 'reserve',         'label': 'Power Reserve (hrs)','type': 'number'},
         {'name': 'complications',   'label': 'Complications',     'type': 'checkbox-group',
@@ -818,6 +820,8 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN cat_id TEXT',
         'ALTER TABLE watches ADD COLUMN cat_id TEXT',
         'ALTER TABLE watches ADD COLUMN escapement TEXT',
+        'ALTER TABLE watches ADD COLUMN escape_wheel TEXT',
+        'ALTER TABLE watches ADD COLUMN calibre_notes TEXT',
         'ALTER TABLE art ADD COLUMN cat_id TEXT',
         'ALTER TABLE persons ADD COLUMN license_number TEXT',
         'ALTER TABLE persons ADD COLUMN passport_number TEXT',
@@ -7013,6 +7017,48 @@ def _backfill_serial_cat_ids(table, prefix):
         assigned += 1
     db.commit()
     return assigned, sample
+
+
+@app.route('/admin/seed-journe-1304', methods=['POST'])
+def seed_journe_1304():
+    """One-shot: write the Calibre 1304 (Chronomètre Bleu / Souverain)
+    movement details from the Perplexity research dump. Targets every
+    watch whose calibre is '1304' so a Bleu and a Souverain on the
+    same calibre both get filled. Returns the affected ids and the
+    before/after for spot-checking."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, brand, model, calibre, escapement, escape_wheel, "
+        "       calibre_notes "
+        "FROM watches "
+        "WHERE TRIM(COALESCE(calibre,'')) = '1304'"
+    ).fetchall()
+    new_escapement = 'Swiss lever escapement'
+    new_escape_wheel = 'Standard Swiss lever; tooth count not always in public summary'
+    new_calibre_notes = ('Time-only, twin barrels in parallel feeding a '
+                         'classic detached lever escapement in a very '
+                         'flat architecture')
+    now = datetime.utcnow().isoformat(timespec='seconds')
+    updated = []
+    for r in rows:
+        before = {'escapement': r['escapement'],
+                  'escape_wheel': r['escape_wheel'],
+                  'calibre_notes': r['calibre_notes']}
+        db.execute(
+            "UPDATE watches SET escapement=?, escape_wheel=?, "
+            "       calibre_notes=?, updated_at=? WHERE id=?",
+            (new_escapement, new_escape_wheel, new_calibre_notes, now, r['id'])
+        )
+        updated.append({'id': r['id'], 'brand': r['brand'],
+                        'model': r['model'], 'calibre': r['calibre'],
+                        'before': before,
+                        'after': {'escapement': new_escapement,
+                                  'escape_wheel': new_escape_wheel,
+                                  'calibre_notes': new_calibre_notes}})
+    db.commit()
+    return jsonify(matched=len(rows), updated=updated)
 
 
 @app.route('/admin/watches-backfill-cat-ids', methods=['POST'])
