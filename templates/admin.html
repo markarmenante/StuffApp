@@ -20,7 +20,7 @@
         <strong>{{ action.label }}</strong>
         <span class="admin-action-desc">{{ action.desc }}</span>
       </div>
-      <button type="button" class="admin-run-btn">{% if action.kind == 'download' %}Download{% else %}Run{% endif %}</button>
+      <button type="button" class="admin-run-btn">{% if action.kind == 'download' %}Download{% elif action.kind == 'loop' %}Start{% else %}Run{% endif %}</button>
       <span class="admin-result"></span>
       <button type="button" class="admin-hide-btn" title="Hide this action">×</button>
     </li>
@@ -145,6 +145,10 @@ function triggerDownload(blob, filenameFallback) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
 
+// Loop-kind state lives on the <li> so a second click can flip the
+// flag and the in-flight iteration reads it before scheduling the
+// next batch. We can't interrupt a request that's already mid-AI-
+// lookup (gunicorn is blocked on it), but new batches stop firing.
 document.querySelectorAll('.admin-action').forEach(li => {
   const btn = li.querySelector('.admin-run-btn');
   const out = li.querySelector('.admin-result');
@@ -155,6 +159,71 @@ document.querySelectorAll('.admin-action').forEach(li => {
   const needsConfirm = li.dataset.confirm === 'true';
 
   btn.addEventListener('click', async () => {
+    // Loop-kind: clicking while running stops it. Click again to restart.
+    if (kind === 'loop') {
+      if (li.dataset.looping === '1') {
+        li.dataset.looping = '0';
+        btn.textContent = 'Stopping…';
+        btn.disabled = true;   // re-enabled by the loop body when it exits
+        return;
+      }
+      li.dataset.looping = '1';
+      btn.textContent = 'Stop';
+      const startedAt = new Date().toISOString();
+      let totalUpdated = 0, totalUnchanged = 0, totalFailed = 0, batches = 0;
+      out.className = 'admin-result running';
+      try {
+        while (li.dataset.looping === '1') {
+          batches++;
+          out.textContent = `Batch ${batches}: requesting…  ` +
+            `(updated ${totalUpdated}, unchanged ${totalUnchanged}, failed ${totalFailed})`;
+          let data;
+          try {
+            const fd = new URLSearchParams({secret: SECRET, ...extra});
+            const r = await fetch(url, {method: 'POST', body: fd});
+            data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(`HTTP ${r.status}: ${data.error || 'failed'}`);
+          } catch (e) {
+            out.textContent = `Stopped on error in batch ${batches}: ${e.message || e}`;
+            out.className = 'admin-result err';
+            break;
+          }
+          totalUpdated   += (data.updated   || []).length;
+          totalUnchanged += (data.unchanged || []).length;
+          totalFailed    += (data.failed    || []).length;
+          // Done condition: every in-scope row's updated_at is newer
+          // than when we started. The endpoint surfaces the oldest
+          // updated_at still in the candidate pool — once that
+          // crosses our start timestamp we've cycled the whole library.
+          const oldest = data.oldest_updated_at || '';
+          const cycled = oldest && oldest > startedAt;
+          out.textContent = `Batch ${batches}: ` +
+            `updated ${totalUpdated}, unchanged ${totalUnchanged}, failed ${totalFailed} ` +
+            `· in-scope ${data.in_scope ?? '?'} · oldest now ${oldest || 'n/a'}`;
+          if (cycled) {
+            out.textContent += '  — DONE';
+            out.className = 'admin-result ok';
+            break;
+          }
+          // Tiny pause so the UI can paint and the user gets a chance
+          // to click Stop without racing the next fetch.
+          await new Promise(r => setTimeout(r, 500));
+        }
+      } finally {
+        if (li.dataset.looping !== '1') {
+          // We exited via the Stop button. Mark the result clearly so
+          // the user sees that progress so far is committed.
+          out.textContent = `Stopped after ${batches} batch${batches === 1 ? '' : 'es'}: ` +
+            `updated ${totalUpdated}, unchanged ${totalUnchanged}, failed ${totalFailed}`;
+          if (out.className === 'admin-result running') out.className = 'admin-result';
+        }
+        li.dataset.looping = '0';
+        btn.textContent = 'Start';
+        btn.disabled = false;
+      }
+      return;
+    }
+
     if (needsConfirm) {
       const lbl = li.querySelector('strong')?.textContent || 'this action';
       if (!confirm(`Run "${lbl}"? This is destructive.`)) return;

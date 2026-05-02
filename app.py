@@ -7586,6 +7586,18 @@ def admin_index():
     extra typing. Cloudflare Access still gates the page itself in prod.
     """
     actions = [
+        # Newest on top — keep prepending here as new admin actions land.
+        {
+            'label': "Watches: bulk AI lookup (calibre/jewels/origin/escapement/beat)",
+            'desc':  "Walks every watch with enough identity (brand/model/"
+                     "ref) and uses the AI lookup to OVERWRITE those five "
+                     "movement fields. Loops batches of 5 in the browser "
+                     "until every row has been touched since you started. "
+                     "Click Stop while running to halt.",
+            'url':   url_for('watches_bulk_lookup'),
+            'kind':  'loop',
+            'extra': {'limit': '5'},
+        },
         {
             'label': "Download backup (DB + uploads)",
             'desc':  "Streams a zip of the SQLite database (consistent "
