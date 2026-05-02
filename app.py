@@ -6861,7 +6861,10 @@ def watches_needing_relocation():
         "ORDER BY brand COLLATE NODIACRITIC"
     ).fetchall()
     plan = EXPORT_LAYOUT['watches']
+    file_specs = plan['files']           # [(field, default_label, title_field), …]
+    docs_cols  = _docs_cols_for('watches') or []
     affected = []
+    file_count = 0
     for r in rows:
         brand_raw = plan['group'](r)
         ident_raw = plan['ident'](r)
@@ -6869,14 +6872,78 @@ def watches_needing_relocation():
         # punctuation get sanitized identically so the paths reported
         # here are byte-equal to what's actually on disk.
         brand_safe, ident_safe = _safe_path(brand_raw, ident_raw)
+
+        files = []
+
+        def _emit(label, fname):
+            """Build the same '<ident> — <label><ext>' leaf the export
+            writes, then pair the No-longer-Owned path (where it lives
+            now) with the main path (where the next sync will land it)."""
+            if not fname:
+                return
+            label_safe = _safe_path(label)[0]
+            ext = os.path.splitext(fname)[1] or ''
+            leaf = (f'{ident_safe} — {label_safe}{ext}'
+                    if label_safe else f'{ident_safe}{ext}')
+            files.append({
+                'label':    label_safe or label,
+                'old_path': f'StuffFiles/Watches/No longer Owned/{brand_safe}/{leaf}',
+                'new_path': f'StuffFiles/Watches/{brand_safe}/{leaf}',
+            })
+
+        # Fixed file slots (image_obv / image_rev / receipt). Mirrors
+        # the per-row dedupe in the export so the same upload referenced
+        # from two columns is reported once.
+        seen = set()
+        for field, default_label, title_field in file_specs:
+            try:
+                fname = (r[field] or '').strip()
+            except (KeyError, IndexError):
+                continue
+            if not fname or fname in seen:
+                continue
+            seen.add(fname)
+            label = default_label
+            if title_field:
+                try:
+                    t = (r[title_field] or '').strip()
+                    if t:
+                        label = t
+                except (KeyError, IndexError):
+                    pass
+            _emit(label, fname)
+
+        # JSON-column documents (e.g. the `documents` array on watches).
+        for json_col in docs_cols:
+            try:
+                raw = r[json_col]
+            except (KeyError, IndexError):
+                continue
+            try:
+                docs = json.loads(raw or '[]')
+            except (TypeError, ValueError):
+                docs = []
+            if not isinstance(docs, list):
+                continue
+            for i, d in enumerate(docs, 1):
+                if not isinstance(d, dict):
+                    continue
+                fname = (d.get('filename') or '').strip()
+                if not fname:
+                    continue
+                label = (d.get('title') or '').strip() or f'Doc {i}'
+                _emit(label, fname)
+
+        file_count += len(files)
         affected.append({
-            'brand':    brand_safe,
-            'ident':    ident_safe,
-            'status':   r['status'],
-            'old_path': f'StuffFiles/Watches/No longer Owned/{brand_safe}/',
-            'new_path': f'StuffFiles/Watches/{brand_safe}/',
+            'brand':  brand_safe,
+            'ident':  ident_safe,
+            'status': r['status'],
+            'files':  files,
         })
-    return jsonify(count=len(affected), affected=affected)
+    return jsonify(watch_count=len(affected),
+                   file_count=file_count,
+                   affected=affected)
 
 
 @app.route('/admin/coins-fix-missing-cat-id', methods=['POST'])
