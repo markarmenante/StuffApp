@@ -8373,6 +8373,48 @@ def _parse_sweep_path(rel_path):
     }
 
 
+# Cat-id-prefix sweep: if a dropped file's basename leads with a known
+# cat_id (C### / W### / A###), bypass the StuffFiles/<Cat>/<Group>/...
+# path parsing entirely and look up the record by cat_id. Lets the user
+# drop a file anywhere — Inbox, Desktop, iOS Files picker without a
+# category hint — as long as the filename starts with the cat_id.
+#
+# Accepts a 2+-digit serial (the live scheme is 3 digits, but old data
+# or hand-typed names with fewer digits still match) and tolerates any
+# of em-dash / en-dash / ASCII hyphen as the label separator.
+_CAT_ID_SWEEP_PREFIXES = {'C': 'coins', 'W': 'watches', 'A': 'art'}
+_CAT_ID_SWEEP_RE = re.compile(
+    r'^\s*([CWA]\d{2,})\b\s*(?:[—–-]\s*(.+?))?\s*$',
+    re.IGNORECASE,
+)
+
+
+def _try_cat_id_sweep_match(db, filename):
+    """If the basename matches '<CatId>[ — <Label>].<ext>', look the
+    record up directly. Returns (category, row_dict, target_label) or
+    None. Label is empty when the filename is bare cat_id (e.g.
+    'W042.jpg' → label='', and the slot resolver picks the first
+    empty slot)."""
+    base, _ext = os.path.splitext(filename)
+    m = _CAT_ID_SWEEP_RE.match(base)
+    if not m:
+        return None
+    cat_id_raw = m.group(1).upper()
+    label = (m.group(2) or '').strip()
+    cat = _CAT_ID_SWEEP_PREFIXES.get(cat_id_raw[0])
+    if not cat:
+        return None
+    table = CATEGORIES[cat]['table']
+    row = db.execute(
+        f"SELECT * FROM {table} "
+        f"WHERE UPPER(TRIM(COALESCE(cat_id, ''))) = ?",
+        (cat_id_raw,),
+    ).fetchone()
+    if not row:
+        return None
+    return cat, dict(row), label
+
+
 @app.route('/<category>/<record_id>/print-pdf', methods=['GET'])
 def record_print_pdf(category, record_id):
     """Generic per-record PDF: title + a 2-column key/value table of
@@ -8608,34 +8650,67 @@ def sweep_files():
                 rel = '/'.join(['StuffFiles', cat_hint_label,
                                 group_hint or 'Unknown', f.filename])
 
-            parsed = _parse_sweep_path(rel)
-            if not parsed:
-                report['skipped'].append({'file': rel, 'reason': 'unparsable path (need StuffFiles/<Category>/<Group>/<file> shape, or pick a category)'})
-                continue
-            cat = parsed['category']
-            if cat not in allowed:
-                report['skipped'].append({'file': rel, 'reason': f"no access to category '{cat}'"})
-                continue
+            # Cat-id fast path: if the filename leads with a known
+            # cat_id (C### / W### / A###), match the record directly
+            # and skip the path-based parse. Lets the user drop a file
+            # anywhere — no need to know the StuffFiles folder shape,
+            # no category hint required.
+            cat_id_match = _try_cat_id_sweep_match(db, os.path.basename(rel))
+            if cat_id_match:
+                cat, matched_row, cat_id_label = cat_id_match
+                if cat not in allowed:
+                    report['skipped'].append({'file': rel, 'reason': f"no access to category '{cat}'"})
+                    continue
+                plan = EXPORT_LAYOUT[cat]
+                # Skip past path-parsing — synthesize the (group, ident,
+                # row) tuple the rest of the loop expects so slot
+                # resolution proceeds normally.
+                target_group = _norm(plan['group'](matched_row))
+                target_ident = _norm(plan['ident'](matched_row))
+                target_label = _norm(cat_id_label)
+                matches = [(target_group, target_ident, matched_row)]
+                # Skip parsed = ... and exact/prefix matching below; jump
+                # straight to the slot-resolution / save block.
+                parsed = {
+                    'category': cat,
+                    'group':    plan['group'](matched_row),
+                    'ident':    plan['ident'](matched_row),
+                    'label':    cat_id_label,
+                    'ext':      os.path.splitext(rel)[1],
+                    'original_basename': os.path.basename(rel),
+                }
+            else:
+                parsed = _parse_sweep_path(rel)
+                if not parsed:
+                    report['skipped'].append({'file': rel, 'reason': 'unparsable path (need StuffFiles/<Category>/<Group>/<file> shape, or pick a category, or prefix the filename with a cat_id like W042 or C001)'})
+                    continue
+                cat = parsed['category']
+                if cat not in allowed:
+                    report['skipped'].append({'file': rel, 'reason': f"no access to category '{cat}'"})
+                    continue
 
-            plan = EXPORT_LAYOUT[cat]
-            idx = _index_for(cat)
-            target_group = _norm(parsed['group'])
-            target_ident = _norm(parsed['ident'])
-            # Initialized here (not at the slot-resolve step below) so the
-            # single-record-per-group fallback can read it without
-            # tripping UnboundLocalError.
-            target_label = _norm(parsed['label'])
+                plan = EXPORT_LAYOUT[cat]
+                idx = _index_for(cat)
+                target_group = _norm(parsed['group'])
+                target_ident = _norm(parsed['ident'])
+                # Initialized here (not at the slot-resolve step below) so the
+                # single-record-per-group fallback can read it without
+                # tripping UnboundLocalError.
+                target_label = _norm(parsed['label'])
 
             # Find rows whose (group, ident) match. ident match is exact
             # after normalization; if no exact match, fall back to a prefix
-            # match so partial idents still land.
-            exact = [(g, i, r) for (g, i, r) in idx if g == target_group and i == target_ident]
-            if not exact:
-                prefix = [(g, i, r) for (g, i, r) in idx
-                          if g == target_group and target_ident and i.startswith(target_ident)]
-                matches = prefix
-            else:
-                matches = exact
+            # match so partial idents still land. Skipped on the cat_id
+            # fast path — `matches` is already set there and `idx` was
+            # never built.
+            if not cat_id_match:
+                exact = [(g, i, r) for (g, i, r) in idx if g == target_group and i == target_ident]
+                if not exact:
+                    prefix = [(g, i, r) for (g, i, r) in idx
+                              if g == target_group and target_ident and i.startswith(target_ident)]
+                    matches = prefix
+                else:
+                    matches = exact
             # "Single-record-per-group" fallback. For categories where the
             # group field IS the record's identity (Properties → name,
             # Persons → name, Recordings → an artist's record per item),
