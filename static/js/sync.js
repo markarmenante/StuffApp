@@ -236,11 +236,15 @@
     const unzipper = new fflate.Unzip();
     unzipper.register(fflate.UnzipInflate);
 
-    // All disk writes funnel through one chained promise so the read
-    // loop can apply backpressure (await it between input chunks).
-    // Without this, fflate buffers decompressed chunks faster than
-    // the disk consumes them and we recreate the OOM.
+    // All disk writes funnel through one chained promise. We DON'T
+    // await it on every chunk — that serialized read-write-read-write
+    // and was the reason the streaming version felt no faster than
+    // the OOM version (mod the OOM). Instead we track in-flight
+    // write bytes and only block when over the high-water mark, so
+    // network reads race ahead while writes drain in the background.
     let writeChain = Promise.resolve();
+    let pendingBytes = 0;
+    const HIGH_WATER = 64 * 1024 * 1024;  // ~64 MB queued max
 
     // _tombstones.json is captured into RAM rather than written to disk
     // so we can parse it after the unzipper drains and apply local
@@ -288,20 +292,22 @@
       let aborted = false;
 
       file.ondata = (err, data, final) => {
+        const chunkBytes = data ? data.length : 0;
+        if (chunkBytes) pendingBytes += chunkBytes;
         writeChain = writeChain.then(async () => {
-          if (aborted) return;
           try {
+            if (aborted) return;
             if (err) throw err;
             if (!writer) {
               const [parent, fname] = await _ensurePath(dir, rel);
               const fileHandle = await parent.getFileHandle(fname, {create: true});
               writer = await fileHandle.createWritable();
             }
-            if (data && data.length) await writer.write(data);
+            if (chunkBytes) await writer.write(data);
             if (final) {
               await writer.close();
               written++;
-              if (written % 10 === 0) {
+              if (written % 25 === 0) {
                 progress && progress(`Wrote ${written} files…`);
               }
             }
@@ -313,6 +319,8 @@
             if (writer) {
               try { await writer.abort(); } catch (_) {}
             }
+          } finally {
+            if (chunkBytes) pendingBytes -= chunkBytes;
           }
         });
       };
@@ -336,9 +344,14 @@
         progress && progress(`Extracting (${sizeMB} MB read, ${written} files written)…`);
         lastProgressBytes = bytesIn;
       }
-      // Backpressure: drain the write queue before the next read so
-      // we cap RAM at roughly one input chunk plus its expansion.
-      await writeChain;
+      // Only block when the disk write queue is genuinely full.
+      // Drains all the way to 0 (we await the tail), then we go
+      // again — burst-fill, burst-drain, but reads and writes still
+      // overlap in the burst phase so total time tracks max(net, disk)
+      // instead of net + disk.
+      if (pendingBytes > HIGH_WATER) {
+        await writeChain;
+      }
     }
     await writeChain;
     progress && progress(`Wrote ${written}/${total} files…`);
