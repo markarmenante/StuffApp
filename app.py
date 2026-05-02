@@ -6856,21 +6856,25 @@ def watches_needing_relocation():
         abort(403)
     db = get_db()
     rows = db.execute(
-        "SELECT brand, cat_id, model, status FROM watches "
+        "SELECT * FROM watches "
         "WHERE LOWER(TRIM(COALESCE(status,''))) IN ('ordered','loaned','consigned') "
-        "ORDER BY brand COLLATE NODIACRITIC, cat_id"
+        "ORDER BY brand COLLATE NODIACRITIC"
     ).fetchall()
+    plan = EXPORT_LAYOUT['watches']
     affected = []
     for r in rows:
-        brand = (r['brand'] or '').strip() or 'Unknown'
-        cat_id = (r['cat_id'] or '').strip() or '?'
+        brand_raw = plan['group'](r)
+        ident_raw = plan['ident'](r)
+        # _safe_path matches what the actual export does — accents and
+        # punctuation get sanitized identically so the paths reported
+        # here are byte-equal to what's actually on disk.
+        brand_safe, ident_safe = _safe_path(brand_raw, ident_raw)
         affected.append({
-            'brand':    brand,
-            'cat_id':   cat_id,
-            'model':    (r['model'] or '').strip(),
+            'brand':    brand_safe,
+            'ident':    ident_safe,
             'status':   r['status'],
-            'old_path': f'StuffFiles/Watches/No longer Owned/{brand}/',
-            'new_path': f'StuffFiles/Watches/{brand}/',
+            'old_path': f'StuffFiles/Watches/No longer Owned/{brand_safe}/',
+            'new_path': f'StuffFiles/Watches/{brand_safe}/',
         })
     return jsonify(count=len(affected), affected=affected)
 
