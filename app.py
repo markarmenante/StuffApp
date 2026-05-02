@@ -7028,6 +7028,150 @@ def watches_backfill_cat_ids():
     return jsonify(assigned=assigned, sample=sample)
 
 
+WATCH_BULK_LOOKUP_FIELDS = (
+    'calibre', 'movement_jewels', 'movement_origin', 'escapement', 'beat',
+)
+
+
+@app.route('/admin/watches-bulk-lookup', methods=['POST'])
+def watches_bulk_lookup():
+    """Walk watches missing any of (calibre, jewels, origin, escapement,
+    beat) and use the AI watch lookup to fill the blanks. Resumable —
+    only targets rows still missing at least one of those fields, so
+    re-running picks up where the previous batch left off.
+
+    Form params:
+      secret  – IMPORT_MISSING_SECRET
+      limit   – max watches per call (default 5, capped at 20). Each
+                lookup makes ~6 web searches and takes 30-90s; gunicorn
+                is on a 300s timeout so 5-10 is the realistic ceiling
+                per request.
+      dry     – '1' to fetch from AI but skip the UPDATE (sanity check
+                what would change without committing).
+
+    Per-watch behavior: fill BLANK fields only — never overwrite. Beat
+    gets the same sanity check the single-watch lookup applies (snap
+    to canonical for Manual/Automatic, accept-any for everything else).
+    Commits after each watch so a mid-batch failure doesn't lose the
+    progress already made."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    try:
+        limit = int(request.form.get('limit', '5'))
+    except ValueError:
+        limit = 5
+    limit = max(1, min(limit, 20))
+    dry = request.form.get('dry') == '1'
+
+    db = get_db()
+    missing_clause = ' OR '.join(
+        f"COALESCE({f}, '') = ''" for f in WATCH_BULK_LOOKUP_FIELDS
+    )
+    # Need brand/model/reference to even attempt a lookup — rows with
+    # none of those can't be identified online, so skip them.
+    rows = db.execute(
+        f"SELECT * FROM watches "
+        f"WHERE ({missing_clause}) "
+        f"  AND (COALESCE(brand,'') != '' OR COALESCE(model,'') != '' "
+        f"       OR COALESCE(reference,'') != '') "
+        f"ORDER BY brand COLLATE NODIACRITIC, model "
+        f"LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+    mech_allowed = {18000, 19800, 21600, 25200, 28800, 36000, 72000}
+
+    report = {
+        'attempted': len(rows),
+        'updated':   [],
+        'unchanged': [],
+        'failed':    [],
+    }
+
+    for r in rows:
+        watch_id = r['id']
+        label = ' / '.join(x for x in [
+            (r['brand'] or '').strip(),
+            (r['model'] or '').strip(),
+        ] if x) or watch_id[:8]
+
+        try:
+            suggestions = fetch_watch_specs(r)
+        except Exception as e:
+            report['failed'].append({
+                'id':    watch_id, 'label': label,
+                'error': (str(e) or e.__class__.__name__)[:200],
+            })
+            continue
+
+        applied = {}
+        for f in WATCH_BULK_LOOKUP_FIELDS:
+            sug = suggestions.get(f)
+            if sug in (None, ''):
+                continue
+            # Beat sanity: snap to canonical for mechanical, accept any
+            # positive integer for non-mechanical (Quartz, Tuning Fork,
+            # Spring Drive, Co-Axial). Mirrors the single-watch path.
+            if f == 'beat':
+                try:
+                    n = float(sug)
+                except (TypeError, ValueError):
+                    continue
+                if n <= 0:
+                    continue
+                mt = (suggestions.get('movement_type')
+                      or (r['movement_type'] or '')).strip()
+                if mt in ('Manual', 'Automatic'):
+                    if 0 < n < 100:  # source quoted Hz
+                        n = n * 7200
+                    sug = int(round(n))
+                    if sug not in mech_allowed:
+                        continue
+                else:
+                    sug = int(round(n))
+            current = r[f] if f in r.keys() else None
+            if current is not None and str(current).strip() != '':
+                continue
+            applied[f] = sug
+
+        if not applied:
+            report['unchanged'].append({'id': watch_id, 'label': label})
+            continue
+
+        if not dry:
+            sets = ', '.join(f"{k} = ?" for k in applied)
+            params = (list(applied.values())
+                      + [datetime.utcnow().isoformat(timespec='seconds'),
+                         watch_id])
+            try:
+                db.execute(
+                    f"UPDATE watches SET {sets}, updated_at = ? WHERE id = ?",
+                    params,
+                )
+                db.commit()
+            except Exception as e:
+                report['failed'].append({
+                    'id':    watch_id, 'label': label,
+                    'error': f'update failed: {e}',
+                })
+                continue
+
+        report['updated'].append({
+            'id':      watch_id,
+            'label':   label,
+            'applied': applied,
+        })
+
+    # Tells the user whether to re-run.
+    remaining = db.execute(
+        f"SELECT COUNT(*) AS n FROM watches WHERE ({missing_clause}) "
+        f"AND (COALESCE(brand,'') != '' OR COALESCE(model,'') != '' "
+        f"OR COALESCE(reference,'') != '')"
+    ).fetchone()['n']
+    report['remaining_after_run'] = remaining
+    return jsonify(report)
+
+
 @app.route('/admin/art-backfill-cat-ids', methods=['POST'])
 def art_backfill_cat_ids():
     """One-shot: assign A### cat_ids to every art piece missing one.
