@@ -1799,6 +1799,10 @@ EXCLUDED_STATUSES = ('Own', 'Sold', 'Gifted', 'Own')  # dot filter excludes thes
 CATEGORY_FILTERS = {
     'watches': {
         'ordered': ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
+        # Inverts the default list view: shows ONLY watches that have
+        # actually left the collection (sold / gifted / lost). The
+        # default list (no filter) hides these — see build_search_query.
+        'no_longer_owned': ("LOWER(TRIM(COALESCE(status,''))) IN ('sold','gifted','lost')", []),
     },
     'coins': {
         'ca_ancient': ("date_1 <  500 AND property_name IN ('Carp','Carpinteria')", []),
@@ -1919,6 +1923,15 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
         clause, extra_params = cat_filters[coin_filter]
         wheres.append(f"({clause})")
         params += list(extra_params)
+
+    # Watches: default list hides Sold / Gifted / Lost — those have
+    # truly left the collection and clutter the working view. The
+    # 'no_longer_owned' pill flips the view to show only those, so
+    # only suppress the default exclusion when that filter is active.
+    if category == 'watches' and coin_filter != 'no_longer_owned':
+        wheres.append(
+            "(LOWER(TRIM(COALESCE(status,''))) NOT IN ('sold','gifted','lost'))"
+        )
 
     # "?at=<property name>" — narrow to items physically located at
     # that property. Only meaningful for categories that store a
@@ -3001,6 +3014,15 @@ def list_view(category):
             f"SELECT EXISTS(SELECT 1 FROM {table} "
             f"WHERE LOWER(TRIM(COALESCE(status,''))) = 'ordered')"
         ).fetchone()[0] == 1
+    # Same toggle-when-relevant rule for the No-longer-Owned pill so
+    # an empty collection doesn't show a filter that produces nothing.
+    has_no_longer_owned = False
+    if category == 'watches':
+        table = CATEGORIES[category]['table']
+        has_no_longer_owned = db.execute(
+            f"SELECT EXISTS(SELECT 1 FROM {table} "
+            f"WHERE LOWER(TRIM(COALESCE(status,''))) IN ('sold','gifted','lost'))"
+        ).fetchone()[0] == 1
     return render_template('list.html',
                            category=category,
                            cat_info=cat_info,
@@ -3017,6 +3039,7 @@ def list_view(category):
                            prop_type=prop_type,
                            result_count=len(rows),
                            has_ordered=has_ordered,
+                           has_no_longer_owned=has_no_longer_owned,
                            extra_fields=extra_fields,
                            fields=FIELDS[category])
 
@@ -7772,21 +7795,23 @@ def admin_export_files():
                 group_raw = plan['group'](row)
                 group, ident = _safe_path(group_raw, ident_raw)
 
-                # Owned vs. No longer Owned. Categories without a
-                # status column → always treated as owned. status
-                # null/blank → also treated as owned (default state for
-                # records the user hasn't classified yet). Any other
-                # value (Sold, Loaned, etc.) routes the row's files
-                # under "No longer Owned" inside the category folder.
+                # Owned vs. No longer Owned. Only Sold / Gifted / Lost
+                # route under the "No longer Owned" interstitial — those
+                # are the statuses where the item has actually left the
+                # collection. Ordered (paid for, awaiting delivery),
+                # Loaned (lent out, will return), and Consigned (with a
+                # seller, may return unsold) are all still legally
+                # owned and stay in the main category folder. Blank /
+                # missing status defaults to owned too.
                 status_val = ''
                 if 'status' in cols:
                     try:
                         status_val = (row['status'] or '').strip()
                     except (KeyError, IndexError):
                         status_val = ''
-                is_owned = (not status_val) or status_val.lower() in ('own', 'owned')
-                cat_root = f'StuffFiles/{cat_label}' if is_owned \
-                            else f'StuffFiles/{cat_label}/No longer Owned'
+                no_longer_owned = status_val.lower() in ('sold', 'gifted', 'lost')
+                cat_root = f'StuffFiles/{cat_label}/No longer Owned' if no_longer_owned \
+                            else f'StuffFiles/{cat_label}'
 
                 # Per-row dedupe: legacy FileMaker imports often left the
                 # cover-image filename in BOTH the primary file column

@@ -79,6 +79,11 @@
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
      title="Watches with status Ordered">Ordered</a>
   {% endif %}
+  {% if has_no_longer_owned or coin_filter == 'no_longer_owned' %}
+  <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'no_longer_owned' else 'no_longer_owned') }}"
+     class="toolbar-btn pill {% if coin_filter == 'no_longer_owned' %}active{% endif %}"
+     title="Watches that have left the collection (Sold / Gifted / Lost)">No longer Owned</a>
+  {% endif %}
   {% endif %}
   {# When the user came from the Property tab via ?at=, hide the
      redundant Carp / Martis location pills — they target the same
