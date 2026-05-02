@@ -6843,6 +6843,38 @@ def canonicalize_watch_brands():
     })
 
 
+@app.route('/admin/watches-needing-relocation', methods=['GET'])
+def watches_needing_relocation():
+    """Diagnostic: list every watch whose status is Ordered, Loaned, or
+    Consigned. Before the bucket-fix commit these routed under
+    StuffFiles/Watches/No longer Owned/<brand>/ on disk; from now on
+    they land in the main Watches/<brand>/ folder. Auto-purge is off,
+    so the old copies stay behind for manual cleanup — this endpoint
+    tells the user exactly which folders to drag to the Trash."""
+    user = g.get('current_user') or {}
+    if user.get('role') != 'owner':
+        abort(403)
+    db = get_db()
+    rows = db.execute(
+        "SELECT brand, cat_id, model, status FROM watches "
+        "WHERE LOWER(TRIM(COALESCE(status,''))) IN ('ordered','loaned','consigned') "
+        "ORDER BY brand COLLATE NODIACRITIC, cat_id"
+    ).fetchall()
+    affected = []
+    for r in rows:
+        brand = (r['brand'] or '').strip() or 'Unknown'
+        cat_id = (r['cat_id'] or '').strip() or '?'
+        affected.append({
+            'brand':    brand,
+            'cat_id':   cat_id,
+            'model':    (r['model'] or '').strip(),
+            'status':   r['status'],
+            'old_path': f'StuffFiles/Watches/No longer Owned/{brand}/',
+            'new_path': f'StuffFiles/Watches/{brand}/',
+        })
+    return jsonify(count=len(affected), affected=affected)
+
+
 @app.route('/admin/coins-fix-missing-cat-id', methods=['POST'])
 def coins_fix_missing_cat_id():
     """Assign cat_id to any coin missing one. _cat_id_prefix wants both
