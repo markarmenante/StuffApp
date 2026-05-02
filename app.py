@@ -7731,21 +7731,17 @@ def _g(r, key):
 
 
 def _watch_ident(r):
-    """Filename ident for watches: '<year> <model> (<cat_id>)' when a
-    cat_id is set, e.g. '2018 Galet Minute Repeater (W127)'. Reference
-    is intentionally dropped from the human descriptor — cat_id already
-    disambiguates, and shorter filenames read better in Finder.
+    """Filename ident for watches: '<model> (<cat_id>)' when a cat_id
+    is set, e.g. 'Galet Minute Repeater (W127)'. Year and reference
+    are intentionally dropped from the human descriptor — cat_id
+    already disambiguates and shorter filenames read better in Finder.
     Legacy rows without a cat_id keep the older 'year model Ref ref'
     form so their on-disk paths don't move until backfill."""
     cat_id = (_g(r, 'cat_id') or '').strip()
-    year = _g(r, 'year')
-    model = _g(r, 'model') or ''
+    model = (_g(r, 'model') or '').strip()
     if cat_id:
-        descriptor = ' '.join(filter(None, [
-            str(year) if year else '',
-            model,
-        ])).strip()
-        return f'{descriptor} ({cat_id})' if descriptor else cat_id
+        return f'{model} ({cat_id})'.strip() if model else cat_id
+    year = _g(r, 'year')
     legacy = ' '.join(filter(None, [
         str(year) if year else '',
         model,
