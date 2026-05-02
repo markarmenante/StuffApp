@@ -7019,46 +7019,154 @@ def _backfill_serial_cat_ids(table, prefix):
     return assigned, sample
 
 
-@app.route('/admin/seed-journe-1304', methods=['POST'])
-def seed_journe_1304():
-    """One-shot: write the Calibre 1304 (Chronomètre Bleu / Souverain)
-    movement details from the Perplexity research dump. Targets every
-    watch whose calibre is '1304' so a Bleu and a Souverain on the
-    same calibre both get filled. Returns the affected ids and the
-    before/after for spot-checking."""
+# F.P. Journe calibre details from the Perplexity research dump.
+# Keys are exact calibre strings except where match_prefix=True (1499.x
+# family covers all Résonance variants). Targeting is brand-scoped to
+# anything matching F.P. Journe so we don't accidentally overwrite a
+# non-Journe watch that happens to share a calibre number.
+JOURNE_CALIBRE_DETAILS = {
+    '1498': {
+        'escapement': 'Straight-line lever escapement',
+        'escape_wheel': '15-tooth wheel',
+        'calibre_notes': "Classic Swiss-lever-type in a horizontal straight line; tourbillon + remontoir d'égalité, dead seconds.",
+    },
+    '1403': {
+        'escapement': 'Straight-line lever escapement',
+        'escape_wheel': '15-tooth wheel',
+        'calibre_notes': 'Evolves 1498: tourbillon + 1-sec remontoir + dead seconds; straight-line Swiss-lever-type.',
+    },
+    '1412': {
+        'escapement': 'Pallet escapement',
+        'escape_wheel': '15-tooth escape wheel',
+        'calibre_notes': 'Lateral pallet (lever) escapement in Breguet-style architecture; two barrels in parallel.',
+    },
+    '1408': {
+        'escapement': 'Linear escapement',
+        'escape_wheel': '15-tooth escape wheel',
+        'calibre_notes': 'Linear escapement with 15-tooth escape wheel; going train tucked under the dial, escapement visually isolated.',
+    },
+    '1505': {
+        'escapement': 'Linear escapement',
+        'escape_wheel': '15-tooth escape wheel',
+        'calibre_notes': 'Linear escapement with 15-tooth escape wheel; hand-wound grande/petite sonnerie with specific safety architecture.',
+    },
+    '1300.3': {
+        'escapement': 'In-line (linear) lever escapement',
+        'escape_wheel': '15-tooth wheel',
+        'calibre_notes': 'Automatic Octa base, long-reserve architecture; in-line lever escapement in gold movement.',
+    },
+    '1510': {
+        'escapement': 'EBHP "High-Performance Bi-axial" escapement',
+        'escape_wheel': 'Twin wheels; bi-directional direct-impulse (patented)',
+        'calibre_notes': 'Dual-escape-wheel direct-impulse escapement, oil-free, with constant-force remontoir and natural dead-beat seconds.',
+    },
+    '1519': {
+        'escapement': 'Straight-line lever escapement',
+        'escape_wheel': '15-tooth wheel',
+        'calibre_notes': 'Vertical tourbillon with remontoir and dead seconds; straight-line Swiss-lever-type escapement.',
+    },
+    '1304': {
+        'escapement': 'Swiss lever escapement',
+        'escape_wheel': 'Standard Swiss lever; tooth count not always in public summary',
+        'calibre_notes': 'Time-only, twin barrels in parallel feeding a classic detached lever escapement in a very flat architecture.',
+    },
+    '1499': {  # match_prefix — covers all 1499.x Résonance variants
+        'escapement': 'Straight-line lever escapements (x2)',
+        'escape_wheel': 'Swiss lever for each balance',
+        'calibre_notes': 'Two balances in resonance, each with its own straight-line lever escapement.',
+        'match_prefix': True,
+    },
+    '1518': {
+        'escapement': 'Swiss lever escapement',
+        'escape_wheel': 'Swiss lever (tooth count not widely advertised)',
+        'calibre_notes': 'High-beat integrated rattrapante chronograph in LineSport; classic lever escapement.',
+    },
+    '1619': {
+        'escapement': 'Swiss lever escapement + tourbillon',
+        'escape_wheel': 'Tourbillon + Swiss lever escapement',
+        'calibre_notes': 'Grand complication with tourbillon; Journe does not detail a special escapement, so it is a tourbillon with lever.',
+    },
+    '1520': {
+        'escapement': 'Lever escapement with remontoir',
+        'escape_wheel': 'Lever escapement; constant-force per brand release',
+        'calibre_notes': 'Evolution of the tourbillon architecture with remontoir; classic lever escapement in the cage.',
+    },
+}
+
+
+@app.route('/admin/seed-journe-calibres', methods=['POST'])
+def seed_journe_calibres():
+    """One-shot: overwrite escapement / escape_wheel / calibre_notes
+    on every F.P. Journe watch whose calibre matches one of the
+    families documented in JOURNE_CALIBRE_DETAILS. Targeting is
+    brand-scoped (TRIM/LOWER contains 'journe') and either exact-match
+    or prefix-match per entry, so a 1499.x Résonance variant isn't
+    skipped just because of a sub-version suffix.
+
+    Returns matched / updated lists with before/after for spot checks,
+    plus 'unmatched_calibres' so the caller can see which families
+    didn't land on any owned record."""
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
         abort(403)
     db = get_db()
-    rows = db.execute(
+    now = datetime.utcnow().isoformat(timespec='seconds')
+
+    journe_rows = db.execute(
         "SELECT id, brand, model, calibre, escapement, escape_wheel, "
         "       calibre_notes "
         "FROM watches "
-        "WHERE TRIM(COALESCE(calibre,'')) = '1304'"
+        "WHERE LOWER(TRIM(COALESCE(brand,''))) LIKE '%journe%'"
     ).fetchall()
-    new_escapement = 'Swiss lever escapement'
-    new_escape_wheel = 'Standard Swiss lever; tooth count not always in public summary'
-    new_calibre_notes = ('Time-only, twin barrels in parallel feeding a '
-                         'classic detached lever escapement in a very '
-                         'flat architecture')
-    now = datetime.utcnow().isoformat(timespec='seconds')
+
     updated = []
-    for r in rows:
+    matched_keys = set()
+    skipped = []
+    for r in journe_rows:
+        cal = (r['calibre'] or '').strip()
+        if not cal:
+            skipped.append({'id': r['id'], 'brand': r['brand'],
+                            'model': r['model'],
+                            'reason': 'no calibre on record'})
+            continue
+        # First pass: exact match. Second pass: prefix match for entries
+        # flagged match_prefix=True (e.g. 1499.x family).
+        match_key = None
+        if cal in JOURNE_CALIBRE_DETAILS:
+            match_key = cal
+        else:
+            for k, v in JOURNE_CALIBRE_DETAILS.items():
+                if v.get('match_prefix') and cal.startswith(k):
+                    match_key = k
+                    break
+        if not match_key:
+            skipped.append({'id': r['id'], 'brand': r['brand'],
+                            'model': r['model'], 'calibre': cal,
+                            'reason': 'calibre not in seed table'})
+            continue
+        d = JOURNE_CALIBRE_DETAILS[match_key]
         before = {'escapement': r['escapement'],
                   'escape_wheel': r['escape_wheel'],
                   'calibre_notes': r['calibre_notes']}
+        after = {'escapement': d['escapement'],
+                 'escape_wheel': d['escape_wheel'],
+                 'calibre_notes': d['calibre_notes']}
         db.execute(
             "UPDATE watches SET escapement=?, escape_wheel=?, "
             "       calibre_notes=?, updated_at=? WHERE id=?",
-            (new_escapement, new_escape_wheel, new_calibre_notes, now, r['id'])
+            (after['escapement'], after['escape_wheel'],
+             after['calibre_notes'], now, r['id'])
         )
+        matched_keys.add(match_key)
         updated.append({'id': r['id'], 'brand': r['brand'],
-                        'model': r['model'], 'calibre': r['calibre'],
-                        'before': before,
-                        'after': {'escapement': new_escapement,
-                                  'escape_wheel': new_escape_wheel,
-                                  'calibre_notes': new_calibre_notes}})
+                        'model': r['model'], 'calibre': cal,
+                        'matched_via': match_key,
+                        'before': before, 'after': after})
     db.commit()
-    return jsonify(matched=len(rows), updated=updated)
+    unmatched_calibres = sorted(set(JOURNE_CALIBRE_DETAILS.keys()) - matched_keys)
+    return jsonify(updated=updated, skipped=skipped,
+                   unmatched_calibres=unmatched_calibres,
+                   total_journe_watches=len(journe_rows),
+                   total_updated=len(updated))
 
 
 @app.route('/admin/watches-backfill-cat-ids', methods=['POST'])
