@@ -394,7 +394,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="dcell">
           <select name="beat">
             <option value=""></option>
-            {% for b in [18000,19800,21600,25200,28800,36000] %}
+            {% for b in [18000,19800,21600,25200,28800,36000,72000] %}
             <option value="{{ b }}" {{ 'selected' if val('beat')|string == b|string }}>{{ '{:,}'.format(b) }} vph</option>
             {% endfor %}
           </select>

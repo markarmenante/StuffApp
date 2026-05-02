@@ -2291,7 +2291,7 @@ Target fields:
 - movement_type: "Manual" or "Automatic"
 - movement_origin: EXACTLY one of [{origins}] and nothing else. "In-House" = designed and made by the manufacturer; "Ébauche" = bought-in rough movement (e.g. ETA, Sellita, Valjoux) used as-is; "Modified" = an ébauche that has been noticeably reworked. Do not invent values like "Swiss" or "Ebauche-based".
 - movement_jewels: integer
-- beat: vibrations per hour (VPH) for mechanical movements, or raw Hz for quartz/tuning-fork movements. For mechanical (Manual/Automatic) pick from [18000, 19800, 21600, 25200, 28800, 36000]; if the source gives Hz, multiply by 7200 (2.5 Hz = 18000, 3 Hz = 21600, 4 Hz = 28800, 5 Hz = 36000). For battery-powered/quartz/tuning-fork movements, return the actual rate as stated (e.g. 360 for Accutron, 32768 for a quartz crystal, 7200 for a 1 Hz stepping quartz). Do NOT assume 28800 as a default — only return a value if the source clearly states it.
+- beat: vibrations per hour (VPH) for mechanical movements, or raw Hz for quartz/tuning-fork movements. For mechanical (Manual/Automatic) pick from [18000, 19800, 21600, 25200, 28800, 36000, 72000]; if the source gives Hz, multiply by 7200 (2.5 Hz = 18000, 3 Hz = 21600, 4 Hz = 28800, 5 Hz = 36000, 10 Hz = 72000). For battery-powered/quartz/tuning-fork movements, return the actual rate as stated (e.g. 360 for Accutron, 32768 for a quartz crystal, 7200 for a 1 Hz stepping quartz). Do NOT assume 28800 as a default — only return a value if the source clearly states it.
 - reserve: power reserve in hours (integer)
 - complications: array of strings drawn from [{complications}]
 - clasp_type: clasp mechanism (short string)
@@ -4073,7 +4073,7 @@ def watch_lookup_specs(record_id):
                 continue
             if n <= 0:
                 continue
-            mech_allowed = {18000, 19800, 21600, 25200, 28800, 36000}
+            mech_allowed = {18000, 19800, 21600, 25200, 28800, 36000, 72000}
             # Determine whether this is a mechanical movement (from the new
             # suggestion if provided, otherwise from the existing record).
             mt_sugg = suggestions.get('movement_type')
