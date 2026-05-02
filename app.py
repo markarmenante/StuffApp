@@ -7029,6 +7029,56 @@ def art_backfill_cat_ids():
     return jsonify(assigned=assigned, sample=sample)
 
 
+@app.route('/admin/recordings-collisions', methods=['GET'])
+def recordings_collisions():
+    """Diagnostic: count (artist, title) pairs that appear more than
+    once in recordings — the situations a cat_id rollout would
+    disambiguate. Comparison is case-insensitive and trims whitespace
+    so 'Live' vs 'live ' don't read as distinct.
+
+    Output:
+      total_rows          — every row in recordings
+      colliding_rows      — rows whose (artist,title) is non-unique
+      colliding_groups    — number of distinct duplicated pairs
+      pct_colliding       — colliding_rows / total_rows
+      worst               — top 20 pairs by row count, with sample IDs
+    """
+    user = g.get('current_user') or {}
+    if user.get('role') != 'owner':
+        abort(403)
+    db = get_db()
+    total = db.execute("SELECT COUNT(*) AS n FROM recordings").fetchone()['n']
+    rows = db.execute(
+        "SELECT id, "
+        "       LOWER(TRIM(COALESCE(artist,''))) AS a, "
+        "       LOWER(TRIM(COALESCE(title,'')))  AS t, "
+        "       artist, title "
+        "FROM recordings"
+    ).fetchall()
+    buckets = {}
+    for r in rows:
+        key = (r['a'], r['t'])
+        buckets.setdefault(key, {'artist': r['artist'], 'title': r['title'],
+                                 'ids': []})['ids'].append(r['id'])
+    dup_groups = [b for b in buckets.values() if len(b['ids']) > 1]
+    colliding_rows = sum(len(b['ids']) for b in dup_groups)
+    dup_groups.sort(key=lambda b: (-len(b['ids']),
+                                   (b['artist'] or '').lower(),
+                                   (b['title'] or '').lower()))
+    worst = [
+        {'artist': b['artist'], 'title': b['title'],
+         'count': len(b['ids']), 'ids': b['ids'][:5]}
+        for b in dup_groups[:20]
+    ]
+    return jsonify(
+        total_rows=total,
+        colliding_rows=colliding_rows,
+        colliding_groups=len(dup_groups),
+        pct_colliding=round(100 * colliding_rows / total, 1) if total else 0,
+        worst=worst,
+    )
+
+
 @app.route('/admin/coins-fix-missing-cat-id', methods=['POST'])
 def coins_fix_missing_cat_id():
     """Assign cat_id to any coin missing one. _cat_id_prefix wants both
