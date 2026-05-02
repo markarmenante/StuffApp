@@ -7027,12 +7027,12 @@ def _backfill_serial_cat_ids(table, prefix):
 JOURNE_CALIBRE_DETAILS = {
     '1498': {
         'escapement': 'Straight-line lever escapement',
-        'escape_wheel': '15-tooth wheel',
+        'escape_wheel': '15-tooth wheel, 90° anchor fork',
         'calibre_notes': "Classic Swiss-lever-type in a horizontal straight line; tourbillon + remontoir d'égalité, dead seconds.",
     },
     '1403': {
         'escapement': 'Straight-line lever escapement',
-        'escape_wheel': '15-tooth wheel',
+        'escape_wheel': '15-tooth wheel, 90° anchor fork',
         'calibre_notes': 'Evolves 1498: tourbillon + 1-sec remontoir + dead seconds; straight-line Swiss-lever-type.',
     },
     '1412': {
@@ -7057,38 +7057,38 @@ JOURNE_CALIBRE_DETAILS = {
     },
     '1510': {
         'escapement': 'EBHP "High-Performance Bi-axial" escapement',
-        'escape_wheel': 'Twin wheels; bi-directional direct-impulse (patented)',
+        'escape_wheel': 'Twin wheels; bi-axial direct impulse',
         'calibre_notes': 'Dual-escape-wheel direct-impulse escapement, oil-free, with constant-force remontoir and natural dead-beat seconds.',
     },
     '1519': {
         'escapement': 'Straight-line lever escapement',
-        'escape_wheel': '15-tooth wheel',
+        'escape_wheel': '15-tooth wheel, 90° anchor fork',
         'calibre_notes': 'Vertical tourbillon with remontoir and dead seconds; straight-line Swiss-lever-type escapement.',
     },
     '1304': {
         'escapement': 'Swiss lever escapement',
-        'escape_wheel': 'Standard Swiss lever; tooth count not always in public summary',
+        'escape_wheel': 'Standard Swiss lever',
         'calibre_notes': 'Time-only, twin barrels in parallel feeding a classic detached lever escapement in a very flat architecture.',
     },
     '1499': {  # match_prefix — covers all 1499.x Résonance variants
         'escapement': 'Straight-line lever escapements (x2)',
-        'escape_wheel': 'Swiss lever for each balance',
+        'escape_wheel': 'Swiss lever for each train',
         'calibre_notes': 'Two balances in resonance, each with its own straight-line lever escapement.',
         'match_prefix': True,
     },
     '1518': {
         'escapement': 'Swiss lever escapement',
-        'escape_wheel': 'Swiss lever (tooth count not widely advertised)',
+        'escape_wheel': 'Swiss lever',
         'calibre_notes': 'High-beat integrated rattrapante chronograph in LineSport; classic lever escapement.',
     },
     '1619': {
         'escapement': 'Swiss lever escapement + tourbillon',
-        'escape_wheel': 'Tourbillon + Swiss lever escapement',
+        'escape_wheel': 'Tourbillon + Swiss-lever-type escapement',
         'calibre_notes': 'Grand complication with tourbillon; Journe does not detail a special escapement, so it is a tourbillon with lever.',
     },
     '1520': {
         'escapement': 'Lever escapement with remontoir',
-        'escape_wheel': 'Lever escapement; constant-force per brand release',
+        'escape_wheel': 'Lever escapement, constant-force system',
         'calibre_notes': 'Evolution of the tourbillon architecture with remontoir; classic lever escapement in the cage.',
     },
 }
