@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS watches (
     movement_type TEXT,
     movement_jewels INTEGER,
     movement_origin TEXT,
+    escapement TEXT,
     beat INTEGER,
     reserve REAL,
     complications TEXT,

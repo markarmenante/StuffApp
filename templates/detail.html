@@ -390,7 +390,14 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">Origin</span>
         </div>
       </div>
-      <div class="dgrid dg2 watch-vph-hz watch-movement">
+      <div class="dgrid dg3 watch-vph-hz watch-movement">
+        <div class="dcell">
+          <select name="escapement">
+            <option value=""></option>
+            {% for e in vlists.escapement %}<option value="{{ e }}" {{ 'selected' if val('escapement')==e }}>{{ e }}</option>{% endfor %}
+          </select>
+          <span class="clabel">Escapement</span>
+        </div>
         <div class="dcell">
           <select name="beat">
             <option value=""></option>

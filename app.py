@@ -108,6 +108,9 @@ VALUE_LISTS = {
     'metal_watch': ['Bronze','Ceramic','Gold Filled','Gold, Yellow','Gold: Red/Rose','Gold: Rose','Gold: White','Gold: Yellow','Platinum','Silver','Stainless','Tantalum','Titanium','Zirconium'],
     'dial_color': ['Abalone','Black','Black/Gray','Blue','Blue/Open','Brown','Champagne','Copper','Cream','Crystal','Damascus Steel','Ebony','Enamel','Gold','Gray','Gray/Black','Green','Green/Inlaid','Grey','Inlaid','Ivory','Jade','Nacre','Open','Platinum','Purple','Red','Rose Gold','Ruthenium','Salmon','Silver','Silver / Open','Silver/Black','White','White Ceramic','White Enamel','Yellow','Yellow Gold','Zirconium'],
     'movement_origin': ['In-House','Ébauche','Modified'],
+    'escapement': ['Swiss Lever','Co-Axial','Natural','Constant Force',
+                   'Detent','Chronometer','Cylinder','Verge','Pin Lever',
+                   'Duplex','Tuning Fork','Quartz','Other'],
     'strap_material': ['Case Metal','Croc','Leather','Ostrich','Rubber','Skin'],
     'strap_color': ['Black','Blue','Blue/Gray','Brown','Burgundy','Dk Brown','Eggplant','Gold','Gray','Green','Lt Brown','Navy Blue','Red','Rose Gold','Stainless','Tan','Titanium','White Gold'],
     'owner': ['YM','Mark','Young'],
@@ -238,6 +241,8 @@ FIELDS = {
          'options': ['', 'Automatic', 'Manual', 'Quartz', 'Spring Drive', 'Co-Axial']},
         {'name': 'movement_jewels', 'label': 'Jewels',            'type': 'number'},
         {'name': 'movement_origin', 'label': 'Movement Origin',   'type': 'text'},
+        {'name': 'escapement',      'label': 'Escapement',        'type': 'select',
+         'options': [''] + VALUE_LISTS['escapement']},
         {'name': 'beat',            'label': 'Beat (vph)',        'type': 'number'},
         {'name': 'reserve',         'label': 'Power Reserve (hrs)','type': 'number'},
         {'name': 'complications',   'label': 'Complications',     'type': 'checkbox-group',
@@ -813,6 +818,7 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN image_audit_at TEXT',
         'ALTER TABLE coins ADD COLUMN cat_id TEXT',
         'ALTER TABLE watches ADD COLUMN cat_id TEXT',
+        'ALTER TABLE watches ADD COLUMN escapement TEXT',
         'ALTER TABLE art ADD COLUMN cat_id TEXT',
         'ALTER TABLE persons ADD COLUMN license_number TEXT',
         'ALTER TABLE persons ADD COLUMN passport_number TEXT',
@@ -2270,6 +2276,7 @@ def fetch_watch_specs(watch):
     sources_bullets = '\n'.join(f'- {s}' for s in WATCH_SPEC_SOURCES)
     metals = ', '.join(VALUE_LISTS['metal_watch'])
     origins = ', '.join(VALUE_LISTS['movement_origin'])
+    escapements = ', '.join(VALUE_LISTS['escapement'])
     complications = ', '.join(COMPLICATIONS_OPTIONS)
 
     prompt = f"""You are filling in specification fields for a specific wristwatch using reputable public sources.
@@ -2291,6 +2298,7 @@ Target fields:
 - movement_type: "Manual" or "Automatic"
 - movement_origin: EXACTLY one of [{origins}] and nothing else. "In-House" = designed and made by the manufacturer; "Ébauche" = bought-in rough movement (e.g. ETA, Sellita, Valjoux) used as-is; "Modified" = an ébauche that has been noticeably reworked. Do not invent values like "Swiss" or "Ebauche-based".
 - movement_jewels: integer
+- escapement: EXACTLY one of [{escapements}]. "Swiss Lever" is the default for nearly all modern mechanical watches — only return it if a source actually states "lever escapement" (or equivalent), since blank is more useful than an assumed value. "Co-Axial" for Omega's George Daniels-derived escapement. "Natural" for Breguet's natural escapement (also revived by Daniels and others). "Constant Force" for Lange Zeitwerk, Romain Gauthier, F.P. Journe Chronomètre Optimum-style escapements. "Detent" / "Chronometer" for marine/pivoted-detent escapements. "Cylinder", "Verge", "Pin Lever", "Duplex" for vintage/historical pieces. "Tuning Fork" for Accutron / Bulova hum movements. "Quartz" for quartz watches. "Other" only if a clearly novel escapement is named (e.g. Genequand silicon, Ulysse Nardin Anchor) and none above fit. Return null when no source mentions the escapement at all.
 - beat: vibrations per hour (VPH) for mechanical movements, or raw Hz for quartz/tuning-fork movements. For mechanical (Manual/Automatic) pick from [18000, 19800, 21600, 25200, 28800, 36000, 72000]; if the source gives Hz, multiply by 7200 (2.5 Hz = 18000, 3 Hz = 21600, 4 Hz = 28800, 5 Hz = 36000, 10 Hz = 72000). For battery-powered/quartz/tuning-fork movements, return the actual rate as stated (e.g. 360 for Accutron, 32768 for a quartz crystal, 7200 for a 1 Hz stepping quartz). Do NOT assume 28800 as a default — only return a value if the source clearly states it.
 - reserve: power reserve in hours (integer)
 - complications: array of strings drawn from [{complications}]
@@ -2310,6 +2318,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
   "movement_type": null,
   "movement_origin": null,
   "movement_jewels": null,
+  "escapement": null,
   "beat": null,
   "reserve": null,
   "complications": null,
@@ -3939,7 +3948,7 @@ def watch_fetch_value(record_id):
 # details, ownership, and photos stay off this list on purpose.
 WATCH_LOOKUP_FILLABLE = (
     'metal', 'case_diameter', 'dial_color', 'year', 'edition', 'calibre',
-    'movement_type', 'movement_origin', 'movement_jewels',
+    'movement_type', 'movement_origin', 'movement_jewels', 'escapement',
     'beat', 'reserve', 'complications', 'clasp_type', 'lug_mm',
     'strap_material', 'notes',
 )
