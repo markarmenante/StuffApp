@@ -2258,6 +2258,13 @@ input[type="date"] { -webkit-appearance: none; }
     border-bottom: 1px solid var(--border);
   }
   .watch-body .watch-photo img { max-width: 220px; max-height: 220px; }
+  /* When .watch-body flips to column flex, .watch-specs is a column
+     flex item with `flex: 1 1 0%`. Cross-axis stretch should fill
+     width, but the explicit flex:1 + nested flex-column on .watch-specs
+     itself sometimes leaves the spec block computing a narrower
+     intrinsic width than the photo above it — leaving a strip of grey
+     to the right of the rows. Force full width explicitly. */
+  .watch-body .watch-specs { width: 100%; }
   /* Recording radio panel gets breathing room at the reduced spec width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
   /* Keep the two post-radio meta/purchase rows two-up on mobile so
