@@ -7035,47 +7035,47 @@ WATCH_BULK_LOOKUP_FIELDS = (
 
 @app.route('/admin/watches-bulk-lookup', methods=['POST'])
 def watches_bulk_lookup():
-    """Walk watches missing any of (calibre, jewels, origin, escapement,
-    beat) and use the AI watch lookup to fill the blanks. Resumable —
-    only targets rows still missing at least one of those fields, so
-    re-running picks up where the previous batch left off.
+    """Walk every watch (with enough identity to be looked up) and use
+    the AI watch lookup to OVERWRITE calibre / jewels / origin /
+    escapement / beat with whatever the lookup returns. Re-runs
+    progress oldest-first — we order by updated_at ASC, and each
+    successful update bumps the row's updated_at to now, so processed
+    rows naturally fall to the back of the queue. Just keep calling
+    until the report says everything in scope was attempted.
 
     Form params:
       secret  – IMPORT_MISSING_SECRET
-      limit   – max watches per call (default 5, capped at 20). Each
-                lookup makes ~6 web searches and takes 30-90s; gunicorn
-                is on a 300s timeout so 5-10 is the realistic ceiling
-                per request.
-      dry     – '1' to fetch from AI but skip the UPDATE (sanity check
-                what would change without committing).
+      limit   – max watches per call (default 5). gunicorn has a 300s
+                timeout and each lookup is 30-90s, so 5-10 is the
+                realistic ceiling per request. Loop the call from a
+                shell to chew through the rest.
+      dry     – '1' to fetch from AI but skip the UPDATE (preview the
+                changes without committing them).
 
-    Per-watch behavior: fill BLANK fields only — never overwrite. Beat
-    gets the same sanity check the single-watch lookup applies (snap
-    to canonical for Manual/Automatic, accept-any for everything else).
-    Commits after each watch so a mid-batch failure doesn't lose the
-    progress already made."""
+    Overwrite semantics: a non-null AI suggestion replaces any
+    existing value. AI null means "I don't know" — never wipes. Beat
+    still gets the canonical-snap sanity check (Manual/Automatic snap
+    to {18000…72000}; everything else accepts any positive integer)."""
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
         abort(403)
     try:
         limit = int(request.form.get('limit', '5'))
     except ValueError:
         limit = 5
-    limit = max(1, min(limit, 20))
+    limit = max(1, limit)
     dry = request.form.get('dry') == '1'
 
     db = get_db()
-    missing_clause = ' OR '.join(
-        f"COALESCE({f}, '') = ''" for f in WATCH_BULK_LOOKUP_FIELDS
-    )
     # Need brand/model/reference to even attempt a lookup — rows with
-    # none of those can't be identified online, so skip them.
+    # none of those can't be identified online, so skip them. Order by
+    # updated_at ASC so re-runs progress through the queue oldest-first
+    # (each successful update bumps updated_at → row drops to the back).
     rows = db.execute(
-        f"SELECT * FROM watches "
-        f"WHERE ({missing_clause}) "
-        f"  AND (COALESCE(brand,'') != '' OR COALESCE(model,'') != '' "
-        f"       OR COALESCE(reference,'') != '') "
-        f"ORDER BY brand COLLATE NODIACRITIC, model "
-        f"LIMIT ?",
+        "SELECT * FROM watches "
+        "WHERE COALESCE(brand,'') != '' OR COALESCE(model,'') != '' "
+        "   OR COALESCE(reference,'') != '' "
+        "ORDER BY COALESCE(updated_at, '') ASC "
+        "LIMIT ?",
         (limit,),
     ).fetchall()
 
@@ -7129,9 +7129,8 @@ def watches_bulk_lookup():
                         continue
                 else:
                     sug = int(round(n))
-            current = r[f] if f in r.keys() else None
-            if current is not None and str(current).strip() != '':
-                continue
+            # Overwrite mode: apply any non-null AI suggestion regardless
+            # of the existing value. AI null is filtered out above.
             applied[f] = sug
 
         if not applied:
@@ -7162,13 +7161,24 @@ def watches_bulk_lookup():
             'applied': applied,
         })
 
-    # Tells the user whether to re-run.
-    remaining = db.execute(
-        f"SELECT COUNT(*) AS n FROM watches WHERE ({missing_clause}) "
-        f"AND (COALESCE(brand,'') != '' OR COALESCE(model,'') != '' "
-        f"OR COALESCE(reference,'') != '')"
+    # Total identifiable watches in scope. With overwrite semantics
+    # there's no "done" condition — the same row could in principle be
+    # re-processed forever — so we just report how many haven't been
+    # touched in the longest. Use the oldest updated_at still in the
+    # candidate pool as a freshness anchor: when that timestamp is
+    # newer than your batch's start, you've cycled the whole library.
+    in_scope = db.execute(
+        "SELECT COUNT(*) AS n FROM watches "
+        "WHERE COALESCE(brand,'') != '' OR COALESCE(model,'') != '' "
+        "OR COALESCE(reference,'') != ''"
     ).fetchone()['n']
-    report['remaining_after_run'] = remaining
+    oldest = db.execute(
+        "SELECT MIN(COALESCE(updated_at, '')) AS t FROM watches "
+        "WHERE COALESCE(brand,'') != '' OR COALESCE(model,'') != '' "
+        "OR COALESCE(reference,'') != ''"
+    ).fetchone()['t']
+    report['in_scope'] = in_scope
+    report['oldest_updated_at'] = oldest or None
     return jsonify(report)
 
 
