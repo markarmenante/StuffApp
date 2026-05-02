@@ -7948,23 +7948,46 @@ def admin_export_files():
 def _files_export_stale(db, user, allowed):
     """True when at least one record in the user's allowed categories
     has been touched (updated_at) since the user's last successful
-    /export-files run, OR when the export has never run for this user.
-    Returns (stale, last_export_at, latest_update)."""
+    /export-files run, OR a server-side delete was tombstoned in the
+    same window, OR the export has never run for this user. Honors
+    per-user row filters so members don't see "stale" because of
+    records they can't access. Returns (stale, last_export_at,
+    latest_update)."""
     last = (user['last_export_at'] if 'last_export_at' in user.keys() else None) or None
     latest = None
     for cat in allowed:
         info = CATEGORIES.get(cat)
         if not info:
             continue
+        wheres, params = [], []
+        _apply_row_filter_clauses(cat, wheres, params)
+        where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
         try:
             row = db.execute(
-                f"SELECT MAX(updated_at) AS m FROM {info['table']}"
+                f"SELECT MAX(updated_at) AS m FROM {info['table']} {where_clause}",
+                params,
             ).fetchone()
         except sqlite3.OperationalError:
             continue
         m = row and row['m']
         if m and (latest is None or m > latest):
             latest = m
+    # Tombstones: a delete in an allowed category since `last` should
+    # also flip the indicator to stale so the user knows there's a
+    # mirror-deletion waiting in the next syncDown.
+    if allowed:
+        ph = ','.join(['?' for _ in allowed])
+        try:
+            row = db.execute(
+                f"SELECT MAX(deleted_at) AS m FROM tombstones "
+                f"WHERE category IN ({ph})",
+                sorted(allowed),
+            ).fetchone()
+            tomb_latest = row and row['m']
+            if tomb_latest and (latest is None or tomb_latest > latest):
+                latest = tomb_latest
+        except sqlite3.OperationalError:
+            pass
     if latest is None:
         # No data yet → not stale. Avoid a permanent red indicator on
         # an empty account.
