@@ -238,7 +238,7 @@ FIELDS = {
         {'name': 'year',            'label': 'Year',              'type': 'number'},
         {'name': 'calibre',         'label': 'Calibre',           'type': 'text'},
         {'name': 'movement_type',   'label': 'Movement Type',     'type': 'select',
-         'options': ['', 'Automatic', 'Manual', 'Quartz', 'Spring Drive', 'Co-Axial']},
+         'options': ['', 'Automatic', 'Manual', 'Quartz', 'Spring Drive', 'Co-Axial', 'Tuning Fork']},
         {'name': 'movement_jewels', 'label': 'Jewels',            'type': 'number'},
         {'name': 'movement_origin', 'label': 'Movement Origin',   'type': 'text'},
         {'name': 'escapement',      'label': 'Escapement',        'type': 'select',
@@ -2295,7 +2295,7 @@ Target fields:
 - year: integer year of original release/manufacture
 - edition: total count of pieces in a limited edition / limited run (integer). Return null for non-limited / open-production references.
 - calibre: movement calibre name (e.g. "L951.5", "3135")
-- movement_type: "Manual" or "Automatic"
+- movement_type: one of ["Manual", "Automatic", "Quartz", "Spring Drive", "Co-Axial", "Tuning Fork"]. "Manual"/"Automatic" for traditional mechanical, "Quartz" for battery-powered crystal-regulated, "Spring Drive" only for Seiko/Grand Seiko Spring Drive, "Co-Axial" only for Omega watches the brand explicitly markets as Co-Axial, "Tuning Fork" for Bulova Accutron and similar hum movements.
 - movement_origin: EXACTLY one of [{origins}] and nothing else. "In-House" = designed and made by the manufacturer; "Ébauche" = bought-in rough movement (e.g. ETA, Sellita, Valjoux) used as-is; "Modified" = an ébauche that has been noticeably reworked. Do not invent values like "Swiss" or "Ebauche-based".
 - movement_jewels: integer
 - escapement: EXACTLY one of [{escapements}]. "Swiss Lever" is the default for nearly all modern mechanical watches — only return it if a source actually states "lever escapement" (or equivalent), since blank is more useful than an assumed value. "Co-Axial" for Omega's George Daniels-derived escapement. "Natural" for Breguet's natural escapement (also revived by Daniels and others). "Constant Force" for Lange Zeitwerk, Romain Gauthier, F.P. Journe Chronomètre Optimum-style escapements. "Detent" / "Chronometer" for marine/pivoted-detent escapements. "Cylinder", "Verge", "Pin Lever", "Duplex" for vintage/historical pieces. "Tuning Fork" for Accutron / Bulova hum movements. "Quartz" for quartz watches. "Other" only if a clearly novel escapement is named (e.g. Genequand silicon, Ulysse Nardin Anchor) and none above fit. Return null when no source mentions the escapement at all.
