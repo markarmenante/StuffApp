@@ -401,18 +401,22 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="dcell">
           {# Combobox, not select — non-canonical rates (Accutron 360 Hz,
              quartz 32768 Hz, etc.) need to be enterable too, while the
-             common mechanical values stay one click away as suggestions. #}
-          <input type="number" name="beat" min="0" step="1"
+             common mechanical values stay one click away as suggestions.
+             type=text (with inputmode=numeric for the iOS numeric pad)
+             so we can render thousands commas for readability — the
+             form parser strips them on save (replace(',','') in the
+             beat-aware branch of the field loop). #}
+          <input type="text" name="beat" inputmode="numeric"
                  list="beat-options"
-                 value="{{ val('beat') if val('beat') is not none else '' }}"
+                 value="{% if val('beat') is not none and val('beat') != '' %}{{ '{:,}'.format(val('beat')|int) }}{% endif %}"
                  placeholder="vph">
           <datalist id="beat-options">
             {% for b in [18000,19800,21600,25200,28800,36000,72000] %}
-            <option value="{{ b }}">{{ '{:,}'.format(b) }} vph</option>
+            <option value="{{ '{:,}'.format(b) }}">{{ '{:,}'.format(b) }} vph</option>
             {% endfor %}
             <option value="360">360 (Accutron 214/218)</option>
             <option value="480">480 (Accutron 230)</option>
-            <option value="32768">32768 (quartz crystal)</option>
+            <option value="32,768">32,768 (quartz crystal)</option>
           </datalist>
           <span class="clabel">Beat</span>
         </div>
