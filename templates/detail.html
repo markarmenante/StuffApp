@@ -463,10 +463,9 @@ document.addEventListener('DOMContentLoaded', function () {
       </div>
       {# Calibre notes: full-width row spanning the spec column. Sits
          between the movement rows above and the service rows below.
-         Deliberately NOT given the watch-movement shading class so
-         this row reads as a free-form text panel rather than another
-         spec cell. #}
-      <div class="dgrid dg1">
+         Carries watch-movement so it shades grey along with the rest
+         of the movement block. #}
+      <div class="dgrid dg1 watch-movement">
         <div class="dcell">
           <textarea name="calibre_notes" rows="2"
                     style="width:100%;text-align:left;resize:vertical">{{ val('calibre_notes') }}</textarea>
