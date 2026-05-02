@@ -601,6 +601,12 @@ input[type="number"]::-webkit-outer-spin-button {
    rows below. */
 .dgrid.watch-movement .dcell { background: #f4f4f6; }
 
+/* Escape Wheel | Winding | Reserve row: Escape Wheel takes half the row
+   (text values can be long, e.g. "Twin wheels; bi-axial direct impulse");
+   Winding and Reserve split the remaining half. Override the default
+   repeat(3, 1fr) for this row only. */
+.watch-specs .dgrid.dg3.watch-escape-wheel-row { grid-template-columns: 2fr 1fr 1fr; }
+
 /* Service date: desktop shows native date, compact overlay hidden. */
 .svc-date-compact { display: none; }
 /* The MM/DD/YYYY overlay span is mobile-only; hidden on desktop where
