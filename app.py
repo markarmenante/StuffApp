@@ -7730,6 +7730,47 @@ def _g(r, key):
     return v if v is not None else ''
 
 
+def _watch_ident(r):
+    """Filename ident for watches: '<year> <model> (<cat_id>)' when a
+    cat_id is set, e.g. '2018 Galet Minute Repeater (W127)'. Reference
+    is intentionally dropped from the human descriptor — cat_id already
+    disambiguates, and shorter filenames read better in Finder.
+    Legacy rows without a cat_id keep the older 'year model Ref ref'
+    form so their on-disk paths don't move until backfill."""
+    cat_id = (_g(r, 'cat_id') or '').strip()
+    year = _g(r, 'year')
+    model = _g(r, 'model') or ''
+    if cat_id:
+        descriptor = ' '.join(filter(None, [
+            str(year) if year else '',
+            model,
+        ])).strip()
+        return f'{descriptor} ({cat_id})' if descriptor else cat_id
+    legacy = ' '.join(filter(None, [
+        str(year) if year else '',
+        model,
+        f'Ref {_g(r, "reference")}' if _g(r, 'reference') else '',
+    ])).strip()
+    return legacy or (_g(r, 'brand') or '')[:40] or _g(r, 'id')[:8]
+
+
+def _art_ident(r):
+    """Filename ident for art: '<cat_id> — <title>' when a cat_id is
+    set, e.g. 'A042 — Sunset Over Carpinteria'. Year is dropped from
+    the human descriptor (cat_id is the stable id; year is one click
+    away in the detail view). Legacy rows without a cat_id keep the
+    older 'title — year' form."""
+    cat_id = (_g(r, 'cat_id') or '').strip()
+    title = _g(r, 'title') or ''
+    if cat_id:
+        return f'{cat_id} — {title}' if title else cat_id
+    legacy = ' — '.join(filter(None, [
+        title,
+        str(_g(r, 'year')) if _g(r, 'year') else '',
+    ]))
+    return legacy or _g(r, 'id')[:8]
+
+
 # Per-category constructors used by the sweep tool's auto-create path.
 # Each takes (group, ident) parsed from the StuffFiles path and returns
 # a dict of column → value to seed a new row, or None if the category
@@ -7784,18 +7825,7 @@ def _create_vehicle(g, i):
 EXPORT_LAYOUT = {
     'watches': {
         'group': lambda r: _g(r, 'brand') or 'Unknown',
-        # Prefer cat_id (W###) when assigned — stable across edits to
-        # year/model/reference. Falls back to the year+model+ref form
-        # for legacy rows that haven't been backfilled yet, so existing
-        # files keep their current names until the user runs the
-        # /admin/watches-backfill-cat-ids one-shot.
-        'ident': lambda r: (_g(r, 'cat_id') or '').strip() or (
-            ' '.join(filter(None, [
-                str(_g(r, 'year')) if _g(r, 'year') else '',
-                _g(r, 'model'),
-                (f'Ref {_g(r, "reference")}') if _g(r, 'reference') else '',
-            ])).strip() or (_g(r, 'brand'))[:40] or _g(r, 'id')[:8]
-        ),
+        'ident': _watch_ident,
         'create': _create_watch,
         # User-titled docs (container_1, container_2) moved into the
         # JSON `documents` column; export walks them separately. Image
@@ -7881,13 +7911,7 @@ EXPORT_LAYOUT = {
     },
     'art': {
         'group': lambda r: _g(r, 'artist') or 'Unknown',
-        # Same cat_id-preferred-with-fallback pattern as watches.
-        'ident': lambda r: (_g(r, 'cat_id') or '').strip() or (
-            ' — '.join(filter(None, [
-                _g(r, 'title') or '',
-                str(_g(r, 'year')) if _g(r, 'year') else '',
-            ])) or _g(r, 'id')[:8]
-        ),
+        'ident': _art_ident,
         'create': _create_art,
         # doc_2 + receipt moved to JSON `documents` column. Image is
         # the only fixed file slot for art now — receipts are exported
