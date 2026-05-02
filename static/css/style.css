@@ -2237,35 +2237,27 @@ input[type="date"] { -webkit-appearance: none; }
   /* Bottom action row: wrap into 2-up. */
   .detail-bottom { grid-template-columns: repeat(2, 1fr); gap: 6px; }
 
-  /* Detail pages share the .watch-body layout (photo left, specs right).
-     On phones shrink the photo so the spec column has room to breathe,
-     keeping the balanced side-by-side split instead of stacking. */
-  .watch-body .watch-photo {
-    width: 140px;
-    min-height: 140px;
-    padding: 6px;
-  }
-  .watch-body .watch-photo img { max-width: 128px; max-height: 220px; }
+  /* Detail pages share the .watch-body layout (photo left, specs right
+     on desktop). On phones a 140px-wide photo on the left squeezed the
+     spec column into ~225px and left a stripe of grey beside any rows
+     that extend below the photo's height. Stack the image above the
+     specs so every row spans the full screen width — the right
+     trade-off on phones, where vertical scroll is cheap and readable
+     row width is precious.
 
-  /* Watches detail on mobile: stack the image above the spec rows so
-     the rows span the full screen width. The shared 140px-wide photo
-     above leaves the spec column squeezed into ~225px on the right
-     and a stripe of grey to the left of the rows that extend below
-     the photo's height. Stacking trades vertical pixels for full-
-     width, readable rows — the right call for watches specifically
-     because the spec column has both 3-across and full-width rows
-     (escapement, escape wheel, calibre notes) that need the room. */
-  .detail-page-watches .watch-body { flex-direction: column; }
-  .detail-page-watches .watch-body .watch-photo {
+     Applies to every .watch-body variant (watches, cameras, pens,
+     vehicles, recordings, rifles, audio, properties). Art and lenses
+     already stack via their own *-body / *-photo-full classes;
+     persons keeps the photo hidden via the override below. */
+  .watch-body { flex-direction: column; }
+  .watch-body .watch-photo {
     width: 100%;
     min-height: 220px;
+    padding: 6px;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
-  .detail-page-watches .watch-body .watch-photo img {
-    max-width: 220px;
-    max-height: 220px;
-  }
+  .watch-body .watch-photo img { max-width: 220px; max-height: 220px; }
   /* Recording radio panel gets breathing room at the reduced spec width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
   /* Keep the two post-radio meta/purchase rows two-up on mobile so
