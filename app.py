@@ -812,6 +812,8 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN image_audit_reason TEXT',
         'ALTER TABLE coins ADD COLUMN image_audit_at TEXT',
         'ALTER TABLE coins ADD COLUMN cat_id TEXT',
+        'ALTER TABLE watches ADD COLUMN cat_id TEXT',
+        'ALTER TABLE art ADD COLUMN cat_id TEXT',
         'ALTER TABLE persons ADD COLUMN license_number TEXT',
         'ALTER TABLE persons ADD COLUMN passport_number TEXT',
         'ALTER TABLE persons ADD COLUMN global_entry_number TEXT',
@@ -2052,6 +2054,30 @@ def next_cat_id(db, property_name=None, date_1=None):
     return f'C{n:03d}'
 
 
+# Watches and Art use the same flat-serial scheme as coins, just with
+# their own letter prefix and their own series. No per-brand/per-artist
+# partitioning — keeps the next-id query trivial and the IDs stable
+# across brand/artist renames.
+def next_serial_cat_id(db, table, prefix):
+    """Next zero-padded serial cat_id for a category table, e.g.
+    'W001' / 'A001'. Mirrors next_cat_id but accepts the table and
+    prefix as args so watches and art can share the helper without
+    further duplication."""
+    glob = f'{prefix}[0-9]*'
+    row = db.execute(
+        f"SELECT cat_id FROM {table} "
+        f"WHERE cat_id GLOB ? "
+        f"ORDER BY CAST(SUBSTR(cat_id, {len(prefix) + 1}) AS INTEGER) DESC LIMIT 1",
+        (glob,),
+    ).fetchone()
+    n = 1
+    if row and row['cat_id']:
+        m = re.match(rf'^{re.escape(prefix)}(\d+)$', row['cat_id'], re.IGNORECASE)
+        if m:
+            n = int(m.group(1)) + 1
+    return f'{prefix}{n:03d}'
+
+
 def coin_age(date_1):
     if date_1 is None:
         return None
@@ -3155,6 +3181,10 @@ def new_record(category):
         if category == 'coins':
             data['coin_id'] = next_coin_id(db)
             data['cat_id'] = next_cat_id(db, data.get('property_name'), data.get('date_1'))
+        elif category == 'watches':
+            data['cat_id'] = next_serial_cat_id(db, 'watches', 'W')
+        elif category == 'art':
+            data['cat_id'] = next_serial_cat_id(db, 'art', 'A')
 
         # Row-filter guard on creation. If the user is restricted on
         # any field for this category, the new record's value must
@@ -6946,6 +6976,59 @@ def watches_needing_relocation():
                    affected=affected)
 
 
+def _backfill_serial_cat_ids(table, prefix):
+    """Assign cat_ids to every row in `table` that doesn't have one,
+    using the same flat W###/A### scheme as live inserts. Walks rows
+    deterministically (id ASC) so re-runs are stable. Returns
+    (assigned_count, sample_assignments).
+
+    Side effect to flag to the user before running: every record that
+    gets a fresh cat_id will have its file path in StuffFiles change
+    on the next sync (because EXPORT_LAYOUT prefers cat_id when set).
+    Old paths stay on disk for manual cleanup since auto-purge is
+    off — typically dozens-to-hundreds of orphaned files."""
+    db = get_db()
+    rows = db.execute(
+        f"SELECT id FROM {table} WHERE COALESCE(cat_id, '') = '' "
+        f"ORDER BY id"
+    ).fetchall()
+    sample = []
+    assigned = 0
+    for r in rows:
+        new_id = next_serial_cat_id(db, table, prefix)
+        db.execute(
+            f"UPDATE {table} SET cat_id = ?, updated_at = ? WHERE id = ?",
+            (new_id, datetime.utcnow().isoformat(timespec='seconds'), r['id']),
+        )
+        if len(sample) < 10:
+            sample.append({'id': r['id'], 'cat_id': new_id})
+        assigned += 1
+    db.commit()
+    return assigned, sample
+
+
+@app.route('/admin/watches-backfill-cat-ids', methods=['POST'])
+def watches_backfill_cat_ids():
+    """One-shot: assign W### cat_ids to every watch missing one. After
+    running, every backfilled watch's file path in StuffFiles changes
+    on the next sync — the new path uses cat_id, the old path stays
+    behind for manual cleanup."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    assigned, sample = _backfill_serial_cat_ids('watches', 'W')
+    return jsonify(assigned=assigned, sample=sample)
+
+
+@app.route('/admin/art-backfill-cat-ids', methods=['POST'])
+def art_backfill_cat_ids():
+    """One-shot: assign A### cat_ids to every art piece missing one.
+    Same disk-side caveat as watches-backfill-cat-ids."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    assigned, sample = _backfill_serial_cat_ids('art', 'A')
+    return jsonify(assigned=assigned, sample=sample)
+
+
 @app.route('/admin/coins-fix-missing-cat-id', methods=['POST'])
 def coins_fix_missing_cat_id():
     """Assign cat_id to any coin missing one. _cat_id_prefix wants both
@@ -7651,11 +7734,18 @@ def _create_vehicle(g, i):
 EXPORT_LAYOUT = {
     'watches': {
         'group': lambda r: _g(r, 'brand') or 'Unknown',
-        'ident': lambda r: ' '.join(filter(None, [
-            str(_g(r, 'year')) if _g(r, 'year') else '',
-            _g(r, 'model'),
-            (f'Ref {_g(r, "reference")}') if _g(r, 'reference') else '',
-        ])).strip() or (_g(r, 'brand'))[:40] or _g(r, 'id')[:8],
+        # Prefer cat_id (W###) when assigned — stable across edits to
+        # year/model/reference. Falls back to the year+model+ref form
+        # for legacy rows that haven't been backfilled yet, so existing
+        # files keep their current names until the user runs the
+        # /admin/watches-backfill-cat-ids one-shot.
+        'ident': lambda r: (_g(r, 'cat_id') or '').strip() or (
+            ' '.join(filter(None, [
+                str(_g(r, 'year')) if _g(r, 'year') else '',
+                _g(r, 'model'),
+                (f'Ref {_g(r, "reference")}') if _g(r, 'reference') else '',
+            ])).strip() or (_g(r, 'brand'))[:40] or _g(r, 'id')[:8]
+        ),
         'create': _create_watch,
         # User-titled docs (container_1, container_2) moved into the
         # JSON `documents` column; export walks them separately. Image
@@ -7741,10 +7831,13 @@ EXPORT_LAYOUT = {
     },
     'art': {
         'group': lambda r: _g(r, 'artist') or 'Unknown',
-        'ident': lambda r: ' — '.join(filter(None, [
-            _g(r, 'title') or '',
-            str(_g(r, 'year')) if _g(r, 'year') else '',
-        ])) or _g(r, 'id')[:8],
+        # Same cat_id-preferred-with-fallback pattern as watches.
+        'ident': lambda r: (_g(r, 'cat_id') or '').strip() or (
+            ' — '.join(filter(None, [
+                _g(r, 'title') or '',
+                str(_g(r, 'year')) if _g(r, 'year') else '',
+            ])) or _g(r, 'id')[:8]
+        ),
         'create': _create_art,
         # doc_2 + receipt moved to JSON `documents` column. Image is
         # the only fixed file slot for art now — receipts are exported
