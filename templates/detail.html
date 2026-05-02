@@ -392,10 +392,19 @@ document.addEventListener('DOMContentLoaded', function () {
       </div>
       <div class="dgrid dg3 watch-vph-hz watch-movement">
         <div class="dcell">
-          <select name="escapement">
-            <option value=""></option>
-            {% for e in vlists.escapement %}<option value="{{ e }}" {{ 'selected' if val('escapement')==e }}>{{ e }}</option>{% endfor %}
-          </select>
+          {# Combobox, not select — same pattern as Beat. The value list
+             covers the canonical escapement types but novel/uncommon
+             entries (e.g. Genequand silicon, Ulysse Nardin Anchor, a
+             specific historical sub-variant) need to be writable too,
+             so we use a free-text input with the value list surfaced as
+             autocomplete suggestions via <datalist>. #}
+          <input type="text" name="escapement"
+                 list="escapement-options"
+                 value="{{ val('escapement') }}"
+                 placeholder="">
+          <datalist id="escapement-options">
+            {% for e in vlists.escapement %}<option value="{{ e }}">{% endfor %}
+          </datalist>
           <span class="clabel">Escapement</span>
         </div>
         <div class="dcell">
