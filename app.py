@@ -2290,11 +2290,21 @@ WATCH_SPEC_SOURCES = [
     "chrono24.com",
     "watchbox / thewatchbox.com",
     "calibercorner.com",
+    "17jewels.info",
     "emmywatch.com",
     "thewatchpages.com",
     "hodinkee.com",
     "monochrome-watches.com",
     "watch-wiki.org / wikipedia watch entries",
+]
+
+# When the watch already has a calibre value, the lookup can go
+# straight to calibre-specific reference sites for movement detail
+# (jewels, escapement, beat, reserve). These two cover the long tail
+# of obscure references better than the generalist watch sites.
+WATCH_CALIBRE_SOURCES = [
+    "calibercorner.com",
+    "17jewels.info",
 ]
 
 
@@ -2336,13 +2346,31 @@ def fetch_watch_specs(watch):
     escapements = ', '.join(VALUE_LISTS['escapement'])
     complications = ', '.join(COMPLICATIONS_OPTIONS)
 
+    # When the record already has a calibre, point the searcher at
+    # the two calibre-specific reference sites for movement detail
+    # (jewels / escapement / beat / reserve). They cover obscure
+    # references better than the generalist watch sites.
+    if calibre_hint:
+        calibre_sources_bullets = '\n'.join(
+            f'- {s}' for s in WATCH_CALIBRE_SOURCES
+        )
+        calibre_hint_block = (
+            f"\nThe calibre is already known: {calibre_hint}. For "
+            f"movement-detail fields (movement_jewels, escapement, "
+            f"beat, reserve, movement_type, movement_origin) prefer "
+            f"these calibre-specific sources first:\n"
+            f"{calibre_sources_bullets}\n"
+        )
+    else:
+        calibre_hint_block = ''
+
     prompt = f"""You are filling in specification fields for a specific wristwatch using reputable public sources.
 
 Watch: {ident}
 
 Use at most 6 web searches, preferring these sources (roughly in order):
 {sources_bullets}
-
+{calibre_hint_block}
 For each field below, return the value you find in any of those sources. If one reputable source states a value clearly, use it; do not require unanimous agreement. Return null only when NO source you searched mentions the field at all. Prefer sourced values over leaving fields null.
 
 Target fields:
