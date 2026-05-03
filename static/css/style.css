@@ -760,7 +760,7 @@ textarea.results-raw { display: none !important; }
 /* Watch split layout */
 .watch-body { display: flex; border-bottom: 1px solid var(--border); }
 .watch-photo { width: 210px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--cell-bg); display: flex; align-items: center; justify-content: center; min-height: 210px; position: relative; }
-.watch-body-watch .watch-photo { border: 2px solid #888; }
+.watch-body-watch .watch-photo { border-top: 1px solid var(--border); border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .watch-photo img { max-width: 210px; max-height: 210px; object-fit: contain; display: block; }
 .watch-photo .no-img { font-size: 44px; color: var(--text-hint); }
 .watch-photo-upload { position: absolute; bottom: 6px; right: 6px; }
