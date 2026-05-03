@@ -2293,6 +2293,7 @@ WATCH_SPEC_SOURCES = [
     "watchbox / thewatchbox.com",
     "calibercorner.com",
     "17jewels.info",
+    "sjx.com.sg",
     "emmywatch.com",
     "thewatchpages.com",
     "hodinkee.com",
