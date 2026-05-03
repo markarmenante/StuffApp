@@ -2279,48 +2279,35 @@ input[type="date"] { -webkit-appearance: none; }
   }
   .watch-body .watch-specs > .dgrid { width: 100%; box-sizing: border-box; }
 
-  /* Watches mobile: image takes the left half (50% width, justified
-     left, sits under the model row); right half is a 2-col stack of
-     8 paired cells; below the image is full-width Escape Wheel,
-     Calibre Notes, then a 2-col Svc / Since.
+  /* Watches mobile layout:
+       +-------------+-----------+
+       |             | met | wid |   ← brand-top: 2 dg2 rows beside
+       |   PHOTO     |-----+-----|     the photo, stretched to fill
+       |  (natural)  | ref | dia |     the photo's natural height
+       +-------------+-----+-----+
+       |     case#   |    mvt#   |   ← brand-bot: full-width below
+       |     ed      |    yr     |     2pt rule under this row
+       +-------------+-----------+
+       | calibre     | jewels    |   ← movement: 2-col pairs
+       | origin      | escapement|
+       | beat        | hz        |
+       | winding     | reserve   |
+       | escape wheel (full)     |
+       | calibre notes (full)    |   2pt rule under this row
+       | svc         | since     |
+       +-------------+-----------+
 
-     +-----+-----+-----+-----+
-     |  PHOTO   | met | wid |
-     |  PHOTO   | ref | dia |
-     |  PHOTO   | cs# | mv# |
-     |  PHOTO   | edi | yr  |  <- 2pt divider under this row
-     |  PHOTO   | cal | jew |
-     |  PHOTO   | ori | esc |
-     |  PHOTO   | bea | hz  |
-     |  PHOTO   | win | res |
-     +-----+-----+-----+-----+
-     |  Escape Wheel        |
-     |  Calibre Notes       |
-     |  Svc      | Since    |
-     +-----+-----+-----+-----+
-
-     Achieved by flattening the dgrid hierarchy with display:contents
-     on every wrapper (.watch-specs, .watch-brand-specs,
-     .watch-movement-block, every .dgrid) and assigning each .dcell
-     a named grid-area on the .watch-body-watch grid. Cells are
-     identified via :has(input[name=...]) so the HTML stays unchanged
-     and desktop layout (which rebuilds 3-col rows from the same
-     cells) keeps working. */
+     The HTML wrappers (.watch-brand-top, .watch-brand-bot,
+     .watch-movement-block) are placed via grid-area on
+     .watch-body-watch; .watch-specs uses display:contents so its
+     children participate directly in the parent grid. */
   .watch-body-watch {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr 1fr;
+    grid-template-columns: auto 1fr;
     grid-template-areas:
-      "photo photo metal       width"
-      "photo photo ref         dial"
-      "photo photo casenum     mvtnum"
-      "photo photo edition     year"
-      "photo photo calibre     jewels"
-      "photo photo origin      escapement"
-      "photo photo beat        hz"
-      "photo photo winding     reserve"
-      "esc   esc   esc         esc"
-      "notes notes notes       notes"
-      "svc   svc   since       since";
+      "photo brandtop"
+      "brandbot brandbot"
+      "movement movement";
     width: 100%;
     box-sizing: border-box;
   }
@@ -2332,43 +2319,33 @@ input[type="date"] { -webkit-appearance: none; }
     border-bottom: 1px solid var(--border);
   }
   .watch-body-watch .watch-photo img { max-width: 100%; max-height: 100%; }
+  .watch-body-watch .watch-specs { display: contents; }
+  .watch-body-watch .watch-brand-top {
+    grid-area: brandtop;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+  }
+  /* Stretch the two dg2 rows in brand-top so they fill the photo's
+     natural height — no grey blank zone beside the photo. */
+  .watch-body-watch .watch-brand-top .dgrid {
+    flex: 1;
+  }
+  .watch-body-watch .watch-brand-bot { grid-area: brandbot; }
+  .watch-body-watch .watch-movement-block { grid-area: movement; }
 
-  /* Flatten the wrapper hierarchy so every .dcell becomes a direct
-     grid item of .watch-body-watch. */
-  .watch-body-watch .watch-specs,
-  .watch-body-watch .watch-brand-specs,
-  .watch-body-watch .watch-movement-block,
-  .watch-body-watch .dgrid { display: contents; }
+  /* Force every dg2 inside the watch-body-watch back to 2-col
+     (overrides the global mobile dg2 single-col collapse). */
+  .watch-body-watch .dgrid.dg2 {
+    grid-template-columns: 1fr 1fr;
+  }
 
-  /* Per-cell placement. Cells without name attributes (Hz, Since)
-     are pinned via the title prefix on the readonly input. */
-  .watch-body-watch .dcell:has(select[name="metal"])              { grid-area: metal; }
-  .watch-body-watch .dcell:has(input[name="case_diameter"])       { grid-area: width; }
-  .watch-body-watch .dcell:has(input[name="reference"])           { grid-area: ref; }
-  .watch-body-watch .dcell:has(input[name="dial_color"])          { grid-area: dial; }
-  .watch-body-watch .dcell:has(input[name="case_num"])            { grid-area: casenum; }
-  .watch-body-watch .dcell:has(input[name="movement_num"])        { grid-area: mvtnum; }
-  .watch-body-watch .dcell:has(input[name="edition"])             { grid-area: edition; }
-  .watch-body-watch .dcell:has(input[name="year"])                { grid-area: year; }
-  .watch-body-watch .dcell:has(input[name="calibre"])             { grid-area: calibre; }
-  .watch-body-watch .dcell:has(input[name="movement_jewels"])     { grid-area: jewels; }
-  .watch-body-watch .dcell:has(select[name="movement_origin"])    { grid-area: origin; }
-  .watch-body-watch .dcell:has(input[name="escapement"])          { grid-area: escapement; }
-  .watch-body-watch .dcell:has(input[name="beat"])                { grid-area: beat; }
-  .watch-body-watch .dcell:has(input[title^="Calculated from Beat"]) { grid-area: hz; }
-  .watch-body-watch .dcell:has(input[name="escape_wheel"])        { grid-area: esc; }
-  .watch-body-watch .dcell:has(select[name="movement_type"])      { grid-area: winding; }
-  .watch-body-watch .dcell:has(input[name="reserve"])             { grid-area: reserve; }
-  .watch-body-watch .dcell:has(textarea[name="calibre_notes"])    { grid-area: notes; }
-  .watch-body-watch .dcell:has(input[name="service_date"])        { grid-area: svc; }
-  .watch-body-watch .dcell:has(input[title^="Calculated from the Svc"]) { grid-area: since; }
-
-  /* 2pt dividers: one under Edition/Year (separating brand specs
-     from movement specs), one under Calibre Notes (separating the
-     movement block from Svc/Since). */
-  .watch-body-watch .dcell:has(input[name="edition"]),
-  .watch-body-watch .dcell:has(input[name="year"]),
-  .watch-body-watch .dcell:has(textarea[name="calibre_notes"]) {
+  /* 2pt dividers: under Edition/Yr (= last dg2 of brand-bot),
+     and under Calibre Notes. */
+  .watch-body-watch .watch-brand-bot .dgrid:last-child .dcell {
+    border-bottom: 2px solid var(--border);
+  }
+  .watch-body-watch .watch-movement-block .dgrid.dg1:has(textarea[name="calibre_notes"]) .dcell {
     border-bottom: 2px solid var(--border);
   }
   /* Recording radio panel gets breathing room at the reduced spec width. */
