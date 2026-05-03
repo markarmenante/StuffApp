@@ -2278,6 +2278,15 @@ input[type="date"] { -webkit-appearance: none; }
        from the desktop flex layout was leaving a stray width hint. */
   }
   .watch-body .watch-specs > .dgrid { width: 100%; box-sizing: border-box; }
+  /* The desktop-only 2fr/1fr/1fr split on the Escape Wheel row leaves
+     a phantom 1fr third column on phones — Escape Wheel and Winding
+     occupy cols 1-2, Reserve wraps to row 2 spanning cols 1-2 (per
+     the dg3 :nth-child(3) span rule), and col 3 sits empty on the
+     right. Reset the row to a plain 2-col grid at mobile so the
+     wrapped layout fills the full width. */
+  .watch-specs .dgrid.dg3.watch-escape-wheel-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
   /* Recording radio panel gets breathing room at the reduced spec width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
   /* Keep the two post-radio meta/purchase rows two-up on mobile so
