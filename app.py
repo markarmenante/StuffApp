@@ -2360,8 +2360,8 @@ def fetch_watch_specs(watch):
             f"\nThe calibre is already known: {calibre_hint}. For "
             f"movement-detail fields (movement_jewels, escapement, "
             f"balance_wheel, beat, reserve, movement_type, "
-            f"movement_origin) prefer these calibre-specific "
-            f"sources first:\n"
+            f"movement_origin, calibre_notes) prefer these "
+            f"calibre-specific sources first:\n"
             f"{calibre_sources_bullets}\n"
         )
     else:
@@ -2395,6 +2395,7 @@ Target fields:
 - lug_mm: lug width in mm (float)
 - strap_material: e.g. "Leather", "Steel", "Rubber"
 - notes: a 2-4 sentence quality blurb about what makes this specific reference notable — its place in the brand's history, design innovation, technical distinction, or cultural significance. Write in a knowledgeable but concise collector's voice. Keep under 500 characters. Return null only if sources offer nothing substantive.
+- calibre_notes: a 1-3 sentence summary of the calibre's distinguishing features — architecture (e.g. twin barrels in parallel, going train under the dial), key complications integrated into the movement, escapement / regulator design, hand-finishing, family lineage (which calibre it evolved from), or any patented mechanisms. This is about the MOVEMENT, not the watch as a whole — write what a movement-savvy collector would want to know. Keep under 400 characters. Return null if sources don't describe the calibre's internals.
 
 Reply with ONLY a JSON object, no prose, no code fences:
 {{
@@ -2416,6 +2417,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
   "lug_mm": null,
   "strap_material": null,
   "notes": null,
+  "calibre_notes": null,
   "sources": "one-line note of which sources hit"
 }}
 """
@@ -4040,7 +4042,7 @@ WATCH_LOOKUP_FILLABLE = (
     'metal', 'case_diameter', 'dial_color', 'year', 'edition', 'calibre',
     'movement_type', 'movement_origin', 'movement_jewels', 'escapement',
     'balance_wheel', 'beat', 'reserve', 'complications', 'clasp_type',
-    'lug_mm', 'strap_material', 'notes',
+    'lug_mm', 'strap_material', 'notes', 'calibre_notes',
 )
 
 # Fields we'll only populate when blank — never overwrite the existing
