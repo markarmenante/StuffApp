@@ -383,7 +383,8 @@ document.addEventListener('DOMContentLoaded', function () {
          the service rows below. #}
       <div class="dgrid dg2 watch-movement">
         <div class="dcell">
-          <input type="text" name="calibre" value="{{ val('calibre') }}">
+          <input type="text" name="calibre" class="calibre-input"
+                 value="{{ val('calibre') }}">
           <span class="clabel">Calibre</span>
         </div>
         <div class="dcell">
@@ -4856,6 +4857,63 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   // Expose so other scripts (e.g. recording Lookup that programmatically
   // sets textarea values) can trigger a resize after they assign .value.
   window._autosizeTextarea = resize;
+})();
+
+// Calibre short-form display on mobile. Lookup returns the calibre
+// in canonical form ("Universal Genève 262", "F.P. Journe Calibre
+// 1304"), but on a narrow phone screen the brand prefix dominates
+// the cell. Strip the prefix for display, restore the full form on
+// focus so editing still works against the canonical name. Save flow
+// is untouched — autosave reads input.value at blur, which by then
+// has been written back to whatever the user actually typed.
+(function () {
+  const MOBILE_QUERY = window.matchMedia('(max-width: 640px)');
+  function stripBrand(full, brand) {
+    if (!full || !brand) return full || '';
+    const b = brand.trim();
+    if (!b) return full;
+    let s = full.trim();
+    if (s.toLowerCase().startsWith(b.toLowerCase())) {
+      s = s.slice(b.length).trim();
+      // Drop a "Calibre" / "Cal." / "Cal" connector when present.
+      s = s.replace(/^(?:calibre|cal\.?)\s+/i, '').trim();
+    }
+    return s || full;
+  }
+  function setup(input) {
+    const form = input.closest('form');
+    if (!form) return;
+    const brandEl = form.querySelector('[name="brand"]');
+    const fullValue = () => input.dataset.full || input.value;
+    const refreshDataset = () => {
+      input.dataset.full = input.value;
+      input.dataset.short = stripBrand(input.value, brandEl ? brandEl.value : '');
+    };
+    refreshDataset();
+    const apply = () => {
+      // Don't clobber what the user is currently typing.
+      if (document.activeElement === input) return;
+      input.value = MOBILE_QUERY.matches ? input.dataset.short : input.dataset.full;
+    };
+    apply();
+    input.addEventListener('focus', () => {
+      // Expand to full canonical form so the user is editing the
+      // unambiguous name, not a brand-stripped fragment.
+      input.value = input.dataset.full;
+    });
+    input.addEventListener('blur', () => {
+      // Whatever the user ended up with is the new full value.
+      refreshDataset();
+      apply();
+    });
+    MOBILE_QUERY.addEventListener('change', apply);
+    // Brand might be edited too; re-derive short form when it changes.
+    if (brandEl) brandEl.addEventListener('blur', () => {
+      input.dataset.short = stripBrand(input.dataset.full, brandEl.value);
+      apply();
+    });
+  }
+  document.querySelectorAll('input.calibre-input').forEach(setup);
 })();
 
 // Perplexity search button on the watch model row. Pulls Brand,
