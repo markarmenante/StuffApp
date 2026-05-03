@@ -1724,12 +1724,13 @@ def _looks_like_heic(data):
 
 def save_upload(file_obj):
     """Save an uploaded file and return the stored filename.
-    HEIC/HEIF input is transcoded to JPEG so browsers can render it.
-    Images with an alpha channel (transparent PNG, RGBA WebP, etc.)
-    are flattened onto white before save — without that step PIL's
-    default RGBA→RGB conversion fills transparent pixels with black,
-    so dragging a transparent product render onto a watch slot would
-    paint a black square behind the watch."""
+
+    Decode-and-re-encode runs whenever the image is HEIC/HEIF OR has
+    an alpha channel that would otherwise paint black behind
+    transparent pixels (PIL's default RGBA→RGB fill). Both cases
+    converge on a JPEG re-encode with the alpha (if any) composited
+    over white. Non-alpha JPEG/PNG/RGB images pass through untouched
+    so we don't lose source quality on a needless re-encode."""
     if not file_obj or file_obj.filename == '':
         return None
     if not allowed_file(file_obj.filename):
@@ -1738,37 +1739,44 @@ def save_upload(file_obj):
     data = file_obj.read()
     ext = file_obj.filename.rsplit('.', 1)[1].lower()
 
-    if _looks_like_heic(data) and HEIF_SUPPORTED:
+    is_heic = _looks_like_heic(data) and HEIF_SUPPORTED
+
+    try:
         from io import BytesIO
         from PIL import Image
         img = Image.open(BytesIO(data))
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        out = BytesIO()
-        img.save(out, format='JPEG', quality=90)
-        data = out.getvalue()
-        ext = 'jpg'
-    else:
-        # Flatten any alpha channel onto white so transparent pixels
-        # render as white, not black. Skipped silently if PIL can't
-        # decode the bytes (e.g. SVG, unrecognised format) — the
-        # original bytes still get written.
-        try:
-            from io import BytesIO
-            from PIL import Image
-            img = Image.open(BytesIO(data))
-            if img.mode == 'P' and 'transparency' in img.info:
-                img = img.convert('RGBA')
-            if img.mode in ('RGBA', 'LA'):
+        # Promote palette-with-transparency to RGBA so alpha gets
+        # flattened by the next branch (PNGs saved with type-3 palette
+        # + tRNS chunk land here).
+        if img.mode == 'P' and 'transparency' in img.info:
+            img = img.convert('RGBA')
+        has_alpha = img.mode in ('RGBA', 'LA')
+
+        if is_heic or has_alpha:
+            if has_alpha:
                 bg = Image.new('RGB', img.size, (255, 255, 255))
                 alpha = img.split()[-1]
                 bg.paste(img.convert('RGB'), mask=alpha)
-                out = BytesIO()
-                bg.save(out, format='JPEG', quality=92)
-                data = out.getvalue()
-                ext = 'jpg'
-        except Exception:
-            pass
+                img = bg
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            out = BytesIO()
+            img.save(out, format='JPEG', quality=90)
+            data = out.getvalue()
+            ext = 'jpg'
+            app.logger.info(
+                'save_upload: re-encoded as JPEG (heic=%s, had_alpha=%s, '
+                'orig_ext=%s)', is_heic, has_alpha,
+                file_obj.filename.rsplit('.', 1)[-1].lower()
+            )
+    except Exception as e:
+        # Decode failed (SVG, unsupported format, malformed data). We
+        # still write the original bytes — the file just bypasses the
+        # alpha-flatten / HEIC branch.
+        app.logger.warning(
+            'save_upload: PIL decode failed for %r: %s — saving as-is',
+            file_obj.filename, e
+        )
 
     stored_name = f"{uuid.uuid4().hex}.{ext}"
     with open(os.path.join(UPLOAD_FOLDER, stored_name), 'wb') as f:
