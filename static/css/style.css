@@ -2147,6 +2147,10 @@ input[type="date"] { -webkit-appearance: none; }
      with Vendor orphaned on its own row. */
   .dgrid.dg3.camera-purchase { grid-template-columns: 1fr 1fr 1fr; }
 
+  /* Coin purchase row (Vendor | Date | Price): keep three-up on
+     phones too instead of wrapping Price to its own row. */
+  .dgrid.dg3.coin-purchase { grid-template-columns: 1fr 1fr 1fr; }
+
   /* Art detail rows are explicitly grouped (Medium|Dimensions,
      Date|Price|Vendor, Property|Location, Owner|Status) — keep them
      side-by-side on phones instead of letting dg2/dg3 stack. */
