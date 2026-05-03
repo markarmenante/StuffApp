@@ -2249,22 +2249,26 @@ input[type="date"] { -webkit-appearance: none; }
      vehicles, recordings, rifles, audio, properties). Art and lenses
      already stack via their own *-body / *-photo-full classes;
      persons keeps the photo hidden via the override below. */
-  .watch-body { flex-direction: column; }
+  /* On phones, drop the flex layout entirely — .watch-body becomes a
+     plain block so .watch-photo and .watch-specs each take a full
+     row of the viewport. Tried flex-direction: column with width: 100%
+     on the children; cross-axis stretch was unreliable in iOS Safari
+     and left a strip of grey to the right of the spec rows. Block flow
+     side-steps that quirk: each child is a block, each block is 100%
+     wide by default. */
+  .watch-body { display: block; }
   .watch-body .watch-photo {
-    width: 100%;
+    width: auto;
     min-height: 220px;
     padding: 6px;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    /* Re-establish the photo's centered-image flex so .no-img and
+       <img> stay vertically centered inside the now-block parent. */
+    display: flex;
   }
   .watch-body .watch-photo img { max-width: 220px; max-height: 220px; }
-  /* When .watch-body flips to column flex, .watch-specs is a column
-     flex item with `flex: 1 1 0%`. Cross-axis stretch should fill
-     width, but the explicit flex:1 + nested flex-column on .watch-specs
-     itself sometimes leaves the spec block computing a narrower
-     intrinsic width than the photo above it — leaving a strip of grey
-     to the right of the rows. Force full width explicitly. */
-  .watch-body .watch-specs { width: 100%; }
+  .watch-body .watch-specs { display: block; width: auto; }
   /* Recording radio panel gets breathing room at the reduced spec width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
   /* Keep the two post-radio meta/purchase rows two-up on mobile so
