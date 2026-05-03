@@ -2616,3 +2616,13 @@ input[type="date"] { -webkit-appearance: none; }
     padding-left: 32px;
   }
 }
+
+/* Watches: 2pt rule above the Escape Wheel row at narrow viewports
+   (iPhone + "collapsed" desktop windows up to 1024px). Visually
+   separates the standalone Escape Wheel field from the dg2 movement
+   pairs above it; full desktop keeps the cells' natural 1px borders. */
+@media (max-width: 1024px) {
+  .watch-body-watch .watch-specs > .dgrid.dg1:has(input[name="escape_wheel"]) > .dcell {
+    border-top: 2px solid var(--border);
+  }
+}
