@@ -2312,20 +2312,24 @@ WATCH_CALIBRE_SOURCES = [
 
 
 def fetch_watch_specs(watch):
-    """Use Claude's web_search tool to look up a watch's specs from
-    reputable sources and return {field: value} suggestions.
+    """Use Perplexity's web-search-grounded completions to look up a
+    watch's specs from reputable sources and return {field: value}
+    suggestions.
+
+    Perplexity is search-first by design — every response is grounded
+    in web results — and in side-by-side testing against Anthropic's
+    web_search tool it tends to surface more reference / movement
+    detail per query. Prompt and return shape are unchanged from the
+    Claude version so the calling code (apply-lookup propagation,
+    field-by-field validation, blank-only rules) doesn't need to know.
 
     Only fields the model is confident about should be populated; all
-    others should come back null. Raises RuntimeError on missing key or
+    others come back null. Raises RuntimeError on missing key or
     API failure.
     """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    api_key = os.environ.get('PERPLEXITY_API_KEY')
     if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
-    try:
-        import anthropic
-    except ImportError:
-        raise RuntimeError("anthropic package not installed. Run 'pip install anthropic'.")
+        raise RuntimeError('PERPLEXITY_API_KEY not configured')
 
     brand = (watch['brand'] or '').strip()
     model = (watch['model'] or '').strip()
@@ -2423,55 +2427,83 @@ Reply with ONLY a JSON object, no prose, no code fences:
 }}
 """
 
-    # Cap the SDK request below gunicorn's 300s killer so we surface a
-    # clean Python exception (and a JSON 503) instead of letting the
-    # worker get SIGKILLed mid-flight and returning HTML/empty 500s.
-    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
-
+    # POST to Perplexity's chat-completions endpoint. urllib avoids
+    # adding a `requests` dependency. Timeout is held below the 300s
+    # gunicorn killer so the worker raises a clean Python exception
+    # (mapped to a JSON 503 by the route) instead of getting SIGKILLed
+    # and returning empty 500s.
+    import urllib.request
+    import urllib.error
     import time as _time
-    last_err = None
-    transient_errs = (
-        anthropic.RateLimitError,
-        anthropic.APIConnectionError,
-        anthropic.APITimeoutError,
-        anthropic.InternalServerError,
+
+    body = json.dumps({
+        'model': 'sonar-pro',
+        'messages': [{'role': 'user', 'content': prompt}],
+        'max_tokens': 2048,
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        'https://api.perplexity.ai/chat/completions',
+        data=body,
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        },
+        method='POST',
     )
+
+    last_err = None
+    api_data = None
     for attempt in range(3):
         try:
-            resp = client.messages.create(
-                model='claude-sonnet-4-5',
-                max_tokens=2048,
-                tools=[{
-                    'type': 'web_search_20250305',
-                    'name': 'web_search',
-                    'max_uses': 6,
-                }],
-                messages=[{'role': 'user', 'content': prompt}],
-            )
+            with urllib.request.urlopen(req, timeout=240) as resp:
+                api_data = json.loads(resp.read().decode('utf-8'))
             break
-        except transient_errs as e:
+        except urllib.error.HTTPError as e:
             last_err = e
-            wait = 10 * (attempt + 1)
+            # 5xx + 429 are transient; 4xx (except 429) are permanent.
+            if e.code == 429 or 500 <= e.code < 600:
+                wait = 10 * (attempt + 1)
+                try:
+                    ra = e.headers.get('retry-after') if getattr(e, 'headers', None) else None
+                    if ra:
+                        wait = max(wait, int(float(ra)))
+                except Exception:
+                    pass
+                _time.sleep(wait)
+                continue
             try:
-                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
-                if ra:
-                    wait = max(wait, int(float(ra)))
+                detail = e.read().decode('utf-8', 'ignore')[:200]
             except Exception:
-                pass
-            _time.sleep(wait)
+                detail = ''
+            raise RuntimeError(f'Perplexity HTTP {e.code}: {detail}')
+        except urllib.error.URLError as e:
+            last_err = e
+            _time.sleep(10 * (attempt + 1))
     else:
         raise RuntimeError(f'Lookup failed after retries: {last_err}')
 
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    try:
+        text = api_data['choices'][0]['message']['content'] or ''
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(f'Unexpected Perplexity response: {str(api_data)[:200]}')
     text = text.strip()
 
     m = re.search(r'\{.*\}', text, re.DOTALL)
     if not m:
         raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
-    return json.loads(m.group(0))
+    parsed = json.loads(m.group(0))
+
+    # Surface Perplexity's citation URLs alongside the model's own
+    # one-line "sources" note. Helpful when reviewing a lookup result
+    # to see which pages it actually drew from.
+    citations = api_data.get('citations') or []
+    if citations and isinstance(parsed, dict):
+        existing = (parsed.get('sources') or '').strip()
+        cite_list = '; '.join(citations[:6])
+        parsed['sources'] = (f'{existing} | citations: {cite_list}'
+                             if existing else f'citations: {cite_list}')
+    return parsed
 
 
 def audit_coin_image_vs_description(coin):
