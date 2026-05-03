@@ -8886,17 +8886,26 @@ def record_print_pdf(category, record_id):
                             leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch)
     styles = getSampleStyleSheet()
-    h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontSize=16, spaceAfter=2)
+    h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontSize=18, spaceAfter=2)
+    h2 = ParagraphStyle('h2', parent=styles['Heading2'], fontSize=13,
+                        spaceAfter=10)
     sub = ParagraphStyle('sub', parent=styles['Normal'], fontSize=10,
                          textColor=colors.grey, spaceAfter=10)
     cell_style = ParagraphStyle('cell', parent=styles['Normal'],
                                 fontSize=9, leading=11)
 
     story = []
-    story.append(Paragraph(ident or '(untitled)', h1))
-    sub_text = ' · '.join(filter(None, [cat_label, group]))
-    if sub_text:
-        story.append(Paragraph(sub_text, sub))
+    if category == 'watches':
+        # Mirror the desktop UI: brand as the prominent H1, model
+        # (with cat_id, e.g. "Reference 8 (W402)") as the sub-header.
+        story.append(Paragraph(group or '(unknown brand)', h1))
+        if ident:
+            story.append(Paragraph(ident, h2))
+    else:
+        story.append(Paragraph(ident or '(untitled)', h1))
+        sub_text = ' · '.join(filter(None, [cat_label, group]))
+        if sub_text:
+            story.append(Paragraph(sub_text, sub))
 
     # Find a primary image to embed near the top.
     fields = FIELDS.get(category, [])
@@ -9088,25 +9097,31 @@ def record_print_pdf(category, record_id):
             ]))
             story.append(tbl)
 
+        # Cell builder: value on top, small grey label underneath.
+        # Mirrors the desktop UI where the clabel sits at the bottom
+        # of each cell — and avoids the cramped 8-column-row problem
+        # where short label tracks (~0.28") forced labels like
+        # "Material" and "Vendor" to wrap to 2 or 3 lines.
+        def _kv_cell(value, label):
+            return Paragraph(
+                f'{value}<br/><font size=7 color="#888">{label}</font>',
+                cell_style
+            )
+
         # Tang | Lug | Material | Color
         if any(_val(n) for n in ('clasp_type', 'lug_mm', 'strap_material', 'strap_color')):
-            data = [[Paragraph(_val('clasp_type'), cell_style),
-                     Paragraph('<font size=7 color="#888">Clasp</font>', cell_style),
-                     Paragraph(_val('lug_mm'), cell_style),
-                     Paragraph('<font size=7 color="#888">Lug mm</font>', cell_style),
-                     Paragraph(_val('strap_material'), cell_style),
-                     Paragraph('<font size=7 color="#888">Material</font>', cell_style),
-                     Paragraph(_val('strap_color'), cell_style),
-                     Paragraph('<font size=7 color="#888">Color</font>', cell_style)]]
-            cw = doc.width / 8
-            tbl = Table(data, colWidths=[cw * 0.7, cw * 0.3] * 4)
+            data = [[_kv_cell(_val('clasp_type'), 'Clasp'),
+                     _kv_cell(_val('lug_mm'), 'Lug mm'),
+                     _kv_cell(_val('strap_material'), 'Material'),
+                     _kv_cell(_val('strap_color'), 'Color')]]
+            tbl = Table(data, colWidths=[doc.width / 4] * 4)
             tbl.setStyle(TableStyle([
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('FONTSIZE', (0, 0), (-1, -1), 9),
                 ('LEFTPADDING', (0, 0), (-1, -1), 4),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
                 ('LINEBELOW', (0, 0), (-1, -1), 0.25, colors.lightgrey),
             ]))
             story.append(tbl)
@@ -9123,23 +9138,18 @@ def record_print_pdf(category, record_id):
         except (TypeError, ValueError):
             pass
         if any([_val('date'), price_v, _val('vendor'), value_v]):
-            data = [[Paragraph(_val('date'), cell_style),
-                     Paragraph('<font size=7 color="#888">Date</font>', cell_style),
-                     Paragraph(price_v, cell_style),
-                     Paragraph('<font size=7 color="#888">Price</font>', cell_style),
-                     Paragraph(_val('vendor'), cell_style),
-                     Paragraph('<font size=7 color="#888">Vendor</font>', cell_style),
-                     Paragraph(value_v, cell_style),
-                     Paragraph('<font size=7 color="#888">Value</font>', cell_style)]]
-            cw = doc.width / 8
-            tbl = Table(data, colWidths=[cw * 0.7, cw * 0.3] * 4)
+            data = [[_kv_cell(_val('date'), 'Date'),
+                     _kv_cell(price_v, 'Price'),
+                     _kv_cell(_val('vendor'), 'Vendor'),
+                     _kv_cell(value_v, 'Value')]]
+            tbl = Table(data, colWidths=[doc.width / 4] * 4)
             tbl.setStyle(TableStyle([
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('FONTSIZE', (0, 0), (-1, -1), 9),
                 ('LEFTPADDING', (0, 0), (-1, -1), 4),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
                 ('LINEBELOW', (0, 0), (-1, -1), 0.25, colors.lightgrey),
             ]))
             story.append(tbl)
