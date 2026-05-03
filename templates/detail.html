@@ -335,6 +335,13 @@ document.addEventListener('DOMContentLoaded', function () {
     <input type="text" name="model" value="{{ val('model') }}"
            placeholder="Model"
            style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+    {# Magnifying-glass button: opens a Perplexity search asking for
+       calibre / jewels / escapement / beat / power reserve /
+       complications / retail price / history of the watch identified
+       by the Brand/Model/Reference/Metal currently in the form. #}
+    <button type="button" class="watch-perplexity-btn"
+            onclick="openPerplexitySearch(this)"
+            title="Search Perplexity for movement details, retail price, and history">🔍</button>
     <span class="header-row-label">Model</span>
   </div>
 
@@ -4850,5 +4857,36 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   // sets textarea values) can trigger a resize after they assign .value.
   window._autosizeTextarea = resize;
 })();
+
+// Perplexity search button on the watch model row. Pulls Brand,
+// Model, Reference, Metal from the form and opens a Perplexity
+// search in a new tab asking for the technical detail block the
+// user wants to populate movement / pricing / history fields.
+function openPerplexitySearch(btn) {
+  const form = btn.closest('form');
+  if (!form) return;
+  const v = name => {
+    const el = form.querySelector(`[name="${name}"]`);
+    if (!el) return '';
+    // Selects (e.g. metal) carry the choice as .value too.
+    return (el.value || '').trim();
+  };
+  const brand = v('brand');
+  const model = v('model');
+  const reference = v('reference');
+  const metal = v('metal');
+  const ident = [brand, model, reference, metal].filter(Boolean).join(' ');
+  if (!ident) {
+    alert('Add a Brand, Model, Reference, or Metal first.');
+    return;
+  }
+  const q =
+    `For the ${ident} watch, give detailed information on: ` +
+    `calibre, jewels, escapement, beat (in vph), power reserve, ` +
+    `manual or automatic, complications, retail price when new, ` +
+    `and history.`;
+  const url = 'https://www.perplexity.ai/search?q=' + encodeURIComponent(q);
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
 </script>
 {% endblock %}
