@@ -530,7 +530,10 @@ document.addEventListener('DOMContentLoaded', function () {
       <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric">
       <span class="clabel">Price</span>
     </div>
-    {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+    <div class="dcell ta-wrap">
+      <input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center">
+      <span class="clabel">Vendor</span>
+    </div>
     <div class="dcell">
       <input type="text" name="value" value="{{ val('value')|currency }}" class="price-input" inputmode="numeric">
       <span class="clabel">Value</span>
