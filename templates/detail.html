@@ -377,7 +377,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="dcell"><input type="text" name="year" value="{{ val('year') }}" style="text-align:center"><span class="clabel">Yr Mfg</span></div>
       </div>
       {# Movement: four dg2 pairs (Calibre/Jewels, Escapement/Origin,
-         Beat/Hz, Winding/Reserve), then standalone Escape Wheel as
+         Beat/Hz, Winding/Reserve), then standalone Balance Wheel as
          a dg1 row. The .watch-movement class on these rows tints
          them grey to set them apart from the brand specs above and
          the service rows below. #}
@@ -469,8 +469,8 @@ document.addEventListener('DOMContentLoaded', function () {
       </div>
       <div class="dgrid dg1 watch-movement">
         <div class="dcell">
-          <input type="text" name="escape_wheel" value="{{ val('escape_wheel') }}">
-          <span class="clabel">Escape Wheel</span>
+          <input type="text" name="balance_wheel" value="{{ val('balance_wheel') }}">
+          <span class="clabel">Balance Wheel</span>
         </div>
       </div>
       {# Calibre notes: full-width row spanning the spec column. Sits

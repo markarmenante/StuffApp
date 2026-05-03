@@ -617,12 +617,6 @@ input[type="number"]::-webkit-outer-spin-button {
    rows below. */
 .dgrid.watch-movement .dcell { background: #f4f4f6; }
 
-/* Escape Wheel | Winding | Reserve row: Escape Wheel takes half the row
-   (text values can be long, e.g. "Twin wheels; bi-axial direct impulse");
-   Winding and Reserve split the remaining half. Override the default
-   repeat(3, 1fr) for this row only. */
-.watch-specs .dgrid.dg3.watch-escape-wheel-row { grid-template-columns: 2fr 1fr 1fr; }
-
 /* Service date: desktop shows native date, compact overlay hidden. */
 .svc-date-compact { display: none; }
 /* The MM/DD/YYYY overlay span is mobile-only; hidden on desktop where
@@ -2306,7 +2300,7 @@ input[type="date"] { -webkit-appearance: none; }
   /* Watches mobile: image at 40% width on the left, height matches
      the first eight dgrid rows on the right (4 brand-spec rows +
      the four movement dg2 pairs: Calibre/Jewels, Escapement/Origin,
-     Beat/Hz, Winding/Reserve). The remaining dgrids — Escape Wheel,
+     Beat/Hz, Winding/Reserve). The remaining dgrids — Balance Wheel,
      Calibre Notes, and Svc/Since — drop full-width below the image.
      Implemented via CSS grid: photo spans 8 rows in col 1, the
      first eight dgrids auto-flow into col 2 (sized 60%), the rest
@@ -2336,7 +2330,7 @@ input[type="date"] { -webkit-appearance: none; }
   .watch-body-watch .watch-specs > .dgrid:nth-child(-n+8) {
     grid-column: 2;
   }
-  /* Remaining dgrids (Escape Wheel, Calibre Notes, Svc/Since) span
+  /* Remaining dgrids (Balance Wheel, Calibre Notes, Svc/Since) span
      both columns, dropping below the photo. */
   .watch-body-watch .watch-specs > .dgrid:nth-child(n+9) {
     grid-column: 1 / -1;
@@ -2633,12 +2627,12 @@ input[type="date"] { -webkit-appearance: none; }
   }
 }
 
-/* Watches: 2pt rule above the Escape Wheel row at narrow viewports
+/* Watches: 2pt rule above the Balance Wheel row at narrow viewports
    (iPhone + "collapsed" desktop windows up to 1024px). Visually
-   separates the standalone Escape Wheel field from the dg2 movement
+   separates the standalone Balance Wheel field from the dg2 movement
    pairs above it; full desktop keeps the cells' natural 1px borders. */
 @media (max-width: 1024px) {
-  .watch-body-watch .watch-specs > .dgrid.dg1:has(input[name="escape_wheel"]) > .dcell {
+  .watch-body-watch .watch-specs > .dgrid.dg1:has(input[name="balance_wheel"]) > .dcell {
     border-top: 2px solid var(--border);
   }
 }

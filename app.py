@@ -250,7 +250,7 @@ FIELDS = {
         {'name': 'movement_jewels', 'label': 'Jewels',            'type': 'number'},
         {'name': 'movement_origin', 'label': 'Movement Origin',   'type': 'text'},
         {'name': 'escapement',      'label': 'Escapement',        'type': 'text'},
-        {'name': 'escape_wheel',    'label': 'Escape Wheel',      'type': 'text'},
+        {'name': 'balance_wheel',   'label': 'Balance Wheel',     'type': 'text'},
         {'name': 'calibre_notes',   'label': 'Calibre Notes',     'type': 'textarea'},
         {'name': 'beat',            'label': 'Beat (vph)',        'type': 'number'},
         {'name': 'reserve',         'label': 'Power Reserve (hrs)','type': 'number'},
@@ -835,6 +835,8 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN cat_id TEXT',
         'ALTER TABLE watches ADD COLUMN escapement TEXT',
         'ALTER TABLE watches ADD COLUMN escape_wheel TEXT',
+        'ALTER TABLE watches RENAME COLUMN escape_wheel TO balance_wheel',
+        'ALTER TABLE watches ADD COLUMN balance_wheel TEXT',
         'ALTER TABLE watches ADD COLUMN calibre_notes TEXT',
         'ALTER TABLE art ADD COLUMN cat_id TEXT',
         'ALTER TABLE persons ADD COLUMN license_number TEXT',
@@ -2357,8 +2359,9 @@ def fetch_watch_specs(watch):
         calibre_hint_block = (
             f"\nThe calibre is already known: {calibre_hint}. For "
             f"movement-detail fields (movement_jewels, escapement, "
-            f"beat, reserve, movement_type, movement_origin) prefer "
-            f"these calibre-specific sources first:\n"
+            f"balance_wheel, beat, reserve, movement_type, "
+            f"movement_origin) prefer these calibre-specific "
+            f"sources first:\n"
             f"{calibre_sources_bullets}\n"
         )
     else:
@@ -2384,6 +2387,7 @@ Target fields:
 - movement_origin: EXACTLY one of [{origins}] and nothing else. "In-House" = designed and made by the manufacturer; "Ébauche" = bought-in rough movement (e.g. ETA, Sellita, Valjoux) used as-is; "Modified" = an ébauche that has been noticeably reworked. Do not invent values like "Swiss" or "Ebauche-based".
 - movement_jewels: integer
 - escapement: EXACTLY one of [{escapements}]. "Swiss Lever" is the default for nearly all modern mechanical watches — only return it if a source actually states "lever escapement" (or equivalent), since blank is more useful than an assumed value. "Co-Axial" for Omega's George Daniels-derived escapement. "Natural" for Breguet's natural escapement (also revived by Daniels and others). "Constant Force" for Lange Zeitwerk, Romain Gauthier, F.P. Journe Chronomètre Optimum-style escapements. "Detent" / "Chronometer" for marine/pivoted-detent escapements. "Cylinder", "Verge", "Pin Lever", "Duplex" for vintage/historical pieces. "Tuning Fork" for Accutron / Bulova hum movements. "Quartz" for quartz watches. "Other" only if a clearly novel escapement is named (e.g. Genequand silicon, Ulysse Nardin Anchor) and none above fit. Return null when no source mentions the escapement at all.
+- balance_wheel: short string describing the balance wheel — material, construction, and any notable features. Examples: "Glucydur with regulating screws", "Beryllium copper, free-sprung", "Variable-inertia gold mass", "Silicon hairspring with smooth bimetallic balance". Keep it under 80 characters. Return null if no source mentions balance-wheel detail.
 - beat: vibrations per hour (VPH) for mechanical movements, or raw Hz for quartz/tuning-fork movements. For mechanical (Manual/Automatic) pick from [18000, 19800, 21600, 25200, 28800, 36000, 72000]; if the source gives Hz, multiply by 7200 (2.5 Hz = 18000, 3 Hz = 21600, 4 Hz = 28800, 5 Hz = 36000, 10 Hz = 72000). For battery-powered/quartz/tuning-fork movements, return the actual rate as stated (e.g. 360 for Accutron, 32768 for a quartz crystal, 7200 for a 1 Hz stepping quartz). Do NOT assume 28800 as a default — only return a value if the source clearly states it.
 - reserve: power reserve in hours (integer)
 - complications: array of strings drawn from [{complications}]
@@ -2404,6 +2408,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
   "movement_origin": null,
   "movement_jewels": null,
   "escapement": null,
+  "balance_wheel": null,
   "beat": null,
   "reserve": null,
   "complications": null,
@@ -4034,8 +4039,8 @@ def watch_fetch_value(record_id):
 WATCH_LOOKUP_FILLABLE = (
     'metal', 'case_diameter', 'dial_color', 'year', 'edition', 'calibre',
     'movement_type', 'movement_origin', 'movement_jewels', 'escapement',
-    'beat', 'reserve', 'complications', 'clasp_type', 'lug_mm',
-    'strap_material', 'notes',
+    'balance_wheel', 'beat', 'reserve', 'complications', 'clasp_type',
+    'lug_mm', 'strap_material', 'notes',
 )
 
 # Fields we'll only populate when blank — never overwrite the existing
@@ -7109,68 +7114,68 @@ def _backfill_serial_cat_ids(table, prefix):
 JOURNE_CALIBRE_DETAILS = {
     '1498': {
         'escapement': 'Straight-line lever escapement',
-        'escape_wheel': '15-tooth wheel, 90° anchor fork',
+        'balance_wheel': '15-tooth wheel, 90° anchor fork',
         'calibre_notes': "Classic Swiss-lever-type in a horizontal straight line; tourbillon + remontoir d'égalité, dead seconds.",
     },
     '1403': {
         'escapement': 'Straight-line lever escapement',
-        'escape_wheel': '15-tooth wheel, 90° anchor fork',
+        'balance_wheel': '15-tooth wheel, 90° anchor fork',
         'calibre_notes': 'Evolves 1498: tourbillon + 1-sec remontoir + dead seconds; straight-line Swiss-lever-type.',
     },
     '1412': {
         'escapement': 'Pallet escapement',
-        'escape_wheel': '15-tooth escape wheel',
+        'balance_wheel': '15-tooth escape wheel',
         'calibre_notes': 'Lateral pallet (lever) escapement in Breguet-style architecture; two barrels in parallel.',
     },
     '1408': {
         'escapement': 'Linear escapement',
-        'escape_wheel': '15-tooth escape wheel',
+        'balance_wheel': '15-tooth escape wheel',
         'calibre_notes': 'Linear escapement with 15-tooth escape wheel; going train tucked under the dial, escapement visually isolated.',
     },
     '1505': {
         'escapement': 'Linear escapement',
-        'escape_wheel': '15-tooth escape wheel',
+        'balance_wheel': '15-tooth escape wheel',
         'calibre_notes': 'Linear escapement with 15-tooth escape wheel; hand-wound grande/petite sonnerie with specific safety architecture.',
     },
     '1300.3': {
         'escapement': 'In-line (linear) lever escapement',
-        'escape_wheel': '15-tooth wheel',
+        'balance_wheel': '15-tooth wheel',
         'calibre_notes': 'Automatic Octa base, long-reserve architecture; in-line lever escapement in gold movement.',
     },
     '1510': {
         'escapement': 'EBHP "High-Performance Bi-axial" escapement',
-        'escape_wheel': 'Twin wheels; bi-axial direct impulse',
+        'balance_wheel': 'Twin wheels; bi-axial direct impulse',
         'calibre_notes': 'Dual-escape-wheel direct-impulse escapement, oil-free, with constant-force remontoir and natural dead-beat seconds.',
     },
     '1519': {
         'escapement': 'Straight-line lever escapement',
-        'escape_wheel': '15-tooth wheel, 90° anchor fork',
+        'balance_wheel': '15-tooth wheel, 90° anchor fork',
         'calibre_notes': 'Vertical tourbillon with remontoir and dead seconds; straight-line Swiss-lever-type escapement.',
     },
     '1304': {
         'escapement': 'Swiss lever escapement',
-        'escape_wheel': 'Standard Swiss lever',
+        'balance_wheel': 'Standard Swiss lever',
         'calibre_notes': 'Time-only, twin barrels in parallel feeding a classic detached lever escapement in a very flat architecture.',
     },
     '1499': {  # match_prefix — covers all 1499.x Résonance variants
         'escapement': 'Straight-line lever escapements (x2)',
-        'escape_wheel': 'Swiss lever for each train',
+        'balance_wheel': 'Swiss lever for each train',
         'calibre_notes': 'Two balances in resonance, each with its own straight-line lever escapement.',
         'match_prefix': True,
     },
     '1518': {
         'escapement': 'Swiss lever escapement',
-        'escape_wheel': 'Swiss lever',
+        'balance_wheel': 'Swiss lever',
         'calibre_notes': 'High-beat integrated rattrapante chronograph in LineSport; classic lever escapement.',
     },
     '1619': {
         'escapement': 'Swiss lever escapement + tourbillon',
-        'escape_wheel': 'Tourbillon + Swiss-lever-type escapement',
+        'balance_wheel': 'Tourbillon + Swiss-lever-type escapement',
         'calibre_notes': 'Grand complication with tourbillon; Journe does not detail a special escapement, so it is a tourbillon with lever.',
     },
     '1520': {
         'escapement': 'Lever escapement with remontoir',
-        'escape_wheel': 'Lever escapement, constant-force system',
+        'balance_wheel': 'Lever escapement, constant-force system',
         'calibre_notes': 'Evolution of the tourbillon architecture with remontoir; classic lever escapement in the cage.',
     },
 }
@@ -7221,7 +7226,7 @@ def normalize_watch_brand_unicode():
 
 @app.route('/admin/seed-journe-calibres', methods=['POST'])
 def seed_journe_calibres():
-    """One-shot: overwrite escapement / escape_wheel / calibre_notes
+    """One-shot: overwrite escapement / balance_wheel / calibre_notes
     on every F.P. Journe watch whose calibre matches one of the
     families documented in JOURNE_CALIBRE_DETAILS. Targeting is
     brand-scoped (TRIM/LOWER contains 'journe') and either exact-match
@@ -7237,7 +7242,7 @@ def seed_journe_calibres():
     now = datetime.utcnow().isoformat(timespec='seconds')
 
     journe_rows = db.execute(
-        "SELECT id, brand, model, calibre, escapement, escape_wheel, "
+        "SELECT id, brand, model, calibre, escapement, balance_wheel, "
         "       calibre_notes "
         "FROM watches "
         "WHERE LOWER(TRIM(COALESCE(brand,''))) LIKE '%journe%'"
@@ -7270,15 +7275,15 @@ def seed_journe_calibres():
             continue
         d = JOURNE_CALIBRE_DETAILS[match_key]
         before = {'escapement': r['escapement'],
-                  'escape_wheel': r['escape_wheel'],
+                  'balance_wheel': r['balance_wheel'],
                   'calibre_notes': r['calibre_notes']}
         after = {'escapement': d['escapement'],
-                 'escape_wheel': d['escape_wheel'],
+                 'balance_wheel': d['balance_wheel'],
                  'calibre_notes': d['calibre_notes']}
         db.execute(
-            "UPDATE watches SET escapement=?, escape_wheel=?, "
+            "UPDATE watches SET escapement=?, balance_wheel=?, "
             "       calibre_notes=?, updated_at=? WHERE id=?",
-            (after['escapement'], after['escape_wheel'],
+            (after['escapement'], after['balance_wheel'],
              after['calibre_notes'], now, r['id'])
         )
         matched_keys.add(match_key)
@@ -9058,8 +9063,8 @@ def record_print_pdf(category, record_id):
         story.append(outer)
         story.append(Spacer(1, 6))
 
-        # Full-width Escape Wheel + Calibre Notes rows.
-        for label, name in [('Escape Wheel', 'escape_wheel'),
+        # Full-width Balance Wheel + Calibre Notes rows.
+        for label, name in [('Balance Wheel', 'balance_wheel'),
                             ('Calibre Notes', 'calibre_notes')]:
             v = _val(name)
             if v:
