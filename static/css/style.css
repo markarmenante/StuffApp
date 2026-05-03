@@ -2279,74 +2279,38 @@ input[type="date"] { -webkit-appearance: none; }
   }
   .watch-body .watch-specs > .dgrid { width: 100%; box-sizing: border-box; }
 
-  /* Watches mobile layout:
-       +-------------+-----------+
-       |             | met | wid |   ← brand-top: 2 dg2 rows beside
-       |   PHOTO     |-----+-----|     the photo, stretched to fill
-       |  (natural)  | ref | dia |     the photo's natural height
-       +-------------+-----+-----+
-       |     case#   |    mvt#   |   ← brand-bot: full-width below
-       |     ed      |    yr     |     2pt rule under this row
-       +-------------+-----------+
-       | calibre     | jewels    |   ← movement: 2-col pairs
-       | origin      | escapement|
-       | beat        | hz        |
-       | winding     | reserve   |
-       | escape wheel (full)     |
-       | calibre notes (full)    |   2pt rule under this row
-       | svc         | since     |
-       +-------------+-----------+
-
-     The HTML wrappers (.watch-brand-top, .watch-brand-bot,
-     .watch-movement-block) are placed via grid-area on
-     .watch-body-watch; .watch-specs uses display:contents so its
-     children participate directly in the parent grid. */
+  /* Watches mobile: keep the desktop side-by-side layout but with a
+     smaller photo (~40% width). Image on the left under the model
+     row, all spec rows flow on the right at their natural sizes —
+     same structure as desktop, just narrower. */
   .watch-body-watch {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-areas:
-      "photo brandtop"
-      "brandbot brandbot"
-      "movement movement";
+    display: flex;
+    flex-direction: row;
     width: 100%;
     box-sizing: border-box;
   }
   .watch-body-watch .watch-photo {
-    grid-area: photo;
-    width: auto;
+    width: 40%;
+    flex-shrink: 0;
     min-height: 0;
     border-right: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
+    border-bottom: none;
+    padding: 6px;
   }
-  .watch-body-watch .watch-photo img { max-width: 100%; max-height: 100%; }
-  .watch-body-watch .watch-specs { display: contents; }
-  .watch-body-watch .watch-brand-top {
-    grid-area: brandtop;
+  .watch-body-watch .watch-photo img {
+    max-width: 100%;
+    max-height: 100%;
+  }
+  .watch-body-watch .watch-specs {
     display: flex;
     flex-direction: column;
-    border-bottom: 1px solid var(--border);
-  }
-  /* Stretch the two dg2 rows in brand-top so they fill the photo's
-     natural height — no grey blank zone beside the photo. */
-  .watch-body-watch .watch-brand-top .dgrid {
     flex: 1;
+    min-width: 0;
   }
-  .watch-body-watch .watch-brand-bot { grid-area: brandbot; }
-  .watch-body-watch .watch-movement-block { grid-area: movement; }
-
-  /* Force every dg2 inside the watch-body-watch back to 2-col
-     (overrides the global mobile dg2 single-col collapse). */
-  .watch-body-watch .dgrid.dg2 {
+  /* Force the brand-spec dg2 rows to stay 2-col (override the global
+     mobile dg2 single-col collapse). */
+  .watch-body-watch .watch-specs .dgrid.dg2 {
     grid-template-columns: 1fr 1fr;
-  }
-
-  /* 2pt dividers: under Edition/Yr (= last dg2 of brand-bot),
-     and under Calibre Notes. */
-  .watch-body-watch .watch-brand-bot .dgrid:last-child .dcell {
-    border-bottom: 2px solid var(--border);
-  }
-  .watch-body-watch .watch-movement-block .dgrid.dg1:has(textarea[name="calibre_notes"]) .dcell {
-    border-bottom: 2px solid var(--border);
   }
   /* Recording radio panel gets breathing room at the reduced spec width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
