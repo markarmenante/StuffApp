@@ -2279,38 +2279,74 @@ input[type="date"] { -webkit-appearance: none; }
   }
   .watch-body .watch-specs > .dgrid { width: 100%; box-sizing: border-box; }
 
-  /* Watches mobile: keep the desktop side-by-side layout but with a
-     smaller photo (~40% width). Image on the left under the model
-     row, all spec rows flow on the right at their natural sizes —
-     same structure as desktop, just narrower. */
+  /* Watches mobile: image at 40% width on the left, height matches
+     the first six dgrid rows on the right (4 brand-spec rows + the
+     Calibre/Jewels/Origin row + the Escapement/Beat/Hz row). The
+     remaining rows — Escape Wheel/Winding/Reserve, Calibre Notes,
+     and Svc/Since — drop full-width below the image. Implemented
+     via CSS grid: photo spans 6 rows in col 1, the first six dgrids
+     auto-flow into col 2 (sized 60%), the rest span both cols.
+     .watch-specs gets display:contents so its child dgrids
+     participate directly in the parent grid. */
   .watch-body-watch {
-    display: flex;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: 40% 1fr;
     width: 100%;
     box-sizing: border-box;
   }
   .watch-body-watch .watch-photo {
-    width: 40%;
-    flex-shrink: 0;
+    grid-row: 1 / span 6;
+    grid-column: 1;
+    width: auto;
     min-height: 0;
+    padding: 6px;
     border-right: 1px solid var(--border);
     border-bottom: none;
-    padding: 6px;
   }
   .watch-body-watch .watch-photo img {
     max-width: 100%;
     max-height: 100%;
   }
-  .watch-body-watch .watch-specs {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-width: 0;
+  .watch-body-watch .watch-specs { display: contents; }
+  /* First six dgrids (4 brand + Calibre row + Escapement row) sit in
+     col 2 on the right of the photo. */
+  .watch-body-watch .watch-specs > .dgrid:nth-child(-n+6) {
+    grid-column: 2;
   }
-  /* Force the brand-spec dg2 rows to stay 2-col (override the global
-     mobile dg2 single-col collapse). */
-  .watch-body-watch .watch-specs .dgrid.dg2 {
+  /* Remaining dgrids (Escape Wheel row, Calibre Notes, Svc/Since)
+     span both columns, dropping below the photo. */
+  .watch-body-watch .watch-specs > .dgrid:nth-child(n+7) {
+    grid-column: 1 / -1;
+  }
+  /* Keep dg2 rows two-up and dg3 rows three-up on mobile, overriding
+     the global mobile collapse — the spec rows use the column-2
+     width (60% of viewport) which is plenty for the layouts. */
+  .watch-body-watch .watch-specs > .dgrid.dg2 {
     grid-template-columns: 1fr 1fr;
+  }
+  .watch-body-watch .watch-specs > .dgrid.dg3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  /* The desktop-only 2fr/1fr/1fr split on the Escape Wheel row needs
+     a reset on mobile (it's now a full-width row below the image, so
+     even thirds read better). */
+  .watch-body-watch .watch-specs > .dgrid.watch-escape-wheel-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  /* Cancel the global :nth-child(3) span 2 rule for these dg3 rows
+     (it was the narrow-screen wrap fallback; not needed here). */
+  .watch-body-watch .watch-specs > .dgrid.dg3 .dcell:nth-child(3) {
+    grid-column: auto;
+  }
+  /* 2pt dividers: under the 4th dgrid (Edition/Yr Mfg, separating
+     brand specs above from movement specs to the right of the photo
+     and below it), and under the dg1 calibre notes (separating it
+     from the svc/since row). */
+  .watch-body-watch .watch-specs > .dgrid:nth-child(4) > .dcell {
+    border-bottom: 2px solid var(--border);
+  }
+  .watch-body-watch .watch-specs > .dgrid.dg1 > .dcell {
+    border-bottom: 2px solid var(--border);
   }
   /* Recording radio panel gets breathing room at the reduced spec width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
