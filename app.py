@@ -4277,15 +4277,34 @@ def watch_lookup_specs(record_id):
     })
 
 
+# Fields that describe the calibre itself — a property of the
+# movement, not of the specific watch reference. When a Lookup
+# updates these on one watch, propagate the same values to every
+# other watch sharing the same calibre so the movement spec stays
+# consistent across the collection.
+MOVEMENT_PROPERTY_FIELDS = frozenset([
+    'movement_jewels', 'movement_origin', 'movement_type',
+    'escapement', 'balance_wheel', 'beat', 'reserve',
+    'calibre_notes',
+])
+
+
 @app.route('/watches/<record_id>/apply-lookup', methods=['POST'])
 def watch_apply_lookup(record_id):
     """Apply a user-selected subset of lookup suggestions to a watch.
 
     Body: ``{"updates": {"<field>": <value>, ...}}``
     Only fields listed in ``WATCH_LOOKUP_FILLABLE`` are accepted.
+
+    Movement-property fields (jewels, escapement, balance wheel, beat,
+    reserve, calibre notes, etc. — see MOVEMENT_PROPERTY_FIELDS) get
+    propagated to every other watch with the same calibre, so the
+    movement spec stays consistent across siblings on the same calibre.
     """
     db = get_db()
-    watch = db.execute("SELECT id FROM watches WHERE id = ?", (record_id,)).fetchone()
+    watch = db.execute(
+        "SELECT id, calibre FROM watches WHERE id = ?", (record_id,)
+    ).fetchone()
     if not watch:
         return jsonify({'error': 'Watch not found'}), 404
     data = request.get_json(force=True) or {}
@@ -4300,7 +4319,8 @@ def watch_apply_lookup(record_id):
             v = normalize_field_value('watches', k, v)
         updates[k] = v
     if not updates:
-        return jsonify({'updated': 0, 'fields': []})
+        return jsonify({'updated': 0, 'fields': [],
+                        'propagated_to': 0, 'propagated_fields': []})
     set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
     now = datetime.utcnow().isoformat()
     params = list(updates.values()) + [now, record_id]
@@ -4308,8 +4328,39 @@ def watch_apply_lookup(record_id):
         f"UPDATE watches SET {set_clause}, updated_at = ? WHERE id = ?",
         params,
     )
+
+    # Propagate movement-property fields to siblings with the same
+    # calibre. The calibre to match by is whatever this watch ends up
+    # with — the new value if calibre is part of this update, otherwise
+    # the calibre that was already on the record.
+    propagated_to = 0
+    propagated_fields = []
+    target_calibre = (
+        updates.get('calibre') if 'calibre' in updates else (watch['calibre'] or '')
+    )
+    target_calibre = (target_calibre or '').strip()
+    movement_updates = {
+        k: v for k, v in updates.items() if k in MOVEMENT_PROPERTY_FIELDS
+    }
+    if target_calibre and movement_updates:
+        sib_set = ', '.join(f'{k} = ?' for k in movement_updates.keys())
+        sib_params = (list(movement_updates.values())
+                      + [now, target_calibre, record_id])
+        cur = db.execute(
+            f"UPDATE watches SET {sib_set}, updated_at = ? "
+            f"WHERE TRIM(COALESCE(calibre,'')) = ? AND id != ?",
+            sib_params,
+        )
+        propagated_to = cur.rowcount or 0
+        propagated_fields = list(movement_updates.keys())
+
     db.commit()
-    return jsonify({'updated': len(updates), 'fields': list(updates.keys())})
+    return jsonify({
+        'updated': len(updates),
+        'fields': list(updates.keys()),
+        'propagated_to': propagated_to,
+        'propagated_fields': propagated_fields,
+    })
 
 
 # ---------------------------------------------------------------------------
