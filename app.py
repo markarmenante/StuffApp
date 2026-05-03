@@ -1724,7 +1724,12 @@ def _looks_like_heic(data):
 
 def save_upload(file_obj):
     """Save an uploaded file and return the stored filename.
-    HEIC/HEIF input is transcoded to JPEG so browsers can render it."""
+    HEIC/HEIF input is transcoded to JPEG so browsers can render it.
+    Images with an alpha channel (transparent PNG, RGBA WebP, etc.)
+    are flattened onto white before save — without that step PIL's
+    default RGBA→RGB conversion fills transparent pixels with black,
+    so dragging a transparent product render onto a watch slot would
+    paint a black square behind the watch."""
     if not file_obj or file_obj.filename == '':
         return None
     if not allowed_file(file_obj.filename):
@@ -1743,6 +1748,27 @@ def save_upload(file_obj):
         img.save(out, format='JPEG', quality=90)
         data = out.getvalue()
         ext = 'jpg'
+    else:
+        # Flatten any alpha channel onto white so transparent pixels
+        # render as white, not black. Skipped silently if PIL can't
+        # decode the bytes (e.g. SVG, unrecognised format) — the
+        # original bytes still get written.
+        try:
+            from io import BytesIO
+            from PIL import Image
+            img = Image.open(BytesIO(data))
+            if img.mode == 'P' and 'transparency' in img.info:
+                img = img.convert('RGBA')
+            if img.mode in ('RGBA', 'LA'):
+                bg = Image.new('RGB', img.size, (255, 255, 255))
+                alpha = img.split()[-1]
+                bg.paste(img.convert('RGB'), mask=alpha)
+                out = BytesIO()
+                bg.save(out, format='JPEG', quality=92)
+                data = out.getvalue()
+                ext = 'jpg'
+        except Exception:
+            pass
 
     stored_name = f"{uuid.uuid4().hex}.{ext}"
     with open(os.path.join(UPLOAD_FOLDER, stored_name), 'wb') as f:
