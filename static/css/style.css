@@ -2256,19 +2256,28 @@ input[type="date"] { -webkit-appearance: none; }
      and left a strip of grey to the right of the spec rows. Block flow
      side-steps that quirk: each child is a block, each block is 100%
      wide by default. */
-  .watch-body { display: block; }
+  .watch-body { display: block; width: 100%; box-sizing: border-box; }
   .watch-body .watch-photo {
-    width: auto;
+    width: 100%;
     min-height: 220px;
     padding: 6px;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    box-sizing: border-box;
     /* Re-establish the photo's centered-image flex so .no-img and
        <img> stay vertically centered inside the now-block parent. */
     display: flex;
   }
   .watch-body .watch-photo img { max-width: 220px; max-height: 220px; }
-  .watch-body .watch-specs { display: block; width: auto; }
+  .watch-body .watch-specs {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    /* Inside .watch-specs, the grid rows need to be unconstrained
+       blocks too — defensive override in case anything inherited
+       from the desktop flex layout was leaving a stray width hint. */
+  }
+  .watch-body .watch-specs > .dgrid { width: 100%; box-sizing: border-box; }
   /* Recording radio panel gets breathing room at the reduced spec width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
   /* Keep the two post-radio meta/purchase rows two-up on mobile so
