@@ -2380,9 +2380,9 @@ Target fields:
 - metal: one of [{metals}]
 - case_diameter: number in mm (float)
 - dial_color: short string (e.g. "Black", "Blue", "Silver")
-- year: integer year of original release/manufacture
+- year: integer production year of THIS specific piece. If the case number / movement number is on the record AND the brand has a published serial-to-year table (Rolex, Omega, Patek Philippe, IWC, A. Lange & Söhne, Vacheron Constantin, etc.), use that table to date the piece — that's more accurate than the reference's release year. Fall back to the reference's original release/manufacture year only when no serial-year mapping is available. Never return a year later than the watch's purchase date.
 - edition: total count of pieces in a limited edition / limited run (integer). Return null for non-limited / open-production references.
-- calibre: movement calibre name (e.g. "L951.5", "3135")
+- calibre: movement calibre name in its complete canonical form, with the manufacturer prefix when one is conventionally used (e.g. "F.P. Journe Calibre 1300.3", "A. Lange & Söhne L951.5", "ETA 7750", "Frédéric Piguet 1185", "Patek Philippe CH 29-535 PS"). Avoid returning just a bare number ("1304", "7750") — those are ambiguous because multiple manufacturers reuse number-style designations.
 - movement_type: one of ["Manual", "Automatic", "Quartz", "Spring Drive", "Co-Axial", "Tuning Fork"]. "Manual"/"Automatic" for traditional mechanical, "Quartz" for battery-powered crystal-regulated, "Spring Drive" only for Seiko/Grand Seiko Spring Drive, "Co-Axial" only for Omega watches the brand explicitly markets as Co-Axial, "Tuning Fork" for Bulova Accutron and similar hum movements.
 - movement_origin: EXACTLY one of [{origins}] and nothing else. "In-House" = designed and made by the manufacturer; "Ébauche" = bought-in rough movement (e.g. ETA, Sellita, Valjoux) used as-is; "Modified" = an ébauche that has been noticeably reworked. Do not invent values like "Swiss" or "Ebauche-based".
 - movement_jewels: integer
@@ -4046,11 +4046,13 @@ WATCH_LOOKUP_FILLABLE = (
 )
 
 # Fields we'll only populate when blank — never overwrite the existing
-# value. Year is frequently engraved on caseback or papers, so the user's
-# entry is authoritative over a web guess. Strap material is set from
-# the physical strap on the watch — a web guess ("Leather") is almost
-# always less precise than what's already there ("Croc").
-WATCH_LOOKUP_BLANK_ONLY = {'year', 'strap_material', 'clasp_type', 'dial_color', 'metal'}
+# value. Strap material is set from the physical strap on the watch —
+# a web guess ("Leather") is almost always less precise than what's
+# already there ("Croc"). Year used to be in this set, but the lookup
+# now derives year from case/movement serial numbers when possible
+# (which is more accurate than the reference's release year), so
+# overwrites are allowed.
+WATCH_LOOKUP_BLANK_ONLY = {'strap_material', 'clasp_type', 'dial_color', 'metal'}
 
 
 def _numeric_field(field):
@@ -4281,9 +4283,13 @@ def watch_lookup_specs(record_id):
 # movement, not of the specific watch reference. When a Lookup
 # updates these on one watch, propagate the same values to every
 # other watch sharing the same calibre so the movement spec stays
-# consistent across the collection.
+# consistent across the collection. `calibre` itself is included so
+# that when the lookup normalises a short form (e.g. "1304") to its
+# complete canonical form (e.g. "F.P. Journe Calibre 1304"), the
+# expanded value also lands on every sibling — keeping the whole
+# collection in lockstep on naming.
 MOVEMENT_PROPERTY_FIELDS = frozenset([
-    'movement_jewels', 'movement_origin', 'movement_type',
+    'calibre', 'movement_jewels', 'movement_origin', 'movement_type',
     'escapement', 'balance_wheel', 'beat', 'reserve',
     'calibre_notes',
 ])
@@ -4330,22 +4336,23 @@ def watch_apply_lookup(record_id):
     )
 
     # Propagate movement-property fields to siblings with the same
-    # calibre. The calibre to match by is whatever this watch ends up
-    # with — the new value if calibre is part of this update, otherwise
-    # the calibre that was already on the record.
+    # calibre. Match siblings by the OLD calibre — the value they
+    # still share with this watch before the update lands. If the
+    # lookup is normalising the calibre (short "1304" → complete
+    # "F.P. Journe Calibre 1304"), the new value gets pushed onto
+    # siblings as part of the same propagation, so all watches that
+    # were on the old short form end up on the canonical form
+    # together.
     propagated_to = 0
     propagated_fields = []
-    target_calibre = (
-        updates.get('calibre') if 'calibre' in updates else (watch['calibre'] or '')
-    )
-    target_calibre = (target_calibre or '').strip()
+    old_calibre = (watch['calibre'] or '').strip()
     movement_updates = {
         k: v for k, v in updates.items() if k in MOVEMENT_PROPERTY_FIELDS
     }
-    if target_calibre and movement_updates:
+    if old_calibre and movement_updates:
         sib_set = ', '.join(f'{k} = ?' for k in movement_updates.keys())
         sib_params = (list(movement_updates.values())
-                      + [now, target_calibre, record_id])
+                      + [now, old_calibre, record_id])
         cur = db.execute(
             f"UPDATE watches SET {sib_set}, updated_at = ? "
             f"WHERE TRIM(COALESCE(calibre,'')) = ? AND id != ?",
