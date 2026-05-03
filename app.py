@@ -8914,57 +8914,341 @@ def record_print_pdf(category, record_id):
                 primary_img = p
                 break
 
-    if primary_img:
-        try:
-            ir = ImageReader(primary_img)
-            iw, ih = ir.getSize()
-            max_w, max_h = 4.0 * inch, 3.5 * inch
-            scale = min(max_w / iw, max_h / ih)
-            story.append(Image(primary_img, width=iw * scale, height=ih * scale))
-            story.append(Spacer(1, 8))
-        except Exception:
-            pass
+    # Long-text fields render as full-width sections below the spec
+     # grid instead of getting cramped into a label/value table cell.
+    # Includes any 'textarea' field plus a few text fields the user
+    # treats as prose (calibre_notes, history_context).
+    LONG_TEXT_FIELDS = {f['name'] for f in fields if f.get('type') == 'textarea'}
+    LONG_TEXT_FIELDS |= {'calibre_notes', 'history_context'}
 
-    # Field table — every populated, non-file field. Two columns
-    # (label / value), repeated for compactness.
-    rows_for_table = []
-    for f in fields:
-        name = f['name']
-        if f.get('type') == 'file': continue
-        if name in ('id', 'created_at', 'updated_at'): continue
+    def _val(name):
         try:
             v = row[name]
         except (KeyError, IndexError):
-            continue
-        if v is None or (isinstance(v, str) and not v.strip()):
-            continue
-        label = f.get('label') or name
-        rows_for_table.append((label, str(v)))
+            return ''
+        if v is None:
+            return ''
+        s = str(v).strip()
+        return s
 
-    if rows_for_table:
-        # Two-column layout: label/value pairs flowing left-to-right.
-        col_w = (doc.width / 2) - 4
-        data = []
-        for i in range(0, len(rows_for_table), 2):
-            left = rows_for_table[i]
-            right = rows_for_table[i + 1] if i + 1 < len(rows_for_table) else ('', '')
-            data.append([
-                Paragraph(f'<b>{left[0]}</b>', cell_style),
-                Paragraph(left[1], cell_style),
-                Paragraph(f'<b>{right[0]}</b>', cell_style) if right[0] else '',
-                Paragraph(right[1], cell_style) if right[1] else '',
-            ])
-        tbl = Table(data, colWidths=[col_w * 0.35, col_w * 0.65, col_w * 0.35, col_w * 0.65])
-        tbl.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    def _spec_cell(label, value):
+        """One label/value cell pair — Paragraph wrapping handles long
+        values. Returns ['<value>', '<label>'] so the Table renders
+        with the label-as-clabel underneath the value, matching the
+        desktop UI's bottom-right label position."""
+        return [Paragraph(value or '', cell_style),
+                Paragraph(f'<font size=7 color="#888">{label}</font>',
+                          cell_style)]
+
+    if category == 'watches':
+        # Top row: image left, structured spec grid right.
+        spec_data = []
+        # Brand specs — four dg2 pairs.
+        for left_l, left_n, right_l, right_n in [
+            ('Metal', 'metal', 'Width', 'case_diameter'),
+            ('Ref', 'reference', 'Dial', 'dial_color'),
+            ('Case#', 'case_num', 'Mvt#', 'movement_num'),
+            ('Edition', 'edition', 'Yr Mfg', 'year'),
+        ]:
+            spec_data.append([Paragraph(_val(left_n), cell_style),
+                              Paragraph(f'<font size=7 color="#888">{left_l}</font>', cell_style),
+                              Paragraph(_val(right_n), cell_style),
+                              Paragraph(f'<font size=7 color="#888">{right_l}</font>', cell_style)])
+        # Movement specs — four dg2 pairs.
+        beat_v = _val('beat')
+        try:
+            hz_v = '%.2g Hz' % (float(beat_v) / 7200) if beat_v else ''
+        except (TypeError, ValueError):
+            hz_v = ''
+        reserve_v = _val('reserve')
+        if reserve_v and not reserve_v.endswith('hrs'):
+            reserve_v = f'{reserve_v} hrs'
+        for left_l, left_v, right_l, right_v in [
+            ('Calibre', _val('calibre'), 'Jewels', _val('movement_jewels')),
+            ('Escapement', _val('escapement'), 'Origin', _val('movement_origin')),
+            ('Beat', f'{int(float(beat_v)):,}' if beat_v else '', 'Hz (calc)', hz_v),
+            ('Winding', _val('movement_type'), 'Reserve', reserve_v),
+        ]:
+            spec_data.append([Paragraph(left_v, cell_style),
+                              Paragraph(f'<font size=7 color="#888">{left_l}</font>', cell_style),
+                              Paragraph(right_v, cell_style),
+                              Paragraph(f'<font size=7 color="#888">{right_l}</font>', cell_style)])
+
+        # Image cell (left) + spec grid (right) side-by-side.
+        img_cell = ''
+        if primary_img:
+            try:
+                ir = ImageReader(primary_img)
+                iw, ih = ir.getSize()
+                max_w, max_h = 2.4 * inch, 3.0 * inch
+                scale = min(max_w / iw, max_h / ih)
+                img_cell = Image(primary_img, width=iw * scale, height=ih * scale)
+            except Exception:
+                pass
+
+        # Right-side nested spec grid: value | label | value | label.
+        # Column ratios mirror the desktop dgrid dg2 (each value cell
+        # takes ~3x the width of its clabel).
+        right_w = doc.width - 2.6 * inch
+        spec_table = Table(
+            spec_data,
+            colWidths=[right_w * 0.35, right_w * 0.15,
+                       right_w * 0.35, right_w * 0.15]
+        )
+        spec_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('LEFTPADDING', (0, 0), (-1, -1), 4),
             ('RIGHTPADDING', (0, 0), (-1, -1), 4),
             ('TOPPADDING', (0, 0), (-1, -1), 3),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
             ('LINEBELOW', (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            # Tint the four movement rows (rows 4..7) grey to set them
+            # apart from the brand specs above, matching the desktop.
+            ('BACKGROUND', (0, 4), (-1, 7), colors.HexColor('#f4f4f6')),
         ]))
-        story.append(tbl)
+        outer = Table(
+            [[img_cell, spec_table]],
+            colWidths=[2.5 * inch, doc.width - 2.5 * inch]
+        )
+        outer.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(outer)
+        story.append(Spacer(1, 6))
+
+        # Full-width Escape Wheel + Calibre Notes rows.
+        for label, name in [('Escape Wheel', 'escape_wheel'),
+                            ('Calibre Notes', 'calibre_notes')]:
+            v = _val(name)
+            if v:
+                tbl = Table([[Paragraph(v, cell_style),
+                              Paragraph(f'<font size=7 color="#888">{label}</font>', cell_style)]],
+                            colWidths=[doc.width * 0.85, doc.width * 0.15])
+                tbl.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('LINEBELOW', (0, 0), (-1, -1), 0.25, colors.lightgrey),
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f4f4f6')),
+                ]))
+                story.append(tbl)
+
+        # Service / Strap / Purchase rows — short-field 4-up tables.
+        def _kv4(triples):
+            """Build a 4-column row of (label, value) pairs from a list
+            of (label, name) tuples. Each cell is value-on-top, label
+            below in small grey text."""
+            cells = []
+            for lbl, name in triples:
+                v = _val(name)
+                cells.extend([Paragraph(v, cell_style),
+                              Paragraph(f'<font size=7 color="#888">{lbl}</font>', cell_style)])
+            # Pad to 8 columns (4 value/label pairs).
+            while len(cells) < 8:
+                cells.extend(['', ''])
+            return cells
+
+        # Svc | Since
+        svc_v = _val('service_date')
+        try:
+            from datetime import date as _date
+            svc_d = _date.fromisoformat(svc_v) if svc_v else None
+        except (TypeError, ValueError):
+            svc_d = None
+        since_v = ''
+        if svc_d:
+            today = datetime.utcnow().date()
+            since_v = f'{(today - svc_d).days // 365} yrs'
+        if svc_v or since_v:
+            tbl = Table([_kv4([('Svc', 'service_date'), ('Since (calc)', None)])[:4]],
+                        colWidths=[doc.width * 0.35, doc.width * 0.15,
+                                   doc.width * 0.35, doc.width * 0.15])
+            # Override the second value-cell to use the computed since_v.
+            data = [[Paragraph(svc_v, cell_style),
+                     Paragraph('<font size=7 color="#888">Svc</font>', cell_style),
+                     Paragraph(since_v, cell_style),
+                     Paragraph('<font size=7 color="#888">Since (calc)</font>', cell_style)]]
+            tbl = Table(data, colWidths=[doc.width * 0.35, doc.width * 0.15,
+                                          doc.width * 0.35, doc.width * 0.15])
+            tbl.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            ]))
+            story.append(tbl)
+
+        # Tang | Lug | Material | Color
+        if any(_val(n) for n in ('clasp_type', 'lug_mm', 'strap_material', 'strap_color')):
+            data = [[Paragraph(_val('clasp_type'), cell_style),
+                     Paragraph('<font size=7 color="#888">Clasp</font>', cell_style),
+                     Paragraph(_val('lug_mm'), cell_style),
+                     Paragraph('<font size=7 color="#888">Lug mm</font>', cell_style),
+                     Paragraph(_val('strap_material'), cell_style),
+                     Paragraph('<font size=7 color="#888">Material</font>', cell_style),
+                     Paragraph(_val('strap_color'), cell_style),
+                     Paragraph('<font size=7 color="#888">Color</font>', cell_style)]]
+            cw = doc.width / 8
+            tbl = Table(data, colWidths=[cw * 0.7, cw * 0.3] * 4)
+            tbl.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            ]))
+            story.append(tbl)
+
+        # Date | Price | Vendor | Value
+        price_v = _val('price')
+        try:
+            price_v = '${:,.0f}'.format(float(price_v)) if price_v else ''
+        except (TypeError, ValueError):
+            pass
+        value_v = _val('value')
+        try:
+            value_v = '${:,.0f}'.format(float(value_v)) if value_v else ''
+        except (TypeError, ValueError):
+            pass
+        if any([_val('date'), price_v, _val('vendor'), value_v]):
+            data = [[Paragraph(_val('date'), cell_style),
+                     Paragraph('<font size=7 color="#888">Date</font>', cell_style),
+                     Paragraph(price_v, cell_style),
+                     Paragraph('<font size=7 color="#888">Price</font>', cell_style),
+                     Paragraph(_val('vendor'), cell_style),
+                     Paragraph('<font size=7 color="#888">Vendor</font>', cell_style),
+                     Paragraph(value_v, cell_style),
+                     Paragraph('<font size=7 color="#888">Value</font>', cell_style)]]
+            cw = doc.width / 8
+            tbl = Table(data, colWidths=[cw * 0.7, cw * 0.3] * 4)
+            tbl.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            ]))
+            story.append(tbl)
+
+        # Complications (single full-width line).
+        comp_v = _val('complications')
+        if comp_v:
+            story.append(Spacer(1, 4))
+            story.append(Paragraph(f'<b>Complications:</b> {comp_v}', cell_style))
+
+        # Owner | Property | Status (small footer line).
+        op_bits = []
+        for lbl, name in [('Owner', 'owner'), ('Property', 'property'), ('Status', 'status')]:
+            v = _val(name)
+            if v:
+                op_bits.append(f'<b>{lbl}:</b> {v}')
+        if op_bits:
+            story.append(Spacer(1, 4))
+            story.append(Paragraph(' &nbsp;·&nbsp; '.join(op_bits), cell_style))
+
+        # Long-text sections — full-width prose blocks for description,
+        # notes, results, history_context. Each gets its own bold
+        # heading followed by the text content, with the text using
+        # the page's full inner width (no narrow column).
+        long_section_style = ParagraphStyle(
+            'long', parent=cell_style, fontSize=9, leading=12, spaceAfter=4
+        )
+        for name, label in [('description', 'Description'),
+                            ('notes', 'Notes'),
+                            ('results', 'Value Estimate from Retailers and Recent Auctions')]:
+            v = _val(name)
+            if v:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph(f'<b>{label}</b>', cell_style))
+                # Preserve paragraph breaks: split on double newline,
+                # render each as its own Paragraph so blank lines
+                # become real spacing.
+                for para in v.split('\n\n'):
+                    para = para.replace('\n', '<br/>')
+                    story.append(Paragraph(para, long_section_style))
+
+    else:
+        # Generic (non-watches) layout — image at top, then a 2-col
+        # key/value table for short fields, plus full-width sections
+        # for long-text fields underneath.
+        if primary_img:
+            try:
+                ir = ImageReader(primary_img)
+                iw, ih = ir.getSize()
+                max_w, max_h = 4.0 * inch, 3.5 * inch
+                scale = min(max_w / iw, max_h / ih)
+                story.append(Image(primary_img, width=iw * scale, height=ih * scale))
+                story.append(Spacer(1, 8))
+            except Exception:
+                pass
+
+        short_rows = []
+        long_sections = []
+        for f in fields:
+            name = f['name']
+            if f.get('type') == 'file': continue
+            if name in ('id', 'created_at', 'updated_at'): continue
+            try:
+                v = row[name]
+            except (KeyError, IndexError):
+                continue
+            if v is None or (isinstance(v, str) and not v.strip()):
+                continue
+            label = f.get('label') or name
+            if name in LONG_TEXT_FIELDS:
+                long_sections.append((label, str(v)))
+            else:
+                short_rows.append((label, str(v)))
+
+        if short_rows:
+            col_w = (doc.width / 2) - 4
+            data = []
+            for i in range(0, len(short_rows), 2):
+                left = short_rows[i]
+                right = short_rows[i + 1] if i + 1 < len(short_rows) else ('', '')
+                data.append([
+                    Paragraph(f'<b>{left[0]}</b>', cell_style),
+                    Paragraph(left[1], cell_style),
+                    Paragraph(f'<b>{right[0]}</b>', cell_style) if right[0] else '',
+                    Paragraph(right[1], cell_style) if right[1] else '',
+                ])
+            tbl = Table(data, colWidths=[col_w * 0.35, col_w * 0.65,
+                                          col_w * 0.35, col_w * 0.65])
+            tbl.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            ]))
+            story.append(tbl)
+
+        # Full-width long-text sections for non-watches categories.
+        long_section_style = ParagraphStyle(
+            'long', parent=cell_style, fontSize=9, leading=12, spaceAfter=4
+        )
+        for label, text in long_sections:
+            story.append(Spacer(1, 8))
+            story.append(Paragraph(f'<b>{label}</b>', cell_style))
+            for para in text.split('\n\n'):
+                para = para.replace('\n', '<br/>')
+                story.append(Paragraph(para, long_section_style))
 
     # Append remaining file fields as a small "Documents" list
     other_files = [f for f in file_fields if not (primary_img and
