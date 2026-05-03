@@ -880,6 +880,8 @@ input[type="date"] { -webkit-appearance: none; }
 .detail-page-art .dcell textarea[name="object_notes"] {
   text-align: left;
 }
+/* Title in italics — convention for artwork titles. */
+.detail-page-art .dcell input[name="title"] { font-style: italic; }
 
 /* Lens detail: center field values too, same convention. */
 .detail-page-lenses .dcell input,
