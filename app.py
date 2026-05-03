@@ -194,9 +194,17 @@ FIELD_ALIASES = {
 
 
 def normalize_field_value(table, field_name, value):
-    """Return the canonical value for a known alias, or the value unchanged."""
+    """Return the canonical value for a known alias, or the input
+    unchanged. Strings are first NFC-normalized so pre-composed and
+    decomposed Unicode forms of the same character (e.g. 'ü' as U+00FC
+    vs U+0075+U+0308) collapse to one canonical form before any alias
+    lookup or DB write — keeps a pasted brand name from creating two
+    visually-identical-but-different entries down the line."""
     if value is None:
         return value
+    if isinstance(value, str):
+        import unicodedata
+        value = unicodedata.normalize('NFC', value)
     aliases = FIELD_ALIASES.get((table, field_name))
     if not aliases:
         return value
