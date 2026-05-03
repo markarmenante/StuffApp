@@ -684,6 +684,12 @@ def get_db():
         # Register the diacritic-folding collation on every fresh
         # connection — collations are per-connection in sqlite3.
         g.db.create_collation('NODIACRITIC', _nodiacritic_collation)
+        # NODIA(text) — function form of the same fold, usable in WHERE
+        # clauses like NODIA(brand) LIKE ?. Lets free-text search match
+        # 'Urban Jürgensen' from the term 'urban jurg', and folds both
+        # pre-composed and decomposed Unicode variants to the same form.
+        g.db.create_function('NODIA', 1, _strip_diacritics,
+                             deterministic=True)
     return g.db
 
 
@@ -1940,13 +1946,19 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
         # term must match at least one searchable field. "Breguet Carp"
         # finds watches where 'Breguet' is in some field AND 'Carp' is
         # in some field — so brand+property combos work.
+        #
+        # Text fields go through NODIA(col) LIKE NODIA('%term%') so
+        # 'urban jurg' matches 'Urban Jürgensen', and both pre-composed
+        # and decomposed Unicode forms of the same string match each
+        # other. Numeric fields are ASCII-only, so plain LIKE suffices.
         terms = [t for t in q.split() if t.strip()]
         for term in terms:
             num_term = _normalize_numeric_term(term)
+            folded_term = _strip_diacritics(term)
             conds = []
             for col in text_fields:
-                conds.append(f"{col} LIKE ?")
-                params.append(f'%{term}%')
+                conds.append(f"NODIA({col}) LIKE ?")
+                params.append(f'%{folded_term}%')
             for col in numeric_fields:
                 conds.append(f"{col} LIKE ?")
                 params.append(f'%{num_term}%')
@@ -7126,6 +7138,49 @@ JOURNE_CALIBRE_DETAILS = {
         'calibre_notes': 'Evolution of the tourbillon architecture with remontoir; classic lever escapement in the cage.',
     },
 }
+
+
+@app.route('/admin/normalize-watch-brand-unicode', methods=['POST'])
+def normalize_watch_brand_unicode():
+    """One-shot: NFC-normalize every watch's brand string so pre-composed
+    and decomposed Unicode variants of the same name (e.g. 'Urban
+    Jürgensen' as U+00FC vs U+0075+U+0308) collapse to one canonical
+    form. Without this, two visually-identical brand entries can
+    diverge in the data and fragment lookups.
+
+    Defaults to dry-run; pass ?dry=0 to actually apply. Always returns
+    the list of rows where NFC would change the brand, so you can
+    review before committing."""
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    import unicodedata as _ud
+    dry = request.args.get('dry', '1') != '0'
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, brand FROM watches WHERE brand IS NOT NULL AND brand != ''"
+    ).fetchall()
+    diffs = []
+    for r in rows:
+        original = r['brand']
+        canonical = _ud.normalize('NFC', original)
+        if canonical != original:
+            diffs.append({
+                'id': r['id'],
+                'before': original,
+                'before_codepoints': [hex(ord(c)) for c in original],
+                'after': canonical,
+                'after_codepoints': [hex(ord(c)) for c in canonical],
+            })
+            if not dry:
+                db.execute(
+                    "UPDATE watches SET brand = ?, updated_at = ? WHERE id = ?",
+                    (canonical,
+                     datetime.utcnow().isoformat(timespec='seconds'),
+                     r['id'])
+                )
+    if not dry:
+        db.commit()
+    return jsonify(dry=dry, count=len(diffs), changes=diffs)
 
 
 @app.route('/admin/seed-journe-calibres', methods=['POST'])
