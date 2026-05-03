@@ -353,6 +353,11 @@ document.addEventListener('DOMContentLoaded', function () {
       </label>
     </div>
     <div class="watch-specs">
+      {# Brand specs: the four dg2 rows that sit beside the image on
+         desktop (Metal/Width, Ref/Dial, Case#/Mvt#, Edition/Year).
+         Wrapped so the mobile grid can place this block beside the
+         photo while the movement block below spans the full width. #}
+      <div class="watch-brand-specs">
       <div class="dgrid dg2">
         {{ selcell('metal','Metal', vlists.metal_watch) }}
         <div class="dcell"><input type="text" name="case_diameter" value="{{ '%s mm'|format(val('case_diameter')) if val('case_diameter') else '' }}" class="coin-unit-input" data-suffix=" mm" inputmode="decimal" style="text-align:center"><span class="clabel">Width</span></div>
@@ -369,10 +374,14 @@ document.addEventListener('DOMContentLoaded', function () {
         {{ cell('edition','Edition') }}
         <div class="dcell"><input type="text" name="year" value="{{ val('year') }}" style="text-align:center"><span class="clabel">Yr Mfg</span></div>
       </div>
-      <!-- Movement + service rows continue inside watch-specs so the
-           full spec column sits beside the image. The .watch-movement
-           class on the three movement rows tints them grey to set them
-           apart from the brand specs above and the service rows below. -->
+      </div>
+      {# Movement block: 3-across rows + calibre notes + svc/since.
+         Wrapped so on mobile this whole block drops below the
+         image+brand-specs row and spans the full width. The
+         .watch-movement class on the three movement rows tints them
+         grey to set them apart from the brand specs above and the
+         service rows below. #}
+      <div class="watch-movement-block">
       <div class="dgrid dg3 watch-movement">
         <div class="dcell">
           <input type="text" name="calibre" value="{{ val('calibre') }}">
@@ -490,6 +499,7 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">Since (calc)</span>
         </div>
       </div>
+      </div>{# /watch-movement-block #}
     </div>
   </div>
 

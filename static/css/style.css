@@ -2256,6 +2256,11 @@ input[type="date"] { -webkit-appearance: none; }
      and left a strip of grey to the right of the spec rows. Block flow
      side-steps that quirk: each child is a block, each block is 100%
      wide by default. */
+  /* Default mobile layout for non-watches detail pages: stack the
+     image above the spec rows so every row spans the full screen
+     width. Applies to cameras, pens, vehicles, recordings, rifles,
+     audio, properties (everything that uses .watch-body but isn't
+     watches). Watches gets a different two-up grid below. */
   .watch-body { display: block; width: 100%; box-sizing: border-box; }
   .watch-body .watch-photo {
     width: 100%;
@@ -2264,8 +2269,6 @@ input[type="date"] { -webkit-appearance: none; }
     border-right: none;
     border-bottom: 1px solid var(--border);
     box-sizing: border-box;
-    /* Re-establish the photo's centered-image flex so .no-img and
-       <img> stay vertically centered inside the now-block parent. */
     display: flex;
   }
   .watch-body .watch-photo img { max-width: 220px; max-height: 220px; }
@@ -2273,19 +2276,72 @@ input[type="date"] { -webkit-appearance: none; }
     display: block;
     width: 100%;
     box-sizing: border-box;
-    /* Inside .watch-specs, the grid rows need to be unconstrained
-       blocks too — defensive override in case anything inherited
-       from the desktop flex layout was leaving a stray width hint. */
   }
   .watch-body .watch-specs > .dgrid { width: 100%; box-sizing: border-box; }
-  /* The desktop-only 2fr/1fr/1fr split on the Escape Wheel row leaves
-     a phantom 1fr third column on phones — Escape Wheel and Winding
-     occupy cols 1-2, Reserve wraps to row 2 spanning cols 1-2 (per
-     the dg3 :nth-child(3) span rule), and col 3 sits empty on the
-     right. Reset the row to a plain 2-col grid at mobile so the
-     wrapped layout fills the full width. */
-  .watch-specs .dgrid.dg3.watch-escape-wheel-row {
-    grid-template-columns: repeat(2, 1fr);
+
+  /* Watches mobile: image takes the left half (justified left, sits
+     under the model row), four brand-spec rows (Metal/Width, Ref/Dial,
+     Case#/Mvt#, Edition/Yr Mfg) sit on the right half, and the
+     movement block (Calibre/Jewels/Origin, Escapement/Beat/Hz,
+     Escape Wheel/Winding/Reserve, Calibre Notes, Svc/Since) drops
+     below spanning the full width. Achieved by gridding the
+     .watch-body-watch container and using display:contents on the
+     .watch-specs wrapper so its children (.watch-brand-specs and
+     .watch-movement-block) participate directly in the grid. */
+  .watch-body-watch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "photo brand"
+      "movement movement";
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .watch-body-watch .watch-photo {
+    grid-area: photo;
+    width: auto;
+    min-height: 0;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .watch-body-watch .watch-photo img { max-width: 100%; max-height: 100%; }
+  .watch-body-watch .watch-specs { display: contents; }
+  .watch-body-watch .watch-brand-specs {
+    grid-area: brand;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+  }
+  /* The four brand-spec rows are dg2; on phones the global rule
+     collapses dg2 to one column. Force them back to two-up inside
+     the brand block so the right half stays a 2-col grid (Metal |
+     Width, Ref | Dial, etc.). */
+  .watch-body-watch .watch-brand-specs .dgrid.dg2 {
+    grid-template-columns: 1fr 1fr;
+  }
+  .watch-body-watch .watch-movement-block {
+    grid-area: movement;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .watch-body-watch .watch-movement-block > .dgrid {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  /* Movement block on phones: keep every dg3 row at three columns
+     instead of collapsing to two-and-wrap. The user wants the three
+     movement rows (Calibre/Jewels/Origin, Escapement/Beat/Hz,
+     Escape Wheel/Winding/Reserve) genuinely three-across on mobile.
+     Overrides both the global dg3 mobile collapse (repeat(2,1fr))
+     and the desktop-only 2fr/1fr/1fr split on the escape-wheel row. */
+  .watch-movement-block .dgrid.dg3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  /* Cancel the global :nth-child(3) span 2 rule for the movement
+     block — that rule was meant for narrow-screen 2-col fallback,
+     but the movement block stays 3-col on mobile. */
+  .watch-movement-block .dgrid.dg3 .dcell:nth-child(3) {
+    grid-column: auto;
   }
   /* Recording radio panel gets breathing room at the reduced spec width. */
   .rec-body .rec-radio-row { gap: 10px 16px; }
