@@ -97,7 +97,14 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .nav-item:hover { background: rgba(0,0,0,.07); text-decoration: none; }
 .nav-item.active { background: var(--nav-active-bg); color: var(--text); }
-.nav-item .icon { font-size: 20px; line-height: 1; }
+.nav-item .icon { font-size: 20px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+/* Category icons are now Phosphor-duotone SVGs referenced via <use>
+   from the sprite at the top of body. Sized here, not via font-size,
+   since font-size doesn't drive <svg> dimensions. Kept at 20px to
+   match the previous emoji visual weight; bump to 22-24px for a more
+   prominent nav. Inherits color via fill="currentColor" on the
+   sprite. */
+.nav-item .icon > svg { width: 20px; height: 20px; display: block; }
 .nav-item .lbl { font-size: 9px; color: inherit; white-space: nowrap; }
 
 .nav-right {
@@ -2102,6 +2109,9 @@ input[type="date"] { -webkit-appearance: none; }
      bigger and keep labels readable. */
   .nav-item       { min-width: 56px; }
   .nav-item .icon { font-size: 22px; }
+  /* Bump category SVGs to match the mobile emoji size, matching the
+     desktop rule's pattern. */
+  .nav-item .icon > svg { width: 22px; height: 22px; }
   .nav-item .lbl  { font-size: 10px; }
 
   /* Upload tap target on each row. */
