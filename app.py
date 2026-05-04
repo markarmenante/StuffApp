@@ -6389,6 +6389,18 @@ def import_watches_missing():
         existing.add(((r['reference'] or '').strip(),
                       (r['case_num'] or '').strip(),
                       (r['movement_num'] or '').strip()))
+    # Secondary index for the no-paperwork CSV rows. Every entry in
+    # Watch.csv where all three of (reference, case_num, movement_num)
+    # are blank — the vintage / orphan pieces — falls through the
+    # primary dedupe (which can't tell ('','','') keys apart) and
+    # would otherwise be silently dropped. We also dedupe those by
+    # case-insensitive (brand, model) so we restore them once and
+    # only once.
+    existing_by_brand_model = set()
+    for r in db.execute("SELECT brand, model FROM watches"):
+        existing_by_brand_model.add(
+            ((r['brand'] or '').strip().lower(),
+             (r['model'] or '').strip().lower()))
 
     inserted = 0
     skipped_existing = 0
@@ -6404,23 +6416,38 @@ def import_watches_missing():
         case_num = _mclean(row[3])
         movement_num = _mclean(row[19])
         key = ((reference or '').strip(), (case_num or '').strip(), (movement_num or '').strip())
+        brand_v = _mclean(row[1])
+        model_v = _mclean(row[11])
+        bm_key = ((brand_v or '').strip().lower(),
+                  (model_v or '').strip().lower())
+
         if not any(key):
-            skipped_bad += 1
-            continue
-        if key in existing:
+            # No-paperwork row — fall back to (brand, model) dedupe.
+            # Skip if we can't even identify the piece by name.
+            if not (bm_key[0] or bm_key[1]):
+                skipped_bad += 1
+                continue
+            if bm_key in existing_by_brand_model:
+                skipped_existing += 1
+                continue
+        elif key in existing:
             skipped_existing += 1
             continue
 
         if dry:
             would_insert.append({
-                'brand':        _mclean(row[1]),
-                'model':        _mclean(row[11]),
+                'brand':        brand_v,
+                'model':        model_v,
                 'reference':    reference,
                 'case_num':     case_num,
                 'movement_num': movement_num,
                 'year':         _mnum(row[37], int),
+                'matched_by':   '(brand, model)' if not any(key) else '(ref, case, mvt)',
             })
-            existing.add(key)  # so duplicate CSV rows don't double-report
+            if any(key):
+                existing.add(key)
+            else:
+                existing_by_brand_model.add(bm_key)
             continue
 
         db.execute('''
@@ -6449,7 +6476,10 @@ def import_watches_missing():
             now, now,
         ))
         inserted += 1
-        existing.add(key)
+        if any(key):
+            existing.add(key)
+        else:
+            existing_by_brand_model.add(bm_key)
 
     if not dry:
         db.commit()
@@ -8036,21 +8066,26 @@ def admin_index():
         {
             'label': "Scan watches missing from Watch.csv (dry run)",
             'desc':  "Reads the bundled Watch.csv legacy import and lists "
-                     "rows whose (reference, case_num, movement_num) isn't "
-                     "in the watches table. Use this when the live count "
-                     "has dropped below the legacy 410 to confirm whether "
-                     "the diff is recoverable accidental loss vs. "
-                     "intentional deletions you DON'T want resurrected.",
+                     "rows missing from the watches table. Primary "
+                     "dedupe is (reference, case_num, movement_num); "
+                     "no-paperwork CSV rows (vintage / orphan pieces "
+                     "with all three blank) fall back to (brand, model) "
+                     "dedupe so they're not silently dropped. Use when "
+                     "the live count has dropped below the legacy 410 "
+                     "to confirm whether the diff is recoverable "
+                     "accidental loss vs. intentional deletions you "
+                     "DON'T want resurrected.",
             'url':   url_for('import_watches_missing'),
             'extra': {'dry': '1'},
         },
         {
             'label': "Re-import watches missing from Watch.csv",
-            'desc':  "Inserts every Watch.csv row whose (reference, "
-                     "case_num, movement_num) isn't already present. Safe "
-                     "to re-run — dedupes by that key. Will resurrect any "
-                     "intentionally-deleted watches that still match a "
-                     "CSV row, so run the dry scan first.",
+            'desc':  "Inserts every Watch.csv row that isn't already "
+                     "present, by (reference, case_num, movement_num) "
+                     "or — for no-paperwork rows — (brand, model). "
+                     "Safe to re-run; dedupes both ways. Will resurrect "
+                     "any intentionally-deleted watches that still "
+                     "match a CSV row, so run the dry scan first.",
             'url':   url_for('import_watches_missing'),
         },
         {
