@@ -4869,16 +4869,35 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 (function () {
   const MOBILE_QUERY = window.matchMedia('(max-width: 640px)');
   function stripBrand(full, brand) {
-    if (!full || !brand) return full || '';
-    const b = brand.trim();
-    if (!b) return full;
+    if (!full) return '';
     let s = full.trim();
-    if (s.toLowerCase().startsWith(b.toLowerCase())) {
-      s = s.slice(b.length).trim();
-      // Drop a "Calibre" / "Cal." / "Cal" connector when present.
-      s = s.replace(/^(?:calibre|cal\.?)\s+/i, '').trim();
+    if (!s) return '';
+    // Strategy 1: calibre starts with the exact brand string. Cleanest
+    // case — strip the brand and any "Calibre" / "Cal." connector.
+    if (brand) {
+      const b = brand.trim();
+      if (b && s.toLowerCase().startsWith(b.toLowerCase())) {
+        s = s.slice(b.length).trim();
+        s = s.replace(/^(?:calibre|caliber|cal\.?)\s+/i, '').trim();
+        return s || full;
+      }
     }
-    return s || full;
+    // Strategy 2: the brand on the record may be a short form (e.g.
+    // "Lange") while the calibre carries the canonical long form
+    // ("A. Lange & Söhne L951.5"). Find the first whitespace-token
+    // that contains a digit — that's where the calibre identifier
+    // starts. Everything before it is maker prefix to drop.
+    const tokens = s.split(/\s+/);
+    let firstDigit = -1;
+    for (let i = 0; i < tokens.length; i++) {
+      if (/\d/.test(tokens[i])) { firstDigit = i; break; }
+    }
+    if (firstDigit > 0) {
+      let result = tokens.slice(firstDigit).join(' ').trim();
+      result = result.replace(/^(?:calibre|caliber|cal\.?)\s+/i, '').trim();
+      return result || full;
+    }
+    return full;
   }
   function setup(input) {
     const form = input.closest('form');
