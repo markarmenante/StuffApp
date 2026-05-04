@@ -10,11 +10,20 @@
 
   <ul class="admin-list">
     {% for action in actions %}
+    {# data-extra and data-action-key embed JSON; Flask's tojson filter
+       escapes <, >, &, and ' but leaves " unescaped, so they MUST be
+       wrapped in single quotes here — otherwise the JSON's own double
+       quotes close the attribute prematurely. With "..." the browser
+       parses {"dry":"0"} as data-extra="{" plus stray attributes,
+       JSON.parse silently fails, the catch leaves extra={}, and
+       destructive admin buttons (DELETE orphan uploads, dedupe ?dry=0,
+       etc.) silently behave like dry-run because the dry=0 form field
+       never makes it to the server. #}
     <li class="admin-action"
         data-url="{{ action.url }}"
         data-kind="{{ action.kind|default('post') }}"
-        data-extra="{{ (action.extra or {})|tojson }}"
-        data-action-key="{{ action.url }}|{{ (action.extra or {})|tojson }}"
+        data-extra='{{ (action.extra or {})|tojson }}'
+        data-action-key='{{ action.url }}|{{ (action.extra or {})|tojson }}'
         data-confirm="{{ 'true' if action.confirm or (action.extra and action.extra.get('dry') == '0') else 'false' }}">
       <div class="admin-action-text">
         <strong>{{ action.label }}</strong>
