@@ -1340,6 +1340,112 @@ def _undo_receipt_phantoms(db, table, dry_run, write_tombstones=True):
     return out
 
 
+def _undo_numbered_doc_phantoms(db, table, dry_run):
+    """Remove docs entries whose title is a fixed-slot label followed
+    by a numeric suffix — 'Front 2', 'Receipt 3', 'Image 2', etc.
+    These come from FileMaker imports that auto-numbered duplicate
+    container fields; the legacy importer carried the numeric suffix
+    into the title verbatim, and the receipt→documents migration
+    faithfully preserved it. They typically point at an extra copy
+    of the cover image (different filename than the cover slot, so
+    _strip_phantom_cover_image_docs can't catch them by filename
+    match) and clutter the docs UI as redundant tiles.
+
+    Conservative — only matches titles where the prefix is a known
+    label drawn from the category's EXPORT_LAYOUT.files defaults,
+    plus a small set of common legacy FileMaker labels (Image, Cover,
+    Front, Back, Receipt, Doc, Document, Obverse, Reverse). User-
+    authored titles like 'Service receipt 2024' or 'Front of dial'
+    aren't matched because the suffix has to be a bare integer.
+    """
+    out = {'matched': 0, 'sample': []}
+    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    cat = next((c for c, info in CATEGORIES.items()
+                if info.get('table') == table), None)
+    if not cat:
+        return out
+    plan = EXPORT_LAYOUT.get(cat) or {}
+    json_cols = [c for c in DOC_SETS_BY_CATEGORY.get(cat, {}).values() if c in cols]
+    if not json_cols:
+        return out
+
+    known_labels = set()
+    for spec in plan.get('files', []):
+        _field, default_label, _title_field = spec
+        if default_label:
+            known_labels.add(default_label.lower())
+    for extra in ('image', 'cover', 'front', 'back', 'receipt',
+                  'image (obverse)', 'image (reverse)',
+                  'obverse', 'reverse', 'doc', 'document'):
+        known_labels.add(extra)
+    if not known_labels:
+        return out
+    label_re = re.compile(
+        r'^(' + '|'.join(re.escape(lbl) for lbl in sorted(known_labels)) + r')\s+\d+$',
+        re.IGNORECASE,
+    )
+
+    rows = db.execute(f"SELECT * FROM {table}").fetchall()
+    now = datetime.utcnow().isoformat()
+    for row in rows:
+        for json_col in json_cols:
+            try:
+                docs = json.loads((row[json_col] if json_col in row.keys() else None) or '[]')
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(docs, list):
+                continue
+            new_docs = []
+            removed = []
+            for d in docs:
+                if isinstance(d, dict):
+                    title = (d.get('title') or '').strip()
+                    if title and label_re.match(title):
+                        removed.append(d)
+                        continue
+                new_docs.append(d)
+            if not removed:
+                continue
+            out['matched'] += len(removed)
+            if len(out['sample']) < 25:
+                try:
+                    ident = plan['ident'](row) if 'ident' in plan else '?'
+                    group = plan['group'](row) if 'group' in plan else '?'
+                except Exception:
+                    ident, group = '?', '?'
+                for entry in removed:
+                    out['sample'].append({
+                        'record_id': row['id'],
+                        'ident':     ident,
+                        'group':     group,
+                        'json_col':  json_col,
+                        'label':     entry.get('title'),
+                        'filename':  entry.get('filename'),
+                        'ext':       os.path.splitext(entry.get('filename') or '')[1],
+                    })
+                    if len(out['sample']) >= 25:
+                        break
+            if dry_run:
+                continue
+            db.execute(
+                f"UPDATE {table} SET {json_col} = ?, updated_at = ? "
+                f"WHERE id = ?",
+                [json.dumps(new_docs), now, row['id']],
+            )
+            for entry in removed:
+                title = (entry.get('title') or '').strip()
+                fname = (entry.get('filename') or '').strip()
+                if fname:
+                    try:
+                        _record_tombstone(db, cat, row, title, fname)
+                    except Exception:
+                        app.logger.exception(
+                            'tombstone write failed for %s/%s/%s',
+                            cat, row['id'], title,
+                        )
+    return out
+
+
 def _backfill_docs_json(db, table, target_col, sources):
     """Compact legacy fixed doc columns into a JSON array stored in
     `target_col`. `sources` is a list of (filename_col, title_col,
@@ -8212,6 +8318,48 @@ def admin_undo_receipt_phantoms():
     })
 
 
+@app.route('/admin/undo-numbered-doc-phantoms', methods=['POST'])
+def admin_undo_numbered_doc_phantoms():
+    """Sibling cleanup to /admin/undo-receipt-phantoms — removes docs
+    entries whose title is a fixed-slot label plus a numeric suffix
+    ('Front 2', 'Receipt 3', 'Image 2', etc.). These are typically
+    legacy FileMaker auto-numbered duplicates the receipt-phantom
+    cleanup couldn't catch (different title, sometimes different
+    filename from the cover slot). Runs across every DOCUMENTS_-
+    CATEGORIES table.
+
+    `dry=1` reports what WOULD be removed without writing — run this
+    first. `dry=0` applies + tombstones each removed file's export
+    path so the next syncDown removes the orphan from local mirrors.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.form.get('dry') == '1'
+    db = get_db()
+    by_category = {}
+    total = 0
+    samples = []
+    for cat in sorted(DOCUMENTS_CATEGORIES):
+        info = CATEGORIES.get(cat)
+        if not info:
+            continue
+        rep = _undo_numbered_doc_phantoms(db, info['table'], dry_run=dry)
+        by_category[cat] = rep['matched']
+        total += rep['matched']
+        for s in rep['sample']:
+            samples.append({**s, 'category': cat})
+            if len(samples) >= 50:
+                break
+    if not dry:
+        db.commit()
+    return jsonify({
+        'dry_run':     dry,
+        'total':       total,
+        'by_category': by_category,
+        'sample':      samples[:50],
+    })
+
+
 @app.route('/admin', methods=['GET'])
 def admin_index():
     """Tiny browser-friendly index of one-shot maintenance actions.
@@ -8241,6 +8389,30 @@ def admin_index():
                      "so the next ⬇ Files syncDown removes the orphan "
                      "from your local mirror. Run the dry scan first.",
             'url':   url_for('admin_undo_receipt_phantoms'),
+            'extra': {'dry': '0'},
+            'confirm': True,
+        },
+        {
+            'label': "Numbered-suffix doc phantoms: scan (dry run)",
+            'desc':  "Reports docs entries titled '<known-label> N' "
+                     "across every category — 'Front 2', 'Front 3', "
+                     "'Receipt 2', 'Image 2', 'Back 3', 'Doc 4', etc. "
+                     "These are legacy FileMaker auto-numbered duplicates "
+                     "that the title-exact 'Receipt' cleanup couldn't "
+                     "match. User-authored titles like 'Service Receipt "
+                     "2024' aren't matched (the suffix has to be a bare "
+                     "integer following a known label).",
+            'url':   url_for('admin_undo_numbered_doc_phantoms'),
+            'extra': {'dry': '1'},
+        },
+        {
+            'label': "Numbered-suffix doc phantoms: REMOVE",
+            'desc':  "Splices each matched entry, bumps updated_at on "
+                     "the affected row, and tombstones the '<ident> — "
+                     "<title>.<ext>' export path so the next ⬇ Files "
+                     "syncDown removes the orphan locally. Run the dry "
+                     "scan first.",
+            'url':   url_for('admin_undo_numbered_doc_phantoms'),
             'extra': {'dry': '0'},
             'confirm': True,
         },
