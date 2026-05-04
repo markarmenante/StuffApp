@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Icon style preview · StuffApp</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Lucide: line icons, ISC license -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Phosphor: 6 weights, MIT license. We load 'regular' + 'duotone'. -->
+  <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+
+  <!-- Heroicons: solid + outline, MIT license. Embedded inline below. -->
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 0 16px;
+      color: #111;
+      background: #fafafa;
+    }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .lede { color: #666; font-size: 13px; margin-bottom: 24px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border: 1px solid #e0e0e3;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #666;
+      padding: 10px 12px;
+      background: #f5f5f7;
+      border-bottom: 1px solid #e0e0e3;
+    }
+    th.icon-col { text-align: center; width: 110px; }
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #f0f0f2;
+      vertical-align: middle;
+    }
+    td.icon-cell { text-align: center; }
+    td.label-cell {
+      font-size: 14px;
+      font-weight: 500;
+    }
+    td.label-cell .slug {
+      display: block;
+      font-size: 11px;
+      color: #999;
+      font-weight: 400;
+      margin-top: 2px;
+    }
+    .emoji {
+      font-size: 24px;
+      line-height: 1;
+    }
+    .lucide, .ph, svg.heroicon {
+      width: 24px;
+      height: 24px;
+      color: #333;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .ph { font-size: 24px; }
+    .missing {
+      color: #c0392b;
+      font-size: 11px;
+      font-style: italic;
+    }
+    .nav-mockup {
+      background: #fff;
+      border: 1px solid #e0e0e3;
+      border-radius: 6px;
+      padding: 12px;
+      margin: 24px 0;
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .nav-mockup-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: #666;
+      letter-spacing: 0.5px;
+      margin-right: 8px;
+    }
+    .nav-item-mock {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: default;
+    }
+    .nav-item-mock:hover { background: #f0f0f2; }
+    .nav-item-mock .lbl {
+      font-size: 10px;
+      color: #555;
+    }
+    .nav-item-mock .emoji,
+    .nav-item-mock .lucide,
+    .nav-item-mock .ph,
+    .nav-item-mock svg.heroicon {
+      font-size: 22px;
+      width: 22px;
+      height: 22px;
+    }
+    h2 {
+      font-size: 16px;
+      margin: 28px 0 8px;
+      color: #333;
+    }
+    .footnote {
+      margin-top: 32px;
+      padding: 14px;
+      background: #fffbe6;
+      border: 1px solid #f0e4a3;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #5c4a00;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Category icon style preview</h1>
+<p class="lede">
+  Side-by-side comparison of the current emoji icons vs three icon-library
+  alternatives. Custom hand-drawn icons would follow the same SVG pattern
+  as Lucide / Heroicons.
+</p>
+
+<!-- Compact nav-style mockups so you can see the icons in something
+     close to their actual context (small, in a row, with labels). -->
+<h2>Nav-row mockups (actual size)</h2>
+
+<div class="nav-mockup">
+  <span class="nav-mockup-label">Today (emoji)</span>
+  <span class="nav-item-mock"><span class="emoji">⌚</span><span class="lbl">Watches</span></span>
+  <span class="nav-item-mock"><span class="emoji">🪙</span><span class="lbl">Coins</span></span>
+  <span class="nav-item-mock"><span class="emoji">🏠</span><span class="lbl">Property</span></span>
+  <span class="nav-item-mock"><span class="emoji">💳</span><span class="lbl">Cards</span></span>
+  <span class="nav-item-mock"><span class="emoji">👤</span><span class="lbl">People</span></span>
+  <span class="nav-item-mock"><span class="emoji">📷</span><span class="lbl">Cameras</span></span>
+  <span class="nav-item-mock"><span class="emoji">🔭</span><span class="lbl">Lenses</span></span>
+  <span class="nav-item-mock"><span class="emoji">✒️</span><span class="lbl">Pens</span></span>
+  <span class="nav-item-mock"><span class="emoji">🎨</span><span class="lbl">Art</span></span>
+  <span class="nav-item-mock"><span class="emoji">🚗</span><span class="lbl">Vehicles</span></span>
+  <span class="nav-item-mock"><span class="emoji">🎵</span><span class="lbl">Music</span></span>
+  <span class="nav-item-mock"><span class="emoji">🔊</span><span class="lbl">Audio</span></span>
+  <span class="nav-item-mock"><span class="emoji">🔫</span><span class="lbl">Rifles</span></span>
+</div>
+
+<div class="nav-mockup">
+  <span class="nav-mockup-label">Lucide (line)</span>
+  <span class="nav-item-mock"><i data-lucide="watch" class="lucide"></i><span class="lbl">Watches</span></span>
+  <span class="nav-item-mock"><i data-lucide="coins" class="lucide"></i><span class="lbl">Coins</span></span>
+  <span class="nav-item-mock"><i data-lucide="house" class="lucide"></i><span class="lbl">Property</span></span>
+  <span class="nav-item-mock"><i data-lucide="credit-card" class="lucide"></i><span class="lbl">Cards</span></span>
+  <span class="nav-item-mock"><i data-lucide="users" class="lucide"></i><span class="lbl">People</span></span>
+  <span class="nav-item-mock"><i data-lucide="camera" class="lucide"></i><span class="lbl">Cameras</span></span>
+  <span class="nav-item-mock"><i data-lucide="aperture" class="lucide"></i><span class="lbl">Lenses</span></span>
+  <span class="nav-item-mock"><i data-lucide="pen-tool" class="lucide"></i><span class="lbl">Pens</span></span>
+  <span class="nav-item-mock"><i data-lucide="palette" class="lucide"></i><span class="lbl">Art</span></span>
+  <span class="nav-item-mock"><i data-lucide="car" class="lucide"></i><span class="lbl">Vehicles</span></span>
+  <span class="nav-item-mock"><i data-lucide="disc-3" class="lucide"></i><span class="lbl">Music</span></span>
+  <span class="nav-item-mock"><i data-lucide="volume-2" class="lucide"></i><span class="lbl">Audio</span></span>
+  <span class="nav-item-mock"><i data-lucide="crosshair" class="lucide"></i><span class="lbl">Rifles</span></span>
+</div>
+
+<div class="nav-mockup">
+  <span class="nav-mockup-label">Phosphor (regular)</span>
+  <span class="nav-item-mock"><i class="ph ph-watch"></i><span class="lbl">Watches</span></span>
+  <span class="nav-item-mock"><i class="ph ph-coins"></i><span class="lbl">Coins</span></span>
+  <span class="nav-item-mock"><i class="ph ph-house"></i><span class="lbl">Property</span></span>
+  <span class="nav-item-mock"><i class="ph ph-credit-card"></i><span class="lbl">Cards</span></span>
+  <span class="nav-item-mock"><i class="ph ph-users"></i><span class="lbl">People</span></span>
+  <span class="nav-item-mock"><i class="ph ph-camera"></i><span class="lbl">Cameras</span></span>
+  <span class="nav-item-mock"><i class="ph ph-aperture"></i><span class="lbl">Lenses</span></span>
+  <span class="nav-item-mock"><i class="ph ph-pen-nib"></i><span class="lbl">Pens</span></span>
+  <span class="nav-item-mock"><i class="ph ph-palette"></i><span class="lbl">Art</span></span>
+  <span class="nav-item-mock"><i class="ph ph-car"></i><span class="lbl">Vehicles</span></span>
+  <span class="nav-item-mock"><i class="ph ph-vinyl-record"></i><span class="lbl">Music</span></span>
+  <span class="nav-item-mock"><i class="ph ph-speaker-high"></i><span class="lbl">Audio</span></span>
+  <span class="nav-item-mock"><i class="ph ph-crosshair"></i><span class="lbl">Rifles</span></span>
+</div>
+
+<div class="nav-mockup">
+  <span class="nav-mockup-label">Phosphor (duotone)</span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-watch ph"></i><span class="lbl">Watches</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-coins ph"></i><span class="lbl">Coins</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-house ph"></i><span class="lbl">Property</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-credit-card ph"></i><span class="lbl">Cards</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-users ph"></i><span class="lbl">People</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-camera ph"></i><span class="lbl">Cameras</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-aperture ph"></i><span class="lbl">Lenses</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-pen-nib ph"></i><span class="lbl">Pens</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-palette ph"></i><span class="lbl">Art</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-car ph"></i><span class="lbl">Vehicles</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-vinyl-record ph"></i><span class="lbl">Music</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-speaker-high ph"></i><span class="lbl">Audio</span></span>
+  <span class="nav-item-mock"><i class="ph-duotone ph-crosshair ph"></i><span class="lbl">Rifles</span></span>
+</div>
+
+<h2>Per-category breakdown</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th class="label-col">Category</th>
+      <th class="icon-col">Today (emoji)</th>
+      <th class="icon-col">Lucide (line)</th>
+      <th class="icon-col">Phosphor (reg)</th>
+      <th class="icon-col">Phosphor (duo)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="label-cell">Watches <span class="slug">watches</span></td>
+      <td class="icon-cell"><span class="emoji">⌚</span></td>
+      <td class="icon-cell"><i data-lucide="watch" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-watch"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-watch ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Coins <span class="slug">coins</span></td>
+      <td class="icon-cell"><span class="emoji">🪙</span></td>
+      <td class="icon-cell"><i data-lucide="coins" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-coins"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-coins ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Property <span class="slug">properties</span></td>
+      <td class="icon-cell"><span class="emoji">🏠</span></td>
+      <td class="icon-cell"><i data-lucide="house" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-house"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-house ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Cards <span class="slug">credit_cards</span></td>
+      <td class="icon-cell"><span class="emoji">💳</span></td>
+      <td class="icon-cell"><i data-lucide="credit-card" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-credit-card"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-credit-card ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">People <span class="slug">persons</span></td>
+      <td class="icon-cell"><span class="emoji">👤</span></td>
+      <td class="icon-cell"><i data-lucide="users" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-users"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-users ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Cameras <span class="slug">cameras</span></td>
+      <td class="icon-cell"><span class="emoji">📷</span></td>
+      <td class="icon-cell"><i data-lucide="camera" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-camera"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-camera ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Lenses <span class="slug">lenses</span></td>
+      <td class="icon-cell"><span class="emoji">🔭</span></td>
+      <td class="icon-cell"><i data-lucide="aperture" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-aperture"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-aperture ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Pens <span class="slug">pens</span></td>
+      <td class="icon-cell"><span class="emoji">✒️</span></td>
+      <td class="icon-cell"><i data-lucide="pen-tool" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-pen-nib"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-pen-nib ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Art <span class="slug">art</span></td>
+      <td class="icon-cell"><span class="emoji">🎨</span></td>
+      <td class="icon-cell"><i data-lucide="palette" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-palette"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-palette ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Vehicles <span class="slug">vehicles</span></td>
+      <td class="icon-cell"><span class="emoji">🚗</span></td>
+      <td class="icon-cell"><i data-lucide="car" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-car"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-car ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Music <span class="slug">recordings</span></td>
+      <td class="icon-cell"><span class="emoji">🎵</span></td>
+      <td class="icon-cell"><i data-lucide="disc-3" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-vinyl-record"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-vinyl-record ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Audio <span class="slug">audio</span></td>
+      <td class="icon-cell"><span class="emoji">🔊</span></td>
+      <td class="icon-cell"><i data-lucide="volume-2" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-speaker-high"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-speaker-high ph"></i></td>
+    </tr>
+    <tr>
+      <td class="label-cell">Rifles <span class="slug">rifles</span></td>
+      <td class="icon-cell"><span class="emoji">🔫</span></td>
+      <td class="icon-cell"><i data-lucide="crosshair" class="lucide"></i></td>
+      <td class="icon-cell"><i class="ph ph-crosshair"></i></td>
+      <td class="icon-cell"><i class="ph-duotone ph-crosshair ph"></i></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="footnote">
+  <strong>Notes:</strong>
+  Lucide and Phosphor are loaded from public CDNs (unpkg.com) — fine for
+  this preview, not what we'd ship. For production we'd inline the SVG
+  paths directly into <code>templates/base.html</code> so there's no
+  external dependency, no extra HTTP request, and full control over
+  styling. Custom-drawn icons would follow the same inline-SVG pattern.
+  Rifles uses <em>crosshair</em> in both libraries — neither ships an
+  actual firearm icon. We can keep the 🔫 emoji for that one specifically,
+  hand-draw a small SVG, or accept the crosshair mapping.
+</div>
+
+<script>
+  // Lucide and Phosphor both auto-init on DOMContentLoaded — Phosphor
+  // CSS classes are picked up automatically; Lucide needs an explicit
+  // call so its <i data-lucide> placeholders get swapped for SVGs.
+  if (window.lucide) {
+    window.lucide.createIcons();
+  }
+</script>
+</body>
+</html>
