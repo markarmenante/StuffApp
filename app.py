@@ -1252,6 +1252,94 @@ def _dedupe_receipt_docs(db, table):
             )
 
 
+def _undo_receipt_phantoms(db, table, dry_run, write_tombstones=True):
+    """Remove Receipt-titled docs entries that are exact phantoms of the
+    legacy receipt column — same title 'Receipt', filename equal to the
+    row's receipt column value. These are entries the migration created
+    from FileMaker-era receipt slots that actually held cover-image
+    duplicates (different filename than the cover image column, so
+    _strip_redundant_receipts couldn't NULL them, and
+    _strip_phantom_cover_image_docs couldn't strip them by filename).
+
+    Conservative — does NOT touch:
+      * User-added Receipt docs whose filename differs from the receipt
+        column value (those came in via the dynamic docs UI and are
+        legitimate user uploads).
+      * Receipt docs in non-migrated categories (recordings).
+      * Any doc whose title isn't exactly 'Receipt' (case-insensitive).
+
+    For each match it: splices the docs entry, NULLs the receipt column
+    so the boot-time migration won't re-insert on the next restart,
+    bumps updated_at, and (optionally) writes a tombstone so the next
+    syncDown removes the orphan from the user's local mirror.
+
+    Returns a per-table report:
+      {'matched': N, 'sample': [...up to 25 entries...]}
+    Sample entries: {record_id, ident, label, filename, ext, group}.
+    """
+    out = {'matched': 0, 'sample': []}
+    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    if 'documents' not in cols or 'receipt' not in cols:
+        return out
+    cat = next((c for c, info in CATEGORIES.items()
+                if info.get('table') == table), None)
+    plan = EXPORT_LAYOUT.get(cat) if cat else None
+    rows = db.execute(f"SELECT * FROM {table}").fetchall()
+    now = datetime.utcnow().isoformat()
+    for row in rows:
+        receipt = (row['receipt'] or '').strip() if 'receipt' in row.keys() else ''
+        if not receipt:
+            continue
+        try:
+            docs = json.loads(row['documents'] or '[]')
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(docs, list):
+            continue
+        # Find the phantom: title == 'Receipt', filename == receipt column.
+        new_docs = []
+        removed_entry = None
+        for d in docs:
+            if (removed_entry is None
+                    and isinstance(d, dict)
+                    and (d.get('title') or '').strip().lower() == 'receipt'
+                    and (d.get('filename') or '').strip() == receipt):
+                removed_entry = d
+                continue
+            new_docs.append(d)
+        if not removed_entry:
+            continue
+        out['matched'] += 1
+        if len(out['sample']) < 25 and plan:
+            try:
+                ident = plan['ident'](row)
+                group = plan['group'](row)
+            except Exception:
+                ident, group = '?', '?'
+            out['sample'].append({
+                'record_id': row['id'],
+                'ident':     ident,
+                'group':     group,
+                'label':     'Receipt',
+                'filename':  receipt,
+                'ext':       os.path.splitext(receipt)[1] or '',
+            })
+        if dry_run:
+            continue
+        db.execute(
+            f"UPDATE {table} SET documents = ?, receipt = NULL, "
+            f"updated_at = ? WHERE id = ?",
+            [json.dumps(new_docs), now, row['id']],
+        )
+        if write_tombstones and cat:
+            try:
+                _record_tombstone(db, cat, row, 'Receipt', receipt)
+            except Exception:
+                app.logger.exception('tombstone write failed for %s/%s',
+                                     cat, row['id'])
+    return out
+
+
 def _backfill_docs_json(db, table, target_col, sources):
     """Compact legacy fixed doc columns into a JSON array stored in
     `target_col`. `sources` is a list of (filename_col, title_col,
@@ -8075,6 +8163,55 @@ def admin_users_delete(user_id):
     return redirect(url_for('admin_users'))
 
 
+# Categories the receipt-into-documents migration ran for. Recordings
+# is intentionally excluded — its FileMaker receipt slot historically
+# held cover-image data, and the migration was never enabled there.
+RECEIPT_MIGRATED_CATEGORIES = (
+    'art', 'coins', 'watches', 'pens', 'rifles', 'audio', 'cameras', 'lenses',
+)
+
+
+@app.route('/admin/undo-receipt-phantoms', methods=['POST'])
+def admin_undo_receipt_phantoms():
+    """Remove Receipt-titled docs entries the receipt→documents
+    migration created from FileMaker-era receipt slots that actually
+    held cover-image duplicates. Conservative: only entries whose
+    filename matches the row's receipt column value AND whose title is
+    exactly 'Receipt' get removed. User-uploaded Receipt docs (added
+    via the dynamic docs UI with a different filename) are preserved.
+
+    `dry=1` reports what WOULD be removed without writing — run this
+    first to spot-check the list. Default behaviour is `dry=0`: applies
+    the cleanup. Both modes return per-category counts and a sample.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.form.get('dry') == '1'
+    db = get_db()
+    by_category = {}
+    total = 0
+    samples = []
+    for cat in RECEIPT_MIGRATED_CATEGORIES:
+        info = CATEGORIES.get(cat)
+        if not info:
+            continue
+        rep = _undo_receipt_phantoms(db, info['table'], dry_run=dry)
+        by_category[cat] = rep['matched']
+        total += rep['matched']
+        for s in rep['sample']:
+            samples.append({**s, 'category': cat})
+            if len(samples) >= 50:
+                break
+    if not dry:
+        db.commit()
+    return jsonify({
+        'dry_run': dry,
+        'total':   total,
+        'by_category': by_category,
+        'sample':  samples[:50],
+    })
+
+
 @app.route('/admin', methods=['GET'])
 def admin_index():
     """Tiny browser-friendly index of one-shot maintenance actions.
@@ -8083,7 +8220,35 @@ def admin_index():
     extra typing. Cloudflare Access still gates the page itself in prod.
     """
     actions = [
-        # Newest on top — keep prepending here as new admin actions land.
+        {
+            'label': "Receipt phantoms: scan (dry run)",
+            'desc':  "Reports per-category counts of legacy receipt-column "
+                     "phantoms that the receipt→documents migration left "
+                     "as 'Receipt'-titled docs entries pointing at "
+                     "cover-image duplicates. Only entries whose filename "
+                     "exactly matches the row's receipt column value are "
+                     "counted — user-uploaded Receipt docs (different "
+                     "filename) are safe and never reported.",
+            'url':   url_for('admin_undo_receipt_phantoms'),
+            'extra': {'dry': '1'},
+        },
+        {
+            'label': "Receipt phantoms: REMOVE",
+            'desc':  "Splices the matched Receipt-titled docs entries, "
+                     "NULLs the legacy receipt column on the affected "
+                     "rows so the boot-time migration doesn't re-insert, "
+                     "and tombstones each '<ident> — Receipt.<ext>' path "
+                     "so the next ⬇ Files syncDown removes the orphan "
+                     "from your local mirror. Run the dry scan first.",
+            'url':   url_for('admin_undo_receipt_phantoms'),
+            'extra': {'dry': '0'},
+            'confirm': True,
+        },
+    ]
+    archived_actions = [
+        # Older one-shot maintenance actions — preserved for history /
+        # re-run if needed, but archived under a collapsed section so
+        # the active set stays focused.
         {
             'label': "Watches: bulk AI lookup (calibre/jewels/origin/escapement/beat)",
             'desc':  "Walks every watch with enough identity (brand/model/"
@@ -8230,6 +8395,7 @@ def admin_index():
         },
     ]
     return render_template('admin.html', actions=actions,
+                           archived_actions=archived_actions,
                            secret=IMPORT_MISSING_SECRET,
                            current_category='__admin__',
                            categories=CATEGORIES,
