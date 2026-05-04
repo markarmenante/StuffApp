@@ -2175,9 +2175,16 @@ document.addEventListener('DOMContentLoaded', function () {
   {% else %}
   <div class="save-bar">
     <span class="autosave-hint">Fields save automatically</span>
+    {# Forward q / filter / at from the detail URL back to the list so
+       a delete from a filtered list (e.g. searched "Journe") drops the
+       user back into the same filtered view, not the unfiltered list. #}
     <button type="button" class="btn-delete" style="margin-left:auto"
             data-delete-url="{{ url_for('delete_record', category=category, record_id=r['id']) }}"
-            data-redirect-url="{{ url_for('list_view', category=category) }}"
+            data-redirect-url="{{ url_for('list_view', category=category,
+                                          q=request.args.get('q') or None,
+                                          filter=request.args.get('filter') or None,
+                                          at=request.args.get('at') or None,
+                                          dot=request.args.get('dot') or None) }}"
             data-armed-text="OK to Delete?"
             onclick="confirmDelete(this)">Delete</button>
   </div>
