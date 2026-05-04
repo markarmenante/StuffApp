@@ -10659,7 +10659,12 @@ def sweep_files():
                         # the cat_id fast path we never built indexes[cat];
                         # subsequent cat_id_match calls re-query the DB
                         # so they pick up the UPDATE without a cache hit.
-                        for (g, i, r_cached) in indexes.get(cat, []):
+                        # NB: tuple element renamed off `g` because Python
+                        # treats `g` as local for the WHOLE function once
+                        # any assignment exists, which would shadow
+                        # `flask.g` at sweep_files entry and crash with
+                        # UnboundLocalError before user auth even ran.
+                        for (_g_cached, _i_cached, r_cached) in indexes.get(cat, []):
                             if r_cached.get('id') == row['id']:
                                 for k, v in updates.items():
                                     r_cached[k] = v
