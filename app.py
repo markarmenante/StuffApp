@@ -881,6 +881,11 @@ def init_db():
     for _t in ('art', 'coins', 'watches', 'pens', 'rifles', 'audio',
                'cameras', 'lenses'):
         _migrate_receipt_into_documents(db, _t)
+        # Collapse historical "Receipt"-titled duplicates left behind
+        # by an earlier boot that ran the migration with only a
+        # filename-based dedupe — see _dedupe_receipt_docs for the
+        # full story.
+        _dedupe_receipt_docs(db, _t)
     _strip_phantom_cover_image_docs(db)
     _strip_redundant_receipts(db)
     _backfill_docs_json(db, 'vehicles', 'documents', [
@@ -1179,11 +1184,61 @@ def _migrate_receipt_into_documents(db, table):
             docs = []
         if any(isinstance(d, dict) and (d.get('filename') or '') == receipt for d in docs):
             continue
+        # Skip when ANY Receipt-titled entry already exists — even with
+        # a different filename. The user's manual docs-UI upload takes
+        # precedence over the legacy column. Without this guard, every
+        # boot after a re-upload stacks another Receipt-titled entry,
+        # which collides at export time and gets the " (2).ext" suffix.
+        if any(isinstance(d, dict)
+               and (d.get('title') or '').strip().lower() == 'receipt'
+               for d in docs):
+            continue
         docs.insert(0, {'title': 'Receipt', 'filename': receipt})
         db.execute(
             f'UPDATE {table} SET documents = ? WHERE id = ?',
             (json.dumps(docs), row['id']),
         )
+
+
+def _dedupe_receipt_docs(db, table):
+    """Collapse multiple 'Receipt'-titled entries in the documents
+    JSON down to one. Earlier boots of _migrate_receipt_into_documents
+    deduped only by filename, so a row that already had a user-uploaded
+    {title:'Receipt', filename:B} ended up with {title:'Receipt',
+    filename:A} inserted at index 0 by the migration — and both then
+    collided at export time as '<ident> — Receipt.<ext>' /
+    '<ident> — Receipt (2).<ext>'.
+    Keeps the LAST Receipt-titled entry (the user's manual upload
+    that lived in the JSON before the migration ran) and drops the
+    earlier ones (the auto-derived migration inserts at index 0).
+    Other shared titles are left alone — only literal 'Receipt'
+    duplicates are collapsed, since the user might intentionally have
+    multiple docs with other matching titles. Idempotent."""
+    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    if 'documents' not in cols:
+        return
+    rows = db.execute(f"SELECT id, documents FROM {table}").fetchall()
+    for row in rows:
+        try:
+            docs = json.loads(row['documents'] or '[]')
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(docs, list):
+            continue
+        receipt_kept = False
+        kept = []
+        for d in reversed(docs):
+            if isinstance(d, dict) and (d.get('title') or '').strip().lower() == 'receipt':
+                if receipt_kept:
+                    continue
+                receipt_kept = True
+            kept.append(d)
+        kept.reverse()
+        if len(kept) != len(docs):
+            db.execute(
+                f'UPDATE {table} SET documents = ? WHERE id = ?',
+                (json.dumps(kept), row['id']),
+            )
 
 
 def _backfill_docs_json(db, table, target_col, sources):
