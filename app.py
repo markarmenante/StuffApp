@@ -9721,6 +9721,12 @@ def sweep_files():
 
                 plan = EXPORT_LAYOUT[cat]
                 idx = _index_for(cat)
+                target_group = _norm(parsed['group'])
+                target_ident = _norm(parsed['ident'])
+                # Initialized here (not at the slot-resolve step below) so the
+                # single-record-per-group fallback can read it without
+                # tripping UnboundLocalError.
+                target_label = _norm(parsed['label'])
 
             # ─── Per-row data snapshot branch ─────────────────────────
             # Files named "<ident> — _data.json" carry the row's column
@@ -9762,13 +9768,19 @@ def sweep_files():
                 skip_cols = (file_slot_cols | doc_json_cols
                              | {'id', 'created_at', 'updated_at'})
 
-                # Try to find an existing row by (group, ident).
-                snap_matches = [(g, i, r) for (g, i, r) in idx
-                                if g == target_group and i == target_ident]
-                if not snap_matches and target_ident:
+                # Try to find an existing row by (group, ident). On the
+                # cat_id fast path we already matched the row directly —
+                # use it instead of searching the per-category index
+                # (which wasn't built on that path).
+                if cat_id_match:
+                    snap_matches = matches
+                else:
                     snap_matches = [(g, i, r) for (g, i, r) in idx
-                                    if g == target_group
-                                    and i.startswith(target_ident)]
+                                    if g == target_group and i == target_ident]
+                    if not snap_matches and target_ident:
+                        snap_matches = [(g, i, r) for (g, i, r) in idx
+                                        if g == target_group
+                                        and i.startswith(target_ident)]
 
                 if snap_matches:
                     if len(snap_matches) > 1:
@@ -9803,8 +9815,11 @@ def sweep_files():
                             list(updates.values()) + [now, row['id']],
                         )
                         # Refresh in-memory index so subsequent regular
-                        # files in this batch see the filled values.
-                        for (g, i, r_cached) in indexes[cat]:
+                        # files in this batch see the filled values. On
+                        # the cat_id fast path we never built indexes[cat];
+                        # subsequent cat_id_match calls re-query the DB
+                        # so they pick up the UPDATE without a cache hit.
+                        for (g, i, r_cached) in indexes.get(cat, []):
                             if r_cached.get('id') == row['id']:
                                 for k, v in updates.items():
                                     r_cached[k] = v
@@ -9859,12 +9874,6 @@ def sweep_files():
                 })
                 continue
             # ─── End data snapshot branch ─────────────────────────────
-                target_group = _norm(parsed['group'])
-                target_ident = _norm(parsed['ident'])
-                # Initialized here (not at the slot-resolve step below) so the
-                # single-record-per-group fallback can read it without
-                # tripping UnboundLocalError.
-                target_label = _norm(parsed['label'])
 
             # Find rows whose (group, ident) match. ident match is exact
             # after normalization; if no exact match, fall back to a prefix
