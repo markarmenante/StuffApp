@@ -8634,10 +8634,6 @@ def admin_export_files():
     written = 0
     skipped_missing = 0
     seen_paths = set()
-    # Track per-category rows so we can write one CSV per category at
-    # the top of that category's folder once all files are processed.
-    csv_rows = {}      # category → list[dict-like row]
-    csv_columns = {}   # category → list[column name]
 
     def _next_unique(base_dir, ident, label, ext):
         """Avoid name collisions when two items in the same folder render
@@ -8681,12 +8677,13 @@ def admin_export_files():
             except sqlite3.OperationalError:
                 continue
             cat_label = EXPORT_CATEGORY_LABELS.get(cat, cat.title())
-            cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
-
-            # Stash for the per-category CSV. Capture every column in
-            # column-info order so the CSV is stable across exports.
-            csv_columns[cat] = [r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()]
-            csv_rows[cat] = [dict(r) for r in rows]
+            # One PRAGMA per category, then derive both the membership
+            # set (for `field in cols` checks below) and the ordered
+            # column list (for the per-category CSV header) from the
+            # same fetch.
+            col_names = [r['name'] for r in
+                         db.execute(f"PRAGMA table_info({table})").fetchall()]
+            cols = set(col_names)
 
             for row in rows:
                 ident_raw = plan['ident'](row)
@@ -8798,21 +8795,20 @@ def admin_export_files():
                         zf.write(src, arcname=arcname)
                         written += 1
 
-        # Per-category CSV at the top of each category's folder. Rows
-        # in the same order as the table; columns straight from
-        # PRAGMA table_info so the schema is faithfully captured.
-        for cat, rows in csv_rows.items():
-            if not rows:
-                continue
-            cat_label = EXPORT_CATEGORY_LABELS.get(cat, cat.title())
-            cols = csv_columns[cat]
-            sio = io.StringIO()
-            w = _csv.writer(sio, quoting=_csv.QUOTE_MINIMAL)
-            w.writerow(cols)
-            for r in rows:
-                w.writerow(['' if r.get(c) is None else r.get(c) for c in cols])
-            zf.writestr(f'StuffFiles/{cat_label}/{cat_label}.csv',
-                        sio.getvalue().encode('utf-8'))
+            # Per-category CSV at the top of each category's folder.
+            # Streamed straight into the zip right after this category's
+            # file loop so we never hold every row of every category in
+            # memory at once. Columns straight from PRAGMA table_info so
+            # the schema is faithfully captured; rows in the same order
+            # as the SELECT.
+            if rows:
+                sio = io.StringIO()
+                w = _csv.writer(sio, quoting=_csv.QUOTE_MINIMAL)
+                w.writerow(col_names)
+                for r in rows:
+                    w.writerow(['' if r[c] is None else r[c] for c in col_names])
+                zf.writestr(f'StuffFiles/{cat_label}/{cat_label}.csv',
+                            sio.getvalue().encode('utf-8'))
 
         # _tombstones.json: deletions newer than `since` that are in a
         # category the caller has access to. Each entry carries the
@@ -9553,6 +9549,9 @@ def _finalize_sweep_seed(seed, cat, user, db, now):
     them, while a path-driven create gets fresh ones."""
     seed.setdefault('id', str(uuid.uuid4()))
     seed.setdefault('created_at', now)
+    # updated_at intentionally overwrites: this is a fresh INSERT, not
+    # a re-creation of the historical row, so the snapshot's stale
+    # updated_at would lie about when the row entered THIS database.
     seed['updated_at'] = now
     if 'owner' not in seed or not seed.get('owner'):
         if cat == 'coins':
@@ -9764,9 +9763,18 @@ def sweep_files():
                 #   filenames which may not exist after a rebuild — leave
                 #   them blank so sweep's regular file-slot logic populates
                 #   them with the actual on-disk filenames;
-                # - doc JSON columns reference uploads similarly.
+                # - doc JSON columns reference uploads similarly;
+                # - owner is derived from the uploading user's role so a
+                #   member can't claim a row for someone else by editing
+                #   the JSON;
+                # - cat_id is allocated by _finalize_sweep_seed so a
+                #   snapshot can't claim an arbitrary serial (W001 etc.)
+                #   on auto-create, and a fill-blanks pass can't paint
+                #   a chosen cat_id onto an existing row with a blank
+                #   one.
                 skip_cols = (file_slot_cols | doc_json_cols
-                             | {'id', 'created_at', 'updated_at'})
+                             | {'id', 'created_at', 'updated_at',
+                                'owner', 'cat_id'})
 
                 # Try to find an existing row by (group, ident). On the
                 # cat_id fast path we already matched the row directly —
