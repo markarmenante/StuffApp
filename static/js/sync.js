@@ -374,25 +374,66 @@
         `mirror the deletion locally, or Cancel to keep the local ` +
         `copies.\n\n` + sample + more
       );
+      // For each tombstone, remove the canonical path AND any
+      // collision-suffix variants `<ident> — <label> (2).<ext>`,
+      // `(3).<ext>`, ..., `(8).<ext>`. The server's _record_tombstone
+      // emits one path; the export's _next_unique may have written
+      // additional files when two records collided on the same
+      // arcname. Without expanding here, the collision-suffixed
+      // copies persist locally as orphans even after the user agreed
+      // to apply deletions. NotFoundError is silently ignored, so
+      // probing variants that don't exist is essentially free.
+      const expandVariants = (path) => {
+        const variants = [path];
+        const m = path.match(/^(.+?)(\.[^.]+)?$/);
+        if (m) {
+          const base = m[1];
+          const ext = m[2] || '';
+          for (let n = 2; n <= 8; n++) {
+            variants.push(`${base} (${n})${ext}`);
+          }
+        }
+        return variants;
+      };
+      const tryRemove = async (path) => {
+        const parts = path.split('/').filter(Boolean);
+        if (!parts.length) return null;
+        let cur = dir;
+        for (let i = 0; i < parts.length - 1; i++) {
+          cur = await cur.getDirectoryHandle(parts[i]);
+        }
+        await cur.removeEntry(parts[parts.length - 1]);
+        return true;
+      };
       if (ok) {
         for (const t of list) {
           const path = (t.path || '').replace(/^StuffFiles\//, '');
           if (!path) continue;
-          const parts = path.split('/').filter(Boolean);
-          if (!parts.length) continue;
-          try {
-            let cur = dir;
-            for (let i = 0; i < parts.length - 1; i++) {
-              cur = await cur.getDirectoryHandle(parts[i]);
+          let canonicalRemoved = false;
+          let variantRemoved = 0;
+          for (const variant of expandVariants(path)) {
+            try {
+              await tryRemove(variant);
+              if (variant === path) {
+                canonicalRemoved = true;
+              } else {
+                variantRemoved++;
+              }
+            } catch (e) {
+              // Most common: file absent → NotFoundError. Variants
+              // are speculative, so absence is the expected case.
+              if (!e || e.name === 'NotFoundError') continue;
+              // Real failure on the canonical path is the only one
+              // counted as failed; variant failures are silent because
+              // they're best-effort cleanup.
+              if (variant === path) {
+                tombstoneFailed++;
+                console.warn('tombstone apply failed', t.path, e);
+              }
             }
-            await cur.removeEntry(parts[parts.length - 1]);
+          }
+          if (canonicalRemoved || variantRemoved) {
             tombstoneApplied++;
-          } catch (e) {
-            // Most common: file already absent locally → NotFoundError.
-            // Don't count those as failures; everything else is logged.
-            if (e && e.name === 'NotFoundError') continue;
-            tombstoneFailed++;
-            console.warn('tombstone apply failed', t.path, e);
           }
         }
         progress && progress(

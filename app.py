@@ -858,6 +858,50 @@ def init_db():
     db.commit()
     _ensure_owner_user(db)
     db.commit()
+
+    # Migration-state ledger: one row per applied one-shot data
+    # migration so subsequent boots skip them. Used for the kind of
+    # change where boot-time helpers can't infer "needs to run" from
+    # row state alone — e.g. the post-1ebf6ed updated_at bump that
+    # has to walk every row regardless of current contents.
+    db.execute("CREATE TABLE IF NOT EXISTS migration_state ("
+               "key TEXT PRIMARY KEY, applied_at TEXT NOT NULL)")
+    db.commit()
+
+    # One-shot: when commit 1ebf6ed added the per-row _data.json
+    # snapshot writer to the export, every row that already existed
+    # needed to flow through the export at least once to gain a
+    # snapshot file. The export's incremental `since` filter excludes
+    # rows whose updated_at hasn't moved, so any record not edited
+    # since 1ebf6ed stayed frozen in pre-snapshot state on local
+    # mirrors (e.g. the user's whole Atelier de Chronométrie folder
+    # had files but no _data.json files, breaking sweep round-trip).
+    # Bumping updated_at on every row in every export-eligible table
+    # forces the next incremental export to re-include them all.
+    # Gated by a sentinel so subsequent boots don't re-bump.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('data_json_initial_bump_v1',),
+    ).fetchone():
+        _bump_now = datetime.utcnow().isoformat()
+        for _cat, _info in CATEGORIES.items():
+            _table = _info.get('table')
+            if not _table:
+                continue
+            try:
+                db.execute(
+                    f"UPDATE {_table} SET updated_at = ? "
+                    f"WHERE updated_at IS NOT NULL",
+                    (_bump_now,),
+                )
+            except sqlite3.OperationalError:
+                pass
+        db.execute(
+            "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+            ('data_json_initial_bump_v1', _bump_now),
+        )
+        db.commit()
+
     _backfill_meds_from_prescriptions(db)
     _backfill_persons_doc_slots(db)
     _backfill_properties_documents_json(db)
@@ -9231,6 +9275,12 @@ def admin_export_files():
                 # persons has 'ids' + 'health'). Each entry exports as
                 # "<ident> — <title>.<ext>" same as a fixed slot, so
                 # the round-trip with sweep stays symmetric.
+                # `seen_files` carries over from the fixed-slot loop
+                # above so a docs entry whose filename happens to match
+                # a fixed slot (legacy phantom that escaped the boot-
+                # time strip + a row mutation since boot) doesn't get
+                # re-emitted — would have shown up as the same file at
+                # two different arcnames in the same record folder.
                 for json_col in _docs_cols_for(cat):
                     if json_col not in cols:
                         continue
@@ -9246,6 +9296,9 @@ def admin_export_files():
                         fname = (d.get('filename') or '').strip()
                         if not fname:
                             continue
+                        if fname in seen_files:
+                            continue
+                        seen_files.add(fname)
                         src = os.path.join(UPLOAD_FOLDER, fname)
                         if not os.path.isfile(src):
                             skipped_missing += 1
@@ -9259,16 +9312,32 @@ def admin_export_files():
                         written += 1
 
             # Per-category CSV at the top of each category's folder.
-            # Streamed straight into the zip right after this category's
-            # file loop so we never hold every row of every category in
-            # memory at once. Columns straight from PRAGMA table_info so
-            # the schema is faithfully captured; rows in the same order
-            # as the SELECT.
-            if rows:
+            # Always written with the FULL table (subject to the user's
+            # row filter) — independent of the `since` filter applied
+            # to the per-row file/JSON loop above. Without this, an
+            # incremental sync would emit a CSV containing only the N
+            # changed rows, replacing the user's previously-complete
+            # local CSV with a sliver — silently turning a "schema
+            # snapshot" into "diff of recent edits". Re-fetching with
+            # the row filter only is cheap (single SELECT) and the
+            # user gets a real complete dump on every export.
+            csv_wheres, csv_params = [], []
+            _apply_row_filter_clauses(cat, csv_wheres, csv_params)
+            csv_where_clause = (
+                f"WHERE {' AND '.join(csv_wheres)}" if csv_wheres else ''
+            )
+            try:
+                csv_rows_full = db.execute(
+                    f"SELECT * FROM {table} {csv_where_clause}",
+                    csv_params,
+                ).fetchall()
+            except sqlite3.OperationalError:
+                csv_rows_full = []
+            if csv_rows_full:
                 sio = io.StringIO()
                 w = _csv.writer(sio, quoting=_csv.QUOTE_MINIMAL)
                 w.writerow(col_names)
-                for r in rows:
+                for r in csv_rows_full:
                     w.writerow(['' if r[c] is None else r[c] for c in col_names])
                 zf.writestr(f'StuffFiles/{cat_label}/{cat_label}.csv',
                             sio.getvalue().encode('utf-8'))
@@ -9325,27 +9394,43 @@ def admin_export_files():
     tmp.close()
     ts = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
     fname = f'StuffFiles-{user["email"].split("@")[0]}-{ts}.zip'
-    # Mark this user's Files export as fresh — the nav indicator turns
-    # green once the zip is delivered. Any record edited after this
-    # timestamp will flip the indicator back to red on the next page
-    # load (see _files_export_stale + /files-status below).
-    db.execute(
-        'UPDATE users SET last_export_at = ? WHERE id = ?',
-        (datetime.utcnow().isoformat(timespec='seconds'), user['id']),
-    )
-    db.commit()
     # Delete the tempfile after Flask finishes streaming. send_file
     # opens its own descriptor for streaming, so unlink-after-response
     # is safe on POSIX (the open fd keeps the inode alive until the
     # response finishes).
     tmp_path = tmp.name
+    user_id = user['id']
+
     @after_this_request
     def _cleanup(response):
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
+        # Bump last_export_at only when the response actually built
+        # cleanly (status_code 200). Previously the bump ran BEFORE
+        # send_file returned, so a Cloudflare timeout, browser close,
+        # or any send_file exception left the user marked as having
+        # exported when no zip ever reached them — the next sync's
+        # `since` filter would then skip everything in the cancelled
+        # export window. Moving the update here means a 5xx from
+        # send_file (or an exception bubbling out of the view) leaves
+        # last_export_at unchanged so the next click retries cleanly.
+        if response.status_code == 200:
+            try:
+                db2 = get_db()
+                db2.execute(
+                    'UPDATE users SET last_export_at = ? WHERE id = ?',
+                    (datetime.utcnow().isoformat(timespec='seconds'),
+                     user_id),
+                )
+                db2.commit()
+            except Exception:
+                app.logger.exception(
+                    'last_export_at bump failed for user %s', user_id
+                )
         return response
+
     return send_file(tmp_path, as_attachment=True, download_name=fname,
                      mimetype='application/zip')
 
@@ -9999,7 +10084,12 @@ def _is_data_snapshot_path(path):
         return False
     # Trailing ' — _data' on the canonical em-dash separator. Tolerate
     # the user hand-renaming with an en-dash or hyphen too.
-    return bool(re.search(r'\s+[—–-]\s+_data$', name))
+    # Also recognize the collision-suffix variant '_data (2)' that
+    # _next_unique produces when two records in the same group share
+    # an ident — without this the second snapshot would be parsed as
+    # an opaque doc upload titled "_data (2)" and never restore its
+    # row's blank columns.
+    return bool(re.search(r'\s+[—–-]\s+_data(\s+\(\d+\))?$', name))
 
 
 def _process_sweep_deletes(record_state, allowed, db, now, dry_run, max_deletes=50):
