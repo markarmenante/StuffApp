@@ -620,12 +620,14 @@ document.addEventListener('DOMContentLoaded', function () {
     {# Cat ID readout: surfaced so the user can name local files
        "<anything> (W###).pdf" and have sweep route them to this row
        automatically (see _try_cat_id_sweep_match in app.py). Readonly
-       — auto-assigned at row creation; click → copies to clipboard. #}
+       — auto-assigned at row creation; click → copies "(W###)" with
+       the parens included so the user can paste straight into a
+       filename without retyping the brackets. #}
     <div class="bottom-cell">
       <input type="text" value="{{ val('cat_id') }}"
              readonly
-             title="Auto-assigned. Name a local file like 'invoice (W042).pdf' and sweep will route it to this watch."
-             onclick="navigator.clipboard?.writeText(this.value); this.select();"
+             title="Auto-assigned. Click to copy '(W###)' — paste into any local filename and sweep routes it here."
+             onclick="if(this.value){navigator.clipboard?.writeText('(' + this.value + ')')}; this.select();"
              style="text-align:center;cursor:pointer;color:#666;font-family:var(--font-mono,monospace)">
       <span class="blabel">Cat ID</span>
     </div>
