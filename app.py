@@ -6371,8 +6371,18 @@ def import_coins_missing():
 
 @app.route('/admin/import-watches-missing', methods=['POST'])
 def import_watches_missing():
+    """Insert any rows from Watch.csv that aren't already in the
+    watches table. Dedupe key: (reference, case_num, movement_num).
+
+    `dry=1` reports what WOULD be inserted (brand / model / ref /
+    case / mvt / year for each missing row) without writing — useful
+    when the live count has dropped to spot-check whether the diff
+    is recoverable accidental loss versus intentional deletions you
+    DON'T want resurrected. Default behaviour is unchanged: actual
+    insert."""
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
         abort(403)
+    dry = request.form.get('dry') == '1'
     db = get_db()
     existing = set()
     for r in db.execute("SELECT reference, case_num, movement_num FROM watches"):
@@ -6384,6 +6394,7 @@ def import_watches_missing():
     skipped_existing = 0
     skipped_bad = 0
     now = datetime.utcnow().isoformat()
+    would_insert = []  # dry-run only
 
     for row in _csv_rows('Watch.csv'):
         if len(row) < 38:
@@ -6398,6 +6409,18 @@ def import_watches_missing():
             continue
         if key in existing:
             skipped_existing += 1
+            continue
+
+        if dry:
+            would_insert.append({
+                'brand':        _mclean(row[1]),
+                'model':        _mclean(row[11]),
+                'reference':    reference,
+                'case_num':     case_num,
+                'movement_num': movement_num,
+                'year':         _mnum(row[37], int),
+            })
+            existing.add(key)  # so duplicate CSV rows don't double-report
             continue
 
         db.execute('''
@@ -6428,10 +6451,13 @@ def import_watches_missing():
         inserted += 1
         existing.add(key)
 
-    db.commit()
+    if not dry:
+        db.commit()
     total = db.execute('SELECT COUNT(*) FROM watches').fetchone()[0]
     return jsonify(inserted=inserted, skipped_existing=skipped_existing,
-                   skipped_bad=skipped_bad, total=total)
+                   skipped_bad=skipped_bad, total=total,
+                   dry_run=dry,
+                   would_insert=would_insert if dry else None)
 
 
 @app.route('/coins/print-pdf')
@@ -8006,6 +8032,26 @@ def admin_index():
                      "PDF/HEIC thumbnail cache. Run the dry scan first.",
             'url':   url_for('admin_orphan_uploads'),
             'extra': {'dry': '0'},
+        },
+        {
+            'label': "Scan watches missing from Watch.csv (dry run)",
+            'desc':  "Reads the bundled Watch.csv legacy import and lists "
+                     "rows whose (reference, case_num, movement_num) isn't "
+                     "in the watches table. Use this when the live count "
+                     "has dropped below the legacy 410 to confirm whether "
+                     "the diff is recoverable accidental loss vs. "
+                     "intentional deletions you DON'T want resurrected.",
+            'url':   url_for('import_watches_missing'),
+            'extra': {'dry': '1'},
+        },
+        {
+            'label': "Re-import watches missing from Watch.csv",
+            'desc':  "Inserts every Watch.csv row whose (reference, "
+                     "case_num, movement_num) isn't already present. Safe "
+                     "to re-run — dedupes by that key. Will resurrect any "
+                     "intentionally-deleted watches that still match a "
+                     "CSV row, so run the dry scan first.",
+            'url':   url_for('import_watches_missing'),
         },
         {
             'label': "Coins: set every owner to 'Mark'",
