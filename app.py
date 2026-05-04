@@ -1172,6 +1172,7 @@ def _migrate_receipt_into_documents(db, table):
     if 'documents' not in cols or 'receipt' not in cols:
         return
     rows = db.execute(f"SELECT id, receipt, documents FROM {table}").fetchall()
+    now = datetime.utcnow().isoformat()
     for row in rows:
         receipt = (row['receipt'] or '').strip()
         if not receipt:
@@ -1194,9 +1195,13 @@ def _migrate_receipt_into_documents(db, table):
                for d in docs):
             continue
         docs.insert(0, {'title': 'Receipt', 'filename': receipt})
+        # Bump updated_at so the next incremental export picks up the
+        # changed docs JSON. Without this, the row's documents column
+        # is silently rewritten but the export's `updated_at >= since`
+        # filter excludes the row, so the new entry never ships.
         db.execute(
-            f'UPDATE {table} SET documents = ? WHERE id = ?',
-            (json.dumps(docs), row['id']),
+            f'UPDATE {table} SET documents = ?, updated_at = ? WHERE id = ?',
+            (json.dumps(docs), now, row['id']),
         )
 
 
@@ -1218,6 +1223,7 @@ def _dedupe_receipt_docs(db, table):
     if 'documents' not in cols:
         return
     rows = db.execute(f"SELECT id, documents FROM {table}").fetchall()
+    now = datetime.utcnow().isoformat()
     for row in rows:
         try:
             docs = json.loads(row['documents'] or '[]')
@@ -1235,9 +1241,14 @@ def _dedupe_receipt_docs(db, table):
             kept.append(d)
         kept.reverse()
         if len(kept) != len(docs):
+            # Bump updated_at so the next incremental export re-includes
+            # this row and ships the deduped docs JSON. Without it, the
+            # row is silently mutated and the export's `updated_at >=
+            # since` filter leaves the duplicate-laden previous export
+            # in place on the client's local mirror.
             db.execute(
-                f'UPDATE {table} SET documents = ? WHERE id = ?',
-                (json.dumps(kept), row['id']),
+                f'UPDATE {table} SET documents = ?, updated_at = ? WHERE id = ?',
+                (json.dumps(kept), now, row['id']),
             )
 
 
