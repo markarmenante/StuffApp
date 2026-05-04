@@ -76,10 +76,49 @@
       </label>
     </div>
 
-    <div class="sweep-row">
-      <button type="submit" class="sweep-submit">Sweep &amp; import</button>
+    <input type="hidden" name="sync_deletes" id="sweepSyncDeletes" value="off">
+
+    <div class="sweep-row sweep-buttons">
+      <button type="submit" class="sweep-submit"
+              onclick="document.getElementById('sweepSyncDeletes').value='off'">
+        Sweep &amp; import
+      </button>
+      <button type="submit" class="sweep-submit sweep-submit-preview"
+              onclick="document.getElementById('sweepSyncDeletes').value='preview'"
+              title="Adds + fills as normal, plus reports what would be deleted server-side based on the _data.json snapshot for each record. Doesn't apply.">
+        Sweep + preview deletes
+      </button>
+      <button type="submit" class="sweep-submit sweep-submit-apply"
+              onclick="return confirmApplyDeletes()"
+              title="Same as Preview, but ACTUALLY clears slot columns and splices docs entries for files missing from the upload. Bumps updated_at and tombstones for syncDown.">
+        Sweep + apply deletes
+      </button>
     </div>
+    <p class="sweep-note" style="margin-top:6px">
+      Delete-sync requires uploading the affected record's whole folder
+      (with its <code>_data.json</code>) so the server has a baseline.
+      Records without a snapshot in the upload are never auto-deleted.
+      Identity slots (cover image, license front/back, etc.) are also
+      protected. Capped at 50 deletions per batch.
+    </p>
   </form>
+
+  <script>
+    function confirmApplyDeletes() {
+      if (!confirm(
+        'Apply deletions?\n\n'
+        + 'Files in the snapshot but missing from this upload will be '
+        + 'cleared from the DB and tombstoned. Identity slots are '
+        + 'protected. Cap is 50 per batch (apply will downgrade to '
+        + 'preview if exceeded).\n\n'
+        + 'Click OK to apply, Cancel to abort.'
+      )) {
+        return false;
+      }
+      document.getElementById('sweepSyncDeletes').value = 'apply';
+      return true;
+    }
+  </script>
 
   {% if report %}
   <div class="sweep-report">
@@ -106,6 +145,59 @@
       <ul class="sweep-list sweep-list-skip">
         {% for s in report.skipped %}
         <li><code>{{ s.file }}</code> — {{ s.reason }}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+
+    {% if report.sync_deletes_mode and report.sync_deletes_mode != 'off' %}
+    <p>
+      <strong>Delete-sync ({{ report.sync_deletes_mode }}):</strong>
+      <strong>{{ (report.deleted or [])|length }}</strong>
+      {% if report.sync_deletes_mode == 'preview' or report.delete_capped %}
+        would be deleted
+      {% else %}
+        deleted
+      {% endif %}
+      {% if report.delete_skipped %}
+        · <strong>{{ report.delete_skipped|length }}</strong> protected/skipped
+      {% endif %}
+      {% if report.delete_capped %}
+        · <em style="color:#b00">apply refused — exceeded cap; review and re-submit</em>
+      {% endif %}
+    </p>
+    {% endif %}
+
+    {% if report.deleted %}
+    <details {% if report.sync_deletes_mode == 'preview' or report.delete_capped %}open{% endif %}>
+      <summary>
+        {% if report.sync_deletes_mode == 'preview' or report.delete_capped %}Would delete{% else %}Deleted{% endif %}
+        ({{ report.deleted|length }})
+      </summary>
+      <ul class="sweep-list sweep-list-skip">
+        {% for d in report.deleted %}
+        <li>
+          <code>{{ d.record }}</code>
+          · <strong>{{ d.label }}</strong>
+          ({{ d.kind }}{% if d.field %} → {{ d.field }}{% endif %})
+          · <code>{{ d.filename }}</code>
+          {% if d.note %} — <em>{{ d.note }}</em>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+
+    {% if report.delete_skipped %}
+    <details>
+      <summary>Delete-sync skipped ({{ report.delete_skipped|length }})</summary>
+      <ul class="sweep-list sweep-list-skip">
+        {% for s in report.delete_skipped %}
+        <li>
+          <code>{{ s.record }}</code>
+          {% if s.label %} · <strong>{{ s.label }}</strong>{% endif %}
+          — {{ s.reason }}
+        </li>
         {% endfor %}
       </ul>
     </details>
@@ -140,6 +232,9 @@
   color: #fff; border-radius: 5px; cursor: pointer; font-size: 14px;
 }
 .sweep-submit:hover { filter: brightness(1.08); }
+.sweep-buttons { gap: 10px; flex-wrap: wrap; }
+.sweep-submit-preview { background: #5b6470; }
+.sweep-submit-apply   { background: #b94a3a; }
 
 .sweep-report { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
 .sweep-report h2 { font-size: 16px; margin: 0 0 6px; }

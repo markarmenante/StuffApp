@@ -8652,6 +8652,27 @@ EXPORT_LAYOUT = {
     },
 }
 
+# Slot columns that the delete-sync flow refuses to clear, even when
+# the local file is missing from the upload. These are identity-bearing
+# (cover image, obverse/reverse pair, license front/back, etc.) and a
+# user dragging a record's folder back into Sweep without the cover
+# should not silently nuke the cover from the DB. Categories not listed
+# default to {'image'} via _identity_slots(). Receipts and free docs
+# (which live in the JSON documents column) are deliberately not in
+# this set — their whole purpose is to be add/remove-able via Files.
+IDENTITY_SLOTS_BY_CATEGORY = {
+    'watches':      {'image_obv', 'image_rev'},
+    'coins':        {'image_1', 'image_2'},
+    'persons':      {'head_shot', 'license_obverse', 'license_reverse',
+                     'health_card_obv', 'health_card_rev'},
+    'credit_cards': {'image_front', 'image_back'},
+}
+
+
+def _identity_slots(category):
+    return IDENTITY_SLOTS_BY_CATEGORY.get(category, {'image'})
+
+
 # Pretty labels for the top-level category folders inside the zip.
 EXPORT_CATEGORY_LABELS = {
     'watches': 'Watches', 'coins': 'Coins', 'properties': 'Properties',
@@ -9609,6 +9630,183 @@ def _is_data_snapshot_path(path):
     return bool(re.search(r'\s+[—–-]\s+_data$', name))
 
 
+def _process_sweep_deletes(record_state, allowed, db, now, dry_run, max_deletes=50):
+    """For each record in this sweep batch that included a `_data.json`
+    snapshot, compare what files the snapshot says the row owns against
+    what files actually arrived in the upload. Anything in the snapshot
+    but missing from the upload is a local deletion the user wants
+    mirrored: clear the slot column (NULL) or splice the entry out of
+    the docs JSON, bump updated_at, and record a tombstone so other
+    clients pick up the deletion on their next syncDown.
+
+    record_state: {row_id: {
+        'cat':      category slug,
+        'row':      row dict,
+        'snapshot': parsed _data.json (or None if no snapshot uploaded),
+        'uploads':  set of (label_norm, ext) for files actually uploaded,
+    }}
+    dry_run:   True returns a report without modifying the DB.
+    max_deletes: refuse `apply` mode if total candidates exceed this.
+                 The cap protects against a misconfigured upload (e.g.
+                 user dragged a single file thinking they'd dragged the
+                 whole folder, then ticked apply) wiping out dozens of
+                 records' files in one go. Preview is unaffected.
+
+    Returns {'deleted': [...], 'skipped': [...]} for the JSON report.
+    """
+    deleted = []
+    skipped = []
+    candidates = []  # (cat, row_id, row, kind, field, label, ext, fname)
+
+    for row_id, state in record_state.items():
+        snapshot = state.get('snapshot')
+        if not snapshot:
+            continue
+        cat = state['cat']
+        row = state['row']
+        if cat not in allowed:
+            skipped.append({
+                'record': f'{cat}/{row_id[:8] if row_id else "?"}',
+                'reason': f"no access to category '{cat}'",
+            })
+            continue
+        plan = EXPORT_LAYOUT.get(cat) or {}
+        identity = _identity_slots(cat)
+        actual = state.get('uploads') or set()
+
+        # Build the expected file set from the snapshot. Mirrors the
+        # arcname-shaping logic in admin_export_files so what's compared
+        # is what was actually written into the export the user is now
+        # editing locally.
+        expected = []  # (kind, field, label, ext, fname)
+        for spec in plan.get('files', []):
+            field, default_label, title_field = spec
+            fname = (snapshot.get(field) or '').strip() if isinstance(snapshot.get(field), str) else ''
+            if not fname:
+                continue
+            label = default_label
+            if title_field and snapshot.get(title_field):
+                t = (snapshot.get(title_field) or '').strip()
+                if t:
+                    label = t
+            ext = os.path.splitext(fname)[1] or ''
+            expected.append(('slot', field, label, ext, fname))
+        for json_col in DOC_SETS_BY_CATEGORY.get(cat, {}).values():
+            try:
+                docs = json.loads(snapshot.get(json_col) or '[]')
+            except (TypeError, ValueError):
+                docs = []
+            if not isinstance(docs, list):
+                continue
+            for d in docs:
+                if not isinstance(d, dict):
+                    continue
+                fname = (d.get('filename') or '').strip()
+                if not fname:
+                    continue
+                label = (d.get('title') or '').strip() or 'Doc'
+                ext = os.path.splitext(fname)[1] or ''
+                expected.append(('doc', json_col, label, ext, fname))
+
+        for kind, field, label, ext, fname in expected:
+            if (_norm(label), ext) in actual:
+                continue
+            if kind == 'slot' and field in identity:
+                # Cover images, obverse/reverse pairs, license front/back
+                # — never auto-delete via sync. Removing them in the app
+                # is a deliberate UI action.
+                skipped.append({
+                    'record': f'{cat}/{row_id[:8]}',
+                    'label':  label,
+                    'reason': f"{field} is an identity slot — won't delete via sync",
+                })
+                continue
+            candidates.append((cat, row_id, row, kind, field, label, ext, fname))
+
+    # Per-batch cap: if apply mode would exceed it, downgrade everything
+    # to a dry-run report and tell the caller.
+    capped = (not dry_run) and len(candidates) > max_deletes
+    effective_dry = dry_run or capped
+
+    for cat, row_id, row, kind, field, label, ext, fname in candidates:
+        entry = {
+            'record':   f'{cat}/{row_id[:8]}',
+            'label':    label,
+            'kind':     kind,
+            'field':    field,
+            'filename': fname,
+        }
+        if effective_dry:
+            entry['dry_run'] = True
+            if capped:
+                entry['note'] = (
+                    f'apply refused — {len(candidates)} candidate deletions '
+                    f'exceeds cap ({max_deletes}); review and re-submit')
+            deleted.append(entry)
+            continue
+        table = CATEGORIES[cat]['table']
+        try:
+            if kind == 'slot':
+                db.execute(
+                    f"UPDATE {table} SET {field} = NULL, updated_at = ? "
+                    f"WHERE id = ?",
+                    [now, row_id],
+                )
+            else:  # 'doc'
+                cur = db.execute(
+                    f"SELECT {field} FROM {table} WHERE id = ?", [row_id]
+                ).fetchone()
+                try:
+                    cur_docs = json.loads((cur[field] if cur else None) or '[]')
+                except (TypeError, ValueError):
+                    cur_docs = []
+                if not isinstance(cur_docs, list):
+                    cur_docs = []
+                label_norm = _norm(label)
+                # Splice the matching entry. Try (title + filename) first
+                # for precision; if filename drifted (e.g. user re-uploaded
+                # via UI), fall back to title alone.
+                new_docs = []
+                removed = False
+                for d in cur_docs:
+                    if not removed and isinstance(d, dict) \
+                            and _norm((d.get('title') or '').strip()) == label_norm \
+                            and (d.get('filename') or '').strip() == fname:
+                        removed = True
+                        continue
+                    new_docs.append(d)
+                if not removed:
+                    new_docs = []
+                    for d in cur_docs:
+                        if not removed and isinstance(d, dict) \
+                                and _norm((d.get('title') or '').strip()) == label_norm:
+                            removed = True
+                            continue
+                        new_docs.append(d)
+                if not removed:
+                    skipped.append({
+                        **entry,
+                        'reason': 'no matching docs entry at apply-time '
+                                  '(probably already removed via UI)',
+                    })
+                    continue
+                db.execute(
+                    f"UPDATE {table} SET {field} = ?, updated_at = ? "
+                    f"WHERE id = ?",
+                    [json.dumps(new_docs), now, row_id],
+                )
+            _record_tombstone(db, cat, row, label, fname)
+            deleted.append(entry)
+        except Exception as exc:
+            app.logger.exception('sweep delete failed for %s', entry)
+            skipped.append({
+                **entry,
+                'reason': f'server error: {exc.__class__.__name__}: {exc}',
+            })
+
+    return {'deleted': deleted, 'skipped': skipped, 'capped': capped}
+
+
 def _finalize_sweep_seed(seed, cat, user, db, now):
     """Apply the defaults a freshly-created sweep row needs: id (UUID
     fallback), created_at / updated_at, owner (per-category default),
@@ -9715,6 +9913,14 @@ def sweep_files():
     # could spawn dozens of stub records before the user notices. Default
     # OFF; the sweep UI exposes a second checkbox specifically for it.
     auto_create_watches = request.form.get('auto_create_watches') == '1'
+    # Delete-sync mode: 'off' (default), 'preview' (report only), or
+    # 'apply' (mirror local deletions to the DB). When on, we use each
+    # record's _data.json snapshot as the baseline and treat any file
+    # the snapshot expected but the upload didn't deliver as a local
+    # delete to mirror server-side. See _process_sweep_deletes.
+    sync_deletes_mode = (request.form.get('sync_deletes') or 'off').strip().lower()
+    if sync_deletes_mode not in ('off', 'preview', 'apply'):
+        sync_deletes_mode = 'off'
 
     db = get_db()
     # Cache record indexes per category so we don't re-scan the table
@@ -9727,6 +9933,23 @@ def sweep_files():
 
     report = {'uploaded': [], 'skipped': []}
     now = datetime.utcnow().isoformat()
+    # Per-row state for the optional delete-sync pass at the end. Each
+    # entry tracks the snapshot (if a _data.json was uploaded for this
+    # row) and the set of (label_norm, ext) pairs the upload actually
+    # delivered. Populated only when a file successfully matches a row.
+    record_state = {}  # row_id -> {'cat', 'row', 'snapshot', 'uploads'}
+    def _track_upload(cat, row, label, ext):
+        rid = row.get('id') if isinstance(row, dict) else row['id']
+        st = record_state.setdefault(rid, {
+            'cat': cat, 'row': row, 'snapshot': None, 'uploads': set()
+        })
+        st['uploads'].add((_norm(label), ext))
+    def _track_snapshot(cat, row, data_obj):
+        rid = row.get('id') if isinstance(row, dict) else row['id']
+        st = record_state.setdefault(rid, {
+            'cat': cat, 'row': row, 'snapshot': None, 'uploads': set()
+        })
+        st['snapshot'] = data_obj
 
     for f in files:
         if not f or not f.filename:
@@ -9868,6 +10091,11 @@ def sweep_files():
                         })
                         continue
                     row = snap_matches[0][2]
+                    # Stash the parsed snapshot keyed by the matched row's
+                    # id so the optional delete-sync pass at the end of
+                    # the request can use it as the "expected files"
+                    # baseline for this record.
+                    _track_snapshot(cat, row, data_obj)
                     # Fill BLANK columns only — never overwrite live
                     # column data with stale snapshot values. The
                     # snapshot is for recovering missing data, not for
@@ -10045,6 +10273,13 @@ def sweep_files():
                 report['skipped'].append({'file': rel, 'reason': f"ambiguous — {len(matches)} records match in {cat} (won't auto-pick)"})
                 continue
             row = matches[0][2]
+            # Record this upload against the matched row so the
+            # optional delete-sync pass knows the file was delivered
+            # (and therefore is NOT a deletion candidate). Tracked
+            # before any "skipped: slot full / duplicate" continue
+            # below — those still represent files the user has
+            # locally and doesn't want deleted.
+            _track_upload(cat, row, target_label, parsed['ext'])
             table = CATEGORIES[cat]['table']
             cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
 
@@ -10202,6 +10437,21 @@ def sweep_files():
                 'file':   getattr(f, 'filename', '?'),
                 'reason': f'server error: {exc.__class__.__name__}: {exc}',
             })
+
+    # Optional delete-sync pass. Runs after all files are processed so
+    # `record_state` has both the snapshot baseline and the full set of
+    # uploaded files for each record. Only records whose upload included
+    # a _data.json contribute — partial uploads can't trigger deletes.
+    if sync_deletes_mode in ('preview', 'apply'):
+        delete_report = _process_sweep_deletes(
+            record_state, allowed, db, now,
+            dry_run=(sync_deletes_mode == 'preview'),
+        )
+        report['deleted'] = delete_report['deleted']
+        report['delete_skipped'] = delete_report['skipped']
+        report['delete_capped'] = delete_report.get('capped', False)
+        report['sync_deletes_mode'] = sync_deletes_mode
+
     db.commit()
 
     if request.headers.get('Accept', '').startswith('application/json') \
