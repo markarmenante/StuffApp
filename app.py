@@ -1222,7 +1222,9 @@ def _dedupe_receipt_docs(db, table):
     cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
     if 'documents' not in cols:
         return
-    rows = db.execute(f"SELECT id, documents FROM {table}").fetchall()
+    cat = next((c for c, info in CATEGORIES.items()
+                if info.get('table') == table), None)
+    rows = db.execute(f"SELECT * FROM {table}").fetchall()
     now = datetime.utcnow().isoformat()
     for row in rows:
         try:
@@ -1233,9 +1235,11 @@ def _dedupe_receipt_docs(db, table):
             continue
         receipt_kept = False
         kept = []
+        dropped = []
         for d in reversed(docs):
             if isinstance(d, dict) and (d.get('title') or '').strip().lower() == 'receipt':
                 if receipt_kept:
+                    dropped.append(d)
                     continue
                 receipt_kept = True
             kept.append(d)
@@ -1250,6 +1254,23 @@ def _dedupe_receipt_docs(db, table):
                 f'UPDATE {table} SET documents = ?, updated_at = ? WHERE id = ?',
                 (json.dumps(kept), now, row['id']),
             )
+            # Tombstone the dropped entries so the next syncDown removes
+            # the orphan files from the user's local mirror. Without
+            # tombstones, the dedupe rewrites the docs JSON cleanly but
+            # the previous export's '<ident> — Receipt (2).<ext>'
+            # collision-suffixed file persists locally with no path
+            # back to the server saying "delete me".
+            if cat:
+                for d in dropped:
+                    fname = (d.get('filename') or '').strip()
+                    if fname:
+                        try:
+                            _record_tombstone(db, cat, row, 'Receipt', fname)
+                        except Exception:
+                            app.logger.exception(
+                                'dedupe tombstone write failed for %s/%s',
+                                cat, row['id'],
+                            )
 
 
 def _undo_receipt_phantoms(db, table, dry_run, write_tombstones=True):
@@ -8376,7 +8397,10 @@ def admin_index():
                      "cover-image duplicates. Only entries whose filename "
                      "exactly matches the row's receipt column value are "
                      "counted — user-uploaded Receipt docs (different "
-                     "filename) are safe and never reported.",
+                     "filename) are safe and never reported. "
+                     "Pair with the numbered-suffix scan below — together "
+                     "they cover both phantom shapes (bare 'Receipt' here, "
+                     "numbered 'Receipt 2' / 'Front 2' there).",
             'url':   url_for('admin_undo_receipt_phantoms'),
             'extra': {'dry': '1'},
         },
@@ -8387,7 +8411,11 @@ def admin_index():
                      "rows so the boot-time migration doesn't re-insert, "
                      "and tombstones each '<ident> — Receipt.<ext>' path "
                      "so the next ⬇ Files syncDown removes the orphan "
-                     "from your local mirror. Run the dry scan first.",
+                     "from your local mirror. Run the dry scan first. "
+                     "Run the numbered-suffix REMOVE below afterwards "
+                     "(or before — order doesn't matter) for a complete "
+                     "cleanup; this one alone misses 'Receipt 2', "
+                     "'Front 2', 'Image 2' style phantoms.",
             'url':   url_for('admin_undo_receipt_phantoms'),
             'extra': {'dry': '0'},
             'confirm': True,
@@ -8401,7 +8429,9 @@ def admin_index():
                      "that the title-exact 'Receipt' cleanup couldn't "
                      "match. User-authored titles like 'Service Receipt "
                      "2024' aren't matched (the suffix has to be a bare "
-                     "integer following a known label).",
+                     "integer following a known label). "
+                     "Pair with the bare-Receipt scan above — together "
+                     "they cover both phantom shapes.",
             'url':   url_for('admin_undo_numbered_doc_phantoms'),
             'extra': {'dry': '1'},
         },
@@ -8411,7 +8441,11 @@ def admin_index():
                      "the affected row, and tombstones the '<ident> — "
                      "<title>.<ext>' export path so the next ⬇ Files "
                      "syncDown removes the orphan locally. Run the dry "
-                     "scan first.",
+                     "scan first. Run the bare-Receipt REMOVE above too "
+                     "(order doesn't matter) for a complete cleanup; "
+                     "this one alone leaves the legacy receipt column "
+                     "populated, so the next boot's migration would "
+                     "re-create a {title:'Receipt'} entry.",
             'url':   url_for('admin_undo_numbered_doc_phantoms'),
             'extra': {'dry': '0'},
             'confirm': True,

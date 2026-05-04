@@ -23,16 +23,28 @@ DB_PATH = os.path.join(BASE_DIR, 'stuffapp.db')
 UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
 
 # FileMaker export name -> (sqlite_table, sqlite_column)
+#
+# Receipt mappings deliberately removed for the categories whose
+# receipt → documents migration completed (Watch, Coin, Pen, Art,
+# Rifle). Routing a FileMaker `<table>_<uuid>_Receipt.<ext>` back
+# into the legacy receipt column would re-populate the very field
+# the migration NULLed and the next boot's
+# _migrate_receipt_into_documents would faithfully re-create the
+# phantom Receipt-titled docs entry. Files matching the dropped
+# keys hit the "No mapping" skip branch in main(). Real receipts
+# should be uploaded via the dynamic docs UI on the record page.
+# Recordings keeps its Receipt mapping because the migration was
+# never run for it (the FM-era receipt slot historically held
+# cover-image data and migrating would corrupt the docs JSON).
+# Mirrors FM_FIELD_MAP in app.py — kept in lockstep on every change.
 FIELD_MAP = {
     # Watches
     ('Watch', 'ImageObv'):       ('watches', 'image_obv'),
     ('Watch', 'ImageRev'):       ('watches', 'image_rev'),
-    ('Watch', 'Receipt'):        ('watches', 'receipt'),
     ('Watch', 'Document'):       ('watches', 'document'),
     # Coins
     ('Coin', 'Image1'):          ('coins', 'image_1'),
     ('Coin', 'Image2'):          ('coins', 'image_2'),
-    ('Coin', 'Receipt'):         ('coins', 'receipt'),
     ('Coin', 'Document1'):       ('coins', 'document_1'),
     ('Coin', 'Document2'):       ('coins', 'document_2'),
     # Cameras
@@ -41,10 +53,8 @@ FIELD_MAP = {
     ('Lens', 'Image'):           ('lenses', 'image'),
     # Pens
     ('Pen', 'Image'):            ('pens', 'image'),
-    ('Pen', 'Receipt'):          ('pens', 'receipt'),
     # Art
     ('Art', 'Image'):            ('art', 'image'),
-    ('Art', 'Receipt'):          ('art', 'receipt'),
     # Vehicles
     ('Vehicle', 'Image'):        ('vehicles', 'image'),
     ('Vehicle', 'Registration'): ('vehicles', 'registration'),
@@ -55,7 +65,6 @@ FIELD_MAP = {
     ('Recording', 'Receipt'):    ('recordings', 'receipt'),
     # Rifles
     ('Rifle', 'Image'):          ('rifles', 'image'),
-    ('Rifle', 'Receipt'):        ('rifles', 'receipt'),
     # Credit Cards
     ('CreditCard', 'ImageFront'): ('credit_cards', 'image_front'),
     ('CreditCard', 'ImageBack'):  ('credit_cards', 'image_back'),
