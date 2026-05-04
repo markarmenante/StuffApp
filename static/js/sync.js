@@ -512,15 +512,38 @@
     // do so manually in Finder after reviewing the list.
     window.StuffSync = window.StuffSync || {};
     window.StuffSync._lastStale = stale.map(s => s.path);
-    if (stale.length > 0) {
-      console.warn(`[StuffSync] ${stale.length} local file(s) not in this export. ` +
-                   `Review window.StuffSync._lastStale; nothing was deleted.`);
+    // Purge gate: only prompt on a full sync (lastSyncAt was empty
+    // BEFORE this run). On an incremental, expectedPaths only covers
+    // the rows that changed, so the stale list would include every
+    // unchanged record's files — purging would nuke most of the
+    // user's library. Full sync = expectedPaths covers everything
+    // the server has → stale truly means orphan.
+    // Trigger a one-off full sync any time via:
+    //   await StuffSync.resetLastSyncAt(); then click ⬇ Files
+    const wasFullSync = !lastSyncAt;
+    if (stale.length > 0 && !wasFullSync) {
+      console.warn(`[StuffSync] ${stale.length} local file(s) not in this incremental export. ` +
+                   `Review window.StuffSync._lastStale; purge skipped on incremental ` +
+                   `(would flag every unchanged record's files). Force a full sync ` +
+                   `via StuffSync.resetLastSyncAt() to enable the purge prompt.`);
       progress && progress(
-        `${stale.length} local file(s) flagged but NOT deleted. ` +
-        `Review window.StuffSync._lastStale in console.`
+        `${stale.length} stale file(s) flagged but NOT deleted (incremental sync).`
       );
-      // Skip the destructive path entirely.
-      const ok = false;
+    } else if (stale.length > 0 && wasFullSync) {
+      // Full sync — safe to offer the purge. Default-Cancel confirm
+      // with sample so the user can spot-check before agreeing.
+      const sample = stale.slice(0, 20).map(s => s.path).join('\n');
+      const more = stale.length > 20 ? `\n…and ${stale.length - 20} more` : '';
+      const ok = window.confirm(
+        `Found ${stale.length} local file(s) in your StuffFiles folder ` +
+        `that the server didn't ship in this export. These are typically ` +
+        `orphans from prior exports — legacy phantom titles like 'Back 3.png', ` +
+        `'Front 2.png', 'Receipt 2.png', or files for records that have been ` +
+        `deleted server-side.\n\n` +
+        `Click OK to delete them locally, or Cancel to keep them and review ` +
+        `via window.StuffSync._lastStale in the console.\n\n` +
+        sample + more
+      );
       if (ok) {
         for (const s of stale) {
           try {
