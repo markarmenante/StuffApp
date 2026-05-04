@@ -276,7 +276,6 @@ FIELDS = {
          'options': ['', 'Storage', 'Consigned', 'Missing', 'Gifted']},
         {'name': 'image_obv',       'label': 'Image (Obverse)',   'type': 'file'},
         {'name': 'image_rev',       'label': 'Image (Reverse)',   'type': 'file'},
-        {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
         {'name': 'container_1',     'label': 'Container 1',       'type': 'file'},
         {'name': 'container_2',     'label': 'Container 2',       'type': 'file'},
         {'name': 'document',        'label': 'Document',          'type': 'file'},
@@ -321,7 +320,6 @@ FIELDS = {
          'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image_1',         'label': 'Image (Obverse)',   'type': 'file'},
         {'name': 'image_2',         'label': 'Image (Reverse)',   'type': 'file'},
-        {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
         {'name': 'document_1',      'label': 'Document 1',        'type': 'file'},
         {'name': 'document_2',      'label': 'Document 2',        'type': 'file'},
     ],
@@ -392,7 +390,6 @@ FIELDS = {
         {'name': 'location_status', 'label': 'Disposition',       'type': 'select',
          'options': ['', 'Storage', 'Consigned', 'Missing', 'Gifted']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
-        {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
     ],
     'art': [
         {'name': 'title',           'label': 'Title',             'type': 'text'},
@@ -413,7 +410,6 @@ FIELDS = {
         {'name': 'location_status', 'label': 'Disposition',       'type': 'select',
          'options': ['', 'Storage', 'Consigned', 'Missing', 'Gifted']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
-        {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
         {'name': 'doc_2',           'label': 'Doc 2',             'type': 'file'},
     ],
     'vehicles': [
@@ -495,7 +491,6 @@ FIELDS = {
         {'name': 'location_status', 'label': 'Disposition',       'type': 'select',
          'options': ['', 'Storage', 'Consigned', 'Missing', 'Gifted']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
-        {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
     ],
     'rifles': [
         {'name': 'make',            'label': 'Make',              'type': 'text'},
@@ -513,7 +508,6 @@ FIELDS = {
         {'name': 'location_status', 'label': 'Disposition',       'type': 'select',
          'options': ['', 'Storage', 'Consigned', 'Missing', 'Gifted']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
-        {'name': 'receipt',         'label': 'Receipt',           'type': 'file'},
     ],
     'credit_cards': [
         {'name': 'name',            'label': 'Card Name',         'type': 'text'},
@@ -776,6 +770,8 @@ def init_db():
         'ALTER TABLE recordings ADD COLUMN documents TEXT',
         'ALTER TABLE rifles     ADD COLUMN documents TEXT',
         'ALTER TABLE audio      ADD COLUMN documents TEXT',
+        'ALTER TABLE cameras    ADD COLUMN documents TEXT',
+        'ALTER TABLE lenses     ADD COLUMN documents TEXT',
         # location_status (Storage / Consigned / Missing / Gifted) is a
         # second status axis distinct from the lifecycle `status` field.
         # Declared in FIELDS with type='select', so the search builder
@@ -882,7 +878,8 @@ def init_db():
     # cover. Same issue happens elsewhere too (vehicles' Auto Title
     # column got the cover image, etc.), so the strip-phantom helper
     # below sweeps every item table for cover-image duplicates.
-    for _t in ('art', 'coins', 'watches', 'pens', 'rifles', 'audio'):
+    for _t in ('art', 'coins', 'watches', 'pens', 'rifles', 'audio',
+               'cameras', 'lenses'):
         _migrate_receipt_into_documents(db, _t)
     _strip_phantom_cover_image_docs(db)
     _strip_redundant_receipts(db)
@@ -5654,6 +5651,8 @@ DOC_SETS_BY_CATEGORY = {
     'recordings': {'main': 'documents'},
     'rifles':     {'main': 'documents'},
     'audio':      {'main': 'documents'},
+    'cameras':    {'main': 'documents'},
+    'lenses':     {'main': 'documents'},
     'persons':    {'ids': 'id_documents', 'health': 'health_documents'},
 }
 DOCUMENTS_CATEGORIES = set(DOC_SETS_BY_CATEGORY.keys())
@@ -8455,13 +8454,13 @@ EXPORT_LAYOUT = {
         'group': lambda r: _g(r, 'brand') or 'Unknown',
         'ident': _watch_ident,
         'create': _create_watch,
-        # User-titled docs (container_1, container_2) moved into the
-        # JSON `documents` column; export walks them separately. Image
-        # + receipt remain fixed columns.
+        # User-titled docs (container_1, container_2) AND receipt moved
+        # into the JSON `documents` column; export walks them via the
+        # docs JSON path. Only the obverse/reverse identity images stay
+        # as fixed slot columns.
         'files': [
             ('image_obv', 'Front', None),
             ('image_rev', 'Back', None),
-            ('receipt',   'Receipt', None),
         ],
     },
     'coins': {
@@ -8523,19 +8522,22 @@ EXPORT_LAYOUT = {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
         'create': _create_make_only,
-        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+        # Receipt moved into the JSON `documents` column.
+        'files': [('image', 'Image', None)],
     },
     'lenses': {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
         'create': _create_make_only,
-        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+        # Receipt moved into the JSON `documents` column.
+        'files': [('image', 'Image', None)],
     },
     'pens': {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
         'create': _create_make_only,
-        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+        # Receipt moved into the JSON `documents` column.
+        'files': [('image', 'Image', None)],
     },
     'art': {
         'group': lambda r: _g(r, 'artist') or 'Unknown',
@@ -8572,13 +8574,15 @@ EXPORT_LAYOUT = {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'type') or ''])).strip() or _g(r, 'id')[:8],
         'create': _create_make_only,
-        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+        # Receipt moved into the JSON `documents` column.
+        'files': [('image', 'Image', None)],
     },
     'rifles': {
         'group': lambda r: _g(r, 'make') or 'Unknown',
         'ident': lambda r: ' '.join(filter(None, [_g(r, 'model') or '', _g(r, 'serial_number') or ''])).strip() or _g(r, 'id')[:8],
         'create': _create_make_only,
-        'files': [('image', 'Image', None), ('receipt', 'Receipt', None)],
+        # Receipt moved into the JSON `documents` column.
+        'files': [('image', 'Image', None)],
     },
 }
 
