@@ -11692,21 +11692,30 @@ def backfill_property_owner_ym():
 #   Coin_<UUID>_Image2.jpg  -> coins.image_2 (reverse)
 # See import_fm_images.py for the matching CLI importer.
 FM_FIELD_MAP = {
+    # Receipt mappings deliberately removed for the categories whose
+    # receipt → documents migration completed (watches, coins, pens,
+    # art, rifles). Routing a FileMaker `<table>_<uuid>_Receipt.<ext>`
+    # back into the legacy receipt column would re-populate the very
+    # field the migration just NULLed, and the next boot's
+    # _migrate_receipt_into_documents would re-create the phantom
+    # Receipt-titled docs entry. Files matching those keys now hit
+    # the "no mapping" skip branch and are reported as skipped — the
+    # user can re-upload via the dynamic docs UI if they're real
+    # receipts, or just leave them out of the FM batch.
+    # Recordings keeps its Receipt mapping because the migration was
+    # never run for it (the FM-era receipt slot historically held
+    # cover-image data and migrating it would corrupt the docs JSON).
     ('Watch', 'ImageObv'):        ('watches',      'image_obv'),
     ('Watch', 'ImageRev'):        ('watches',      'image_rev'),
-    ('Watch', 'Receipt'):         ('watches',      'receipt'),
     ('Watch', 'Document'):        ('watches',      'document'),
     ('Coin', 'Image1'):           ('coins',        'image_1'),
     ('Coin', 'Image2'):           ('coins',        'image_2'),
-    ('Coin', 'Receipt'):          ('coins',        'receipt'),
     ('Coin', 'Document1'):        ('coins',        'document_1'),
     ('Coin', 'Document2'):        ('coins',        'document_2'),
     ('Camera', 'Image'):          ('cameras',      'image'),
     ('Lens', 'Image'):            ('lenses',       'image'),
     ('Pen', 'Image'):             ('pens',         'image'),
-    ('Pen', 'Receipt'):           ('pens',         'receipt'),
     ('Art', 'Image'):             ('art',          'image'),
-    ('Art', 'Receipt'):           ('art',          'receipt'),
     ('Vehicle', 'Image'):         ('vehicles',     'image'),
     ('Vehicle', 'Registration'):  ('vehicles',     'registration'),
     ('Vehicle', 'Insurance'):     ('vehicles',     'insurance'),
@@ -11714,7 +11723,6 @@ FM_FIELD_MAP = {
     ('Recording', 'Image'):       ('recordings',   'image'),
     ('Recording', 'Receipt'):     ('recordings',   'receipt'),
     ('Rifle', 'Image'):           ('rifles',       'image'),
-    ('Rifle', 'Receipt'):         ('rifles',       'receipt'),
     ('CreditCard', 'ImageFront'): ('credit_cards', 'image_front'),
     ('CreditCard', 'ImageBack'):  ('credit_cards', 'image_back'),
     ('Property', 'Image'):        ('properties',   'image'),
