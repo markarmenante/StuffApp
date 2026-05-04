@@ -8662,6 +8662,29 @@ def admin_export_files():
                     zf.write(src, arcname=arcname)
                     written += 1
 
+                # Per-row data snapshot. Writes the full row as JSON
+                # inside the record's folder so the StuffFiles mirror is
+                # round-trip-able — sweep can read it back to reconstruct
+                # all column data (calibre, escapement, balance_wheel,
+                # calibre_notes, notes, description, vendor, price,
+                # service dates, every category's spec fields) even if
+                # the SQLite DB has been blown away. Without this, only
+                # the files survive an export/sweep cycle and every
+                # column value is permanently lost on rebuild — the
+                # StuffFiles mirror is misleadingly partial. Applies to
+                # all categories that have a record-folder layout.
+                base_dir = f'{cat_root}/{group}'
+                arcname = (
+                    f'{base_dir}/'
+                    f'{_next_unique(base_dir, ident, "_data", ".json")}'
+                )
+                payload = json.dumps(
+                    dict(row), default=str, indent=2,
+                    ensure_ascii=False, sort_keys=True,
+                )
+                zf.writestr(arcname, payload)
+                written += 1
+
                 # JSON documents columns — unbounded user-titled docs.
                 # Walk every doc-set declared for this category (e.g.
                 # persons has 'ids' + 'health'). Each entry exports as
@@ -9413,6 +9436,64 @@ def record_print_pdf(category, record_id):
                      mimetype='application/pdf')
 
 
+# ---------------------------------------------------------------------------
+# Per-row data snapshots (_data.json). Pair with admin_export_files's per-row
+# JSON write so the StuffFiles mirror round-trips: sweep can read the
+# snapshot back to recreate or fill rows when the SQLite DB is missing or
+# blank for those columns.
+# ---------------------------------------------------------------------------
+
+# Categories that allocate W### / A### style cat_ids on creation. Sweep's
+# auto-create path mirrors the /new route here so paths-only and snapshot-
+# only auto-creates both end up with a usable cat_id (which the export's
+# folder naming relies on, _watch_ident etc.).
+_SERIAL_CAT_PREFIX = {'watches': 'W', 'art': 'A'}
+
+
+def _is_data_snapshot_path(path):
+    """True if `path` (or a bare basename) names a per-row JSON snapshot
+    written by admin_export_files. Convention: '<ident> — _data.json'."""
+    base = os.path.basename(path or '')
+    name, ext = os.path.splitext(base)
+    if ext.lower() != '.json':
+        return False
+    # Trailing ' — _data' on the canonical em-dash separator. Tolerate
+    # the user hand-renaming with an en-dash or hyphen too.
+    return bool(re.search(r'\s+[—–-]\s+_data$', name))
+
+
+def _finalize_sweep_seed(seed, cat, user, db, now):
+    """Apply the defaults a freshly-created sweep row needs: id (UUID
+    fallback), created_at / updated_at, owner (per-category default),
+    and cat_id (for the W### / A### serial categories).
+
+    Doesn't overwrite values already in `seed` — so a snapshot-driven
+    create that already carries a stable id, owner, and cat_id keeps
+    them, while a path-driven create gets fresh ones."""
+    seed.setdefault('id', str(uuid.uuid4()))
+    seed.setdefault('created_at', now)
+    seed['updated_at'] = now
+    if 'owner' not in seed or not seed.get('owner'):
+        if cat == 'coins':
+            seed['owner'] = 'Mark'
+        elif user.get('role') != 'owner':
+            seed['owner'] = 'YM'
+        else:
+            d = DEFAULT_OWNER_BY_CATEGORY.get(cat)
+            if d:
+                seed['owner'] = d
+    if not seed.get('cat_id'):
+        prefix = _SERIAL_CAT_PREFIX.get(cat)
+        if prefix:
+            try:
+                seed['cat_id'] = next_serial_cat_id(
+                    db, CATEGORIES[cat]['table'], prefix
+                )
+            except Exception:
+                pass
+    return seed
+
+
 @app.route('/sweep', methods=['GET', 'POST'])
 def sweep_files():
     """Bulk-import files from a StuffFiles-shaped folder.
@@ -9457,6 +9538,23 @@ def sweep_files():
     files = request.files.getlist('files')
     if not files:
         return jsonify({'error': 'No files uploaded'}), 400
+
+    # Process per-row data snapshots (`<ident> — _data.json`) before any
+    # regular files. Snapshot processing creates or fills rows from the
+    # JSON column dump, so any rows it materialises are in the index by
+    # the time the regular files arrive looking for slots — otherwise a
+    # regular file would race-create an empty stub row first and the
+    # snapshot's column data would be ignored on the fill-blanks pass.
+    def _is_snapshot(f):
+        if not (f and f.filename):
+            return False
+        rel = (getattr(f, 'webkit_relative_path', None) or
+               getattr(f, 'webkitRelativePath', None) or
+               request.form.get(f'path_{f.filename}', '') or
+               f.filename)
+        return _is_data_snapshot_path(rel)
+    files = sorted(files, key=lambda f: 0 if _is_snapshot(f) else 1)
+
     cat_hint = (request.form.get('category_hint') or '').strip()
     cat_hint_label = EXPORT_CATEGORY_LABELS.get(cat_hint) if cat_hint else None
     group_hint = (request.form.get('group_hint') or '').strip()
@@ -9542,6 +9640,144 @@ def sweep_files():
 
                 plan = EXPORT_LAYOUT[cat]
                 idx = _index_for(cat)
+
+            # ─── Per-row data snapshot branch ─────────────────────────
+            # Files named "<ident> — _data.json" carry the row's column
+            # data (written by admin_export_files). Process them here
+            # instead of as file-slot uploads so the JSON content
+            # restores spec data rather than getting saved as an opaque
+            # blob in a slot. Files are sorted snapshot-first up top, so
+            # by the time regular files arrive any rows the snapshot
+            # created are already in the index.
+            if _is_data_snapshot_path(rel):
+                try:
+                    raw = f.read()
+                    if isinstance(raw, bytes):
+                        raw = raw.decode('utf-8')
+                    data_obj = json.loads(raw)
+                    if not isinstance(data_obj, dict):
+                        raise ValueError('snapshot is not a JSON object')
+                except Exception as e:
+                    report['skipped'].append({
+                        'file': rel,
+                        'reason': f'_data.json parse failed: {e}',
+                    })
+                    continue
+
+                table = CATEGORIES[cat]['table']
+                table_cols = {r['name'] for r in db.execute(
+                    f"PRAGMA table_info({table})"
+                ).fetchall()}
+                file_slot_cols = {spec[0] for spec in plan.get('files', [])}
+                doc_json_cols = set(DOC_SETS_BY_CATEGORY.get(cat, {}).values())
+                # Columns we never restore from snapshot:
+                # - id is generated fresh per record (collision avoidance);
+                # - created_at/updated_at are managed locally;
+                # - file slot columns reference the original UPLOAD_FOLDER
+                #   filenames which may not exist after a rebuild — leave
+                #   them blank so sweep's regular file-slot logic populates
+                #   them with the actual on-disk filenames;
+                # - doc JSON columns reference uploads similarly.
+                skip_cols = (file_slot_cols | doc_json_cols
+                             | {'id', 'created_at', 'updated_at'})
+
+                # Try to find an existing row by (group, ident).
+                snap_matches = [(g, i, r) for (g, i, r) in idx
+                                if g == target_group and i == target_ident]
+                if not snap_matches and target_ident:
+                    snap_matches = [(g, i, r) for (g, i, r) in idx
+                                    if g == target_group
+                                    and i.startswith(target_ident)]
+
+                if snap_matches:
+                    if len(snap_matches) > 1:
+                        report['skipped'].append({
+                            'file': rel,
+                            'reason': f"_data.json: ambiguous — {len(snap_matches)} matches in {cat}",
+                        })
+                        continue
+                    row = snap_matches[0][2]
+                    # Fill BLANK columns only — never overwrite live
+                    # column data with stale snapshot values. The
+                    # snapshot is for recovering missing data, not for
+                    # one-way replacement.
+                    cur_row = db.execute(
+                        f"SELECT * FROM {table} WHERE id = ?", [row['id']]
+                    ).fetchone()
+                    updates = {}
+                    for col, val in data_obj.items():
+                        if col in skip_cols or col not in table_cols:
+                            continue
+                        cur = cur_row[col] if col in cur_row.keys() else None
+                        cur_blank = cur is None or (
+                            isinstance(cur, str) and not cur.strip())
+                        if not cur_blank:
+                            continue
+                        updates[col] = val
+                    if updates:
+                        set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
+                        db.execute(
+                            f"UPDATE {table} SET {set_clause}, "
+                            f"updated_at = ? WHERE id = ?",
+                            list(updates.values()) + [now, row['id']],
+                        )
+                        # Refresh in-memory index so subsequent regular
+                        # files in this batch see the filled values.
+                        for (g, i, r_cached) in indexes[cat]:
+                            if r_cached.get('id') == row['id']:
+                                for k, v in updates.items():
+                                    r_cached[k] = v
+                                break
+                    report['uploaded'].append({
+                        'file':   rel,
+                        'record': f"{cat}/{row['id'][:8]} (snapshot filled {len(updates)} blank cols)",
+                        'slot':   '(metadata)',
+                    })
+                    continue
+
+                # No match — auto-create from snapshot. Same gates as
+                # path-based auto-create: needs auto_create, plus the
+                # watches-specific opt-in for cat=='watches'.
+                if not auto_create or (cat == 'watches' and not auto_create_watches):
+                    report['skipped'].append({
+                        'file':   rel,
+                        'reason': (
+                            f"_data.json: no record matches in {cat} "
+                            f"(group='{parsed['group']}', ident='{parsed['ident']}'); "
+                            f"auto-create off"
+                        ),
+                    })
+                    continue
+
+                seed = {k: v for k, v in data_obj.items()
+                        if k in table_cols and k not in skip_cols}
+                seed = _finalize_sweep_seed(seed, cat, user, db, now)
+                cols_sql = ', '.join(seed.keys())
+                placeholders = ', '.join(['?'] * len(seed))
+                try:
+                    db.execute(
+                        f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})",
+                        list(seed.values()),
+                    )
+                except sqlite3.IntegrityError as e:
+                    report['skipped'].append({
+                        'file': rel,
+                        'reason': f'_data.json insert failed: {e}',
+                    })
+                    continue
+                new_row = dict(db.execute(
+                    f"SELECT * FROM {table} WHERE id = ?", [seed['id']]
+                ).fetchone())
+                g_norm = _norm(plan['group'](new_row))
+                i_norm = _norm(plan['ident'](new_row))
+                indexes[cat].append((g_norm, i_norm, new_row))
+                report['uploaded'].append({
+                    'file':   rel,
+                    'record': f"{cat}/{seed['id'][:8]} (CREATED FROM _data.json)",
+                    'slot':   '(metadata)',
+                })
+                continue
+            # ─── End data snapshot branch ─────────────────────────────
                 target_group = _norm(parsed['group'])
                 target_ident = _norm(parsed['ident'])
                 # Initialized here (not at the slot-resolve step below) so the
@@ -9600,23 +9836,13 @@ def sweep_files():
                 if auto_create and create_fn:
                     seed = create_fn(parsed['group'], parsed['ident']) or {}
                     if seed:
-                        new_id = str(uuid.uuid4())
-                        seed['id'] = new_id
-                        seed['created_at'] = now
-                        seed['updated_at'] = now
-                        # Owner default for the freshly-created record.
-                        # Coins always seed Mark; otherwise members get
-                        # 'YM', owners get the per-category canonical
-                        # default.
-                        if 'owner' not in seed:
-                            if cat == 'coins':
-                                seed['owner'] = 'Mark'
-                            elif user.get('role') != 'owner':
-                                seed['owner'] = 'YM'
-                            else:
-                                d = DEFAULT_OWNER_BY_CATEGORY.get(cat)
-                                if d:
-                                    seed['owner'] = d
+                        # Centralised seed defaults (id, timestamps,
+                        # owner, cat_id). Without this, sweep-created
+                        # watches landed with cat_id=NULL even though
+                        # /new-created watches always get a W### —
+                        # which is what _watch_ident later relies on
+                        # to build the export folder name.
+                        seed = _finalize_sweep_seed(seed, cat, user, db, now)
                         table = CATEGORIES[cat]['table']
                         table_cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
                         seed = {k: v for k, v in seed.items() if k in table_cols}
@@ -9630,7 +9856,7 @@ def sweep_files():
                         # sweep can match this brand-new row. dict() so
                         # the loop can mutate slot fields after saves.
                         new_row = dict(db.execute(
-                            f"SELECT * FROM {table} WHERE id = ?", [new_id]
+                            f"SELECT * FROM {table} WHERE id = ?", [seed['id']]
                         ).fetchone())
                         g_norm = _norm(plan['group'](new_row))
                         i_norm = _norm(plan['ident'](new_row))
@@ -9638,7 +9864,7 @@ def sweep_files():
                         matches = [(g_norm, i_norm, new_row)]
                         report['uploaded'].append({
                             'file':   rel,
-                            'record': f"{cat}/{new_id[:8]} (CREATED)",
+                            'record': f"{cat}/{seed['id'][:8]} (CREATED)",
                             'slot':   '(record)',
                         })
                     else:
