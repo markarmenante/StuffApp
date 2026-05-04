@@ -1992,6 +1992,13 @@ input[type="date"] { -webkit-appearance: none; }
    auto-zoom on focus.
    ══════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 640px) {
+  /* Files (export) and Sweep (upload) hidden on phones. Both rely on
+     the File System Access API / webkitdirectory folder picker, neither
+     of which works in iOS Safari — the buttons would either no-op or
+     confuse a user who can't follow through. Admin button still shows
+     for owners. */
+  .nav-export, .nav-sweep { display: none !important; }
+
   /* Typography: tighten list + detail density without shrinking inputs. */
   .item-brand  { font-size: 18px; }
   .item-model  { font-size: 16px; }
