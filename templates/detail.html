@@ -4746,6 +4746,15 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 
   function applyOverflow() {
     restoreInline();
+    // Desktop always shows the full action set inline. The kebab only
+    // exists for the phone breakpoint (matches the 640px @media block
+    // in style.css that hides Files/Sweep/Admin in the top nav).
+    // Without this gate, a wide-viewport user whose nav merely brushes
+    // the floating overlay loses one-click PDF / Lookup access.
+    if (window.innerWidth > 640) {
+      kebab.hidden = true;
+      return;
+    }
     if (!isOverlapping()) {
       kebab.hidden = true;
       return;
