@@ -1992,12 +1992,12 @@ input[type="date"] { -webkit-appearance: none; }
    auto-zoom on focus.
    ══════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 640px) {
-  /* Files (export) and Sweep (upload) hidden on phones. Both rely on
-     the File System Access API / webkitdirectory folder picker, neither
-     of which works in iOS Safari — the buttons would either no-op or
-     confuse a user who can't follow through. Admin button still shows
-     for owners. */
-  .nav-export, .nav-sweep { display: none !important; }
+  /* Files (export), Sweep (upload), and Admin all hidden on phones.
+     Files + Sweep rely on the File System Access API / webkitdirectory
+     folder picker, neither of which works in iOS Safari. Admin actions
+     are one-shot maintenance flows that the user runs from a desktop;
+     no value cluttering the phone nav with them. */
+  .nav-export, .nav-sweep, .nav-admin { display: none !important; }
 
   /* Typography: tighten list + detail density without shrinking inputs. */
   .item-brand  { font-size: 18px; }
