@@ -274,8 +274,7 @@ FIELDS = {
          'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'location_status', 'label': 'Disposition',       'type': 'select',
          'options': ['', 'Storage', 'Consigned', 'Missing', 'Gifted']},
-        {'name': 'image_obv',       'label': 'Image (Obverse)',   'type': 'file'},
-        {'name': 'image_rev',       'label': 'Image (Reverse)',   'type': 'file'},
+        {'name': 'image_obv',       'label': 'Image',             'type': 'file'},
         {'name': 'container_1',     'label': 'Container 1',       'type': 'file'},
         {'name': 'container_2',     'label': 'Container 2',       'type': 'file'},
         {'name': 'document',        'label': 'Document',          'type': 'file'},
@@ -899,6 +898,55 @@ def init_db():
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
             ('data_json_initial_bump_v1', _bump_now),
+        )
+        db.commit()
+
+    # One-shot: nuke the watches.image_rev column. Legacy FileMaker
+    # import populated it with copies of the cover image on every
+    # watch, so the export emitted bogus '<ident> — Back.<ext>' files
+    # everywhere. The Back slot has been removed from FIELDS,
+    # EXPORT_LAYOUT, FM_FIELD_MAP, and import_fm_images.py — this
+    # one-shot cleans up the existing data:
+    #   1) Tombstone every '<ident> — Back.<ext>' so the next
+    #      syncDown removes the orphan from the user's local mirror.
+    #   2) NULL image_rev so subsequent exports don't emit anything.
+    # Tombstones use the actual extension from each row's image_rev
+    # value (different rows may have .png / .jpg / .heic etc).
+    # Coins (image_1 / image_2 = Obverse/Reverse) are NOT touched —
+    # that pair is genuine identity for numismatics.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('watches_drop_image_rev_v1',),
+    ).fetchone():
+        _now = datetime.utcnow().isoformat()
+        try:
+            _watch_rows = db.execute(
+                "SELECT * FROM watches WHERE image_rev IS NOT NULL "
+                "AND TRIM(image_rev) != ''"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            _watch_rows = []
+        for _row in _watch_rows:
+            try:
+                _back_filename = (_row['image_rev'] or '').strip()
+                if _back_filename:
+                    _record_tombstone(db, 'watches', _row, 'Back',
+                                      _back_filename)
+            except Exception:
+                app.logger.exception(
+                    'image_rev tombstone failed for watch %s', _row['id']
+                )
+        try:
+            db.execute(
+                "UPDATE watches SET image_rev = NULL, updated_at = ? "
+                "WHERE image_rev IS NOT NULL",
+                (_now,),
+            )
+        except sqlite3.OperationalError:
+            pass
+        db.execute(
+            "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+            ('watches_drop_image_rev_v1', _now),
         )
         db.commit()
 
@@ -8936,13 +8984,17 @@ EXPORT_LAYOUT = {
         'group': lambda r: _g(r, 'brand') or 'Unknown',
         'ident': _watch_ident,
         'create': _create_watch,
-        # User-titled docs (container_1, container_2) AND receipt moved
-        # into the JSON `documents` column; export walks them via the
-        # docs JSON path. Only the obverse/reverse identity images stay
-        # as fixed slot columns.
+        # Single cover image (image_obv, exported as 'Front') is the
+        # only fixed slot for watches now. The image_rev column (Back)
+        # was dropped — legacy FileMaker import populated it with copies
+        # of the cover on every watch, so the export emitted bogus
+        # '<ident> — Back.<ext>' files everywhere. Receipts and other
+        # user-titled docs (container_1, container_2) flow through the
+        # JSON `documents` column. Coins still keep their Obverse/Reverse
+        # pair (image_1, image_2) — that pair is genuinely identity for
+        # numismatics.
         'files': [
             ('image_obv', 'Front', None),
-            ('image_rev', 'Back', None),
         ],
     },
     'coins': {
@@ -9077,7 +9129,7 @@ EXPORT_LAYOUT = {
 # (which live in the JSON documents column) are deliberately not in
 # this set — their whole purpose is to be add/remove-able via Files.
 IDENTITY_SLOTS_BY_CATEGORY = {
-    'watches':      {'image_obv', 'image_rev'},
+    'watches':      {'image_obv'},
     'coins':        {'image_1', 'image_2'},
     'persons':      {'head_shot', 'license_obverse', 'license_reverse',
                      'health_card_obv', 'health_card_rev'},
@@ -12002,7 +12054,6 @@ FM_FIELD_MAP = {
     # never run for it (the FM-era receipt slot historically held
     # cover-image data and migrating it would corrupt the docs JSON).
     ('Watch', 'ImageObv'):        ('watches',      'image_obv'),
-    ('Watch', 'ImageRev'):        ('watches',      'image_rev'),
     ('Watch', 'Document'):        ('watches',      'document'),
     ('Coin', 'Image1'):           ('coins',        'image_1'),
     ('Coin', 'Image2'):           ('coins',        'image_2'),

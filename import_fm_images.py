@@ -40,7 +40,6 @@ UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
 FIELD_MAP = {
     # Watches
     ('Watch', 'ImageObv'):       ('watches', 'image_obv'),
-    ('Watch', 'ImageRev'):       ('watches', 'image_rev'),
     ('Watch', 'Document'):       ('watches', 'document'),
     # Coins
     ('Coin', 'Image1'):          ('coins', 'image_1'),
