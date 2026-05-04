@@ -659,24 +659,38 @@
   // POST one batch of files to /sweep with a retry on transient
   // network failure. Returns parsed JSON or throws with the last
   // error.
+  //
+  // AbortController + 4-min timeout: server gunicorn timeout is 300s
+  // (railway.toml). Without a client-side timeout, a worker that gets
+  // killed mid-request leaves the browser fetch hanging forever on a
+  // dead socket — observed as a frozen "Sending batch…" message. 240s
+  // < 300s so we abort BEFORE the worker gets killed, surfacing the
+  // failure cleanly through the retry / outer skipped-file path.
   async function _uploadBatch(files, autoCreate) {
     const fd = new FormData();
     if (autoCreate) fd.append('auto_create', '1');
     for (const f of files) fd.append('files', f, f.name);
     let lastErr;
     for (let attempt = 0; attempt < 2; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 240000);
       try {
         const r = await fetch('/sweep', {
           method: 'POST',
           headers: {'Accept': 'application/json'},
           body: fd,
           credentials: 'include',
+          signal: ctrl.signal,
         });
         if (!r.ok) throw new Error('Server returned HTTP ' + r.status);
         return await r.json();
       } catch (e) {
-        lastErr = e;
+        lastErr = e.name === 'AbortError'
+          ? new Error('batch timed out after 240s (server likely killed by gunicorn timeout)')
+          : e;
         if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
+      } finally {
+        clearTimeout(timer);
       }
     }
     throw lastErr;
@@ -746,7 +760,7 @@
 
     async function flush() {
       if (!batch.length) return;
-      progress && progress(`Sending batch of ${batch.length} (${done}/${handles.length} read)…`);
+      progress && progress(`Sending batch of ${batch.length} (${done}/${changed.length} read)…`);
       try {
         const data = await _uploadBatch(batch, true);
         if (data.uploaded) uploaded.push(...data.uploaded);
@@ -771,6 +785,12 @@
           delete newState[f.name];
         }
       }
+      // Persist after every flush, not just at the very end. A 5620-file
+      // sync that hangs on batch 200 used to lose every fingerprint
+      // (newState was only written at the end), forcing the next syncUp
+      // to re-read + re-upload everything. Now an abort costs at most
+      // one batch's worth of re-work.
+      try { await _saveSyncState(newState); } catch (_) {}
       batch = [];
       batchSize = 0;
     }
