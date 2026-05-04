@@ -9461,6 +9461,12 @@ def sweep_files():
     cat_hint_label = EXPORT_CATEGORY_LABELS.get(cat_hint) if cat_hint else None
     group_hint = (request.form.get('group_hint') or '').strip()
     auto_create = request.form.get('auto_create') == '1'
+    # Watches require a separate opt-in. Watch model names drift between
+    # folder and DB ("Chronomètre Souverain" vs "Chronomètre Souveraine
+    # Ref CSXX" vs years prefixed/missing), so a single auto-create tick
+    # could spawn dozens of stub records before the user notices. Default
+    # OFF; the sweep UI exposes a second checkbox specifically for it.
+    auto_create_watches = request.form.get('auto_create_watches') == '1'
 
     db = get_db()
     # Cache record indexes per category so we don't re-scan the table
@@ -9574,7 +9580,23 @@ def sweep_files():
             if not matches:
                 # Optional auto-create. Only happens when the user opts in
                 # AND the category has a 'create' constructor in the layout.
+                # Watches require a second, watches-specific opt-in
+                # (auto_create_watches) — model names drift too easily and
+                # one bad sweep can spawn dozens of stub records. If the
+                # main auto-create is on but watches-specific isn't, log
+                # what would have been created so the user can see the
+                # impact before flipping the second flag.
                 create_fn = plan.get('create')
+                if auto_create and create_fn and cat == 'watches' and not auto_create_watches:
+                    report['skipped'].append({
+                        'file': rel,
+                        'reason': (
+                            f"watches auto-create requires the separate "
+                            f"'auto_create_watches' opt-in (group="
+                            f"'{parsed['group']}', ident='{parsed['ident']}')"
+                        ),
+                    })
+                    continue
                 if auto_create and create_fn:
                     seed = create_fn(parsed['group'], parsed['ident']) or {}
                     if seed:

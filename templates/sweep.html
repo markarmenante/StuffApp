@@ -54,11 +54,25 @@
       <label>
         <input type="checkbox" name="auto_create" value="1">
         <strong>Auto-create new records</strong> when a folder/item doesn't
-        match an existing one (Watches, Properties, People, Cameras,
-        Lenses, Pens, Art, Vehicles, Music, Audio, Rifles).
+        match an existing one (Properties, People, Cameras, Lenses, Pens,
+        Art, Vehicles, Music, Audio, Rifles).
         <br>
         <span style="font-size:11px;color:var(--text-label)">Coins and Cards aren't auto-created
         — too many required fields without a folder convention.</span>
+      </label>
+    </div>
+
+    <div class="sweep-row sweep-hints">
+      <label>
+        <input type="checkbox" name="auto_create_watches" value="1">
+        <strong>Also auto-create watches</strong> (advanced — off by default).
+        <br>
+        <span style="font-size:11px;color:var(--text-label)">Watch model
+        names drift between folders and DB rows ("Chronomètre Souverain"
+        vs "Chronomètre Souveraine Ref CSXX" vs year-prefixed variants),
+        so one auto-create sweep can quietly spawn dozens of stub records.
+        Leave this off unless you've confirmed the file paths exactly match
+        your existing watch records.</span>
       </label>
     </div>
 
