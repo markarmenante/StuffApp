@@ -9625,10 +9625,11 @@ def _parse_sweep_path(rel_path):
 
 
 # Cat-id-prefix sweep: if a dropped file's basename leads with a known
-# cat_id (C### / W### / A###), bypass the StuffFiles/<Cat>/<Group>/...
-# path parsing entirely and look up the record by cat_id. Lets the user
-# drop a file anywhere — Inbox, Desktop, iOS Files picker without a
-# category hint — as long as the filename starts with the cat_id.
+# cat_id (C### / W### / A###), or contains a parenthesised cat_id token
+# anywhere (the export naming convention, e.g. 'Foo (W307) — Front.pdf'),
+# bypass the StuffFiles/<Cat>/<Group>/... path parsing entirely and look
+# up the record by cat_id. Lets the user drop an export-shaped file
+# anywhere, or invent their own filename around a known (W###) tag.
 #
 # Accepts a 2+-digit serial (the live scheme is 3 digits, but old data
 # or hand-typed names with fewer digits still match) and tolerates any
@@ -9638,20 +9639,39 @@ _CAT_ID_SWEEP_RE = re.compile(
     r'^\s*([CWA]\d{2,})\b\s*(?:[—–-]\s*(.+?))?\s*$',
     re.IGNORECASE,
 )
+# Parens form: '(W307)' anywhere in the basename. Strict on both sides
+# (literal '(' and ')') so a stray substring like 'W307abc' inside a
+# longer token can't trigger a misroute.
+_CAT_ID_PARENS_RE = re.compile(r'\(([CWA]\d{2,})\)', re.IGNORECASE)
 
 
 def _try_cat_id_sweep_match(db, filename):
-    """If the basename matches '<CatId>[ — <Label>].<ext>', look the
-    record up directly. Returns (category, row_dict, target_label) or
-    None. Label is empty when the filename is bare cat_id (e.g.
-    'W042.jpg' → label='', and the slot resolver picks the first
-    empty slot)."""
+    """If the basename matches '<CatId>[ — <Label>].<ext>' OR contains
+    a '(<CatId>)' token (the export format, e.g.
+    'Foo (W307) — Front.pdf'), look the record up directly. Returns
+    (category, row_dict, target_label) or None. Label is empty when
+    no ' — Label' suffix is present, and the slot resolver picks the
+    first empty slot (or appends to the documents JSON for categories
+    in DOCUMENTS_CATEGORIES)."""
     base, _ext = os.path.splitext(filename)
     m = _CAT_ID_SWEEP_RE.match(base)
-    if not m:
-        return None
-    cat_id_raw = m.group(1).upper()
-    label = (m.group(2) or '').strip()
+    if m:
+        cat_id_raw = m.group(1).upper()
+        label = (m.group(2) or '').strip()
+    else:
+        m2 = _CAT_ID_PARENS_RE.search(base)
+        if not m2:
+            return None
+        cat_id_raw = m2.group(1).upper()
+        # Strip the (CatId) token; the part after ' — ' in what's left,
+        # if any, is the slot label. Otherwise leave label empty so the
+        # slot resolver picks the first empty slot (or appends to the
+        # documents JSON for DOCUMENTS_CATEGORIES).
+        remainder = (base[:m2.start()] + base[m2.end():]).strip()
+        if ' — ' in remainder:
+            label = remainder.rpartition(' — ')[2].strip()
+        else:
+            label = ''
     cat = _CAT_ID_SWEEP_PREFIXES.get(cat_id_raw[0])
     if not cat:
         return None
