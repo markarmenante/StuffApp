@@ -4195,6 +4195,11 @@ def detail_view(category, record_id):
         for slug in CATEGORY_PROPERTY_FIELD:
             if slug not in allowed or slug in PROPERTY_PILL_EXCLUDE:
                 continue
+            # Tenant scope — when a deployment restricts what the owner
+            # sees, broader-access viewers (e.g. cross-tenant admins)
+            # still get only the tenant's slice of pills.
+            if TENANT_CATEGORIES is not None and slug not in TENANT_CATEGORIES:
+                continue
             prop_field = CATEGORY_PROPERTY_FIELD[slug]
             table = CATEGORIES[slug]['table']
             ph = ','.join(['?'] * len(aliases))
@@ -6611,6 +6616,15 @@ OWNER_EMAIL = (os.environ.get('STUFFAPP_OWNER_EMAIL') or
 OWNER_DISPLAY_NAME = (os.environ.get('STUFFAPP_OWNER_DISPLAY_NAME') or
                       'Mark Armenante')
 OWNER_CATEGORIES = os.environ.get('STUFFAPP_OWNER_CATEGORIES') or '*'
+
+# Tenant scope — when a deployment restricts the owner's categories,
+# this is the canonical "what does this tenant deal with" set. Used to
+# constrain UI surfaces (e.g. property pills) so visiting users with
+# broader access still see only the tenant's slice.
+TENANT_CATEGORIES = (
+    None if OWNER_CATEGORIES.strip() in ('*', '')
+    else {c.strip() for c in OWNER_CATEGORIES.split(',') if c.strip()}
+)
 
 
 def _ensure_owner_user(db):
