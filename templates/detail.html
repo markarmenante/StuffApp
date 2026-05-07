@@ -1274,7 +1274,6 @@ document.addEventListener('DOMContentLoaded', function () {
         <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Item">
       {% else %}
         <span class="no-img">📦</span>
-        <span class="drop-hint">Drop an image here</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
         <input type="file" name="image" accept="image/*" style="display:none"
