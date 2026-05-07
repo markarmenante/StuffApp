@@ -2071,7 +2071,6 @@ document.addEventListener('DOMContentLoaded', function () {
     {% endfor %}
   </div>
   {% endif %}
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
 
   <!-- People associated with this property (landlord, plumber, agent,
        neighbor, etc.). Same shape as the alarm-codes / medications
@@ -2098,6 +2097,18 @@ document.addEventListener('DOMContentLoaded', function () {
       <button type="button" class="people-del-btn" title="Delete this row">×</button>
     </div>
     {% endfor %}
+  </div>
+
+  {# Free-form notes for the property — auto-expands as the user types
+     so they can keep adding lines without scrolling within the field.
+     Replaces the small fixed-rows Notes that previously sat above the
+     People table; the column itself is unchanged. #}
+  <div class="dgrid dg1">
+    <div class="dcell">
+      <textarea name="notes" rows="2" data-autogrow="1"
+                {% if is_new and not val('notes') %}placeholder="Notes"{% endif %}>{{ val('notes') }}</textarea>
+      <span class="clabel">Notes</span>
+    </div>
   </div>
 
   {# Pill row: jump to a filtered list of every category-item that
