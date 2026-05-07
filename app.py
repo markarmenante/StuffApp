@@ -2077,7 +2077,16 @@ def _backfill_meds_from_prescriptions(db):
 def get_counts():
     db = get_db()
     counts = {}
+    # Skip categories the current user can't see — otherwise the nav
+    # leaks the existence and row count of hidden tables (e.g. a
+    # third-party deployment would still see "Watches: 73" in the
+    # nav even though the watches tab is hidden by visibility rules).
+    # Falls back to all categories outside a request context (CLI,
+    # tests) where g.allowed_cats isn't populated.
+    allowed = g.get('allowed_cats') or set(CATEGORIES.keys())
     for slug, cat in CATEGORIES.items():
+        if slug not in allowed:
+            continue
         # Apply the current user's row filter so the nav count
         # matches what they can actually see in the list.
         wheres, params = [], []
