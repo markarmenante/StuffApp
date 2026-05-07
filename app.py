@@ -3585,10 +3585,16 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}"""
 # Routes
 # ---------------------------------------------------------------------------
 
+LANDING_CATEGORY = (os.environ.get('STUFFAPP_LANDING_CATEGORY') or '').strip()
+
+
 @app.route('/')
 def index():
     allowed = g.get('allowed_cats') or set()
-    target = next((c for c in CATEGORIES if c in allowed), 'watches')
+    if LANDING_CATEGORY in CATEGORIES and LANDING_CATEGORY in allowed:
+        target = LANDING_CATEGORY
+    else:
+        target = next((c for c in CATEGORIES if c in allowed), 'watches')
     return redirect(url_for('list_view', category=target))
 
 
