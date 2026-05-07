@@ -2219,6 +2219,12 @@ def current_vlists(category=None):
         # owner dropdown matches what the rest of the app shows. The
         # users-table-derived list is the historical default for the
         # primary deployment where members come and go.
+        # Also: drop the property owner_filter on tenants — the
+        # 'Mark'/'Jointly' household-member convention only matches
+        # the original deployment's property.owner values, so a
+        # tenant whose properties use 'Joint'/'Gerri' would otherwise
+        # see an empty property dropdown here.
+        prop_owner_filter = None if os.environ.get('STUFFAPP_OWNER_OPTIONS') else me
         if os.environ.get('STUFFAPP_OWNER_OPTIONS'):
             items_owner = VALUE_LISTS['owner']
         else:
@@ -2241,7 +2247,7 @@ def current_vlists(category=None):
             items_owner = members + ['Jointly']
         return {
             **VALUE_LISTS,
-            'property': get_property_choices(owner_filter=me),
+            'property': get_property_choices(owner_filter=prop_owner_filter),
             'items_owner': items_owner,
             'items_status': ['Own', 'Sold', 'Gifted', 'Lost'],
         }
