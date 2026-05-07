@@ -654,6 +654,39 @@ FIELDS = {
     ],
 }
 
+
+def _parse_hide_fields(raw):
+    """STUFFAPP_HIDE_FIELDS format: 'cat:field1,field2;cat2:field3'.
+    Per-tenant field hiding — drops listed fields from forms, detail
+    views, and save_field validation so the surface is consistent.
+    Existing data in those columns stays in the DB (just not shown)."""
+    out = {}
+    for part in (raw or '').split(';'):
+        part = part.strip()
+        if ':' not in part:
+            continue
+        cat, names = part.split(':', 1)
+        cat = cat.strip()
+        if cat not in CATEGORIES:
+            continue
+        out[cat] = {n.strip() for n in names.split(',') if n.strip()}
+    return out
+
+
+HIDE_FIELDS = _parse_hide_fields(os.environ.get('STUFFAPP_HIDE_FIELDS'))
+
+
+def visible_fields(category):
+    """FIELDS[category] minus tenant-hidden fields. Use this everywhere
+    forms render or validation runs so a hidden field is invisible end
+    to end (no render, no save, no clear)."""
+    fields = FIELDS.get(category) or []
+    hidden = HIDE_FIELDS.get(category)
+    if not hidden:
+        return fields
+    return [f for f in fields if f['name'] not in hidden]
+
+
 # List-view extra info fields per category
 LIST_EXTRA_FIELDS = {
     'watches':      ['metal', 'reference', 'vendor', 'property'],
@@ -2320,7 +2353,7 @@ def save_upload(file_obj):
 
 
 def get_file_fields(category):
-    return [f['name'] for f in FIELDS[category] if f['type'] == 'file']
+    return [f['name'] for f in visible_fields(category) if f['type'] == 'file']
 
 
 def _title_field_for(category, file_field):
@@ -2461,7 +2494,7 @@ def _normalize_numeric_term(term):
 def build_search_query(category, q, dot=False, coin_filter=None, at_property=None):
     """Build a SELECT with optional text search and/or dot (unresolved) filter."""
     table = CATEGORIES[category]['table']
-    text_fields = [f['name'] for f in FIELDS[category]
+    text_fields = [f['name'] for f in visible_fields(category)
                    if f['type'] in ('text', 'textarea', 'select') and f.get('type') != 'file']
     # Per-category extra columns to expose in free-text search. SQLite's
     # LIKE coerces numerics to strings, but strips trailing zeros — so
@@ -2496,7 +2529,7 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
     if dot:
         # Find which field holds status for this category
         status_col = 'status'
-        field_names = [f['name'] for f in FIELDS[category]]
+        field_names = [f['name'] for f in visible_fields(category)]
         if 'property_name' in field_names and 'status' not in field_names:
             status_col = None  # no status column — skip
         if status_col:
@@ -3728,7 +3761,7 @@ def list_view(category):
                            has_ordered=has_ordered,
                            has_no_longer_owned=has_no_longer_owned,
                            extra_fields=extra_fields,
-                           fields=FIELDS[category])
+                           fields=visible_fields(category))
 
 
 @app.route('/<category>/new', methods=['GET', 'POST'])
@@ -3747,7 +3780,7 @@ def new_record(category):
         # Track originals so we can default empty *_title columns to the
         # uploaded file's basename after the row is parsed.
         file_originals = {}
-        for field in FIELDS[category]:
+        for field in visible_fields(category):
             fname = field['name']
             if field.get('readonly'):
                 continue
@@ -3909,7 +3942,7 @@ def _render_new_form(category, data=None, focus_field=None):
                            counts=get_counts(),
                            current_category=category,
                            categories=CATEGORIES,
-                           fields=FIELDS[category],
+                           fields=visible_fields(category),
                            is_new=True,
                            prev_id=None,
                            next_id=None,
@@ -3988,7 +4021,7 @@ def detail_view(category, record_id):
         now = datetime.utcnow().isoformat()
         updates = {'updated_at': now}
 
-        for field in FIELDS[category]:
+        for field in visible_fields(category):
             fname = field['name']
             if field.get('readonly'):
                 continue
@@ -4178,7 +4211,7 @@ def detail_view(category, record_id):
                            counts=counts,
                            current_category=category,
                            categories=CATEGORIES,
-                           fields=FIELDS[category],
+                           fields=visible_fields(category),
                            is_new=False,
                            prev_id=prev_id,
                            next_id=next_id,
@@ -4210,7 +4243,7 @@ def save_field(category, record_id):
     value = data.get('value', '')
 
     # Validate field exists in this category
-    valid_fields = {f['name']: f for f in FIELDS[category]}
+    valid_fields = {f['name']: f for f in visible_fields(category)}
     if field_name not in valid_fields:
         return jsonify({'error': f'Unknown field: {field_name}'}), 400
     # Owner field is owner-only — members can't edit it via the API
@@ -5936,7 +5969,7 @@ def delete_file_field(category, record_id):
         return jsonify({'error': 'Unknown category'}), 400
     payload = request.get_json(silent=True) or {}
     field_name = (payload.get('field') or '').strip()
-    valid = {f['name']: f for f in FIELDS[category]}
+    valid = {f['name']: f for f in visible_fields(category)}
     if field_name not in valid or valid[field_name].get('type') != 'file':
         return jsonify({'error': 'Invalid file field'}), 400
     db = get_db()

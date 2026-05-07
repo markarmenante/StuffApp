@@ -2788,7 +2788,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
   // Debounced save while the user is still typing — no need to wait for
   // blur. blur still fires saveNow() to flush any pending change.
-  const SAVE_DEBOUNCE_MS = 600;
+  const SAVE_DEBOUNCE_MS = 250;
   const pendingTimers = new WeakMap();
   const lastSaved = new WeakMap();
   function saveNow(el) {
@@ -2812,7 +2812,14 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
   form.querySelectorAll('input[name]:not([type=file]):not([type=radio]):not([type=checkbox]):not([type=date]), textarea[name]').forEach(el => {
     lastSaved.set(el, el.value);
-    el.addEventListener('input', () => scheduleSave(el));
+    el.addEventListener('input', () => {
+      // Kick off record creation on the very first keystroke so the
+      // row exists even if the user navigates away before debounce or
+      // blur fires. ensureRecord() is idempotent — subsequent input
+      // events are no-ops once recordExists is true.
+      ensureRecord();
+      scheduleSave(el);
+    });
     el.addEventListener('blur', () => saveNow(el));
   });
   // Flush any pending typed-but-not-saved changes if the page is being
