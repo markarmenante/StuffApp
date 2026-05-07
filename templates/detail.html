@@ -24,10 +24,10 @@
 </div>
 {% endif %}
 {% endmacro %}
-{% macro datecell(field, label) %}
+{% macro datecell(field, label, seed_today=true) %}
 {% if not is_hidden_field(category, field) %}
 <div class="dcell date-overlay-cell">
-  {% set _dv = val(field) if val(field) else (today_iso if is_new else '') %}
+  {% set _dv = val(field) if val(field) else (today_iso if (is_new and seed_today) else '') %}
   <input type="date" name="{{ field }}" value="{{ _dv }}" class="date-overlay-input">
   <span class="date-overlay-display">{% if _dv and _dv|length >= 10 %}{{ _dv[5:7] }}/{{ _dv[8:10] }}/{{ _dv[0:4] }}{% endif %}</span>
   <span class="clabel">{{ label }}</span>
@@ -2031,7 +2031,7 @@ document.addEventListener('DOMContentLoaded', function () {
         {{ cell('ein','EIN') }}
       </div>
       <div class="dgrid dg2 properties-specs">
-        {{ datecell('date','Purchase Date') }}
+        {{ datecell('date','Purchase Date', seed_today=false) }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Purchase Price</span></div>
       </div>
     </div>
@@ -2139,7 +2139,8 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ dyndocrow(_documents) }}
 
   <div class="detail-bottom">
-    <div class="bottom-cell"><select name="status">{% for s in ['','Own','Sold'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    {% set _vs = val('status') if val('status') else ('Own' if is_new else '') %}
+    <div class="bottom-cell"><select name="status">{% for s in ['','Own','Sold'] %}<option value="{{ s }}" {{ 'selected' if _vs==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}<select name="owner">{% for o in ['','YM','Mark','Young'] %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
@@ -2693,12 +2694,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
 // ── Auto-save on field change/blur ──────────────────────────────────────────
 (function () {
-  {# Autosave-on-new now runs for every category that uses the new_record
+  {# Autosave-on-new runs for every category that uses the new_record
      route, so a user who types a few fields and hits Back leaves a real
      row behind instead of losing everything. The server's required-field
      check no longer blocks creation when Property is empty (see app.py
      comment in new_record), so the first blur just creates the row. #}
-  {% set _autosave_on_new = category not in ('persons',) %}
+  {% set _autosave_on_new = true %}
   {% if not is_new or _autosave_on_new %}
   let SAVE_URL = "{% if not is_new %}{{ url_for('save_field', category=category, record_id=r['id']) }}{% endif %}";
   let recordExists = {{ 'true' if not is_new else 'false' }};
