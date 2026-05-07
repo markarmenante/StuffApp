@@ -787,6 +787,14 @@ textarea.results-raw { display: none !important; }
 /* Art: full-width large photo */
 .art-photo-full { display: flex; align-items: center; justify-content: center; background: var(--cell-bg); min-height: 420px; position: relative; border-bottom: 1px solid var(--border); padding: 10px; }
 .art-photo-full img { max-width: 100%; max-height: 560px; object-fit: contain; display: block; }
+@media (max-width: 640px) {
+  /* Phones don't have the desktop's 50/50 side-by-side layout, so the
+     420px min-height swallows half the viewport before the spec
+     fields show. Shrink it so the form is reachable without a
+     scroll. */
+  .art-photo-full { min-height: 180px; }
+  .art-photo-full img { max-height: 280px; }
+}
 .art-photo-full .no-img { font-size: 56px; color: var(--text-hint); }
 .art-photo-full .drop-hint {
   position: absolute;
