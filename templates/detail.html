@@ -4,6 +4,7 @@
 {% set r = record %}
 {% macro val(field) %}{{ (r[field] if r and field in r.keys() and r[field] is not none else '') }}{% endmacro %}
 {% macro cell(field, label, colspan=1, rows=1) %}
+{% if not is_hidden_field(category, field) %}
 <div class="dcell" style="{% if colspan > 1 %}grid-column: span {{ colspan }};{% endif %}">
   {% set v = val(field) %}
   {% if rows > 1 %}
@@ -13,22 +14,28 @@
   {% endif %}
   <span class="clabel">{{ label }}</span>
 </div>
+{% endif %}
 {% endmacro %}
 {% macro numcell(field, label) %}
+{% if not is_hidden_field(category, field) %}
 <div class="dcell">
   <input type="number" step="any" name="{{ field }}" value="{{ val(field) }}">
   <span class="clabel">{{ label }}</span>
 </div>
+{% endif %}
 {% endmacro %}
 {% macro datecell(field, label) %}
+{% if not is_hidden_field(category, field) %}
 <div class="dcell date-overlay-cell">
   {% set _dv = val(field) if val(field) else (today_iso if is_new else '') %}
   <input type="date" name="{{ field }}" value="{{ _dv }}" class="date-overlay-input">
   <span class="date-overlay-display">{% if _dv and _dv|length >= 10 %}{{ _dv[5:7] }}/{{ _dv[8:10] }}/{{ _dv[0:4] }}{% endif %}</span>
   <span class="clabel">{{ label }}</span>
 </div>
+{% endif %}
 {% endmacro %}
 {% macro selcell(field, label, opts, empty_label='') %}
+{% if not is_hidden_field(category, field) %}
 <div class="dcell">
   {# val() is a macro: its output goes through Jinja autoescape, so
      "R&B" comes back as "R&amp;B" and `val(field)==o` mismatches the
@@ -41,12 +48,15 @@
   </select>
   <span class="clabel">{{ label }}</span>
 </div>
+{% endif %}
 {% endmacro %}
 {% macro tacell(field, label, opts) %}
+{% if not is_hidden_field(category, field) %}
 <div class="dcell ta-wrap">
   <input type="text" name="{{ field }}" value="{{ val(field) }}" autocomplete="off" class="ta-input" data-ta="{{ opts|join('||') }}">
   <span class="clabel">{{ label }}</span>
 </div>
+{% endif %}
 {% endmacro %}
 {% macro imgcell(field, label) %}
 {% set f = r[field] if r else none %}

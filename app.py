@@ -6563,6 +6563,7 @@ def inject_globals():
         'current_user': g.get('current_user'),
         'allowed_cats': g.get('allowed_cats', set()),
         'asset_v': _asset_v,
+        'is_hidden_field': lambda cat, field: field in HIDE_FIELDS.get(cat, set()),
     }
 
 
