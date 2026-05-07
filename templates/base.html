@@ -92,7 +92,9 @@
   </div>
 
   <div class="nav-right">
-    {% if current_user %}
+    {# Files (export) and Sweep (re-import) are owner-role tools —
+       member-role users on a third-party deployment don't get them. #}
+    {% if current_user and current_user.role == 'owner' %}
     <a href="{{ url_for('admin_export_files') }}"
        class="nav-item nav-export" id="navExportLink"
        title="Download + auto-extract into your StuffFiles folder. iOS / Safari: gets a zip you save manually."
