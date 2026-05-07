@@ -2151,17 +2151,44 @@ def get_property_choices(owner_filter=None):
 
 def current_vlists(category=None):
     """Per-request VALUE_LISTS with 'property' resolved from the DB.
-    For the items category, properties are scoped to the current
-    user's own (owner = first word of display_name) and an
-    'items_owner' key is added containing [<member>, 'Jointly'] so
-    the items form can offer a personal-vs-jointly choice instead of
-    the household-wide owner dropdown."""
+    For the items category we also resolve a few values from the
+    deployment's current state instead of from the static dict:
+
+      * 'property' is scoped to properties owned by the current user
+        (or marked 'Jointly').
+      * 'items_owner' lists every household member (first word of
+        each user's display_name), with the current user first so
+        they're the default, plus 'Jointly' as a tail option.
+      * 'items_status' is the simplified status set used by items
+        ('Own', 'Sold', 'Gifted', 'Lost') — no 'Loaned'/'Ordered'/
+        'Consigned' since those concepts don't apply to general
+        household inventory.
+    """
     if category == 'items':
-        owner = current_owner_name()
+        me = current_owner_name()
+        # Collect first-word display names of every user, deduped,
+        # current user first so they're the default for new records.
+        db = get_db()
+        rows = db.execute(
+            "SELECT display_name FROM users "
+            "WHERE display_name IS NOT NULL AND display_name != ''"
+        ).fetchall()
+        seen, members = set(), []
+        for r in rows:
+            first = (r['display_name'] or '').strip().split()
+            if not first:
+                continue
+            n = first[0]
+            if n not in seen:
+                seen.add(n)
+                members.append(n)
+        if me:
+            members = [me] + [m for m in members if m != me]
         return {
             **VALUE_LISTS,
-            'property': get_property_choices(owner_filter=owner),
-            'items_owner': [o for o in [owner, 'Jointly'] if o],
+            'property': get_property_choices(owner_filter=me),
+            'items_owner': members + ['Jointly'],
+            'items_status': ['Own', 'Sold', 'Gifted', 'Lost'],
         }
     return {**VALUE_LISTS, 'property': get_property_choices()}
 
@@ -6515,15 +6542,21 @@ def inject_globals():
 
 OWNER_EMAIL = (os.environ.get('STUFFAPP_OWNER_EMAIL') or
                'MarkArmenante@gmail.com').lower()
+OWNER_DISPLAY_NAME = (os.environ.get('STUFFAPP_OWNER_DISPLAY_NAME') or
+                      'Mark Armenante')
+OWNER_CATEGORIES = os.environ.get('STUFFAPP_OWNER_CATEGORIES') or '*'
 
 
 def _ensure_owner_user(db):
-    """Idempotent: make sure the owner email exists with full access."""
+    """Idempotent: make sure the owner email exists. On a fresh DB,
+    seed the configured display_name and categories. On an existing
+    DB, only re-assert role='owner' so an admin's manual edits to
+    display_name or categories aren't clobbered on every boot."""
     db.execute(
         "INSERT INTO users (id, email, display_name, role, categories) "
-        "VALUES (?, ?, ?, 'owner', '*') "
-        "ON CONFLICT(email) DO UPDATE SET role='owner', categories='*'",
-        [str(uuid.uuid4()), OWNER_EMAIL, 'Mark Armenante']
+        "VALUES (?, ?, ?, 'owner', ?) "
+        "ON CONFLICT(email) DO UPDATE SET role='owner'",
+        [str(uuid.uuid4()), OWNER_EMAIL, OWNER_DISPLAY_NAME, OWNER_CATEGORIES]
     )
 
 
@@ -6536,10 +6569,15 @@ def _resolve_user_email():
 
 
 def _expand_categories(raw, role):
-    """Resolve a user's category list. '*' or owner role → everything."""
-    if role == 'owner' or (raw or '').strip() == '*':
+    """Resolve a user's category list. '*' (or empty for owner role)
+    means all categories; otherwise the explicit comma-separated
+    list. Owner role no longer auto-bypasses an explicit list — that
+    way a third-party deployment can be owner-role-but-restricted
+    without forking the visibility model."""
+    s = (raw or '').strip()
+    if s == '*' or (role == 'owner' and not s):
         return set(CATEGORIES.keys())
-    return {c.strip() for c in (raw or '').split(',') if c.strip() in CATEGORIES}
+    return {c.strip() for c in s.split(',') if c.strip() in CATEGORIES}
 
 
 # Property name aliases — different ways the same physical property

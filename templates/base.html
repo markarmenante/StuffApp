@@ -75,7 +75,12 @@
       ('items',        'ph-package',      'Items'),
     ] %}
     {% for slug, icon_id, label in cat_icons %}
-    {% if (not current_user) or (current_user.role == 'owner') or (slug in allowed_cats) %}
+    {# Owner role no longer auto-bypasses — _expand_categories
+       returns all categories when the user's `categories` is '*',
+       so an owner with '*' still sees everything, but an owner with
+       an explicit list only sees that list (third-party deployment
+       use case). #}
+    {% if (not current_user) or (slug in allowed_cats) %}
     <a href="{% if slug == 'persons' %}{{ url_for('persons_default') }}{% else %}{{ url_for('list_view', category=slug) }}{% endif %}"
        class="nav-item {% if current_category == slug %}active{% endif %}"
        title="{{ label }}">

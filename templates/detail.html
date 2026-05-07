@@ -1309,7 +1309,7 @@ document.addEventListener('DOMContentLoaded', function () {
           </select>
           <span class="clabel">Owner</span>
         </div>
-        {{ selcell('status','Status', vlists.status) }}
+        {{ selcell('status','Status', vlists.items_status) }}
         {{ selcell('location_status','Disposition', vlists.location_status, empty_label='-') }}
       </div>
       <div class="dgrid dg1">{{ cell('description','Description',rows=3) }}</div>
