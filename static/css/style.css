@@ -546,6 +546,27 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .brand-input:focus { background: #fffde8; }
 
+/* Topic detail: subject input on the left, prominent Back button on
+   the right, same row. Replaces the old separate header row that
+   wasted vertical space. */
+.topic-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.topic-brand-row .brand-input { flex: 1 1 auto; min-width: 0; }
+.topic-back-btn {
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border: 1px solid var(--blue);
+  border-radius: 6px;
+  background: var(--blue);
+  color: #fff;
+}
+.topic-back-btn:hover { text-decoration: none; opacity: 0.9; }
+
 .detail-model { font-size: 15px; font-weight: 500; padding: 5px 10px 5px; border-bottom: 1px solid var(--border); background: var(--cell-bg); color: var(--text-secondary); }
 
 /* Header rows (Brand, Model, etc.) get a persistent right-aligned

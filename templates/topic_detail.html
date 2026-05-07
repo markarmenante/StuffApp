@@ -7,14 +7,11 @@
       action="{% if is_new %}{{ url_for('topic_new', property_id=property['id']) }}{% else %}{{ url_for('topic_detail', topic_id=topic['id']) }}{% endif %}"
       enctype="multipart/form-data" id="mainForm">
 
-  <div class="detail-header">
-    <span class="detail-brand">{% if is_new %}New Topic{% endif %}</span>
-    <a class="back-link" href="{{ url_for('detail_view', category='properties', record_id=property['id']) }}">← Back</a>
-  </div>
-
-  <div class="detail-brand-row">
+  <div class="detail-brand-row topic-brand-row">
     <input type="text" name="subject" value="{{ topic['subject'] if topic and topic['subject'] else '' }}"
            class="brand-input" placeholder="Topic subject" autocomplete="off">
+    <a class="back-link topic-back-btn"
+       href="{{ url_for('detail_view', category='properties', record_id=property['id']) }}">← Back</a>
   </div>
 
   <div class="dgrid dg1">
