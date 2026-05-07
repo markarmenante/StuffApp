@@ -191,6 +191,33 @@ CREATE TABLE IF NOT EXISTS art (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS items (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    type TEXT,
+    subtype TEXT,
+    make TEXT,
+    model TEXT,
+    serial TEXT,
+    year INTEGER,
+    description TEXT,
+    notes TEXT,
+    date DATE,
+    price REAL,
+    vendor TEXT,
+    value REAL,
+    warranty_until DATE,
+    owner TEXT,
+    property TEXT,
+    location TEXT,
+    status TEXT,
+    location_status TEXT,
+    image TEXT,
+    documents TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS vehicles (
     id TEXT PRIMARY KEY,
     make TEXT,

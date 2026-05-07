@@ -1249,6 +1249,95 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
 
   <!-- ══════════════════════════════════════════════════════════
+       ITEMS (general inventory: sports gear, furniture, etc.)
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'items' %}
+  <div class="detail-brand-row">
+    <input type="text" name="name" value="{{ val('name') }}"
+           class="brand-input ta-input" autocomplete="off"
+           {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
+  </div>
+  <div class="detail-model">
+    <input type="text" name="type" value="{{ val('type') }}"
+           class="ta-input"
+           autocomplete="off"
+           data-ta="{{ ta.get('type', [])|join('||') }}"
+           {% if is_new and not val('type') %}placeholder="Type (Sports Equipment, Furniture, …)"{% endif %}
+           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
+  </div>
+
+  <div class="art-body">
+    <div class="art-photo-full drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Item">
+      {% else %}
+        <span class="no-img">📦</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
+    </div>
+    <div class="art-specs">
+      <div class="dgrid dg2">
+        <div class="dcell ta-wrap">
+          <input type="text" name="subtype" value="{{ val('subtype') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('subtype', [])|join('||') }}">
+          <span class="clabel">Subtype</span>
+        </div>
+        {{ numcell('year','Year') }}
+      </div>
+      <div class="dgrid dg2">
+        <div class="dcell ta-wrap">
+          <input type="text" name="make" value="{{ val('make') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('make', [])|join('||') }}">
+          <span class="clabel">Make</span>
+        </div>
+        <div class="dcell ta-wrap">
+          <input type="text" name="model" value="{{ val('model') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('model', [])|join('||') }}">
+          <span class="clabel">Model</span>
+        </div>
+      </div>
+      <div class="dgrid dg1">
+        {{ cell('serial','Serial') }}
+      </div>
+      <div class="dgrid dg3">
+        {{ datecell('date','Date') }}
+        <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
+        {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
+      </div>
+      <div class="dgrid dg2">
+        <div class="dcell"><input type="text" name="value" value="{{ val('value')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Value</span></div>
+        {{ datecell('warranty_until','Warranty Until') }}
+      </div>
+      <div class="dgrid dg2">
+        {{ selcell('property','Property', vlists.property) }}
+        <div class="dcell ta-wrap">
+          <input type="text" name="location" value="{{ val('location') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
+          <span class="clabel">Location</span>
+        </div>
+      </div>
+      <div class="dgrid dg3">
+        {% if current_user and current_user.role == 'owner' %}
+        {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
+        <div class="dcell">
+          <select name="owner">
+            <option value=""></option>
+            {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}
+          </select>
+          <span class="clabel">Owner</span>
+        </div>
+        {% endif %}
+        {{ selcell('status','Status', vlists.status) }}
+        {{ selcell('location_status','Disposition', vlists.location_status, empty_label='-') }}
+      </div>
+      <div class="dgrid dg1">{{ cell('description','Description',rows=3) }}</div>
+      <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+    </div>
+  </div>
+  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
+
+  <!-- ══════════════════════════════════════════════════════════
        VEHICLES
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'vehicles' %}
