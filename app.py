@@ -2214,28 +2214,35 @@ def current_vlists(category=None):
     """
     if category == 'items':
         me = current_owner_name()
-        # Collect first-word display names of every user, deduped,
-        # current user first so they're the default for new records.
-        db = get_db()
-        rows = db.execute(
-            "SELECT display_name FROM users "
-            "WHERE display_name IS NOT NULL AND display_name != ''"
-        ).fetchall()
-        seen, members = set(), []
-        for r in rows:
-            first = (r['display_name'] or '').strip().split()
-            if not first:
-                continue
-            n = first[0]
-            if n not in seen:
-                seen.add(n)
-                members.append(n)
-        if me:
-            members = [me] + [m for m in members if m != me]
+        # Tenant override: when STUFFAPP_OWNER_OPTIONS is set, use that
+        # explicit list verbatim (first option = default) so items'
+        # owner dropdown matches what the rest of the app shows. The
+        # users-table-derived list is the historical default for the
+        # primary deployment where members come and go.
+        if os.environ.get('STUFFAPP_OWNER_OPTIONS'):
+            items_owner = VALUE_LISTS['owner']
+        else:
+            db = get_db()
+            rows = db.execute(
+                "SELECT display_name FROM users "
+                "WHERE display_name IS NOT NULL AND display_name != ''"
+            ).fetchall()
+            seen, members = set(), []
+            for r in rows:
+                first = (r['display_name'] or '').strip().split()
+                if not first:
+                    continue
+                n = first[0]
+                if n not in seen:
+                    seen.add(n)
+                    members.append(n)
+            if me:
+                members = [me] + [m for m in members if m != me]
+            items_owner = members + ['Jointly']
         return {
             **VALUE_LISTS,
             'property': get_property_choices(owner_filter=me),
-            'items_owner': members + ['Jointly'],
+            'items_owner': items_owner,
             'items_status': ['Own', 'Sold', 'Gifted', 'Lost'],
         }
     return {**VALUE_LISTS, 'property': get_property_choices()}
