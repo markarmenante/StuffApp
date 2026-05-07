@@ -34,14 +34,15 @@
 </div>
 {% endif %}
 {% endmacro %}
-{% macro selcell(field, label, opts, empty_label='') %}
+{% macro selcell(field, label, opts, empty_label='', new_default='') %}
 {% if not is_hidden_field(category, field) %}
 <div class="dcell">
   {# val() is a macro: its output goes through Jinja autoescape, so
      "R&B" comes back as "R&amp;B" and `val(field)==o` mismatches the
      raw Python option. Compare against the raw cell value instead so
      values containing '&' (or any other HTML special) round-trip. #}
-  {% set _v = r[field] if r and r[field] is not none else '' %}
+  {% set _vraw = r[field] if r and r[field] is not none else '' %}
+  {% set _v = _vraw if _vraw else (new_default if is_new else '') %}
   <select name="{{ field }}">
     <option value="">{{ empty_label }}</option>
     {% for o in opts %}<option value="{{ o }}" {{ 'selected' if _v == o }}>{{ o }}</option>{% endfor %}
@@ -1319,7 +1320,7 @@ document.addEventListener('DOMContentLoaded', function () {
           </select>
           <span class="clabel">Owner</span>
         </div>
-        {{ selcell('status','Status', vlists.items_status) }}
+        {{ selcell('status','Status', vlists.items_status, new_default='Own') }}
       </div>
       <div class="dgrid dg1">{{ cell('description','Description',rows=3) }}</div>
       <div class="dgrid dg1">{{ cell('notes','Notes',rows=3) }}</div>
@@ -2729,6 +2730,24 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
 
   const form = document.getElementById('mainForm');
+
+  // Property required: when this category's form has a Property
+  // dropdown, block the explicit Save click (and warn on back-link
+  // navigation) until it's set. Autosave isn't blocked — the row
+  // can still come into existence with property=NULL — so the user
+  // doesn't lose typing if they hop away mid-form.
+  function propertyEmpty() {
+    const p = form.querySelector('[name="property"]');
+    return p && !((p.value || '').trim());
+  }
+  form.addEventListener('submit', function (e) {
+    if (propertyEmpty()) {
+      e.preventDefault();
+      alert('Property required');
+      const p = form.querySelector('[name="property"]');
+      if (p && typeof p.focus === 'function') p.focus();
+    }
+  });
 
   function ensureRecord() {
     if (recordExists) return Promise.resolve();
