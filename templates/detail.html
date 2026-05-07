@@ -621,13 +621,6 @@ document.addEventListener('DOMContentLoaded', function () {
       <span class="blabel">Owner</span>
     </div>
     {% endif %}
-    <div class="bottom-cell">
-      <select name="location_status">
-        <option value="">-</option>
-        {% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}
-      </select>
-      <span class="blabel">Disposition</span>
-    </div>
     {# Cat ID readout: surfaced so the user can name local files
        "<anything> (W###).pdf" and have sweep route them to this row
        automatically (see _try_cat_id_sweep_match in app.py). Readonly
@@ -996,7 +989,6 @@ document.addEventListener('DOMContentLoaded', function () {
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
-    <div class="bottom-cell"><select name="location_status"><option value="">-</option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Disposition</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1084,7 +1076,6 @@ document.addEventListener('DOMContentLoaded', function () {
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
-    <div class="bottom-cell"><select name="location_status"><option value="">-</option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Disposition</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1148,7 +1139,6 @@ document.addEventListener('DOMContentLoaded', function () {
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
-    <div class="bottom-cell"><select name="location_status"><option value="">-</option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Disposition</span></div>
   </div>
   <script>
   // Hide the Cartridge cell live when the user picks a built-in filling
@@ -1236,7 +1226,6 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
         {% endif %}
         {{ selcell('status','Status', vlists.status) }}
-        {{ selcell('location_status','Disposition', vlists.location_status, empty_label='-') }}
       </div>
       <!-- Notes + Receipt sit under the data fields, inside the
            specs column so they share the right-half on desktop.
@@ -1391,9 +1380,6 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
-    {% endif %}
-    {% if not is_hidden_field(category, 'location_status') %}
-    <div class="bottom-cell"><select name="location_status"><option value="">-</option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Disposition</span></div>
     {% endif %}
   </div>
 
@@ -1833,7 +1819,6 @@ document.addEventListener('DOMContentLoaded', function () {
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
-    <div class="bottom-cell"><select name="location_status"><option value="">-</option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Disposition</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1895,7 +1880,6 @@ document.addEventListener('DOMContentLoaded', function () {
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
-    <div class="bottom-cell"><select name="location_status"><option value="">-</option>{% for s in vlists.location_status %}<option value="{{ s }}" {{ 'selected' if val('location_status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Disposition</span></div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
