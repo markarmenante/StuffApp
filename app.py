@@ -2061,22 +2061,30 @@ def get_counts():
 
 
 def get_property_choices():
-    """Property short-names (or names if short_name is blank) sorted
-    case-insensitively. Archived properties are excluded so they don't
-    clutter the dropdown for new entries. Returns [] when the table is
-    empty so a fresh install renders an empty dropdown instead of a
-    stale seed list."""
+    """Property names (or short_name if name is blank) sorted
+    case-insensitively. Limited to currently-owned residential
+    properties (status='Own', type='Residential') — the dropdown is
+    for placing new items, so sold and commercial properties just add
+    noise. The full `name` is preferred because that's what the
+    item-table property columns (watches.property, coins.property,
+    etc.) actually store. Returns [] when nothing matches so a fresh
+    install renders an empty dropdown instead of a stale seed list.
+
+    NB: the `archive` column is not used as an archive flag here —
+    historical data stores wifi passwords in it, so it can't be
+    filtered on safely without a data cleanup pass first."""
     db = get_db()
     rows = db.execute(
-        "SELECT short_name, name FROM properties "
-        "WHERE (archive IS NULL OR archive = '') "
-        "  AND COALESCE(NULLIF(short_name,''), name) IS NOT NULL "
-        "  AND COALESCE(NULLIF(short_name,''), name) != '' "
-        "ORDER BY LOWER(COALESCE(NULLIF(short_name,''), name))"
+        "SELECT name, short_name FROM properties "
+        "WHERE status = 'Own' "
+        "  AND type = 'Residential' "
+        "  AND COALESCE(NULLIF(name,''), short_name) IS NOT NULL "
+        "  AND COALESCE(NULLIF(name,''), short_name) != '' "
+        "ORDER BY LOWER(COALESCE(NULLIF(name,''), short_name))"
     ).fetchall()
     seen, out = set(), []
     for r in rows:
-        label = (r['short_name'] or '').strip() or (r['name'] or '').strip()
+        label = (r['name'] or '').strip() or (r['short_name'] or '').strip()
         if label and label not in seen:
             seen.add(label)
             out.append(label)
