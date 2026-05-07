@@ -110,7 +110,7 @@
       <span class="lbl" id="navSweepLabel">Sweep</span>
     </a>
     {% endif %}
-    {% if current_user and current_user.role == 'owner' %}
+    {% if current_user and current_user.role == 'owner' and not is_tenant %}
     <a href="{{ url_for('admin_index') }}"
        class="nav-item nav-admin {% if current_category == '__admin__' %}active{% endif %}"
        title="Admin">
