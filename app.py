@@ -6564,6 +6564,8 @@ def inject_globals():
         'allowed_cats': g.get('allowed_cats', set()),
         'asset_v': _asset_v,
         'is_hidden_field': lambda cat, field: field in HIDE_FIELDS.get(cat, set()),
+        'count_visible': lambda cat, names: sum(
+            1 for n in names if n not in HIDE_FIELDS.get(cat, set())),
     }
 
 

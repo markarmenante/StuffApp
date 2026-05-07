@@ -2024,12 +2024,15 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
     <div class="watch-specs">
       <div class="dgrid dg1 properties-address">{{ cell('address','Address',rows=2) }}</div>
-      <div class="dgrid dg4 properties-specs">
+      {% set _specs_n = count_visible(category, ['type','year_built','llc','ein']) %}
+      {% if _specs_n > 0 %}
+      <div class="dgrid dg{{ _specs_n }} properties-specs">
         {{ selcell('type','Type', vlists.property_type) }}
         {{ cell('year_built','Year Built') }}
         {{ cell('llc','LLC') }}
         {{ cell('ein','EIN') }}
       </div>
+      {% endif %}
       <div class="dgrid dg2 properties-specs">
         {{ datecell('date','Purchase Date', seed_today=false) }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Purchase Price</span></div>
