@@ -114,11 +114,10 @@ VALUE_LISTS = {
     'strap_material': ['Case Metal','Croc','Leather','Ostrich','Rubber','Skin'],
     'strap_color': ['Black','Blue','Blue/Gray','Brown','Burgundy','Dk Brown','Eggplant','Gold','Gray','Green','Lt Brown','Navy Blue','Red','Rose Gold','Stainless','Tan','Titanium','White Gold'],
     'owner': ['YM','Mark','Young'],
-    'property': [
-        '42 Hotaling',
-        'Carpinteria','Glass House','Harlemville','Lahontan','Martis',
-        'NYC','Paris','Party Barn','Pond House','Rec Center',
-    ],
+    # 'property' is loaded per-request from the properties table; see
+    # current_vlists(). Keeping it out of the static dict ensures a
+    # fork of this app pointed at a different DB doesn't leak the
+    # original deployment's property names.
     'status': ['Own','Ordered','Sold','Loaned','Gifted','Consigned','Lost'],
     'location_status': ['Storage','Consigned','Missing','Gifted'],
     'camera_status': ['Own','Sold','Gifted'],
@@ -2061,6 +2060,34 @@ def get_counts():
     return counts
 
 
+def get_property_choices():
+    """Property short-names (or names if short_name is blank) sorted
+    case-insensitively. Archived properties are excluded so they don't
+    clutter the dropdown for new entries. Returns [] when the table is
+    empty so a fresh install renders an empty dropdown instead of a
+    stale seed list."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT short_name, name FROM properties "
+        "WHERE (archive IS NULL OR archive = '') "
+        "  AND COALESCE(NULLIF(short_name,''), name) IS NOT NULL "
+        "  AND COALESCE(NULLIF(short_name,''), name) != '' "
+        "ORDER BY LOWER(COALESCE(NULLIF(short_name,''), name))"
+    ).fetchall()
+    seen, out = set(), []
+    for r in rows:
+        label = (r['short_name'] or '').strip() or (r['name'] or '').strip()
+        if label and label not in seen:
+            seen.add(label)
+            out.append(label)
+    return out
+
+
+def current_vlists():
+    """Per-request VALUE_LISTS with 'property' resolved from the DB."""
+    return {**VALUE_LISTS, 'property': get_property_choices()}
+
+
 def get_typeahead(table, *fields):
     """Return dict of field -> sorted list of distinct non-empty values."""
     db = get_db()
@@ -3767,7 +3794,7 @@ def _render_new_form(category, data=None, focus_field=None):
                            service_years=None,
                            today_iso=date.today().isoformat(),
                            complications_options=COMPLICATIONS_OPTIONS,
-                           vlists=VALUE_LISTS,
+                           vlists=current_vlists(),
                            focus_field=focus_field,
                            ta=build_typeahead(category))
 
@@ -4036,7 +4063,7 @@ def detail_view(category, record_id):
                            service_years=service_years,
                            today_iso=None,
                            complications_options=COMPLICATIONS_OPTIONS,
-                           vlists=VALUE_LISTS,
+                           vlists=current_vlists(),
                            ta=build_typeahead(category))
 
 
@@ -8272,7 +8299,7 @@ def admin_users():
                            counts=get_counts(),
                            row_filter_fields=ROW_FILTER_FIELDS,
                            row_filter_value_lists=ROW_FILTER_VALUE_LISTS,
-                           vlists=VALUE_LISTS)
+                           vlists=current_vlists())
 
 
 def _collect_row_filters_from_form(cats_list):
