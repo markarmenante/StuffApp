@@ -117,7 +117,7 @@ VALUE_LISTS = {
                    'Duplex','Tuning Fork','Quartz','Other'],
     'strap_material': ['Case Metal','Croc','Leather','Ostrich','Rubber','Skin'],
     'strap_color': ['Black','Blue','Blue/Gray','Brown','Burgundy','Dk Brown','Eggplant','Gold','Gray','Green','Lt Brown','Navy Blue','Red','Rose Gold','Stainless','Tan','Titanium','White Gold'],
-    'owner': ['YM','Mark','Young'],
+    'owner': [o.strip() for o in (os.environ.get('STUFFAPP_OWNER_OPTIONS') or 'YM,Mark,Young').split(',') if o.strip()],
     # 'property' is loaded per-request from the properties table; see
     # current_vlists(). Keeping it out of the static dict ensures a
     # fork of this app pointed at a different DB doesn't leak the
@@ -234,6 +234,16 @@ DEFAULT_OWNER_BY_CATEGORY = {
     'audio':        'Mark',
     'rifles':       'Mark',
 }
+
+# Tenant override — when STUFFAPP_OWNER_OPTIONS is set (e.g. for a
+# third-party deployment whose owners aren't Mark/Young/YM), default
+# every category to the first option in that list. The historical
+# Mark/YM split only makes sense for the original deployment.
+if os.environ.get('STUFFAPP_OWNER_OPTIONS'):
+    _first_owner = VALUE_LISTS['owner'][0] if VALUE_LISTS['owner'] else ''
+    DEFAULT_OWNER_BY_CATEGORY = {
+        cat: _first_owner for cat in DEFAULT_OWNER_BY_CATEGORY
+    }
 
 
 FIELDS = {
@@ -559,7 +569,7 @@ FIELDS = {
         {'name': 'status',          'label': 'Status',            'type': 'select',
          'options': ['', 'Own', 'Sold']},
         {'name': 'owner',           'label': 'Owner',             'type': 'select',
-         'options': ['', 'YM', 'Mark', 'Young']},
+         'options': [''] + VALUE_LISTS['owner']},
         {'name': 'archive',         'label': 'Archive',           'type': 'text'},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
         # Ten freeform document slots with editable titles. Two rows of
@@ -2155,10 +2165,17 @@ def get_property_choices(owner_filter=None):
     historical data stores wifi passwords in it, so it can't be
     filtered on safely without a data cleanup pass first."""
     db = get_db()
+    # Skip the type='Residential' filter when 'type' is hidden for this
+    # tenant — those deployments don't surface the field at all so every
+    # property has type=NULL and the filter would zero out the dropdown.
+    type_filter = (
+        "" if 'type' in HIDE_FIELDS.get('properties', set())
+        else "  AND type = 'Residential' "
+    )
     sql = (
         "SELECT name, short_name FROM properties "
         "WHERE status = 'Own' "
-        "  AND type = 'Residential' "
+        f"{type_filter}"
         "  AND COALESCE(NULLIF(name,''), short_name) IS NOT NULL "
         "  AND COALESCE(NULLIF(name,''), short_name) != '' "
     )
