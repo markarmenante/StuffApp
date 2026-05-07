@@ -3587,7 +3587,9 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}"""
 
 @app.route('/')
 def index():
-    return redirect(url_for('list_view', category='watches'))
+    allowed = g.get('allowed_cats') or set()
+    target = next((c for c in CATEGORIES if c in allowed), 'watches')
+    return redirect(url_for('list_view', category=target))
 
 
 @app.route('/persons-default')
