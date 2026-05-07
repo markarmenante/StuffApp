@@ -429,9 +429,7 @@ FIELDS = {
         {'name': 'property',        'label': 'Property',          'type': 'text'},
         {'name': 'location',        'label': 'Location at Property', 'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
-         'options': ['', 'Own', 'Sold', 'Loaned', 'Gifted']},
-        {'name': 'location_status', 'label': 'Disposition',       'type': 'select',
-         'options': ['', 'Storage', 'Consigned', 'Missing', 'Gifted']},
+         'options': ['', 'Own', 'Sold', 'Gifted', 'Lost']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
     ],
     'vehicles': [

@@ -1300,7 +1300,7 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">Location at Property</span>
         </div>
       </div>
-      <div class="dgrid dg3">
+      <div class="dgrid dg2">
         {% set _ow = val('owner') if val('owner') else (_items_owner_default if is_new else '') %}
         <div class="dcell">
           <select name="owner">
@@ -1310,7 +1310,6 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">Owner</span>
         </div>
         {{ selcell('status','Status', vlists.items_status) }}
-        {{ selcell('location_status','Disposition', vlists.location_status, empty_label='-') }}
       </div>
       <div class="dgrid dg1">{{ cell('description','Description',rows=3) }}</div>
       <div class="dgrid dg1">{{ cell('notes','Notes',rows=3) }}</div>
