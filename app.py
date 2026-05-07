@@ -6878,6 +6878,11 @@ def _load_user_and_authorize():
         )
     g.current_user = dict(row)
     g.allowed_cats = _expand_categories(row['categories'], row['role'])
+    # Tenant clamp — even a user with '*' access (e.g. a cross-tenant
+    # admin) sees only the tenant's slice on this deployment, so the
+    # nav, list views, and pills match what the tenant owner sees.
+    if TENANT_CATEGORIES is not None:
+        g.allowed_cats = g.allowed_cats & TENANT_CATEGORIES
     # Anything under /admin is owner-only.
     if (request.path or '').startswith('/admin') and \
             g.current_user['role'] != 'owner':
