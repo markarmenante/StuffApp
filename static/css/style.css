@@ -788,6 +788,16 @@ textarea.results-raw { display: none !important; }
 .art-photo-full { display: flex; align-items: center; justify-content: center; background: var(--cell-bg); min-height: 420px; position: relative; border-bottom: 1px solid var(--border); padding: 10px; }
 .art-photo-full img { max-width: 100%; max-height: 560px; object-fit: contain; display: block; }
 .art-photo-full .no-img { font-size: 56px; color: var(--text-hint); }
+.art-photo-full .drop-hint {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  color: #888;
+  pointer-events: none;
+}
+.art-photo-full.drag-over .drop-hint { color: var(--blue); }
 
 /* Art body: stacked on phones (image full-width above the spec
    block), side-by-side on desktop (image 50% / specs 50%). The

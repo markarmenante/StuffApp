@@ -418,21 +418,16 @@ FIELDS = {
     'items': [
         {'name': 'name',            'label': 'Name',              'type': 'text'},
         {'name': 'type',            'label': 'Type',              'type': 'text'},
-        {'name': 'subtype',         'label': 'Subtype',           'type': 'text'},
-        {'name': 'make',            'label': 'Make',              'type': 'text'},
-        {'name': 'model',           'label': 'Model',             'type': 'text'},
         {'name': 'serial',          'label': 'Serial',            'type': 'text'},
-        {'name': 'year',            'label': 'Year',              'type': 'number'},
         {'name': 'description',     'label': 'Description',       'type': 'textarea'},
         {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
-        {'name': 'value',           'label': 'Value',             'type': 'number'},
         {'name': 'warranty_until',  'label': 'Warranty Until',    'type': 'date'},
         {'name': 'notes',           'label': 'Notes',             'type': 'textarea'},
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property',        'label': 'Property',          'type': 'text'},
-        {'name': 'location',        'label': 'Location',          'type': 'text'},
+        {'name': 'location',        'label': 'Location at Property', 'type': 'text'},
         {'name': 'status',          'label': 'Status',            'type': 'select',
          'options': ['', 'Own', 'Sold', 'Loaned', 'Gifted']},
         {'name': 'location_status', 'label': 'Disposition',       'type': 'select',
@@ -669,7 +664,7 @@ LIST_EXTRA_FIELDS = {
     'lenses':       ['mount', 'aperture', 'filter_size', 'length', 'serial_number', 'vendor', 'price', 'property'],
     'pens':         ['type', 'action', 'nib', 'cartridge', 'vendor', 'price', 'property'],
     'art':          ['medium', 'year', 'dimensions', 'vendor', 'price', 'location', 'property'],
-    'items':        ['type', 'make', 'model', 'vendor', 'price', 'location', 'property'],
+    'items':        ['type', 'vendor', 'price', 'location', 'property'],
     'vehicles':     ['year', 'vin', 'state', 'tags', 'vendor', 'price', 'property'],
     'recordings':   ['type', 'genre', 'year_recorded', 'speed', 'vendor', 'price', 'property'],
     'audio':        ['type', 'serial_number', 'vendor', 'price', 'property'],
@@ -2099,28 +2094,52 @@ def get_counts():
     return counts
 
 
-def get_property_choices():
+def current_owner_name():
+    """First word of the current user's display_name (e.g. 'Mark
+    Armenante' -> 'Mark'). Used as the per-user owner-string for
+    scoping items property dropdowns, typeaheads, and ownership.
+    Returns None outside a request context or for users without a
+    display_name."""
+    user = g.get('current_user')
+    if not user:
+        return None
+    dn = (user.get('display_name') or '').strip()
+    return dn.split()[0] if dn else None
+
+
+def get_property_choices(owner_filter=None):
     """Property names (or short_name if name is blank) sorted
     case-insensitively. Limited to currently-owned residential
     properties (status='Own', type='Residential') — the dropdown is
     for placing new items, so sold and commercial properties just add
     noise. The full `name` is preferred because that's what the
     item-table property columns (watches.property, coins.property,
-    etc.) actually store. Returns [] when nothing matches so a fresh
-    install renders an empty dropdown instead of a stale seed list.
+    etc.) actually store. When `owner_filter` is set, only properties
+    whose owner matches are returned — used by the items category so
+    each member sees only their own residences in the dropdown.
+    Returns [] when nothing matches so a fresh install renders an
+    empty dropdown instead of a stale seed list.
 
     NB: the `archive` column is not used as an archive flag here —
     historical data stores wifi passwords in it, so it can't be
     filtered on safely without a data cleanup pass first."""
     db = get_db()
-    rows = db.execute(
+    sql = (
         "SELECT name, short_name FROM properties "
         "WHERE status = 'Own' "
         "  AND type = 'Residential' "
         "  AND COALESCE(NULLIF(name,''), short_name) IS NOT NULL "
         "  AND COALESCE(NULLIF(name,''), short_name) != '' "
-        "ORDER BY LOWER(COALESCE(NULLIF(name,''), short_name))"
-    ).fetchall()
+    )
+    params = []
+    if owner_filter:
+        # Include the user's own properties AND anything marked
+        # 'Jointly' (household-owned), so a member sees both their
+        # solo-owned residences and the shared ones.
+        sql += "  AND owner IN (?, 'Jointly') "
+        params.append(owner_filter)
+    sql += "ORDER BY LOWER(COALESCE(NULLIF(name,''), short_name))"
+    rows = db.execute(sql, params).fetchall()
     seen, out = set(), []
     for r in rows:
         label = (r['name'] or '').strip() or (r['short_name'] or '').strip()
@@ -2130,18 +2149,42 @@ def get_property_choices():
     return out
 
 
-def current_vlists():
-    """Per-request VALUE_LISTS with 'property' resolved from the DB."""
+def current_vlists(category=None):
+    """Per-request VALUE_LISTS with 'property' resolved from the DB.
+    For the items category, properties are scoped to the current
+    user's own (owner = first word of display_name) and an
+    'items_owner' key is added containing [<member>, 'Jointly'] so
+    the items form can offer a personal-vs-jointly choice instead of
+    the household-wide owner dropdown."""
+    if category == 'items':
+        owner = current_owner_name()
+        return {
+            **VALUE_LISTS,
+            'property': get_property_choices(owner_filter=owner),
+            'items_owner': [o for o in [owner, 'Jointly'] if o],
+        }
     return {**VALUE_LISTS, 'property': get_property_choices()}
 
 
-def get_typeahead(table, *fields):
-    """Return dict of field -> sorted list of distinct non-empty values."""
+def get_typeahead(table, *fields, owner_filter=None):
+    """Return dict of field -> sorted list of distinct non-empty values.
+    When `owner_filter` is set, the DISTINCT scan is restricted to
+    rows the current user owns — items autocompletes only suggest
+    values the user themselves entered, not values from other
+    members' records."""
     db = get_db()
     result = {}
+    extra_where = ""
+    extra_params = []
+    if owner_filter:
+        extra_where = " AND owner = ?"
+        extra_params = [owner_filter]
     for field in fields:
         rows = db.execute(
-            f"SELECT DISTINCT {field} as v FROM {table} WHERE {field} IS NOT NULL AND {field} != '' ORDER BY {field}"
+            f"SELECT DISTINCT {field} as v FROM {table} "
+            f"WHERE {field} IS NOT NULL AND {field} != ''" + extra_where + f" "
+            f"ORDER BY {field}",
+            extra_params,
         ).fetchall()
         result[field] = [r['v'] for r in rows]
     return result
@@ -2151,7 +2194,10 @@ TYPEAHEAD_FIELDS = {
     'watches':      ('brand', 'dial_color', 'strap_color', 'vendor'),
     'coins':        ('region', 'mint', 'denomination', 'vendor'),
     'art':          ('artist', 'medium', 'vendor', 'property', 'location'),
-    'items':        ('type', 'subtype', 'make', 'model', 'vendor', 'location'),
+    # Items typeahead: only the fields still present in the form
+    # (type/subtype/make/model were removed). `type` is the key one —
+    # it's free-text but should converge as the user enters values.
+    'items':        ('type', 'vendor', 'location'),
     'cameras':      ('make', 'lens_mount', 'vendor'),
     'lenses':       ('make', 'mount', 'vendor'),
     'pens':         ('make', 'vendor'),
@@ -2166,7 +2212,10 @@ def build_typeahead(category):
     fields = TYPEAHEAD_FIELDS.get(category)
     if not fields:
         return {}
-    return get_typeahead(CATEGORIES[category]['table'], *fields)
+    owner_filter = current_owner_name() if category == 'items' else None
+    return get_typeahead(
+        CATEGORIES[category]['table'], *fields, owner_filter=owner_filter
+    )
 
 
 def allowed_file(filename):
@@ -3842,7 +3891,7 @@ def _render_new_form(category, data=None, focus_field=None):
                            service_years=None,
                            today_iso=date.today().isoformat(),
                            complications_options=COMPLICATIONS_OPTIONS,
-                           vlists=current_vlists(),
+                           vlists=current_vlists(category),
                            focus_field=focus_field,
                            ta=build_typeahead(category))
 
@@ -4111,7 +4160,7 @@ def detail_view(category, record_id):
                            service_years=service_years,
                            today_iso=None,
                            complications_options=COMPLICATIONS_OPTIONS,
-                           vlists=current_vlists(),
+                           vlists=current_vlists(category),
                            ta=build_typeahead(category))
 
 

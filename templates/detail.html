@@ -1252,6 +1252,7 @@ document.addEventListener('DOMContentLoaded', function () {
        ITEMS (general inventory: sports gear, furniture, etc.)
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'items' %}
+  {% set _items_owner_default = (vlists.items_owner[0] if vlists.items_owner else '') %}
   <div class="detail-brand-row">
     <input type="text" name="name" value="{{ val('name') }}"
            class="brand-input ta-input" autocomplete="off"
@@ -1273,6 +1274,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Item">
       {% else %}
         <span class="no-img">📦</span>
+        <span class="drop-hint">Drop an image here</span>
       {% endif %}
       <label class="file-upload-lbl watch-photo-upload">
         <input type="file" name="image" accept="image/*" style="display:none"
@@ -1280,23 +1282,6 @@ document.addEventListener('DOMContentLoaded', function () {
       </label>
     </div>
     <div class="art-specs">
-      <div class="dgrid dg2">
-        <div class="dcell ta-wrap">
-          <input type="text" name="subtype" value="{{ val('subtype') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('subtype', [])|join('||') }}">
-          <span class="clabel">Subtype</span>
-        </div>
-        {{ numcell('year','Year') }}
-      </div>
-      <div class="dgrid dg2">
-        <div class="dcell ta-wrap">
-          <input type="text" name="make" value="{{ val('make') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('make', [])|join('||') }}">
-          <span class="clabel">Make</span>
-        </div>
-        <div class="dcell ta-wrap">
-          <input type="text" name="model" value="{{ val('model') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('model', [])|join('||') }}">
-          <span class="clabel">Model</span>
-        </div>
-      </div>
       <div class="dgrid dg1">
         {{ cell('serial','Serial') }}
       </div>
@@ -1305,33 +1290,30 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
       </div>
-      <div class="dgrid dg2">
-        <div class="dcell"><input type="text" name="value" value="{{ val('value')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Value</span></div>
+      <div class="dgrid dg1">
         {{ datecell('warranty_until','Warranty Until') }}
       </div>
       <div class="dgrid dg2">
         {{ selcell('property','Property', vlists.property) }}
         <div class="dcell ta-wrap">
           <input type="text" name="location" value="{{ val('location') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
-          <span class="clabel">Location</span>
+          <span class="clabel">Location at Property</span>
         </div>
       </div>
       <div class="dgrid dg3">
-        {% if current_user and current_user.role == 'owner' %}
-        {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
+        {% set _ow = val('owner') if val('owner') else (_items_owner_default if is_new else '') %}
         <div class="dcell">
           <select name="owner">
             <option value=""></option>
-            {% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}
+            {% for o in vlists.items_owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}
           </select>
           <span class="clabel">Owner</span>
         </div>
-        {% endif %}
         {{ selcell('status','Status', vlists.status) }}
         {{ selcell('location_status','Disposition', vlists.location_status, empty_label='-') }}
       </div>
       <div class="dgrid dg1">{{ cell('description','Description',rows=3) }}</div>
-      <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+      <div class="dgrid dg1">{{ cell('notes','Notes',rows=3) }}</div>
     </div>
   </div>
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
