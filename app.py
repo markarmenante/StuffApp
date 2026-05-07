@@ -3951,6 +3951,39 @@ def new_record(category):
     return _render_new_form(category)
 
 
+@app.route('/properties/quick-create', methods=['POST'])
+def property_quick_create():
+    """Inline property creation from the property dropdown on other
+    detail forms (art/items/vehicles/etc.). Takes a name, creates a
+    minimum-viable property row (name + status='Own' + owner default
+    + tenant defaults), returns the name for the calling form to
+    append + select. Skips the full /properties/new flow so the user
+    doesn't lose the in-progress detail form they were filling out."""
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get('name') or '').strip()
+    if not name:
+        return jsonify({'ok': False, 'error': 'Name required'}), 400
+    db = get_db()
+    # Reject duplicate names (case-insensitive) — the dropdown is
+    # keyed on name so a dupe would be ambiguous.
+    existing = db.execute(
+        "SELECT 1 FROM properties WHERE LOWER(name) = LOWER(?) LIMIT 1",
+        [name]
+    ).fetchone()
+    if existing:
+        return jsonify({'ok': False, 'error': 'Property already exists'}), 409
+    record_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    owner_default = DEFAULT_OWNER_BY_CATEGORY.get('properties') or ''
+    db.execute(
+        "INSERT INTO properties (id, name, status, owner, created_at, updated_at) "
+        "VALUES (?, ?, 'Own', ?, ?, ?)",
+        [record_id, name, owner_default, now, now]
+    )
+    db.commit()
+    return jsonify({'ok': True, 'id': record_id, 'name': name})
+
+
 def _render_new_form(category, data=None, focus_field=None):
     """Render the /<category>/new form. Used both for the bare GET and
     for re-rendering after a server-side validation failure on POST so
