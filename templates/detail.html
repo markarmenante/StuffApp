@@ -2810,7 +2810,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
       // was in flight.
       if (stripUsdConversion(el.value) !== stripped) return;
       el.value = stripped + ' / $' + usd;
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+      // Dispatch 'input' so the autosave's text-input handler picks
+      // up the new value and persists it. 'change' was being ignored
+      // (autosave only watches input/blur for text fields), so the
+      // " / $X,XXX" suffix was painted on screen but never saved —
+      // it disappeared on reload.
+      el.dispatchEvent(new Event('input', { bubbles: true }));
     }
     function persist(rate) {
       _fxCache[key] = rate;
