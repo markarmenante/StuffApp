@@ -2770,11 +2770,14 @@ document.querySelectorAll('.comp-item').forEach(item => {
     }
     return PRICE_PREFIXES[PRICE_PREFIXES.length - 1]; // USD
   }
-  // Tiny in-tab cache so re-blurring the same field doesn't refetch.
-  // Server-side /fx-rate was hitting Frankfurter from Railway, which
-  // hung (some combination of egress + TLS + redirect). Calling the
-  // public ECB-backed API directly from the browser is faster and
-  // doesn't depend on the server having outbound network access.
+  // FX rate lookup with a three-tier cache:
+  //   1. In-tab _fxCache so re-blurring the same field doesn't refetch.
+  //   2. Server DB cache via GET /fx-rate — survives reloads + redeploys.
+  //   3. Direct call to api.frankfurter.dev for first-time pairs;
+  //      result is POSTed to /fx-rate/save for future cache hits.
+  // The DB cache means once a (currency, date) pair is fetched, no
+  // outbound HTTP is needed again — resilient to API URL changes,
+  // network flakes, and Railway egress issues.
   const _fxCache = {};
   function applyUsdConversion(el) {
     const stripped = stripUsdConversion((el.value || '').trim());
@@ -2794,16 +2797,34 @@ document.querySelectorAll('.comp-item').forEach(item => {
       el.value = stripped + ' / $' + usd;
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }
-    if (_fxCache[key] !== undefined) {
-      paint(_fxCache[key]);
-      return;
+    function persist(rate) {
+      _fxCache[key] = rate;
+      if (!rate) return;
+      // Fire-and-forget: server stores in fx_rates table for future
+      // cache hits. Failure is non-fatal — paint already happened.
+      fetch('/fx-rate/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currency: meta.code, date: dateStr, rate }),
+      }).catch(() => {});
     }
-    fetch(`https://api.frankfurter.dev/v1/${encodeURIComponent(dateStr)}?from=${encodeURIComponent(meta.code)}&to=USD`)
+    if (_fxCache[key] !== undefined) { paint(_fxCache[key]); return; }
+    fetch(`/fx-rate?currency=${encodeURIComponent(meta.code)}&date=${encodeURIComponent(dateStr)}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        const rate = d && d.rates && d.rates.USD ? d.rates.USD : null;
-        _fxCache[key] = rate;
-        paint(rate);
+        if (d && d.ok && d.rate) {
+          _fxCache[key] = d.rate;
+          paint(d.rate);
+          return;
+        }
+        // Server miss — go direct to Frankfurter.
+        return fetch(`https://api.frankfurter.dev/v1/${encodeURIComponent(dateStr)}?from=${encodeURIComponent(meta.code)}&to=USD`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d2 => {
+            const rate = d2 && d2.rates && d2.rates.USD ? d2.rates.USD : null;
+            persist(rate);
+            paint(rate);
+          });
       })
       .catch(() => {});
   }

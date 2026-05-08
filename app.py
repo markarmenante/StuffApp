@@ -885,6 +885,16 @@ def init_db():
         # the property detail can show two rows of network/password.
         'ALTER TABLE properties ADD COLUMN wifi_name_2 TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_2 TEXT',
+        # Persistent FX rate cache — historical rates never change, so
+        # once we've fetched (CHF, 2024-03-15) once we never need to
+        # call out again. Survives redeploys and any future migration
+        # of the upstream FX API.
+        ('CREATE TABLE IF NOT EXISTS fx_rates ('
+         'currency TEXT NOT NULL, '
+         'date TEXT NOT NULL, '
+         'usd_rate REAL NOT NULL, '
+         'fetched_at TEXT NOT NULL, '
+         'PRIMARY KEY (currency, date))'),
         'ALTER TABLE topics ADD COLUMN image TEXT',
         'ALTER TABLE recordings ADD COLUMN players TEXT',
         'ALTER TABLE recordings ADD COLUMN notes_urls TEXT',
@@ -6122,57 +6132,53 @@ _CURRENCY_PREFIX_RE = re.compile(
     re.IGNORECASE)
 
 
-# Frankfurter (frankfurter.app) gives free historical FX rates from
-# the European Central Bank. Cached per (currency, date) pair for the
-# life of the process — historical rates don't move so this is safe.
-_FX_CACHE = {}
-
-
-def _fetch_fx_to_usd(currency, date_str):
-    """Return the USD value of 1 unit of `currency` on the given date,
-    or None on failure / unknown currency. Cached in-memory."""
-    if not currency or not date_str:
-        return None
-    cur = currency.upper()
-    if cur == 'USD':
-        return 1.0
-    cache_key = (cur, date_str)
-    if cache_key in _FX_CACHE:
-        return _FX_CACHE[cache_key]
-    try:
-        import urllib.request
-        # Frankfurter's .app domain now 30x-redirects to .dev/v1/.
-        # Hitting the new URL directly avoids redirect handling (and
-        # the request hang we saw on Railway when urllib followed the
-        # 301 with a fresh TLS handshake).
-        url = (f"https://api.frankfurter.dev/v1/{date_str}"
-               f"?from={cur}&to=USD")
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-        rate = data.get('rates', {}).get('USD')
-        if rate:
-            rate = float(rate)
-            _FX_CACHE[cache_key] = rate
-            return rate
-    except Exception:
-        pass
-    _FX_CACHE[cache_key] = None
-    return None
-
-
 @app.route('/fx-rate')
 def fx_rate():
-    """Fetch (and cache) the historical USD-conversion rate for a
-    currency on a specific date. Used by the price-field blur handler
-    to append "/ \$X,XXX" to non-USD entries."""
+    """Lookup-only: return a cached USD-conversion rate from the
+    fx_rates table, or 404 if not cached. The browser blur handler
+    tries this first; on a 404 it falls back to a direct fetch from
+    api.frankfurter.dev and POSTs the result to /fx-rate/save so
+    future hits are served from this cache. Outbound HTTP doesn't
+    happen on this path — Railway's flaky egress is bypassed
+    entirely."""
     currency = (request.args.get('currency') or '').strip().upper()
     date_str = (request.args.get('date') or '').strip()
     if not currency or not date_str:
         return jsonify({'ok': False, 'error': 'currency + date required'}), 400
-    rate = _fetch_fx_to_usd(currency, date_str)
-    if rate is None:
-        return jsonify({'ok': False, 'error': 'rate unavailable'}), 502
-    return jsonify({'ok': True, 'rate': rate})
+    if currency == 'USD':
+        return jsonify({'ok': True, 'rate': 1.0, 'cached': True})
+    db = get_db()
+    row = db.execute(
+        'SELECT usd_rate FROM fx_rates WHERE currency = ? AND date = ?',
+        [currency, date_str]
+    ).fetchone()
+    if row is None:
+        return jsonify({'ok': False, 'error': 'not cached'}), 404
+    return jsonify({'ok': True, 'rate': float(row['usd_rate']), 'cached': True})
+
+
+@app.route('/fx-rate/save', methods=['POST'])
+def fx_rate_save():
+    """Client posts a (currency, date, rate) triple here after a
+    successful direct fetch from the FX provider. Idempotent —
+    PRIMARY KEY (currency, date) means re-saves are no-ops."""
+    payload = request.get_json(silent=True) or {}
+    currency = (payload.get('currency') or '').strip().upper()
+    date_str = (payload.get('date') or '').strip()
+    try:
+        rate = float(payload.get('rate'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'rate must be a number'}), 400
+    if not currency or not date_str or rate <= 0:
+        return jsonify({'ok': False, 'error': 'currency + date + rate required'}), 400
+    db = get_db()
+    db.execute(
+        'INSERT OR REPLACE INTO fx_rates '
+        '(currency, date, usd_rate, fetched_at) VALUES (?, ?, ?, ?)',
+        [currency, date_str, rate, datetime.utcnow().isoformat()]
+    )
+    db.commit()
+    return jsonify({'ok': True})
 
 
 def _normalize_price_input(val):
