@@ -59,6 +59,23 @@
 </div>
 {% endif %}
 {% endmacro %}
+{# Notes field with the standard section-bar header treatment used
+   across the rest of the app (matches Topics / People / property
+   Notes). Autogrow handles 1 line empty -> content + 1 buffer ->
+   cap 15 lines (MAX_LINES in the universal autogrow handler near
+   the bottom of this template). Placeholder always shown when empty
+   so the field is discoverable on existing records. #}
+{% macro notescell(field, label) %}
+{% if not is_hidden_field(category, field) %}
+<div class="section-bar">{{ label }}</div>
+<div class="dgrid dg1">
+  <div class="dcell">
+    <textarea name="{{ field }}" rows="3" data-autogrow="1"
+              {% if not val(field) %}placeholder="{{ label }}"{% endif %}>{{ val(field) }}</textarea>
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
 {% macro imgcell(field, label) %}
 {% set f = r[field] if r else none %}
 <div class="dcell file-cell drop-zone" data-field="{{ field }}"
@@ -559,13 +576,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <!-- Notes -->
-  <div class="dgrid dg1">
-    <div class="dcell dcell-notes">
-      <textarea name="notes">{{ r['notes'] if r and r['notes'] else '' }}</textarea>
-      <span class="clabel">Notes</span>
-    </div>
-  </div>
+  {{ notescell('notes','Notes') }}
 
   <!-- Value fetch + Results -->
   <div class="dgrid dg1">
@@ -793,7 +804,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- Grade, Conditions -->
   <div class="section-bar">Grade, Conditions</div>
-  <div class="dgrid dg1">{{ cell('notes','',rows=4) }}</div>
+  {{ notescell('notes','Notes') }}
 
   <!-- Extra fields -->
   <div class="dgrid dg2">
@@ -982,7 +993,7 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
   {% endif %}
 
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  {{ notescell('notes','Notes') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.camera_status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -1069,7 +1080,7 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
   {% endif %}
 
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  {{ notescell('notes','Notes') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
     <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
@@ -1130,7 +1141,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  {{ notescell('notes','Notes') }}
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
@@ -1233,20 +1244,8 @@ document.addEventListener('DOMContentLoaded', function () {
          .art-notes-grow class flex-expands the rows so they fill the
          leftover height beside the image. Empty placeholders so the
          field is discoverable on existing records too. #}
-      <div class="section-bar">Artist Notes</div>
-      <div class="dgrid dg1 art-notes-grow">
-        <div class="dcell">
-          <textarea name="notes" rows="6" data-autogrow="1"
-                    {% if not val('notes') %}placeholder="Artist Notes"{% endif %}>{{ val('notes') }}</textarea>
-        </div>
-      </div>
-      <div class="section-bar">Object Notes</div>
-      <div class="dgrid dg1 art-notes-grow">
-        <div class="dcell">
-          <textarea name="object_notes" rows="6" data-autogrow="1"
-                    {% if not val('object_notes') %}placeholder="Object Notes"{% endif %}>{{ val('object_notes') }}</textarea>
-        </div>
-      </div>
+      {{ notescell('notes','Artist Notes') }}
+      {{ notescell('object_notes','Object Notes') }}
     </div>
   </div>
   {# Unbounded JSON-backed docs row. Legacy doc_2 + receipt columns
@@ -1321,7 +1320,7 @@ document.addEventListener('DOMContentLoaded', function () {
         {{ selcell('status','Status', vlists.items_status, new_default='Own') }}
       </div>
       <div class="dgrid dg1">{{ cell('description','Description',rows=3) }}</div>
-      <div class="dgrid dg1">{{ cell('notes','Notes',rows=3) }}</div>
+      {{ notescell('notes','Notes') }}
     </div>
   </div>
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
@@ -1370,7 +1369,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  {{ notescell('notes','Notes') }}
   {# Vehicle documents — unbounded JSON-backed row. Legacy fixed
      columns (insurance/invoice/registration/auto_title with their
      *_label titles + vehicle_doc_5..8 with *_title) were folded into
@@ -1819,7 +1818,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  {{ notescell('notes','Notes') }}
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
@@ -1880,7 +1879,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+  {{ notescell('notes','Notes') }}
   {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
@@ -2113,13 +2112,7 @@ document.addEventListener('DOMContentLoaded', function () {
      so they can keep adding lines without scrolling within the field.
      Section-bar header matches the Topics / People treatment above so
      Notes reads as a peer block, not a stray field. #}
-  <div class="section-bar">Notes</div>
-  <div class="dgrid dg1 property-notes-row">
-    <div class="dcell property-notes-cell">
-      <textarea name="notes" rows="3" data-autogrow="1"
-                {% if not val('notes') %}placeholder="Notes"{% endif %}>{{ val('notes') }}</textarea>
-    </div>
-  </div>
+  {{ notescell('notes','Notes') }}
 
   {# Pill row: jump to a filtered list of every category-item that
      lives at this property (e.g. all Art at Carpinteria). Only
@@ -2179,7 +2172,7 @@ document.addEventListener('DOMContentLoaded', function () {
           {{ datecell('birth_date','Birth Date') }}
           {{ cell('ssn','SSN') }}
         </div>
-        <div class="dgrid dg1">{{ cell('notes','Notes',rows=2) }}</div>
+        {{ notescell('notes','Notes') }}
       </div>
       <div class="person-doc-group" data-group="health">
         <div class="dgrid dg2">
