@@ -2102,11 +2102,13 @@ document.addEventListener('DOMContentLoaded', function () {
   {# Free-form notes for the property — auto-expands as the user types
      so they can keep adding lines without scrolling within the field.
      Replaces the small fixed-rows Notes that previously sat above the
-     People table; the column itself is unchanged. #}
-  <div class="dgrid dg1">
+     People table; the column itself is unchanged.
+     Placeholder is always shown when empty (not gated on is_new) so
+     the field is discoverable on existing records too. #}
+  <div class="dgrid dg1 property-notes-row">
     <div class="dcell">
-      <textarea name="notes" rows="2" data-autogrow="1"
-                {% if is_new and not val('notes') %}placeholder="Notes"{% endif %}>{{ val('notes') }}</textarea>
+      <textarea name="notes" rows="3" data-autogrow="1"
+                {% if not val('notes') %}placeholder="Notes"{% endif %}>{{ val('notes') }}</textarea>
       <span class="clabel">Notes</span>
     </div>
   </div>
