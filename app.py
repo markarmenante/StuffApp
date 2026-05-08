@@ -6141,7 +6141,11 @@ def _fetch_fx_to_usd(currency, date_str):
         return _FX_CACHE[cache_key]
     try:
         import urllib.request
-        url = (f"https://api.frankfurter.app/{date_str}"
+        # Frankfurter's .app domain now 30x-redirects to .dev/v1/.
+        # Hitting the new URL directly avoids redirect handling (and
+        # the request hang we saw on Railway when urllib followed the
+        # 301 with a fresh TLS handshake).
+        url = (f"https://api.frankfurter.dev/v1/{date_str}"
                f"?from={cur}&to=USD")
         with urllib.request.urlopen(url, timeout=5) as resp:
             data = json.loads(resp.read().decode('utf-8'))
