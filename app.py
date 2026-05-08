@@ -563,6 +563,8 @@ FIELDS = {
         {'name': 'llc',             'label': 'LLC',               'type': 'text'},
         {'name': 'wifi',            'label': 'WiFi Password',     'type': 'text'},
         {'name': 'wifi_name',       'label': 'WiFi Name (SSID)',  'type': 'text'},
+        {'name': 'wifi_2',          'label': 'WiFi Password 2',   'type': 'text'},
+        {'name': 'wifi_name_2',     'label': 'WiFi Name 2 (SSID)','type': 'text'},
         {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'notes',           'label': 'Notes',             'type': 'textarea'},
@@ -879,6 +881,10 @@ def init_db():
         'ALTER TABLE properties DROP COLUMN alarm_notes',
         'ALTER TABLE properties ADD COLUMN owner TEXT',
         'ALTER TABLE properties ADD COLUMN wifi_name TEXT',
+        # Second WiFi network (e.g. main + guest) — paired pair so
+        # the property detail can show two rows of network/password.
+        'ALTER TABLE properties ADD COLUMN wifi_name_2 TEXT',
+        'ALTER TABLE properties ADD COLUMN wifi_2 TEXT',
         'ALTER TABLE topics ADD COLUMN image TEXT',
         'ALTER TABLE recordings ADD COLUMN players TEXT',
         'ALTER TABLE recordings ADD COLUMN notes_urls TEXT',
