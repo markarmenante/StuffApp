@@ -757,6 +757,30 @@ input[type="number"]::-webkit-outer-spin-button {
 .value-fetch-stamp {
   color: var(--text-hint, #888); font-style: italic; font-weight: 400;
 }
+
+/* Value Estimate section-bar — title left, pill right, both inline. */
+.section-bar.value-estimate-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+}
+.value-estimate-title { flex: 1 1 auto; }
+.value-search-pill {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text-secondary, #555);
+  cursor: pointer;
+  line-height: 1.4;
+}
+.value-search-pill:hover:not(:disabled) {
+  background: var(--cell-bg);
+  color: #111;
+}
+.value-search-pill:disabled { opacity: 0.5; cursor: default; }
 .results-display {
   font-family: var(--font); font-size: 13px;
   color: #111; line-height: 1.45;
