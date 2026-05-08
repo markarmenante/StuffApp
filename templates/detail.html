@@ -1269,9 +1269,9 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   <!-- Type | Description span the full width above the image and the
-       rest of the spec column. Type autocompletes from prior entries
-       (ta.get('type')); Description is a textarea. -->
-  <div class="dgrid dg2">
+       rest of the spec column. Type takes 1/3, Description 2/3.
+       Type autocompletes from prior entries (ta.get('type')). -->
+  <div class="dgrid items-type-desc">
     <div class="dcell ta-wrap">
       <input type="text" name="type" value="{{ val('type') }}"
              autocomplete="off" class="ta-input"
