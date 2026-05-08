@@ -1267,14 +1267,6 @@ document.addEventListener('DOMContentLoaded', function () {
            class="brand-input ta-input" autocomplete="off"
            {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
   </div>
-  <div class="detail-model">
-    <input type="text" name="type" value="{{ val('type') }}"
-           class="ta-input"
-           autocomplete="off"
-           data-ta="{{ ta.get('type', [])|join('||') }}"
-           {% if is_new and not val('type') %}placeholder="Type (Sports Equipment, Furniture, …)"{% endif %}
-           style="border:none;outline:none;font-size:16px;font-weight:600;width:100%;background:transparent;font-family:var(--font)">
-  </div>
 
   <div class="art-body">
     <div class="art-photo-full drop-zone" data-field="image"
@@ -1290,16 +1282,26 @@ document.addEventListener('DOMContentLoaded', function () {
       </label>
     </div>
     <div class="art-specs">
+      <!-- Type | Description on one line. Type autocompletes from
+           prior entries (ta.get('type')); Description is a textarea. -->
+      <div class="dgrid dg2">
+        <div class="dcell ta-wrap">
+          <input type="text" name="type" value="{{ val('type') }}"
+                 autocomplete="off" class="ta-input"
+                 data-ta="{{ ta.get('type', [])|join('||') }}"
+                 {% if is_new and not val('type') %}placeholder="Type"{% endif %}>
+          <span class="clabel">Type</span>
+        </div>
+        {{ cell('description','Description') }}
+      </div>
       <div class="dgrid dg1">
         {{ cell('serial','Serial') }}
       </div>
-      <div class="dgrid dg3">
+      <!-- Date | Price | Vendor — centred per design. -->
+      <div class="dgrid dg3 items-purchase-center">
         {{ datecell('date','Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
-      </div>
-      <div class="dgrid dg1">
-        {{ datecell('warranty_until','Warranty Until') }}
       </div>
       <div class="dgrid dg2">
         {{ selcell('property','Property', vlists.property) }}
@@ -1319,7 +1321,6 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
         {{ selcell('status','Status', vlists.items_status, new_default='Own') }}
       </div>
-      <div class="dgrid dg1">{{ cell('description','Description',rows=3) }}</div>
       {{ notescell('notes','Notes') }}
     </div>
   </div>
