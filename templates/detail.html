@@ -2614,6 +2614,7 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
       ? '$' + Number(data.value).toLocaleString('en-US', {maximumFractionDigits: 0})
       : '';
     let pillFlash = 'Fetched ✓';
+    let pillFlashClass = 'pill-fresh';
     if (valInput && newValue) {
       const existing = (valInput.value || '').trim();
       const matches = existing === newValue;
@@ -2621,12 +2622,13 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
       if (!existing) {
         proceed = true;                      // empty -> just fill
       } else if (matches) {
-        proceed = false;                     // identical -> flash on pill
+        proceed = false;                     // identical -> yellow flash
         pillFlash = 'No change in value';
+        pillFlashClass = 'pill-stale';
       } else {
-        // Compact two-line confirm: show both values, ask to overwrite.
+        // Compact two-line overwrite confirm.
         proceed = window.confirm(
-          `Current: ${existing}\nNew: ${newValue}\n\nOverwrite?`);
+          `Overwrite ${existing} with new value ${newValue}?`);
       }
       if (proceed) {
         valInput.value = newValue;
@@ -2635,14 +2637,22 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
       }
     }
     btn.textContent = pillFlash;
-    btn.classList.remove('pill-stale');
-    btn.classList.add('pill-fresh');
+    btn.classList.remove('pill-stale', 'pill-fresh');
+    btn.classList.add(pillFlashClass);
     btn.dataset.searchedAt = data.searched_at || new Date().toISOString();
   } catch (err) {
     btn.textContent = 'Error';
     alert('Valuation failed: ' + err.message);
   }
-  setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.disabled = false;
+    // Return to the steady-state post-search colour: green. The
+    // "no change in value" flash uses pill-stale yellow during the
+    // 2s warning, then settles back to pill-fresh.
+    btn.classList.remove('pill-stale');
+    btn.classList.add('pill-fresh');
+  }, 2000);
 });
 
 // Colour the Search Value pill based on how long ago the lookup last
