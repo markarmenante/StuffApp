@@ -1167,10 +1167,9 @@ document.addEventListener('DOMContentLoaded', function () {
            data-ta="{{ ta.get('artist', [])|join('||') }}">
   </div>
 
-  <!-- Title | Year -->
-  <div class="dgrid dg2">
+  <!-- Title -->
+  <div class="dgrid dg1">
     {{ cell('title','Title') }}
-    {{ numcell('year','Year') }}
   </div>
 
   <!-- On desktop the image and the four spec rows sit side by side
@@ -1191,13 +1190,14 @@ document.addEventListener('DOMContentLoaded', function () {
       </label>
     </div>
     <div class="art-specs">
-      <!-- Medium | Dimensions -->
-      <div class="dgrid dg2 art-purchase">
+      <!-- Medium | Dimensions | Year -->
+      <div class="dgrid dg3 art-purchase">
         <div class="dcell ta-wrap">
           <input type="text" name="medium" value="{{ val('medium') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('medium', [])|join('||') }}">
           <span class="clabel">Medium</span>
         </div>
         {{ cell('dimensions','H x W x D') }}
+        {{ numcell('year','Year') }}
       </div>
       <!-- Date | Price | Vendor -->
       <div class="dgrid dg3 art-purchase">
