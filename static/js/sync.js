@@ -228,6 +228,11 @@
     let purged = 0;
     let purgedDirs = 0;
     let staleCount = 0;
+    // Set true once the zip stream has fully drained to disk. Decouples
+    // "got the data" from "post-write cleanup was clean" — anything
+    // after this point (tombstone apply, stale scan, prune) is best-
+    // effort and shouldn't keep the next sync from being incremental.
+    let extractComplete = false;
     try {
     // Stream the response body through fflate.Unzip — chunks of the
     // zip flow in, decompressed file chunks come out via onfile/ondata
@@ -355,6 +360,10 @@
     }
     await writeChain;
     progress && progress(`Wrote ${written}/${total} files…`);
+    // Zip is fully on disk. From here on, any throw is post-write
+    // cleanup — the data we'd need a fresh full-export to recover is
+    // already written, so the next sync is safely incremental.
+    extractComplete = true;
 
     // Apply server-side deletions captured in _tombstones.json. These
     // are authoritative — the server has confirmed each file was
@@ -616,11 +625,15 @@
     }
 
     // Persist the new last-sync timestamp so the next syncDown is
-    // incremental. Only save when the run reached the end without a
-    // syncError — a partial failure leaves the timestamp untouched
-    // so the next attempt picks up everything since the previous
-    // successful sync.
-    if (!syncError) {
+    // incremental. Gate on extractComplete (zip fully landed on disk)
+    // rather than !syncError — post-write cleanup throws (a flaky
+    // tombstone removeEntry, an iCloud-stub during the stale scan, an
+    // empty-dir prune glitch) used to leave the watermark unsaved,
+    // turning every subsequent sync into a full re-export of every
+    // row whose updated_at had been bumped by the data_json migration.
+    // Once we've got the zip's data on disk, the data we'd lose by
+    // advancing the watermark is zero; cleanup failures retry next run.
+    if (extractComplete) {
       try { await _saveLastSyncAt(newSyncAt); } catch (_) {}
     }
 

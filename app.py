@@ -2860,7 +2860,11 @@ results_markdown rules:
 
     consensus = _num(data.get('consensus_usd'))
     wc_median = _num(data.get('watchcharts_median_usd'))
-    orig_price = _num(watch['price'])
+    # Use _price_to_usd so a stored "A$10,000 / $6,500" reads as 6500
+    # (the rate-applied USD), not as a failed float() that drops the
+    # fallback. _num(watch['price']) used to silently return None on
+    # any non-USD entry, leaving the AI's empty result with no floor.
+    orig_price = _price_to_usd(watch['price'])
 
     # Fallback chain: AI consensus → WatchCharts median → original purchase price
     value = consensus
@@ -6130,6 +6134,54 @@ def delete_file_field(category, record_id):
 _CURRENCY_PREFIX_RE = re.compile(
     r'^\s*(A\$|US\$|\$|€|£|¥|CHF\s|EUR\s|USD\s|AUD\s|AUS\s|GBP\s|JPY\s|YEN\s|CHF$|EUR$|USD$|AUD$|AUS$|GBP$|JPY$|YEN$)',
     re.IGNORECASE)
+
+# Foreign-currency prefixes — anything starting with one of these is
+# NOT a USD value (modulo the appended " / $X,XXX" suffix, handled by
+# _price_to_usd below). Used so portfolio / valuation code that needs
+# a USD float can tell "missing conversion" from "is USD".
+_NON_USD_PREFIX_RE = re.compile(
+    r'^\s*(A\$|AUD|AUS|€|EUR|£|GBP|¥|JPY|YEN|CHF)',
+    re.IGNORECASE)
+
+
+def _price_to_usd(val):
+    """Extract a USD float from a stored price string.
+
+    The price field can hold:
+      "2500"               legacy plain number, treated as USD
+      "$2,500"             USD with prefix
+      "US$2,500", "USD 2,500"  same, alternate USD prefixes
+      "A$10,000 / $6,500"  foreign currency with appended USD conversion
+      "€2,500"             foreign currency, no conversion available
+
+    Returns the USD value when one can be determined, else None — so
+    callers can distinguish "no USD on file" from "$0".
+    """
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    # Prefer the appended " / $X,XXX" USD conversion the JS blur
+    # formatter writes for non-USD entries — that's the rate-applied
+    # number, far closer to a market-comparable value than the raw
+    # foreign amount we'd otherwise feed to the AI fallback.
+    m = re.search(r'/\s*\$([\d,]+(?:\.\d+)?)\s*$', s)
+    if m:
+        try:
+            return float(m.group(1).replace(',', ''))
+        except ValueError:
+            return None
+    # Foreign currency without a conversion suffix — nothing to use.
+    if _NON_USD_PREFIX_RE.match(s):
+        return None
+    # USD: strip an optional USD prefix and commas, parse what's left.
+    cleaned = re.sub(r'^(US\$|USD\s*|\$)\s*', '', s, flags=re.IGNORECASE)
+    cleaned = cleaned.replace(',', '').strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
 
 
 @app.route('/fx-rate')
