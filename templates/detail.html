@@ -2101,15 +2101,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
   {# Free-form notes for the property — auto-expands as the user types
      so they can keep adding lines without scrolling within the field.
-     Replaces the small fixed-rows Notes that previously sat above the
-     People table; the column itself is unchanged.
-     Placeholder is always shown when empty (not gated on is_new) so
-     the field is discoverable on existing records too. #}
+     Section-bar header matches the Topics / People treatment above so
+     Notes reads as a peer block, not a stray field. #}
+  <div class="section-bar">Notes</div>
   <div class="dgrid dg1 property-notes-row">
-    <div class="dcell">
+    <div class="dcell property-notes-cell">
       <textarea name="notes" rows="3" data-autogrow="1"
                 {% if not val('notes') %}placeholder="Notes"{% endif %}>{{ val('notes') }}</textarea>
-      <span class="clabel">Notes</span>
     </div>
   </div>
 
@@ -3932,12 +3930,12 @@ function _wireRowDelete(rowSelector, btnClass, emptyClass, dataAttr,
   });
 }
 
-// Property > People — 10 rows total, 4 visible by default; auto-grows
+// Property > People — 10 rows total, 3 visible by default; auto-grows
 // as rows fill, collapses back as they're cleared.
 _wireRowDelete(
   '.people-row[data-people-idx]', 'people-del-btn',
   'people-row-empty', 'peopleIdx',
-  ['people_name', 'people_role', 'people_phone', 'people_email', 'people_note'], 10, 4);
+  ['people_name', 'people_role', 'people_phone', 'people_email', 'people_note'], 10, 3);
 
 // Property > Topics — per-row × button: confirm, DELETE via fetch,
 // fade the row out on success. Each topic is its own DB row in the
@@ -4013,11 +4011,11 @@ document.querySelectorAll('.topic-del-btn').forEach(btn => {
   });
 })();
 
-// Property > Alarm Codes — 8 rows total, 4 visible by default.
+// Property > Alarm Codes — 8 rows total, 2 visible by default.
 _wireRowDelete(
   '.alarm-codes-row[data-alarm-idx]', 'alarm-del-btn',
   'alarm-codes-row-empty', 'alarmIdx',
-  ['alarm_codes_entry', 'alarm_codes_code', 'alarm_codes_note'], 8, 4);
+  ['alarm_codes_entry', 'alarm_codes_code', 'alarm_codes_note'], 8, 2);
 
 // ── Dynamic documents ─────────────────────────────────────────────
 // Always one trailing blank tile. Drop a file or type a title in it
