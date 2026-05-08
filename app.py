@@ -6108,16 +6108,20 @@ def delete_file_field(category, record_id):
 # Template filters
 # ---------------------------------------------------------------------------
 
+# Currency prefixes the JS formatter writes on blur. Anything starting
+# with one of these is treated as already-formatted and round-trips
+# verbatim through save / display.
 _CURRENCY_PREFIX_RE = re.compile(
-    r'^\s*(US\$|A\$|USD|AUD|AUS)\s*', re.IGNORECASE)
+    r'^\s*(A\$|US\$|\$|€|£|¥|CHF\s|EUR\s|USD\s|AUD\s|AUS\s|GBP\s|JPY\s|YEN\s|CHF$|EUR$|USD$|AUD$|AUS$|GBP$|JPY$|YEN$)',
+    re.IGNORECASE)
 
 
 def _normalize_price_input(val):
     """Price-input normaliser. Pre-formatted strings with a currency
-    prefix (US$/A$/USD/AUD/AUS) round-trip verbatim — the JS blur
-    formatter is the source of truth for those. Anything else falls
-    back to the legacy strip-symbols-and-parse behaviour so existing
-    plain-number entries keep working."""
+    prefix ($/A$/€/£/¥/CHF/USD/AUD/EUR/CHF/GBP/JPY/YEN) round-trip
+    verbatim — the JS blur formatter is the source of truth for those.
+    Anything else falls back to the legacy strip-symbols-and-parse
+    behaviour so existing plain-number entries keep working."""
     s = (val or '').strip()
     if not s:
         return s
@@ -6130,9 +6134,9 @@ def _normalize_price_input(val):
 
 @app.template_filter('currency')
 def currency_filter(value):
-    """Format as US$1,234.00 by default. Already-formatted strings
-    (carrying a US$/A$/USD/AUD prefix) round-trip unchanged so the
-    user's chosen currency stays put. Empty -> empty, garbage -> str."""
+    """Format as $1,234 by default. Already-formatted strings carrying
+    a currency prefix round-trip unchanged so the user's chosen
+    currency stays put. Empty -> empty, garbage -> str."""
     if value is None or value == '':
         return ''
     s = str(value).strip()
@@ -6141,7 +6145,7 @@ def currency_filter(value):
     if _CURRENCY_PREFIX_RE.match(s):
         return s
     try:
-        return f"US${float(s.replace(',', '').replace('$', '')):,.2f}"
+        return f"${float(s.replace(',', '').replace('$', '')):,.0f}"
     except (ValueError, TypeError):
         return s
 

@@ -2727,24 +2727,31 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
   const form = document.getElementById('mainForm');
 
-  // Price-field formatter — accept "usd 100000" / "aus 100000" /
-  // "US$100,000" / "A$50,000.50" / plain "100000" and reformat on blur
-  // to "US$100,000.00" or "A$50,000.50". Default currency is USD when
-  // none is detected. The formatted string is what autosave writes
-  // back to the server, so the user's chosen currency round-trips on
-  // page reload. Round-trip note: the server accepts pre-formatted
-  // strings verbatim (see _normalize_price_input in app.py).
+  // Price-field formatter — accept multi-currency input ("eur 10000",
+  // "chf 1000", "yen 50000", "usd 10,000", "$50000", "€500", "A$200")
+  // and reformat on blur with the matching prefix and thousands
+  // separators (no decimals). Default currency is USD when no prefix
+  // is detected. The formatted string round-trips through autosave +
+  // server (_normalize_price_input preserves it verbatim).
+  const PRICE_PREFIXES = [
+    { rx: /^\s*(A\$|AUD|AUS)/i,        prefix: 'A$'   },
+    { rx: /^\s*(€|EUR)/i,              prefix: '€'    },
+    { rx: /^\s*(£|GBP)/i,              prefix: '£'    },
+    { rx: /^\s*(¥|JPY|YEN)/i,          prefix: '¥'    },
+    { rx: /^\s*(CHF)/i,                prefix: 'CHF ' },
+    { rx: /^\s*(US\$|USD|\$)/i,        prefix: '$'    },
+  ];
   function formatPriceField(el) {
     const raw = (el.value || '').trim();
     if (!raw) return;
-    const isAud = /^\s*(A\$|AUD|AUS)/i.test(raw);
+    let prefix = '$';
+    for (const p of PRICE_PREFIXES) {
+      if (p.rx.test(raw)) { prefix = p.prefix; break; }
+    }
     const num = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
     if (!isFinite(num)) return;
-    const formatted = num.toLocaleString('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-    el.value = (isAud ? 'A$' : 'US$') + formatted;
+    const formatted = Math.round(num).toLocaleString('en-US');
+    el.value = prefix + formatted;
   }
   form.querySelectorAll('input.price-input').forEach(el => {
     el.addEventListener('blur', () => formatPriceField(el));
