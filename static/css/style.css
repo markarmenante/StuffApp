@@ -839,10 +839,19 @@ textarea.results-raw { display: none !important; }
     align-items: stretch;
     border-bottom: 1px solid var(--border);
   }
-  .art-body .art-photo-full {
-    flex: 0 0 30%;
-    border-bottom: none;
+  /* Left column = image + object-notes underneath. The photo widens
+     out to 50% of the body and stays a sane height; object-notes
+     fills the remaining vertical space underneath so the column
+     doesn't end with an empty stripe. */
+  .art-body .art-left {
+    flex: 0 0 50%;
+    display: flex;
+    flex-direction: column;
     border-right: 1px solid var(--border);
+  }
+  .art-body .art-photo-full {
+    border-bottom: 1px solid var(--border);
+    border-right: none;
   }
   .art-body .art-specs {
     flex: 1;
