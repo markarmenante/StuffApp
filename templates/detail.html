@@ -1200,7 +1200,7 @@ document.addEventListener('DOMContentLoaded', function () {
         {{ numcell('year','Year') }}
       </div>
       <!-- Date | Price | Vendor -->
-      <div class="dgrid dg3 art-purchase">
+      <div class="dgrid dg3 art-purchase art-purchase-row">
         {{ datecell('date','Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
