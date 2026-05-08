@@ -478,12 +478,17 @@
           <span class="item-brand">{{ row['name'] or '—' }}</span>
           <span class="item-model">{{ row['type'] or '' }}</span>
         </div>
-        {% if row['property'] or row['location'] %}
+        {% if row['description'] or row['property'] or row['location'] %}
         <div class="item-detail-rows">
+          {% if row['description'] %}
+          <div class="idr"><span>{{ row['description'] }}</span></div>
+          {% endif %}
+          {% if row['property'] or row['location'] %}
           <div class="idr">
             {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
             {% if row['location'] %}<span>{{ row['location'] }}</span>{% endif %}
           </div>
+          {% endif %}
         </div>
         {% endif %}
 
