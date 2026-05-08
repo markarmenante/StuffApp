@@ -2613,6 +2613,7 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     const newValue = data.value != null
       ? '$' + Number(data.value).toLocaleString('en-US', {maximumFractionDigits: 0})
       : '';
+    let pillFlash = 'Fetched ✓';
     if (valInput && newValue) {
       const existing = (valInput.value || '').trim();
       const matches = existing === newValue;
@@ -2620,8 +2621,8 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
       if (!existing) {
         proceed = true;                      // empty -> just fill
       } else if (matches) {
-        proceed = false;                     // identical -> just notify
-        window.alert('No change in value.');
+        proceed = false;                     // identical -> flash on pill
+        pillFlash = 'No change in value';
       } else {
         // Compact two-line confirm: show both values, ask to overwrite.
         proceed = window.confirm(
@@ -2633,7 +2634,7 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
         valInput.dispatchEvent(new Event('input', { bubbles: true }));
       }
     }
-    btn.textContent = 'Fetched ✓';
+    btn.textContent = pillFlash;
     btn.classList.remove('pill-stale');
     btn.classList.add('pill-fresh');
     btn.dataset.searchedAt = data.searched_at || new Date().toISOString();
