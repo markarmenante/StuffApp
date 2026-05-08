@@ -6122,6 +6122,55 @@ _CURRENCY_PREFIX_RE = re.compile(
     re.IGNORECASE)
 
 
+# Frankfurter (frankfurter.app) gives free historical FX rates from
+# the European Central Bank. Cached per (currency, date) pair for the
+# life of the process — historical rates don't move so this is safe.
+_FX_CACHE = {}
+
+
+def _fetch_fx_to_usd(currency, date_str):
+    """Return the USD value of 1 unit of `currency` on the given date,
+    or None on failure / unknown currency. Cached in-memory."""
+    if not currency or not date_str:
+        return None
+    cur = currency.upper()
+    if cur == 'USD':
+        return 1.0
+    cache_key = (cur, date_str)
+    if cache_key in _FX_CACHE:
+        return _FX_CACHE[cache_key]
+    try:
+        import urllib.request
+        url = (f"https://api.frankfurter.app/{date_str}"
+               f"?from={cur}&to=USD")
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        rate = data.get('rates', {}).get('USD')
+        if rate:
+            rate = float(rate)
+            _FX_CACHE[cache_key] = rate
+            return rate
+    except Exception:
+        pass
+    _FX_CACHE[cache_key] = None
+    return None
+
+
+@app.route('/fx-rate')
+def fx_rate():
+    """Fetch (and cache) the historical USD-conversion rate for a
+    currency on a specific date. Used by the price-field blur handler
+    to append "/ \$X,XXX" to non-USD entries."""
+    currency = (request.args.get('currency') or '').strip().upper()
+    date_str = (request.args.get('date') or '').strip()
+    if not currency or not date_str:
+        return jsonify({'ok': False, 'error': 'currency + date required'}), 400
+    rate = _fetch_fx_to_usd(currency, date_str)
+    if rate is None:
+        return jsonify({'ok': False, 'error': 'rate unavailable'}), 502
+    return jsonify({'ok': True, 'rate': rate})
+
+
 def _normalize_price_input(val):
     """Price-input normaliser. Pre-formatted strings with a currency
     prefix ($/A$/€/£/¥/CHF/USD/AUD/EUR/CHF/GBP/JPY/YEN) round-trip

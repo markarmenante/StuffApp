@@ -2737,30 +2737,57 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // Price-field formatter — accept multi-currency input ("eur 10000",
   // "chf 1000", "yen 50000", "usd 10,000", "$50000", "€500", "A$200")
   // and reformat on blur with the matching prefix and thousands
-  // separators (no decimals). Default currency is USD when no prefix
-  // is detected. The formatted string round-trips through autosave +
+  // separators (no decimals). Non-USD entries also get a " / $X,XXX"
+  // USD conversion appended, fetched from /fx-rate using the row's
+  // transaction date. Default currency is USD when no prefix is
+  // detected. The formatted string round-trips through autosave +
   // server (_normalize_price_input preserves it verbatim).
   const PRICE_PREFIXES = [
-    { rx: /^\s*(A\$|AUD|AUS)/i,        prefix: 'A$'   },
-    { rx: /^\s*(€|EUR)/i,              prefix: '€'    },
-    { rx: /^\s*(£|GBP)/i,              prefix: '£'    },
-    { rx: /^\s*(¥|JPY|YEN)/i,          prefix: '¥'    },
-    { rx: /^\s*(CHF)/i,                prefix: 'CHF ' },
-    { rx: /^\s*(US\$|USD|\$)/i,        prefix: '$'    },
+    { rx: /^\s*(A\$|AUD|AUS)/i,        prefix: 'A$',   code: 'AUD' },
+    { rx: /^\s*(€|EUR)/i,              prefix: '€',    code: 'EUR' },
+    { rx: /^\s*(£|GBP)/i,              prefix: '£',    code: 'GBP' },
+    { rx: /^\s*(¥|JPY|YEN)/i,          prefix: '¥',    code: 'JPY' },
+    { rx: /^\s*(CHF)/i,                prefix: 'CHF ', code: 'CHF' },
+    { rx: /^\s*(US\$|USD|\$)/i,        prefix: '$',    code: 'USD' },
   ];
+  function stripUsdConversion(s) {
+    // Drop any " / $X,XXX" tail so the user edits just the original.
+    return s.replace(/\s*\/\s*\$[\d,]+\s*$/, '');
+  }
   function formatPriceField(el) {
-    const raw = (el.value || '').trim();
+    const raw = stripUsdConversion((el.value || '').trim());
     if (!raw) return;
     let prefix = '$';
+    let code = 'USD';
     for (const p of PRICE_PREFIXES) {
-      if (p.rx.test(raw)) { prefix = p.prefix; break; }
+      if (p.rx.test(raw)) { prefix = p.prefix; code = p.code; break; }
     }
     const num = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
     if (!isFinite(num)) return;
     const formatted = Math.round(num).toLocaleString('en-US');
     el.value = prefix + formatted;
+    // Append USD conversion for non-USD entries when we have a date.
+    if (code === 'USD') return;
+    const dateInput = form.querySelector('input[name="date"]');
+    const dateStr = dateInput && dateInput.value ? dateInput.value : '';
+    if (!dateStr) return;
+    fetch(`/fx-rate?currency=${encodeURIComponent(code)}&date=${encodeURIComponent(dateStr)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d || !d.ok || !d.rate) return;
+        const usd = Math.round(num * d.rate).toLocaleString('en-US');
+        // Re-check the field — user may have edited again before fetch returned.
+        if (stripUsdConversion(el.value) === prefix + formatted) {
+          el.value = prefix + formatted + ' / $' + usd;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      })
+      .catch(() => {});
   }
   form.querySelectorAll('input.price-input').forEach(el => {
+    el.addEventListener('focus', () => {
+      el.value = stripUsdConversion(el.value);
+    });
     el.addEventListener('blur', () => formatPriceField(el));
   });
 
