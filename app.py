@@ -3828,7 +3828,12 @@ def new_record(category):
                 data[fname] = ','.join(checked)
             else:
                 val = request.form.get(fname, '').strip()
-                if field['type'] == 'number' or fname in ('price', 'beat', 'reserve', 'value'):
+                if fname == 'price':
+                    # Multi-currency: preserve "US$100,000.00" /
+                    # "A$50,000.00" verbatim; fall back to legacy
+                    # strip-and-parse for plain numbers.
+                    val = _normalize_price_input(val)
+                elif field['type'] == 'number' or fname in ('beat', 'reserve', 'value'):
                     val = val.replace('$', '').replace(',', '').strip()
                     # Strip trailing unit suffix ("8.50 g", "26.5 mm", "28800 hrs")
                     # in case the JS submit handler didn't run.
@@ -4101,7 +4106,9 @@ def detail_view(category, record_id):
             else:
                 val = request.form.get(fname, '').strip()
                 # Strip currency formatting before saving numeric fields
-                if field['type'] == 'number' or fname in ('price', 'beat', 'reserve', 'value'):
+                if fname == 'price':
+                    val = _normalize_price_input(val)
+                elif field['type'] == 'number' or fname in ('beat', 'reserve', 'value'):
                     val = val.replace('$', '').replace(',', '').strip()
                 val = normalize_field_value(table, fname, val)
                 updates[fname] = val if val else None
@@ -4342,8 +4349,11 @@ def save_field(category, record_id):
                 'error': f'Cannot set {field_name} outside your allowed values'
             }), 403
 
-    # Strip currency/comma formatting for numeric fields
-    if field['type'] == 'number' or field_name in ('price', 'beat', 'reserve', 'value'):
+    # Strip currency/comma formatting for numeric fields. price keeps
+    # its currency prefix (US$ / A$) verbatim — see _normalize_price_input.
+    if field_name == 'price':
+        value = _normalize_price_input(str(value))
+    elif field['type'] == 'number' or field_name in ('beat', 'reserve', 'value'):
         value = str(value).replace('$', '').replace(',', '').strip()
         # Coin date fields render as "625 BC" / "1952" / "1952 AD" but
         # store as a signed integer year. Accept any of those forms.
@@ -6098,15 +6108,42 @@ def delete_file_field(category, record_id):
 # Template filters
 # ---------------------------------------------------------------------------
 
+_CURRENCY_PREFIX_RE = re.compile(
+    r'^\s*(US\$|A\$|USD|AUD|AUS)\s*', re.IGNORECASE)
+
+
+def _normalize_price_input(val):
+    """Price-input normaliser. Pre-formatted strings with a currency
+    prefix (US$/A$/USD/AUD/AUS) round-trip verbatim — the JS blur
+    formatter is the source of truth for those. Anything else falls
+    back to the legacy strip-symbols-and-parse behaviour so existing
+    plain-number entries keep working."""
+    s = (val or '').strip()
+    if not s:
+        return s
+    if _CURRENCY_PREFIX_RE.match(s):
+        return s
+    s = s.replace('$', '').replace(',', '').strip()
+    m = re.match(r'^\s*(-?\d+(?:\.\d+)?)\s*[A-Za-z%°/]*\s*$', s)
+    return m.group(1) if m else s
+
+
 @app.template_filter('currency')
 def currency_filter(value):
-    """Format as $1,234 (no decimals)."""
+    """Format as US$1,234.00 by default. Already-formatted strings
+    (carrying a US$/A$/USD/AUD prefix) round-trip unchanged so the
+    user's chosen currency stays put. Empty -> empty, garbage -> str."""
     if value is None or value == '':
         return ''
+    s = str(value).strip()
+    # Round-trip already-formatted strings (the JS formatter writes
+    # these on blur). Recognised by a currency prefix.
+    if _CURRENCY_PREFIX_RE.match(s):
+        return s
     try:
-        return f"${float(value):,.0f}"
+        return f"US${float(s.replace(',', '').replace('$', '')):,.2f}"
     except (ValueError, TypeError):
-        return str(value)
+        return s
 
 
 @app.template_filter('lug_fmt')

@@ -2727,6 +2727,29 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
   const form = document.getElementById('mainForm');
 
+  // Price-field formatter — accept "usd 100000" / "aus 100000" /
+  // "US$100,000" / "A$50,000.50" / plain "100000" and reformat on blur
+  // to "US$100,000.00" or "A$50,000.50". Default currency is USD when
+  // none is detected. The formatted string is what autosave writes
+  // back to the server, so the user's chosen currency round-trips on
+  // page reload. Round-trip note: the server accepts pre-formatted
+  // strings verbatim (see _normalize_price_input in app.py).
+  function formatPriceField(el) {
+    const raw = (el.value || '').trim();
+    if (!raw) return;
+    const isAud = /^\s*(A\$|AUD|AUS)/i.test(raw);
+    const num = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
+    if (!isFinite(num)) return;
+    const formatted = num.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    el.value = (isAud ? 'A$' : 'US$') + formatted;
+  }
+  form.querySelectorAll('input.price-input').forEach(el => {
+    el.addEventListener('blur', () => formatPriceField(el));
+  });
+
   // Inline "+ Add new property" — append a sentinel option to every
   // property dropdown and let the user create a property without
   // leaving the in-progress form. POST /properties/quick-create
