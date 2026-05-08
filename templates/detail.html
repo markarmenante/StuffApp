@@ -2754,35 +2754,52 @@ document.querySelectorAll('.comp-item').forEach(item => {
     // Drop any " / $X,XXX" tail so the user edits just the original.
     return s.replace(/\s*\/\s*\$[\d,]+\s*$/, '');
   }
-  function formatPriceField(el) {
-    const raw = stripUsdConversion((el.value || '').trim());
-    if (!raw) return;
-    let prefix = '$';
-    let code = 'USD';
-    for (const p of PRICE_PREFIXES) {
-      if (p.rx.test(raw)) { prefix = p.prefix; code = p.code; break; }
-    }
-    const num = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
-    if (!isFinite(num)) return;
-    const formatted = Math.round(num).toLocaleString('en-US');
-    el.value = prefix + formatted;
-    // Append USD conversion for non-USD entries when we have a date.
-    if (code === 'USD') return;
+  function todayIsoDate() {
+    return new Date().toISOString().slice(0, 10);
+  }
+  function transactionDate() {
+    // Use the row's transaction date if set, else today. Lets a user
+    // type a price + currency before filling in the date and still
+    // get a USD conversion.
     const dateInput = form.querySelector('input[name="date"]');
-    const dateStr = dateInput && dateInput.value ? dateInput.value : '';
-    if (!dateStr) return;
-    fetch(`/fx-rate?currency=${encodeURIComponent(code)}&date=${encodeURIComponent(dateStr)}`)
+    return (dateInput && dateInput.value) ? dateInput.value : todayIsoDate();
+  }
+  function detectCurrency(raw) {
+    for (const p of PRICE_PREFIXES) {
+      if (p.rx.test(raw)) return p;
+    }
+    return PRICE_PREFIXES[PRICE_PREFIXES.length - 1]; // USD
+  }
+  function applyUsdConversion(el) {
+    const stripped = stripUsdConversion((el.value || '').trim());
+    if (!stripped) return;
+    const meta = detectCurrency(stripped);
+    if (meta.code === 'USD') return;
+    const num = parseFloat(stripped.replace(/[^0-9.\-]/g, ''));
+    if (!isFinite(num)) return;
+    const dateStr = transactionDate();
+    fetch(`/fx-rate?currency=${encodeURIComponent(meta.code)}&date=${encodeURIComponent(dateStr)}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (!d || !d.ok || !d.rate) return;
         const usd = Math.round(num * d.rate).toLocaleString('en-US');
-        // Re-check the field — user may have edited again before fetch returned.
-        if (stripUsdConversion(el.value) === prefix + formatted) {
-          el.value = prefix + formatted + ' / $' + usd;
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }
+        // Don't clobber if the user resumed editing while the fetch
+        // was in flight.
+        if (stripUsdConversion(el.value) !== stripped) return;
+        el.value = stripped + ' / $' + usd;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
       })
       .catch(() => {});
+  }
+  function formatPriceField(el) {
+    const raw = stripUsdConversion((el.value || '').trim());
+    if (!raw) return;
+    const meta = detectCurrency(raw);
+    const num = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
+    if (!isFinite(num)) return;
+    const formatted = Math.round(num).toLocaleString('en-US');
+    el.value = meta.prefix + formatted;
+    applyUsdConversion(el);
   }
   form.querySelectorAll('input.price-input').forEach(el => {
     el.addEventListener('focus', () => {
@@ -2790,6 +2807,15 @@ document.querySelectorAll('.comp-item').forEach(item => {
     });
     el.addEventListener('blur', () => formatPriceField(el));
   });
+
+  // When the row's transaction date changes, recompute every non-USD
+  // price field's " / $..." conversion against the new rate.
+  const _dateInput = form.querySelector('input[name="date"]');
+  if (_dateInput) {
+    _dateInput.addEventListener('change', () => {
+      form.querySelectorAll('input.price-input').forEach(applyUsdConversion);
+    });
+  }
 
   // Inline "+ Add new property" — append a sentinel option to every
   // property dropdown and let the user create a property without
