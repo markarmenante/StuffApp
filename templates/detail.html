@@ -1177,23 +1177,17 @@ document.addEventListener('DOMContentLoaded', function () {
        back to a normal block flow so the image still spans the full
        width above the specs. -->
   <div class="art-body">
-    <div class="art-left">
-      <div class="art-photo-full drop-zone" data-field="image"
-           data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
-        {% if r and r['image'] and r['image']|is_image %}
-          <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Art">
-        {% else %}
-          <span class="no-img">🎨</span>
-        {% endif %}
-        <label class="file-upload-lbl watch-photo-upload">
-          <input type="file" name="image" accept="image/*" style="display:none"
-                 onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
-        </label>
-      </div>
-      {# Object Notes (piece-specific notes — gallery / lookup populates).
-         Sits under the photo on the left so the image can be wider
-         without leaving a tall empty stripe under it. #}
-      <div class="dgrid dg1 art-notes-grow">{{ cell('object_notes','Object Notes',rows=6) }}</div>
+    <div class="art-photo-full drop-zone" data-field="image"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image'] and r['image']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image']) }}" alt="Art">
+      {% else %}
+        <span class="no-img">🎨</span>
+      {% endif %}
+      <label class="file-upload-lbl watch-photo-upload">
+        <input type="file" name="image" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image')">
+      </label>
     </div>
     <div class="art-specs">
       <!-- Medium | Dimensions | Year -->
@@ -1233,13 +1227,26 @@ document.addEventListener('DOMContentLoaded', function () {
         {% endif %}
         {{ selcell('status','Status', vlists.status) }}
       </div>
-      {# Artist Notes (artist biography — lookup populates it). Stays
-         on the right under the data fields. Object Notes moved to
-         the left column under the image; see .art-left above. The
-         .art-notes-grow class flex-expands the row so it fills the
-         leftover height beside the image instead of leaving an empty
-         band below. #}
-      <div class="dgrid dg1 art-notes-grow">{{ cell('notes','Artist Notes',rows=8) }}</div>
+      {# Artist Notes + Object Notes — section-bar headers match the
+         Topics / People / Notes treatment used elsewhere so the two
+         text blocks read as proper sections, not stray cells. The
+         .art-notes-grow class flex-expands the rows so they fill the
+         leftover height beside the image. Empty placeholders so the
+         field is discoverable on existing records too. #}
+      <div class="section-bar">Artist Notes</div>
+      <div class="dgrid dg1 art-notes-grow">
+        <div class="dcell">
+          <textarea name="notes" rows="6" data-autogrow="1"
+                    {% if not val('notes') %}placeholder="Artist Notes"{% endif %}>{{ val('notes') }}</textarea>
+        </div>
+      </div>
+      <div class="section-bar">Object Notes</div>
+      <div class="dgrid dg1 art-notes-grow">
+        <div class="dcell">
+          <textarea name="object_notes" rows="6" data-autogrow="1"
+                    {% if not val('object_notes') %}placeholder="Object Notes"{% endif %}>{{ val('object_notes') }}</textarea>
+        </div>
+      </div>
     </div>
   </div>
   {# Unbounded JSON-backed docs row. Legacy doc_2 + receipt columns
