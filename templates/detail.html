@@ -1223,7 +1223,7 @@ document.addEventListener('DOMContentLoaded', function () {
         {{ selcell('property','Property', vlists.property) }}
         <div class="dcell ta-wrap">
           <input type="text" name="location" value="{{ val('location') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('location', [])|join('||') }}">
-          <span class="clabel">Location</span>
+          <span class="clabel">{{ 'Location in home' if is_tenant else 'Location' }}</span>
         </div>
       </div>
       <!-- Owner | Status -->
