@@ -2576,23 +2576,13 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   const url = btn.dataset.url;
   if (!url) return;
-  // Confirm before overwriting an existing value. The backend
-  // refuses to overwrite a manually-edited value (data.value_overridden
-  // path), but it does replace the previous lookup result, so the
-  // user should opt in before kicking off another search.
-  const valInputCheck = document.querySelector('input[name="value"]');
-  const hasExistingValue = valInputCheck && (valInputCheck.value || '').trim();
-  if (hasExistingValue) {
-    const ok = window.confirm(
-      'A Value is already set (' + valInputCheck.value.trim() + ').\n\n' +
-      'Re-running Search Value will overwrite the Results and may ' +
-      'replace the Value field.\n\nProceed?');
-    if (!ok) return;
-  }
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Searching…';
   try {
+    // Always run the search first — the user wants to compare the
+    // looked-up estimate against any existing manually-entered value
+    // before deciding whether to overwrite.
     const res = await fetch(url, { method: 'POST' });
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('application/json')) {
@@ -2602,12 +2592,8 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     }
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed');
-    const valInput = document.querySelector('input[name="value"]');
-    if (valInput && !data.value_overridden) {
-      valInput.value = data.value != null
-        ? '$' + Number(data.value).toLocaleString('en-US', {maximumFractionDigits: 0})
-        : '';
-    }
+    // Results + timestamp always update — those are search artifacts,
+    // not manually-edited fields.
     const resultsTa = document.getElementById('resultsRaw');
     if (resultsTa) resultsTa.value = data.results || '';
     const disp = document.getElementById('resultsDisplay');
@@ -2619,6 +2605,32 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
       stamp.textContent = ' as of ' + d.toLocaleDateString('en-US', {
         month: 'short', day: 'numeric', year: 'numeric'
       });
+    }
+    // Decide whether to overwrite the Value field. Honor the
+    // server's value_overridden flag (manually-edited values are
+    // never overwritten without explicit confirm).
+    const valInput = document.querySelector('input[name="value"]');
+    const newValue = data.value != null
+      ? '$' + Number(data.value).toLocaleString('en-US', {maximumFractionDigits: 0})
+      : '';
+    if (valInput && newValue) {
+      const existing = (valInput.value || '').trim();
+      const matches = existing === newValue;
+      let proceed = false;
+      if (!existing) {
+        proceed = true;                      // empty -> just fill
+      } else if (matches) {
+        proceed = false;                     // identical -> no-op
+      } else {
+        // Compact two-line confirm: show both values, ask to overwrite.
+        proceed = window.confirm(
+          `Current: ${existing}\nNew: ${newValue}\n\nOverwrite?`);
+      }
+      if (proceed) {
+        valInput.value = newValue;
+        // 'input' triggers the autosave handler so the field persists.
+        valInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
     }
     btn.textContent = 'Fetched ✓';
     btn.classList.remove('pill-stale');
