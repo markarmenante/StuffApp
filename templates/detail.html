@@ -2576,6 +2576,19 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   const url = btn.dataset.url;
   if (!url) return;
+  // Confirm before overwriting an existing value. The backend
+  // refuses to overwrite a manually-edited value (data.value_overridden
+  // path), but it does replace the previous lookup result, so the
+  // user should opt in before kicking off another search.
+  const valInputCheck = document.querySelector('input[name="value"]');
+  const hasExistingValue = valInputCheck && (valInputCheck.value || '').trim();
+  if (hasExistingValue) {
+    const ok = window.confirm(
+      'A Value is already set (' + valInputCheck.value.trim() + ').\n\n' +
+      'Re-running Search Value will overwrite the Results and may ' +
+      'replace the Value field.\n\nProceed?');
+    if (!ok) return;
+  }
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Searching…';
