@@ -455,8 +455,7 @@
                 <path d="M10 14a1.6 1.6 0 1 1 0-3.2 1.6 1.6 0 0 1 0 3.2zM3.2 7.5a9.6 9.6 0 0 1 13.6 0l-1.6 1.6a7.3 7.3 0 0 0-10.4 0L3.2 7.5zM0 4.3a14.1 14.1 0 0 1 20 0l-1.6 1.6a11.8 11.8 0 0 0-16.8 0L0 4.3z"/>
               </svg>
             </span>
-            {% if row['wifi_name'] %}<span>{{ row['wifi_name'] }}</span>{% endif %}
-            {% if row['wifi'] %}<span>{{ row['wifi'] }}</span>{% endif %}
+            <span>{{ [row['wifi_name'], row['wifi']]|select|join(' / ') }}</span>
           </div>
           {% endif %}
         </div>
