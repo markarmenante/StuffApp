@@ -2620,7 +2620,8 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
       if (!existing) {
         proceed = true;                      // empty -> just fill
       } else if (matches) {
-        proceed = false;                     // identical -> no-op
+        proceed = false;                     // identical -> just notify
+        window.alert('No change in value.');
       } else {
         // Compact two-line confirm: show both values, ask to overwrite.
         proceed = window.confirm(
