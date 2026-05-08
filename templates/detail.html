@@ -1268,6 +1268,20 @@ document.addEventListener('DOMContentLoaded', function () {
            {% if is_new and not val('name') %}placeholder="Name"{% endif %}>
   </div>
 
+  <!-- Type | Description span the full width above the image and the
+       rest of the spec column. Type autocompletes from prior entries
+       (ta.get('type')); Description is a textarea. -->
+  <div class="dgrid dg2">
+    <div class="dcell ta-wrap">
+      <input type="text" name="type" value="{{ val('type') }}"
+             autocomplete="off" class="ta-input"
+             data-ta="{{ ta.get('type', [])|join('||') }}"
+             {% if is_new and not val('type') %}placeholder="Type"{% endif %}>
+      <span class="clabel">Type</span>
+    </div>
+    {{ cell('description','Description') }}
+  </div>
+
   <div class="art-body">
     <div class="art-photo-full drop-zone" data-field="image"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
@@ -1282,20 +1296,8 @@ document.addEventListener('DOMContentLoaded', function () {
       </label>
     </div>
     <div class="art-specs">
-      <!-- Type | Description on one line. Type autocompletes from
-           prior entries (ta.get('type')); Description is a textarea. -->
-      <div class="dgrid dg2">
-        <div class="dcell ta-wrap">
-          <input type="text" name="type" value="{{ val('type') }}"
-                 autocomplete="off" class="ta-input"
-                 data-ta="{{ ta.get('type', [])|join('||') }}"
-                 {% if is_new and not val('type') %}placeholder="Type"{% endif %}>
-          <span class="clabel">Type</span>
-        </div>
-        {{ cell('description','Description') }}
-      </div>
       <div class="dgrid dg1">
-        {{ cell('serial','Serial') }}
+        {{ cell('serial','Serial Number') }}
       </div>
       <!-- Date | Price | Vendor — centred per design. -->
       <div class="dgrid dg3 items-purchase-center">
