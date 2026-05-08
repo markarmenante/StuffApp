@@ -4504,6 +4504,12 @@ def topic_new():
             [tid, prop['id'], subject, body, image],
         )
         db.commit()
+        # Autosave-from-typing flow: client expects JSON so it can flip
+        # the form into save_field-style updates without a redirect.
+        if request.headers.get('Accept', '').startswith('application/json') \
+                or request.headers.get('X-Requested-With') == 'fetch':
+            return jsonify({'ok': True, 'id': tid,
+                            'detail_url': url_for('topic_detail', topic_id=tid)})
         return redirect(url_for('topic_detail', topic_id=tid))
     return render_template(
         'topic_detail.html', topic=None, property=prop, is_new=True,
@@ -4534,6 +4540,11 @@ def topic_detail(topic_id):
         db.execute(f'UPDATE topics SET {set_clause} WHERE id = ?',
                    list(updates.values()) + [topic_id])
         db.commit()
+        # Autosave-from-typing flow: skip the flash + redirect so the
+        # client can keep typing without a full page navigation.
+        if request.headers.get('Accept', '').startswith('application/json') \
+                or request.headers.get('X-Requested-With') == 'fetch':
+            return jsonify({'ok': True, 'id': topic_id})
         flash('Topic saved.', 'success')
         return redirect(url_for('topic_detail', topic_id=topic_id))
     return render_template(
