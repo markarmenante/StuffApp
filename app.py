@@ -2181,12 +2181,17 @@ def get_property_choices(owner_filter=None):
     historical data stores wifi passwords in it, so it can't be
     filtered on safely without a data cleanup pass first."""
     db = get_db()
-    # Skip the type='Residential' filter when 'type' is hidden for this
-    # tenant — those deployments don't surface the field at all so every
-    # property has type=NULL and the filter would zero out the dropdown.
+    # Match any of the residential-ish property types — the form
+    # dropdown writes 'Residence' (singular), but historical data
+    # has 'Residential' (legacy schema), and 'Rental'/'Vacation' are
+    # also places where personal items belong. Hardcoding only one
+    # spelling silently zeroed out the dropdown for everyone since
+    # the form switched to 'Residence'. Skip the filter entirely on
+    # tenants whose `type` is hidden — they have type=NULL on every
+    # row so any IN-clause would empty the dropdown.
     type_filter = (
         "" if 'type' in HIDE_FIELDS.get('properties', set())
-        else "  AND type = 'Residential' "
+        else "  AND type IN ('Residence', 'Residential', 'Rental', 'Vacation') "
     )
     sql = (
         "SELECT name, short_name FROM properties "
