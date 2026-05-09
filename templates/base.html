@@ -682,16 +682,20 @@ async function startOfflineWarm(ev, link) {
     return false;
   }
 
+  // Order matters: pages first so navigation works even if iOS
+  // storage quota fills mid-warm; docs (small PDFs/HEICs) next;
+  // images (the largest payloads) last. If the cache fills, you
+  // lose images last — every page is still navigable.
   const urls = [].concat(manifest.pages || [],
-                          manifest.images || [],
-                          manifest.docs || []);
+                          manifest.docs || [],
+                          manifest.images || []);
   if (urls.length === 0) {
     ui.done('ok', 'Nothing to cache.');
     return false;
   }
   ui.progress(`Caching 0 / ${urls.length}…`);
 
-  // MessageChannel: SW posts {done,total,ok,failed[,finished]} on port1.
+  // MessageChannel: SW posts {done,total,ok,failed,quotaHit[,finished]}.
   const ch = new MessageChannel();
   const result = await new Promise((resolve) => {
     ch.port1.onmessage = (e) => {
@@ -699,23 +703,33 @@ async function startOfflineWarm(ev, link) {
       if (d.finished) {
         resolve(d);
       } else {
-        ui.progress(`Caching ${d.done} / ${d.total}…`);
+        const note = d.quotaHit ? ' · storage full' : '';
+        ui.progress(`Caching ${d.done} / ${d.total}${note}…`);
       }
     };
     reg.active.postMessage({ type: 'WARM', urls }, [ch.port2]);
   });
 
-  // Stamp localStorage so the indicator can show the last warm-up time
-  // — useful when the user wonders "did I cache this before the trip?".
   try {
     localStorage.setItem('stuffapp:offlineCachedAt', new Date().toISOString());
     localStorage.setItem('stuffapp:offlineCachedCount', String(result.ok));
   } catch (_) {}
 
-  const summary =
-    `Cached ${result.ok} / ${result.total}` +
-    (result.failed ? ` · ${result.failed} failed (see console)` : '');
-  ui.done(result.failed > 0 && result.ok === 0 ? 'err' : 'ok', summary);
+  let summary = `Cached ${result.ok} / ${result.total}`;
+  if (result.quotaHit) {
+    // Specific iOS hint — Safari tabs get a small per-origin quota,
+    // but a Home Screen PWA gets dramatically more storage. Without
+    // this nudge the user sees "X failed" and assumes the app is
+    // broken instead of the actual cause.
+    summary += ` · iPhone storage full. Add to Home Screen ` +
+               `(Share → Add to Home Screen) for more space, then ` +
+               `tap Offline again.`;
+  } else if (result.failed) {
+    summary += ` · ${result.failed} failed (see console)`;
+  }
+  const state = (result.quotaHit || (result.failed > 0 && result.ok === 0))
+                  ? 'err' : 'ok';
+  ui.done(state, summary);
   refreshOfflineStatus();
   return false;
 }
