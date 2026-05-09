@@ -10841,6 +10841,18 @@ def report_generate():
         # restricted member sees only their share in the report.
         _apply_row_filter_clauses(cat, wheres, params)
 
+        # Owned-only: drop records that have left the collection.
+        # Mirrors the watches list-view default so the report can't
+        # surprise the user with sold/gifted/lost items mixed in.
+        # Categories without a status field (credit_cards, persons)
+        # are unaffected.
+        cat_field_names = {f['name'] for f in FIELDS.get(cat, [])}
+        if 'status' in cat_field_names:
+            wheres.append(
+                "(LOWER(TRIM(COALESCE(status,''))) "
+                "NOT IN ('sold','gifted','lost'))"
+            )
+
         order_by = CATEGORY_ORDER_BY.get(cat, 'created_at DESC')
         where_sql = f'WHERE {" AND ".join(wheres)}' if wheres else ''
         sql = f'SELECT * FROM {table_name} {where_sql} ORDER BY {order_by}'
