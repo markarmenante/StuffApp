@@ -11111,7 +11111,19 @@ def offline_manifest():
     if 'persons' in allowed:
         pages.append(url_for('persons_default'))
 
-    for slug, info in CATEGORIES.items():
+    # Warm priority: when iOS storage is constrained, these categories
+    # cache before everything else so the most-used surfaces survive
+    # a partial warm. Order matches the pages → docs → images groups
+    # the client concatenates in (so all priority pages cache before
+    # any non-priority page, etc.).
+    OFFLINE_PRIORITY = ['properties', 'watches', 'persons', 'coins']
+    ordered_slugs = (
+        [s for s in OFFLINE_PRIORITY if s in CATEGORIES] +
+        [s for s in CATEGORIES if s not in OFFLINE_PRIORITY]
+    )
+
+    for slug in ordered_slugs:
+        info = CATEGORIES[slug]
         if slug not in allowed:
             continue
         table = info['table']
