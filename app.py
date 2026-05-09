@@ -10766,11 +10766,49 @@ def report_options():
          'icon':  CATEGORIES[slug].get('icon', '')}
         for slug in CATEGORIES if slug in allowed
     ]
-    # Reuse the same predicate the rest of the app uses for property
-    # dropdowns: only Own + Residential, with the type filter dropped
-    # on tenants whose properties.type is hidden.
-    props = get_property_choices()
+    # Owned + Residential first (same predicate the rest of the app's
+    # property dropdowns use), then filter down to properties that
+    # actually have at least one item in one of the user's allowed
+    # categories — listing a property with zero items in the report
+    # dialog is just noise.
+    candidates = get_property_choices()
+    used_aliases = _report_used_property_aliases(allowed)
+    props = [
+        p for p in candidates
+        if any(a in used_aliases for a in _property_alias_group(p))
+    ]
     return jsonify({'categories': cats, 'properties': props})
+
+
+def _report_used_property_aliases(allowed):
+    """Set of lowercased property-name aliases that have at least one
+    record in any allowed category whose schema carries a property
+    column. Honors row-level access so a restricted member only
+    'sees' properties through items they themselves are allowed to
+    see."""
+    db = get_db()
+    used = set()
+    for cat, prop_col in CATEGORY_PROPERTY_FIELD.items():
+        if cat not in allowed:
+            continue
+        table = CATEGORIES[cat]['table']
+        wheres, params = [
+            f"COALESCE({prop_col},'') != ''",
+        ], []
+        _apply_row_filter_clauses(cat, wheres, params)
+        sql = (
+            f"SELECT DISTINCT LOWER(TRIM({prop_col})) AS p "
+            f"FROM {table} WHERE {' AND '.join(wheres)}"
+        )
+        try:
+            for row in db.execute(sql, params).fetchall():
+                if row['p']:
+                    used.add(row['p'])
+        except sqlite3.OperationalError:
+            # Schema drift (column doesn't exist yet on a freshly
+            # provisioned tenant) — skip the category, don't 500.
+            continue
+    return used
 
 
 @app.route('/report/generate', methods=['GET'])
