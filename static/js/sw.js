@@ -17,7 +17,7 @@
 // Bump on every shipped change to invalidate old caches: a stale CSS
 // entry from before the random→asset_v cache-buster fix would otherwise
 // linger and keep rendering the un-styled page offline.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL_CACHE = `stuffapp-shell-${VERSION}`;
 const DATA_CACHE  = `stuffapp-data-${VERSION}`;
 
@@ -152,47 +152,64 @@ self.addEventListener('message', (event) => {
 async function warmCache(urls, port) {
   const cache = await caches.open(DATA_CACHE);
   const total = urls.length;
-  let done = 0, ok = 0, failed = 0, quotaHit = false;
-  // Modest concurrency: iOS Safari throttles aggressively past 6
-  // in-flight requests on the same origin, so 6 keeps the pipe full
-  // without queueing internally. Drop to 3 once we've hit a quota
-  // error so we don't burn bandwidth fetching responses we can't
-  // store.
-  let CONCURRENCY = 6;
+  let done = 0, ok = 0, skipped = 0, failed = 0, quotaHit = false;
+  const failedUrls = [];
+  // Conservative concurrency: iOS Safari can flake out past ~3 in-
+  // flight requests on the same origin under CF Access auth — the
+  // mismatch with the previous '6' setting was the most likely
+  // reason an earlier warm dropped most categories silently.
+  const CONCURRENCY = 3;
   let cursor = 0;
   async function worker() {
     while (cursor < urls.length) {
       const i = cursor++;
       const u = urls[i];
       try {
-        const r = await fetch(u, { credentials: 'same-origin' });
-        if (r && r.ok && !r.redirected) {
-          try {
-            await cache.put(u, r.clone());
-            ok++;
-          } catch (storageErr) {
-            // QuotaExceededError on iOS Safari surfaces here. Flag
-            // it so the page can show a useful "out of room" hint
-            // — a silent failure looked like a partial cache to
-            // the user.
-            failed++;
-            if (storageErr && (storageErr.name === 'QuotaExceededError' ||
-                               /quota|storage/i.test(String(storageErr)))) {
-              quotaHit = true;
-            }
-          }
+        // Skip-if-already-cached: a previous warm (or organic
+        // browsing) may have already populated this entry.
+        // Re-tapping Offline now resumes from where the last run
+        // stopped instead of re-fetching everything.
+        const existing = await cache.match(u);
+        if (existing) {
+          skipped++;
         } else {
-          failed++;
+          const r = await fetch(u, { credentials: 'same-origin' });
+          if (r && r.ok && !r.redirected) {
+            try {
+              await cache.put(u, r.clone());
+              ok++;
+            } catch (storageErr) {
+              failed++;
+              failedUrls.push(u);
+              if (storageErr && (storageErr.name === 'QuotaExceededError' ||
+                                 /quota|storage/i.test(String(storageErr)))) {
+                quotaHit = true;
+              }
+              console.warn('[SW warm] cache.put failed:', u, storageErr);
+            }
+          } else {
+            failed++;
+            failedUrls.push(u);
+            console.warn('[SW warm] bad response:', u,
+                         r && r.status, r && r.redirected ? '(redirected)' : '');
+          }
         }
-      } catch (_) {
+      } catch (err) {
         failed++;
+        failedUrls.push(u);
+        console.warn('[SW warm] fetch failed:', u, err);
       }
       done++;
       if (port && (done === total || done % 5 === 0)) {
-        port.postMessage({ done, total, ok, failed, quotaHit });
+        port.postMessage({ done, total, ok, skipped, failed, quotaHit });
       }
     }
   }
   await Promise.all(Array.from({length: CONCURRENCY}, worker));
-  if (port) port.postMessage({ done, total, ok, failed, quotaHit, finished: true });
+  if (port) port.postMessage({
+    done, total, ok, skipped, failed, quotaHit, finished: true,
+    // Cap the failed-URL sample so the postMessage doesn't bloat:
+    // 20 is enough for the user (or me) to spot a pattern.
+    failedSample: failedUrls.slice(0, 20),
+  });
 }

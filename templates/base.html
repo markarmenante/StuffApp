@@ -711,23 +711,32 @@ async function startOfflineWarm(ev, link) {
   });
 
   try {
+    const totalCached = (result.ok || 0) + (result.skipped || 0);
     localStorage.setItem('stuffapp:offlineCachedAt', new Date().toISOString());
-    localStorage.setItem('stuffapp:offlineCachedCount', String(result.ok));
+    localStorage.setItem('stuffapp:offlineCachedCount', String(totalCached));
   } catch (_) {}
 
-  let summary = `Cached ${result.ok} / ${result.total}`;
+  // Log a sample of failed URLs so you can grep them in DevTools
+  // (Settings → Safari → Advanced → Web Inspector on iOS).
+  if (result.failedSample && result.failedSample.length) {
+    console.warn('[Offline] failed URLs (first 20):', result.failedSample);
+  }
+
+  // ok = newly fetched + cached; skipped = already in cache from a
+  // prior run. The user thinks of both as "cached", so combine them.
+  const cached = (result.ok || 0) + (result.skipped || 0);
+  let summary = `Cached ${cached} / ${result.total}`;
+  if (result.skipped) {
+    summary += ` (${result.skipped} already cached, ${result.ok} new)`;
+  }
   if (result.quotaHit) {
-    // Specific iOS hint — Safari tabs get a small per-origin quota,
-    // but a Home Screen PWA gets dramatically more storage. Without
-    // this nudge the user sees "X failed" and assumes the app is
-    // broken instead of the actual cause.
     summary += ` · iPhone storage full. Add to Home Screen ` +
                `(Share → Add to Home Screen) for more space, then ` +
                `tap Offline again.`;
   } else if (result.failed) {
     summary += ` · ${result.failed} failed (see console)`;
   }
-  const state = (result.quotaHit || (result.failed > 0 && result.ok === 0))
+  const state = (result.quotaHit || (result.failed > 0 && cached === 0))
                   ? 'err' : 'ok';
   ui.done(state, summary);
   refreshOfflineStatus();

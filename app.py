@@ -11101,6 +11101,16 @@ def offline_manifest():
     docs = []  # non-image files (PDFs etc.) — kept separate so the UI
                # can show them as "documents" in progress reporting.
 
+    # Top-level entry URLs: '/' redirects to the landing category, and
+    # the People nav button targets /persons-default rather than
+    # /persons (it lands on the most relevant person directly). Both
+    # are skipped by the SW cache because they 302, but adding them
+    # here means the cache-fallback case can still serve them — and
+    # surfaces any redirect-target URL on first warm.
+    pages.append(url_for('index'))
+    if 'persons' in allowed:
+        pages.append(url_for('persons_default'))
+
     for slug, info in CATEGORIES.items():
         if slug not in allowed:
             continue
