@@ -2898,61 +2898,6 @@ document.querySelectorAll('.comp-item').forEach(item => {
     });
   }
 
-  // Inline "+ Add new property" — append a sentinel option to every
-  // property dropdown and let the user create a property without
-  // leaving the in-progress form. POST /properties/quick-create
-  // creates a status='Own' row with the typed name; the new option
-  // is inserted (selected) right above the sentinel so it survives
-  // until the next page load.
-  form.querySelectorAll('select[name="property"]').forEach(sel => {
-    if (sel.querySelector('option[value="__new_property__"]')) return;
-    const opt = document.createElement('option');
-    opt.value = '__new_property__';
-    opt.textContent = '+ Add new property';
-    sel.appendChild(opt);
-    let prevValue = sel.value;
-    sel.addEventListener('change', async () => {
-      if (sel.value !== '__new_property__') {
-        prevValue = sel.value;
-        return;
-      }
-      const name = (window.prompt('New property name:') || '').trim();
-      if (!name) {
-        sel.value = prevValue;
-        return;
-      }
-      try {
-        const r = await fetch('/properties/quick-create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
-        const d = await r.json();
-        if (!r.ok || !d.ok) {
-          alert(d.error || 'Failed to create property');
-          sel.value = prevValue;
-          return;
-        }
-        // Mirror the new option into every property select on the
-        // page (forms can repeat the field) and select it on this one.
-        document.querySelectorAll('select[name="property"]').forEach(s => {
-          const sentinel = s.querySelector('option[value="__new_property__"]');
-          const newOpt = document.createElement('option');
-          newOpt.value = d.name;
-          newOpt.textContent = d.name;
-          if (sentinel) s.insertBefore(newOpt, sentinel);
-          else s.appendChild(newOpt);
-        });
-        sel.value = d.name;
-        prevValue = sel.value;
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      } catch (err) {
-        alert('Failed to create property');
-        sel.value = prevValue;
-      }
-    });
-  });
-
   // Property required: when this category's form has a Property
   // dropdown, block the explicit Save click (and warn on back-link
   // navigation) until it's set. Autosave isn't blocked — the row
