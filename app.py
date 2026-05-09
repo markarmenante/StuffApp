@@ -10726,19 +10726,10 @@ def report_options():
          'icon':  CATEGORIES[slug].get('icon', '')}
         for slug in CATEGORIES if slug in allowed
     ]
-    db = get_db()
-    rows = db.execute(
-        "SELECT name, short_name FROM properties "
-        "WHERE COALESCE(NULLIF(name,''), short_name) IS NOT NULL "
-        "  AND COALESCE(NULLIF(name,''), short_name) != '' "
-        "ORDER BY LOWER(COALESCE(NULLIF(name,''), short_name))"
-    ).fetchall()
-    seen, props = set(), []
-    for r in rows:
-        n = (r['name'] or '').strip() or (r['short_name'] or '').strip()
-        if n and n not in seen:
-            seen.add(n)
-            props.append(n)
+    # Reuse the same predicate the rest of the app uses for property
+    # dropdowns: only Own + Residential, with the type filter dropped
+    # on tenants whose properties.type is hidden.
+    props = get_property_choices()
     return jsonify({'categories': cats, 'properties': props})
 
 
