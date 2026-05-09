@@ -10836,15 +10836,18 @@ def report_generate():
     cell = ParagraphStyle('rcell', parent=styles['Normal'],
                           fontSize=8, leading=10)
     cell_bold = ParagraphStyle('rcellb', parent=cell, fontName='Helvetica-Bold')
+    # NB: reportlab's HexColor() does NOT support CSS 3-digit shorthand
+    # — it parses '#888' as the integer 0x888 (= dark blue), not as
+    # '#888888'. Always use the full 6-digit form for greys here.
     cell_h = ParagraphStyle('rcellh', parent=cell,
                             fontName='Helvetica-Bold', fontSize=7,
-                            textColor=colors.HexColor('#555'))
+                            textColor=colors.HexColor('#555555'))
     title_p = ParagraphStyle('rtitle', parent=styles['Normal'],
                              fontSize=10, fontName='Helvetica-Bold',
                              leading=12)
     cap = ParagraphStyle('rcap', parent=cell, fontSize=8, leading=10)
     cap_lbl = ParagraphStyle('rcaplbl', parent=cell,
-                             fontSize=7, textColor=colors.HexColor('#777'),
+                             fontSize=7, textColor=colors.HexColor('#777777'),
                              leading=9)
 
     story = []
@@ -10912,7 +10915,7 @@ def report_generate():
 
         story.append(Paragraph(
             f'{info.get("icon","")}  {cat_label}  '
-            f'<font size=9 color="#888">({len(rows)})</font>',
+            f'<font size=9 color="#888888">({len(rows)})</font>',
             h2))
         grand_total += len(rows)
 
@@ -10949,8 +10952,8 @@ def report_generate():
                 ('TOPPADDING', (0, 0), (-1, -1), 2),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
                 ('LINEBELOW', (0, 0), (-1, 0), 0.5, colors.black),
-                ('LINEBELOW', (0, 1), (-1, -1), 0.25, colors.HexColor('#ddd')),
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eef')),
+                ('LINEBELOW', (0, 1), (-1, -1), 0.25, colors.HexColor('#dddddd')),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eeeeff')),
             ]))
             story.append(tbl)
             story.append(Spacer(1, 6))
@@ -10993,12 +10996,12 @@ def report_generate():
                     left = pairs[i]
                     right = pairs[i + 1] if i + 1 < len(pairs) else None
                     lcell = Paragraph(
-                        f'{left[1]}<br/><font size=6 color="#888">{left[0]}</font>',
+                        f'{left[1]}<br/><font size=6 color="#888888">{left[0]}</font>',
                         cap)
                     rcell = ''
                     if right:
                         rcell = Paragraph(
-                            f'{right[1]}<br/><font size=6 color="#888">{right[0]}</font>',
+                            f'{right[1]}<br/><font size=6 color="#888888">{right[0]}</font>',
                             cap)
                     cap_rows.append([lcell, rcell])
 
@@ -11019,7 +11022,7 @@ def report_generate():
                     ('RIGHTPADDING', (0, 0), (-1, -1), 2),
                     ('TOPPADDING', (0, 0), (-1, -1), 4),
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                    ('BOX', (0, 0), (-1, -1), 0.25, colors.HexColor('#ddd')),
+                    ('BOX', (0, 0), (-1, -1), 0.25, colors.HexColor('#dddddd')),
                 ]))
                 cards.append(card)
 
@@ -11044,7 +11047,7 @@ def report_generate():
     else:
         story.append(Spacer(1, 8))
         story.append(Paragraph(
-            f'<font size=9 color="#888">Total: {grand_total} record'
+            f'<font size=9 color="#888888">Total: {grand_total} record'
             f'{"" if grand_total == 1 else "s"}</font>', sub))
 
     doc.build(story)
