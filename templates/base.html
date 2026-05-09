@@ -109,13 +109,17 @@
     </a>
     {# Offline pre-warm: cache every page + image so the app keeps
        working in low-connectivity areas (mainly iPhone PWAs). Read-
-       only — edits still require connectivity. #}
+       only — edits still require connectivity. Hidden on tenant
+       deployments (Gerri etc.) — they don't want their members
+       chewing through iOS storage. #}
+    {% if not is_tenant %}
     <a href="#" class="nav-item nav-offline" id="navOfflineLink"
        title="Cache every page and image so the app works offline"
        onclick="return startOfflineWarm(event, this)">
       <span class="icon" id="navOfflineIcon">📥</span>
       <span class="lbl" id="navOfflineLabel">Offline</span>
     </a>
+    {% endif %}
     {% endif %}
     {# Files (export) and Sweep (re-import) are owner-role tools —
        member-role users on a third-party deployment don't get them. #}
