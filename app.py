@@ -10552,83 +10552,123 @@ def record_print_pdf(category, record_id):
 # to land 6–8 columns wide so a row fits on Letter portrait without wrap.
 REPORT_COMPACT_COLS = {
     'watches':      [('Brand', 'brand'), ('Model', 'model'), ('Ref', 'reference'),
-                     ('Year', 'year'), ('Metal', 'metal'),
+                     ('Year', 'year'),
                      ('Owner', 'owner'), ('Property', 'property'),
-                     ('Status', 'status')],
+                     ('Status', 'status'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'coins':        [('Cat', 'cat_id'), ('Authority', 'authority'),
-                     ('Denom', 'denomination'), ('Date', 'date_1'),
-                     ('Mint', 'mint'), ('Grade', 'grade'),
-                     ('Owner', 'owner'), ('Property', 'property_name')],
+                     ('Denom', 'denomination'), ('Minted', 'date_1'),
+                     ('Grade', 'grade'),
+                     ('Owner', 'owner'), ('Property', 'property_name'),
+                     ('Bought', 'purchase_date'), ('Price', 'price')],
     'cameras':      [('Make', 'make'), ('Model', 'model'),
                      ('Serial', 'serial_number'),
                      ('Owner', 'owner'), ('Property', 'property'),
-                     ('Status', 'status')],
+                     ('Status', 'status'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'lenses':       [('Make', 'make'), ('Model', 'model'),
                      ('Serial', 'serial_number'),
-                     ('Owner', 'owner'), ('Property', 'property')],
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'pens':         [('Make', 'make'), ('Model', 'model'),
                      ('Type', 'type'),
-                     ('Owner', 'owner'), ('Property', 'property')],
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'art':          [('Artist', 'artist'), ('Title', 'title'),
-                     ('Year', 'year'), ('Medium', 'medium'),
-                     ('Owner', 'owner'), ('Property', 'property')],
+                     ('Year', 'year'),
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'items':        [('Name', 'name'), ('Type', 'type'),
                      ('Owner', 'owner'), ('Property', 'property'),
-                     ('Status', 'status')],
+                     ('Status', 'status'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'vehicles':     [('Year', 'year'), ('Make', 'make'), ('Model', 'model'),
                      ('VIN', 'vin'),
-                     ('Owner', 'owner'), ('Property', 'property')],
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'recordings':   [('Artist', 'artist'), ('Title', 'title'),
                      ('Type', 'recording_type'),
-                     ('Owner', 'owner'), ('Property', 'property')],
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'audio':        [('Make', 'make'), ('Model', 'model'),
                      ('Type', 'type'),
-                     ('Owner', 'owner'), ('Property', 'property')],
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'rifles':       [('Make', 'make'), ('Model', 'model'),
                      ('Caliber', 'caliber'), ('Serial', 'serial_number'),
-                     ('Owner', 'owner'), ('Property', 'property')],
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'credit_cards': [('Name', 'name'), ('Number', 'number'),
                      ('Owner', 'owner')],
     'properties':   [('Name', 'name'), ('Address', 'address'),
                      ('Type', 'type'), ('Status', 'status'),
-                     ('Owner', 'owner')],
+                     ('Owner', 'owner'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'persons':      [('Name', 'name'), ('Phone', 'phone'),
                      ('Email', 'email')],
 }
 
 
-# Detailed-mode caption fields per category — three short rows of
-# label/value pairs printed next to each thumbnail.
+# Detailed-mode caption fields per category — short label/value pairs
+# printed next to each thumbnail. Same Bought/Price additions as
+# compact mode so both layouts surface acquisition cost.
 REPORT_DETAILED_FIELDS = {
     'watches':      [('Ref', 'reference'), ('Year', 'year'),
                      ('Metal', 'metal'), ('Owner', 'owner'),
-                     ('Property', 'property'), ('Status', 'status')],
-    'coins':        [('Date', 'date_1'), ('Mint', 'mint'),
+                     ('Property', 'property'), ('Status', 'status'),
+                     ('Bought', 'date'), ('Price', 'price')],
+    'coins':        [('Minted', 'date_1'), ('Mint', 'mint'),
                      ('Grade', 'grade'), ('Metal', 'metal'),
-                     ('Owner', 'owner'), ('Property', 'property_name')],
+                     ('Owner', 'owner'), ('Property', 'property_name'),
+                     ('Bought', 'purchase_date'), ('Price', 'price')],
     'cameras':      [('Serial', 'serial_number'), ('Owner', 'owner'),
-                     ('Property', 'property'), ('Status', 'status')],
+                     ('Property', 'property'), ('Status', 'status'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'lenses':       [('Serial', 'serial_number'), ('Owner', 'owner'),
-                     ('Property', 'property')],
+                     ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'pens':         [('Type', 'type'), ('Owner', 'owner'),
-                     ('Property', 'property')],
+                     ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'art':          [('Year', 'year'), ('Medium', 'medium'),
-                     ('Owner', 'owner'), ('Property', 'property')],
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'items':        [('Type', 'type'), ('Owner', 'owner'),
-                     ('Property', 'property'), ('Status', 'status')],
+                     ('Property', 'property'), ('Status', 'status'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'vehicles':     [('VIN', 'vin'), ('Owner', 'owner'),
-                     ('Property', 'property')],
+                     ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'recordings':   [('Type', 'recording_type'), ('Owner', 'owner'),
-                     ('Property', 'property')],
+                     ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'audio':        [('Type', 'type'), ('Owner', 'owner'),
-                     ('Property', 'property')],
+                     ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'rifles':       [('Caliber', 'caliber'), ('Serial', 'serial_number'),
-                     ('Owner', 'owner'), ('Property', 'property')],
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'credit_cards': [('Number', 'number'), ('Owner', 'owner')],
     'properties':   [('Address', 'address'), ('Type', 'type'),
-                     ('Status', 'status'), ('Owner', 'owner')],
+                     ('Status', 'status'), ('Owner', 'owner'),
+                     ('Bought', 'date'), ('Price', 'price')],
     'persons':      [('Phone', 'phone'), ('Email', 'email')],
 }
+
+
+def _format_report_value(field_name, value):
+    """Stringify a row value for the report. Money fields get
+    "$1,234" formatting (drops the .0 SQLite returns for REAL
+    columns and the bare int otherwise prints with no thousands
+    separator). Everything else passes through unchanged."""
+    if value is None:
+        return ''
+    if field_name in ('price', 'value'):
+        try:
+            return '${:,.0f}'.format(float(value))
+        except (TypeError, ValueError):
+            pass
+    return str(value).strip()
 
 
 def _report_record_title(category, row):
@@ -10890,10 +10930,8 @@ def report_generate():
                     try:
                         v = r[fname]
                     except (KeyError, IndexError):
-                        v = ''
-                    if v is None:
-                        v = ''
-                    s = str(v).strip()
+                        v = None
+                    s = _format_report_value(fname, v)
                     line.append(Paragraph(s, cell))
                 data.append(line)
 
@@ -10945,10 +10983,11 @@ def report_generate():
                     try:
                         v = r[fname]
                     except (KeyError, IndexError):
-                        v = ''
-                    if v is None or (isinstance(v, str) and not v.strip()):
+                        v = None
+                    s = _format_report_value(fname, v)
+                    if not s:
                         continue
-                    pairs.append((label, str(v).strip()))
+                    pairs.append((label, s))
                 # Pack pairs into 2-column rows.
                 for i in range(0, len(pairs), 2):
                     left = pairs[i]
