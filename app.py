@@ -10541,6 +10541,607 @@ def record_print_pdf(category, record_id):
 
 
 # ---------------------------------------------------------------------------
+# Inventory report — compact one-document summary across categories.
+# Two layouts (detailed=thumbnail card, compact=spreadsheet row), filtered
+# by a chosen subset of categories and properties. Used for owner-side
+# "give me a printable list of everything" workflows on both the primary
+# (Mark) deployment and tenant deployments (e.g. Gerri).
+# ---------------------------------------------------------------------------
+
+# Compact-mode columns per category — short label + db column name. Picked
+# to land 6–8 columns wide so a row fits on Letter portrait without wrap.
+REPORT_COMPACT_COLS = {
+    'watches':      [('Brand', 'brand'), ('Model', 'model'), ('Ref', 'reference'),
+                     ('Year', 'year'), ('Metal', 'metal'),
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Status', 'status')],
+    'coins':        [('Cat', 'cat_id'), ('Authority', 'authority'),
+                     ('Denom', 'denomination'), ('Date', 'date_1'),
+                     ('Mint', 'mint'), ('Grade', 'grade'),
+                     ('Owner', 'owner'), ('Property', 'property_name')],
+    'cameras':      [('Make', 'make'), ('Model', 'model'),
+                     ('Serial', 'serial_number'),
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Status', 'status')],
+    'lenses':       [('Make', 'make'), ('Model', 'model'),
+                     ('Serial', 'serial_number'),
+                     ('Owner', 'owner'), ('Property', 'property')],
+    'pens':         [('Make', 'make'), ('Model', 'model'),
+                     ('Type', 'type'),
+                     ('Owner', 'owner'), ('Property', 'property')],
+    'art':          [('Artist', 'artist'), ('Title', 'title'),
+                     ('Year', 'year'), ('Medium', 'medium'),
+                     ('Owner', 'owner'), ('Property', 'property')],
+    'items':        [('Name', 'name'), ('Type', 'type'),
+                     ('Owner', 'owner'), ('Property', 'property'),
+                     ('Status', 'status')],
+    'vehicles':     [('Year', 'year'), ('Make', 'make'), ('Model', 'model'),
+                     ('VIN', 'vin'),
+                     ('Owner', 'owner'), ('Property', 'property')],
+    'recordings':   [('Artist', 'artist'), ('Title', 'title'),
+                     ('Type', 'recording_type'),
+                     ('Owner', 'owner'), ('Property', 'property')],
+    'audio':        [('Make', 'make'), ('Model', 'model'),
+                     ('Type', 'type'),
+                     ('Owner', 'owner'), ('Property', 'property')],
+    'rifles':       [('Make', 'make'), ('Model', 'model'),
+                     ('Caliber', 'caliber'), ('Serial', 'serial_number'),
+                     ('Owner', 'owner'), ('Property', 'property')],
+    'credit_cards': [('Name', 'name'), ('Number', 'number'),
+                     ('Owner', 'owner')],
+    'properties':   [('Name', 'name'), ('Address', 'address'),
+                     ('Type', 'type'), ('Status', 'status'),
+                     ('Owner', 'owner')],
+    'persons':      [('Name', 'name'), ('Phone', 'phone'),
+                     ('Email', 'email')],
+}
+
+
+# Detailed-mode caption fields per category — three short rows of
+# label/value pairs printed next to each thumbnail.
+REPORT_DETAILED_FIELDS = {
+    'watches':      [('Ref', 'reference'), ('Year', 'year'),
+                     ('Metal', 'metal'), ('Owner', 'owner'),
+                     ('Property', 'property'), ('Status', 'status')],
+    'coins':        [('Date', 'date_1'), ('Mint', 'mint'),
+                     ('Grade', 'grade'), ('Metal', 'metal'),
+                     ('Owner', 'owner'), ('Property', 'property_name')],
+    'cameras':      [('Serial', 'serial_number'), ('Owner', 'owner'),
+                     ('Property', 'property'), ('Status', 'status')],
+    'lenses':       [('Serial', 'serial_number'), ('Owner', 'owner'),
+                     ('Property', 'property')],
+    'pens':         [('Type', 'type'), ('Owner', 'owner'),
+                     ('Property', 'property')],
+    'art':          [('Year', 'year'), ('Medium', 'medium'),
+                     ('Owner', 'owner'), ('Property', 'property')],
+    'items':        [('Type', 'type'), ('Owner', 'owner'),
+                     ('Property', 'property'), ('Status', 'status')],
+    'vehicles':     [('VIN', 'vin'), ('Owner', 'owner'),
+                     ('Property', 'property')],
+    'recordings':   [('Type', 'recording_type'), ('Owner', 'owner'),
+                     ('Property', 'property')],
+    'audio':        [('Type', 'type'), ('Owner', 'owner'),
+                     ('Property', 'property')],
+    'rifles':       [('Caliber', 'caliber'), ('Serial', 'serial_number'),
+                     ('Owner', 'owner'), ('Property', 'property')],
+    'credit_cards': [('Number', 'number'), ('Owner', 'owner')],
+    'properties':   [('Address', 'address'), ('Type', 'type'),
+                     ('Status', 'status'), ('Owner', 'owner')],
+    'persons':      [('Phone', 'phone'), ('Email', 'email')],
+}
+
+
+def _report_record_title(category, row):
+    """Row identifier used as the bold header line in detailed mode and
+    the leading column in compact mode. Reuses EXPORT_LAYOUT's ident
+    when defined so report titles match the export-folder naming."""
+    plan = EXPORT_LAYOUT.get(category, {})
+    try:
+        if plan.get('ident'):
+            return (plan['ident'](row) or '').strip()
+    except Exception:
+        pass
+    info = CATEGORIES.get(category, {})
+    lf = info.get('label_field')
+    sf = info.get('sublabel_field')
+    parts = []
+    for f in (lf, sf):
+        if not f:
+            continue
+        try:
+            v = row[f]
+        except (KeyError, IndexError):
+            v = None
+        if v:
+            parts.append(str(v).strip())
+    return ' '.join(parts).strip() or (row['id'][:8] if 'id' in row.keys() else '')
+
+
+def _report_property_predicate(category, properties):
+    """SQL fragment + params restricting `category` rows to the given
+    property names. Returns ('', []) when no filter applies (all
+    properties chosen, or category has no property field)."""
+    if not properties:
+        return '', []
+    # Properties category itself: match by name.
+    if category == 'properties':
+        ph = ','.join(['?' for _ in properties])
+        return f"(LOWER(TRIM(COALESCE(name,''))) IN ({ph}))", \
+               [p.lower().strip() for p in properties]
+    prop_col = CATEGORY_PROPERTY_FIELD.get(category)
+    if not prop_col:
+        # Category has no property field — return a never-true predicate
+        # so a property-restricted run yields zero rows for it instead
+        # of returning the entire table.
+        return '(1=0)', []
+    expanded = []
+    for p in properties:
+        expanded.extend(_property_alias_group(p))
+    if not expanded:
+        return '', []
+    seen, dedup = set(), []
+    for v in expanded:
+        if v not in seen:
+            seen.add(v)
+            dedup.append(v)
+    ph = ','.join(['?' for _ in dedup])
+    return f"(LOWER(TRIM(COALESCE({prop_col},''))) IN ({ph}))", dedup
+
+
+def _report_primary_image(category, row):
+    """Absolute path to a thumbnail-able cover image for this row, or
+    None when no image is on disk."""
+    candidates = []
+    info_field = CATEGORIES.get(category, {}).get('image_field')
+    if info_field:
+        candidates.append(info_field)
+    candidates.extend(['image', 'image_obv', 'image_1', 'image_front',
+                       'head_shot'])
+    seen = set()
+    for c in candidates:
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        try:
+            v = (row[c] or '').strip()
+        except (KeyError, IndexError):
+            continue
+        if v and is_image_filter(v):
+            p = os.path.join(UPLOAD_FOLDER, v)
+            if os.path.isfile(p):
+                return p
+    return None
+
+
+@app.route('/report/options', methods=['GET'])
+def report_options():
+    """JSON: categories the current user can include in a report, plus
+    the deployment's property names. Drives the Report dialog's
+    checkbox groups."""
+    if not g.get('current_user'):
+        abort(403)
+    allowed = g.get('allowed_cats') or set()
+    cats = [
+        {'slug': slug, 'label': CATEGORIES[slug]['name'],
+         'icon':  CATEGORIES[slug].get('icon', '')}
+        for slug in CATEGORIES if slug in allowed
+    ]
+    db = get_db()
+    rows = db.execute(
+        "SELECT name, short_name FROM properties "
+        "WHERE COALESCE(NULLIF(name,''), short_name) IS NOT NULL "
+        "  AND COALESCE(NULLIF(name,''), short_name) != '' "
+        "ORDER BY LOWER(COALESCE(NULLIF(name,''), short_name))"
+    ).fetchall()
+    seen, props = set(), []
+    for r in rows:
+        n = (r['name'] or '').strip() or (r['short_name'] or '').strip()
+        if n and n not in seen:
+            seen.add(n)
+            props.append(n)
+    return jsonify({'categories': cats, 'properties': props})
+
+
+@app.route('/report/generate', methods=['GET'])
+def report_generate():
+    """Build a one-document inventory report PDF.
+
+    Query string:
+      mode=detailed | compact     (default: compact)
+      categories=watches,coins…   ('*' or omitted = all allowed)
+      properties=Carpinteria,…    ('*' or omitted = all)
+
+    The detailed layout prints a thumbnail + caption per record.
+    The compact layout prints a single spreadsheet row per record.
+    Categories print in the order listed in CATEGORIES and respect
+    g.allowed_cats / row-level access — the same scoping the rest of
+    the app uses, so a tenant deployment automatically restricts to
+    its own slice without any extra config."""
+    if not g.get('current_user'):
+        abort(403)
+
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                     Paragraph, Spacer, Image, KeepTogether,
+                                     PageBreak)
+    import io as _io
+
+    mode = (request.args.get('mode') or 'compact').strip().lower()
+    if mode not in ('detailed', 'compact'):
+        mode = 'compact'
+
+    cats_raw = (request.args.get('categories') or '*').strip()
+    props_raw = (request.args.get('properties') or '*').strip()
+
+    allowed = g.get('allowed_cats') or set()
+    if cats_raw == '*' or not cats_raw:
+        selected_cats = [c for c in CATEGORIES if c in allowed]
+    else:
+        wanted = {c.strip() for c in cats_raw.split(',') if c.strip()}
+        selected_cats = [c for c in CATEGORIES if c in wanted and c in allowed]
+
+    if props_raw == '*' or not props_raw:
+        properties = None
+    else:
+        properties = [p.strip() for p in props_raw.split(',') if p.strip()]
+
+    db = get_db()
+    buf = _io.BytesIO()
+    pagesize = landscape(letter) if mode == 'compact' else letter
+    doc = SimpleDocTemplate(buf, pagesize=pagesize,
+                            leftMargin=0.4 * inch, rightMargin=0.4 * inch,
+                            topMargin=0.4 * inch, bottomMargin=0.4 * inch)
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle('rh1', parent=styles['Heading1'],
+                        fontSize=18, spaceAfter=4)
+    h2 = ParagraphStyle('rh2', parent=styles['Heading2'],
+                        fontSize=13, spaceBefore=10, spaceAfter=4)
+    sub = ParagraphStyle('rsub', parent=styles['Normal'],
+                         fontSize=9, textColor=colors.grey, spaceAfter=8)
+    cell = ParagraphStyle('rcell', parent=styles['Normal'],
+                          fontSize=8, leading=10)
+    cell_bold = ParagraphStyle('rcellb', parent=cell, fontName='Helvetica-Bold')
+    cell_h = ParagraphStyle('rcellh', parent=cell,
+                            fontName='Helvetica-Bold', fontSize=7,
+                            textColor=colors.HexColor('#555'))
+    title_p = ParagraphStyle('rtitle', parent=styles['Normal'],
+                             fontSize=10, fontName='Helvetica-Bold',
+                             leading=12)
+    cap = ParagraphStyle('rcap', parent=cell, fontSize=8, leading=10)
+    cap_lbl = ParagraphStyle('rcaplbl', parent=cell,
+                             fontSize=7, textColor=colors.HexColor('#777'),
+                             leading=9)
+
+    story = []
+    user = g.current_user
+    user_name = (user.get('display_name') or user.get('email') or 'StuffApp')
+    title = 'Inventory Report'
+    if properties:
+        title += f' — {", ".join(properties)}'
+    story.append(Paragraph(title, h1))
+    bits = [user_name, datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')]
+    if cats_raw not in ('', '*'):
+        bits.append('Categories: ' + ', '.join(
+            CATEGORIES[c]['name'] for c in selected_cats))
+    else:
+        bits.append('All categories')
+    story.append(Paragraph(' · '.join(bits), sub))
+
+    grand_total = 0
+    for cat in selected_cats:
+        info = CATEGORIES[cat]
+        table_name = info['table']
+        cat_label = EXPORT_CATEGORY_LABELS.get(cat, info['name'])
+
+        # Property predicate first so a property-restricted report
+        # zeroes out rows for property-less categories.
+        prop_clause, prop_params = _report_property_predicate(cat, properties)
+
+        wheres, params = [], []
+        if prop_clause:
+            wheres.append(prop_clause)
+            params.extend(prop_params)
+
+        # Same row-level access enforcement the list view uses, so a
+        # restricted member sees only their share in the report.
+        _apply_row_filter_clauses(cat, wheres, params)
+
+        order_by = CATEGORY_ORDER_BY.get(cat, 'created_at DESC')
+        where_sql = f'WHERE {" AND ".join(wheres)}' if wheres else ''
+        sql = f'SELECT * FROM {table_name} {where_sql} ORDER BY {order_by}'
+        try:
+            rows = db.execute(sql, params).fetchall()
+        except sqlite3.OperationalError:
+            # Bad ORDER BY column on a category that hasn't defined one
+            # — fall back to created_at.
+            sql = f'SELECT * FROM {table_name} {where_sql} ORDER BY created_at DESC'
+            rows = db.execute(sql, params).fetchall()
+        # Belt-and-suspenders: filter through _user_can_see_row in case
+        # a category has filters not expressible as a SQL IN clause.
+        rows = [r for r in rows if _user_can_see_row(cat, r)]
+
+        if not rows:
+            continue
+
+        story.append(Paragraph(
+            f'{info.get("icon","")}  {cat_label}  '
+            f'<font size=9 color="#888">({len(rows)})</font>',
+            h2))
+        grand_total += len(rows)
+
+        if mode == 'compact':
+            cols = REPORT_COMPACT_COLS.get(cat) or []
+            # Header row: ID + chosen short cols.
+            header = [Paragraph('<b>Item</b>', cell_h)]
+            for label, _ in cols:
+                header.append(Paragraph(f'<b>{label}</b>', cell_h))
+            data = [header]
+            for r in rows:
+                line = [Paragraph(_report_record_title(cat, r) or '—',
+                                  cell_bold)]
+                for _, fname in cols:
+                    try:
+                        v = r[fname]
+                    except (KeyError, IndexError):
+                        v = ''
+                    if v is None:
+                        v = ''
+                    s = str(v).strip()
+                    line.append(Paragraph(s, cell))
+                data.append(line)
+
+            # Wider Item column, even split across the rest.
+            n_cols = 1 + len(cols)
+            item_w = doc.width * 0.22
+            rest = (doc.width - item_w) / max(1, n_cols - 1)
+            col_widths = [item_w] + [rest] * (n_cols - 1)
+            tbl = Table(data, colWidths=col_widths, repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, -1), 2),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                ('LINEBELOW', (0, 0), (-1, 0), 0.5, colors.black),
+                ('LINEBELOW', (0, 1), (-1, -1), 0.25, colors.HexColor('#ddd')),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eef')),
+            ]))
+            story.append(tbl)
+            story.append(Spacer(1, 6))
+
+        else:
+            # Detailed: thumbnail + 3-col caption grid, two records per
+            # row across the page. Each record renders as a 2x1 table
+            # (image | caption) and pairs of records sit side by side.
+            field_plan = REPORT_DETAILED_FIELDS.get(cat) or []
+            cards = []
+            for r in rows:
+                img_path = _report_primary_image(cat, r)
+                img_cell = ''
+                if img_path:
+                    try:
+                        ir = ImageReader(img_path)
+                        iw, ih = ir.getSize()
+                        max_w, max_h = 1.1 * inch, 1.1 * inch
+                        scale = min(max_w / iw, max_h / ih)
+                        img_cell = Image(img_path, width=iw * scale,
+                                          height=ih * scale)
+                    except Exception:
+                        img_cell = ''
+                # Caption block: title at top, then 2-col label/value
+                # pairs in a small grid.
+                cap_rows = [[Paragraph(_report_record_title(cat, r) or '—',
+                                        title_p), '']]
+                pairs = []
+                for label, fname in field_plan:
+                    try:
+                        v = r[fname]
+                    except (KeyError, IndexError):
+                        v = ''
+                    if v is None or (isinstance(v, str) and not v.strip()):
+                        continue
+                    pairs.append((label, str(v).strip()))
+                # Pack pairs into 2-column rows.
+                for i in range(0, len(pairs), 2):
+                    left = pairs[i]
+                    right = pairs[i + 1] if i + 1 < len(pairs) else None
+                    lcell = Paragraph(
+                        f'{left[1]}<br/><font size=6 color="#888">{left[0]}</font>',
+                        cap)
+                    rcell = ''
+                    if right:
+                        rcell = Paragraph(
+                            f'{right[1]}<br/><font size=6 color="#888">{right[0]}</font>',
+                            cap)
+                    cap_rows.append([lcell, rcell])
+
+                caption_tbl = Table(cap_rows, colWidths=['50%', '50%'])
+                caption_tbl.setStyle(TableStyle([
+                    ('SPAN', (0, 0), (1, 0)),  # title spans both columns
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+                    ('TOPPADDING', (0, 0), (-1, -1), 1),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+                ]))
+                card = Table([[img_cell, caption_tbl]],
+                             colWidths=[1.2 * inch, doc.width / 2 - 1.2 * inch - 0.1 * inch])
+                card.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('BOX', (0, 0), (-1, -1), 0.25, colors.HexColor('#ddd')),
+                ]))
+                cards.append(card)
+
+            # Pair cards into rows of 2.
+            for i in range(0, len(cards), 2):
+                left = cards[i]
+                right = cards[i + 1] if i + 1 < len(cards) else ''
+                pair = Table([[left, right]],
+                             colWidths=[doc.width / 2, doc.width / 2])
+                pair.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                    ('TOPPADDING', (0, 0), (-1, -1), 0),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ]))
+                story.append(pair)
+            story.append(Spacer(1, 4))
+
+    if grand_total == 0:
+        story.append(Paragraph('No matching records.', sub))
+    else:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph(
+            f'<font size=9 color="#888">Total: {grand_total} record'
+            f'{"" if grand_total == 1 else "s"}</font>', sub))
+
+    doc.build(story)
+    buf.seek(0)
+    fname = f'Inventory Report — {datetime.utcnow().strftime("%Y-%m-%d")}.pdf'
+    return send_file(buf, as_attachment=False,
+                     download_name=fname,
+                     mimetype='application/pdf')
+
+
+# ---------------------------------------------------------------------------
+# Offline / read-only PWA support. The service worker (static/js/sw.js)
+# does cache-first for /static, /uploads, /file-thumb and network-first
+# for app pages, so a low-connectivity iPhone keeps working as long as
+# the user pre-warmed the cache via the "Offline" nav button.
+#
+# /sw.js — proxy that serves static/js/sw.js at the site root so its
+#          default scope covers every URL, not just /static/js/.
+# /offline/manifest — JSON list of every URL the pre-warm walker hits.
+# ---------------------------------------------------------------------------
+
+@app.route('/sw.js')
+def service_worker():
+    """Serve the worker file at the root path so Service Worker scope
+    defaults to the entire app — without needing the
+    Service-Worker-Allowed header trick."""
+    p = os.path.join(app.static_folder or 'static', 'js', 'sw.js')
+    if not os.path.isfile(p):
+        abort(404)
+    resp = send_file(p, mimetype='application/javascript', max_age=0)
+    # Don't let an intermediate cache pin a stale worker — the browser's
+    # own update check handles freshness. Service-Worker-Allowed left
+    # off because /sw.js's default scope is already '/'.
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
+
+
+@app.route('/offline/manifest', methods=['GET'])
+def offline_manifest():
+    """JSON: every URL the offline pre-warm walker should hit. Includes
+    list pages, detail pages, and every uploaded file referenced by
+    visible records. Scoped to g.allowed_cats + row filters so a
+    member only pre-warms what they can already see."""
+    if not g.get('current_user'):
+        abort(403)
+    db = get_db()
+    allowed = g.get('allowed_cats') or set()
+
+    pages = []
+    images = []
+    docs = []  # non-image files (PDFs etc.) — kept separate so the UI
+               # can show them as "documents" in progress reporting.
+
+    for slug, info in CATEGORIES.items():
+        if slug not in allowed:
+            continue
+        table = info['table']
+        # Reuse the list-view's pagination by hitting the bare list URL —
+        # cached HTML lets the offline user navigate categories.
+        pages.append(url_for('list_view', category=slug))
+
+        wheres, params = [], []
+        _apply_row_filter_clauses(slug, wheres, params)
+        where_sql = f'WHERE {" AND ".join(wheres)}' if wheres else ''
+        try:
+            rows = db.execute(
+                f'SELECT * FROM {table} {where_sql}', params
+            ).fetchall()
+        except sqlite3.OperationalError:
+            continue
+        rows = [r for r in rows if _user_can_see_row(slug, r)]
+
+        # Collect every file slot defined for this category, plus
+        # whatever the JSON `documents` (or persons' id_documents /
+        # health_documents) column carries. UUID-stamped filenames
+        # mean a single SET dedupes naturally.
+        file_fields = [f['name'] for f in FIELDS.get(slug, [])
+                       if f.get('type') == 'file']
+        doc_cols = list(DOC_SETS_BY_CATEGORY.get(slug, {}).values())
+
+        for r in rows:
+            try:
+                rid = r['id']
+            except (KeyError, IndexError):
+                continue
+            pages.append(url_for('detail_view', category=slug, record_id=rid))
+
+            # Fixed-slot files.
+            for f in file_fields:
+                try:
+                    v = (r[f] or '').strip()
+                except (KeyError, IndexError):
+                    v = ''
+                if not v:
+                    continue
+                target = images if is_image_filter(v) else docs
+                target.append(url_for('uploaded_file', filename=v))
+
+            # JSON documents column(s).
+            for col in doc_cols:
+                try:
+                    raw = r[col]
+                except (KeyError, IndexError):
+                    raw = None
+                if not raw:
+                    continue
+                try:
+                    arr = json.loads(raw) if isinstance(raw, str) else raw
+                except (ValueError, TypeError):
+                    arr = None
+                if not isinstance(arr, list):
+                    continue
+                for item in arr:
+                    if not isinstance(item, dict):
+                        continue
+                    fn = (item.get('filename') or '').strip()
+                    if not fn:
+                        continue
+                    target = images if is_image_filter(fn) else docs
+                    target.append(url_for('uploaded_file', filename=fn))
+
+    # Dedupe while preserving order so progress feels predictable.
+    def _dedup(seq):
+        seen, out = set(), []
+        for u in seq:
+            if u not in seen:
+                seen.add(u)
+                out.append(u)
+        return out
+
+    return jsonify({
+        'pages': _dedup(pages),
+        'images': _dedup(images),
+        'docs': _dedup(docs),
+        'generated_at': datetime.utcnow().isoformat() + 'Z',
+    })
+
+
+# ---------------------------------------------------------------------------
 # Per-row data snapshots (_data.json). Pair with admin_export_files's per-row
 # JSON write so the StuffFiles mirror round-trips: sweep can read the
 # snapshot back to recreate or fill rows when the SQLite DB is missing or

@@ -92,6 +92,26 @@
   </div>
 
   <div class="nav-right">
+    {# Inventory report: open to anyone authenticated. The dialog +
+       generated PDF respect the user's allowed_cats and row filters,
+       so a member sees only their own slice. #}
+    {% if current_user %}
+    <a href="#" class="nav-item nav-report" id="navReportLink"
+       title="Generate a printable inventory report (compact or with images)"
+       onclick="openReportDialog(event)">
+      <span class="icon">📋</span>
+      <span class="lbl">Report</span>
+    </a>
+    {# Offline pre-warm: cache every page + image so the app keeps
+       working in low-connectivity areas (mainly iPhone PWAs). Read-
+       only — edits still require connectivity. #}
+    <a href="#" class="nav-item nav-offline" id="navOfflineLink"
+       title="Cache every page and image so the app works offline"
+       onclick="return startOfflineWarm(event, this)">
+      <span class="icon" id="navOfflineIcon">📥</span>
+      <span class="lbl" id="navOfflineLabel">Offline</span>
+    </a>
+    {% endif %}
     {# Files (export) and Sweep (re-import) are owner-role tools —
        member-role users on a third-party deployment don't get them. #}
     {% if current_user and current_user.role == 'owner' %}
@@ -123,6 +143,237 @@
 
 <!-- Toast for export progress / completion -->
 <div id="exportToast" class="export-toast" hidden></div>
+
+{% if current_user %}
+<!-- Inventory report dialog: opened by the Report nav button. The
+     option lists are populated lazily from /report/options on first
+     open so the per-page render isn't paying for the property query. -->
+<dialog id="reportDialog" class="report-dialog">
+  <form method="GET" action="{{ url_for('report_generate') }}"
+        target="_blank" id="reportForm" onsubmit="return prepReportSubmit(this)">
+    <div class="rd-header">
+      <h2>Inventory Report</h2>
+      <button type="button" class="rd-close" aria-label="Close"
+              onclick="document.getElementById('reportDialog').close()">×</button>
+    </div>
+
+    <fieldset class="rd-section">
+      <legend>Layout</legend>
+      <label class="rd-radio">
+        <input type="radio" name="mode" value="compact" checked>
+        <span><b>Compact</b> — one or two lines per item, spreadsheet style (no images)</span>
+      </label>
+      <label class="rd-radio">
+        <input type="radio" name="mode" value="detailed">
+        <span><b>Detailed</b> — thumbnail + key fields per item</span>
+      </label>
+    </fieldset>
+
+    <fieldset class="rd-section">
+      <legend>Categories</legend>
+      <label class="rd-radio">
+        <input type="radio" name="categories_mode" value="all" checked
+               onchange="syncReportToggles('categories')">
+        <span>All categories I can see</span>
+      </label>
+      <label class="rd-radio">
+        <input type="radio" name="categories_mode" value="choose"
+               onchange="syncReportToggles('categories')">
+        <span>Choose…</span>
+      </label>
+      <div class="rd-grid" id="rdCategories"></div>
+    </fieldset>
+
+    <fieldset class="rd-section">
+      <legend>Properties</legend>
+      <label class="rd-radio">
+        <input type="radio" name="properties_mode" value="all" checked
+               onchange="syncReportToggles('properties')">
+        <span>All properties</span>
+      </label>
+      <label class="rd-radio">
+        <input type="radio" name="properties_mode" value="choose"
+               onchange="syncReportToggles('properties')">
+        <span>Choose…</span>
+      </label>
+      <div class="rd-grid" id="rdProperties"></div>
+      <p class="rd-hint">Categories without a property field (cards, people)
+        are skipped when specific properties are chosen.</p>
+    </fieldset>
+
+    <div class="rd-actions">
+      <button type="button" class="rd-btn"
+              onclick="document.getElementById('reportDialog').close()">Cancel</button>
+      <button type="submit" class="rd-btn rd-btn-primary">Generate PDF</button>
+    </div>
+  </form>
+</dialog>
+
+<style>
+  .nav-report .icon { font-size: 18px; }
+  .report-dialog {
+    border: 1px solid #ccc; border-radius: 10px; padding: 0;
+    width: min(560px, 92vw); max-height: 90vh;
+    box-shadow: 0 12px 40px rgba(0,0,0,.18);
+  }
+  .report-dialog::backdrop { background: rgba(0,0,0,.35); }
+  .report-dialog form {
+    display: flex; flex-direction: column;
+    max-height: 90vh; overflow: hidden;
+  }
+  .rd-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid #eee;
+  }
+  .rd-header h2 { margin: 0; font-size: 18px; font-weight: 600; }
+  .rd-close {
+    background: none; border: none; font-size: 24px; line-height: 1;
+    cursor: pointer; color: #666; padding: 0 4px;
+  }
+  .rd-close:hover { color: #000; }
+  .rd-section {
+    border: none; padding: 12px 18px; margin: 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .rd-section legend {
+    font-weight: 600; font-size: 13px; color: #333;
+    text-transform: uppercase; letter-spacing: .04em;
+    padding: 0 0 6px 0;
+  }
+  .rd-radio {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 4px 0; cursor: pointer; font-size: 14px;
+  }
+  .rd-radio input { margin-top: 3px; }
+  .rd-grid {
+    display: none; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 4px 12px; margin-top: 8px; padding: 8px;
+    border: 1px solid #eee; border-radius: 6px; background: #fafafa;
+    max-height: 220px; overflow-y: auto;
+  }
+  .rd-grid.active { display: grid; }
+  .rd-grid label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; padding: 2px 0; cursor: pointer;
+  }
+  .rd-hint { font-size: 12px; color: #888; margin: 8px 0 0 0; }
+  .rd-actions {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 12px 18px; border-top: 1px solid #eee; background: #fafafa;
+  }
+  .rd-btn {
+    padding: 8px 16px; border: 1px solid #ccc; background: #fff;
+    border-radius: 6px; cursor: pointer; font-size: 14px;
+  }
+  .rd-btn:hover { background: #f0f0f0; }
+  .rd-btn-primary {
+    background: var(--blue, #0f2f66); border-color: var(--blue, #0f2f66);
+    color: #fff;
+  }
+  .rd-btn-primary:hover { background: #0050c0; }
+</style>
+
+<script>
+let _reportOptionsLoaded = false;
+
+async function openReportDialog(ev) {
+  if (ev) ev.preventDefault();
+  const dlg = document.getElementById('reportDialog');
+  if (!dlg) return false;
+  if (!_reportOptionsLoaded) {
+    try {
+      const r = await fetch('/report/options', { credentials: 'same-origin' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      const catBox = document.getElementById('rdCategories');
+      catBox.innerHTML = (d.categories || []).map(c =>
+        `<label><input type="checkbox" name="cat" value="${c.slug}">` +
+        `<span>${c.icon || ''} ${c.label}</span></label>`
+      ).join('');
+      const propBox = document.getElementById('rdProperties');
+      const props = d.properties || [];
+      if (props.length === 0) {
+        propBox.innerHTML = '<span style="color:#888;font-size:13px">No properties on file.</span>';
+      } else {
+        propBox.innerHTML = props.map(p =>
+          `<label><input type="checkbox" name="prop" value="${p.replace(/"/g,'&quot;')}">` +
+          `<span>${p}</span></label>`
+        ).join('');
+      }
+      _reportOptionsLoaded = true;
+    } catch (err) {
+      alert('Could not load report options: ' + (err.message || err));
+      return false;
+    }
+  }
+  syncReportToggles('categories');
+  syncReportToggles('properties');
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else dlg.setAttribute('open', '');
+  return false;
+}
+
+function syncReportToggles(group) {
+  const mode = document.querySelector(
+    `#reportForm input[name="${group}_mode"]:checked`)?.value;
+  const grid = document.getElementById(
+    group === 'categories' ? 'rdCategories' : 'rdProperties');
+  if (!grid) return;
+  grid.classList.toggle('active', mode === 'choose');
+}
+
+// Translate the dialog form into the URL params /report/generate expects:
+//   categories=<csv>|*  properties=<csv>|*  mode=<detailed|compact>
+// Done in JS so the dialog can keep its friendlier "All / Choose" radio
+// pattern without a server-side translation step.
+function prepReportSubmit(form) {
+  const mode = form.querySelector('input[name="mode"]:checked').value;
+  const catMode = form.querySelector('input[name="categories_mode"]:checked').value;
+  const propMode = form.querySelector('input[name="properties_mode"]:checked').value;
+  const cats = catMode === 'all'
+    ? '*'
+    : Array.from(form.querySelectorAll('input[name="cat"]:checked'))
+            .map(i => i.value).join(',');
+  const props = propMode === 'all'
+    ? '*'
+    : Array.from(form.querySelectorAll('input[name="prop"]:checked'))
+            .map(i => i.value).join(',');
+  if (catMode === 'choose' && !cats) {
+    alert('Pick at least one category, or switch back to "All categories".');
+    return false;
+  }
+  if (propMode === 'choose' && !props) {
+    alert('Pick at least one property, or switch back to "All properties".');
+    return false;
+  }
+  // Strip the dialog-only fields from the GET so the URL stays clean,
+  // then inject single hidden inputs holding the resolved csv values.
+  Array.from(form.querySelectorAll('input[name="cat"], input[name="prop"], ' +
+    'input[name="categories_mode"], input[name="properties_mode"]'))
+    .forEach(i => i.disabled = true);
+  let h = form.querySelector('input[name="categories"]');
+  if (!h) {
+    h = document.createElement('input');
+    h.type = 'hidden'; h.name = 'categories';
+    form.appendChild(h);
+  }
+  h.value = cats;
+  let h2 = form.querySelector('input[name="properties"]');
+  if (!h2) {
+    h2 = document.createElement('input');
+    h2.type = 'hidden'; h2.name = 'properties';
+    form.appendChild(h2);
+  }
+  h2.value = props;
+  // Re-enable disabled fields in 0ms after submit so a re-open finds
+  // them intact (the dialog is reused across opens).
+  setTimeout(() => {
+    form.querySelectorAll('input[disabled]').forEach(i => i.disabled = false);
+  }, 0);
+  return true;
+}
+</script>
+{% endif %}
 
 <!-- fflate for streaming zip extraction (used by sync.js when the
      browser supports the File System Access API). Streaming so a
@@ -373,5 +624,116 @@ async function startSyncUp(ev, link) {
 </main>
 
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+{% if current_user %}
+<script>
+// Service worker — read-only offline cache. Registered at root scope so
+// it intercepts every URL the app uses. Quietly skipped on browsers
+// without SW support (none of the current targets, but harmless).
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('[SW] register failed:', err);
+    });
+  });
+}
+
+// "Offline" button click handler. Walks /offline/manifest, hands the URL
+// list to the active service worker via postMessage, and shows progress
+// in the existing exportToast.
+async function startOfflineWarm(ev, link) {
+  ev.preventDefault();
+  if (!('serviceWorker' in navigator)) {
+    alert('This browser does not support offline caching.');
+    return false;
+  }
+  const ui = _busy(link, 'navOfflineIcon', 'navOfflineLabel', '⏳', 'Caching');
+  if (!ui) return false;
+
+  let reg;
+  try {
+    reg = await navigator.serviceWorker.ready;
+  } catch (err) {
+    ui.done('err', 'Service worker unavailable: ' + (err.message || err));
+    return false;
+  }
+  if (!reg.active) {
+    // First-ever load: SW just installed, give it a beat to take over.
+    await new Promise(r => setTimeout(r, 500));
+    if (!reg.active) {
+      ui.done('err', 'Service worker still installing — try again in a moment.');
+      return false;
+    }
+  }
+
+  let manifest;
+  try {
+    ui.progress('Building offline list…');
+    const r = await fetch('/offline/manifest', { credentials: 'same-origin' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    manifest = await r.json();
+  } catch (err) {
+    ui.done('err', 'Could not list offline content: ' + (err.message || err));
+    return false;
+  }
+
+  const urls = [].concat(manifest.pages || [],
+                          manifest.images || [],
+                          manifest.docs || []);
+  if (urls.length === 0) {
+    ui.done('ok', 'Nothing to cache.');
+    return false;
+  }
+  ui.progress(`Caching 0 / ${urls.length}…`);
+
+  // MessageChannel: SW posts {done,total,ok,failed[,finished]} on port1.
+  const ch = new MessageChannel();
+  const result = await new Promise((resolve) => {
+    ch.port1.onmessage = (e) => {
+      const d = e.data || {};
+      if (d.finished) {
+        resolve(d);
+      } else {
+        ui.progress(`Caching ${d.done} / ${d.total}…`);
+      }
+    };
+    reg.active.postMessage({ type: 'WARM', urls }, [ch.port2]);
+  });
+
+  // Stamp localStorage so the indicator can show the last warm-up time
+  // — useful when the user wonders "did I cache this before the trip?".
+  try {
+    localStorage.setItem('stuffapp:offlineCachedAt', new Date().toISOString());
+    localStorage.setItem('stuffapp:offlineCachedCount', String(result.ok));
+  } catch (_) {}
+
+  const summary =
+    `Cached ${result.ok} / ${result.total}` +
+    (result.failed ? ` · ${result.failed} failed (see console)` : '');
+  ui.done(result.failed > 0 && result.ok === 0 ? 'err' : 'ok', summary);
+  refreshOfflineStatus();
+  return false;
+}
+
+// Tint the Offline pill green once anything has been cached, with the
+// last warm-up time as the tooltip. Cheap localStorage lookup — no
+// network call.
+function refreshOfflineStatus() {
+  const link = document.getElementById('navOfflineLink');
+  if (!link) return;
+  let when = null, count = 0;
+  try {
+    when = localStorage.getItem('stuffapp:offlineCachedAt');
+    count = parseInt(localStorage.getItem('stuffapp:offlineCachedCount') || '0', 10);
+  } catch (_) { return; }
+  if (!when) return;
+  link.classList.add('fresh');
+  const d = new Date(when);
+  link.title = `Cached ${count} item(s) on ${d.toLocaleString()} — tap to refresh`;
+}
+document.addEventListener('DOMContentLoaded', refreshOfflineStatus);
+</script>
+{% endif %}
+
 </body>
 </html>
