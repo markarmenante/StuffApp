@@ -14,7 +14,10 @@
  * a stale CF cookie doesn't poison the cache with login HTML.
  */
 
-const VERSION = 'v1';
+// Bump on every shipped change to invalidate old caches: a stale CSS
+// entry from before the random→asset_v cache-buster fix would otherwise
+// linger and keep rendering the un-styled page offline.
+const VERSION = 'v2';
 const SHELL_CACHE = `stuffapp-shell-${VERSION}`;
 const DATA_CACHE  = `stuffapp-data-${VERSION}`;
 
@@ -88,7 +91,13 @@ self.addEventListener('fetch', (event) => {
 
 async function cacheFirst(req, cacheName) {
   const cache = await caches.open(cacheName);
-  const hit = await cache.match(req);
+  // ignoreSearch fallback: cache-buster query strings on /static/
+  // assets change every deploy; we still want offline hits against
+  // an earlier-cached version of the same path. Harmless for
+  // /uploads and /file-thumb since those identify content by their
+  // uuid path, not the query.
+  let hit = await cache.match(req);
+  if (!hit) hit = await cache.match(req, { ignoreSearch: true });
   if (hit) return hit;
   try {
     const resp = await fetch(req);

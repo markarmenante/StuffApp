@@ -9,7 +9,12 @@
        we want them to be. -->
   <meta name="format-detection" content="telephone=no">
   <title>{% block title %}StuffApp{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?t={{ range(100000,999999)|random }}">
+  {# Stable mtime-based cache buster (matches the JS asset_v pattern):
+     a fresh deploy bumps the URL, but every render of a given build
+     emits the same URL — so the service worker can actually serve
+     the cached CSS when offline. The previous `?t=random` token
+     defeated both the browser cache and the SW cache. #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ asset_v('css/style.css') }}">
 
   {# PWA install: lets the user "Install StuffApp" from the browser's
      address bar (Chromium) or "Add to Home Screen" (iOS Safari) so
