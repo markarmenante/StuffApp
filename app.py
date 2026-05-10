@@ -431,11 +431,13 @@ FIELDS = {
         # all stays out of the working set. Free-text values typed
         # before this dropdown was added still display fine on detail
         # pages — the select just can't reproduce them on edit until
-        # the user picks one of the canonical entries.
+        # the user picks one of the canonical entries. Same list on
+        # both Mark's and Gerri's deployments since FIELDS is global.
         {'name': 'type',            'label': 'Type',              'type': 'select',
-         'options': ['', 'Antiques', 'Apparel', 'Books', 'Computer',
+         'options': ['', 'Antiques', 'Books', 'Computer',
                      'Electronics', 'Furniture', 'Gym Equipment',
-                     'Household Items', 'Knives', 'Tools', 'Other']},
+                     'Household Items', 'Jewelry', 'Kitchen',
+                     'Knives', 'Other']},
         {'name': 'serial',          'label': 'Serial',            'type': 'text'},
         {'name': 'description',     'label': 'Description',       'type': 'textarea'},
         {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},
