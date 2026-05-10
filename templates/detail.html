@@ -804,10 +804,9 @@ document.addEventListener('DOMContentLoaded', function () {
   <div class="section-bar">Pedigree, References</div>
   <div class="dgrid dg1">{{ cell('coin_references','',rows=4) }}</div>
 
-  <!-- Grade, Conditions -->
-  <div class="section-bar">Grade, Conditions</div>
-  <div class="dgrid dg1">{{ cell('condition','',rows=3) }}</div>
-  {{ notescell('notes','Notes') }}
+  <!-- Grade, Conditions (existing notes data) + Notes (condition column) -->
+  {{ notescell('notes','Grade, Conditions') }}
+  {{ notescell('condition','Notes') }}
 
   <!-- Extra fields -->
   <div class="dgrid dg2">
