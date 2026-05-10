@@ -97,30 +97,8 @@
   </div>
 
   <div class="nav-right">
-    {# Inventory report: open to anyone authenticated. The dialog +
-       generated PDF respect the user's allowed_cats and row filters,
-       so a member sees only their own slice. #}
-    {% if current_user %}
-    <a href="#" class="nav-item nav-report" id="navReportLink"
-       title="Generate a printable inventory report (compact or with images)"
-       onclick="openReportDialog(event)">
-      <span class="icon">📋</span>
-      <span class="lbl">Report</span>
-    </a>
-    {# Offline pre-warm: cache every page + image so the app keeps
-       working in low-connectivity areas (mainly iPhone PWAs). Read-
-       only — edits still require connectivity. Hidden on tenant
-       deployments (Gerri etc.) — they don't want their members
-       chewing through iOS storage. #}
-    {% if not is_tenant %}
-    <a href="#" class="nav-item nav-offline" id="navOfflineLink"
-       title="Cache every page and image so the app works offline"
-       onclick="return startOfflineWarm(event, this)">
-      <span class="icon" id="navOfflineIcon">📥</span>
-      <span class="lbl" id="navOfflineLabel">Offline</span>
-    </a>
-    {% endif %}
-    {% endif %}
+    {# Report + Offline used to live here; moved into the Admin page
+       (top icon row, above the maintenance list). #}
     {# Files (export) and Sweep (re-import) are owner-role tools —
        member-role users on a third-party deployment don't get them. #}
     {% if current_user and current_user.role == 'owner' %}

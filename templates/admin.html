@@ -3,6 +3,27 @@
 {% block content %}
 <div class="admin-page">
   <h1 class="admin-title">Admin</h1>
+
+  {# Tools row — icons match the global nav styling. Report and
+     Offline used to live in the top nav; moved here so the nav stays
+     focused on category navigation. #}
+  <div class="admin-tools">
+    <a href="#" class="nav-item" id="navReportLink"
+       title="Generate a printable inventory report (compact or with images)"
+       onclick="openReportDialog(event)">
+      <span class="icon">📋</span>
+      <span class="lbl">Report</span>
+    </a>
+    <a href="#" class="nav-item" id="navOfflineLink"
+       title="Cache every page and image so the app works offline"
+       onclick="return startOfflineWarm(event, this)">
+      <span class="icon" id="navOfflineIcon">📥</span>
+      <span class="lbl" id="navOfflineLabel">Offline</span>
+    </a>
+  </div>
+
+  <hr class="admin-divider">
+
   <p class="admin-note">One-shot maintenance actions. All gated by the
     server-side secret <code>{{ secret }}</code> and Cloudflare Access.</p>
 
@@ -335,7 +356,19 @@ document.querySelectorAll('.admin-action').forEach(li => {
 
 <style>
 .admin-page { max-width: 800px; margin: 24px auto; padding: 0 16px; font-family: var(--font); }
-.admin-title { font-size: 22px; margin-bottom: 4px; }
+.admin-title { font-size: 22px; margin-bottom: 12px; }
+.admin-tools {
+  display: flex; gap: 4px; padding: 8px 0;
+}
+.admin-tools .nav-item {
+  /* Override the nav bar's right border — looks wrong on a standalone row. */
+  border-right: none;
+  border-radius: 6px;
+}
+.admin-divider {
+  border: none; border-top: 1px solid var(--border);
+  margin: 8px 0 16px;
+}
 .admin-note { font-size: 12px; color: var(--text-label); margin-bottom: 16px; }
 .admin-note code { background: #f4f4f6; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
 .admin-list { list-style: none; padding: 0; margin: 0; }
