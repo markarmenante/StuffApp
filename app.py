@@ -2240,12 +2240,15 @@ def current_vlists(category=None):
         # owner dropdown matches what the rest of the app shows. The
         # users-table-derived list is the historical default for the
         # primary deployment where members come and go.
-        # Also: drop the property owner_filter on tenants — the
-        # 'Mark'/'Jointly' household-member convention only matches
-        # the original deployment's property.owner values, so a
-        # tenant whose properties use 'Joint'/'Gerri' would otherwise
-        # see an empty property dropdown here.
-        prop_owner_filter = None if os.environ.get('STUFFAPP_OWNER_OPTIONS') else me
+        #
+        # Property dropdown: show every owned residential property,
+        # regardless of which household member owns the row. The
+        # earlier 'Mark'/'Jointly' filter zeroed out the dropdown
+        # whenever properties were stored under 'YM' (the default
+        # joint marker) instead of 'Jointly' — items are about
+        # location ("where does this thing live"), not ownership,
+        # so the per-user scoping was the wrong cut.
+        prop_owner_filter = None
         if os.environ.get('STUFFAPP_OWNER_OPTIONS'):
             items_owner = VALUE_LISTS['owner']
         else:
