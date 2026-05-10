@@ -556,7 +556,7 @@ FIELDS = {
         {'name': 'name',            'label': 'Property Name',     'type': 'text'},
         {'name': 'short_name',      'label': 'Short Name',        'type': 'text'},
         {'name': 'type',            'label': 'Type',              'type': 'select',
-         'options': ['', 'Residence', 'Commercial', 'Rental', 'Vacation', 'Land', 'Other']},
+         'options': [''] + VALUE_LISTS['property_type']},
         {'name': 'address',         'label': 'Address',           'type': 'textarea'},
         {'name': 'year_built',      'label': 'Year Built',        'type': 'number'},
         {'name': 'ein',             'label': 'EIN',               'type': 'text'},
@@ -2164,32 +2164,26 @@ def current_owner_name():
     return dn.split()[0] if dn else None
 
 
-def get_property_choices(owner_filter=None):
+def get_property_choices():
     """Property names (or short_name if name is blank) sorted
     case-insensitively. Limited to currently-owned residential
     properties (status='Own', type='Residential') — the dropdown is
     for placing new items, so sold and commercial properties just add
     noise. The full `name` is preferred because that's what the
     item-table property columns (watches.property, coins.property,
-    etc.) actually store. When `owner_filter` is set, only properties
-    whose owner matches are returned — used by the items category so
-    each member sees only their own residences in the dropdown.
-    Returns [] when nothing matches so a fresh install renders an
-    empty dropdown instead of a stale seed list.
+    etc.) actually store. Returns [] when nothing matches so a fresh
+    install renders an empty dropdown instead of a stale seed list.
 
     NB: the `archive` column is not used as an archive flag here —
     historical data stores wifi passwords in it, so it can't be
     filtered on safely without a data cleanup pass first."""
     db = get_db()
-    # Strictly residential — the form dropdown writes 'Residence'
-    # (singular), but historical data has the legacy 'Residential'
-    # spelling, so accept both. Other residential-ish types like
-    # Rental and Vacation are deliberately excluded so the dropdown
-    # only offers actual residences. Tenants whose `type` is hidden
-    # have type=NULL on every row, so the filter is skipped there.
+    # Strictly Residential — Mark's deployment uses one canonical
+    # type value. Tenants whose `type` is hidden have type=NULL on
+    # every row, so the filter is skipped there.
     type_filter = (
         "" if 'type' in HIDE_FIELDS.get('properties', set())
-        else "  AND type IN ('Residence', 'Residential') "
+        else "  AND type = 'Residential' "
     )
     sql = (
         "SELECT name, short_name FROM properties "
@@ -2197,16 +2191,9 @@ def get_property_choices(owner_filter=None):
         f"{type_filter}"
         "  AND COALESCE(NULLIF(name,''), short_name) IS NOT NULL "
         "  AND COALESCE(NULLIF(name,''), short_name) != '' "
+        "ORDER BY LOWER(COALESCE(NULLIF(name,''), short_name))"
     )
-    params = []
-    if owner_filter:
-        # Include the user's own properties AND anything marked
-        # 'Jointly' (household-owned), so a member sees both their
-        # solo-owned residences and the shared ones.
-        sql += "  AND owner IN (?, 'Jointly') "
-        params.append(owner_filter)
-    sql += "ORDER BY LOWER(COALESCE(NULLIF(name,''), short_name))"
-    rows = db.execute(sql, params).fetchall()
+    rows = db.execute(sql).fetchall()
     seen, out = set(), []
     for r in rows:
         label = (r['name'] or '').strip() or (r['short_name'] or '').strip()
@@ -2233,20 +2220,13 @@ def current_vlists(category=None):
     """
     if category == 'items':
         me = current_owner_name()
-        # Tenant override: when STUFFAPP_OWNER_OPTIONS is set, use that
-        # explicit list verbatim (first option = default) so items'
-        # owner dropdown matches what the rest of the app shows. The
-        # users-table-derived list is the historical default for the
-        # primary deployment where members come and go.
-        #
-        # Property dropdown: show every owned residential property,
-        # regardless of which household member owns the row. The
-        # earlier 'Mark'/'Jointly' filter zeroed out the dropdown
-        # whenever properties were stored under 'YM' (the default
-        # joint marker) instead of 'Jointly' — items are about
-        # location ("where does this thing live"), not ownership,
-        # so the per-user scoping was the wrong cut.
-        prop_owner_filter = None
+        # Tenant override: when STUFFAPP_OWNER_OPTIONS is set, use
+        # that explicit list verbatim (first option = default) so
+        # items' owner dropdown matches what the rest of the app
+        # shows. On Mark's deployment the household members come
+        # from the users table, with 'YM' (the joint Mark+Young
+        # marker) appended as a tail option. 'Jointly' is Gerri's
+        # convention, never Mark's.
         if os.environ.get('STUFFAPP_OWNER_OPTIONS'):
             items_owner = VALUE_LISTS['owner']
         else:
@@ -2266,10 +2246,10 @@ def current_vlists(category=None):
                     members.append(n)
             if me:
                 members = [me] + [m for m in members if m != me]
-            items_owner = members + ['Jointly']
+            items_owner = members + ['YM']
         return {
             **VALUE_LISTS,
-            'property': get_property_choices(owner_filter=prop_owner_filter),
+            'property': get_property_choices(),
             'items_owner': items_owner,
             'items_status': ['Own', 'Sold', 'Gifted', 'Lost'],
         }
