@@ -108,8 +108,9 @@
       <span class="lbl">Report</span>
     </a>
     {% endif %}
-    {# Files (export) and Sweep (re-import) are owner-role tools —
-       member-role users on a third-party deployment don't get them. #}
+    {# Files (export) is an owner-role tool — member-role users on a
+       third-party deployment don't get it. Sweep moved into the Admin
+       page (top icon row). #}
     {% if current_user and current_user.role == 'owner' %}
     <a href="{{ url_for('admin_export_files') }}"
        class="nav-item nav-export" id="navExportLink"
@@ -117,13 +118,6 @@
        onclick="return startExport(event, this)">
       <span class="icon" id="navExportIcon">⬇</span>
       <span class="lbl" id="navExportLabel">Files</span>
-    </a>
-    <a href="{{ url_for('sweep_files') }}"
-       class="nav-item nav-sweep {% if current_category == '__sweep__' %}active{% endif %}" id="navSweepLink"
-       title="Upload changes from your StuffFiles folder back into the app"
-       onclick="return startSyncUp(event, this)">
-      <span class="icon" id="navSweepIcon">⬆</span>
-      <span class="lbl" id="navSweepLabel">Sweep</span>
     </a>
     {% endif %}
     {% if current_user and current_user.role == 'owner' and not is_tenant %}
