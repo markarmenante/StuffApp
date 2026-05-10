@@ -427,7 +427,15 @@ FIELDS = {
     ],
     'items': [
         {'name': 'name',            'label': 'Name',              'type': 'text'},
-        {'name': 'type',            'label': 'Type',              'type': 'text'},
+        # Alphabetical, with 'Other' pinned at the end so the catch-
+        # all stays out of the working set. Free-text values typed
+        # before this dropdown was added still display fine on detail
+        # pages — the select just can't reproduce them on edit until
+        # the user picks one of the canonical entries.
+        {'name': 'type',            'label': 'Type',              'type': 'select',
+         'options': ['', 'Antiques', 'Apparel', 'Books', 'Computer',
+                     'Electronics', 'Furniture', 'Gym Equipment',
+                     'Household Items', 'Knives', 'Tools', 'Other']},
         {'name': 'serial',          'label': 'Serial',            'type': 'text'},
         {'name': 'description',     'label': 'Description',       'type': 'textarea'},
         {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},

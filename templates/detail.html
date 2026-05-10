@@ -1272,13 +1272,24 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- Type | Description span the full width above the image and the
        rest of the spec column. Type takes 1/3, Description 2/3.
-       Type autocompletes from prior entries (ta.get('type')). -->
+       Type is a select pulled from FIELDS['items']['type'].options
+       so the canonical category list (Antiques / Apparel / … /
+       Other) is enforced. -->
   <div class="dgrid items-type-desc">
-    <div class="dcell ta-wrap">
-      <input type="text" name="type" value="{{ val('type') }}"
-             autocomplete="off" class="ta-input"
-             data-ta="{{ ta.get('type', [])|join('||') }}"
-             {% if is_new and not val('type') %}placeholder="Type"{% endif %}>
+    <div class="dcell">
+      {% set _type_field = (fields | selectattr('name','equalto','type') | list | first) %}
+      {% set _type_opts = (_type_field.options if _type_field else ['']) %}
+      <select name="type">
+        {% for opt in _type_opts %}
+        <option value="{{ opt }}" {% if val('type') == opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+        {# Preserve any pre-existing free-text value from before the
+           dropdown was added, so an in-place upgrade doesn't silently
+           erase it on the first save. #}
+        {% if val('type') and val('type') not in _type_opts %}
+        <option value="{{ val('type') }}" selected>{{ val('type') }}</option>
+        {% endif %}
+      </select>
       <span class="clabel">Type</span>
     </div>
     {{ cell('description','Description') }}
