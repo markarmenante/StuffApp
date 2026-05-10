@@ -97,8 +97,17 @@
   </div>
 
   <div class="nav-right">
-    {# Report + Offline used to live here; moved into the Admin page
-       (top icon row, above the maintenance list). #}
+    {# Report + Offline live in the Admin page on Mark's own deployment.
+       Tenant deployments hide the Admin page entirely, so members would
+       have no path to Report — keep it in the nav there. #}
+    {% if current_user and is_tenant %}
+    <a href="#" class="nav-item nav-report" id="navReportLink"
+       title="Generate a printable inventory report (compact or with images)"
+       onclick="openReportDialog(event)">
+      <span class="icon">📋</span>
+      <span class="lbl">Report</span>
+    </a>
+    {% endif %}
     {# Files (export) and Sweep (re-import) are owner-role tools —
        member-role users on a third-party deployment don't get them. #}
     {% if current_user and current_user.role == 'owner' %}
