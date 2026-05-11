@@ -11,13 +11,10 @@
      filter pills (Own / Sold / Carp / etc.) all build URLs without
      the ?at= param and would silently break the navigation chain. #}
   {% if not at_property %}
-  {% if current_user and current_user.role != 'owner' %}
   <a href="{{ url_for('new_record', category=category) }}"
-     class="toolbar-btn add add-labeled"
-     title="Add {{ cat_info.singular }}">Add {{ cat_info.singular }}</a>
-  {% else %}
-  <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add" title="New">+</a>
-  {% endif %}
+     class="toolbar-btn add"
+     title="Add {{ cat_info.singular }}"
+     aria-label="Add {{ cat_info.singular }}">+</a>
   {% endif %}
   {# Drilled in from a Property — give a one-tap way back. #}
   {% if at_property and at_property_url %}
@@ -204,6 +201,7 @@
           <div class="idr">
             {% if row['case_num'] %}<span><span class="lbl">s/n</span> {{ row['case_num'] }}</span>{% endif %}
             {% if row['movement_num'] %}<span><span class="lbl">Mvt</span> {{ row['movement_num'] }}</span>{% endif %}
+            {% if row['cat_id'] %}<span class="item-cat-id">{{ row['cat_id'] }}</span>{% endif %}
           </div>
           {% if row['property'] %}<div class="idr li-hide-mobile"><span>{{ row['property'] }}</span></div>{% endif %}
         </div>
@@ -308,6 +306,7 @@
             {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
             {% if row['location'] %}<span>{{ row['location'] }}</span>{% endif %}
             {% if row['dimensions'] %}<span>{{ row['dimensions'] }}</span>{% endif %}
+            {% if row['cat_id'] %}<span class="item-cat-id">{{ row['cat_id'] }}</span>{% endif %}
           </div>
         </div>
 

@@ -642,6 +642,7 @@ document.addEventListener('DOMContentLoaded', function () {
        filename without retyping the brackets. #}
     <div class="bottom-cell">
       <input type="text" value="{{ val('cat_id') }}"
+             data-generated-field="cat_id"
              readonly
              title="Auto-assigned. Click to copy '(W###)' — paste into any local filename and sweep routes it here."
              onclick="if(this.value){navigator.clipboard?.writeText('(' + this.value + ')')}; this.select();"
@@ -876,13 +877,14 @@ document.addEventListener('DOMContentLoaded', function () {
       <span class="blabel">Display Position</span>
     </div>
     <div class="bottom-cell">
-      {# cat_id is auto-assigned at row creation from Property + Date,
-         not a user-entered field. Click → alert to explain. #}
+      {# cat_id is the stable collection ID. Display Position can be
+         resequenced, but this C### stays useful for file matching. #}
       <input type="text" name="cat_id" value="{{ val('cat_id') }}"
+             data-generated-field="cat_id"
              readonly
-             title="Auto-assigned from Property + Date when the coin is first created."
-             onclick="alert('Cat ID is auto-assigned from this coin’s Property and Date when the row is created. To change it, edit Property or Date and the next renumber pass will update Cat ID.')"
-             style="text-align:center;cursor:not-allowed;color:#888">
+             title="Auto-assigned stable ID. Click to copy '(C###)' — paste into any local filename and sweep routes it here."
+             onclick="if(this.value){navigator.clipboard?.writeText('(' + this.value + ')')}; this.select();"
+             style="text-align:center;cursor:pointer;color:#666;font-family:var(--font-mono,monospace)">
       <span class="blabel">Cat ID (auto)</span>
     </div>
     <div class="bottom-cell">
@@ -1226,8 +1228,8 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">{{ 'Location in home' if is_tenant else 'Location' }}</span>
         </div>
       </div>
-      <!-- Owner | Status -->
-      <div class="dgrid dg2 art-purchase">
+      <!-- Owner | Status | stable Art ID -->
+      <div class="dgrid art-purchase" style="grid-template-columns: repeat({{ 3 if current_user and current_user.role == 'owner' else 2 }}, 1fr);">
         {% if current_user and current_user.role == 'owner' %}
         {% set _ow = val('owner') if val('owner') else ('YM' if is_new else '') %}
         <div class="dcell">
@@ -1239,6 +1241,15 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
         {% endif %}
         {{ selcell('status','Status', vlists.status) }}
+        <div class="dcell generated-id-cell">
+          <input type="text" value="{{ val('cat_id') }}"
+                 data-generated-field="cat_id"
+                 readonly
+                 title="Auto-assigned. Click to copy '(A###)' — paste into any local filename and sweep routes it here."
+                 onclick="if(this.value){navigator.clipboard?.writeText('(' + this.value + ')')}; this.select();"
+                 style="text-align:center;cursor:pointer;color:#666;font-family:var(--font-mono,monospace)">
+          <span class="clabel">Art ID</span>
+        </div>
       </div>
       {# Artist Notes + Object Notes — section-bar headers match the
          Topics / People / Notes treatment used elsewhere so the two
@@ -2946,6 +2957,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
         if (!d || !d.ok) throw new Error('Create failed');
         recordExists = true;
         SAVE_URL = d.save_url;
+        if (d.generated) {
+          Object.entries(d.generated).forEach(([field, value]) => {
+            form.querySelectorAll(`[data-generated-field="${field}"], input[name="${field}"]`)
+              .forEach(input => { input.value = value || ''; });
+          });
+        }
         // URL bar swaps to the detail URL — back button still goes home.
         window.history.replaceState({}, '', d.detail_url);
         // Future file uploads need a real record_id; rewrite form action
@@ -2970,6 +2987,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
       });
     return creatingPromise;
   }
+  window.ensureRecord = ensureRecord;
 
   function saveField(name, value) {
     return ensureRecord().then(() => {
@@ -3977,7 +3995,14 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
   });
 
   form.querySelectorAll('.med-del-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!btn.classList.contains('armed')) {
+        _armDelBtn(btn);
+        return;
+      }
+      _disarmDelBtn(btn);
       const row = btn.closest('.med-row');
       if (!row) return;
       const startIdx = parseInt(row.dataset.medIdx);
@@ -4037,7 +4062,14 @@ function _wireRowDelete(rowSelector, btnClass, emptyClass, dataAttr,
     inp.addEventListener('blur', refresh);
   });
   form.querySelectorAll('.' + btnClass).forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!btn.classList.contains('armed')) {
+        _armDelBtn(btn);
+        return;
+      }
+      _disarmDelBtn(btn);
       const row = btn.closest(rowSelector);
       if (!row) return;
       const startIdx = parseInt(row.dataset[dataAttr]);

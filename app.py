@@ -3913,15 +3913,12 @@ def new_record(category):
         # the autosave-on-new flow would silently 400 every keystroke
         # for users who hadn't filled Property yet, and nothing got
         # persisted. Property can be filled in afterwards via the
-        # normal save_field path.
-        # Coins still need a Date — Property + Date drive Display
-        # Position numbering for cat_id assignment below.
+        # normal save_field path. Same for coin date: a coin should come
+        # into existence when the user starts typing Authority / Region /
+        # Denomination, then Date can be filled later.
         missing = []
         if not (data.get('owner') or '').strip():
             missing.append('Owner')
-        if category == 'coins':
-            if data.get('date_1') in (None, '') and not (data.get('date_1_text') or '').strip():
-                missing.append('Date')
         if missing:
             err = 'Missing required field(s): ' + ', '.join(missing)
             # AJAX autosave-on-/new flow: client expects JSON.
@@ -3985,8 +3982,13 @@ def new_record(category):
         # client can flip into save_field mode without a page reload.
         if request.headers.get('Accept', '').startswith('application/json') \
                 or request.headers.get('X-Requested-With') == 'fetch':
+            generated = {
+                k: data.get(k) for k in ('coin_id', 'cat_id')
+                if data.get(k) not in (None, '')
+            }
             return jsonify({'ok': True, 'id': record_id,
-                            'detail_url': detail_url, 'save_url': save_url})
+                            'detail_url': detail_url, 'save_url': save_url,
+                            'generated': generated})
         flash(f"Record created successfully.", 'success')
         return redirect(detail_url)
 

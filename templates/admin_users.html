@@ -82,8 +82,9 @@
             <button type="submit" class="user-btn">Save</button>
         </form>
             <form method="post" action="{{ url_for('admin_users_delete', user_id=u.id) }}"
-                  style="display:inline" onsubmit="return confirm('Remove {{ u.email }}? They lose access immediately.')">
+                  class="user-delete-form" style="display:inline">
               <button type="submit" class="user-btn user-btn-danger"
+                      data-armed-text="OK to Remove?"
                       {% if u.email|lower == current_user.email|lower or
                             (u.role == 'owner' and users|selectattr('role','equalto','owner')|list|length <= 1) %}
                         disabled title="Cannot remove the only owner or yourself"
@@ -190,6 +191,13 @@
 .user-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .user-btn-danger { border-color: #c0392b; color: #c0392b; }
 .user-btn-danger:hover:not(:disabled) { background: #ffe9e6; }
+.user-btn-danger.armed {
+  background: #c0392b; color: #fff; border-color: #c0392b;
+  font-weight: 600;
+}
+.user-btn-danger.armed:hover:not(:disabled) {
+  background: #a52a1f; border-color: #a52a1f;
+}
 .user-btn-primary { background: var(--blue); color: #fff; }
 .user-btn-primary:hover { background: var(--blue); filter: brightness(1.1); }
 .user-add-form {
@@ -208,4 +216,46 @@
 }
 .user-add-row input[type=email] { flex: 1; min-width: 200px; }
 </style>
+
+<script>
+(function wireUserDeleteConfirm() {
+  function arm(btn) {
+    document.querySelectorAll('.user-btn-danger.armed').forEach(other => {
+      if (other !== btn) disarm(other);
+    });
+    btn.dataset.origText = btn.textContent;
+    btn.textContent = btn.dataset.armedText || 'OK?';
+    btn.classList.add('armed');
+    btn._disarmTimer = setTimeout(() => disarm(btn), 3000);
+  }
+  function disarm(btn) {
+    if (btn._disarmTimer) {
+      clearTimeout(btn._disarmTimer);
+      btn._disarmTimer = null;
+    }
+    if (btn.dataset.origText !== undefined) {
+      btn.textContent = btn.dataset.origText;
+      delete btn.dataset.origText;
+    }
+    btn.classList.remove('armed');
+  }
+
+  document.querySelectorAll('.user-delete-form').forEach(form => {
+    form.addEventListener('submit', ev => {
+      const btn = form.querySelector('.user-btn-danger');
+      if (!btn || btn.disabled) return;
+      if (!btn.classList.contains('armed')) {
+        ev.preventDefault();
+        arm(btn);
+      }
+    });
+  });
+
+  document.addEventListener('click', ev => {
+    document.querySelectorAll('.user-btn-danger.armed').forEach(btn => {
+      if (!btn.contains(ev.target)) disarm(btn);
+    });
+  }, true);
+})();
+</script>
 {% endblock %}

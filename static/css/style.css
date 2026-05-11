@@ -1319,6 +1319,12 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .med-row:hover .med-del-btn { opacity: 1; }
 .med-del-btn:hover { background: #ffe9e6; color: #c0392b; border-color: #e6b6ad; opacity: 1; }
+.med-del-btn.armed {
+  opacity: 1; width: auto; min-width: 34px; padding: 0 7px; border-radius: 11px;
+  background: #c0392b; color: #fff; border-color: #c0392b;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+}
+.med-del-btn.armed:hover { background: #a52a1f; border-color: #a52a1f; }
 .med-row.med-row-empty .med-del-btn { visibility: hidden; }
 .med-table .med-row.med-head {
   font-size: 10px; color: var(--text-label);
@@ -1361,6 +1367,12 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .alarm-codes-row:hover .alarm-del-btn { opacity: 1; }
 .alarm-del-btn:hover { background: #ffe9e6; color: #c0392b; border-color: #e6b6ad; opacity: 1; }
+.alarm-del-btn.armed {
+  opacity: 1; width: auto; min-width: 34px; padding: 0 7px; border-radius: 11px;
+  background: #c0392b; color: #fff; border-color: #c0392b;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+}
+.alarm-del-btn.armed:hover { background: #a52a1f; border-color: #a52a1f; }
 .alarm-codes-row.alarm-codes-row-empty .alarm-del-btn { visibility: hidden; }
 .alarm-codes-table .alarm-codes-row.alarm-codes-head {
   font-size: 10px; color: var(--text-label);
@@ -1441,6 +1453,12 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .people-row:hover .people-del-btn { opacity: 1; }
 .people-del-btn:hover { background: #ffe9e6; color: #c0392b; border-color: #e6b6ad; opacity: 1; }
+.people-del-btn.armed {
+  opacity: 1; width: auto; min-width: 34px; padding: 0 7px; border-radius: 11px;
+  background: #c0392b; color: #fff; border-color: #c0392b;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+}
+.people-del-btn.armed:hover { background: #a52a1f; border-color: #a52a1f; }
 .people-row.people-row-empty .people-del-btn { visibility: hidden; }
 .people-table .people-row.people-head {
   font-size: 10px; color: var(--text-label);
