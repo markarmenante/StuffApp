@@ -1085,7 +1085,7 @@ def init_db():
         db.execute(
             "UPDATE vehicles SET owner = 'Mark', updated_at = ? "
             "WHERE owner IS NULL OR TRIM(owner) = ''",
-            (_now,),
+            (datetime.utcnow().isoformat(),),
         )
     except sqlite3.OperationalError:
         pass
