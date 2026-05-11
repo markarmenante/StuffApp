@@ -108,16 +108,24 @@
       <span class="lbl">Report</span>
     </a>
     {% endif %}
-    {# Files (export) is an owner-role tool — member-role users on a
-       third-party deployment don't get it. Sweep moved into the Admin
-       page (top icon row). #}
-    {% if current_user and current_user.role == 'owner' %}
+    {# Files sync is per-user: export and sweep both honor allowed_cats
+       plus row filters, so non-owner users can keep their own iCloud
+       StuffFiles tree in sync without needing Admin access. #}
+    {% if current_user and allowed_cats %}
     <a href="{{ url_for('admin_export_files') }}"
        class="nav-item nav-export" id="navExportLink"
        title="Download + auto-extract into your StuffFiles folder. iOS / Safari: gets a zip you save manually."
        onclick="return startExport(event, this)">
       <span class="icon" id="navExportIcon">⬇</span>
       <span class="lbl" id="navExportLabel">Files</span>
+    </a>
+    <a href="{{ url_for('sweep_files') }}"
+       class="nav-item nav-sweep {% if current_category == '__sweep__' %}active{% endif %}"
+       id="navSweepLink"
+       title="Upload changes from your StuffFiles folder back into the app"
+       onclick="return startSyncUp(event, this)">
+      <span class="icon" id="navSweepIcon">⬆</span>
+      <span class="lbl" id="navSweepLabel">Sweep</span>
     </a>
     {% endif %}
     {% if current_user and current_user.role == 'owner' and not is_tenant %}

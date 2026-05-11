@@ -229,7 +229,7 @@ DEFAULT_OWNER_BY_CATEGORY = {
     'pens':         'Mark',
     'art':          'YM',
     'items':        'YM',
-    'vehicles':     'YM',
+    'vehicles':     'Mark',
     'recordings':   'Mark',
     'audio':        'Mark',
     'rifles':       'Mark',
@@ -1081,6 +1081,14 @@ def init_db():
         ('vehicle_doc_7', 'vehicle_doc_7_title', 'Doc 7'),
         ('vehicle_doc_8', 'vehicle_doc_8_title', 'Doc 8'),
     ])
+    try:
+        db.execute(
+            "UPDATE vehicles SET owner = 'Mark', updated_at = ? "
+            "WHERE owner IS NULL OR TRIM(owner) = ''",
+            (_now,),
+        )
+    except sqlite3.OperationalError:
+        pass
     _backfill_docs_json(db, 'persons', 'id_documents', [
         (f'id_doc_{i}', f'id_doc_{i}_title', f'ID Doc {i}')
         for i in range(3, 9)
@@ -2929,6 +2937,11 @@ def fetch_watch_specs(watch):
     model = (watch['model'] or '').strip()
     reference = (watch['reference'] or '').strip()
     calibre_hint = (watch['calibre'] or '').strip()
+    case_num = (watch['case_num'] or '').strip()
+    movement_num = (watch['movement_num'] or '').strip()
+    purchase_date = (watch['date'] or '').strip()
+    description = (watch['description'] or '').strip()
+    notes = (watch['notes'] or '').strip()
     year_hint = watch['year']
 
     if not (brand or model or reference):
@@ -2938,6 +2951,8 @@ def fetch_watch_specs(watch):
         brand, model,
         f'Ref. {reference}' if reference else '',
         f'Cal. {calibre_hint}' if calibre_hint else '',
+        f'Case {case_num}' if case_num else '',
+        f'Movement {movement_num}' if movement_num else '',
         str(year_hint) if year_hint else '',
     ] if x)
 
@@ -2969,6 +2984,9 @@ def fetch_watch_specs(watch):
     prompt = f"""You are filling in specification fields for a specific wristwatch using reputable public sources.
 
 Watch: {ident}
+Record context that may contain piece-specific dating evidence:
+- Description: {(description[:300] + '…') if len(description) > 300 else description or '(none)'}
+- Notes: {(notes[:220] + '…') if len(notes) > 220 else notes or '(none)'}
 
 Use at most 6 web searches, preferring these sources (roughly in order):
 {sources_bullets}
@@ -2979,7 +2997,8 @@ Target fields:
 - metal: one of [{metals}]
 - case_diameter: number in mm (float)
 - dial_color: short string (e.g. "Black", "Blue", "Silver")
-- year: integer production year of THIS specific piece. If the case number / movement number is on the record AND the brand has a published serial-to-year table (Rolex, Omega, Patek Philippe, IWC, A. Lange & Söhne, Vacheron Constantin, etc.), use that table to date the piece — that's more accurate than the reference's release year. Fall back to the reference's original release/manufacture year only when no serial-year mapping is available. Never return a year later than the watch's purchase date.
+- year: integer production year of THIS individual watch, not the model/reference introduction year. Only return a year when you can derive it from piece-specific evidence: case/serial number, movement number when present (common for Lange and a few others, not most brands), papers, archive extract, warranty card, certificate, or a brand serial-to-year table. If sources only say when the reference/model was introduced or produced generally, return null. Never return a year later than the purchase date ({purchase_date or 'unknown'}).
+- year_basis: one short phrase explaining the evidence for year, e.g. "movement number dates to 2003 via Omega serial table" or null. If year is null, year_basis must be null.
 - edition: total count of pieces in a limited edition / limited run (integer). Return null for non-limited / open-production references.
 - calibre: movement calibre name in its complete canonical form, with the manufacturer prefix when one is conventionally used (e.g. "F.P. Journe Calibre 1300.3", "A. Lange & Söhne L951.5", "ETA 7750", "Frédéric Piguet 1185", "Patek Philippe CH 29-535 PS"). Avoid returning just a bare number ("1304", "7750") — those are ambiguous because multiple manufacturers reuse number-style designations. CRITICAL: the case/reference number is NOT the calibre. The "Ref." value above is the case reference (e.g. Lange 1815 Chronograph references like 414.031 / 414.028 / 401.026; Patek Nautilus 5711/1A) — never copy that value into this field. The calibre is the MOVEMENT designation (Lange L951.5, Patek 26-330, Rolex 3135, etc.) and is published on calibercorner.com / 17jewels.info / brand technical sheets, not on retailer reference pages. If sources only mention the reference and don't disclose the movement calibre, return null.
 - movement_type: one of ["Manual", "Automatic", "Quartz", "Spring Drive", "Co-Axial", "Tuning Fork"]. "Manual"/"Automatic" for traditional mechanical, "Quartz" for battery-powered crystal-regulated, "Spring Drive" only for Seiko/Grand Seiko Spring Drive, "Co-Axial" only for Omega watches the brand explicitly markets as Co-Axial, "Tuning Fork" for Bulova Accutron and similar hum movements.
@@ -3002,6 +3021,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
   "case_diameter": null,
   "dial_color": null,
   "year": null,
+  "year_basis": null,
   "edition": null,
   "calibre": null,
   "movement_type": null,
@@ -4475,10 +4495,12 @@ def topic_new():
     db = get_db()
     property_id = request.values.get('property_id') or ''
     prop = db.execute(
-        'SELECT id, name FROM properties WHERE id = ?', [property_id]
+        'SELECT * FROM properties WHERE id = ?', [property_id]
     ).fetchone() if property_id else None
     if prop is None:
         abort(404)
+    if not _user_can_see_row('properties', prop):
+        abort(403)
     if request.method == 'POST':
         tid = str(uuid.uuid4())
         subject = (request.form.get('subject') or '').strip() or None
@@ -4513,8 +4535,10 @@ def topic_detail(topic_id):
     if topic is None:
         abort(404)
     prop = db.execute(
-        'SELECT id, name FROM properties WHERE id = ?', [topic['property_id']]
+        'SELECT * FROM properties WHERE id = ?', [topic['property_id']]
     ).fetchone()
+    if prop is None or not _user_can_see_row('properties', prop):
+        abort(403)
     if request.method == 'POST':
         subject = (request.form.get('subject') or '').strip() or None
         body = (request.form.get('body') or '').strip() or None
@@ -4548,6 +4572,13 @@ def topic_delete(topic_id):
     row = db.execute(
         'SELECT property_id FROM topics WHERE id = ?', [topic_id]
     ).fetchone()
+    prop = None
+    if row and row['property_id']:
+        prop = db.execute(
+            'SELECT * FROM properties WHERE id = ?', [row['property_id']]
+        ).fetchone()
+    if prop is None or not _user_can_see_row('properties', prop):
+        abort(403)
     db.execute('DELETE FROM topics WHERE id = ?', [topic_id])
     db.commit()
     # AJAX path (per-row × button on the property detail) — return
@@ -4565,9 +4596,14 @@ def topic_delete(topic_id):
 @app.route('/topics/<topic_id>/upload-image', methods=['POST'])
 def topic_upload_image(topic_id):
     db = get_db()
-    topic = db.execute('SELECT 1 FROM topics WHERE id = ?', [topic_id]).fetchone()
+    topic = db.execute('SELECT * FROM topics WHERE id = ?', [topic_id]).fetchone()
     if topic is None:
         return jsonify({'error': 'Unknown topic'}), 404
+    prop = db.execute(
+        'SELECT * FROM properties WHERE id = ?', [topic['property_id']]
+    ).fetchone()
+    if prop is None or not _user_can_see_row('properties', prop):
+        return jsonify({'error': 'Forbidden'}), 403
     f = request.files.get('image')
     if not f or not f.filename or not allowed_file(f.filename):
         return jsonify({'error': 'No file'}), 400
@@ -4584,6 +4620,8 @@ def topic_upload_image(topic_id):
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
+    if not _upload_visible_to_current_user(filename):
+        abort(404)
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 
@@ -4603,6 +4641,8 @@ def file_thumb(filename):
     so production issues can be diagnosed without shell access.
     """
     debug = request.args.get('debug') == '1'
+    if not _upload_visible_to_current_user(filename):
+        abort(404)
     def _bail(msg, code=404):
         app.logger.warning(f'file-thumb {filename}: {msg}')
         if debug:
@@ -4817,12 +4857,32 @@ def watch_lookup_specs(record_id):
         # "Purchase Date").
         if f == 'year':
             pd = watch['date']
+            basis = str(suggestions.get('year_basis') or '').strip()
+            record_evidence = ' '.join(str(watch[x] or '') for x in (
+                'case_num', 'movement_num', 'description', 'notes'
+            ))
+            has_piece_identifier = bool(re.search(
+                r'\b(case|movement|serial|papers?|archive|extract|warranty|certificate)\b|\d{4,}',
+                record_evidence,
+                flags=re.IGNORECASE,
+            ))
+            basis_is_piece_specific = bool(re.search(
+                r'\b(case|movement|serial|papers?|archive|extract|warranty|certificate)\b',
+                basis,
+                flags=re.IGNORECASE,
+            ))
+            # The model often finds the year a reference was introduced.
+            # That is not the production year of this individual watch.
+            # Only accept year when it is anchored to case/movement/papers
+            # style evidence for the specific piece.
+            if not (has_piece_identifier and basis_is_piece_specific):
+                continue
             if pd:
                 try:
                     purchase_year = int(str(pd)[:4])
                     sugg_year = int(float(val))
                     if purchase_year < sugg_year:
-                        val = purchase_year
+                        continue
                 except (TypeError, ValueError):
                     pass
         # Beat sanity check. Mechanical movements (Manual/Automatic) run at
@@ -5977,18 +6037,28 @@ def upload_image(category, record_id):
     if not allowed_file(f.filename):
         return jsonify({'error': 'File type not allowed'}), 400
 
+    # Allow specifying which image field to update (for coins with image_1/image_2 etc.)
+    image_field = request.form.get('field') or CATEGORIES[category]['image_field']
+    table       = CATEGORIES[category]['table']
+    db = get_db()
+    valid = {f['name']: f for f in visible_fields(category)}
+    if image_field not in valid or valid[image_field].get('type') != 'file':
+        return jsonify({'error': 'Invalid file field'}), 400
+    cols = [row['name'] for row in db.execute(f"PRAGMA table_info({table})").fetchall()]
+    if image_field not in cols:
+        return jsonify({'error': 'Invalid field'}), 400
+    existing = db.execute(
+        f"SELECT * FROM {table} WHERE id = ?", [record_id]
+    ).fetchone()
+    if not existing:
+        return jsonify({'error': 'Record not found'}), 404
+    if not _user_can_see_row(category, existing):
+        return jsonify({'error': 'Forbidden'}), 403
+
     stored = save_upload(f)
     if not stored:
         return jsonify({'error': 'Upload failed'}), 500
 
-    # Allow specifying which image field to update (for coins with image_1/image_2 etc.)
-    image_field = request.form.get('field') or CATEGORIES[category]['image_field']
-    table       = CATEGORIES[category]['table']
-    # Validate field name exists in the table schema
-    db = get_db()
-    cols = [row['name'] for row in db.execute(f"PRAGMA table_info({table})").fetchall()]
-    if image_field not in cols:
-        return jsonify({'error': 'Invalid field'}), 400
     db.execute(f"UPDATE {table} SET {image_field} = ?, updated_at = ? WHERE id = ?",
                [stored, datetime.utcnow().isoformat(), record_id])
     _autofill_title_from_filename(db, table, record_id, category,
@@ -6048,6 +6118,10 @@ def delete_file_field(category, record_id):
     existing = db.execute(
         f"SELECT * FROM {table} WHERE id = ?", [record_id]
     ).fetchone()
+    if not existing:
+        return jsonify({'error': 'Record not found'}), 404
+    if not _user_can_see_row(category, existing):
+        return jsonify({'error': 'Forbidden'}), 403
     old_filename = existing[field_name] if existing else None
     # Clear the paired title/label column too so the tile doesn't keep
     # showing a leftover auto-fill from a since-removed file.
@@ -6451,6 +6525,18 @@ def _docs_save(db, table, record_id, docs, col='documents'):
     db.commit()
 
 
+def _docs_update(db, table, record_id, docs, col='documents', now=None):
+    """Update a document JSON column without committing.
+
+    Used when multiple document columns must change atomically; callers
+    commit once after every column update succeeds.
+    """
+    db.execute(
+        f"UPDATE {table} SET {col} = ?, updated_at = ? WHERE id = ?",
+        [json.dumps(docs), now or datetime.utcnow().isoformat(), record_id],
+    )
+
+
 def _auto_title_from_basename(category, record_id, basename):
     """Compute a sensible default title for a doc tile from its
     uploaded filename. Drops the extension, then strips a leading
@@ -6651,8 +6737,10 @@ def documents_move(category, record_id, doc_set, idx, dst_set):
     dst_docs = _docs_load(db, table, record_id, dst_col) or []
     entry = src_docs.pop(idx)
     dst_docs.append(entry)
-    _docs_save(db, table, record_id, src_docs, src_col)
-    _docs_save(db, table, record_id, dst_docs, dst_col)
+    now = datetime.utcnow().isoformat()
+    _docs_update(db, table, record_id, src_docs, src_col, now)
+    _docs_update(db, table, record_id, dst_docs, dst_col, now)
+    db.commit()
     return jsonify({
         'ok': True,
         'src_count': len(src_docs),
@@ -6935,9 +7023,108 @@ def _apply_row_filter_clauses(category, wheres, params):
         params.extend(allowed)
 
 
+def _upload_visible_to_current_user(filename):
+    """Return True when an upload filename belongs to a visible row.
+
+    Upload URLs are intentionally opaque UUID-ish names, but they still
+    need the same category + row-filter privacy model as the list/detail
+    pages. This checks fixed file columns, JSON document lists, and
+    property topic images before serving `/uploads/...` or thumbnails.
+    """
+    name = (filename or '').strip()
+    if not name or '/' in name or '\\' in name or name.startswith('.'):
+        return False
+    if not g.get('current_user'):
+        return False
+    allowed = g.get('allowed_cats') or set()
+    if not allowed:
+        return False
+    db = get_db()
+
+    for cat, info in CATEGORIES.items():
+        if cat not in allowed:
+            continue
+        table = info['table']
+        try:
+            cols = {
+                r['name']
+                for r in db.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+        except sqlite3.OperationalError:
+            continue
+
+        file_cols = [
+            f['name'] for f in FIELDS.get(cat, [])
+            if f.get('type') == 'file' and f['name'] in cols
+        ]
+        if file_cols:
+            wheres = ['(' + ' OR '.join(f"{c} = ?" for c in file_cols) + ')']
+            params = [name] * len(file_cols)
+            _apply_row_filter_clauses(cat, wheres, params)
+            where_clause = ' AND '.join(wheres)
+            try:
+                row = db.execute(
+                    f"SELECT id FROM {table} WHERE {where_clause} LIMIT 1",
+                    params,
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = None
+            if row:
+                return True
+
+        doc_cols = [c for c in _docs_cols_for(cat) if c in cols]
+        if doc_cols:
+            wheres = [
+                '(' + ' OR '.join(f"{c} LIKE ?" for c in doc_cols) + ')'
+            ]
+            params = [f'%{name}%'] * len(doc_cols)
+            _apply_row_filter_clauses(cat, wheres, params)
+            where_clause = ' AND '.join(wheres)
+            try:
+                rows = db.execute(
+                    f"SELECT {', '.join(doc_cols)} FROM {table} "
+                    f"WHERE {where_clause}",
+                    params,
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+            for row in rows:
+                for col in doc_cols:
+                    try:
+                        docs = json.loads(row[col] or '[]')
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(docs, list):
+                        continue
+                    for d in docs:
+                        if isinstance(d, dict) and \
+                                (d.get('filename') or '').strip() == name:
+                            return True
+
+    # Property topic images live in topics.image rather than the regular
+    # category file fields. They inherit visibility from the parent
+    # property row.
+    if 'properties' in allowed:
+        try:
+            rows = db.execute(
+                "SELECT p.* FROM topics t "
+                "JOIN properties p ON p.id = t.property_id "
+                "WHERE t.image = ?",
+                [name],
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        for row in rows:
+            if _user_can_see_row('properties', row):
+                return True
+
+    return False
+
+
 # Endpoints that everyone gets to hit regardless of category access.
-# (The static handler also bypasses; checked separately below.)
-_AUTH_EXEMPT_ENDPOINTS = {'static', 'uploaded_file', 'file_thumb'}
+# Uploaded files and generated thumbnails are NOT exempt: the route
+# handlers enforce category + row-filter access before serving bytes.
+_AUTH_EXEMPT_ENDPOINTS = {'static'}
 
 
 @app.before_request
@@ -10053,6 +10240,8 @@ def _try_cat_id_sweep_match(db, filename):
     ).fetchone()
     if not row:
         return None
+    if not _user_can_see_row(cat, row):
+        return None
     return cat, dict(row), label
 
 
@@ -11386,13 +11575,24 @@ def _process_sweep_deletes(record_state, allowed, db, now, dry_run, max_deletes=
                         continue
                     new_docs.append(d)
                 if not removed:
-                    new_docs = []
-                    for d in cur_docs:
-                        if not removed and isinstance(d, dict) \
-                                and _norm((d.get('title') or '').strip()) == label_norm:
-                            removed = True
-                            continue
-                        new_docs.append(d)
+                    title_matches = [
+                        i for i, d in enumerate(cur_docs)
+                        if isinstance(d, dict)
+                        and _norm((d.get('title') or '').strip()) == label_norm
+                    ]
+                    if len(title_matches) == 1:
+                        new_docs = [
+                            d for i, d in enumerate(cur_docs)
+                            if i != title_matches[0]
+                        ]
+                        removed = True
+                    elif len(title_matches) > 1:
+                        skipped.append({
+                            **entry,
+                            'reason': 'ambiguous docs title at apply-time; '
+                                      'multiple entries match this label',
+                        })
+                        continue
                 if not removed:
                     skipped.append({
                         **entry,
