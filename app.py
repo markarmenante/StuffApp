@@ -2734,9 +2734,9 @@ CATEGORY_ORDER_BY = {
                      "WHEN (LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%ym%visa%' "
                      "      OR (LOWER(TRIM(COALESCE(owner,''))) IN ('ym','young') "
                      "          AND LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%visa%')) THEN 2 "
-                     "WHEN (LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%ma%visa%' "
-                     "      OR (LOWER(TRIM(COALESCE(owner,''))) IN ('ma','mark') "
-                     "          AND LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%visa%')) THEN 3 "
+                     "WHEN LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%ma%visa%' THEN 3 "
+                     "WHEN (LOWER(TRIM(COALESCE(owner,''))) IN ('ma','mark') "
+                     "      AND LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%visa%') THEN 4 "
                      "ELSE 99 END, "
                      "COALESCE(description, '') COLLATE NODIACRITIC DESC, "
                      "COALESCE(name, '') COLLATE NODIACRITIC"),
