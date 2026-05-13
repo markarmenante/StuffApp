@@ -576,6 +576,42 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
+  {% set _order_status = (r['status'] if r and 'status' in r.keys() and r['status'] else ('Ordered' if is_new else '')) %}
+  {% set _order_has_data = r and (
+      (r['order_purchase_price'] if 'order_purchase_price' in r.keys() else none) is not none or
+      (r['order_deposit'] if 'order_deposit' in r.keys() else none) is not none or
+      (r['expected_delivery_date'] if 'expected_delivery_date' in r.keys() else none) or
+      (r['actual_delivery_date'] if 'actual_delivery_date' in r.keys() else none)
+    ) %}
+  <div id="watchOrderPanel" class="watch-order-panel{% if not (is_new or _order_status == 'Ordered' or _order_has_data) %} is-hidden{% endif %}">
+    <div class="section-bar watch-order-bar">Order</div>
+    <div class="dgrid dg4 watch-order-grid">
+      <div class="dcell">
+        <input type="text" name="order_purchase_price" value="{{ val('order_purchase_price')|currency }}"
+               class="watch-order-money watch-order-purchase" inputmode="numeric">
+        <span class="clabel">Purchase Price</span>
+      </div>
+      <div class="dcell">
+        <input type="text" name="order_deposit"
+               value="{{ (r['order_deposit'] if r and 'order_deposit' in r.keys() else '')|order_deposit(r['order_deposit_percent'] if r and 'order_deposit_percent' in r.keys() else none) }}"
+               class="watch-order-money watch-order-deposit" inputmode="numeric">
+        <span class="clabel">Deposit</span>
+      </div>
+      {{ datecell('expected_delivery_date','Promised Delivery Date', false) }}
+      <div class="dcell">
+        <input type="text" value="{{ val('order_balance')|currency }}" class="watch-order-balance" readonly>
+        <span class="clabel">Balance</span>
+      </div>
+    </div>
+    <div class="dgrid dg2 watch-order-delivery-grid">
+      {{ datecell('actual_delivery_date','Actual Delivery Date', false) }}
+      <div class="dcell">
+        <input type="text" value="{{ val('expected_delivery_date')|delivery_lateness(val('actual_delivery_date')) }}" class="watch-order-late" readonly>
+        <span class="clabel">Late vs Promised</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Value Estimate block — section-bar header (matches Topics /
        People / Notes) with the lookup pill scaled to size and the
        results table below. Timestamp sits inline next to the title. -->
@@ -2917,6 +2953,118 @@ document.querySelectorAll('.comp-item').forEach(item => {
   if (_dateInput) {
     _dateInput.addEventListener('change', () => {
       form.querySelectorAll('input.price-input').forEach(applyUsdConversion);
+    });
+  }
+
+  // Watch order panel: deposit accepts either dollars or a percentage
+  // of purchase price. When a watch graduates to Own, mirror the
+  // order purchase price into the normal Price field and stamp actual
+  // delivery date if blank; the server applies the same rule.
+  const watchOrderPanel = document.getElementById('watchOrderPanel');
+  function orderMoneyNumber(raw) {
+    const s = stripUsdConversion(String(raw || '')).replace(/\([^)]*\)/g, '');
+    const cleaned = s.replace(/[^0-9.\-]/g, '');
+    const n = parseFloat(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+  function formatOrderMoney(n) {
+    return Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '';
+  }
+  function monthsLateText(expected, actual) {
+    if (!expected) return '';
+    const exp = new Date(expected + 'T00:00:00');
+    const act = actual ? new Date(actual + 'T00:00:00') : new Date();
+    if (Number.isNaN(exp.getTime()) || Number.isNaN(act.getTime())) return '';
+    if (act <= exp) return 'On time';
+    let months = (act.getFullYear() - exp.getFullYear()) * 12
+      + (act.getMonth() - exp.getMonth());
+    if (act.getDate() < exp.getDate()) months -= 1;
+    months = Math.max(months, 0);
+    if (months === 0) {
+      const days = Math.max(1, Math.round((act - exp) / 86400000));
+      return days + ' day' + (days === 1 ? '' : 's') + ' late';
+    }
+    const years = Math.floor(months / 12);
+    const rem = months % 12;
+    const parts = [];
+    if (years) parts.push(years + ' yr' + (years === 1 ? '' : 's'));
+    if (rem) parts.push(rem + ' mo');
+    return parts.join(' ') + ' late';
+  }
+  function updateWatchOrderPanelVisibility() {
+    if (!watchOrderPanel) return;
+    const status = form.querySelector('select[name="status"]')?.value || '';
+    const hasData = Array.from(watchOrderPanel.querySelectorAll('input[name]'))
+      .some(input => (input.value || '').trim());
+    watchOrderPanel.classList.toggle('is-hidden',
+      !(status === 'Ordered' || hasData));
+  }
+  function updateWatchOrderMath(formatDeposit) {
+    if (!watchOrderPanel) return;
+    const purchaseInput = watchOrderPanel.querySelector('input[name="order_purchase_price"]');
+    const depositInput = watchOrderPanel.querySelector('input[name="order_deposit"]');
+    const balanceInput = watchOrderPanel.querySelector('.watch-order-balance');
+    const lateInput = watchOrderPanel.querySelector('.watch-order-late');
+    const expectedInput = watchOrderPanel.querySelector('input[name="expected_delivery_date"]');
+    const actualInput = watchOrderPanel.querySelector('input[name="actual_delivery_date"]');
+    const purchase = orderMoneyNumber(purchaseInput?.value);
+    let deposit = orderMoneyNumber(depositInput?.value);
+    const pctMatch = (depositInput?.value || '').match(/(-?\d+(?:\.\d+)?)\s*%/);
+    if (pctMatch && purchase !== null) {
+      const pct = parseFloat(pctMatch[1]);
+      if (Number.isFinite(pct)) {
+        deposit = purchase * pct / 100;
+        if (formatDeposit) depositInput.value = formatOrderMoney(deposit) + ' (' + pct + '%)';
+      }
+    }
+    if (balanceInput) {
+      balanceInput.value = purchase === null ? '' : formatOrderMoney(purchase - (deposit || 0));
+    }
+    if (lateInput) {
+      lateInput.value = monthsLateText(expectedInput?.value || '', actualInput?.value || '');
+    }
+  }
+  if (watchOrderPanel) {
+    watchOrderPanel.querySelectorAll('.watch-order-money').forEach(input => {
+      input.addEventListener('focus', () => {
+        input.value = input.value.replace(/\s*\/\s*\$[\d,]+\s*$/, '');
+      });
+      input.addEventListener('input', () => updateWatchOrderMath(false));
+      input.addEventListener('blur', () => {
+        if (!/%/.test(input.value || '')) {
+          const n = orderMoneyNumber(input.value);
+          if (n !== null) input.value = formatOrderMoney(n);
+        }
+        updateWatchOrderMath(true);
+      });
+    });
+    watchOrderPanel.querySelectorAll('input[type="date"]').forEach(input => {
+      input.addEventListener('change', () => updateWatchOrderMath(false));
+    });
+    updateWatchOrderMath(false);
+    updateWatchOrderPanelVisibility();
+  }
+  const statusSelect = form.querySelector('select[name="status"]');
+  if (statusSelect) {
+    statusSelect.addEventListener('change', () => {
+      const isOrdered = statusSelect.value === 'Ordered';
+      statusSelect.classList.toggle('status-ordered', isOrdered);
+      if (watchOrderPanel && statusSelect.value === 'Own') {
+        const purchaseInput = watchOrderPanel.querySelector('input[name="order_purchase_price"]');
+        const actualInput = watchOrderPanel.querySelector('input[name="actual_delivery_date"]');
+        const expectedInput = watchOrderPanel.querySelector('input[name="expected_delivery_date"]');
+        const depositInput = watchOrderPanel.querySelector('input[name="order_deposit"]');
+        const priceInput = form.querySelector('input[name="price"]');
+        const hasOrderData = [purchaseInput, depositInput, expectedInput]
+          .some(input => ((input && input.value) || '').trim());
+        if (purchaseInput && priceInput && purchaseInput.value) {
+          priceInput.value = purchaseInput.value;
+          formatPriceField(priceInput);
+        }
+        if (hasOrderData && actualInput && !actualInput.value) actualInput.value = todayIsoDate();
+        updateWatchOrderMath(false);
+      }
+      updateWatchOrderPanelVisibility();
     });
   }
 

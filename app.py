@@ -307,6 +307,10 @@ FIELDS = {
         {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
+        {'name': 'order_purchase_price', 'label': 'Order Purchase Price', 'type': 'text'},
+        {'name': 'order_deposit',    'label': 'Order Deposit',     'type': 'text'},
+        {'name': 'expected_delivery_date', 'label': 'Promised Delivery Date', 'type': 'date'},
+        {'name': 'actual_delivery_date', 'label': 'Actual Delivery Date', 'type': 'date'},
         {'name': 'service_date',    'label': 'Service Date',      'type': 'date'},
         {'name': 'value',           'label': 'Value',             'type': 'number'},
         {'name': 'results',         'label': 'Results',           'type': 'textarea'},
@@ -954,6 +958,12 @@ def init_db():
         'ALTER TABLE watches RENAME COLUMN escape_wheel TO balance_wheel',
         'ALTER TABLE watches ADD COLUMN balance_wheel TEXT',
         'ALTER TABLE watches ADD COLUMN calibre_notes TEXT',
+        'ALTER TABLE watches ADD COLUMN order_purchase_price REAL',
+        'ALTER TABLE watches ADD COLUMN order_deposit REAL',
+        'ALTER TABLE watches ADD COLUMN order_deposit_percent REAL',
+        'ALTER TABLE watches ADD COLUMN expected_delivery_date TEXT',
+        'ALTER TABLE watches ADD COLUMN actual_delivery_date TEXT',
+        'ALTER TABLE watches ADD COLUMN order_balance REAL',
         'ALTER TABLE art ADD COLUMN cat_id TEXT',
         'ALTER TABLE persons ADD COLUMN license_number TEXT',
         'ALTER TABLE persons ADD COLUMN passport_number TEXT',
@@ -3927,6 +3937,10 @@ def new_record(category):
                         val = m.group(1)
                 data[fname] = val if val else None
 
+        if category == 'watches':
+            _apply_watch_order_form_fields(data, request.form)
+            _graduate_watch_order_if_owned(data, data.get('status'))
+
         # Auto-fill empty *_title / *_label columns with the uploaded
         # file's basename for each file field that has a paired title
         # column. Only fills when the user didn't supply a title via
@@ -4167,6 +4181,10 @@ def detail_view(category, record_id):
                 val = normalize_field_value(table, fname, val)
                 updates[fname] = val if val else None
 
+        if category == 'watches':
+            _apply_watch_order_form_fields(updates, request.form)
+            _graduate_watch_order_if_owned(updates, updates.get('status'))
+
         # If a coin moved groups, resequence both the old group (to
         # close the gap) and the new group (to place the coin).
         groups_to_resequence = []
@@ -4403,6 +4421,11 @@ def save_field(category, record_id):
                 'error': f'Cannot set {field_name} outside your allowed values'
             }), 403
 
+    if category == 'watches' and field_name in ('order_purchase_price', 'order_deposit'):
+        if _update_watch_order_field(db, record_id, field_name, value):
+            db.commit()
+            return jsonify({'ok': True})
+
     # Strip currency/comma formatting for numeric fields. price keeps
     # its currency prefix (US$ / A$) verbatim — see _normalize_price_input.
     if field_name == 'price':
@@ -4439,6 +4462,10 @@ def save_field(category, record_id):
     now = datetime.utcnow().isoformat()
     db.execute(f"UPDATE {table} SET {field_name} = ?, updated_at = ? WHERE id = ?",
                [value if value != '' else None, now, record_id])
+
+    if category == 'watches' and field_name == 'status' \
+            and str(value or '').strip().lower() == 'own':
+        _graduate_watch_order_status(db, record_id)
 
     # date_1 / date_2 each have a parallel _text column the detail
     # template prefers for display. Without keeping them in sync, the
@@ -6289,6 +6316,163 @@ def _normalize_price_input(val):
     return m.group(1) if m else s
 
 
+def _parse_order_money(value):
+    s = (value or '').strip()
+    if not s:
+        return None
+    s = re.split(r'\s*/\s*\$', s, maxsplit=1)[0]
+    s = re.sub(r'\([^)]*\)', '', s)
+    cleaned = re.sub(r'[^0-9.\-]', '', s)
+    if cleaned in ('', '-', '.', '-.'):
+        return None
+    try:
+        return float(cleaned)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_watch_order_deposit(value, purchase_price):
+    s = (value or '').strip()
+    pct = None
+    m = re.search(r'(-?\d+(?:\.\d+)?)\s*%', s)
+    if m:
+        try:
+            pct = float(m.group(1))
+        except (TypeError, ValueError):
+            pct = None
+    if pct is not None and purchase_price is not None:
+        return purchase_price * pct / 100.0, pct
+    return _parse_order_money(s), pct
+
+
+def _watch_order_balance(purchase_price, deposit):
+    if purchase_price is None:
+        return None
+    if deposit is None:
+        return purchase_price
+    return purchase_price - deposit
+
+
+def _watch_order_lateness(expected, actual=None):
+    if not expected:
+        return ''
+    try:
+        expected_date = datetime.strptime(str(expected)[:10], '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return ''
+    actual_date = None
+    if actual:
+        try:
+            actual_date = datetime.strptime(str(actual)[:10], '%Y-%m-%d').date()
+        except (TypeError, ValueError):
+            actual_date = None
+    compare_date = actual_date or date.today()
+    if compare_date <= expected_date:
+        return 'On time'
+    months = (
+        (compare_date.year - expected_date.year) * 12
+        + compare_date.month - expected_date.month
+    )
+    if compare_date.day < expected_date.day:
+        months -= 1
+    months = max(months, 0)
+    if months == 0:
+        days = (compare_date - expected_date).days
+        return f"{days} day{'s' if days != 1 else ''} late"
+    years, rem_months = divmod(months, 12)
+    parts = []
+    if years:
+        parts.append(f"{years} yr{'s' if years != 1 else ''}")
+    if rem_months:
+        parts.append(f"{rem_months} mo")
+    return ' '.join(parts) + ' late'
+
+
+def _apply_watch_order_form_fields(target, form):
+    purchase = _parse_order_money(form.get('order_purchase_price'))
+    deposit, pct = _parse_watch_order_deposit(form.get('order_deposit'), purchase)
+    target['order_purchase_price'] = purchase
+    target['order_deposit'] = deposit
+    target['order_deposit_percent'] = pct
+    target['order_balance'] = _watch_order_balance(purchase, deposit)
+
+
+def _has_watch_order_data(record):
+    def _field_value(name):
+        if hasattr(record, 'keys'):
+            return record[name] if name in record.keys() else None
+        return record.get(name)
+
+    return any(
+        _field_value(k) not in (None, '')
+        for k in ('order_purchase_price', 'order_deposit', 'expected_delivery_date')
+    )
+
+
+def _graduate_watch_order_if_owned(target, status_value):
+    if str(status_value or '').strip().lower() != 'own':
+        return
+    purchase = target.get('order_purchase_price')
+    if purchase is not None:
+        target['price'] = purchase
+    if _has_watch_order_data(target) and not target.get('actual_delivery_date'):
+        target['actual_delivery_date'] = date.today().isoformat()
+
+
+def _update_watch_order_field(db, record_id, field_name, raw_value):
+    row = db.execute(
+        "SELECT order_purchase_price, order_deposit, order_deposit_percent "
+        "FROM watches WHERE id = ?",
+        [record_id],
+    ).fetchone()
+    if not row:
+        return False
+    purchase = row['order_purchase_price']
+    deposit = row['order_deposit']
+    pct = row['order_deposit_percent']
+    if field_name == 'order_purchase_price':
+        purchase = _parse_order_money(raw_value)
+        if pct is not None and purchase is not None:
+            deposit = purchase * float(pct) / 100.0
+    elif field_name == 'order_deposit':
+        deposit, pct = _parse_watch_order_deposit(raw_value, purchase)
+    else:
+        return False
+    balance = _watch_order_balance(purchase, deposit)
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "UPDATE watches SET order_purchase_price = ?, order_deposit = ?, "
+        "order_deposit_percent = ?, order_balance = ?, updated_at = ? "
+        "WHERE id = ?",
+        [purchase, deposit, pct, balance, now, record_id],
+    )
+    return True
+
+
+def _graduate_watch_order_status(db, record_id):
+    row = db.execute(
+        "SELECT order_purchase_price, order_deposit, expected_delivery_date, "
+        "actual_delivery_date "
+        "FROM watches WHERE id = ?",
+        [record_id],
+    ).fetchone()
+    if not row:
+        return
+    updates = []
+    params = []
+    if row['order_purchase_price'] is not None:
+        updates.append('price = ?')
+        params.append(row['order_purchase_price'])
+    if _has_watch_order_data(row) and not row['actual_delivery_date']:
+        updates.append('actual_delivery_date = ?')
+        params.append(date.today().isoformat())
+    if updates:
+        updates.append('updated_at = ?')
+        params.append(datetime.utcnow().isoformat())
+        params.append(record_id)
+        db.execute(f"UPDATE watches SET {', '.join(updates)} WHERE id = ?", params)
+
+
 @app.template_filter('currency')
 def currency_filter(value):
     """Format as $1,234 by default. Already-formatted strings carrying
@@ -6305,6 +6489,24 @@ def currency_filter(value):
         return f"${float(s.replace(',', '').replace('$', '')):,.0f}"
     except (ValueError, TypeError):
         return s
+
+
+@app.template_filter('order_deposit')
+def order_deposit_filter(value, percent=None):
+    base = currency_filter(value)
+    if percent in (None, ''):
+        return base
+    try:
+        pct = float(percent)
+    except (TypeError, ValueError):
+        return base
+    pct_text = f"{pct:g}%"
+    return f"{base} ({pct_text})" if base else pct_text
+
+
+@app.template_filter('delivery_lateness')
+def delivery_lateness_filter(expected, actual=None):
+    return _watch_order_lateness(expected, actual)
 
 
 @app.template_filter('lug_fmt')
