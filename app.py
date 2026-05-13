@@ -11571,6 +11571,8 @@ def admin_item_type_report():
         columns = _table_column_names(db, table)
         wheres, params = [], []
         _apply_row_filter_clauses(category, wheres, params)
+        if 'status' in columns:
+            wheres.append("LOWER(TRIM(COALESCE(status, ''))) IN ('own', 'owned')")
 
         if q:
             search_columns = _item_report_search_columns(columns)
@@ -11614,6 +11616,10 @@ def admin_item_type_report():
                 if field in columns and row[field] not in (None, ''):
                     details.append({'label': label, 'value': _format_report_value(field, row[field])})
             property_field = CATEGORY_PROPERTY_FIELD.get(category)
+            status_display = (
+                _item_report_row_value(row, columns, 'status')
+                if 'status' in columns else 'Owned'
+            )
             item = {
                 'category': category,
                 'category_name': info['name'],
@@ -11622,7 +11628,7 @@ def admin_item_type_report():
                 'title': _report_record_title(category, row),
                 'owner': _item_report_row_value(row, columns, 'owner'),
                 'property': row[property_field] if property_field in columns else '',
-                'status': _item_report_row_value(row, columns, 'status', 'location_status'),
+                'status': status_display,
                 'date': _item_report_date(row, columns),
                 'price_number': price_number,
                 'price_display': _format_money(row['price']) if 'price' in columns else '',

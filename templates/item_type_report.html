@@ -7,12 +7,12 @@
     <div>
       <div class="admin-crumbs"><a href="{{ url_for('admin_index') }}">Admin</a> &rsaquo; Item type report</div>
       <h1>{{ type_label }} Report</h1>
-      <p>Searchable inventory summary across all item types, with category-specific detail links.</p>
+      <p>Searchable owned-inventory summary across all item categories, with category-specific detail links.</p>
     </div>
     <form method="get" action="{{ url_for('admin_item_type_report') }}" class="item-report-form">
-      <label for="type">Type</label>
+      <label for="type">Category</label>
       <select id="type" name="type" onchange="this.form.submit()">
-        <option value="all" {% if selected_type == 'all' %}selected{% endif %}>All items</option>
+        <option value="all" {% if selected_type == 'all' %}selected{% endif %}>All categories</option>
         {% for option in type_options %}
         <option value="{{ option.slug }}" {% if selected_type == option.slug %}selected{% endif %}>{{ option.label }}</option>
         {% endfor %}
@@ -93,7 +93,10 @@
   </div>
 
   <section class="item-report-card item-ledger-card">
-    <h2>Item Ledger</h2>
+    <div class="item-ledger-head">
+      <h2>Item Ledger</h2>
+      <span>Owned records only</span>
+    </div>
     {% if items %}
     <table class="item-ledger">
       <thead>
@@ -250,6 +253,16 @@
   white-space: nowrap;
 }
 .item-ledger-card { padding: 12px; }
+.item-ledger-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.item-ledger-head span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
 .item-ledger th {
   color: var(--text-secondary);
   font-weight: 700;
