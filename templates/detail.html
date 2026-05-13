@@ -3527,8 +3527,9 @@ document.querySelectorAll('.ta-input').forEach(inp => {
     prefixMatch = ''; updateGhost();
   }, 150));
   inp.addEventListener('keydown', e => {
-    // Tab / ArrowRight / Enter accept the inline ghost when caret is at end.
-    if ((e.key === 'Tab' || e.key === 'ArrowRight' || e.key === 'Enter')
+    // Space / Tab / ArrowRight / Enter accept the inline ghost when
+    // caret is at end. Space is the muscle-memory path for these fields.
+    if ((e.key === ' ' || e.key === 'Spacebar' || e.key === 'Tab' || e.key === 'ArrowRight' || e.key === 'Enter')
         && prefixMatch
         && (activeIdx < 0)
         && inp.selectionStart === inp.value.length) {
