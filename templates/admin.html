@@ -373,12 +373,20 @@ document.querySelectorAll('.admin-action').forEach(li => {
 .admin-page { max-width: 800px; margin: 24px auto; padding: 0 16px; font-family: var(--font); }
 .admin-title { font-size: 22px; margin-bottom: 12px; }
 .admin-tools {
-  display: flex; gap: 4px; padding: 8px 0;
+  display: flex; gap: 8px; padding: 8px 0;
 }
 .admin-tools .nav-item {
   /* Override the nav bar's right border — looks wrong on a standalone row. */
   border-right: none;
   border-radius: 6px;
+  min-width: 72px;
+  padding: 8px 12px;
+}
+.admin-tools .nav-item .icon {
+  font-size: 30px;
+}
+.admin-tools .nav-item .lbl {
+  font-size: 11px;
 }
 .admin-divider {
   border: none; border-top: 1px solid var(--border);
