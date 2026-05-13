@@ -2720,8 +2720,11 @@ CATEGORY_ORDER_BY = {
                    "END, "
                    "COALESCE(name,'') COLLATE NODIACRITIC"),
     # Cards: pin the primary cards first, then keep the older issuer/name
-    # grouping for everything else.
+    # grouping for everything else. The Atlas Apple Pay virtual card is
+    # intentionally demoted to the very bottom.
     'credit_cards': ("CASE "
+                     "WHEN (LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%atlas%' "
+                     "      AND LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%apple%pay%') THEN 1000 "
                      "WHEN (LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%ma%centurion%' "
                      "      OR (LOWER(TRIM(COALESCE(owner,''))) IN ('ma','mark') "
                      "          AND LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%centurion%')) THEN 0 "
