@@ -2825,6 +2825,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
   const form = document.getElementById('mainForm');
 
+  // Shared currency-field formatter. Any future money field should use
+  // this behavior: currency prefix detection, historical USD conversion,
+  // cached FX rates, and a stored/displayed USD tail where applicable.
+  //
   // Price-field formatter — accept multi-currency input ("eur 10000",
   // "chf 1000", "yen 50000", "usd 10,000", "$50000", "€500", "A$200")
   // and reformat on blur with the matching prefix and thousands
