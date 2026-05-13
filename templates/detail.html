@@ -583,7 +583,8 @@ document.addEventListener('DOMContentLoaded', function () {
       (r['expected_delivery_date'] if 'expected_delivery_date' in r.keys() else none) or
       (r['actual_delivery_date'] if 'actual_delivery_date' in r.keys() else none)
     ) %}
-  <div id="watchOrderPanel" class="watch-order-panel{% if _order_status == 'Own' or not (is_new or _order_status == 'Ordered' or _order_has_data) %} is-hidden{% endif %}">
+  {% set _order_status_lc = _order_status|lower %}
+  <div id="watchOrderPanel" class="watch-order-panel{% if _order_status_lc in ['own', 'owned'] or not (is_new or _order_status == 'Ordered' or _order_has_data) %} is-hidden{% endif %}">
     <div class="section-bar watch-order-bar">Order History</div>
     <div class="dgrid dg4 watch-order-grid">
       <div class="dcell">
@@ -2994,10 +2995,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
   function updateWatchOrderPanelVisibility() {
     if (!watchOrderPanel) return;
     const status = form.querySelector('select[name="status"]')?.value || '';
+    const statusLc = status.trim().toLowerCase();
+    const isOwned = statusLc === 'own' || statusLc === 'owned';
     const hasData = Array.from(watchOrderPanel.querySelectorAll('input[name]'))
       .some(input => (input.value || '').trim());
     watchOrderPanel.classList.toggle('is-hidden',
-      status === 'Own' || !(status === 'Ordered' || hasData));
+      isOwned || !(status === 'Ordered' || hasData));
   }
   function updateWatchOrderMath(formatDeposit) {
     if (!watchOrderPanel) return;
