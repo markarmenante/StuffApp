@@ -11285,6 +11285,94 @@ def _coin_collection_narrative(scope_label, q, summary, top_regions,
     return lines
 
 
+def _table_column_names(db, table):
+    return {
+        row['name'] for row in db.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+
+
+def _item_report_row_value(row, columns, *names):
+    for name in names:
+        if name in columns:
+            value = row[name]
+            if value not in (None, ''):
+                return str(value).strip()
+    return ''
+
+
+def _item_report_date(row, columns):
+    return _item_report_row_value(
+        row, columns, 'purchase_date', 'date', 'service_date', 'created_at'
+    )
+
+
+def _item_report_search_columns(columns):
+    excluded = {
+        'image', 'image_obv', 'image_1', 'image_2', 'image_front',
+        'head_shot', 'receipt', 'document', 'document_1', 'document_2',
+        'documents', 'container_1', 'container_2',
+    }
+    return [c for c in columns if c not in excluded]
+
+
+def _item_report_bucket(items, key, limit=None):
+    counts = {}
+    spend = {}
+    for item in items:
+        label = (item.get(key) or '').strip() or 'Unspecified'
+        counts[label] = counts.get(label, 0) + 1
+        spend[label] = spend.get(label, 0.0) + (item.get('price_number') or 0.0)
+    rows = [
+        {'label': label, 'count': counts[label], 'spend': spend[label]}
+        for label in sorted(counts, key=lambda k: (-counts[k], k.lower()))
+    ]
+    return rows[:limit] if limit else rows
+
+
+def _item_type_narrative(type_label, q, summary, by_type, by_property,
+                         by_owner, by_status):
+    total = summary['total']
+    if not total:
+        return [
+            f"No records match this {type_label.lower()} report"
+            + (f" for “{q}”." if q else ".")
+        ]
+    search_phrase = f" matching “{q}”" if q else ''
+    lines = [
+        f"This {type_label.lower()} report{search_phrase} covers {total} records "
+        f"across {summary['type_count']} item type"
+        f"{'' if summary['type_count'] == 1 else 's'}.",
+        f"{summary['priced_count']} records carry a price, totaling "
+        f"{_format_money(summary['total_spend'])}. {summary['with_images']} "
+        f"records have a primary image available for review.",
+    ]
+    type_text = ', '.join(
+        f"{r['label']} ({r['count']})" for r in by_type[:5]
+        if r['label'] != 'Unspecified'
+    )
+    property_text = ', '.join(
+        f"{r['label']} ({r['count']})" for r in by_property[:5]
+        if r['label'] != 'Unspecified'
+    )
+    owner_text = ', '.join(
+        f"{r['label']} ({r['count']})" for r in by_owner[:4]
+        if r['label'] != 'Unspecified'
+    )
+    status_text = ', '.join(
+        f"{r['label']} ({r['count']})" for r in by_status[:4]
+        if r['label'] != 'Unspecified'
+    )
+    if type_text:
+        lines.append(f"The largest item-type blocks are {type_text}.")
+    if property_text:
+        lines.append(f"The most represented properties are {property_text}.")
+    if owner_text:
+        lines.append(f"Ownership is concentrated in {owner_text}.")
+    if status_text:
+        lines.append(f"Status mix: {status_text}.")
+    return lines
+
+
 @app.route('/admin/coin-collections', methods=['GET'])
 def admin_coin_collections():
     """Coin collection report, filterable by all / ancient / modern."""
@@ -11456,6 +11544,144 @@ def admin_coin_collections():
         by_vendor=by_vendor,
         era_rows=era_rows,
         top_references=top_references,
+        most_expensive=most_expensive,
+    )
+
+
+@app.route('/admin/item-type-report', methods=['GET'])
+def admin_item_type_report():
+    """Admin HTML report across all categories, selectable by item type."""
+    db = get_db()
+    requested_type = (request.args.get('type') or 'all').strip()
+    if requested_type != 'all' and requested_type not in CATEGORIES:
+        requested_type = 'all'
+    q = (request.args.get('q') or '').strip()
+
+    selected_categories = (
+        list(CATEGORIES.keys()) if requested_type == 'all' else [requested_type]
+    )
+    items = []
+    total_spend = 0.0
+    priced_count = 0
+    with_images = 0
+
+    for category in selected_categories:
+        info = CATEGORIES[category]
+        table = info['table']
+        columns = _table_column_names(db, table)
+        wheres, params = [], []
+        _apply_row_filter_clauses(category, wheres, params)
+
+        if q:
+            search_columns = _item_report_search_columns(columns)
+            if search_columns:
+                like = f"%{q.lower()}%"
+                wheres.append('(' + ' OR '.join(
+                    f"LOWER(CAST({col} AS TEXT)) LIKE ?"
+                    for col in search_columns
+                ) + ')')
+                params.extend([like] * len(search_columns))
+
+        where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+        order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
+        sql = f"SELECT * FROM {table} {where_sql} ORDER BY {order_by}"
+        try:
+            rows = db.execute(sql, params).fetchall()
+        except sqlite3.OperationalError:
+            rows = db.execute(
+                f"SELECT * FROM {table} {where_sql} ORDER BY created_at DESC",
+                params,
+            ).fetchall()
+        rows = [row for row in rows if _user_can_see_row(category, row)]
+
+        compact_cols = REPORT_COMPACT_COLS.get(category, [])[:4]
+        for row in rows:
+            price_number = _money_number(row['price']) if 'price' in columns else None
+            if price_number is not None:
+                priced_count += 1
+                total_spend += price_number
+            value_number = _money_number(row['value']) if 'value' in columns else None
+            image = ''
+            image_field = info.get('image_field')
+            if image_field in columns:
+                image = (row[image_field] or '').strip()
+                if image and is_image_filter(image):
+                    with_images += 1
+                else:
+                    image = ''
+            details = []
+            for label, field in compact_cols:
+                if field in columns and row[field] not in (None, ''):
+                    details.append({'label': label, 'value': _format_report_value(field, row[field])})
+            property_field = CATEGORY_PROPERTY_FIELD.get(category)
+            item = {
+                'category': category,
+                'category_name': info['name'],
+                'category_icon': info.get('icon', ''),
+                'row': row,
+                'title': _report_record_title(category, row),
+                'owner': _item_report_row_value(row, columns, 'owner'),
+                'property': row[property_field] if property_field in columns else '',
+                'status': _item_report_row_value(row, columns, 'status', 'location_status'),
+                'date': _item_report_date(row, columns),
+                'price_number': price_number,
+                'price_display': _format_money(row['price']) if 'price' in columns else '',
+                'value_display': _format_money(row['value']) if 'value' in columns else '',
+                'value_number': value_number,
+                'image': image,
+                'details': details,
+            }
+            items.append(item)
+
+    items.sort(key=lambda item: (
+        item['category_name'].lower(),
+        (item['title'] or '').lower(),
+    ))
+    by_type = _item_report_bucket(items, 'category_name')
+    by_property = _item_report_bucket(items, 'property', 12)
+    by_owner = _item_report_bucket(items, 'owner', 10)
+    by_status = _item_report_bucket(items, 'status', 10)
+    most_expensive = sorted(
+        [item for item in items if item['price_number'] is not None],
+        key=lambda item: item['price_number'],
+        reverse=True,
+    )[:10]
+    type_options = [
+        {'slug': slug, 'label': CATEGORIES[slug]['name'], 'icon': CATEGORIES[slug].get('icon', '')}
+        for slug in CATEGORIES
+    ]
+    type_label = (
+        'All Items' if requested_type == 'all'
+        else CATEGORIES[requested_type]['name']
+    )
+    summary = {
+        'total': len(items),
+        'type_count': len([row for row in by_type if row['count']]),
+        'priced_count': priced_count,
+        'total_spend': total_spend,
+        'avg_spend': total_spend / priced_count if priced_count else 0,
+        'with_images': with_images,
+    }
+    narrative = _item_type_narrative(
+        type_label, q, summary, by_type, by_property, by_owner, by_status,
+    )
+
+    return render_template(
+        'item_type_report.html',
+        current_category='__admin__',
+        categories=CATEGORIES,
+        counts=get_counts(),
+        selected_type=requested_type,
+        type_label=type_label,
+        type_options=type_options,
+        q=q,
+        items=items,
+        summary=summary,
+        narrative=narrative,
+        by_type=by_type,
+        by_property=by_property,
+        by_owner=by_owner,
+        by_status=by_status,
         most_expensive=most_expensive,
     )
 

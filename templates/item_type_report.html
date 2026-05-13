@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+{% block title %}{{ type_label }} Report · StuffApp{% endblock %}
+
+{% block content %}
+<div class="item-report-page">
+  <div class="item-report-head">
+    <div>
+      <div class="admin-crumbs"><a href="{{ url_for('admin_index') }}">Admin</a> &rsaquo; Item type report</div>
+      <h1>{{ type_label }} Report</h1>
+      <p>Searchable inventory summary across all item types, with category-specific detail links.</p>
+    </div>
+    <form method="get" action="{{ url_for('admin_item_type_report') }}" class="item-report-form">
+      <label for="type">Type</label>
+      <select id="type" name="type" onchange="this.form.submit()">
+        <option value="all" {% if selected_type == 'all' %}selected{% endif %}>All items</option>
+        {% for option in type_options %}
+        <option value="{{ option.slug }}" {% if selected_type == option.slug %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+      <label for="q">Search</label>
+      <input id="q" name="q" value="{{ q }}" placeholder="name, maker, owner, property...">
+      <button type="submit">View</button>
+      <button type="button" onclick="window.print()">Print</button>
+    </form>
+  </div>
+
+  <section class="item-narrative">
+    <h2>Report Narrative</h2>
+    {% for line in narrative %}
+    <p>{{ line }}</p>
+    {% endfor %}
+  </section>
+
+  <div class="item-kpis">
+    <div class="item-kpi"><span>Total</span><strong>{{ summary.total }}</strong></div>
+    <div class="item-kpi"><span>Types</span><strong>{{ summary.type_count }}</strong></div>
+    <div class="item-kpi"><span>Priced</span><strong>{{ summary.priced_count }}/{{ summary.total }}</strong></div>
+    <div class="item-kpi"><span>Total Spend</span><strong>{{ summary.total_spend|currency }}</strong></div>
+    <div class="item-kpi"><span>Average</span><strong>{{ summary.avg_spend|currency }}</strong></div>
+    <div class="item-kpi"><span>Images</span><strong>{{ summary.with_images }}</strong></div>
+  </div>
+
+  <div class="item-report-grid">
+    <section class="item-report-card">
+      <h2>Item Types</h2>
+      <table class="item-mini-table">
+        {% for row in by_type %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="item-report-card">
+      <h2>Properties</h2>
+      <table class="item-mini-table">
+        {% for row in by_property %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="item-report-card">
+      <h2>Owners</h2>
+      <table class="item-mini-table">
+        {% for row in by_owner %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="item-report-card">
+      <h2>Status</h2>
+      <table class="item-mini-table">
+        {% for row in by_status %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="item-report-card item-wide-card">
+      <h2>Largest Priced Records</h2>
+      <table class="item-mini-table">
+        {% for item in most_expensive %}
+        <tr>
+          <td><a href="{{ url_for('detail_view', category=item.category, record_id=item.row['id']) }}">{{ item.category_name }} · {{ item.title }}</a></td>
+          <td>{{ item.price_display }}</td>
+        </tr>
+        {% else %}
+        <tr><td>No priced records in this view.</td><td></td></tr>
+        {% endfor %}
+      </table>
+    </section>
+  </div>
+
+  <section class="item-report-card item-ledger-card">
+    <h2>Item Ledger</h2>
+    {% if items %}
+    <table class="item-ledger">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Item</th>
+          <th>Details</th>
+          <th>Owner</th>
+          <th>Property</th>
+          <th>Status</th>
+          <th>Date</th>
+          <th>Price</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td class="item-type-cell">{{ item.category_icon }} {{ item.category_name }}</td>
+          <td class="item-title-cell">
+            {% if item.image %}
+            <img src="{{ url_for('uploaded_file', filename=item.image) }}" alt="">
+            {% endif %}
+            <a href="{{ url_for('detail_view', category=item.category, record_id=item.row['id']) }}">{{ item.title }}</a>
+          </td>
+          <td class="item-detail-cell">
+            {% for detail in item.details %}
+            <span><b>{{ detail.label }}</b> {{ detail.value }}</span>
+            {% endfor %}
+          </td>
+          <td>{{ item.owner }}</td>
+          <td>{{ item.property }}</td>
+          <td>{{ item.status }}</td>
+          <td class="mono">{{ item.date }}</td>
+          <td class="money">{{ item.price_display }}</td>
+          <td class="money">{{ item.value_display }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty-report">No items match this report.</p>
+    {% endif %}
+  </section>
+</div>
+
+<style>
+.item-report-page {
+  max-width: 1220px;
+  margin: 24px auto;
+  padding: 0 16px 32px;
+  font-family: var(--font);
+}
+.item-report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.item-report-head h1 { margin: 4px 0; font-size: 24px; }
+.item-report-head p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.admin-crumbs { font-size: 12px; color: var(--text-secondary); }
+.admin-crumbs a { color: var(--blue); text-decoration: none; }
+.item-report-form {
+  display: grid;
+  grid-template-columns: auto minmax(130px, auto) auto minmax(240px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px;
+}
+.item-report-form label { font-size: 12px; color: var(--text-secondary); }
+.item-report-form select,
+.item-report-form input,
+.item-report-form button {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+}
+.item-report-form button { color: var(--blue); font-weight: 600; }
+.item-narrative,
+.item-kpi,
+.item-report-card {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+}
+.item-narrative {
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.item-narrative h2,
+.item-report-card h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.item-narrative p {
+  margin: 7px 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+.item-kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.item-kpi { padding: 12px; }
+.item-kpi span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.item-kpi strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+}
+.item-report-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.item-report-card {
+  padding: 12px;
+  overflow: hidden;
+}
+.item-wide-card { grid-column: span 2; }
+.item-mini-table,
+.item-ledger {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.item-mini-table td,
+.item-ledger th,
+.item-ledger td {
+  border-top: 1px solid var(--border-light);
+  padding: 6px 4px;
+  vertical-align: top;
+}
+.item-mini-table td:nth-child(2),
+.item-mini-table td:nth-child(3),
+.item-ledger .money {
+  text-align: right;
+  white-space: nowrap;
+}
+.item-ledger-card { padding: 12px; }
+.item-ledger th {
+  color: var(--text-secondary);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+.item-type-cell { white-space: nowrap; color: var(--text-secondary); }
+.item-title-cell {
+  min-width: 240px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.item-title-cell img {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.item-detail-cell {
+  min-width: 220px;
+  color: var(--text-secondary);
+}
+.item-detail-cell span {
+  display: inline-block;
+  margin-right: 8px;
+}
+.item-title-cell a,
+.item-mini-table a {
+  color: var(--blue);
+  text-decoration: none;
+}
+.item-title-cell a:hover,
+.item-mini-table a:hover { text-decoration: underline; }
+.mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.empty-report { margin: 10px 0 0; color: var(--text-secondary); }
+@media (max-width: 1000px) {
+  .item-report-head { display: block; }
+  .item-report-form {
+    margin-top: 12px;
+    grid-template-columns: 1fr;
+  }
+  .item-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .item-report-grid { grid-template-columns: 1fr; }
+  .item-wide-card { grid-column: auto; }
+}
+@media print {
+  .topnav, .item-report-form { display: none !important; }
+  .item-report-page { max-width: none; margin: 0; padding: 0; }
+  .item-report-grid { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .item-kpis { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .item-report-card, .item-kpi, .item-narrative { break-inside: avoid; }
+  .item-ledger { font-size: 9px; }
+}
+</style>
+{% endblock %}
