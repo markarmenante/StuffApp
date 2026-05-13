@@ -208,10 +208,40 @@ def normalize_field_value(table, field_name, value):
     if isinstance(value, str):
         import unicodedata
         value = unicodedata.normalize('NFC', value)
+    if field_name == 'status' and value.strip().lower() == 'owned':
+        return 'Own'
     aliases = FIELD_ALIASES.get((table, field_name))
     if not aliases:
         return value
     return aliases.get(value.strip().lower(), value)
+
+
+def _normalize_owned_status_values(db):
+    """Fold legacy status='Owned' rows to the canonical status='Own'."""
+    tables = [
+        r['name'] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    ]
+    for table in tables:
+        cols = [r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()]
+        if 'status' in cols:
+            db.execute(
+                f"UPDATE {table} SET status = 'Own' "
+                "WHERE LOWER(TRIM(COALESCE(status, ''))) = 'owned'"
+            )
+
+
+def _backfill_blank_status_own(db):
+    """Default blank lifecycle statuses to Own for item tables."""
+    for category, info in CATEGORIES.items():
+        table = info['table']
+        cols = [r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()]
+        if 'status' in cols:
+            db.execute(
+                f"UPDATE {table} SET status = 'Own' "
+                "WHERE status IS NULL OR TRIM(status) = ''"
+            )
 
 
 # Default owner assigned to brand-new records when the form's owner
@@ -947,6 +977,8 @@ def init_db():
             pass
     db.commit()
     _ensure_owner_user(db)
+    _normalize_owned_status_values(db)
+    _backfill_blank_status_own(db)
     db.commit()
 
     # Migration-state ledger: one row per applied one-shot data
@@ -2205,7 +2237,7 @@ def get_property_choices():
     )
     sql = (
         "SELECT name, short_name FROM properties "
-        "WHERE status = 'Own' "
+        f"WHERE {_own_status_predicate()} "
         f"{type_filter}"
         "  AND COALESCE(NULLIF(name,''), short_name) IS NOT NULL "
         "  AND COALESCE(NULLIF(name,''), short_name) != '' "
@@ -2457,7 +2489,12 @@ def _autofill_title_from_filename(db, table, record_id, category,
     return (title_field, base)
 
 
-EXCLUDED_STATUSES = ('Own', 'Sold', 'Gifted', 'Own')  # dot filter excludes these
+EXCLUDED_STATUSES = ('Own', 'Owned', 'Sold', 'Gifted')  # dot filter excludes these
+
+
+def _own_status_predicate(column='status'):
+    return f"LOWER(TRIM(COALESCE({column}, ''))) IN ('own', 'owned')"
+
 
 CATEGORY_FILTERS = {
     'watches': {
@@ -2486,7 +2523,7 @@ CATEGORY_FILTERS = {
     # imported with inconsistent casing (e.g. 'commercial' vs 'Commercial')
     # still matches.
     'vehicles': {
-        'own':  ("LOWER(TRIM(COALESCE(status,''))) = 'own'", []),
+        'own':  (_own_status_predicate(), []),
         'sold': ("LOWER(TRIM(COALESCE(status,''))) = 'sold'", []),
     },
     # Cameras and lenses intentionally have no filter map — both lists
@@ -2494,13 +2531,13 @@ CATEGORY_FILTERS = {
     # removed.
     'properties': {
         # Single-axis filters
-        'own':         ("LOWER(TRIM(COALESCE(status,''))) = 'own'", []),
+        'own':         (_own_status_predicate(), []),
         'sold':        ("LOWER(TRIM(COALESCE(status,''))) = 'sold'", []),
         'commercial':  ("LOWER(TRIM(COALESCE(type,'')))   = 'commercial'", []),
         'residential': ("LOWER(TRIM(COALESCE(type,'')))   = 'residential'", []),
         # Combined (status + type)
-        'own_commercial':   ("LOWER(TRIM(COALESCE(status,''))) = 'own'  AND LOWER(TRIM(COALESCE(type,''))) = 'commercial'",  []),
-        'own_residential':  ("LOWER(TRIM(COALESCE(status,''))) = 'own'  AND LOWER(TRIM(COALESCE(type,''))) = 'residential'", []),
+        'own_commercial':   (_own_status_predicate() + " AND LOWER(TRIM(COALESCE(type,''))) = 'commercial'",  []),
+        'own_residential':  (_own_status_predicate() + " AND LOWER(TRIM(COALESCE(type,''))) = 'residential'", []),
         'sold_commercial':  ("LOWER(TRIM(COALESCE(status,''))) = 'sold' AND LOWER(TRIM(COALESCE(type,''))) = 'commercial'",  []),
         'sold_residential': ("LOWER(TRIM(COALESCE(status,''))) = 'sold' AND LOWER(TRIM(COALESCE(type,''))) = 'residential'", []),
     },
@@ -7875,7 +7912,10 @@ def status_owned_to_own():
     for t in tables:
         cols = [r['name'] for r in db.execute(f"PRAGMA table_info({t})").fetchall()]
         if 'status' in cols:
-            r = db.execute(f"UPDATE {t} SET status='Own' WHERE status='Owned'")
+            r = db.execute(
+                f"UPDATE {t} SET status='Own' "
+                "WHERE LOWER(TRIM(COALESCE(status, ''))) = 'owned'"
+            )
             if r.rowcount:
                 per_table[t] = r.rowcount
             total += r.rowcount
@@ -11572,7 +11612,7 @@ def admin_item_type_report():
         wheres, params = [], []
         _apply_row_filter_clauses(category, wheres, params)
         if 'status' in columns:
-            wheres.append("LOWER(TRIM(COALESCE(status, ''))) IN ('own', 'owned')")
+            wheres.append(_own_status_predicate())
 
         if q:
             search_columns = _item_report_search_columns(columns)
@@ -11618,7 +11658,7 @@ def admin_item_type_report():
             property_field = CATEGORY_PROPERTY_FIELD.get(category)
             status_display = (
                 _item_report_row_value(row, columns, 'status')
-                if 'status' in columns else 'Owned'
+                if 'status' in columns else 'Own'
             )
             item = {
                 'category': category,
