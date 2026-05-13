@@ -3330,6 +3330,26 @@ document.querySelectorAll('.coin-unit-input').forEach(inp => {
   }
 });
 
+function expandFourDigitYear(raw) {
+  const s = String(raw || '').trim();
+  if (!/^\d{1,2}$/.test(s)) return raw;
+  const yy = parseInt(s, 10);
+  const currentYear = new Date().getFullYear();
+  const currentCentury = Math.floor(currentYear / 100) * 100;
+  let candidate = currentCentury + yy;
+  if (candidate > currentYear + 25) candidate -= 100;
+  else if (candidate < currentYear - 75) candidate += 100;
+  return String(candidate);
+}
+document.querySelectorAll(
+  '#mainForm input[name="year"], #mainForm input[name="year_recorded"], ' +
+  '#mainForm input[name="year_built"]'
+).forEach(inp => {
+  inp.addEventListener('blur', () => {
+    inp.value = expandFourDigitYear(inp.value);
+  });
+});
+
 // Detail view: clicking/tabbing into any text-ish input selects all so the
 // next keystroke replaces the current value instead of appending to it.
 document.querySelectorAll(

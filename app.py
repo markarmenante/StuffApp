@@ -196,6 +196,24 @@ FIELD_ALIASES = {
 }
 
 
+FOUR_DIGIT_YEAR_FIELDS = {'year', 'year_recorded', 'year_built'}
+
+
+def _normalize_four_digit_year(value):
+    s = str(value or '').strip()
+    if not re.fullmatch(r'\d{1,2}', s):
+        return value
+    yy = int(s)
+    current_year = datetime.now().year
+    current_century = (current_year // 100) * 100
+    candidate = current_century + yy
+    if candidate > current_year + 25:
+        candidate -= 100
+    elif candidate < current_year - 75:
+        candidate += 100
+    return str(candidate)
+
+
 def normalize_field_value(table, field_name, value):
     """Return the canonical value for a known alias, or the input
     unchanged. Strings are first NFC-normalized so pre-composed and
@@ -208,6 +226,8 @@ def normalize_field_value(table, field_name, value):
     if isinstance(value, str):
         import unicodedata
         value = unicodedata.normalize('NFC', value)
+    if field_name in FOUR_DIGIT_YEAR_FIELDS:
+        return _normalize_four_digit_year(value)
     if field_name == 'status' and value.strip().lower() == 'owned':
         return 'Own'
     aliases = FIELD_ALIASES.get((table, field_name))
@@ -3913,6 +3933,7 @@ def new_record(category):
     db = get_db()
     counts = get_counts()
     cat_info = CATEGORIES[category]
+    table = cat_info['table']
 
     if request.method == 'POST':
         record_id = str(uuid.uuid4())
@@ -3952,6 +3973,7 @@ def new_record(category):
                     m = re.match(r'^\s*(-?\d+(?:\.\d+)?)\s*[A-Za-z%°/]*\s*$', val)
                     if m:
                         val = m.group(1)
+                val = normalize_field_value(table, fname, val)
                 data[fname] = val if val else None
 
         if category == 'watches':
