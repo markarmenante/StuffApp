@@ -975,6 +975,8 @@ input[type="date"] { -webkit-appearance: none; }
   color: var(--text-secondary);
   -webkit-text-fill-color: var(--text-secondary);
 }
+.watch-order-late[readonly] { font-weight: 600; }
+.watch-order-late::placeholder { color: #777; opacity: 1; }
 .camera-purchase .dcell input,
 .camera-purchase .dcell select { text-align: center; }
 

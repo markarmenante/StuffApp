@@ -6317,6 +6317,8 @@ def _normalize_price_input(val):
 
 
 def _parse_order_money(value):
+    if isinstance(value, (int, float)):
+        return float(value)
     s = (value or '').strip()
     if not s:
         return None
@@ -6343,6 +6345,48 @@ def _parse_watch_order_deposit(value, purchase_price):
     if pct is not None and purchase_price is not None:
         return purchase_price * pct / 100.0, pct
     return _parse_order_money(s), pct
+
+
+def _row_get(record, name):
+    if not record:
+        return None
+    if hasattr(record, 'keys'):
+        return record[name] if name in record.keys() else None
+    return record.get(name)
+
+
+def _watch_order_purchase_amount(record):
+    order_purchase = _row_get(record, 'order_purchase_price')
+    if order_purchase not in (None, ''):
+        return order_purchase
+    if str(_row_get(record, 'status') or '').strip() == 'Ordered':
+        return _parse_order_money(_row_get(record, 'price'))
+    return None
+
+
+def _infer_watch_order_deposit_percent(record):
+    notes = _row_get(record, 'notes') or ''
+    m = re.search(r'(\d+(?:\.\d+)?)\s*%\s*(?:down|deposit|paid)', notes, re.IGNORECASE)
+    if not m:
+        m = re.search(r'(?:down|deposit|paid)[^\d]{0,20}(\d+(?:\.\d+)?)\s*%', notes, re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _watch_order_deposit_values(record):
+    deposit = _row_get(record, 'order_deposit')
+    pct = _row_get(record, 'order_deposit_percent')
+    if deposit not in (None, ''):
+        return deposit, pct
+    purchase = _watch_order_purchase_amount(record)
+    pct = pct if pct not in (None, '') else _infer_watch_order_deposit_percent(record)
+    if pct is not None and purchase is not None:
+        return float(purchase) * float(pct) / 100.0, pct
+    return None, pct
 
 
 def _watch_order_balance(purchase_price, deposit):
@@ -6399,9 +6443,7 @@ def _apply_watch_order_form_fields(target, form):
 
 def _has_watch_order_data(record):
     def _field_value(name):
-        if hasattr(record, 'keys'):
-            return record[name] if name in record.keys() else None
-        return record.get(name)
+        return _row_get(record, name)
 
     return any(
         _field_value(k) not in (None, '')
@@ -6502,6 +6544,24 @@ def order_deposit_filter(value, percent=None):
         return base
     pct_text = f"{pct:g}%"
     return f"{base} ({pct_text})" if base else pct_text
+
+
+@app.template_filter('watch_order_purchase')
+def watch_order_purchase_filter(record):
+    return currency_filter(_watch_order_purchase_amount(record))
+
+
+@app.template_filter('watch_order_deposit')
+def watch_order_deposit_filter(record):
+    deposit, pct = _watch_order_deposit_values(record)
+    return order_deposit_filter(deposit, pct)
+
+
+@app.template_filter('watch_order_balance')
+def watch_order_balance_filter(record):
+    purchase = _watch_order_purchase_amount(record)
+    deposit, _pct = _watch_order_deposit_values(record)
+    return currency_filter(_watch_order_balance(purchase, deposit))
 
 
 @app.template_filter('delivery_lateness')

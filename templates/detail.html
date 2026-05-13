@@ -587,26 +587,26 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="section-bar watch-order-bar">Order</div>
     <div class="dgrid dg4 watch-order-grid">
       <div class="dcell">
-        <input type="text" name="order_purchase_price" value="{{ val('order_purchase_price')|currency }}"
+        <input type="text" name="order_purchase_price" value="{{ r|watch_order_purchase if r else '' }}"
                class="watch-order-money watch-order-purchase" inputmode="numeric">
         <span class="clabel">Purchase Price</span>
       </div>
       <div class="dcell">
         <input type="text" name="order_deposit"
-               value="{{ (r['order_deposit'] if r and 'order_deposit' in r.keys() else '')|order_deposit(r['order_deposit_percent'] if r and 'order_deposit_percent' in r.keys() else none) }}"
+               value="{{ r|watch_order_deposit if r else '' }}"
                class="watch-order-money watch-order-deposit" inputmode="numeric">
         <span class="clabel">Deposit</span>
       </div>
       {{ datecell('expected_delivery_date','Promised Delivery Date', false) }}
       <div class="dcell">
-        <input type="text" value="{{ val('order_balance')|currency }}" class="watch-order-balance" readonly>
+        <input type="text" value="{{ r|watch_order_balance if r else '' }}" class="watch-order-balance" readonly>
         <span class="clabel">Balance</span>
       </div>
     </div>
     <div class="dgrid dg2 watch-order-delivery-grid">
       {{ datecell('actual_delivery_date','Actual Delivery Date', false) }}
       <div class="dcell">
-        <input type="text" value="{{ val('expected_delivery_date')|delivery_lateness(val('actual_delivery_date')) }}" class="watch-order-late" readonly>
+        <input type="text" value="{{ val('expected_delivery_date')|delivery_lateness(val('actual_delivery_date')) }}" class="watch-order-late" placeholder="Needs promised date" readonly>
         <span class="clabel">Late vs Promised</span>
       </div>
     </div>
