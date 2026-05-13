@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% block title %}{{ scope_label }} Report · StuffApp{% endblock %}
+
+{% block content %}
+<div class="coin-report-page">
+  <div class="coin-report-head">
+    <div>
+      <div class="admin-crumbs"><a href="{{ url_for('admin_index') }}">Admin</a> &rsaquo; Coin collection report</div>
+      <h1>{{ scope_label }} Report</h1>
+      <p>Narrative collection summary with pedigree, reference, acquisition, and catalog views.</p>
+    </div>
+    <form method="get" action="{{ url_for('admin_coin_collections') }}" class="coin-report-form">
+      <label for="scope">Scope</label>
+      <select id="scope" name="scope" onchange="this.form.submit()">
+        <option value="all" {% if scope == 'all' %}selected{% endif %}>All coins</option>
+        <option value="ancient" {% if scope == 'ancient' %}selected{% endif %}>Ancient</option>
+        <option value="modern" {% if scope == 'modern' %}selected{% endif %}>Modern</option>
+      </select>
+      <label for="q">Search</label>
+      <input id="q" name="q" value="{{ q }}" placeholder="region, authority, reference...">
+      <button type="submit">View</button>
+      <button type="button" onclick="window.print()">Print</button>
+    </form>
+  </div>
+
+  <section class="coin-narrative">
+    <h2>Collection Narrative</h2>
+    {% for line in narrative %}
+    <p>{{ line }}</p>
+    {% endfor %}
+  </section>
+
+  <div class="coin-kpis">
+    <div class="coin-kpi"><span>Total</span><strong>{{ summary.total }}</strong></div>
+    <div class="coin-kpi"><span>Ancient</span><strong>{{ summary.ancient_count }}</strong></div>
+    <div class="coin-kpi"><span>Modern</span><strong>{{ summary.modern_count }}</strong></div>
+    <div class="coin-kpi"><span>Referenced</span><strong>{{ summary.with_refs }}/{{ summary.total }}</strong></div>
+    <div class="coin-kpi"><span>Priced</span><strong>{{ summary.known_price_count }}/{{ summary.total }}</strong></div>
+    <div class="coin-kpi"><span>Total Spend</span><strong>{{ summary.total_spend|currency }}</strong></div>
+  </div>
+
+  <div class="coin-report-grid">
+    <section class="coin-report-card">
+      <h2>Chronology</h2>
+      <table class="coin-mini-table">
+        {% for row in era_rows %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="coin-report-card">
+      <h2>Regions</h2>
+      <table class="coin-mini-table">
+        {% for row in by_region %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="coin-report-card">
+      <h2>Authorities</h2>
+      <table class="coin-mini-table">
+        {% for row in by_authority %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="coin-report-card">
+      <h2>Metals</h2>
+      <table class="coin-mini-table">
+        {% for row in by_metal %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="coin-report-card">
+      <h2>Denominations</h2>
+      <table class="coin-mini-table">
+        {% for row in by_denomination %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="coin-report-card">
+      <h2>Reference Signals</h2>
+      <table class="coin-mini-table">
+        {% for row in top_references %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td></tr>
+        {% else %}
+        <tr><td>No recurring reference markers found.</td><td></td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="coin-report-card">
+      <h2>Property</h2>
+      <table class="coin-mini-table">
+        {% for row in by_property %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="coin-report-card">
+      <h2>Top Vendors</h2>
+      <table class="coin-mini-table">
+        {% for row in by_vendor %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
+    </section>
+
+    <section class="coin-report-card">
+      <h2>Largest Purchases</h2>
+      <table class="coin-mini-table">
+        {% for item in most_expensive %}
+        <tr>
+          <td><a href="{{ url_for('detail_view', category='coins', record_id=item.row['id']) }}">{{ item.title }}</a></td>
+          <td>{{ item.price_display }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </section>
+  </div>
+
+  <section class="coin-report-card coin-ledger-card">
+    <h2>Coin Ledger</h2>
+    {% if coins %}
+    <table class="coin-ledger">
+      <thead>
+        <tr>
+          <th>Coin</th>
+          <th>Region</th>
+          <th>Authority</th>
+          <th>Denom</th>
+          <th>Minted</th>
+          <th>Metal</th>
+          <th>Grade</th>
+          <th>Property</th>
+          <th>Vendor</th>
+          <th>Refs</th>
+          <th>Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in coins %}
+        {% set row = item.row %}
+        <tr>
+          <td class="coin-title-cell">
+            {% if item.image %}
+            <img src="{{ url_for('uploaded_file', filename=item.image) }}" alt="">
+            {% endif %}
+            <a href="{{ url_for('detail_view', category='coins', record_id=row['id']) }}">{{ item.title }}</a>
+          </td>
+          <td>{{ row['region'] or '' }}</td>
+          <td>{{ row['authority'] or '' }}</td>
+          <td>{{ row['denomination'] or '' }}</td>
+          <td class="mono">{{ item.date_label }}</td>
+          <td>{{ row['metal'] or '' }}</td>
+          <td>{{ row['grade'] or row['sheldon'] or '' }}</td>
+          <td>{{ row['property_name'] or '' }}</td>
+          <td>{{ row['vendor'] or '' }}</td>
+          <td>{% if item.has_refs %}Yes{% endif %}</td>
+          <td class="money">{{ item.price_display }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty-report">No coins match this report.</p>
+    {% endif %}
+  </section>
+</div>
+
+<style>
+.coin-report-page {
+  max-width: 1180px;
+  margin: 24px auto;
+  padding: 0 16px 32px;
+  font-family: var(--font);
+}
+.coin-report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.coin-report-head h1 { margin: 4px 0; font-size: 24px; }
+.coin-report-head p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.admin-crumbs { font-size: 12px; color: var(--text-secondary); }
+.admin-crumbs a { color: var(--blue); text-decoration: none; }
+.coin-report-form {
+  display: grid;
+  grid-template-columns: auto minmax(120px, auto) auto minmax(220px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px;
+}
+.coin-report-form label { font-size: 12px; color: var(--text-secondary); }
+.coin-report-form select,
+.coin-report-form input,
+.coin-report-form button {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+}
+.coin-report-form button { color: var(--blue); font-weight: 600; }
+.coin-narrative {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.coin-narrative h2,
+.coin-report-card h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.coin-narrative p {
+  margin: 7px 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+.coin-kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.coin-kpi,
+.coin-report-card {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+}
+.coin-kpi {
+  padding: 12px;
+}
+.coin-kpi span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.coin-kpi strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+}
+.coin-report-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.coin-report-card {
+  padding: 12px;
+  overflow: hidden;
+}
+.coin-mini-table,
+.coin-ledger {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.coin-mini-table td,
+.coin-ledger th,
+.coin-ledger td {
+  border-top: 1px solid var(--border-light);
+  padding: 6px 4px;
+  vertical-align: top;
+}
+.coin-mini-table td:nth-child(2),
+.coin-mini-table td:nth-child(3),
+.coin-ledger .money {
+  text-align: right;
+  white-space: nowrap;
+}
+.coin-ledger-card { padding: 12px; }
+.coin-ledger th {
+  color: var(--text-secondary);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+.coin-title-cell {
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.coin-title-cell img {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.coin-title-cell a,
+.coin-mini-table a {
+  color: var(--blue);
+  text-decoration: none;
+}
+.coin-title-cell a:hover,
+.coin-mini-table a:hover { text-decoration: underline; }
+.mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.empty-report { margin: 10px 0 0; color: var(--text-secondary); }
+@media (max-width: 900px) {
+  .coin-report-head { display: block; }
+  .coin-report-form {
+    margin-top: 12px;
+    grid-template-columns: 1fr;
+  }
+  .coin-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .coin-report-grid { grid-template-columns: 1fr; }
+}
+@media print {
+  .topnav, .coin-report-form { display: none !important; }
+  .coin-report-page { max-width: none; margin: 0; padding: 0; }
+  .coin-report-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .coin-kpis { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .coin-report-card, .coin-kpi, .coin-narrative { break-inside: avoid; }
+  .coin-ledger { font-size: 9px; }
+}
+</style>
+{% endblock %}

@@ -3243,10 +3243,12 @@ def fetch_coin_context(coin):
 
     prompt = f"""You are an ancient-numismatics historian writing a short,
 rich profile of a specific coin. You have seven inputs; weave them
-together — don't just restate them. The catalog references and
-grade notes often carry a lot of signal (BCD pedigree, Calciati
-number, hoard provenance, strike quality, rarity call-outs); mine
-them for anything useful.
+together — don't just restate them. Put special weight on pedigree,
+provenance, sale history, hoard context, and catalog references. The
+catalog references and grade notes often carry a lot of signal (BCD
+pedigree, Calciati number, SNG / HGC / RIC / RPC / Crawford / Ravel
+references, hoard provenance, strike quality, rarity call-outs); mine
+them for anything useful and cite the reference trail when it matters.
 
 Region:      {region or '(not specified)'}
 Authority:   {authority or '(not specified)'}
@@ -3268,9 +3270,10 @@ Use up to 4 concise web searches to ground the facts. Cover, in this order:
    Hellenistic realism, archaic incuse reverse, Roman provincial
    portrait conventions). Name the style when it's identifiable.
 
-3. Numismatic importance — rarity, die-study or hoard context,
-   significance within the series (first portrait of a ruler, earliest
-   use of a legend, reference-book pedigree, a benchmark type in a
+3. Numismatic importance — lead with the pedigree / reference evidence
+   when present: collection pedigree, prior sale, hoard, die-study,
+   rarity, catalog placement, or significance within the series (first
+   portrait of a ruler, earliest use of a legend, benchmark type in a
    standard catalog). Skip padding; only include what actually applies.
 
 4. How this coin reflected the times — propaganda choices, civic pride,
@@ -3370,21 +3373,34 @@ def fetch_coin_history(field_name, topic, coin):
     context_bits = [x for x in [coin['denomination'], coin['metal'], coin['mint']] if x]
     ctx = (' / '.join(context_bits)) if context_bits else ''
     kind = 'region' if field_name == 'region' else 'issuing authority'
+    desc = (coin['description'] or '').strip()
+    refs = (coin['coin_references'] or '').strip()
+    grade_notes = (coin['notes'] or '').strip()
 
     prompt = f"""You are an ancient-numismatics historian summarizing the {kind} of a specific coin.
 
 {kind.capitalize()}: {topic}
 Date range: {date_hint or '(not specified)'}
 Other coin context: {ctx or '(none)'}
+Description: {desc[:500] if desc else '(not specified)'}
+Pedigree / References: {refs[:500] if refs else '(not specified)'}
+Grade / Conditions: {grade_notes[:300] if grade_notes else '(not specified)'}
 
-Use up to 4 concise web searches to ground facts. Focus on:
+Use up to 4 concise web searches to ground facts. Stress pedigree and
+references wherever the record gives you a lead: collection pedigree,
+prior sale, hoard provenance, die-study, catalog numbers, rarity notes,
+or standard references (SNG, HGC, RIC, RPC, Crawford, Ravel, Calciati,
+BCD, etc.). Do not bury this evidence behind generic political history.
+
+Focus on:
 - What this {kind} was (city-state, kingdom, satrapy, Roman province, etc.)
 - Key political/cultural events during the coin's date range that shaped its coinage
 - Notable rulers or mint activity tied to this {kind}
+- Pedigree / reference evidence that helps identify why this coin matters
 - One-line significance in the broader Greek/Roman world
 
 Reply with ONLY a JSON object, no prose, no code fences:
-{{"markdown": "3–6 short lines. Prefix factual claims with '- '. May include 1–2 plain lines of context. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~700 chars total."}}"""
+{{"markdown": "4–7 short lines. Prefix factual claims with '- '. Lead with pedigree / reference evidence when present, then add necessary historical context. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~900 chars total."}}"""
 
     client = anthropic.Anthropic(api_key=api_key)
 
@@ -11157,6 +11173,290 @@ def admin_watch_acquisitions():
         coins_by_status=coin_bucket_counts('status'),
         coins_by_vendor=coin_bucket_counts('vendor')[:10],
         coin_most_expensive=coin_most_expensive,
+    )
+
+
+def _money_number(value):
+    if value in (None, ''):
+        return None
+    try:
+        return float(str(value).replace(',', '').replace('$', ''))
+    except (TypeError, ValueError):
+        return None
+
+
+def _coin_date_label(row):
+    text = (row['date_1_text'] or '').strip()
+    if text:
+        if row['date_2_text']:
+            return f"{text} – {row['date_2_text']}"
+        return text
+    if row['date_1'] not in (None, ''):
+        try:
+            start = int(row['date_1'])
+            start_text = f"{abs(start)} BC" if start < 0 else str(start)
+            if row['date_2'] not in (None, ''):
+                end = int(row['date_2'])
+                return f"{start_text} – {abs(end)} BC" if end < 0 else f"{start_text} – {end}"
+            return start_text
+        except (TypeError, ValueError):
+            return str(row['date_1']).strip()
+    return ''
+
+
+def _coin_scope_predicate(scope):
+    if scope == 'ancient':
+        return 'date_1 < 500', []
+    if scope == 'modern':
+        return '(date_1 >= 500 OR date_1 IS NULL)', []
+    return '1=1', []
+
+
+def _coin_collection_buckets(items, field, limit=None):
+    counts = {}
+    spend = {}
+    for item in items:
+        row = item['row']
+        label = (row[field] or '').strip() if field in row.keys() else ''
+        if not label:
+            label = 'Unspecified'
+        counts[label] = counts.get(label, 0) + 1
+        spend[label] = spend.get(label, 0.0) + (item['price_number'] or 0.0)
+    rows = [
+        {'label': label, 'count': counts[label], 'spend': spend[label]}
+        for label in sorted(counts, key=lambda k: (-counts[k], k.lower()))
+    ]
+    return rows[:limit] if limit else rows
+
+
+def _coin_collection_narrative(scope_label, q, summary, top_regions,
+                               top_authorities, top_references,
+                               era_rows):
+    total = summary['total']
+    if not total:
+        return [
+            f"No coins match this {scope_label.lower()} report"
+            + (f" for “{q}”." if q else ".")
+        ]
+
+    scope_phrase = scope_label.lower()
+    search_phrase = f" matching “{q}”" if q else ''
+    ancient = summary['ancient_count']
+    modern = summary['modern_count']
+    oldest = summary.get('oldest_label') or 'undated'
+    newest = summary.get('newest_label') or 'undated'
+    refs = summary['with_refs']
+    priced = summary['known_price_count']
+
+    region_text = ', '.join(
+        f"{r['label']} ({r['count']})" for r in top_regions[:3]
+        if r['label'] != 'Unspecified'
+    )
+    authority_text = ', '.join(
+        f"{r['label']} ({r['count']})" for r in top_authorities[:3]
+        if r['label'] != 'Unspecified'
+    )
+    era_text = ', '.join(
+        f"{r['label']} ({r['count']})" for r in era_rows
+        if r['count']
+    )
+    reference_text = ', '.join(
+        f"{r['label']} ({r['count']})" for r in top_references[:3]
+        if r['label'] != 'Unspecified'
+    )
+
+    lines = [
+        f"This {scope_phrase} coin report{search_phrase} covers {total} coins, "
+        f"spanning {oldest} to {newest}. It currently breaks out as "
+        f"{ancient} ancient and {modern} modern or undated records.",
+        f"Reference coverage is {refs} of {total} records, with {priced} priced "
+        f"records totaling {_format_money(summary['total_spend'])}. The report "
+        "is meant to surface pedigree, catalog trail, and acquisition context "
+        "alongside the basic inventory facts.",
+    ]
+    if region_text:
+        lines.append(f"The strongest regional concentrations are {region_text}.")
+    if authority_text:
+        lines.append(f"Leading authorities or issuers are {authority_text}.")
+    if era_text:
+        lines.append(f"Chronologically, the collection clusters around {era_text}.")
+    if reference_text:
+        lines.append(f"The most common reference signals are {reference_text}.")
+    return lines
+
+
+@app.route('/admin/coin-collections', methods=['GET'])
+def admin_coin_collections():
+    """Coin collection report, filterable by all / ancient / modern."""
+    db = get_db()
+    scope = (request.args.get('scope') or 'all').strip().lower()
+    if scope not in ('all', 'ancient', 'modern'):
+        scope = 'all'
+    q = (request.args.get('q') or '').strip()
+
+    scope_clause, scope_params = _coin_scope_predicate(scope)
+    where, params = [scope_clause], list(scope_params)
+    if q:
+        like = f"%{q.lower()}%"
+        fields = [
+            'coin_id', 'cat_id', 'region', 'authority', 'official',
+            'denomination', 'metal', 'mint', 'date_1_text',
+            'description', 'coin_references', 'notes', 'condition',
+            'grade', 'vendor', 'owner', 'property_name', 'status',
+        ]
+        where.append('(' + ' OR '.join(
+            f"LOWER(COALESCE({field}, '')) LIKE ?" for field in fields
+        ) + ')')
+        params.extend([like] * len(fields))
+
+    sql = (
+        "SELECT * FROM coins "
+        f"WHERE {' AND '.join(where)} "
+        "ORDER BY CASE WHEN date_1 IS NULL THEN 1 ELSE 0 END, "
+        "         date_1 ASC, "
+        "         COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
+        "         COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
+        "         COALESCE(NULLIF(denomination, ''), 'zzz') COLLATE NODIACRITIC"
+    )
+    rows = db.execute(sql, params).fetchall()
+
+    coins = []
+    total_spend = 0.0
+    known_price_count = 0
+    with_refs = 0
+    with_images = 0
+    ancient_count = 0
+    modern_count = 0
+    oldest_label = ''
+    newest_label = ''
+    era_counts = {
+        'Archaic / Early': 0,
+        'Classical': 0,
+        'Hellenistic': 0,
+        'Roman / Late Antique': 0,
+        'Modern / Undated': 0,
+    }
+    reference_counts = {}
+
+    for row in rows:
+        price = _money_number(row['price'])
+        if price is not None:
+            total_spend += price
+            known_price_count += 1
+        image = (row['image_1'] or '').strip()
+        if image and is_image_filter(image):
+            with_images += 1
+        date_label = _coin_date_label(row)
+        if row['date_1'] not in (None, ''):
+            try:
+                d = int(row['date_1'])
+                if d < 500:
+                    ancient_count += 1
+                    if d <= -480:
+                        era_counts['Archaic / Early'] += 1
+                    elif d <= -323:
+                        era_counts['Classical'] += 1
+                    elif d <= -31:
+                        era_counts['Hellenistic'] += 1
+                    else:
+                        era_counts['Roman / Late Antique'] += 1
+                else:
+                    modern_count += 1
+                    era_counts['Modern / Undated'] += 1
+            except (TypeError, ValueError):
+                modern_count += 1
+                era_counts['Modern / Undated'] += 1
+        else:
+            modern_count += 1
+            era_counts['Modern / Undated'] += 1
+
+        if date_label:
+            if not oldest_label:
+                oldest_label = date_label
+            newest_label = date_label
+
+        refs = (row['coin_references'] or '').strip()
+        if refs:
+            with_refs += 1
+            for pattern in [
+                'BCD', 'SNG', 'HGC', 'RIC', 'RPC', 'Crawford',
+                'Ravel', 'Calciati', 'CNG', 'Roma', 'ANS', 'BMC',
+                'Jameson', 'Weber', 'Boston MFA',
+            ]:
+                if re.search(rf'\b{re.escape(pattern)}\b', refs, re.IGNORECASE):
+                    reference_counts[pattern] = reference_counts.get(pattern, 0) + 1
+
+        coins.append({
+            'row': row,
+            'title': _report_record_title('coins', row),
+            'date_label': date_label,
+            'price_number': price,
+            'price_display': _format_money(row['price']),
+            'image': image if image and is_image_filter(image) else '',
+            'has_refs': bool(refs),
+        })
+
+    scope_labels = {
+        'all': 'All Coins',
+        'ancient': 'Ancient Coins',
+        'modern': 'Modern Coins',
+    }
+    summary = {
+        'total': len(coins),
+        'ancient_count': ancient_count,
+        'modern_count': modern_count,
+        'with_refs': with_refs,
+        'with_images': with_images,
+        'known_price_count': known_price_count,
+        'total_spend': total_spend,
+        'avg_spend': total_spend / known_price_count if known_price_count else 0,
+        'oldest_label': oldest_label,
+        'newest_label': newest_label,
+    }
+    by_region = _coin_collection_buckets(coins, 'region', 12)
+    by_authority = _coin_collection_buckets(coins, 'authority', 12)
+    by_metal = _coin_collection_buckets(coins, 'metal', 10)
+    by_denomination = _coin_collection_buckets(coins, 'denomination', 10)
+    by_property = _coin_collection_buckets(coins, 'property_name', 10)
+    by_vendor = _coin_collection_buckets(coins, 'vendor', 10)
+    era_rows = [
+        {'label': label, 'count': count}
+        for label, count in era_counts.items()
+    ]
+    top_references = [
+        {'label': label, 'count': reference_counts[label]}
+        for label in sorted(reference_counts, key=lambda k: (-reference_counts[k], k.lower()))
+    ][:10]
+    most_expensive = sorted(
+        [item for item in coins if item['price_number'] is not None],
+        key=lambda item: item['price_number'],
+        reverse=True,
+    )[:8]
+    narrative = _coin_collection_narrative(
+        scope_labels[scope], q, summary, by_region, by_authority,
+        top_references, era_rows,
+    )
+
+    return render_template(
+        'coin_collection_report.html',
+        current_category='__admin__',
+        categories=CATEGORIES,
+        counts=get_counts(),
+        scope=scope,
+        scope_label=scope_labels[scope],
+        q=q,
+        coins=coins,
+        summary=summary,
+        narrative=narrative,
+        by_region=by_region,
+        by_authority=by_authority,
+        by_metal=by_metal,
+        by_denomination=by_denomination,
+        by_property=by_property,
+        by_vendor=by_vendor,
+        era_rows=era_rows,
+        top_references=top_references,
+        most_expensive=most_expensive,
     )
 
 
