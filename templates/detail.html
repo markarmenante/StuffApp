@@ -2003,7 +2003,7 @@ document.addEventListener('DOMContentLoaded', function () {
        similar managers honor. #}
     <div class="dgrid dg2">
       <div class="dcell">
-        <input type="text" name="number" value="{{ val('number') }}"
+        <input type="text" name="number" value="{{ val('number')|card_number }}"
                autocomplete="off" data-form-type="other" data-1p-ignore="true"
                inputmode="numeric"
                {% if is_new and not val('number') %}placeholder="Card Number"{% endif %}>
@@ -3784,6 +3784,23 @@ document.querySelectorAll('input.cc-exp-input').forEach(inp => {
   inp.addEventListener('input', () => {
     const digits = inp.value.replace(/\D/g, '').slice(0, 6);
     inp.value = digits.length <= 2 ? digits : digits.slice(0, 2) + '/' + digits.slice(2);
+  });
+});
+
+function formatCardNumberValue(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 15 && (digits.startsWith('34') || digits.startsWith('37'))) {
+    return digits.slice(0, 4) + ' ' + digits.slice(4, 10) + ' ' + digits.slice(10);
+  }
+  if (digits.length === 16) {
+    return digits.replace(/(.{4})/g, '$1 ').trim();
+  }
+  return raw;
+}
+document.querySelectorAll('input[name="number"]').forEach(inp => {
+  if (!inp.closest('.detail-page-credit_cards')) return;
+  inp.addEventListener('blur', () => {
+    inp.value = formatCardNumberValue(inp.value);
   });
 });
 

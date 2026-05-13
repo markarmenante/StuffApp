@@ -398,7 +398,7 @@
           <span class="item-brand">{{ _desc1 or row['name'] or '—' }}</span>
           <button type="button" class="row-share-btn"
                   data-name="{{ row['name'] or '' }}"
-                  data-number="{{ row['number'] or '' }}"
+                  data-number="{{ row['number']|card_number if row['number'] else '' }}"
                   data-exp="{{ _e_disp }}"
                   data-cvc="{{ row['cvc'] or '' }}"
                   data-zip="{{ row['billing_short'] or '' }}"
@@ -416,7 +416,7 @@
           </button>
         </div>
         <div class="item-detail-rows">
-          {% if row['number'] %}<div class="idr"><span>{{ row['number'] }}</span></div>{% endif %}
+          {% if row['number'] %}<div class="idr"><span>{{ row['number']|card_number }}</span></div>{% endif %}
           <div class="idr">
             {% if _e_disp %}<span><span class="lbl">Exp</span> {{ _e_disp }}</span>{% endif %}
             {% if row['cvc'] %}<span><span class="lbl">CVC</span> {{ row['cvc'] }}</span>{% endif %}

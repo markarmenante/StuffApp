@@ -2719,9 +2719,23 @@ CATEGORY_ORDER_BY = {
                    "  ELSE 99 "
                    "END, "
                    "COALESCE(name,'') COLLATE NODIACRITIC"),
-    # Cards: sort by description (the bank/issuer name shown next to
-    # each card) descending so heavier-use families group together.
-    'credit_cards': ("COALESCE(description, '') COLLATE NODIACRITIC DESC, "
+    # Cards: pin the primary cards first, then keep the older issuer/name
+    # grouping for everything else.
+    'credit_cards': ("CASE "
+                     "WHEN (LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%ma%centurion%' "
+                     "      OR (LOWER(TRIM(COALESCE(owner,''))) IN ('ma','mark') "
+                     "          AND LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%centurion%')) THEN 0 "
+                     "WHEN (LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%ym%atlas%' "
+                     "      OR (LOWER(TRIM(COALESCE(owner,''))) IN ('ym','young') "
+                     "          AND LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%atlas%')) THEN 1 "
+                     "WHEN (LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%ym%visa%' "
+                     "      OR (LOWER(TRIM(COALESCE(owner,''))) IN ('ym','young') "
+                     "          AND LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%visa%')) THEN 2 "
+                     "WHEN (LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%ma%visa%' "
+                     "      OR (LOWER(TRIM(COALESCE(owner,''))) IN ('ma','mark') "
+                     "          AND LOWER(COALESCE(name,'') || ' ' || COALESCE(description,'')) LIKE '%visa%')) THEN 3 "
+                     "ELSE 99 END, "
+                     "COALESCE(description, '') COLLATE NODIACRITIC DESC, "
                      "COALESCE(name, '') COLLATE NODIACRITIC"),
 }
 
@@ -6531,6 +6545,21 @@ def currency_filter(value):
         return f"${float(s.replace(',', '').replace('$', '')):,.0f}"
     except (ValueError, TypeError):
         return s
+
+
+@app.template_filter('card_number')
+def card_number_filter(value):
+    if value is None:
+        return ''
+    raw = str(value).strip()
+    digits = re.sub(r'\D', '', raw)
+    if not digits:
+        return raw
+    if len(digits) == 15 and digits.startswith(('34', '37')):
+        return f"{digits[:4]} {digits[4:10]} {digits[10:]}"
+    if len(digits) == 16:
+        return ' '.join(digits[i:i + 4] for i in range(0, 16, 4))
+    return raw
 
 
 @app.template_filter('order_deposit')
