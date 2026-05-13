@@ -6361,7 +6361,12 @@ def _parse_order_money(value):
     s = (value or '').strip()
     if not s:
         return None
-    s = re.split(r'\s*/\s*\$', s, maxsplit=1)[0]
+    usd_tail = re.search(r'/\s*\$([\d,]+(?:\.\d+)?)', s)
+    if usd_tail:
+        try:
+            return float(usd_tail.group(1).replace(',', ''))
+        except (TypeError, ValueError):
+            return None
     s = re.sub(r'\([^)]*\)', '', s)
     cleaned = re.sub(r'[^0-9.\-]', '', s)
     if cleaned in ('', '-', '.', '-.'):
@@ -6374,16 +6379,18 @@ def _parse_order_money(value):
 
 def _parse_watch_order_deposit(value, purchase_price):
     s = (value or '').strip()
-    pct = None
-    m = re.search(r'(-?\d+(?:\.\d+)?)\s*%', s)
-    if m:
+    m = re.fullmatch(r'\s*(-?\d+(?:\.\d+)?)\s*%\s*', s)
+    if m and purchase_price is not None:
         try:
             pct = float(m.group(1))
+            return purchase_price * pct / 100.0, pct
         except (TypeError, ValueError):
-            pct = None
-    if pct is not None and purchase_price is not None:
-        return purchase_price * pct / 100.0, pct
-    return _parse_order_money(s), pct
+            return None, None
+    deposit = _parse_order_money(s)
+    pct = None
+    if deposit is not None and purchase_price:
+        pct = deposit / float(purchase_price) * 100.0
+    return deposit, pct
 
 
 def _row_get(record, name):

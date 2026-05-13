@@ -2845,6 +2845,9 @@ document.querySelectorAll('.comp-item').forEach(item => {
     // Drop any " / $X,XXX" tail so the user edits just the original.
     return s.replace(/\s*\/\s*\$[\d,]+\s*$/, '');
   }
+  function stripOrderPercent(s) {
+    return String(s || '').replace(/\s*\([^)]*%\)\s*$/, '');
+  }
   function todayIsoDate() {
     return new Date().toISOString().slice(0, 10);
   }
@@ -2886,6 +2889,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
       // was in flight.
       if (stripUsdConversion(el.value) !== stripped) return;
       el.value = stripped + ' / $' + usd;
+      if (el.classList && el.classList.contains('watch-order-deposit') &&
+          typeof window.updateWatchOrderMath === 'function') {
+        window.updateWatchOrderMath(true);
+      }
       // Dispatch 'input' so the autosave's text-input handler picks
       // up the new value and persists it. 'change' was being ignored
       // (autosave only watches input/blur for text fields), so the
@@ -2956,13 +2963,23 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // delivery date if blank; the server applies the same rule.
   const watchOrderPanel = document.getElementById('watchOrderPanel');
   function orderMoneyNumber(raw) {
-    const s = stripUsdConversion(String(raw || '')).replace(/\([^)]*\)/g, '');
+    const noPct = stripOrderPercent(raw);
+    const usdTail = String(noPct || '').match(/\/\s*\$([\d,]+(?:\.\d+)?)/);
+    if (usdTail) {
+      const tail = parseFloat(usdTail[1].replace(/,/g, ''));
+      return Number.isFinite(tail) ? tail : null;
+    }
+    const s = stripUsdConversion(String(noPct || '')).replace(/\([^)]*\)/g, '');
     const cleaned = s.replace(/[^0-9.\-]/g, '');
     const n = parseFloat(cleaned);
     return Number.isFinite(n) ? n : null;
   }
   function formatOrderMoney(n) {
     return Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '';
+  }
+  function formatOrderPercent(n) {
+    if (!Number.isFinite(n)) return '';
+    return (Math.round(n * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%';
   }
   function monthsLateText(expected, actual) {
     if (!expected) return '';
@@ -3000,12 +3017,24 @@ document.querySelectorAll('.comp-item').forEach(item => {
     const actualInput = watchOrderPanel.querySelector('input[name="actual_delivery_date"]');
     const purchase = orderMoneyNumber(purchaseInput?.value);
     let deposit = orderMoneyNumber(depositInput?.value);
-    const pctMatch = (depositInput?.value || '').match(/(-?\d+(?:\.\d+)?)\s*%/);
+    let pct = null;
+    const depositRaw = stripOrderPercent(depositInput?.value || '').trim();
+    const pctMatch = depositRaw.match(/^(-?\d+(?:\.\d+)?)\s*%$/);
     if (pctMatch && purchase !== null) {
-      const pct = parseFloat(pctMatch[1]);
+      pct = parseFloat(pctMatch[1]);
       if (Number.isFinite(pct)) {
         deposit = purchase * pct / 100;
         if (formatDeposit) depositInput.value = formatOrderMoney(deposit) + ' (' + pct + '%)';
+      }
+    } else if (deposit !== null && purchase) {
+      pct = deposit / purchase * 100;
+      const meta = detectCurrency(depositRaw);
+      const hasUsdTail = /\/\s*\$[\d,]+/.test(depositRaw);
+      if (formatDeposit && depositInput && depositInput.value && (meta.code === 'USD' || hasUsdTail)) {
+        const base = hasUsdTail || meta.code !== 'USD'
+          ? depositRaw
+          : formatOrderMoney(deposit);
+        depositInput.value = base + ' (' + formatOrderPercent(pct) + ')';
       }
     }
     if (balanceInput) {
@@ -3018,10 +3047,17 @@ document.querySelectorAll('.comp-item').forEach(item => {
   if (watchOrderPanel) {
     watchOrderPanel.querySelectorAll('.watch-order-money').forEach(input => {
       input.addEventListener('focus', () => {
-        input.value = input.value.replace(/\s*\/\s*\$[\d,]+\s*$/, '');
+        input.value = stripUsdConversion(stripOrderPercent(input.value));
       });
       input.addEventListener('input', () => updateWatchOrderMath(false));
       input.addEventListener('blur', () => {
+        if (input.classList.contains('watch-order-deposit')) {
+          const raw = stripOrderPercent(input.value || '').trim();
+          const isPct = /^-?\d+(?:\.\d+)?\s*%$/.test(raw);
+          if (!isPct) formatPriceField(input);
+          updateWatchOrderMath(true);
+          return;
+        }
         if (!/%/.test(input.value || '')) {
           const n = orderMoneyNumber(input.value);
           if (n !== null) input.value = formatOrderMoney(n);
@@ -3035,6 +3071,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
     updateWatchOrderMath(false);
     updateWatchOrderPanelVisibility();
   }
+  window.updateWatchOrderMath = updateWatchOrderMath;
   const statusSelect = form.querySelector('select[name="status"]');
   if (statusSelect) {
     statusSelect.addEventListener('change', () => {
