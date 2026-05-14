@@ -8,3 +8,4 @@ art_images/
 .DS_Store
 .env
 stuffapp-backup-*.zip
+.claude/worktrees/

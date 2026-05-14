@@ -23,6 +23,9 @@
   {% if category == 'coins' and not at_property %}
   {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
   <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} pgs</a>
+  <button type="button" class="toolbar-btn pill coin-tray-count" id="coinTrayCount" title="Selected coin cards">Tray &mdash; 0</button>
+  <a href="{{ url_for('coins_print_pdf') }}" class="toolbar-btn pill coin-tray-print disabled" id="coinTrayPrint" title="Print selected coin cards" target="_blank">Print Tray</a>
+  <button type="button" class="toolbar-btn pill coin-tray-clear" id="coinTrayClear" title="Clear selected coin cards">Clear</button>
   <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
      title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
   {# Two era pills, each cycling its own axis:
@@ -499,6 +502,12 @@
       {% endif %}
 
     </div><!-- /item-body -->
+    {% if category == 'coins' and not at_property %}
+    <button type="button"
+            class="coin-tray-toggle"
+            data-coin-id="{{ row['id'] }}"
+            title="Add this coin to the print tray">+ Card</button>
+    {% endif %}
   </div>
   {% if category == 'properties' %}{% set ns.prev = row['type'] %}{% endif %}
   {% endfor %}
@@ -590,6 +599,96 @@ window.shareCardRow = async function (ev, btn) {
   document.addEventListener('dragover', function(e) { e.preventDefault(); }, true);
   document.addEventListener('drop', function(e) { e.preventDefault(); }, true);
 
+  {% if category == 'coins' and not at_property %}
+  var coinTrayKey = 'stuffapp.coinPrintTray.v1';
+  var coinTrayBaseUrl = "{{ url_for('coins_print_pdf') }}";
+  var coinTrayCount = document.getElementById('coinTrayCount');
+  var coinTrayPrint = document.getElementById('coinTrayPrint');
+  var coinTrayClear = document.getElementById('coinTrayClear');
+
+  function loadCoinTray() {
+    try {
+      var raw = window.localStorage.getItem(coinTrayKey);
+      var parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) return [];
+      var seen = {};
+      return parsed.filter(function(id) {
+        id = String(id || '').trim();
+        if (!id || seen[id]) return false;
+        seen[id] = true;
+        return true;
+      });
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function saveCoinTray(ids) {
+    try {
+      window.localStorage.setItem(coinTrayKey, JSON.stringify(ids));
+    } catch (_) { /* Keep the UI usable even if storage is unavailable. */ }
+  }
+
+  function updateCoinTrayUi(ids) {
+    var count = ids.length;
+    if (coinTrayCount) coinTrayCount.textContent = 'Tray — ' + count;
+    if (coinTrayPrint) {
+      if (count) {
+        coinTrayPrint.classList.remove('disabled');
+        coinTrayPrint.href = coinTrayBaseUrl + '?ids=' + encodeURIComponent(ids.join(','));
+      } else {
+        coinTrayPrint.classList.add('disabled');
+        coinTrayPrint.href = coinTrayBaseUrl;
+      }
+    }
+    if (coinTrayClear) coinTrayClear.disabled = !count;
+
+    var selected = {};
+    ids.forEach(function(id) { selected[id] = true; });
+    document.querySelectorAll('.coin-tray-toggle[data-coin-id]').forEach(function(btn) {
+      var isSelected = !!selected[btn.dataset.coinId];
+      btn.classList.toggle('selected', isSelected);
+      btn.textContent = isSelected ? '✓ Card' : '+ Card';
+      btn.title = isSelected ? 'Remove this coin from the print tray' : 'Add this coin to the print tray';
+    });
+  }
+
+  var coinTrayIds = loadCoinTray();
+  updateCoinTrayUi(coinTrayIds);
+
+  document.querySelectorAll('.coin-tray-toggle[data-coin-id]').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var id = btn.dataset.coinId;
+      var idx = coinTrayIds.indexOf(id);
+      if (idx >= 0) {
+        coinTrayIds.splice(idx, 1);
+      } else {
+        coinTrayIds.push(id);
+      }
+      saveCoinTray(coinTrayIds);
+      updateCoinTrayUi(coinTrayIds);
+    });
+  });
+
+  if (coinTrayClear) {
+    coinTrayClear.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      coinTrayIds = [];
+      saveCoinTray(coinTrayIds);
+      updateCoinTrayUi(coinTrayIds);
+    });
+  }
+
+  if (coinTrayPrint) {
+    coinTrayPrint.addEventListener('click', function(e) {
+      if (!coinTrayIds.length) e.preventDefault();
+    });
+  }
+  {% endif %}
+
   function uploadFile(file, uploadUrl, thumb, field) {
     if (!file || !file.type.startsWith('image/')) { alert('Please drop an image file.'); return; }
     thumb.classList.add('uploading');
@@ -642,7 +741,7 @@ window.shareCardRow = async function (ev, btn) {
     // so click still bubbles up here). Wired unconditionally — categories
     // without a thumbnail (e.g. persons) still need this to work.
     row.addEventListener('click', function(e) {
-      if (e.target.closest('.row-upload-btn')) return;
+      if (e.target.closest('.row-upload-btn, .coin-tray-toggle')) return;
       window.location = row.dataset.href;
     });
 

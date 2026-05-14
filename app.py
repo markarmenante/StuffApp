@@ -7807,27 +7807,53 @@ def coins_print_pdf():
     db = get_db()
     q = (request.args.get('q') or '').strip()
     coin_filter = (request.args.get('filter') or '').strip() or None
+    ids_raw = (request.args.get('ids') or '').strip()
+    selected_ids = []
+    seen_ids = set()
+    if ids_raw:
+        for part in ids_raw.split(','):
+            coin_id = part.strip()
+            if not coin_id or coin_id in seen_ids or len(coin_id) > 80:
+                continue
+            selected_ids.append(coin_id)
+            seen_ids.add(coin_id)
+            if len(selected_ids) >= 500:
+                break
 
-    wheres, params = [], []
-    if q:
-        # Same multi-term AND logic as build_search_query: each
-        # whitespace-separated term must match at least one column.
-        search_cols = ['coin_id', 'authority', 'region', 'denomination',
-                       'mint', 'obv_rev', 'description']
-        terms = [t for t in q.split() if t.strip()]
-        for term in terms:
-            conditions = ' OR '.join([f'{c} LIKE ?' for c in search_cols])
-            wheres.append(f"({conditions})")
-            params += [f'%{term}%'] * len(search_cols)
-    cat_filters = CATEGORY_FILTERS.get('coins', {})
-    if coin_filter and coin_filter in cat_filters:
-        clause, extra = cat_filters[coin_filter]
-        wheres.append(f"({clause})")
-        params += list(extra)
+    if selected_ids:
+        placeholders = ','.join('?' for _ in selected_ids)
+        selected_rows = db.execute(
+            f"SELECT * FROM coins WHERE id IN ({placeholders})",
+            selected_ids,
+        ).fetchall()
+        rows_by_id = {str(row['id']): row for row in selected_rows}
+        rows = [
+            rows_by_id[coin_id]
+            for coin_id in selected_ids
+            if coin_id in rows_by_id and _user_can_see_row('coins', rows_by_id[coin_id])
+        ]
+    else:
+        wheres, params = [], []
+        if q:
+            # Same multi-term AND logic as build_search_query: each
+            # whitespace-separated term must match at least one column.
+            search_cols = ['coin_id', 'authority', 'region', 'denomination',
+                           'mint', 'obv_rev', 'description']
+            terms = [t for t in q.split() if t.strip()]
+            for term in terms:
+                conditions = ' OR '.join([f'{c} LIKE ?' for c in search_cols])
+                wheres.append(f"({conditions})")
+                params += [f'%{term}%'] * len(search_cols)
+        cat_filters = CATEGORY_FILTERS.get('coins', {})
+        if coin_filter and coin_filter in cat_filters:
+            clause, extra = cat_filters[coin_filter]
+            wheres.append(f"({clause})")
+            params += list(extra)
+        _apply_row_filter_clauses('coins', wheres, params)
 
-    where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
-    rows = db.execute(
-        f"SELECT * FROM coins {where_sql}", params).fetchall()
+        where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+        rows = db.execute(
+            f"SELECT * FROM coins {where_sql}", params).fetchall()
     # Recompute display-position bins for the print set: existing C\d+(\w*)
     # bins are preserved; new (no-bin / non-conforming) coins get a letter
     # suffix slotted between their neighbours per region/authority/mint.
@@ -7857,8 +7883,9 @@ def coins_print_pdf():
         _draw_coin_card(c, coin, x, y, card, card)
     c.save()
     buf.seek(0)
+    filename = 'coin-tray.pdf' if selected_ids else 'coins.pdf'
     return Response(buf.read(), mimetype='application/pdf',
-                    headers={'Content-Disposition': 'inline; filename="coins.pdf"'})
+                    headers={'Content-Disposition': f'inline; filename="{filename}"'})
 
 
 COIN_BIN_PREFIXES = ('C', 'CM', 'N', 'NM')

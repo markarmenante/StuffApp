@@ -248,6 +248,10 @@ input[type="number"]::-webkit-outer-spin-button {
   background: #fff3cd; border-color: #c8961a; color: #6b5210;
 }
 .toolbar-btn.pill.pill-stale:hover { background: #ffeeba; }
+.coin-tray-clear:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 
 /* ── ITEM LIST ── */
 .item-list { background: var(--surface); }
@@ -361,6 +365,26 @@ input[type="number"]::-webkit-outer-spin-button {
 .row-upload-btn:hover { background: #e8f0ff; color: var(--blue); }
 
 .item-body { flex: 1; padding: 8px 16px; display: flex; flex-direction: column; gap: 2px; justify-content: center; overflow: hidden; }
+
+.coin-tray-toggle {
+  align-self: center;
+  margin: 0 12px 0 0;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #fff;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.coin-tray-toggle:hover { background: rgba(0, 122, 255, 0.08); }
+.coin-tray-toggle.selected {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
 
 .item-line1 { display: flex; align-items: baseline; gap: 14px; }
 .item-brand  { font-size: 20px; font-weight: 700; color: var(--text); }
