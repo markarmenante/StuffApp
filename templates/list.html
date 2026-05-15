@@ -233,12 +233,14 @@
           <div class="idr">
             {% if row['date_1_text'] %}<span>{{ row['date_1_text'] }}{% if row['date_2_text'] %} – {{ row['date_2_text'] }}{% endif %}</span>{% endif %}
           </div>
-          <div class="idr coin-meta-row">
-            {% if row['weight'] %}<span>{{ '%.2f'|format(row['weight']|float) }} g</span>{% endif %}
-            {% if row['size'] %}<span>{{ '%.1f'|format(row['size']|float) }} mm</span>{% endif %}
-            {% if row['die_axis'] %}<span>{{ row['die_axis'] }}h</span>{% endif %}
+          <div class="idr coin-meta-row" style="display:flex;align-items:center;width:100%;flex-wrap:nowrap;gap:14px;">
+            <div class="coin-list-specs" style="display:inline-flex;align-items:baseline;flex:1 1 auto;min-width:0;gap:14px;flex-wrap:wrap;">
+              {% if row['weight'] %}<span>{{ '%.2f'|format(row['weight']|float) }} g</span>{% endif %}
+              {% if row['size'] %}<span>{{ '%.1f'|format(row['size']|float) }} mm</span>{% endif %}
+              {% if row['die_axis'] %}<span>{{ row['die_axis'] }}h</span>{% endif %}
+            </div>
             {% if row['coin_id'] or not at_property %}
-            <span class="coin-position-actions">
+            <span class="coin-position-actions" style="display:inline-flex;align-items:center;justify-content:flex-end;gap:8px;margin-left:auto;padding-left:12px;flex-shrink:0;white-space:nowrap;">
               {% if not at_property %}
               <button type="button"
                       class="coin-tray-toggle"

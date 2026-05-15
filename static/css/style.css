@@ -518,7 +518,7 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .coin-position-actions {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
@@ -527,11 +527,28 @@ input[type="number"]::-webkit-outer-spin-button {
   white-space: nowrap;
 }
 .coin-meta-row {
+  display: flex;
   align-items: center;
+  flex-wrap: nowrap;
+  width: 100%;
+  gap: 14px;
+}
+.coin-list-specs {
+  display: inline-flex;
+  align-items: baseline;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.coin-list-specs span {
+  font-size: 17px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 .item-cat-id { font-size: 17px; color: var(--text-hint); align-self: flex-end; margin-left: auto; padding-left: 12px; white-space: nowrap; }
 .coin-position-actions .item-cat-id {
-  align-self: baseline;
+  align-self: center;
   margin-left: 0;
   padding-left: 0;
 }
