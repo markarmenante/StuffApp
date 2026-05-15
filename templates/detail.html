@@ -2406,10 +2406,33 @@ function formatResultsHtml(text) {
   text = text.replace(/<\/?cite\b[^>]*>/gi, '');
   const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const trail = /[.,;:)\]}"']+$/;
+  const humanizeUrlSegment = segment => {
+    try { segment = decodeURIComponent(segment); } catch (e) {}
+    segment = segment.replace(/\.[a-z0-9]{2,5}$/i, '');
+    segment = segment.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!segment) return '';
+    return segment.replace(/\b\w/g, c => c.toUpperCase());
+  };
+  const hostLabel = h => {
+    h = h.replace(/^www\./, '');
+    const known = {
+      'en.wikipedia.org': 'Wikipedia',
+      'coinweek.com': 'CoinWeek',
+      'ancientcoins.market': 'Ancient Coins Market',
+      'thearchaeologist.org': 'The Archaeologist',
+      'academia.edu': 'Academia',
+    };
+    return known[h] || h;
+  };
   const shortHost = u => {
     try {
-      const h = new URL(u).hostname.replace(/^www\./, '');
-      return h || 'link';
+      const url = new URL(u);
+      const h = url.hostname.replace(/^www\./, '');
+      const parts = url.pathname.split('/').filter(Boolean);
+      const page = humanizeUrlSegment(parts[parts.length - 1] || '');
+      const label = hostLabel(h);
+      const full = page ? `${label}: ${page}` : label;
+      return full.length > 86 ? full.slice(0, 83).trimEnd() + '...' : full;
     } catch (e) { return 'link'; }
   };
   const inline = raw => {
@@ -2440,10 +2463,10 @@ function formatResultsHtml(text) {
   for (const raw of text.split('\n')) {
     const line = raw.trim();
     if (!line) { if (inList) { out.push('</ul>'); inList = false; } continue; }
-    const bullet = '-*•'.includes(line[0]);
+    const bullet = line.length >= 2 && '-*•'.includes(line[0]) && /\s/.test(line[1]);
     if (bullet) {
       if (!inList) { out.push('<ul class="results-list">'); inList = true; }
-      out.push('<li>' + inline(line.slice(1).trim()) + '</li>');
+      out.push('<li>' + inline(line.slice(2).trim()) + '</li>');
     } else {
       if (inList) { out.push('</ul>'); inList = false; }
       out.push('<p>' + inline(line) + '</p>');
@@ -2504,6 +2527,91 @@ function refreshMarkdownNotePreview(textarea, preferPreview = false) {
     textarea.addEventListener('blur', showPreviewIfFilled);
   });
 })();
+
+const TEXT_FIELD_URL_RE = /https?:\/\/[^\s<>()]+/i;
+
+function hasWebReference(value) {
+  return TEXT_FIELD_URL_RE.test(value || '');
+}
+
+function isTextLinkPreviewEligible(el) {
+  if (!el || !el.name || el.disabled) return false;
+  if (el.matches('input[type="hidden"], input[type="file"], input[type="radio"], input[type="checkbox"], input[type="date"], input[type="month"]')) return false;
+  if (!(el.matches('textarea') || el.matches('input[type="text"], input:not([type])'))) return false;
+  if (el.classList.contains('results-raw') ||
+      el.classList.contains('rec-players-input') ||
+      el.classList.contains('markdown-note-editor') ||
+      el.closest('.dcell-markdown-note')) return false;
+  return true;
+}
+
+function textLinkPreviewFor(el) {
+  if (!isTextLinkPreviewEligible(el)) return null;
+  if (el._textLinkPreview) return el._textLinkPreview;
+  const preview = document.createElement('div');
+  preview.className = 'text-link-preview';
+  preview.tabIndex = 0;
+  preview.title = 'Click to edit';
+  preview.style.display = 'none';
+  el.insertAdjacentElement('afterend', preview);
+  el._textLinkPreview = preview;
+
+  function showEditor() {
+    preview.style.display = 'none';
+    el.style.display = '';
+    if (window._autosizeTextarea && el.tagName === 'TEXTAREA') {
+      window._autosizeTextarea(el);
+    }
+    el.focus();
+  }
+
+  preview.addEventListener('click', event => {
+    if (event.target.closest('a')) return;
+    showEditor();
+  });
+  preview.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      showEditor();
+    }
+  });
+  return preview;
+}
+
+function refreshTextLinkPreview(el, preferPreview = false) {
+  if (!isTextLinkPreviewEligible(el)) return;
+  const preview = textLinkPreviewFor(el);
+  if (!preview) return;
+  const value = el.value || '';
+  if (!hasWebReference(value)) {
+    preview.style.display = 'none';
+    el.style.display = '';
+    return;
+  }
+  preview.innerHTML = formatResultsHtml(value);
+  if (preferPreview && document.activeElement !== el) {
+    el.style.display = 'none';
+    preview.style.display = '';
+  }
+}
+window.refreshTextLinkPreview = refreshTextLinkPreview;
+
+function setupTextLinkPreview(el) {
+  if (!isTextLinkPreviewEligible(el)) return;
+  textLinkPreviewFor(el);
+  refreshTextLinkPreview(el, true);
+  el.addEventListener('input', () => refreshTextLinkPreview(el, false));
+  el.addEventListener('blur', () => refreshTextLinkPreview(el, true));
+  el.addEventListener('focus', () => {
+    const preview = textLinkPreviewFor(el);
+    if (preview) preview.style.display = 'none';
+    el.style.display = '';
+  });
+}
+
+document
+  .querySelectorAll('#mainForm input[name], #mainForm textarea[name]')
+  .forEach(setupTextLinkPreview);
 
 // Watch / Art "Lookup" buttons share the .watch-lookup-btn class for
 // styling. The PDF link in the same nav row also carries the class to
@@ -5119,6 +5227,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         if (refs && typeof data.coin_references === 'string') {
           refs.value = data.coin_references;
           refs.dispatchEvent(new Event('input', { bubbles: true }));
+          if (window.refreshTextLinkPreview) {
+            window.refreshTextLinkPreview(refs, true);
+          }
         }
         if (stamp && data.searched_at) {
           const d = new Date(data.searched_at);

@@ -6955,11 +6955,27 @@ def format_results_filter(value):
     def _short(url):
         u = url.rstrip(_url_trail)
         try:
-            from urllib.parse import urlparse
-            host = urlparse(u).hostname or u
+            from urllib.parse import unquote, urlparse
+            parsed = urlparse(u)
+            host = parsed.hostname or u
             if host.startswith('www.'):
                 host = host[4:]
-            return host
+            host_label = {
+                'en.wikipedia.org': 'Wikipedia',
+                'coinweek.com': 'CoinWeek',
+                'ancientcoins.market': 'Ancient Coins Market',
+                'thearchaeologist.org': 'The Archaeologist',
+                'academia.edu': 'Academia',
+            }.get(host, host)
+            page = ''
+            parts = [p for p in (parsed.path or '').split('/') if p]
+            if parts:
+                page = unquote(parts[-1])
+                page = re.sub(r'\.[a-z0-9]{2,5}\Z', '', page, flags=re.I)
+                page = re.sub(r'[-_]+', ' ', page)
+                page = re.sub(r'\s+', ' ', page).strip().title()
+            label = f'{host_label}: {page}' if page else host_label
+            return label[:83].rstrip() + '...' if len(label) > 86 else label
         except Exception:
             return 'link'
 

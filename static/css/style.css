@@ -832,11 +832,25 @@ input[type="number"]::-webkit-outer-spin-button {
   margin: 2px 0;
 }
 .markdown-note-preview a.result-src {
-  color: var(--blue);
+  display: inline-block;
+  padding: 1px 8px;
+  margin: 0 3px 2px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f4f4f6;
+  color: var(--text-secondary, #555);
+  font-size: 11px;
+  line-height: 1.5;
   text-decoration: none;
+  word-break: normal;
+  vertical-align: baseline;
+  overflow-wrap: normal;
 }
 .markdown-note-preview a.result-src:hover {
-  text-decoration: underline;
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+  text-decoration: none;
 }
 .dcell textarea[rows="4"] { min-height: 80px; }
 .dcell textarea[rows="5"] { min-height: 100px; }
@@ -949,6 +963,59 @@ input[type="number"]::-webkit-outer-spin-button {
   text-decoration: none;
 }
 .results-display strong { font-weight: 600; }
+.text-link-preview {
+  width: 100%;
+  min-height: 18px;
+  font-family: var(--font);
+  font-size: inherit;
+  font-weight: 400;
+  line-height: 1.35;
+  color: #111111;
+  cursor: text;
+  outline: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.text-link-preview:focus {
+  background: #fffde8;
+}
+.text-link-preview p {
+  margin: 0 0 4px;
+}
+.text-link-preview p:last-child,
+.text-link-preview ul:last-child {
+  margin-bottom: 0;
+}
+.text-link-preview ul.results-list {
+  margin: 0 0 4px;
+  padding-left: 18px;
+}
+.text-link-preview li {
+  margin: 2px 0;
+}
+.text-link-preview a.result-src {
+  display: inline-block;
+  padding: 1px 8px;
+  margin: 0 3px 2px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f4f4f6;
+  color: var(--text-secondary, #555);
+  font-size: 11px;
+  line-height: 1.5;
+  text-decoration: none;
+  word-break: normal;
+  vertical-align: baseline;
+  overflow-wrap: normal;
+}
+.text-link-preview a.result-src:hover {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+  text-decoration: none;
+}
+.dcell .text-link-preview { font-size: 14px; }
+.detail-page-coins .dcell .text-link-preview { font-size: 13px; }
 textarea.results-raw { display: none !important; }
 .dcell input:focus,
 .dcell select:focus,
