@@ -881,23 +881,23 @@ document.addEventListener('DOMContentLoaded', function () {
               style="display:none">{{ r['history_region'] if r and r['history_region'] else (r['history_authority'] if r and r['history_authority'] else '') }}</textarea>
   </div>
 
-  {# Origin map only renders for ancient coins (date_1 < 500). Modern
-     coinage (date_1 >= 500) doesn't benefit from the Mediterranean
-     city map, so skip the panel entirely on those records. #}
+  {# Origin map: ancient coins keep the Mediterranean city layer;
+     modern/world issues get a quieter global origin map. #}
   {%- set _d1 = val('date_1') -%}
   {%- set _is_ancient_coin = _d1 not in (None, '') and (_d1|int) < 500 -%}
-  {% if _is_ancient_coin %}
   <!-- Origin map -->
   <div class="section-bar">Origin</div>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <div class="coin-map-panel"
        data-region="{{ val('region') }}"
        data-authority="{{ val('authority') }}"
-       data-mint="{{ val('mint') }}">
+       data-mint="{{ val('mint') }}"
+       data-ancient="{{ '1' if _is_ancient_coin else '0' }}">
     <div id="coinMap" class="coin-map"></div>
-    <div class="coin-map-caption" id="coinMapCaption">Ancient Greek &amp; Mediterranean cities — locating this coin's origin…</div>
+    <div class="coin-map-caption" id="coinMapCaption">
+      {{ 'Ancient Greek & Mediterranean cities' if _is_ancient_coin else 'World origin map' }} — locating this coin's origin…
+    </div>
   </div>
-  {% endif %}
 
   {# Unbounded JSON-backed docs row. Legacy document_1 / document_2
      and the legacy receipt column all fold into `documents` at boot
@@ -5303,19 +5303,25 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     });
   })();
 
-  // ── Origin map: Mediterranean with Ancient Greek city names ──
+  // ── Origin map: Mediterranean ancient layer + global fallback ──
   if (typeof L === 'undefined') return;
   const mapEl = document.getElementById('coinMap');
   if (!mapEl) return;
 
   // Geography data shared with /coins/map (see static/js/coin-geo.js)
   const CITIES = window.COIN_CITIES || {};
-  const REGIONS = window.COIN_REGIONS || {};
+  const panel2 = document.querySelector('.coin-map-panel');
+  const caption = document.getElementById('coinMapCaption');
+  const isAncientMap = panel2 && panel2.dataset.ancient === '1';
 
   const map = L.map(mapEl, {
-    center: [37.5, 22.0], zoom: 5, minZoom: 3, maxZoom: 12,
+    center: isAncientMap ? [37.5, 22.0] : [20.0, 0.0],
+    zoom: isAncientMap ? 5 : 2,
+    minZoom: isAncientMap ? 3 : 2,
+    maxZoom: 12,
     scrollWheelZoom: false,
     dragging: true,
+    worldCopyJump: !isAncientMap,
   });
   // Clean basemap — no admin boundaries or territorial-water markings
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
@@ -5328,14 +5334,16 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   // names permanently.
   const LABEL_ZOOM = 7;
   const cityMarkers = {};
-  Object.entries(CITIES).forEach(([name, [lat, lng]]) => {
-    const dot = L.marker([lat, lng], {
-      icon: L.divIcon({className: 'coin-city-pin', iconSize: [7,7], iconAnchor: [4,4]}),
-    }).addTo(map);
-    dot.bindTooltip(name, {permanent: false, direction: 'right', offset: [6,0],
-                           className: 'coin-city-label'});
-    cityMarkers[name.toLowerCase()] = {name, latlng: [lat, lng], marker: dot};
-  });
+  if (isAncientMap) {
+    Object.entries(CITIES).forEach(([name, [lat, lng]]) => {
+      const dot = L.marker([lat, lng], {
+        icon: L.divIcon({className: 'coin-city-pin', iconSize: [7,7], iconAnchor: [4,4]}),
+      }).addTo(map);
+      dot.bindTooltip(name, {permanent: false, direction: 'right', offset: [6,0],
+                             className: 'coin-city-label'});
+      cityMarkers[name.toLowerCase()] = {name, latlng: [lat, lng], marker: dot};
+    });
+  }
 
   function applyLabelZoom() {
     const show = map.getZoom() >= LABEL_ZOOM;
@@ -5352,11 +5360,10 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   map.on('zoomend', applyLabelZoom);
 
   // Pinpoint origin: prefer Mint, then Region, then Authority
-  const panel2 = document.querySelector('.coin-map-panel');
-  const caption = document.getElementById('coinMapCaption');
   const origin = window.resolveCoinOrigin({
     mint: panel2.dataset.mint, region: panel2.dataset.region,
     authority: panel2.dataset.authority,
+    ancient: isAncientMap,
   });
   if (origin) {
     const [lat, lng] = origin.latlng;
@@ -5376,10 +5383,14 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       dup.marker._isOrigin = true;
       dup.marker.unbindTooltip();
     }
-    map.setView([lat, lng], 7);
-    if (caption) caption.textContent = 'Origin pinpointed: ' + origin.name + ' (scroll to zoom, drag to reposition)';
+    map.setView([lat, lng], isAncientMap ? 7 : 5);
+    if (caption) caption.textContent = 'Origin pinpointed: ' + origin.name + ' (drag to reposition; use + / − to zoom)';
   } else {
-    if (caption) caption.textContent = 'Ancient Greek & Mediterranean cities — scroll to zoom, drag to reposition.';
+    if (caption) {
+      caption.textContent = isAncientMap
+        ? 'Ancient Greek & Mediterranean cities — drag to reposition; use + / − to zoom.'
+        : 'World origin map — add a recognizable mint, region, or authority to pinpoint this issue.';
+    }
   }
   applyLabelZoom();
 })();

@@ -145,14 +145,121 @@ window.COIN_CITY_ALIASES = {
   'knidos':        'Knidos',
 };
 
+// Modern/world origin fallback. For modern coins, prefer mint city when
+// available; otherwise fall back to the country/region capital.
+window.COIN_WORLD_PLACES = {
+  // North America
+  'Philadelphia':[39.95,-75.16], 'Denver':[39.74,-104.99],
+  'San Francisco':[37.77,-122.42], 'West Point':[41.39,-73.96],
+  'New Orleans':[29.95,-90.07], 'Carson City':[39.16,-119.77],
+  'Charlotte':[35.23,-80.84], 'Dahlonega':[34.53,-83.98],
+  'Washington DC':[38.90,-77.04], 'Washington, DC':[38.90,-77.04],
+  'United States':[38.90,-77.04], 'USA':[38.90,-77.04],
+  'U.S.A.':[38.90,-77.04], 'US':[38.90,-77.04],
+  'Ottawa':[45.42,-75.70], 'Canada':[45.42,-75.70],
+  'Mexico City':[19.43,-99.13], 'Mexico':[19.43,-99.13],
+
+  // Europe
+  'London':[51.51,-0.13], 'United Kingdom':[51.51,-0.13],
+  'Great Britain':[51.51,-0.13], 'England':[51.51,-0.13],
+  'Paris':[48.86,2.35], 'France':[48.86,2.35],
+  'Berlin':[52.52,13.41], 'Germany':[52.52,13.41],
+  'Munich':[48.14,11.58], 'Hamburg':[53.55,10.00],
+  'Vienna':[48.21,16.37], 'Austria':[48.21,16.37],
+  'Bern':[46.95,7.45], 'Switzerland':[46.95,7.45],
+  'Rome':[41.90,12.49], 'Italy':[41.90,12.49],
+  'Milan':[45.46,9.19], 'Madrid':[40.42,-3.70], 'Spain':[40.42,-3.70],
+  'Lisbon':[38.72,-9.14], 'Portugal':[38.72,-9.14],
+  'Brussels':[50.85,4.35], 'Belgium':[50.85,4.35],
+  'Amsterdam':[52.37,4.90], 'Netherlands':[52.37,4.90],
+  'Utrecht':[52.09,5.12], 'Stockholm':[59.33,18.07],
+  'Sweden':[59.33,18.07], 'Oslo':[59.91,10.75], 'Norway':[59.91,10.75],
+  'Copenhagen':[55.68,12.57], 'Denmark':[55.68,12.57],
+  'Helsinki':[60.17,24.94], 'Finland':[60.17,24.94],
+  'Warsaw':[52.23,21.01], 'Poland':[52.23,21.01],
+  'Prague':[50.08,14.44], 'Czech Republic':[50.08,14.44],
+  'Czechia':[50.08,14.44], 'Budapest':[47.50,19.04],
+  'Hungary':[47.50,19.04], 'Athens':[37.98,23.73],
+  'Greece':[37.98,23.73], 'Moscow':[55.76,37.62],
+  'Russia':[55.76,37.62], 'St Petersburg':[59.93,30.34],
+
+  // Asia-Pacific
+  'Tokyo':[35.68,139.76], 'Japan':[35.68,139.76],
+  'Osaka':[34.69,135.50], 'Kyoto':[35.01,135.77],
+  'Beijing':[39.90,116.41], 'China':[39.90,116.41],
+  'Nanjing':[32.06,118.80], 'Shanghai':[31.23,121.47],
+  'Hong Kong':[22.32,114.17], 'Seoul':[37.57,126.98],
+  'South Korea':[37.57,126.98], 'India':[28.61,77.21],
+  'New Delhi':[28.61,77.21], 'Mumbai':[19.08,72.88],
+  'Kolkata':[22.57,88.36], 'Calcutta':[22.57,88.36],
+  'Canberra':[-35.28,149.13], 'Australia':[-35.28,149.13],
+  'Perth':[-31.95,115.86], 'Sydney':[-33.87,151.21],
+
+  // Africa, Middle East, South America
+  'Pretoria':[-25.75,28.19], 'South Africa':[-25.75,28.19],
+  'Cairo':[30.04,31.24], 'Egypt':[30.04,31.24],
+  'Jerusalem':[31.78,35.22], 'Israel':[31.78,35.22],
+  'Ankara':[39.93,32.86], 'Turkey':[39.93,32.86],
+  'Tehran':[35.69,51.39], 'Iran':[35.69,51.39],
+  'Brasilia':[-15.79,-47.88], 'Brazil':[-15.79,-47.88],
+  'Buenos Aires':[-34.60,-58.38], 'Argentina':[-34.60,-58.38],
+  'Santiago':[-33.45,-70.66], 'Chile':[-33.45,-70.66],
+  'Lima':[-12.05,-77.04], 'Peru':[-12.05,-77.04],
+};
+
+window.COIN_WORLD_PLACE_ALIASES = {
+  'u s': 'United States',
+  'u.s.': 'United States',
+  'u.s': 'United States',
+  'united states of america': 'United States',
+  'america': 'United States',
+  'american': 'United States',
+  'canadian': 'Canada',
+  'britain': 'Great Britain',
+  'british': 'United Kingdom',
+  'uk': 'United Kingdom',
+  'u.k.': 'United Kingdom',
+  'england': 'England',
+  'french': 'France',
+  'german': 'Germany',
+  'austrian': 'Austria',
+  'swiss': 'Switzerland',
+  'italian': 'Italy',
+  'spanish': 'Spain',
+  'portuguese': 'Portugal',
+  'dutch': 'Netherlands',
+  'belgian': 'Belgium',
+  'japanese': 'Japan',
+  'people republic of china': 'China',
+  'peoples republic of china': 'China',
+  'chinese': 'China',
+  'prc': 'China',
+  'republic of korea': 'South Korea',
+  'korea': 'South Korea',
+  'korean': 'South Korea',
+  'ussr': 'Russia',
+  'soviet union': 'Russia',
+  'russian': 'Russia',
+};
+
 // Given a coin's {mint, region, authority}, return the best {name, latlng}
 // match or null. Exposed so the detail and list maps share identical logic.
 window.resolveCoinOrigin = function(coin) {
   const cities = window.COIN_CITIES, regions = window.COIN_REGIONS;
   const aliases = window.COIN_CITY_ALIASES || {};
+  const world = window.COIN_WORLD_PLACES || {};
+  const worldAliases = window.COIN_WORLD_PLACE_ALIASES || {};
   const mint = (coin.mint || '').trim();
   const region = (coin.region || '').trim();
   const authority = (coin.authority || '').trim();
+
+  const norm = (s) => (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(royal|national|central|federal|state|the|mint|mints|coinage|republic|kingdom|empire|of|bank)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   const byCity = (s) => {
     if (!s) return null;
@@ -160,6 +267,23 @@ window.resolveCoinOrigin = function(coin) {
     let key = Object.keys(cities).find(k => k.toLowerCase() === lc);
     if (!key && aliases[lc]) key = aliases[lc];
     return key && cities[key] ? {name: key, latlng: cities[key]} : null;
+  };
+  const byWorldPlace = (s) => {
+    if (!s) return null;
+    const clean = norm(s);
+    if (!clean) return null;
+    const aliasKey = worldAliases[clean];
+    let key = aliasKey && world[aliasKey] ? aliasKey : null;
+    if (!key) {
+      key = Object.keys(world).find(k => norm(k) === clean);
+    }
+    if (!key) {
+      key = Object.keys(world).find(k => {
+        const kk = norm(k);
+        return clean.includes(kk) || kk.includes(clean);
+      });
+    }
+    return key && world[key] ? {name: key, latlng: world[key]} : null;
   };
   const byRegion = (s) => {
     if (!s) return null;
@@ -176,7 +300,9 @@ window.resolveCoinOrigin = function(coin) {
     });
     return hit ? {name: hit, latlng: cities[hit]} : null;
   };
-  return byCity(mint) || byCity(region) || byCity(authority)
+  return byCity(mint) || byWorldPlace(mint)
+      || byCity(region) || byCity(authority)
       || byRegion(region) || byRegion(authority)
+      || byWorldPlace(region) || byWorldPlace(authority)
       || byFuzzyCity(mint) || byFuzzyCity(region) || byFuzzyCity(authority);
 };
