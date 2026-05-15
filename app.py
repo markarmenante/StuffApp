@@ -264,6 +264,50 @@ def _backfill_blank_status_own(db):
             )
 
 
+def _merge_coin_condition_history(existing_notes, history_context):
+    """Preserve manual notes while replacing the generated history block."""
+    notes = (existing_notes or '').strip()
+    body = (history_context or '').strip()
+    if not body:
+        return notes
+
+    generated = f"Historical Context\n{body}"
+    notes = re.sub(
+        r'(?is)(?:\A|\n{2,})Historical Context\s*:?\s*\n.*\Z',
+        '',
+        notes,
+    ).strip()
+    if not notes:
+        return generated
+    if generated in notes or body in notes:
+        return notes
+    return f"{notes}\n\n{generated}"
+
+
+def _migrate_coin_history_context_into_condition(db):
+    """Move legacy generated coin history into the editable notes field."""
+    cols = {r['name'] for r in db.execute("PRAGMA table_info(coins)").fetchall()}
+    if not {'condition', 'history_context'}.issubset(cols):
+        return
+
+    rows = db.execute(
+        "SELECT id, condition, history_context FROM coins "
+        "WHERE history_context IS NOT NULL AND TRIM(history_context) != ''"
+    ).fetchall()
+    if not rows:
+        return
+
+    now = datetime.utcnow().isoformat()
+    for row in rows:
+        combined = _merge_coin_condition_history(row['condition'], row['history_context'])
+        db.execute(
+            "UPDATE coins SET condition = ?, history_context = NULL, updated_at = ? "
+            "WHERE id = ?",
+            (combined, now, row['id']),
+        )
+    db.commit()
+
+
 # Default owner assigned to brand-new records when the form's owner
 # field is blank (which it always is for member users — the field is
 # hidden in the template for them). Owner-role users see the owner
@@ -375,7 +419,7 @@ FIELDS = {
         {'name': 'storage_location','label': 'Storage Location',  'type': 'text'},
         {'name': 'sheldon',         'label': 'Sheldon',           'type': 'text'},
         {'name': 'obv_rev',         'label': 'Obv/Rev',           'type': 'text'},
-        {'name': 'condition',       'label': 'Condition',         'type': 'text'},
+        {'name': 'condition',       'label': 'Historical Context, Notes', 'type': 'textarea'},
         {'name': 'received',        'label': 'Received',          'type': 'text'},
         {'name': 'print_field',     'label': 'Print Field',       'type': 'text'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
@@ -1009,6 +1053,7 @@ def init_db():
     _ensure_owner_user(db)
     _normalize_owned_status_values(db)
     _backfill_blank_status_own(db)
+    _migrate_coin_history_context_into_condition(db)
     db.commit()
 
     # Migration-state ledger: one row per applied one-shot data
@@ -5853,14 +5898,16 @@ def coin_fetch_context(record_id):
         coin['coin_references'],
         numismatic_importance,
     )
+    condition = _merge_coin_condition_history(coin['condition'], history_context)
     db.execute(
-        "UPDATE coins SET coin_references = ?, history_context = ?, "
+        "UPDATE coins SET coin_references = ?, condition = ?, history_context = NULL, "
         "history_searched_at = ?, updated_at = ? WHERE id = ?",
-        (coin_references, history_context, now, now, record_id),
+        (coin_references, condition, now, now, record_id),
     )
     db.commit()
     return jsonify({
         'markdown': history_context,
+        'condition': condition,
         'history_context': history_context,
         'numismatic_importance': numismatic_importance,
         'coin_references': coin_references,
@@ -10860,9 +10907,9 @@ def record_print_pdf(category, record_id):
     # Long-text fields render as full-width sections below the spec
      # grid instead of getting cramped into a label/value table cell.
     # Includes any 'textarea' field plus a few text fields the user
-    # treats as prose (calibre_notes, history_context).
+    # treats as prose (calibre_notes, history_context, condition).
     LONG_TEXT_FIELDS = {f['name'] for f in fields if f.get('type') == 'textarea'}
-    LONG_TEXT_FIELDS |= {'calibre_notes', 'history_context'}
+    LONG_TEXT_FIELDS |= {'calibre_notes', 'history_context', 'condition'}
 
     def _val(name):
         try:

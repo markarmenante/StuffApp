@@ -292,8 +292,8 @@
     <button type="button"
             class="coin-lookup-btn coin-history-btn{% if r and r['history_searched_at'] %} done{% endif %}"
             data-url="{% if not is_new %}{{ url_for('coin_fetch_context', record_id=r['id']) }}{% endif %}"
-            title="{% if r and r['history_searched_at'] %}History last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Look up the historical environment at this mint, combining region, authority, mint, date, and description{% endif %}">
-      🔎 History
+            title="{% if r and r['history_searched_at'] %}Research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Research the historical environment at this mint, combining region, authority, mint, date, and description{% endif %}">
+      🔎 Research
     </button>
     {% endif %}
     {% if not is_new %}
@@ -835,9 +835,9 @@ document.addEventListener('DOMContentLoaded', function () {
   <div class="section-bar">Pedigree, References</div>
   <div class="dgrid dg1">{{ cell('coin_references','',rows=4) }}</div>
 
-  <!-- Grade, Conditions (existing notes data) + Notes (condition column) -->
+  <!-- Grade, Conditions (existing notes data) + Historical Context, Notes (condition column) -->
   {{ notescell('notes','Grade, Conditions') }}
-  {{ notescell('condition','Notes') }}
+  {{ notescell('condition','Historical Context, Notes') }}
 
   <!-- Extra fields -->
   <div class="dgrid dg2">
@@ -845,23 +845,23 @@ document.addEventListener('DOMContentLoaded', function () {
     {{ cell('storage_location','Storage') }}
   </div>
 
-  <!-- AI History panel — pinned just above the Origin map so the
-       narrative and the geography sit together. -->
-  <div class="coin-history-panel{% if not (r and (r['history_region'] or r['history_authority'] or r['history_context'])) %} is-empty{% endif %}"
+  <!-- Region/authority history panel. The combined Research narrative
+       lives in Historical Context, Notes above. -->
+  <div class="coin-history-panel{% if not (r and (r['history_region'] or r['history_authority'])) %} is-empty{% endif %}"
        id="coinHistoryPanel"
        data-region-raw="{{ r['history_region'] if r and r['history_region'] else '' }}"
        data-authority-raw="{{ r['history_authority'] if r and r['history_authority'] else '' }}"
-       data-context-raw="{{ r['history_context'] if r and r['history_context'] else '' }}">
+       data-context-raw="">
     <div class="coin-history-header">
       <span class="coin-history-title" id="coinHistoryTitle">History</span>
       <span class="coin-history-stamp" id="coinHistoryStamp">{% if r and r['history_searched_at'] %}as of {{ r['history_searched_at']|short_date }}{% endif %}</span>
       <span class="coin-history-edit-hint" id="coinHistoryEditHint" title="Click to edit">✎</span>
     </div>
     <div class="coin-history-body" id="coinHistoryBody" title="Click to edit">
-      {% if r and r['history_context'] %}{{ r['history_context']|format_results }}{% elif r and r['history_region'] %}{{ r['history_region']|format_results }}{% elif r and r['history_authority'] %}{{ r['history_authority']|format_results }}{% endif %}
+      {% if r and r['history_region'] %}{{ r['history_region']|format_results }}{% elif r and r['history_authority'] %}{{ r['history_authority']|format_results }}{% endif %}
     </div>
     <textarea class="coin-history-edit" id="coinHistoryEdit" name="history_context"
-              style="display:none">{{ r['history_context'] if r and r['history_context'] else (r['history_region'] if r and r['history_region'] else (r['history_authority'] if r and r['history_authority'] else '')) }}</textarea>
+              style="display:none">{{ r['history_region'] if r and r['history_region'] else (r['history_authority'] if r and r['history_authority'] else '') }}</textarea>
   </div>
 
   {# Origin map only renders for ancient coins (date_1 < 500). Modern
@@ -5026,21 +5026,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     btn.addEventListener('click', async () => {
       const url = btn.dataset.url;
       if (!url) return;
-      // Second click while Context is showing = collapse.
-      if (panel && panel.dataset.currentField === 'context'
-          && !panel.classList.contains('is-empty')) {
-        panel.classList.add('is-empty');
-        if (body) body.innerHTML = '';
-        panel.dataset.currentField = '';
-        return;
-      }
-      if (title) title.textContent = 'Historical Context';
-      panel.dataset.currentField = 'context';
-      panel.classList.remove('is-empty');
-      if (body) body.innerHTML = '<p><em>Searching…</em></p>';
-      // Scroll the panel into view so the user sees results unfolding.
-      if (panel && typeof panel.scrollIntoView === 'function') {
-        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const notes = document.querySelector('[name="condition"]');
+      if (notes && typeof notes.scrollIntoView === 'function') {
+        notes.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
       btn.classList.add('loading'); btn.disabled = true;
       try {
@@ -5056,12 +5044,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         }
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed');
-        const md = data.history_context || data.markdown || '';
-        const html = formatResultsHtml(md);
-        if (body) body.innerHTML = html || '<p><em>(no results)</em></p>';
-        panel.dataset.contextRaw = md;
-        const edit = document.getElementById('coinHistoryEdit');
-        if (edit) edit.value = md;
+        const combinedNotes = data.condition || data.history_context || data.markdown || '';
+        if (notes) {
+          notes.value = combinedNotes;
+          notes.dispatchEvent(new Event('input', { bubbles: true }));
+        }
         const refs = document.querySelector('[name="coin_references"]');
         if (refs && typeof data.coin_references === 'string') {
           refs.value = data.coin_references;
@@ -5076,7 +5063,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         // immediately (server has also persisted history_searched_at).
         if (data.searched_at) btn.classList.add('done');
       } catch (err) {
-        if (body) body.innerHTML = '<p style="color:#c00">Error: ' + (err.message || 'unknown') + '</p>';
+        alert('Research failed: ' + (err.message || 'unknown'));
       } finally {
         btn.classList.remove('loading'); btn.disabled = false;
       }
@@ -5104,17 +5091,22 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     }
     function leaveEdit() {
       const md = edit.value;
-      panel.dataset.contextRaw = md;
+      const current = panel.dataset.currentField || '';
+      const rawKey = current ? current + 'Raw' : 'contextRaw';
+      panel.dataset[rawKey] = md;
       body.innerHTML = md ? formatResultsHtml(md) : '';
       body.style.display = '';
       edit.style.display = 'none';
       // Persist via the standard /save-field endpoint. Silent on failure.
       const url = "{% if r %}{{ url_for('save_field', category='coins', record_id=r['id']) }}{% endif %}";
       if (!url) return;
+      const saveField = current === 'region'
+        ? 'history_region'
+        : (current === 'authority' ? 'history_authority' : 'history_context');
       fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({field: 'history_context', value: md}),
+        body: JSON.stringify({field: saveField, value: md}),
       }).catch(() => {});
     }
     body.addEventListener('click', e => {
