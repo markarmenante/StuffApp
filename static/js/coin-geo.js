@@ -206,7 +206,14 @@ window.COIN_WORLD_PLACES = {
   'Tokyo':[35.68,139.76], 'Japan':[35.68,139.76],
   'Osaka':[34.69,135.50], 'Kyoto':[35.01,135.77],
   'Beijing':[39.90,116.41], 'China':[39.90,116.41],
-  'Nanjing':[32.06,118.80], 'Shanghai':[31.23,121.47],
+  'Tianjin':[39.12,117.20], 'Tientsin':[39.12,117.20],
+  'Nanjing':[32.06,118.80], 'Nanking':[32.06,118.80],
+  'Shanghai':[31.23,121.47], 'Guangzhou':[23.13,113.26],
+  'Canton':[23.13,113.26], 'Wuhan':[30.59,114.31],
+  'Wuchang':[30.55,114.32], 'Chengdu':[30.66,104.06],
+  'Kunming':[25.04,102.71], 'Shenyang':[41.80,123.43],
+  'Mukden':[41.80,123.43], 'Harbin':[45.76,126.64],
+  'Urumqi':[43.83,87.62], 'Dihua':[43.83,87.62],
   'Hong Kong':[22.32,114.17], 'Seoul':[37.57,126.98],
   'South Korea':[37.57,126.98], 'India':[28.61,77.21],
   'New Delhi':[28.61,77.21], 'Mumbai':[19.08,72.88],
@@ -326,8 +333,21 @@ window.COIN_WORLD_PLACE_ALIASES = {
   'japanese': 'Japan',
   'people republic of china': 'China',
   'peoples republic of china': 'China',
+  'republic china': 'China',
+  'republic of china': 'China',
+  'china republic': 'China',
   'chinese': 'China',
   'prc': 'China',
+  'tianjin mint': 'Tianjin',
+  'tientsin mint': 'Tianjin',
+  'nanking mint': 'Nanjing',
+  'nanjing mint': 'Nanjing',
+  'canton mint': 'Guangzhou',
+  'kwangtung mint': 'Guangzhou',
+  'guangdong mint': 'Guangzhou',
+  'wuchang mint': 'Wuchang',
+  'mukden mint': 'Mukden',
+  'sinkiang mint': 'Urumqi',
   'republic of korea': 'South Korea',
   'korea': 'South Korea',
   'korean': 'South Korea',
@@ -385,6 +405,11 @@ window.COIN_WORLD_PLACE_LABELS = {
   'Russia': 'Moscow',
   'Japan': 'Tokyo',
   'China': 'Beijing',
+  'Tientsin': 'Tianjin',
+  'Nanking': 'Nanjing',
+  'Canton': 'Guangzhou',
+  'Mukden': 'Shenyang',
+  'Dihua': 'Urumqi',
   'South Korea': 'Seoul',
   'India': 'New Delhi',
   'Australia': 'Canberra',
@@ -515,28 +540,39 @@ window.resolveCoinOriginAsync = async function(coin) {
   const local = window.resolveCoinOrigin(coin);
   if (!mint) return local;
 
-  const context = [coin.region, coin.authority].filter(Boolean).join(', ');
-  const query = [mint, context].filter(Boolean).join(', ');
-  const cacheKey = 'coin-origin-geocode:' + query.toLowerCase();
+  const queries = [
+    [mint, coin.region].filter(Boolean).join(', '),
+    [mint, coin.authority].filter(Boolean).join(', '),
+    mint,
+  ].filter(Boolean).filter((q, idx, arr) => arr.indexOf(q) === idx);
 
-  try {
-    const cached = window.localStorage && window.localStorage.getItem(cacheKey);
-    if (cached) return JSON.parse(cached);
-  } catch (_) {}
+  const fetchGeocode = async (query) => {
+    const cacheKey = 'coin-origin-geocode:' + query.toLowerCase();
+    try {
+      const cached = window.localStorage && window.localStorage.getItem(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (_) {}
 
-  try {
     const url = '/api/geocode-city?q=' + encodeURIComponent(query);
     const res = await fetch(url, {headers: {'Accept': 'application/json'}});
-    if (!res.ok) return local || null;
+    if (!res.ok) return null;
     const hit = await res.json();
     if (!hit || !hit.latlng || !Number.isFinite(Number(hit.latlng[0])) || !Number.isFinite(Number(hit.latlng[1]))) {
-      return local || null;
+      return null;
     }
     hit.latlng = [Number(hit.latlng[0]), Number(hit.latlng[1])];
     try {
       if (window.localStorage) window.localStorage.setItem(cacheKey, JSON.stringify(hit));
     } catch (_) {}
     return hit;
+  };
+
+  try {
+    for (const query of queries) {
+      const hit = await fetchGeocode(query);
+      if (hit) return hit;
+    }
+    return local || null;
   } catch (_) {
     return local || null;
   }

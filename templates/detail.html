@@ -5390,17 +5390,33 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     authority: panel2.dataset.authority,
     ancient: isAncientMap,
   };
-  const origin = window.resolveCoinOrigin(originInput);
-  if (!placeOrigin(origin)) {
+  const fallbackOrigin = () => window.resolveCoinOrigin({
+    mint: '',
+    region: originInput.region,
+    authority: originInput.authority,
+    ancient: originInput.ancient,
+  });
+  const mintOrigin = window.resolveCoinOrigin({
+    mint: originInput.mint,
+    region: '',
+    authority: '',
+    ancient: originInput.ancient,
+  });
+
+  if (placeOrigin(mintOrigin)) {
+    // Mint hit: done. This keeps modern mint cities ahead of country fallbacks.
+  } else if (!isAncientMap && originInput.mint && window.resolveCoinOriginAsync) {
+    if (caption) caption.textContent = 'Locating mint city: ' + originInput.mint + '…';
+    window.resolveCoinOriginAsync(originInput).then(hit => {
+      if (!placeOrigin(hit)) placeOrigin(fallbackOrigin());
+    }).catch(() => {
+      placeOrigin(fallbackOrigin());
+    });
+  } else if (!placeOrigin(window.resolveCoinOrigin(originInput))) {
     if (caption) {
       caption.textContent = isAncientMap
         ? 'Ancient Greek & Mediterranean cities — drag to reposition; use + / − to zoom.'
         : 'World origin map — add a recognizable mint, region, or authority to pinpoint this issue.';
-    }
-    if (!isAncientMap && window.resolveCoinOriginAsync) {
-      window.resolveCoinOriginAsync(originInput).then(hit => {
-        if (hit) placeOrigin(hit);
-      }).catch(() => {});
     }
   }
   applyLabelZoom();
