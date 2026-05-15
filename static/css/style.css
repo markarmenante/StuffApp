@@ -2753,6 +2753,14 @@ input[type="date"] { -webkit-appearance: none; }
 .coin-map {
   width: 100%; height: 340px;
 }
+.coin-map.leaflet-container,
+.coins-dist-map.leaflet-container {
+  cursor: grab;
+}
+.coin-map.leaflet-dragging,
+.coins-dist-map.leaflet-dragging {
+  cursor: grabbing;
+}
 .coin-map-caption {
   padding: 6px 10px;
   font-size: 12px; color: var(--text-secondary, #555);

@@ -5203,7 +5203,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 
   const map = L.map(mapEl, {
     center: [37.5, 22.0], zoom: 5, minZoom: 3, maxZoom: 12,
-    scrollWheelZoom: true,
+    scrollWheelZoom: false,
     dragging: true,
   });
   // Clean basemap — no admin boundaries or territorial-water markings
