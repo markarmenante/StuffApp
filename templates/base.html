@@ -621,7 +621,7 @@ async function startSyncUp(ev, link) {
   {% block content %}{% endblock %}
 </main>
 
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}?v={{ asset_v('js/app.js') }}"></script>
 
 {% if current_user %}
 <script>

@@ -17,7 +17,7 @@
 // Bump on every shipped change to invalidate old caches: a stale CSS
 // entry from before the random→asset_v cache-buster fix would otherwise
 // linger and keep rendering the un-styled page offline.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL_CACHE = `stuffapp-shell-${VERSION}`;
 const DATA_CACHE  = `stuffapp-data-${VERSION}`;
 
@@ -91,13 +91,9 @@ self.addEventListener('fetch', (event) => {
 
 async function cacheFirst(req, cacheName) {
   const cache = await caches.open(cacheName);
-  // ignoreSearch fallback: cache-buster query strings on /static/
-  // assets change every deploy; we still want offline hits against
-  // an earlier-cached version of the same path. Harmless for
-  // /uploads and /file-thumb since those identify content by their
-  // uuid path, not the query.
-  let hit = await cache.match(req);
-  if (!hit) hit = await cache.match(req, { ignoreSearch: true });
+  // Match exact URLs only. Static assets use ?v=<mtime> cache busters;
+  // ignoring the query lets old JS/CSS survive a deploy until hard refresh.
+  const hit = await cache.match(req);
   if (hit) return hit;
   try {
     const resp = await fetch(req);
