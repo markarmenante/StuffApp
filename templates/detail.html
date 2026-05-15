@@ -76,6 +76,24 @@
 </div>
 {% endif %}
 {% endmacro %}
+{% macro formatted_notescell(field, label) %}
+{% if not is_hidden_field(category, field) %}
+{% set raw = r[field] if r and field in r.keys() and r[field] is not none else '' %}
+<div class="section-bar">{{ label }}</div>
+<div class="dgrid dg1">
+  <div class="dcell dcell-markdown-note">
+    <div class="markdown-note-preview{% if not raw %} is-empty{% endif %}"
+         data-md-preview-for="{{ field }}"
+         tabindex="0"
+         title="Click to edit"
+         {% if not raw %}style="display:none"{% endif %}>{{ raw|format_results }}</div>
+    <textarea name="{{ field }}" rows="3" data-autogrow="1" class="markdown-note-editor"
+              {% if raw %}style="display:none"{% endif %}
+              {% if not raw %}placeholder="{{ label }}"{% endif %}>{{ raw }}</textarea>
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
 {% macro imgcell(field, label) %}
 {% set f = r[field] if r else none %}
 <div class="dcell file-cell drop-zone" data-field="{{ field }}"
@@ -837,7 +855,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- Grade, Conditions (existing notes data) + Historical Context, Notes (condition column) -->
   {{ notescell('notes','Grade, Conditions') }}
-  {{ notescell('condition','Historical Context, Notes') }}
+  {{ formatted_notescell('condition','Historical Context, Notes') }}
 
   <!-- Extra fields -->
   <div class="dgrid dg2">
@@ -2441,6 +2459,52 @@ document.getElementById('resultsRaw')?.addEventListener('input', (e) => {
   const disp = document.getElementById('resultsDisplay');
   if (disp) disp.innerHTML = formatResultsHtml(e.target.value);
 });
+
+function refreshMarkdownNotePreview(textarea, preferPreview = false) {
+  if (!textarea || !textarea.name) return;
+  const preview = document.querySelector('[data-md-preview-for="' + textarea.name + '"]');
+  if (!preview) return;
+  const value = textarea.value || '';
+  preview.innerHTML = formatResultsHtml(value);
+  preview.classList.toggle('is-empty', !value.trim());
+  if (preferPreview && value.trim()) {
+    textarea.style.display = 'none';
+    preview.style.display = '';
+  }
+}
+
+(function setupMarkdownNotePreviews() {
+  document.querySelectorAll('.markdown-note-preview').forEach(preview => {
+    const field = preview.dataset.mdPreviewFor;
+    const textarea = document.querySelector('textarea[name="' + field + '"]');
+    if (!textarea) return;
+    function showEditor() {
+      preview.style.display = 'none';
+      textarea.style.display = '';
+      if (window._autosizeTextarea) window._autosizeTextarea(textarea);
+      textarea.focus();
+    }
+    function showPreviewIfFilled() {
+      refreshMarkdownNotePreview(textarea, true);
+      if (!textarea.value.trim()) {
+        preview.style.display = 'none';
+        textarea.style.display = '';
+      }
+    }
+    preview.addEventListener('click', event => {
+      if (event.target.closest('a')) return;
+      showEditor();
+    });
+    preview.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        showEditor();
+      }
+    });
+    textarea.addEventListener('input', () => refreshMarkdownNotePreview(textarea));
+    textarea.addEventListener('blur', showPreviewIfFilled);
+  });
+})();
 
 // Watch / Art "Lookup" buttons share the .watch-lookup-btn class for
 // styling. The PDF link in the same nav row also carries the class to
@@ -5048,6 +5112,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         if (notes) {
           notes.value = combinedNotes;
           notes.dispatchEvent(new Event('input', { bubbles: true }));
+          if (window.refreshMarkdownNotePreview) {
+            window.refreshMarkdownNotePreview(notes, true);
+          }
         }
         const refs = document.querySelector('[name="coin_references"]');
         if (refs && typeof data.coin_references === 'string') {

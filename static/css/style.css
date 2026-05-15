@@ -799,6 +799,43 @@ input[type="number"]::-webkit-outer-spin-button {
   resize: vertical;
   min-height: 40px;
 }
+.dcell-markdown-note {
+  padding: 7px 10px 8px;
+}
+.markdown-note-preview {
+  width: 100%;
+  min-height: 40px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #111111;
+  white-space: normal;
+  cursor: text;
+  outline: none;
+}
+.markdown-note-preview:focus {
+  box-shadow: inset 0 0 0 2px rgba(0, 122, 255, 0.18);
+}
+.markdown-note-preview p {
+  margin: 0 0 8px;
+}
+.markdown-note-preview p:last-child,
+.markdown-note-preview ul:last-child {
+  margin-bottom: 0;
+}
+.markdown-note-preview ul.results-list {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+.markdown-note-preview li {
+  margin: 2px 0;
+}
+.markdown-note-preview a.result-src {
+  color: var(--blue);
+  text-decoration: none;
+}
+.markdown-note-preview a.result-src:hover {
+  text-decoration: underline;
+}
 .dcell textarea[rows="4"] { min-height: 80px; }
 .dcell textarea[rows="5"] { min-height: 100px; }
 .dcell textarea[rows="6"] { min-height: 130px; }
