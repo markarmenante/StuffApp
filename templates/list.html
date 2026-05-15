@@ -22,10 +22,8 @@
   {% endif %}
   {% if category == 'coins' and not at_property %}
   {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
-  <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} pgs</a>
-  <button type="button" class="toolbar-btn pill coin-tray-count" id="coinTrayCount" title="Selected coin cards">Tray &mdash; 0</button>
-  <a href="{{ url_for('coins_print_pdf') }}" class="toolbar-btn pill coin-tray-print disabled" id="coinTrayPrint" title="Print selected coin cards" target="_blank">Print Tray</a>
-  <button type="button" class="toolbar-btn pill coin-tray-clear" id="coinTrayClear" title="Clear selected coin cards">Clear</button>
+  <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} {{ 'page' if _pgs == 1 else 'pages' }}</a>
+  <a href="{{ url_for('coins_print_pdf') }}" class="toolbar-btn pill coin-tray-count disabled" id="coinTrayCount" title="Print selected coin cards" target="_blank">Tray &mdash; 0</a>
   <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
      title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
   {# Two era pills, each cycling its own axis:
@@ -67,6 +65,7 @@
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_modern_href) }}"
      class="toolbar-btn pill {% if _is_modern %}active{% elif _is_ancient %}muted{% endif %}"
      title="Cycle: off → CA Modern → NY Modern → off (date_1 ≥ 500)">{{ _modern_label }}</a>
+  <button type="button" class="toolbar-btn pill coin-tray-clear" id="coinTrayClear" title="Clear selected coin cards">Clear</button>
   {% if has_ordered or coin_filter == 'ordered' %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
@@ -231,7 +230,17 @@
             {% if row['weight'] %}<span>{{ '%.2f'|format(row['weight']|float) }} g</span>{% endif %}
             {% if row['size'] %}<span>{{ '%.1f'|format(row['size']|float) }} mm</span>{% endif %}
             {% if row['die_axis'] %}<span>{{ row['die_axis'] }}h</span>{% endif %}
-            {% if row['coin_id'] %}<span class="item-cat-id">{{ row['coin_id'] }}</span>{% endif %}
+            {% if row['coin_id'] or not at_property %}
+            <span class="coin-position-actions">
+              {% if row['coin_id'] %}<span class="item-cat-id">{{ row['coin_id'] }}</span>{% endif %}
+              {% if not at_property %}
+              <button type="button"
+                      class="coin-tray-toggle"
+                      data-coin-id="{{ row['id'] }}"
+                      title="Add this coin to the print tray">+ Card</button>
+              {% endif %}
+            </span>
+            {% endif %}
           </div>
         </div>
 
@@ -502,12 +511,6 @@
       {% endif %}
 
     </div><!-- /item-body -->
-    {% if category == 'coins' and not at_property %}
-    <button type="button"
-            class="coin-tray-toggle"
-            data-coin-id="{{ row['id'] }}"
-            title="Add this coin to the print tray">+ Card</button>
-    {% endif %}
   </div>
   {% if category == 'properties' %}{% set ns.prev = row['type'] %}{% endif %}
   {% endfor %}
@@ -603,7 +606,6 @@ window.shareCardRow = async function (ev, btn) {
   var coinTrayKey = 'stuffapp.coinPrintTray.v1';
   var coinTrayBaseUrl = "{{ url_for('coins_print_pdf') }}";
   var coinTrayCount = document.getElementById('coinTrayCount');
-  var coinTrayPrint = document.getElementById('coinTrayPrint');
   var coinTrayClear = document.getElementById('coinTrayClear');
 
   function loadCoinTray() {
@@ -631,14 +633,14 @@ window.shareCardRow = async function (ev, btn) {
 
   function updateCoinTrayUi(ids) {
     var count = ids.length;
-    if (coinTrayCount) coinTrayCount.textContent = 'Tray — ' + count;
-    if (coinTrayPrint) {
+    if (coinTrayCount) {
+      coinTrayCount.textContent = 'Tray — ' + count;
       if (count) {
-        coinTrayPrint.classList.remove('disabled');
-        coinTrayPrint.href = coinTrayBaseUrl + '?ids=' + encodeURIComponent(ids.join(','));
+        coinTrayCount.classList.remove('disabled');
+        coinTrayCount.href = coinTrayBaseUrl + '?ids=' + encodeURIComponent(ids.join(','));
       } else {
-        coinTrayPrint.classList.add('disabled');
-        coinTrayPrint.href = coinTrayBaseUrl;
+        coinTrayCount.classList.add('disabled');
+        coinTrayCount.href = coinTrayBaseUrl;
       }
     }
     if (coinTrayClear) coinTrayClear.disabled = !count;
@@ -682,8 +684,8 @@ window.shareCardRow = async function (ev, btn) {
     });
   }
 
-  if (coinTrayPrint) {
-    coinTrayPrint.addEventListener('click', function(e) {
+  if (coinTrayCount) {
+    coinTrayCount.addEventListener('click', function(e) {
       if (!coinTrayIds.length) e.preventDefault();
     });
   }

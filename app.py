@@ -3432,6 +3432,75 @@ No prose, no code fences, no JSON."""
     return {'markdown': md}
 
 
+COIN_CONTEXT_SECTION_RE = re.compile(
+    r'(?im)^\s*(?:\*\*)?\s*'
+    r'(Historical environment|Style|Numismatic importance|Reflection of the times)'
+    r'\s*(?:\*\*)?\s*:?\s*$'
+)
+
+
+def _split_coin_context_markdown(markdown):
+    """Return (historical_context, numismatic_importance_body).
+
+    The History lookup asks for four labeled sections. Store the
+    numismatic-importance section with pedigree/references, while the
+    remaining sections stay in the historical-context field.
+    """
+    md = (markdown or '').strip()
+    if not md:
+        return '', ''
+    matches = list(COIN_CONTEXT_SECTION_RE.finditer(md))
+    if not matches:
+        return md, ''
+
+    context_parts = []
+    importance_parts = []
+    if matches[0].start() > 0:
+        context_parts.append(md[:matches[0].start()].strip())
+
+    for idx, match in enumerate(matches):
+        heading = match.group(1).strip().lower()
+        next_start = matches[idx + 1].start() if idx + 1 < len(matches) else len(md)
+        section_body = md[match.end():next_start].strip()
+        section_text = md[match.start():next_start].strip()
+        if heading == 'numismatic importance':
+            importance_parts.append(section_body)
+        else:
+            context_parts.append(section_text)
+
+    historical_context = '\n\n'.join(part for part in context_parts if part).strip()
+    numismatic_importance = '\n\n'.join(part for part in importance_parts if part).strip()
+    return historical_context, numismatic_importance
+
+
+def _merge_coin_numismatic_importance(existing_refs, importance):
+    """Append/replace the generated Numismatic importance block.
+
+    Existing pedigree/reference text is preserved. If the History button
+    is run again, replace the previously appended block at the end rather
+    than stacking duplicates.
+    """
+    refs = (existing_refs or '').strip()
+    body = (importance or '').strip()
+    if not body:
+        return refs
+
+    generated = f"Numismatic importance\n{body}"
+    if not refs:
+        return generated
+
+    refs = re.sub(
+        r'(?is)\n{2,}Numismatic importance\s*:?\s*\n.*\Z',
+        '',
+        refs,
+    ).strip()
+    if not refs:
+        return generated
+    if generated in refs:
+        return refs
+    return f"{refs}\n\n{generated}"
+
+
 def fetch_coin_history(field_name, topic, coin):
     """Use Claude's web_search tool to describe the history of a coin's
     region or authority. Returns dict {markdown: str}.
@@ -5738,13 +5807,24 @@ def coin_fetch_context(record_id):
         detail = str(e) or e.__class__.__name__
         return jsonify({'error': f'Context lookup failed: {detail}'}), 500
     now = datetime.utcnow().isoformat()
+    history_context, numismatic_importance = _split_coin_context_markdown(data['markdown'])
+    coin_references = _merge_coin_numismatic_importance(
+        coin['coin_references'],
+        numismatic_importance,
+    )
     db.execute(
-        "UPDATE coins SET history_context = ?, history_searched_at = ?, "
-        "updated_at = ? WHERE id = ?",
-        (data['markdown'], now, now, record_id),
+        "UPDATE coins SET coin_references = ?, history_context = ?, "
+        "history_searched_at = ?, updated_at = ? WHERE id = ?",
+        (coin_references, history_context, now, now, record_id),
     )
     db.commit()
-    return jsonify({'markdown': data['markdown'], 'searched_at': now})
+    return jsonify({
+        'markdown': history_context,
+        'history_context': history_context,
+        'numismatic_importance': numismatic_importance,
+        'coin_references': coin_references,
+        'searched_at': now,
+    })
 
 
 @app.route('/coins/<record_id>/history', methods=['POST'])

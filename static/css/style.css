@@ -187,6 +187,27 @@ input[type="number"]::-webkit-outer-spin-button {
   top: var(--nav-height);
   z-index: 90;
 }
+.list-toolbar-coins {
+  flex-wrap: wrap;
+  overflow: hidden;
+}
+.list-toolbar-coins .list-cat-title {
+  flex: 0 0 auto;
+}
+.list-toolbar-coins .search-form {
+  flex: 1 1 190px;
+  min-width: 150px;
+  max-width: 280px;
+  margin-left: auto;
+}
+.list-toolbar-coins .search-wrap {
+  width: 100%;
+  box-sizing: border-box;
+}
+.list-toolbar-coins .search-wrap input {
+  width: 100%;
+  min-width: 0;
+}
 .list-count { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-right: 6px; }
 .list-cat-title { font-size: 13px; font-weight: 600; flex: 1; }
 
@@ -367,23 +388,26 @@ input[type="number"]::-webkit-outer-spin-button {
 .item-body { flex: 1; padding: 8px 16px; display: flex; flex-direction: column; gap: 2px; justify-content: center; overflow: hidden; }
 
 .coin-tray-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   align-self: center;
-  margin: 0 12px 0 0;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
+  min-height: 20px;
+  padding: 1px 8px;
+  border: 1px solid var(--border-light);
   border-radius: 13px;
-  background: #fff;
-  color: var(--blue);
+  background: transparent;
+  color: var(--text-hint);
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
-.coin-tray-toggle:hover { background: rgba(0, 122, 255, 0.08); }
+.coin-tray-toggle:hover { background: rgba(0,0,0,.04); color: var(--text-secondary); }
 .coin-tray-toggle.selected {
-  background: var(--blue);
-  border-color: var(--blue);
-  color: #fff;
+  background: #ededed;
+  border-color: var(--border);
+  color: var(--text-secondary);
 }
 
 .item-line1 { display: flex; align-items: baseline; gap: 14px; }
@@ -487,7 +511,20 @@ input[type="number"]::-webkit-outer-spin-button {
 .rdot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--border); background: #fff; flex-shrink: 0; }
 .rdot.on { background: var(--text); border-color: var(--text); }
 
+.coin-position-actions {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .item-cat-id { font-size: 17px; color: var(--text-hint); align-self: flex-end; margin-left: auto; padding-left: 12px; white-space: nowrap; }
+.coin-position-actions .item-cat-id {
+  align-self: baseline;
+  margin-left: 0;
+  padding-left: 0;
+}
 
 /* ── EMPTY STATE ── */
 .empty-state { text-align: center; padding: 60px 20px; color: var(--text-secondary); background: var(--surface); }

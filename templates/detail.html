@@ -5056,10 +5056,17 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         }
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed');
-        const md = data.markdown || '';
+        const md = data.history_context || data.markdown || '';
         const html = formatResultsHtml(md);
         if (body) body.innerHTML = html || '<p><em>(no results)</em></p>';
         panel.dataset.contextRaw = md;
+        const edit = document.getElementById('coinHistoryEdit');
+        if (edit) edit.value = md;
+        const refs = document.querySelector('[name="coin_references"]');
+        if (refs && typeof data.coin_references === 'string') {
+          refs.value = data.coin_references;
+          refs.dispatchEvent(new Event('input', { bubbles: true }));
+        }
         if (stamp && data.searched_at) {
           const d = new Date(data.searched_at);
           stamp.textContent = 'as of ' + d.toLocaleDateString('en-US',
