@@ -205,6 +205,18 @@ window.COIN_WORLD_PLACES = {
   'Buenos Aires':[-34.60,-58.38], 'Argentina':[-34.60,-58.38],
   'Santiago':[-33.45,-70.66], 'Chile':[-33.45,-70.66],
   'Lima':[-12.05,-77.04], 'Peru':[-12.05,-77.04],
+
+  // Historical states, mapped to a reasonable capital or mint center.
+  'Bohemia':[50.08,14.44], 'Kingdom of Bohemia':[50.08,14.44],
+  'Czechoslovakia':[50.08,14.44],
+  'Prussia':[52.52,13.41], 'German Empire':[52.52,13.41],
+  'Weimar Republic':[52.52,13.41], 'Bavaria':[48.14,11.58],
+  'Austria-Hungary':[48.21,16.37], 'Austrian Empire':[48.21,16.37],
+  'Holy Roman Empire':[48.21,16.37],
+  'Ottoman Empire':[41.01,28.97], 'Constantinople':[41.01,28.97],
+  'Russian Empire':[59.93,30.34],
+  'Kingdom of Naples':[40.85,14.27], 'Kingdom of the Two Sicilies':[40.85,14.27],
+  'Papal States':[41.90,12.49],
 };
 
 window.COIN_WORLD_PLACE_ALIASES = {
@@ -215,6 +227,10 @@ window.COIN_WORLD_PLACE_ALIASES = {
   'america': 'United States',
   'american': 'United States',
   'canadian': 'Canada',
+  'commonwealth australia': 'Australia',
+  'commonwealth of australia': 'Australia',
+  'australian': 'Canberra',
+  'royal australian': 'Canberra',
   'britain': 'Great Britain',
   'british': 'United Kingdom',
   'uk': 'United Kingdom',
@@ -240,6 +256,67 @@ window.COIN_WORLD_PLACE_ALIASES = {
   'ussr': 'Russia',
   'soviet union': 'Russia',
   'russian': 'Russia',
+  'bohemian': 'Bohemia',
+  'kingdom bohemia': 'Kingdom of Bohemia',
+  'austro hungarian': 'Austria-Hungary',
+  'ottoman': 'Ottoman Empire',
+};
+
+window.COIN_WORLD_PLACE_LABELS = {
+  'United States': 'Washington, DC',
+  'Canada': 'Ottawa',
+  'Mexico': 'Mexico City',
+  'United Kingdom': 'London',
+  'Great Britain': 'London',
+  'England': 'London',
+  'France': 'Paris',
+  'Germany': 'Berlin',
+  'Austria': 'Vienna',
+  'Switzerland': 'Bern',
+  'Italy': 'Rome',
+  'Spain': 'Madrid',
+  'Portugal': 'Lisbon',
+  'Belgium': 'Brussels',
+  'Netherlands': 'Amsterdam',
+  'Sweden': 'Stockholm',
+  'Norway': 'Oslo',
+  'Denmark': 'Copenhagen',
+  'Finland': 'Helsinki',
+  'Poland': 'Warsaw',
+  'Czech Republic': 'Prague',
+  'Czechia': 'Prague',
+  'Hungary': 'Budapest',
+  'Greece': 'Athens',
+  'Russia': 'Moscow',
+  'Japan': 'Tokyo',
+  'China': 'Beijing',
+  'South Korea': 'Seoul',
+  'India': 'New Delhi',
+  'Australia': 'Canberra',
+  'South Africa': 'Pretoria',
+  'Egypt': 'Cairo',
+  'Israel': 'Jerusalem',
+  'Turkey': 'Ankara',
+  'Iran': 'Tehran',
+  'Brazil': 'Brasilia',
+  'Argentina': 'Buenos Aires',
+  'Chile': 'Santiago',
+  'Peru': 'Lima',
+  'Bohemia': 'Prague',
+  'Kingdom of Bohemia': 'Prague',
+  'Czechoslovakia': 'Prague',
+  'Prussia': 'Berlin',
+  'German Empire': 'Berlin',
+  'Weimar Republic': 'Berlin',
+  'Bavaria': 'Munich',
+  'Austria-Hungary': 'Vienna',
+  'Austrian Empire': 'Vienna',
+  'Holy Roman Empire': 'Vienna',
+  'Ottoman Empire': 'Constantinople',
+  'Russian Empire': 'St Petersburg',
+  'Kingdom of Naples': 'Naples',
+  'Kingdom of the Two Sicilies': 'Naples',
+  'Papal States': 'Rome',
 };
 
 // Given a coin's {mint, region, authority}, return the best {name, latlng}
@@ -249,6 +326,7 @@ window.resolveCoinOrigin = function(coin) {
   const aliases = window.COIN_CITY_ALIASES || {};
   const world = window.COIN_WORLD_PLACES || {};
   const worldAliases = window.COIN_WORLD_PLACE_ALIASES || {};
+  const worldLabels = window.COIN_WORLD_PLACE_LABELS || {};
   const mint = (coin.mint || '').trim();
   const region = (coin.region || '').trim();
   const authority = (coin.authority || '').trim();
@@ -272,6 +350,7 @@ window.resolveCoinOrigin = function(coin) {
     if (!s) return null;
     const clean = norm(s);
     if (!clean) return null;
+    const cleanTokens = new Set(clean.split(' '));
     const aliasKey = worldAliases[clean];
     let key = aliasKey && world[aliasKey] ? aliasKey : null;
     if (!key) {
@@ -280,10 +359,14 @@ window.resolveCoinOrigin = function(coin) {
     if (!key) {
       key = Object.keys(world).find(k => {
         const kk = norm(k);
-        return clean.includes(kk) || kk.includes(clean);
+        if (kk.length < 4 && clean !== kk) return false;
+        const keyTokens = kk.split(' ').filter(Boolean);
+        return keyTokens.length > 0 && keyTokens.every(t => cleanTokens.has(t));
       });
     }
-    return key && world[key] ? {name: key, latlng: world[key]} : null;
+    return key && world[key]
+      ? {name: worldLabels[key] || key, latlng: world[key]}
+      : null;
   };
   const byRegion = (s) => {
     if (!s) return null;
