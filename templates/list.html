@@ -4,8 +4,12 @@
 {% block content %}
 <!-- Toolbar -->
 <div class="list-toolbar list-toolbar-{{ category }}{% if at_property %} list-toolbar-at-prop{% endif %}">
+  {% if category == 'coins' %}
+  <span class="list-cat-title list-cat-title-count">{{ result_count }} Coins{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
+  {% else %}
   <span class="list-count">{{ result_count }}</span>
   <span class="list-cat-title">{{ cat_info.name }}{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
+  {% endif %}
   {# When drilled in from a Property, the toolbar collapses to just
      the back-pill + search. The Add button and category-specific
      filter pills (Own / Sold / Carp / etc.) all build URLs without
@@ -22,10 +26,12 @@
   {% endif %}
   {% if category == 'coins' and not at_property %}
   {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
-  <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}" class="toolbar-btn pill" title="Print PDF cards (42 per page)" target="_blank">Cards &mdash; {{ _pgs }} {{ 'page' if _pgs == 1 else 'pages' }}</a>
-  <a href="{{ url_for('coins_print_pdf') }}" class="toolbar-btn pill coin-tray-count disabled" id="coinTrayCount" title="Print selected coin cards" target="_blank">Tray &mdash; 0</a>
-  <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
-     title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
+  <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}"
+     class="toolbar-btn pill"
+     id="coinCardsPrint"
+     title="Print PDF cards (42 per page)"
+     target="_blank">Cards &mdash; {{ _pgs }} {{ 'page' if _pgs == 1 else 'pages' }}</a>
+  <button type="button" class="toolbar-btn pill coin-tray-clear" id="coinTrayClear" title="Clear selected coin cards">Clear</button>
   {# Two era pills, each cycling its own axis:
      Ancient pill: off -> CA Ancient -> NY Ancient -> off
      Modern pill : off -> CA Modern  -> NY Modern  -> off
@@ -65,12 +71,13 @@
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_modern_href) }}"
      class="toolbar-btn pill {% if _is_modern %}active{% elif _is_ancient %}muted{% endif %}"
      title="Cycle: off → CA Modern → NY Modern → off (date_1 ≥ 500)">{{ _modern_label }}</a>
-  <button type="button" class="toolbar-btn pill coin-tray-clear" id="coinTrayClear" title="Clear selected coin cards">Clear</button>
   {% if has_ordered or coin_filter == 'ordered' %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
      title="Coins with status Ordered">Ordered</a>
   {% endif %}
+  <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
+     title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
   {% endif %}
   {% if category == 'watches' and not at_property %}
   {% if has_ordered or coin_filter == 'ordered' %}
@@ -605,7 +612,9 @@ window.shareCardRow = async function (ev, btn) {
   {% if category == 'coins' and not at_property %}
   var coinTrayKey = 'stuffapp.coinPrintTray.v1';
   var coinTrayBaseUrl = "{{ url_for('coins_print_pdf') }}";
-  var coinTrayCount = document.getElementById('coinTrayCount');
+  var coinCardsPrint = document.getElementById('coinCardsPrint');
+  var coinCardsDefaultHref = coinCardsPrint ? coinCardsPrint.href : coinTrayBaseUrl;
+  var coinCardsDefaultText = coinCardsPrint ? coinCardsPrint.textContent : 'Cards — 0 pages';
   var coinTrayClear = document.getElementById('coinTrayClear');
 
   function loadCoinTray() {
@@ -633,14 +642,17 @@ window.shareCardRow = async function (ev, btn) {
 
   function updateCoinTrayUi(ids) {
     var count = ids.length;
-    if (coinTrayCount) {
-      coinTrayCount.textContent = 'Tray — ' + count;
+    if (coinCardsPrint) {
       if (count) {
-        coinTrayCount.classList.remove('disabled');
-        coinTrayCount.href = coinTrayBaseUrl + '?ids=' + encodeURIComponent(ids.join(','));
+        var pages = Math.ceil(count / 42);
+        coinCardsPrint.textContent = count + ' ' + (count === 1 ? 'Coin' : 'Coins') +
+          ' - ' + pages + ' ' + (pages === 1 ? 'page' : 'pages');
+        coinCardsPrint.href = coinTrayBaseUrl + '?ids=' + encodeURIComponent(ids.join(','));
+        coinCardsPrint.title = 'Print ' + count + ' selected coin card' + (count === 1 ? '' : 's');
       } else {
-        coinTrayCount.classList.add('disabled');
-        coinTrayCount.href = coinTrayBaseUrl;
+        coinCardsPrint.textContent = coinCardsDefaultText;
+        coinCardsPrint.href = coinCardsDefaultHref;
+        coinCardsPrint.title = 'Print PDF cards (42 per page)';
       }
     }
     if (coinTrayClear) coinTrayClear.disabled = !count;
@@ -684,11 +696,6 @@ window.shareCardRow = async function (ev, btn) {
     });
   }
 
-  if (coinTrayCount) {
-    coinTrayCount.addEventListener('click', function(e) {
-      if (!coinTrayIds.length) e.preventDefault();
-    });
-  }
   {% endif %}
 
   function uploadFile(file, uploadUrl, thumb, field) {

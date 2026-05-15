@@ -2595,6 +2595,10 @@ SEARCHABLE_NUMERIC = {
     'coins': ['weight'],
 }
 
+COIN_PURCHASE_DATE_SEARCH_RE = re.compile(
+    r'^\s*(>=|<=|>|<)\s*([0-9]{1,4}[/-][0-9]{1,2}[/-][0-9]{1,4})\s*$'
+)
+
 
 def _normalize_numeric_term(term):
     """Strip trailing zeros after the decimal point so a user search for
@@ -2606,6 +2610,29 @@ def _normalize_numeric_term(term):
         return term
     s = ('%f' % f).rstrip('0').rstrip('.')
     return s or term
+
+
+def _parse_loose_search_date(value):
+    """Parse toolbar shorthand dates like 4/1/2026 or 2026-04-01."""
+    text = (value or '').strip()
+    for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%m/%d/%Y', '%m-%d-%Y',
+                '%m/%d/%y', '%m-%d-%y'):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            pass
+    return None
+
+
+def _coin_purchase_date_search(q):
+    """Return (operator, iso_date) for coin search shorthand: > 4/1/2026."""
+    m = COIN_PURCHASE_DATE_SEARCH_RE.match(q or '')
+    if not m:
+        return None, None
+    iso = _parse_loose_search_date(m.group(2))
+    if not iso:
+        return None, None
+    return m.group(1), iso
 
 
 def build_search_query(category, q, dot=False, coin_filter=None, at_property=None):
@@ -2620,7 +2647,16 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
 
     wheres, params = [], []
 
-    if q and (text_fields or numeric_fields):
+    purchase_date_op, purchase_date_iso = _coin_purchase_date_search(q) \
+        if category == 'coins' else (None, None)
+
+    if purchase_date_op and purchase_date_iso:
+        wheres.append(
+            f"(purchase_date IS NOT NULL AND TRIM(purchase_date) != '' "
+            f"AND purchase_date {purchase_date_op} ?)"
+        )
+        params.append(purchase_date_iso)
+    elif q and (text_fields or numeric_fields):
         # Split the query on whitespace and AND the terms together: each
         # term must match at least one searchable field. "Breguet Carp"
         # finds watches where 'Breguet' is in some field AND 'Carp' is
@@ -2691,6 +2727,11 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
 
     where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
+    if purchase_date_op and purchase_date_iso:
+        order_by = (
+            "COALESCE(NULLIF(purchase_date, ''), '0000-00-00') DESC, "
+            f"{order_by}"
+        )
     return f"SELECT * FROM {table} {where_clause} ORDER BY {order_by}", params
 
 
