@@ -160,15 +160,34 @@ window.COIN_WORLD_PLACES = {
   'Mexico City':[19.43,-99.13], 'Mexico':[19.43,-99.13],
 
   // Europe
-  'London':[51.51,-0.13], 'United Kingdom':[51.51,-0.13],
+  'London':[51.51,-0.13], 'Llantrisant':[51.54,-3.37],
+  'United Kingdom':[51.51,-0.13],
   'Great Britain':[51.51,-0.13], 'England':[51.51,-0.13],
+  'Birmingham':[52.49,-1.89], 'Soho':[52.50,-1.93],
+  'Bristol':[51.45,-2.59], 'Canterbury':[51.28,1.08],
+  'Chester':[53.19,-2.89], 'Durham':[54.78,-1.58],
+  'Edinburgh':[55.95,-3.19], 'Exeter':[50.72,-3.53],
+  'Glasgow':[55.86,-4.25], 'Norwich':[52.63,1.30],
+  'Oxford':[51.75,-1.26], 'Shrewsbury':[52.71,-2.75],
+  'York':[53.96,-1.08],
   'Paris':[48.86,2.35], 'France':[48.86,2.35],
   'Berlin':[52.52,13.41], 'Germany':[52.52,13.41],
   'Munich':[48.14,11.58], 'Hamburg':[53.55,10.00],
   'Vienna':[48.21,16.37], 'Austria':[48.21,16.37],
   'Bern':[46.95,7.45], 'Switzerland':[46.95,7.45],
   'Rome':[41.90,12.49], 'Italy':[41.90,12.49],
-  'Milan':[45.46,9.19], 'Madrid':[40.42,-3.70], 'Spain':[40.42,-3.70],
+  'Milan':[45.46,9.19], 'Florence':[43.77,11.26],
+  'Venice':[45.44,12.33], 'Genoa':[44.41,8.93],
+  'Turin':[45.07,7.69], 'Naples':[40.85,14.27],
+  'Palermo':[38.12,13.36], 'Messina':[38.19,15.55],
+  'Bologna':[44.49,11.34], 'Ferrara':[44.84,11.62],
+  'Mantua':[45.16,10.79], 'Modena':[44.65,10.93],
+  'Parma':[44.80,10.33], 'Lucca':[43.84,10.50],
+  'Pisa':[43.72,10.40], 'Siena':[43.32,11.33],
+  'Ancona':[43.62,13.52], 'Ravenna':[44.42,12.20],
+  'Urbino':[43.73,12.64], 'Verona':[45.44,10.99],
+  'Cagliari':[39.22,9.12],
+  'Madrid':[40.42,-3.70], 'Spain':[40.42,-3.70],
   'Lisbon':[38.72,-9.14], 'Portugal':[38.72,-9.14],
   'Brussels':[50.85,4.35], 'Belgium':[50.85,4.35],
   'Amsterdam':[52.37,4.90], 'Netherlands':[52.37,4.90],
@@ -215,8 +234,17 @@ window.COIN_WORLD_PLACES = {
   'Holy Roman Empire':[48.21,16.37],
   'Ottoman Empire':[41.01,28.97], 'Constantinople':[41.01,28.97],
   'Russian Empire':[59.93,30.34],
+  'Republic of Venice':[45.44,12.33], 'Venetian Republic':[45.44,12.33],
+  'Duchy of Milan':[45.46,9.19], 'Milanese':[45.46,9.19],
+  'Grand Duchy of Tuscany':[43.77,11.26], 'Duchy of Florence':[43.77,11.26],
+  'Florentine Republic':[43.77,11.26], 'Republic of Florence':[43.77,11.26],
+  'Duchy of Savoy':[45.07,7.69], 'Kingdom of Sardinia':[45.07,7.69],
+  'Republic of Genoa':[44.41,8.93],
   'Kingdom of Naples':[40.85,14.27], 'Kingdom of the Two Sicilies':[40.85,14.27],
-  'Papal States':[41.90,12.49],
+  'Kingdom of Sicily':[38.12,13.36], 'Papal States':[41.90,12.49],
+  'Duchy of Parma':[44.80,10.33], 'Duchy of Modena':[44.65,10.93],
+  'Duchy of Mantua':[45.16,10.79], 'Duchy of Ferrara':[44.84,11.62],
+  'Duchy of Urbino':[43.73,12.64],
 };
 
 window.COIN_WORLD_PLACE_ALIASES = {
@@ -235,12 +263,50 @@ window.COIN_WORLD_PLACE_ALIASES = {
   'british': 'United Kingdom',
   'uk': 'United Kingdom',
   'u.k.': 'United Kingdom',
+  'royal mint': 'Llantrisant',
+  'royal mint llantrisant': 'Llantrisant',
+  'llantrisant royal mint': 'Llantrisant',
+  'tower mint': 'London',
+  'tower london': 'London',
+  'london mint': 'London',
+  'soho mint': 'Soho',
+  'soho birmingham': 'Soho',
   'england': 'England',
   'french': 'France',
   'german': 'Germany',
   'austrian': 'Austria',
   'swiss': 'Switzerland',
   'italian': 'Italy',
+  'republic venice': 'Republic of Venice',
+  'venetian': 'Republic of Venice',
+  'venice republic': 'Republic of Venice',
+  'duchy milan': 'Duchy of Milan',
+  'milan duchy': 'Duchy of Milan',
+  'grand duchy tuscany': 'Grand Duchy of Tuscany',
+  'duchy tuscany': 'Grand Duchy of Tuscany',
+  'tuscany': 'Grand Duchy of Tuscany',
+  'florentine': 'Florence',
+  'florence republic': 'Republic of Florence',
+  'republic florence': 'Republic of Florence',
+  'duchy savoy': 'Duchy of Savoy',
+  'savoy': 'Duchy of Savoy',
+  'kingdom sardinia': 'Kingdom of Sardinia',
+  'sardinia': 'Kingdom of Sardinia',
+  'republic genoa': 'Republic of Genoa',
+  'genoese': 'Republic of Genoa',
+  'kingdom naples': 'Kingdom of Naples',
+  'two sicilies': 'Kingdom of the Two Sicilies',
+  'kingdom two sicilies': 'Kingdom of the Two Sicilies',
+  'kingdom sicily': 'Kingdom of Sicily',
+  'sicily': 'Kingdom of Sicily',
+  'papal': 'Papal States',
+  'papal states': 'Papal States',
+  'pontifical': 'Papal States',
+  'duchy parma': 'Duchy of Parma',
+  'duchy modena': 'Duchy of Modena',
+  'duchy mantua': 'Duchy of Mantua',
+  'duchy ferrara': 'Duchy of Ferrara',
+  'duchy urbino': 'Duchy of Urbino',
   'spanish': 'Spain',
   'portuguese': 'Portugal',
   'dutch': 'Netherlands',
@@ -267,6 +333,7 @@ window.COIN_WORLD_PLACE_LABELS = {
   'Canada': 'Ottawa',
   'Mexico': 'Mexico City',
   'United Kingdom': 'London',
+  'Llantrisant': 'Llantrisant',
   'Great Britain': 'London',
   'England': 'London',
   'France': 'Paris',
@@ -274,6 +341,22 @@ window.COIN_WORLD_PLACE_LABELS = {
   'Austria': 'Vienna',
   'Switzerland': 'Bern',
   'Italy': 'Rome',
+  'Republic of Venice': 'Venice',
+  'Venetian Republic': 'Venice',
+  'Duchy of Milan': 'Milan',
+  'Grand Duchy of Tuscany': 'Florence',
+  'Duchy of Florence': 'Florence',
+  'Florentine Republic': 'Florence',
+  'Republic of Florence': 'Florence',
+  'Duchy of Savoy': 'Turin',
+  'Kingdom of Sardinia': 'Turin',
+  'Republic of Genoa': 'Genoa',
+  'Kingdom of Sicily': 'Palermo',
+  'Duchy of Parma': 'Parma',
+  'Duchy of Modena': 'Modena',
+  'Duchy of Mantua': 'Mantua',
+  'Duchy of Ferrara': 'Ferrara',
+  'Duchy of Urbino': 'Urbino',
   'Spain': 'Madrid',
   'Portugal': 'Lisbon',
   'Belgium': 'Brussels',
@@ -334,7 +417,13 @@ window.resolveCoinOrigin = function(coin) {
   const norm = (s) => (s || '')
     .toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\b(royal|national|central|federal|state|the|mint|mints|coinage|republic|kingdom|empire|of|bank)\b/g, ' ')
+    .replace(/\b(royal|national|central|federal|state|the|mint|mints|coinage|republic|kingdom|empire|duchy|grand|principality|county|commune|of|bank)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const rawNorm = (s) => (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -348,6 +437,11 @@ window.resolveCoinOrigin = function(coin) {
   };
   const byWorldPlace = (s) => {
     if (!s) return null;
+    const rawClean = rawNorm(s);
+    const rawAliasKey = worldAliases[rawClean];
+    if (rawAliasKey && world[rawAliasKey]) {
+      return {name: worldLabels[rawAliasKey] || rawAliasKey, latlng: world[rawAliasKey]};
+    }
     const clean = norm(s);
     if (!clean) return null;
     const cleanTokens = new Set(clean.split(' '));
