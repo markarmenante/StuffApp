@@ -392,20 +392,21 @@ input[type="number"]::-webkit-outer-spin-button {
   align-items: center;
   justify-content: center;
   align-self: center;
-  min-height: 20px;
-  padding: 1px 8px;
-  border: 1px solid var(--border-light);
-  border-radius: 13px;
-  background: transparent;
+  min-height: 22px;
+  padding: 2px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f4f4f4;
   color: var(--text-hint);
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
   white-space: nowrap;
 }
-.coin-tray-toggle:hover { background: rgba(0,0,0,.04); color: var(--text-secondary); }
+.coin-tray-toggle:hover { background: #ededed; color: var(--text-secondary); }
 .coin-tray-toggle.selected {
-  background: #ededed;
+  background: #e8e8e8;
   border-color: var(--border);
   color: var(--text-secondary);
 }
@@ -514,10 +515,15 @@ input[type="number"]::-webkit-outer-spin-button {
 .coin-position-actions {
   display: inline-flex;
   align-items: baseline;
+  justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
+  padding-left: 12px;
   flex-shrink: 0;
   white-space: nowrap;
+}
+.coin-meta-row {
+  align-items: center;
 }
 .item-cat-id { font-size: 17px; color: var(--text-hint); align-self: flex-end; margin-left: auto; padding-left: 12px; white-space: nowrap; }
 .coin-position-actions .item-cat-id {
