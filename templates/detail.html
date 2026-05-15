@@ -5017,7 +5017,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="{{ url_for('static', filename='js/coin-geo.js') }}?v={{ asset_v('js/coin-geo.js') }}"></script>
 <script>
-(async function coinHistoryAndMap() {
+(function coinHistoryAndMap() {
   // ── History: magnifier buttons on Region / Authority ──
   const panel = document.getElementById('coinHistoryPanel');
   const body = document.getElementById('coinHistoryBody');
@@ -5359,16 +5359,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   }
   map.on('zoomend', applyLabelZoom);
 
-  // Pinpoint origin: prefer Mint, then Region, then Authority
-  const originInput = {
-    mint: panel2.dataset.mint, region: panel2.dataset.region,
-    authority: panel2.dataset.authority,
-    ancient: isAncientMap,
-  };
-  const origin = window.resolveCoinOriginAsync
-    ? await window.resolveCoinOriginAsync(originInput)
-    : window.resolveCoinOrigin(originInput);
-  if (origin) {
+  function placeOrigin(origin, zoomOverride) {
+    if (!origin) return false;
     const [lat, lng] = origin.latlng;
     const pin = L.marker([lat, lng], {
       icon: L.divIcon({className: 'coin-origin-pin', iconSize: [14,14], iconAnchor: [7,7]}),
@@ -5386,13 +5378,29 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       dup.marker._isOrigin = true;
       dup.marker.unbindTooltip();
     }
-    map.setView([lat, lng], isAncientMap ? 7 : 5);
+    map.setView([lat, lng], zoomOverride || (isAncientMap ? 7 : 5));
     if (caption) caption.textContent = 'Origin pinpointed: ' + origin.name + ' (drag to reposition; use + / − to zoom)';
-  } else {
+    applyLabelZoom();
+    return true;
+  }
+
+  // Pinpoint origin: prefer Mint, then Region, then Authority
+  const originInput = {
+    mint: panel2.dataset.mint, region: panel2.dataset.region,
+    authority: panel2.dataset.authority,
+    ancient: isAncientMap,
+  };
+  const origin = window.resolveCoinOrigin(originInput);
+  if (!placeOrigin(origin)) {
     if (caption) {
       caption.textContent = isAncientMap
         ? 'Ancient Greek & Mediterranean cities — drag to reposition; use + / − to zoom.'
         : 'World origin map — add a recognizable mint, region, or authority to pinpoint this issue.';
+    }
+    if (!isAncientMap && window.resolveCoinOriginAsync) {
+      window.resolveCoinOriginAsync(originInput).then(hit => {
+        if (hit) placeOrigin(hit);
+      }).catch(() => {});
     }
   }
   applyLabelZoom();
