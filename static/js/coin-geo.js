@@ -464,6 +464,24 @@ window.resolveCoinOrigin = function(coin) {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  const isPlaceholderMint = (s) => {
+    const clean = rawNorm(s);
+    return !clean || [
+      'uncertain',
+      'unknown',
+      'undetermined',
+      'unattributed',
+      'not specified',
+      'not known',
+      'various',
+      'multiple',
+      'miscellaneous',
+      'n a',
+      'na',
+      'none',
+    ].includes(clean);
+  };
+  const effectiveMint = isPlaceholderMint(mint) ? '' : mint;
 
   const byCity = (s) => {
     if (!s) return null;
@@ -521,15 +539,38 @@ window.resolveCoinOrigin = function(coin) {
     });
     return hit ? {name: hit, latlng: cities[hit]} : null;
   };
-  return byCity(mint) || byWorldPlace(mint)
+  return byCity(effectiveMint) || byWorldPlace(effectiveMint)
       || byCity(region) || byCity(authority)
       || byRegion(region) || byRegion(authority)
       || byWorldPlace(region) || byWorldPlace(authority)
-      || byFuzzyCity(mint) || byFuzzyCity(region) || byFuzzyCity(authority);
+      || byFuzzyCity(effectiveMint) || byFuzzyCity(region) || byFuzzyCity(authority);
 };
 
 window.resolveCoinOriginAsync = async function(coin) {
-  const mint = (coin && coin.mint || '').trim();
+  const rawNorm = (s) => (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const isPlaceholderMint = (s) => {
+    const clean = rawNorm(s);
+    return !clean || [
+      'uncertain',
+      'unknown',
+      'undetermined',
+      'unattributed',
+      'not specified',
+      'not known',
+      'various',
+      'multiple',
+      'miscellaneous',
+      'n a',
+      'na',
+      'none',
+    ].includes(clean);
+  };
+  const mint = isPlaceholderMint(coin && coin.mint) ? '' : (coin && coin.mint || '').trim();
   const mintLocal = mint
     ? window.resolveCoinOrigin({mint, region: '', authority: '', ancient: coin && coin.ancient})
     : null;
