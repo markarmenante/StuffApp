@@ -5359,15 +5359,29 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   }
   map.on('zoomend', applyLabelZoom);
 
+  let originPin = null;
+  let originView = null;
+  function settleOriginView() {
+    if (!originView) return;
+    map.invalidateSize({pan: false});
+    map.setView(originView.latlng, originView.zoom, {animate: false});
+  }
+  function scheduleOriginSettle() {
+    requestAnimationFrame(settleOriginView);
+    setTimeout(settleOriginView, 80);
+    setTimeout(settleOriginView, 300);
+  }
+
   function placeOrigin(origin, zoomOverride) {
     if (!origin) return false;
     const [lat, lng] = origin.latlng;
-    const pin = L.marker([lat, lng], {
+    if (originPin) map.removeLayer(originPin);
+    originPin = L.marker([lat, lng], {
       icon: L.divIcon({className: 'coin-origin-pin', iconSize: [14,14], iconAnchor: [7,7]}),
       zIndexOffset: 1000,
     }).addTo(map);
-    pin._isOrigin = true;
-    pin.bindTooltip(origin.name, {
+    originPin._isOrigin = true;
+    originPin.bindTooltip(origin.name, {
       permanent: true, direction: 'right', offset: [8,0],
       className: 'coin-city-label coin-origin-label',
     });
@@ -5378,11 +5392,16 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       dup.marker._isOrigin = true;
       dup.marker.unbindTooltip();
     }
-    map.setView([lat, lng], zoomOverride || (isAncientMap ? 7 : 5));
+    originView = {latlng: [lat, lng], zoom: zoomOverride || (isAncientMap ? 7 : 5)};
+    settleOriginView();
+    scheduleOriginSettle();
     if (caption) caption.textContent = 'Origin pinpointed: ' + origin.name + ' (drag to reposition; use + / − to zoom)';
     applyLabelZoom();
     return true;
   }
+
+  window.addEventListener('load', scheduleOriginSettle, {once: true});
+  window.addEventListener('pageshow', scheduleOriginSettle);
 
   // Pinpoint origin: prefer Mint, then Region, then Authority
   const originInput = {
