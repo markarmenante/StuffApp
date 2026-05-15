@@ -193,7 +193,7 @@ window.COIN_WORLD_PLACES = {
   'New Delhi':[28.61,77.21], 'Mumbai':[19.08,72.88],
   'Kolkata':[22.57,88.36], 'Calcutta':[22.57,88.36],
   'Canberra':[-35.28,149.13], 'Australia':[-35.28,149.13],
-  'Perth':[-31.95,115.86], 'Sydney':[-33.87,151.21],
+  'Melbourne':[-37.81,144.96], 'Perth':[-31.95,115.86], 'Sydney':[-33.87,151.21],
 
   // Africa, Middle East, South America
   'Pretoria':[-25.75,28.19], 'South Africa':[-25.75,28.19],
