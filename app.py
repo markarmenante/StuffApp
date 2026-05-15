@@ -5946,6 +5946,61 @@ def recording_fetch_notes(record_id):
     })
 
 
+_GEOCODE_CITY_CACHE = {}
+
+
+@app.route('/api/geocode-city')
+def geocode_city():
+    """Resolve a modern mint/city string through a same-origin endpoint.
+
+    The client keeps the ancient map fully local. This endpoint is only a
+    fallback for modern records whose mint city is not in our small built-in
+    table.
+    """
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 2:
+        return jsonify({'error': 'Missing query'}), 400
+    q = q[:160]
+    key = re.sub(r'\s+', ' ', q.lower())
+    if key in _GEOCODE_CITY_CACHE:
+        return jsonify(_GEOCODE_CITY_CACHE[key])
+
+    import urllib.parse
+    import urllib.request
+    import urllib.error
+
+    params = urllib.parse.urlencode({
+        'format': 'jsonv2',
+        'limit': '1',
+        'addressdetails': '1',
+        'q': q,
+    })
+    req = urllib.request.Request(
+        f'https://nominatim.openstreetmap.org/search?{params}',
+        headers={
+            'Accept': 'application/json',
+            'User-Agent': 'StuffApp/1.0 coin-origin-geocoder',
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            rows = json.loads(resp.read().decode('utf-8') or '[]')
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return jsonify({'error': 'Geocoder unavailable'}), 503
+
+    best = rows[0] if rows else None
+    if not best or not best.get('lat') or not best.get('lon'):
+        return jsonify({'error': 'No match'}), 404
+
+    address = best.get('address') or {}
+    name = (address.get('city') or address.get('town') or address.get('village')
+            or address.get('municipality') or address.get('county')
+            or best.get('name') or q)
+    data = {'name': name, 'latlng': [float(best['lat']), float(best['lon'])]}
+    _GEOCODE_CITY_CACHE[key] = data
+    return jsonify(data)
+
+
 @app.route('/coins/<record_id>/context', methods=['POST'])
 def coin_fetch_context(record_id):
     """Combined historical-environment lookup using region + authority +

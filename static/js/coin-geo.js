@@ -451,12 +451,19 @@ window.resolveCoinOrigin = function(coin) {
       key = Object.keys(world).find(k => norm(k) === clean);
     }
     if (!key) {
-      key = Object.keys(world).find(k => {
+      const candidates = Object.keys(world).filter(k => {
         const kk = norm(k);
         if (kk.length < 4 && clean !== kk) return false;
         const keyTokens = kk.split(' ').filter(Boolean);
         return keyTokens.length > 0 && keyTokens.every(t => cleanTokens.has(t));
       });
+      candidates.sort((a, b) => {
+        const aFallback = worldLabels[a] && worldLabels[a] !== a ? 1 : 0;
+        const bFallback = worldLabels[b] && worldLabels[b] !== b ? 1 : 0;
+        if (aFallback !== bFallback) return aFallback - bFallback;
+        return norm(b).length - norm(a).length;
+      });
+      key = candidates[0] || null;
     }
     return key && world[key]
       ? {name: worldLabels[key] || key, latlng: world[key]}
@@ -482,4 +489,43 @@ window.resolveCoinOrigin = function(coin) {
       || byRegion(region) || byRegion(authority)
       || byWorldPlace(region) || byWorldPlace(authority)
       || byFuzzyCity(mint) || byFuzzyCity(region) || byFuzzyCity(authority);
+};
+
+window.resolveCoinOriginAsync = async function(coin) {
+  const mint = (coin && coin.mint || '').trim();
+  const mintLocal = mint
+    ? window.resolveCoinOrigin({mint, region: '', authority: '', ancient: coin && coin.ancient})
+    : null;
+  if (mintLocal) return mintLocal;
+
+  if (coin && coin.ancient) return null;
+
+  const local = window.resolveCoinOrigin(coin);
+  if (!mint) return local;
+
+  const context = [coin.region, coin.authority].filter(Boolean).join(', ');
+  const query = [mint, context].filter(Boolean).join(', ');
+  const cacheKey = 'coin-origin-geocode:' + query.toLowerCase();
+
+  try {
+    const cached = window.localStorage && window.localStorage.getItem(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch (_) {}
+
+  try {
+    const url = '/api/geocode-city?q=' + encodeURIComponent(query);
+    const res = await fetch(url, {headers: {'Accept': 'application/json'}});
+    if (!res.ok) return local || null;
+    const hit = await res.json();
+    if (!hit || !hit.latlng || !Number.isFinite(Number(hit.latlng[0])) || !Number.isFinite(Number(hit.latlng[1]))) {
+      return local || null;
+    }
+    hit.latlng = [Number(hit.latlng[0]), Number(hit.latlng[1])];
+    try {
+      if (window.localStorage) window.localStorage.setItem(cacheKey, JSON.stringify(hit));
+    } catch (_) {}
+    return hit;
+  } catch (_) {
+    return local || null;
+  }
 };

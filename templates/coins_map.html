@@ -18,7 +18,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="{{ url_for('static', filename='js/coin-geo.js') }}"></script>
+<script src="{{ url_for('static', filename='js/coin-geo.js') }}?v={{ asset_v('js/coin-geo.js') }}"></script>
 <script id="coinsData" type="application/json">{{ coins|tojson }}</script>
 <script>
 (function coinsDistMap() {
