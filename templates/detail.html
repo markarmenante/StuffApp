@@ -88,8 +88,7 @@
          title="Click to edit"
          {% if not raw %}style="display:none"{% endif %}>{{ raw|format_results }}</div>
     <textarea name="{{ field }}" rows="3" data-autogrow="1" class="markdown-note-editor"
-              {% if raw %}style="display:none"{% endif %}
-              {% if not raw %}placeholder="{{ label }}"{% endif %}>{{ raw }}</textarea>
+              {% if raw %}style="display:none"{% endif %}>{{ raw }}</textarea>
   </div>
 </div>
 {% endif %}

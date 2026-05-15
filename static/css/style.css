@@ -800,13 +800,15 @@ input[type="number"]::-webkit-outer-spin-button {
   min-height: 40px;
 }
 .dcell-markdown-note {
-  padding: 7px 10px 8px;
+  padding: 2px 8px 1px;
 }
 .markdown-note-preview {
   width: 100%;
   min-height: 40px;
+  font-family: var(--font);
   font-size: 13px;
-  line-height: 1.45;
+  font-weight: 400;
+  line-height: 1.35;
   color: #111111;
   white-space: normal;
   cursor: text;
@@ -816,15 +818,15 @@ input[type="number"]::-webkit-outer-spin-button {
   box-shadow: inset 0 0 0 2px rgba(0, 122, 255, 0.18);
 }
 .markdown-note-preview p {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
 }
 .markdown-note-preview p:last-child,
 .markdown-note-preview ul:last-child {
   margin-bottom: 0;
 }
 .markdown-note-preview ul.results-list {
-  margin: 0 0 8px;
-  padding-left: 20px;
+  margin: 0 0 6px;
+  padding-left: 18px;
 }
 .markdown-note-preview li {
   margin: 2px 0;

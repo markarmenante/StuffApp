@@ -271,17 +271,19 @@ def _merge_coin_condition_history(existing_notes, history_context):
     if not body:
         return notes
 
-    generated = f"Historical Context\n{body}"
+    body = re.sub(r'(?is)\A\s*Historical Context\s*:?\s*\n+', '', body).strip()
     notes = re.sub(
-        r'(?is)(?:\A|\n{2,})Historical Context\s*:?\s*\n.*\Z',
+        r'(?is)(?:\A|\n{2,})(?:Historical Context\s*:?\s*\n+)?'
+        r'\s*(?:\*\*)?\s*Historical environment\s*(?:\*\*)?\s*:?\s*\n.*\Z',
         '',
         notes,
     ).strip()
+    notes = re.sub(r'(?is)\A\s*Historical Context\s*:?\s*\n+', '', notes).strip()
     if not notes:
-        return generated
-    if generated in notes or body in notes:
+        return body
+    if body in notes:
         return notes
-    return f"{notes}\n\n{generated}"
+    return f"{notes}\n\n{body}"
 
 
 def _migrate_coin_history_context_into_condition(db):
@@ -306,6 +308,64 @@ def _migrate_coin_history_context_into_condition(db):
             (combined, now, row['id']),
         )
     db.commit()
+
+
+def _cleanup_coin_research_headings(db):
+    """Remove legacy generated section wrapper headings from coin prose."""
+    cols = {r['name'] for r in db.execute("PRAGMA table_info(coins)").fetchall()}
+    needed = {'id', 'condition', 'coin_references'}
+    if not needed.issubset(cols):
+        return
+
+    has_refs_research = 'coin_references_research' in cols
+    select_extra = ', coin_references_research' if has_refs_research else ''
+    rows = db.execute(
+        f"SELECT id, condition, coin_references{select_extra} FROM coins"
+    ).fetchall()
+    now = datetime.utcnow().isoformat()
+    changed = False
+    for row in rows:
+        condition = (row['condition'] or '').strip()
+        refs = (row['coin_references'] or '').strip()
+        new_condition = re.sub(
+            r'(?is)\A\s*Historical Context\s*:?\s*\n+',
+            '',
+            condition,
+        ).strip()
+        refs_research = (
+            (row['coin_references_research'] or '').strip()
+            if has_refs_research else ''
+        )
+        new_refs = refs
+        match = re.search(
+            r'(?is)(\A|\n{2,})Numismatic importance\s*:?\s*\n+(.*)\Z',
+            refs,
+        )
+        if match:
+            before = refs[:match.start()].strip()
+            refs_research = match.group(2).strip()
+            new_refs = (
+                f"{before}\n\n{refs_research}" if before and refs_research
+                else (before or refs_research)
+            ).strip()
+        if new_condition != condition or new_refs != refs or (
+            has_refs_research and refs_research != (row['coin_references_research'] or '').strip()
+        ):
+            if has_refs_research:
+                db.execute(
+                    "UPDATE coins SET condition = ?, coin_references = ?, "
+                    "coin_references_research = ?, updated_at = ? WHERE id = ?",
+                    (new_condition, new_refs, refs_research, now, row['id']),
+                )
+            else:
+                db.execute(
+                    "UPDATE coins SET condition = ?, coin_references = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (new_condition, new_refs, now, row['id']),
+                )
+            changed = True
+    if changed:
+        db.commit()
 
 
 # Default owner assigned to brand-new records when the form's owner
@@ -1011,6 +1071,7 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
         'ALTER TABLE coins ADD COLUMN history_context TEXT',
+        'ALTER TABLE coins ADD COLUMN coin_references_research TEXT',
         'ALTER TABLE coins ADD COLUMN image_audit_match TEXT',
         'ALTER TABLE coins ADD COLUMN image_audit_confidence REAL',
         'ALTER TABLE coins ADD COLUMN image_audit_reason TEXT',
@@ -1054,6 +1115,7 @@ def init_db():
     _normalize_owned_status_values(db)
     _backfill_blank_status_own(db)
     _migrate_coin_history_context_into_condition(db)
+    _cleanup_coin_research_headings(db)
     db.commit()
 
     # Migration-state ledger: one row per applied one-shot data
@@ -3444,7 +3506,13 @@ Use up to 4 concise web searches to ground the facts. Cover, in this order:
    when present: collection pedigree, prior sale, hoard, die-study,
    rarity, catalog placement, or significance within the series (first
    portrait of a ruler, earliest use of a legend, benchmark type in a
-   standard catalog). Skip padding; only include what actually applies.
+   standard catalog). Explain terse catalog citations in collector-
+   friendly language when possible. For example, if references include
+   "SNG Kayhan 880; SNG von Aulock 8046; BMC Caria pg. 183, 1; Babelon,
+   Les Perses, pl. X, 8", say what each source is, what region/series
+   it supports, and whether the citation confirms the type, rarity,
+   mint attribution, or iconographic reading. Skip padding; only include
+   what actually applies.
 
 4. How this coin reflected the times — propaganda choices, civic pride,
    response to economic or military pressure, religious festival,
@@ -3559,10 +3627,10 @@ def _split_coin_context_markdown(markdown):
     return historical_context, numismatic_importance
 
 
-def _merge_coin_numismatic_importance(existing_refs, importance):
-    """Append/replace the generated Numismatic importance block.
+def _merge_coin_numismatic_importance(existing_refs, importance, previous_generated=''):
+    """Append/replace the generated numismatic reference notes.
 
-    Existing pedigree/reference text is preserved. If the History button
+    Existing pedigree/reference text is preserved. If the Research button
     is run again, replace the previously appended block at the end rather
     than stacking duplicates.
     """
@@ -3571,7 +3639,7 @@ def _merge_coin_numismatic_importance(existing_refs, importance):
     if not body:
         return refs
 
-    generated = f"Numismatic importance\n{body}"
+    generated = re.sub(r'(?is)\A\s*Numismatic importance\s*:?\s*\n+', '', body).strip()
     if not refs:
         return generated
 
@@ -3580,6 +3648,9 @@ def _merge_coin_numismatic_importance(existing_refs, importance):
         '',
         refs,
     ).strip()
+    previous = (previous_generated or '').strip()
+    if previous:
+        refs = refs.replace(f"\n\n{previous}", '').replace(previous, '').strip()
     if not refs:
         return generated
     if generated in refs:
@@ -5897,12 +5968,13 @@ def coin_fetch_context(record_id):
     coin_references = _merge_coin_numismatic_importance(
         coin['coin_references'],
         numismatic_importance,
+        coin['coin_references_research'] if 'coin_references_research' in coin.keys() else '',
     )
     condition = _merge_coin_condition_history(coin['condition'], history_context)
     db.execute(
         "UPDATE coins SET coin_references = ?, condition = ?, history_context = NULL, "
-        "history_searched_at = ?, updated_at = ? WHERE id = ?",
-        (coin_references, condition, now, now, record_id),
+        "coin_references_research = ?, history_searched_at = ?, updated_at = ? WHERE id = ?",
+        (coin_references, condition, numismatic_importance, now, now, record_id),
     )
     db.commit()
     return jsonify({
