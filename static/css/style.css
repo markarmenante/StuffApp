@@ -1015,6 +1015,7 @@ input[type="number"]::-webkit-outer-spin-button {
   text-decoration: none;
 }
 .dcell .text-link-preview { font-size: 14px; }
+.detail-page-coins .dcell .markdown-note-preview,
 .detail-page-coins .dcell .text-link-preview { font-size: 13px; }
 textarea.results-raw { display: none !important; }
 .dcell input:focus,
@@ -2536,7 +2537,9 @@ input[type="date"] { -webkit-appearance: none; }
      for a smaller, consistent size on the coin detail. */
   .detail-page-coins .dcell input,
   .detail-page-coins .dcell select,
-  .detail-page-coins .dcell textarea { font-size: 15px; }
+  .detail-page-coins .dcell textarea,
+  .detail-page-coins .dcell .markdown-note-preview,
+  .detail-page-coins .dcell .text-link-preview { font-size: 15px; }
 
   /* Watch spec rows: keep two-up even on narrow viewports. */
   .watch-specs .dgrid.dg2 { grid-template-columns: 1fr 1fr; }
