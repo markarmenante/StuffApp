@@ -12455,6 +12455,7 @@ def report_generate():
 
     from reportlab.lib.pagesizes import letter, landscape
     from reportlab.lib import colors
+    from reportlab.lib.enums import TA_RIGHT
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     from reportlab.lib.utils import ImageReader
@@ -12498,12 +12499,18 @@ def report_generate():
     cell = ParagraphStyle('rcell', parent=styles['Normal'],
                           fontSize=8, leading=10)
     cell_bold = ParagraphStyle('rcellb', parent=cell, fontName='Helvetica-Bold')
+    cell_money = ParagraphStyle('rcellmoney', parent=cell,
+                                alignment=TA_RIGHT)
+    cell_money_bold = ParagraphStyle('rcellmoneyb', parent=cell_money,
+                                     fontName='Helvetica-Bold')
     # NB: reportlab's HexColor() does NOT support CSS 3-digit shorthand
     # — it parses '#888' as the integer 0x888 (= dark blue), not as
     # '#888888'. Always use the full 6-digit form for greys here.
     cell_h = ParagraphStyle('rcellh', parent=cell,
                             fontName='Helvetica-Bold', fontSize=7,
                             textColor=colors.HexColor('#555555'))
+    cell_h_money = ParagraphStyle('rcellhmoney', parent=cell_h,
+                                  alignment=TA_RIGHT)
     title_p = ParagraphStyle('rtitle', parent=styles['Normal'],
                              fontSize=10, fontName='Helvetica-Bold',
                              leading=12)
@@ -12575,18 +12582,34 @@ def report_generate():
         if not rows:
             continue
 
+        cat_price_total = 0.0
+        cat_priced_count = 0
+        if 'price' in cat_field_names:
+            for r in rows:
+                price_n = _money_number(r['price'])
+                if price_n is not None:
+                    cat_price_total += price_n
+                    cat_priced_count += 1
+
         story.append(Paragraph(
             f'{info.get("icon","")}  {cat_label}  '
-            f'<font size=9 color="#888888">({len(rows)})</font>',
+            f'<font size=9 color="#888888">({len(rows)})'
+            f'{(" · " + _format_money(cat_price_total)) if cat_priced_count else ""}'
+            f'</font>',
             h2))
         grand_total += len(rows)
 
         if mode == 'compact':
             cols = REPORT_COMPACT_COLS.get(cat) or []
+            price_col = next(
+                (idx + 1 for idx, (_, fname) in enumerate(cols) if fname == 'price'),
+                None,
+            )
             # Header row: ID + chosen short cols.
             header = [Paragraph('<b>Item</b>', cell_h)]
-            for label, _ in cols:
-                header.append(Paragraph(f'<b>{label}</b>', cell_h))
+            for label, fname in cols:
+                header_style = cell_h_money if fname == 'price' else cell_h
+                header.append(Paragraph(f'<b>{label}</b>', header_style))
             data = [header]
             for r in rows:
                 line = [Paragraph(_report_record_title(cat, r) or '—',
@@ -12597,8 +12620,16 @@ def report_generate():
                     except (KeyError, IndexError):
                         v = None
                     s = _format_report_value(fname, v)
-                    line.append(Paragraph(s, cell))
+                    value_style = cell_money if fname == 'price' else cell
+                    line.append(Paragraph(s, value_style))
                 data.append(line)
+            subtotal_row = None
+            if price_col is not None and cat_priced_count:
+                subtotal_row = [''] * (1 + len(cols))
+                subtotal_row[0] = Paragraph('Total', cell_bold)
+                subtotal_row[price_col] = Paragraph(
+                    _format_money(cat_price_total), cell_money_bold)
+                data.append(subtotal_row)
 
             # Wider Item column, even split across the rest.
             n_cols = 1 + len(cols)
@@ -12617,6 +12648,17 @@ def report_generate():
                 ('LINEBELOW', (0, 1), (-1, -1), 0.25, colors.HexColor('#dddddd')),
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eeeeff')),
             ]))
+            if price_col is not None:
+                tbl.setStyle(TableStyle([
+                    ('ALIGN', (price_col, 0), (price_col, -1), 'RIGHT'),
+                ]))
+            if subtotal_row is not None:
+                total_row = len(data) - 1
+                tbl.setStyle(TableStyle([
+                    ('LINEABOVE', (0, total_row), (-1, total_row), 0.6, colors.black),
+                    ('BACKGROUND', (0, total_row), (-1, total_row), colors.HexColor('#f8fafc')),
+                    ('FONTNAME', (0, total_row), (-1, total_row), 'Helvetica-Bold'),
+                ]))
             story.append(tbl)
             story.append(Spacer(1, 6))
 
