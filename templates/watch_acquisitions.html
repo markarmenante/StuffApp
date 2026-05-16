@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Annual Acquisitions {{ year }} · StuffApp{% endblock %}
+{% block title %}Annual Purchases {{ year }} · StuffApp{% endblock %}
 
 {% block content %}
 <div class="watch-report-page">
   <div class="watch-report-head">
     <div>
-      <div class="admin-crumbs"><a href="{{ url_for('admin_index') }}">Admin</a> &rsaquo; Annual acquisitions</div>
-      <h1>Annual Acquisitions {{ year }}</h1>
-      <p>Strawman annual report based on purchase dates. Watches and coins are shown in separate blocks.</p>
+      <div class="admin-crumbs"><a href="{{ url_for('admin_index') }}">Admin</a> &rsaquo; Annual Purchases</div>
+      <h1>Annual Purchases {{ year }}</h1>
+      <p>Purchases by acquisition year, selectable by inventory category.</p>
     </div>
     <form method="get" action="{{ url_for('admin_watch_acquisitions') }}" class="watch-year-form">
       <label for="year">Year</label>
@@ -16,29 +16,39 @@
         <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
         {% endfor %}
       </select>
+      <label for="type">Category</label>
+      <select id="type" name="type" onchange="this.form.submit()">
+        <option value="all" {% if selected_type == 'all' %}selected{% endif %}>All Categories</option>
+        {% for option in type_options %}
+        <option value="{{ option.slug }}" {% if option.slug == selected_type %}selected{% endif %}>{{ option.icon }} {{ option.label }}</option>
+        {% endfor %}
+      </select>
       <button type="submit">View</button>
       <button type="button" onclick="window.print()">Print</button>
     </form>
   </div>
 
-  <h2 class="report-block-title">Watch Acquisitions</h2>
+  <div class="report-scope-line">
+    <strong>{{ selected_label }}</strong>
+    <span>{{ summary.total }} purchase{{ '' if summary.total == 1 else 's' }}</span>
+  </div>
 
   <div class="watch-kpis">
     <div class="watch-kpi">
-      <span>Acquired</span>
-      <strong>{{ watches|length }}</strong>
+      <span>Purchased</span>
+      <strong>{{ summary.total }}</strong>
     </div>
     <div class="watch-kpi">
       <span>Total Spend</span>
-      <strong>{{ total_spend|currency }}</strong>
+      <strong>{{ summary.total_spend|currency }}</strong>
     </div>
     <div class="watch-kpi">
       <span>Average</span>
-      <strong>{{ avg_spend|currency }}</strong>
+      <strong>{{ summary.avg_spend|currency }}</strong>
     </div>
     <div class="watch-kpi">
       <span>Priced</span>
-      <strong>{{ known_price_count }}/{{ watches|length }}</strong>
+      <strong>{{ summary.priced_count }}/{{ summary.total }}</strong>
     </div>
   </div>
 
@@ -58,6 +68,15 @@
         </div>
         {% endfor %}
       </div>
+    </section>
+
+    <section class="watch-report-card">
+      <h2>Category</h2>
+      <table class="watch-mini-table">
+        {% for row in by_type %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
+        {% endfor %}
+      </table>
     </section>
 
     <section class="watch-report-card">
@@ -101,7 +120,7 @@
       <table class="watch-mini-table">
         {% for item in most_expensive %}
         <tr>
-          <td><a href="{{ url_for('detail_view', category='watches', record_id=item.row['id']) }}">{{ item.title }}</a></td>
+          <td><a href="{{ url_for('detail_view', category=item.category, record_id=item.row['id']) }}">{{ item.title }}</a></td>
           <td>{{ item.price_display }}</td>
         </tr>
         {% endfor %}
@@ -110,194 +129,51 @@
   </div>
 
   <section class="watch-report-card watch-list-card">
-    <h2>Acquisition Ledger</h2>
-    {% if watches %}
+    <h2>Purchase Ledger</h2>
+    {% if items %}
     <table class="watch-ledger">
       <thead>
         <tr>
           <th>Date</th>
-          <th>Watch</th>
-          <th>Ref</th>
-          <th>Metal</th>
-          <th>Dial</th>
-          <th>Yr</th>
+          <th>Category</th>
+          <th>Item</th>
+          <th>Details</th>
           <th>Vendor</th>
           <th>Owner</th>
           <th>Property</th>
           <th>Status</th>
           <th>Price</th>
           <th>Value</th>
-          <th>Δ</th>
         </tr>
       </thead>
       <tbody>
-        {% for item in watches %}
-        {% set row = item.row %}
+        {% for item in items %}
         <tr>
-          <td class="mono">{{ row['date'] }}</td>
+          <td class="mono">{{ item.date }}</td>
+          <td class="category-cell"><span>{{ item.category_icon }}</span> {{ item.category_name }}</td>
           <td class="watch-title-cell">
             {% if item.image %}
             <img src="{{ url_for('uploaded_file', filename=item.image) }}" alt="">
             {% endif %}
-            <a href="{{ url_for('detail_view', category='watches', record_id=row['id']) }}">{{ item.title }}</a>
+            <a href="{{ url_for('detail_view', category=item.category, record_id=item.row['id']) }}">{{ item.title }}</a>
           </td>
-          <td>{{ row['reference'] or '' }}</td>
-          <td>{{ row['metal'] or '' }}</td>
-          <td>{{ row['dial_color'] or '' }}</td>
-          <td>{{ row['year'] or '' }}</td>
-          <td>{{ row['vendor'] or '' }}</td>
-          <td>{{ row['owner'] or '' }}</td>
-          <td>{{ row['property'] or '' }}</td>
-          <td>{{ row['status'] or '' }}</td>
+          <td class="detail-cell">
+            {% for detail in item.details %}
+            <span><b>{{ detail.label }}</b> {{ detail.value }}</span>
+            {% endfor %}
+          </td>
+          <td>{{ item.vendor }}</td>
+          <td>{{ item.owner }}</td>
+          <td>{{ item.property }}</td>
+          <td>{{ item.status }}</td>
           <td class="money">{{ item.price_display }}</td>
           <td class="money">{{ item.value_display }}</td>
-          <td class="money">{{ item.delta_display }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     {% else %}
-    <p class="empty-report">No watches have a purchase date in {{ year }}.</p>
-    {% endif %}
-  </section>
-
-  <h2 class="report-block-title report-block-title-spaced">Coin Acquisitions</h2>
-
-  <div class="watch-kpis coin-kpis">
-    <div class="watch-kpi">
-      <span>Acquired</span>
-      <strong>{{ coins|length }}</strong>
-    </div>
-    <div class="watch-kpi">
-      <span>Total Spend</span>
-      <strong>{{ coin_total_spend|currency }}</strong>
-    </div>
-    <div class="watch-kpi">
-      <span>Average</span>
-      <strong>{{ coin_avg_spend|currency }}</strong>
-    </div>
-    <div class="watch-kpi">
-      <span>Priced</span>
-      <strong>{{ coin_known_price_count }}/{{ coins|length }}</strong>
-    </div>
-  </div>
-
-  <div class="watch-report-grid coin-report-grid">
-    <section class="watch-report-card monthly-card">
-      <h2>Monthly Pace</h2>
-      <div class="month-bars">
-        {% set max_coin_month_count = coin_monthly|map(attribute='count')|max if coin_monthly else 0 %}
-        {% for m in coin_monthly %}
-        <div class="month-bar-row">
-          <span>{{ m.month }}</span>
-          <div class="month-bar-track">
-            <div class="month-bar coin-bar" style="width: {{ ((m.count / max_coin_month_count * 100) if max_coin_month_count else 0)|round(0, 'floor') }}%"></div>
-          </div>
-          <b>{{ m.count }}</b>
-          <em>{{ m.spend|currency }}</em>
-        </div>
-        {% endfor %}
-      </div>
-    </section>
-
-    <section class="watch-report-card">
-      <h2>Owner</h2>
-      <table class="watch-mini-table">
-        {% for row in coins_by_owner %}
-        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
-        {% endfor %}
-      </table>
-    </section>
-
-    <section class="watch-report-card">
-      <h2>Property</h2>
-      <table class="watch-mini-table">
-        {% for row in coins_by_property %}
-        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
-        {% endfor %}
-      </table>
-    </section>
-
-    <section class="watch-report-card">
-      <h2>Status</h2>
-      <table class="watch-mini-table">
-        {% for row in coins_by_status %}
-        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
-        {% endfor %}
-      </table>
-    </section>
-
-    <section class="watch-report-card">
-      <h2>Top Vendors</h2>
-      <table class="watch-mini-table">
-        {% for row in coins_by_vendor %}
-        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.spend|currency }}</td></tr>
-        {% endfor %}
-      </table>
-    </section>
-
-    <section class="watch-report-card">
-      <h2>Largest Purchases</h2>
-      <table class="watch-mini-table">
-        {% for item in coin_most_expensive %}
-        <tr>
-          <td><a href="{{ url_for('detail_view', category='coins', record_id=item.row['id']) }}">{{ item.title }}</a></td>
-          <td>{{ item.price_display }}</td>
-        </tr>
-        {% endfor %}
-      </table>
-    </section>
-  </div>
-
-  <section class="watch-report-card watch-list-card">
-    <h2>Coin Acquisition Ledger</h2>
-    {% if coins %}
-    <table class="watch-ledger">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Coin</th>
-          <th>Region</th>
-          <th>Authority</th>
-          <th>Denom</th>
-          <th>Minted</th>
-          <th>Metal</th>
-          <th>Grade</th>
-          <th>Vendor</th>
-          <th>Owner</th>
-          <th>Property</th>
-          <th>Status</th>
-          <th>Price</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in coins %}
-        {% set row = item.row %}
-        <tr>
-          <td class="mono">{{ row['purchase_date'] }}</td>
-          <td class="watch-title-cell coin-title-cell">
-            {% if item.image %}
-            <img src="{{ url_for('uploaded_file', filename=item.image) }}" alt="">
-            {% endif %}
-            <a href="{{ url_for('detail_view', category='coins', record_id=row['id']) }}">{{ item.title }}</a>
-          </td>
-          <td>{{ row['region'] or '' }}</td>
-          <td>{{ row['authority'] or '' }}</td>
-          <td>{{ row['denomination'] or '' }}</td>
-          <td>{{ item.date_text }}</td>
-          <td>{{ row['metal'] or '' }}</td>
-          <td>{{ row['grade'] or row['sheldon'] or '' }}</td>
-          <td>{{ row['vendor'] or '' }}</td>
-          <td>{{ row['owner'] or '' }}</td>
-          <td>{{ row['property_name'] or '' }}</td>
-          <td>{{ row['status'] or '' }}</td>
-          <td class="money">{{ item.price_display }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="empty-report">No coins have a purchase date in {{ year }}.</p>
+    <p class="empty-report">No purchases match this category and year.</p>
     {% endif %}
   </section>
 </div>
@@ -320,15 +196,14 @@
 .watch-report-head p { margin: 0; color: var(--text-secondary); font-size: 13px; }
 .admin-crumbs { font-size: 12px; color: var(--text-secondary); }
 .admin-crumbs a { color: var(--blue); text-decoration: none; }
-.report-block-title {
-  margin: 18px 0 10px;
-  font-size: 16px;
+.report-scope-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: var(--text-secondary);
 }
-.report-block-title-spaced {
-  margin-top: 28px;
-  padding-top: 18px;
-  border-top: 2px solid var(--border-light);
-}
+.report-scope-line strong { color: var(--text); font-size: 16px; }
 .watch-year-form {
   display: flex;
   align-items: center;
@@ -407,7 +282,6 @@
   border-radius: inherit;
   background: #315f9f;
 }
-.coin-bar { background: #9a6a24; }
 .month-bar-row b { text-align: right; }
 .month-bar-row em { color: var(--text-secondary); text-align: right; font-style: normal; }
 .watch-mini-table {
@@ -462,12 +336,24 @@
 }
 .watch-title-cell a { color: var(--text); text-decoration: none; }
 .watch-title-cell a:hover { color: var(--blue); text-decoration: underline; }
-.coin-title-cell { min-width: 260px; }
+.category-cell { white-space: nowrap; color: var(--text-secondary); }
+.category-cell span { display: inline-block; width: 20px; text-align: center; }
+.detail-cell {
+  min-width: 180px;
+  color: var(--text-secondary);
+}
+.detail-cell span {
+  display: inline-block;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.detail-cell b { color: var(--text); font-weight: 700; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: nowrap; }
 .money { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .empty-report { margin: 0; padding: 20px; color: var(--text-secondary); }
 @media (max-width: 820px) {
   .watch-report-head { align-items: stretch; flex-direction: column; }
+  .watch-year-form { flex-wrap: wrap; }
   .watch-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .watch-report-grid { grid-template-columns: 1fr; }
   .monthly-card { grid-row: auto; }

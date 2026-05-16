@@ -2745,8 +2745,11 @@ def _coin_purchase_date_search(q):
 def build_search_query(category, q, dot=False, coin_filter=None, at_property=None):
     """Build a SELECT with optional text search and/or dot (unresolved) filter."""
     table = CATEGORIES[category]['table']
+    excluded_text_fields = {'results'} if category == 'watches' else set()
     text_fields = [f['name'] for f in visible_fields(category)
-                   if f['type'] in ('text', 'textarea', 'select') and f.get('type') != 'file']
+                   if f['type'] in ('text', 'textarea', 'select')
+                   and f.get('type') != 'file'
+                   and f['name'] not in excluded_text_fields]
     # Per-category extra columns to expose in free-text search. SQLite's
     # LIKE coerces numerics to strings, but strips trailing zeros — so
     # the search term gets normalized before matching against these.
@@ -11661,95 +11664,166 @@ def report_options():
     return jsonify({'categories': cats, 'properties': props})
 
 
+def _annual_purchase_date_field(columns):
+    for name in ('purchase_date', 'date'):
+        if name in columns:
+            return name
+    return None
+
+
+def _annual_purchase_categories(db):
+    allowed = g.get('allowed_cats') or set(CATEGORIES.keys())
+    options = []
+    for slug, info in CATEGORIES.items():
+        if slug not in allowed:
+            continue
+        columns = _table_column_names(db, info['table'])
+        if 'price' not in columns:
+            continue
+        if not _annual_purchase_date_field(columns):
+            continue
+        options.append({
+            'slug': slug,
+            'label': info['name'],
+            'icon': info.get('icon', ''),
+        })
+    return options
+
+
+def _annual_purchase_years(db, category_slugs):
+    years = set()
+    for category in category_slugs:
+        info = CATEGORIES[category]
+        table = info['table']
+        columns = _table_column_names(db, table)
+        date_field = _annual_purchase_date_field(columns)
+        if not date_field:
+            continue
+        try:
+            rows = db.execute(
+                f"SELECT DISTINCT SUBSTR({date_field}, 1, 4) AS year "
+                f"FROM {table} "
+                f"WHERE {date_field} IS NOT NULL "
+                f"  AND TRIM({date_field}) != '' "
+                f"  AND {date_field} GLOB '[0-9][0-9][0-9][0-9]-*'"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            continue
+        years.update(row['year'] for row in rows if row['year'])
+    return sorted(years, reverse=True)
+
+
+def _annual_purchase_items(db, category_slugs, year):
+    items = []
+    for category in category_slugs:
+        info = CATEGORIES[category]
+        table = info['table']
+        columns = _table_column_names(db, table)
+        date_field = _annual_purchase_date_field(columns)
+        if not date_field:
+            continue
+
+        wheres = [
+            f"{date_field} IS NOT NULL",
+            f"TRIM({date_field}) != ''",
+            f"SUBSTR({date_field}, 1, 4) = ?",
+        ]
+        params = [year]
+        _apply_row_filter_clauses(category, wheres, params)
+        where_sql = f"WHERE {' AND '.join(wheres)}"
+        order_bits = [f"{date_field} ASC"]
+        label_field = info.get('label_field')
+        sublabel_field = info.get('sublabel_field')
+        for field in (label_field, sublabel_field):
+            if field in columns:
+                order_bits.append(
+                    f"COALESCE(NULLIF({field}, ''), 'zzz') COLLATE NODIACRITIC"
+                )
+        sql = (
+            f"SELECT * FROM {table} {where_sql} "
+            f"ORDER BY {', '.join(order_bits)}"
+        )
+        try:
+            rows = db.execute(sql, params).fetchall()
+        except sqlite3.OperationalError:
+            continue
+        rows = [row for row in rows if _user_can_see_row(category, row)]
+
+        compact_cols = REPORT_COMPACT_COLS.get(category, [])
+        skip_detail_fields = {
+            date_field, 'price', 'value', 'owner',
+            CATEGORY_PROPERTY_FIELD.get(category), 'status',
+        }
+        for row in rows:
+            price_number = _money_number(row['price']) if 'price' in columns else None
+            value_number = _money_number(row['value']) if 'value' in columns else None
+            image = ''
+            image_field = info.get('image_field')
+            if image_field in columns:
+                image = (row[image_field] or '').strip()
+                if not (image and is_image_filter(image)):
+                    image = ''
+            details = []
+            for label, field in compact_cols:
+                if field in skip_detail_fields:
+                    continue
+                if field in columns and row[field] not in (None, ''):
+                    details.append({
+                        'label': label,
+                        'value': _format_report_value(field, row[field]),
+                    })
+                if len(details) >= 4:
+                    break
+            prop_field = CATEGORY_PROPERTY_FIELD.get(category)
+            items.append({
+                'category': category,
+                'category_name': info['name'],
+                'category_icon': info.get('icon', ''),
+                'row': row,
+                'title': _report_record_title(category, row),
+                'date': row[date_field],
+                'month': row[date_field][5:7] if row[date_field] and len(row[date_field]) >= 7 else '',
+                'owner': _item_report_row_value(row, columns, 'owner'),
+                'property': row[prop_field] if prop_field in columns else '',
+                'status': _item_report_row_value(row, columns, 'status'),
+                'vendor': _item_report_row_value(row, columns, 'vendor'),
+                'price_number': price_number,
+                'price_display': _format_money(row['price']) if 'price' in columns else '',
+                'value_number': value_number,
+                'value_display': _format_money(row['value']) if 'value' in columns else '',
+                'image': image,
+                'details': details,
+            })
+    items.sort(key=lambda item: (
+        item['date'] or '9999-99-99',
+        item['category_name'].lower(),
+        (item['title'] or '').lower(),
+    ))
+    return items
+
+
 @app.route('/admin/watch-acquisitions', methods=['GET'])
 def admin_watch_acquisitions():
-    """Annual acquisitions report for watches and coins.
-
-    Strawman admin view: pick a purchase year and review the watches and
-    coins acquired in that year, with quick summary cuts by month, owner,
-    property, status, and vendor.
-    """
+    """Annual Purchases report across inventory categories."""
     db = get_db()
-    years = [
-        row['year'] for row in db.execute(
-            "SELECT DISTINCT year FROM ("
-            "  SELECT SUBSTR(date, 1, 4) AS year "
-            "  FROM watches "
-            "  WHERE date IS NOT NULL "
-            "    AND TRIM(date) != '' "
-            "    AND date GLOB '[0-9][0-9][0-9][0-9]-*' "
-            "  UNION "
-            "  SELECT SUBSTR(purchase_date, 1, 4) AS year "
-            "  FROM coins "
-            "  WHERE purchase_date IS NOT NULL "
-            "    AND TRIM(purchase_date) != '' "
-            "    AND purchase_date GLOB '[0-9][0-9][0-9][0-9]-*'"
-            ") WHERE year IS NOT NULL ORDER BY year DESC"
-        ).fetchall()
-        if row['year']
-    ]
+    type_options = _annual_purchase_categories(db)
+    option_slugs = [option['slug'] for option in type_options]
+    requested_type = (request.args.get('type') or 'all').strip()
+    if requested_type != 'all' and requested_type not in option_slugs:
+        requested_type = 'all'
+
+    selected_categories = option_slugs if requested_type == 'all' else [requested_type]
+    years = _annual_purchase_years(db, option_slugs)
     default_year = years[0] if years else str(datetime.utcnow().year)
     year = (request.args.get('year') or default_year).strip()
     if not re.fullmatch(r'\d{4}', year):
         year = default_year
 
-    rows = db.execute(
-        "SELECT * FROM watches "
-        "WHERE date IS NOT NULL "
-        "  AND TRIM(date) != '' "
-        "  AND SUBSTR(date, 1, 4) = ? "
-        "ORDER BY date ASC, "
-        "         COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
-        "         COALESCE(NULLIF(model, ''), 'zzz') COLLATE NODIACRITIC",
-        [year],
-    ).fetchall()
-
-    watches = []
-    total_spend = 0.0
-    known_price_count = 0
-    for row in rows:
-        price = None
-        if row['price'] not in (None, ''):
-            try:
-                price = float(str(row['price']).replace(',', '').replace('$', ''))
-                total_spend += price
-                known_price_count += 1
-            except (TypeError, ValueError):
-                price = None
-        value = None
-        if 'value' in row.keys() and row['value'] not in (None, ''):
-            try:
-                value = float(str(row['value']).replace(',', '').replace('$', ''))
-            except (TypeError, ValueError):
-                value = None
-        image = (row['image_obv'] or '').strip()
-        watches.append({
-            'row': row,
-            'title': _report_record_title('watches', row),
-            'month': row['date'][5:7] if row['date'] and len(row['date']) >= 7 else '',
-            'price_number': price,
-            'value_number': value,
-            'price_display': _format_money(row['price']),
-            'value_display': _format_money(row['value']) if 'value' in row.keys() else '',
-            'delta_display': _format_money(value - price) if value is not None and price is not None else '',
-            'image': image if image and is_image_filter(image) else '',
-        })
-
-    def bucket_counts(field):
-        counts = {}
-        spend = {}
-        for item in watches:
-            row = item['row']
-            label = (row[field] or '').strip() if field in row.keys() else ''
-            if not label:
-                label = 'Unspecified'
-            counts[label] = counts.get(label, 0) + 1
-            spend[label] = spend.get(label, 0.0) + (item['price_number'] or 0.0)
-        return [
-            {'label': label, 'count': counts[label], 'spend': spend[label]}
-            for label in sorted(counts, key=lambda k: (-counts[k], k.lower()))
-        ]
-
+    items = _annual_purchase_items(db, selected_categories, year)
+    priced_items = [item for item in items if item['price_number'] is not None]
+    total_spend = sum(item['price_number'] or 0.0 for item in priced_items)
+    value_items = [item for item in items if item['value_number'] is not None]
+    total_value = sum(item['value_number'] or 0.0 for item in value_items)
     month_names = [
         'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -11757,95 +11831,30 @@ def admin_watch_acquisitions():
     monthly = []
     for index, name in enumerate(month_names, start=1):
         key = f'{index:02d}'
-        items = [item for item in watches if item['month'] == key]
+        month_items = [item for item in items if item['month'] == key]
         monthly.append({
             'month': name,
-            'count': len(items),
-            'spend': sum(item['price_number'] or 0.0 for item in items),
+            'count': len(month_items),
+            'spend': sum(item['price_number'] or 0.0 for item in month_items),
         })
-
     most_expensive = sorted(
-        [item for item in watches if item['price_number'] is not None],
+        priced_items,
         key=lambda item: item['price_number'],
         reverse=True,
-    )[:5]
-    avg_spend = total_spend / known_price_count if known_price_count else 0
-
-    coin_rows = db.execute(
-        "SELECT * FROM coins "
-        "WHERE purchase_date IS NOT NULL "
-        "  AND TRIM(purchase_date) != '' "
-        "  AND SUBSTR(purchase_date, 1, 4) = ? "
-        "ORDER BY purchase_date ASC, "
-        "         COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
-        "         COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
-        "         COALESCE(NULLIF(denomination, ''), 'zzz') COLLATE NODIACRITIC",
-        [year],
-    ).fetchall()
-
-    coins = []
-    coin_total_spend = 0.0
-    coin_known_price_count = 0
-    for row in coin_rows:
-        price = None
-        if row['price'] not in (None, ''):
-            try:
-                price = float(str(row['price']).replace(',', '').replace('$', ''))
-                coin_total_spend += price
-                coin_known_price_count += 1
-            except (TypeError, ValueError):
-                price = None
-        image = (row['image_1'] or '').strip()
-        date_text = (row['date_1_text'] or '').strip()
-        if not date_text and row['date_1'] not in (None, ''):
-            try:
-                date_num = int(row['date_1'])
-                date_text = f"{abs(date_num)} BC" if date_num < 0 else str(date_num)
-            except (TypeError, ValueError):
-                date_text = str(row['date_1']).strip()
-        coins.append({
-            'row': row,
-            'title': _report_record_title('coins', row),
-            'month': row['purchase_date'][5:7] if row['purchase_date'] and len(row['purchase_date']) >= 7 else '',
-            'price_number': price,
-            'price_display': _format_money(row['price']),
-            'date_text': date_text,
-            'image': image if image and is_image_filter(image) else '',
-        })
-
-    def coin_bucket_counts(field):
-        counts = {}
-        spend = {}
-        for item in coins:
-            row = item['row']
-            label = (row[field] or '').strip() if field in row.keys() else ''
-            if not label:
-                label = 'Unspecified'
-            counts[label] = counts.get(label, 0) + 1
-            spend[label] = spend.get(label, 0.0) + (item['price_number'] or 0.0)
-        return [
-            {'label': label, 'count': counts[label], 'spend': spend[label]}
-            for label in sorted(counts, key=lambda k: (-counts[k], k.lower()))
-        ]
-
-    coin_monthly = []
-    for index, name in enumerate(month_names, start=1):
-        key = f'{index:02d}'
-        items = [item for item in coins if item['month'] == key]
-        coin_monthly.append({
-            'month': name,
-            'count': len(items),
-            'spend': sum(item['price_number'] or 0.0 for item in items),
-        })
-    coin_most_expensive = sorted(
-        [item for item in coins if item['price_number'] is not None],
-        key=lambda item: item['price_number'],
-        reverse=True,
-    )[:5]
-    coin_avg_spend = (
-        coin_total_spend / coin_known_price_count
-        if coin_known_price_count else 0
+    )[:10]
+    selected_label = (
+        'All Categories' if requested_type == 'all'
+        else CATEGORIES[requested_type]['name']
     )
+    summary = {
+        'total': len(items),
+        'type_count': len({item['category'] for item in items}),
+        'priced_count': len(priced_items),
+        'total_spend': total_spend,
+        'avg_spend': total_spend / len(priced_items) if priced_items else 0,
+        'total_value': total_value,
+        'valued_count': len(value_items),
+    }
 
     return render_template(
         'watch_acquisitions.html',
@@ -11854,26 +11863,18 @@ def admin_watch_acquisitions():
         counts=get_counts(),
         year=year,
         years=years,
-        watches=watches,
-        total_spend=total_spend,
-        avg_spend=avg_spend,
-        known_price_count=known_price_count,
+        selected_type=requested_type,
+        selected_label=selected_label,
+        type_options=type_options,
+        items=items,
+        summary=summary,
         monthly=monthly,
-        by_owner=bucket_counts('owner'),
-        by_property=bucket_counts('property'),
-        by_status=bucket_counts('status'),
-        by_vendor=bucket_counts('vendor')[:10],
+        by_type=_item_report_bucket(items, 'category_name'),
+        by_owner=_item_report_bucket(items, 'owner'),
+        by_property=_item_report_bucket(items, 'property'),
+        by_status=_item_report_bucket(items, 'status'),
+        by_vendor=_item_report_bucket(items, 'vendor', 12),
         most_expensive=most_expensive,
-        coins=coins,
-        coin_total_spend=coin_total_spend,
-        coin_avg_spend=coin_avg_spend,
-        coin_known_price_count=coin_known_price_count,
-        coin_monthly=coin_monthly,
-        coins_by_owner=coin_bucket_counts('owner'),
-        coins_by_property=coin_bucket_counts('property_name'),
-        coins_by_status=coin_bucket_counts('status'),
-        coins_by_vendor=coin_bucket_counts('vendor')[:10],
-        coin_most_expensive=coin_most_expensive,
     )
 
 
