@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}{{ type_label }} Report · StuffApp{% endblock %}
+{% block title %}Inventory Report · StuffApp{% endblock %}
 
 {% block content %}
 <div class="item-report-page">
   <div class="item-report-head">
     <div>
-      <div class="admin-crumbs"><a href="{{ url_for('admin_index') }}">Admin</a> &rsaquo; Item type report</div>
-      <h1>{{ type_label }} Report</h1>
+      <div class="admin-crumbs"><a href="{{ url_for('admin_index') }}">Admin</a> &rsaquo; Inventory report</div>
+      <h1>Inventory Report</h1>
       <p>Searchable inventory summary for records with status Own, with category-specific detail links.</p>
     </div>
     <form method="get" action="{{ url_for('admin_item_type_report') }}" class="item-report-form">
