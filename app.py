@@ -12344,6 +12344,16 @@ def admin_item_type_report():
         item['category_name'].lower(),
         (item['title'] or '').lower(),
     ))
+    category_totals = {}
+    category_priced_counts = {}
+    for item in items:
+        category = item['category']
+        category_totals[category] = category_totals.get(category, 0.0) + (item['price_number'] or 0.0)
+        category_priced_counts[category] = category_priced_counts.get(category, 0) + (1 if item['price_number'] is not None else 0)
+    for item in items:
+        item['category_total_display'] = _format_money(category_totals.get(item['category'], 0.0))
+        item['category_priced_count'] = category_priced_counts.get(item['category'], 0)
+
     by_type = _item_report_bucket(items, 'category_name')
     by_property = _item_report_bucket(items, 'property', 12)
     by_owner = _item_report_bucket(items, 'owner', 10)
