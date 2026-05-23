@@ -12945,6 +12945,8 @@ def _mobile_file_entry(filename, label='', field='', doc_set=''):
     filename = (filename or '').strip()
     if not filename:
         return None
+    if not os.path.exists(os.path.join(UPLOAD_FOLDER, filename)):
+        return None
     entry = {
         'filename': filename,
         'label': label or '',

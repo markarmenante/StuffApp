@@ -9,15 +9,18 @@ final class StuffOfflineViewModel: ObservableObject {
     @Published var statusText: String = "Not synced yet"
     @Published var isSyncing = false
     @Published var errorMessage: String?
+    @Published private(set) var lastSyncedAt: Date?
 
     private let store: StuffLocalStore
     private let client: StuffSyncClient
+    private let lastSyncedAtKey = "stuff.lastSyncedAt"
 
     init() {
         do {
             let store = try StuffLocalStore()
             self.store = store
             self.client = StuffSyncClient(store: store)
+            self.lastSyncedAt = UserDefaults.standard.object(forKey: lastSyncedAtKey) as? Date
             Task { await loadLocalCache() }
         } catch {
             fatalError("Could not create Stuff local store: \(error)")
@@ -32,6 +35,13 @@ final class StuffOfflineViewModel: ObservableObject {
 
     var selectedRecords: [StuffRecord] {
         records[selectedCategory] ?? []
+    }
+
+    var lastSyncedText: String {
+        guard let lastSyncedAt else {
+            return "Never synced"
+        }
+        return "Last synced \(lastSyncedAt.formatted(date: .abbreviated, time: .shortened))"
     }
 
     func localURL(for file: StuffFile) async -> URL? {
@@ -90,12 +100,19 @@ final class StuffOfflineViewModel: ObservableObject {
                 Task { @MainActor in self?.statusText = message }
             }
             await loadLocalCache()
+            markSyncedNow()
             statusText = "Synced"
         } catch {
             errorMessage = error.localizedDescription
             statusText = "Sync failed"
         }
         isSyncing = false
+    }
+
+    private func markSyncedNow() {
+        let now = Date()
+        lastSyncedAt = now
+        UserDefaults.standard.set(now, forKey: lastSyncedAtKey)
     }
 
     private func apply(_ snapshot: StuffMobileSnapshot) {

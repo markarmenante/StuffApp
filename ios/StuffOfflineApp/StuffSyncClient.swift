@@ -3,6 +3,7 @@ import Foundation
 actor StuffSyncClient {
     enum SyncError: Error {
         case badResponse(Int)
+        case badResponseAt(String, Int)
         case invalidFileURL(String)
         case signInRequired
         case invalidJSON(String)
@@ -65,12 +66,17 @@ actor StuffSyncClient {
         progress: ((String) -> Void)?
     ) async throws {
         var downloaded = 0
+        var skipped = 0
         for file in files {
             if await store.hasFile(file) {
                 continue
             }
-            try await download(file)
-            downloaded += 1
+            let didDownload = try await download(file)
+            if didDownload {
+                downloaded += 1
+            } else {
+                skipped += 1
+            }
             if downloaded % 25 == 0 {
                 progress?("Downloaded \(downloaded) files")
             }
@@ -78,24 +84,34 @@ actor StuffSyncClient {
         if downloaded > 0 {
             progress?("Downloaded \(downloaded) files")
         }
+        if skipped > 0 {
+            progress?("Skipped \(skipped) missing files")
+        }
     }
 
-    private func download(_ file: StuffFile) async throws {
+    private func download(_ file: StuffFile) async throws -> Bool {
         guard let url = URL(string: file.url, relativeTo: StuffConfig.serverURL) else {
             throw SyncError.invalidFileURL(file.url)
         }
         let (tempURL, response) = try await session.download(from: url)
-        try validate(response)
+        if let http = response as? HTTPURLResponse, http.statusCode == 404 {
+            return false
+        }
+        try validate(response, path: url.path)
         try await store.saveDownloadedFile(tempURL: tempURL, for: file)
+        return true
     }
 
-    private func validate(_ response: URLResponse) throws {
+    private func validate(_ response: URLResponse, path: String? = nil) throws {
         guard let http = response as? HTTPURLResponse else {
             return
         }
         guard (200..<300).contains(http.statusCode) else {
             if [401, 403].contains(http.statusCode) || (300..<400).contains(http.statusCode) {
                 throw SyncError.signInRequired
+            }
+            if let path {
+                throw SyncError.badResponseAt(path, http.statusCode)
             }
             throw SyncError.badResponse(http.statusCode)
         }
@@ -107,6 +123,8 @@ extension StuffSyncClient.SyncError: LocalizedError {
         switch self {
         case .badResponse(let status):
             return "Stuff sync failed with HTTP \(status)."
+        case .badResponseAt(let path, let status):
+            return "Stuff sync failed with HTTP \(status) at \(path)."
         case .invalidFileURL(let path):
             return "Stuff sync found an invalid file URL: \(path)."
         case .signInRequired:

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var viewModel = StuffOfflineViewModel()
     @State private var showingWebApp = false
+    @AppStorage("stuff.syncOnOpen") private var syncOnOpen = true
 
     var body: some View {
         NavigationSplitView {
@@ -24,7 +25,15 @@ struct ContentView: View {
             }
             .navigationTitle("Stuff")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Menu {
+                        Toggle("Sync on Open", isOn: $syncOnOpen)
+                        Text(syncOnOpen ? "Syncs when the app opens" : "Manual sync only")
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Sync settings")
+
                     Button {
                         showingWebApp = true
                     } label: {
@@ -45,7 +54,7 @@ struct ContentView: View {
         }
         .task {
             await viewModel.loadLocalCache()
-            if !viewModel.records.isEmpty {
+            if syncOnOpen && !viewModel.records.isEmpty {
                 await viewModel.sync()
             }
         }
@@ -91,9 +100,13 @@ struct ContentView: View {
                 }
                 .font(.footnote)
             } else {
-                Text(viewModel.errorMessage ?? viewModel.statusText)
-                    .font(.footnote)
-                    .foregroundStyle(viewModel.errorMessage == nil ? Color.secondary : Color.red)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(viewModel.errorMessage ?? viewModel.statusText)
+                        .foregroundStyle(viewModel.errorMessage == nil ? Color.secondary : Color.red)
+                    Text(viewModel.lastSyncedText)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.footnote)
             }
 
             HStack {
@@ -171,10 +184,15 @@ struct RecordListView: View {
             if viewModel.isSyncing {
                 ProgressView()
             }
-            Text(viewModel.errorMessage ?? viewModel.statusText)
-                .font(.footnote)
-                .foregroundStyle(viewModel.errorMessage == nil ? Color.secondary : Color.red)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(viewModel.errorMessage ?? viewModel.statusText)
+                    .foregroundStyle(viewModel.errorMessage == nil ? Color.secondary : Color.red)
+                    .lineLimit(1)
+                Text(viewModel.lastSyncedText)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .font(.footnote)
             Spacer()
             Button {
                 Task { await viewModel.sync() }
