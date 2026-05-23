@@ -79,7 +79,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("No offline cache yet")
                     .font(.title3.weight(.semibold))
-                Text("Open the live Stuff app once, sign in if asked, tap Done, then sync to keep records and files on this iPhone.")
+                Text("Open the live Stuff app once, complete the sign-in in this app, tap Done, then sync to keep records and files on this iPhone.")
                     .foregroundStyle(.secondary)
             }
 

@@ -36,7 +36,7 @@ struct StuffWebView: UIViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-            if host == StuffConfig.serverURL.host || host.hasSuffix(".\(StuffConfig.serverURL.host ?? "")") {
+            if Self.shouldKeepInApp(host: host) {
                 decisionHandler(.allow)
             } else {
                 decisionHandler(.cancel)
@@ -54,6 +54,17 @@ struct StuffWebView: UIViewRepresentable {
                 webView.load(navigationAction.request)
             }
             return nil
+        }
+
+        private static func shouldKeepInApp(host: String) -> Bool {
+            let host = host.lowercased()
+            guard let appHost = StuffConfig.serverURL.host?.lowercased() else {
+                return false
+            }
+            return host == appHost
+                || host.hasSuffix(".\(appHost)")
+                || host == "armenante.cloudflareaccess.com"
+                || host.hasSuffix(".cloudflareaccess.com")
         }
     }
 }
