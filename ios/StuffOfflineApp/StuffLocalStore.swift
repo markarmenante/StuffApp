@@ -36,6 +36,9 @@ actor StuffLocalStore {
     func saveSnapshot(_ snapshot: StuffMobileSnapshot) throws {
         try write(snapshot, to: "snapshot.json")
         try write(snapshot.maxUpdatedAt, to: "last-sync.json")
+        try? FileManager.default.removeItem(
+            at: rootURL.appendingPathComponent("last-changes.json")
+        )
     }
 
     func saveChanges(_ changes: StuffMobileChanges) throws {

@@ -12971,7 +12971,21 @@ def _mobile_row_files(category, row, cols):
         seen.add(entry['filename'])
         files.append(entry)
 
-    for field in visible_fields(category):
+    file_fields = [
+        field for field in FIELDS.get(category, [])
+        if field.get('type') == 'file'
+    ]
+    image_field = (CATEGORIES.get(category) or {}).get('image_field')
+    if image_field and image_field in cols and all(
+        field.get('name') != image_field for field in file_fields
+    ):
+        file_fields.insert(0, {
+            'name': image_field,
+            'label': 'Image',
+            'type': 'file',
+        })
+
+    for field in file_fields:
         if field.get('type') != 'file':
             continue
         name = field['name']
@@ -13010,7 +13024,7 @@ def _mobile_row_files(category, row, cols):
     return files
 
 
-def _mobile_row_payload(category, row, cols):
+def _mobile_row_payload(category, row, cols, sort_index=None):
     data = {}
     for col in cols:
         try:
@@ -13021,6 +13035,7 @@ def _mobile_row_payload(category, row, cols):
         'category': category,
         'id': row['id'],
         'updated_at': data.get('updated_at'),
+        'sort_index': sort_index,
         'data': data,
         'files': _mobile_row_files(category, row, set(cols)),
     }
@@ -13069,18 +13084,22 @@ def _mobile_visible_rows(since=None):
             wheres.append("(updated_at IS NOT NULL AND updated_at >= ?)")
             params.append(since)
         where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+        order_by = CATEGORY_ORDER_BY.get(
+            slug,
+            f"COALESCE(NULLIF({info['label_field']}, ''), 'zzz') COLLATE NODIACRITIC"
+        )
         try:
             rows = db.execute(
-                f"SELECT * FROM {table} {where_sql}", params
+                f"SELECT * FROM {table} {where_sql} ORDER BY {order_by}", params
             ).fetchall()
         except sqlite3.OperationalError:
             continue
 
         payload_rows = []
-        for row in rows:
+        for sort_index, row in enumerate(rows):
             if not _user_can_see_row(slug, row):
                 continue
-            payload = _mobile_row_payload(slug, row, cols)
+            payload = _mobile_row_payload(slug, row, cols, sort_index)
             payload_rows.append(payload)
             updated_at = payload.get('updated_at')
             if updated_at and (max_updated_at is None or updated_at > max_updated_at):

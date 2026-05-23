@@ -106,10 +106,10 @@ final class StuffOfflineViewModel: ObservableObject {
         guard !isSyncing else { return }
         isSyncing = true
         errorMessage = nil
-        statusText = "Syncing"
+        statusText = "Refreshing Stuff cache"
         do {
             await StuffCookieBridge.syncWebCookiesToURLSession()
-            let summary = try await client.pullChanges { [weak self] message in
+            let summary = try await client.bootstrap { [weak self] message in
                 Task { @MainActor in self?.statusText = message }
             }
             await loadLocalCache()
@@ -155,12 +155,16 @@ final class StuffOfflineViewModel: ObservableObject {
 
     private func sortRecords(_ rows: [StuffRecord]) -> [StuffRecord] {
         rows.sorted { lhs, rhs in
-            let left = lhs.updatedAt ?? ""
-            let right = rhs.updatedAt ?? ""
-            if left == right {
+            switch (lhs.sortIndex, rhs.sortIndex) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (.some, nil):
+                return true
+            case (nil, .some):
+                return false
+            default:
                 return title(for: lhs) < title(for: rhs)
             }
-            return left > right
         }
     }
 }

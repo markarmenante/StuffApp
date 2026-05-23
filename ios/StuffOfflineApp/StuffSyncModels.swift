@@ -68,6 +68,7 @@ struct StuffRecord: Codable, Identifiable {
     let category: String
     let id: String
     let updatedAt: String?
+    let sortIndex: Int?
     let data: [String: StuffValue]
     let files: [StuffFile]
 
@@ -75,6 +76,7 @@ struct StuffRecord: Codable, Identifiable {
         case category
         case id
         case updatedAt = "updated_at"
+        case sortIndex = "sort_index"
         case data
         case files
     }
