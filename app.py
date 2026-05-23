@@ -11914,6 +11914,38 @@ def _format_money(value):
         return str(value).strip()
 
 
+def _format_percent(value):
+    if value is None:
+        return ''
+    try:
+        return '{:,.1f}%'.format(float(value) * 100).replace('.0%', '%')
+    except (TypeError, ValueError):
+        return ''
+
+
+def _percent_number(value):
+    if value in (None, ''):
+        return 0.0
+    cleaned = re.sub(r'[^0-9.\-]', '', str(value))
+    if cleaned in ('', '-', '.', '-.'):
+        return 0.0
+    try:
+        number = float(cleaned)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, number / 100.0)
+
+
+def _rate_number(value, fallback):
+    if value in (None, ''):
+        return fallback
+    try:
+        number = float(str(value).strip())
+    except (TypeError, ValueError):
+        return fallback
+    return number if number >= 0 else fallback
+
+
 def _report_record_title(category, row):
     """Row identifier used as the bold header line in detailed mode and
     the leading column in compact mode. Reuses EXPORT_LAYOUT's ident
@@ -12234,6 +12266,158 @@ def admin_watch_acquisitions():
         by_status=_item_report_bucket(items, 'status'),
         by_vendor=_item_report_bucket(items, 'vendor', 12),
         most_expensive=most_expensive,
+    )
+
+
+@app.route('/admin/sell-options', methods=['GET'])
+def admin_sell_options():
+    """Watch sell-candidate report with current tax/proceeds math."""
+    db = get_db()
+    columns = _table_column_names(db, 'watches')
+    wheres, params = [], []
+    _apply_row_filter_clauses('watches', wheres, params)
+    if 'sell_keep' in columns:
+        wheres.append("LOWER(COALESCE(NULLIF(sell_keep,''),'Keep')) = 'sell'")
+    else:
+        wheres.append('1 = 0')
+
+    where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+    rows = db.execute(
+        f"SELECT * FROM watches {where_sql} ORDER BY {CATEGORY_ORDER_BY['watches']}",
+        params,
+    ).fetchall()
+    rows = [row for row in rows if _user_can_see_row('watches', row)]
+
+    items = []
+    totals = {
+        'purchase': 0.0,
+        'gross_sales': 0.0,
+        'commission': 0.0,
+        'net_sales': 0.0,
+        'gross_gain_loss': 0.0,
+        'federal_tax': 0.0,
+        'state_tax': 0.0,
+        'total_tax': 0.0,
+        'net_proceeds': 0.0,
+        'net_gain_loss': 0.0,
+    }
+    priced_count = 0
+    tax_rates = {
+        'federal': 0.318,
+        'NY': 0.109,
+        'CA': 0.133,
+    }
+
+    for row in rows:
+        purchase = (
+            _money_number(row['sell_purchase_price'])
+            if 'sell_purchase_price' in columns else None
+        )
+        if purchase is None and 'price' in columns:
+            purchase = _money_number(row['price'])
+        sale = (
+            _money_number(row['sell_estimated_sales_price'])
+            if 'sell_estimated_sales_price' in columns else None
+        )
+        commission_rate = (
+            _percent_number(row['sell_commission_percent'])
+            if 'sell_commission_percent' in columns else 0.0
+        )
+        commission = sale * commission_rate if sale is not None else None
+        net_sales = sale - commission if sale is not None and commission is not None else None
+        gross_gain_loss = (
+            net_sales - purchase
+            if net_sales is not None and purchase is not None else None
+        )
+        taxable_gain = max(0.0, gross_gain_loss) if gross_gain_loss is not None else None
+        tax_state = (
+            row['sell_tax_state'] if 'sell_tax_state' in columns and row['sell_tax_state'] in ('NY', 'CA')
+            else 'NY'
+        )
+        federal_rate = _rate_number(
+            row['sell_federal_tax_rate'] if 'sell_federal_tax_rate' in columns else None,
+            tax_rates['federal'],
+        )
+        state_rate = _rate_number(
+            row['sell_ca_tax_rate'] if tax_state == 'CA' and 'sell_ca_tax_rate' in columns
+            else row['sell_ny_tax_rate'] if 'sell_ny_tax_rate' in columns
+            else None,
+            tax_rates[tax_state],
+        )
+        federal_tax = taxable_gain * federal_rate if taxable_gain is not None else None
+        state_tax = taxable_gain * state_rate if taxable_gain is not None else None
+        total_tax = (
+            federal_tax + state_tax
+            if federal_tax is not None and state_tax is not None else None
+        )
+        net_proceeds = (
+            net_sales - total_tax
+            if net_sales is not None and total_tax is not None else None
+        )
+        net_gain_loss = (
+            gross_gain_loss - total_tax
+            if gross_gain_loss is not None and total_tax is not None else None
+        )
+        status = row['status'] if 'status' in columns and row['status'] else ''
+        image = ''
+        if 'image_obv' in columns:
+            image = (row['image_obv'] or '').strip()
+            if image and not is_image_filter(image):
+                image = ''
+        item = {
+            'row': row,
+            'title': _report_record_title('watches', row),
+            'brand': row['brand'] if 'brand' in columns else '',
+            'model': row['model'] if 'model' in columns else '',
+            'ref': row['reference'] if 'reference' in columns else '',
+            'year': row['year'] if 'year' in columns else '',
+            'owner': row['owner'] if 'owner' in columns else '',
+            'property': row['property'] if 'property' in columns else '',
+            'status': status,
+            'sold_to': row['sold_to'] if 'sold_to' in columns else '',
+            'tax_state': tax_state,
+            'federal_rate_display': _format_percent(federal_rate),
+            'state_rate_display': _format_percent(state_rate),
+            'image': image,
+            'purchase': purchase,
+            'gross_sales': sale,
+            'commission_rate': commission_rate,
+            'commission': commission,
+            'net_sales': net_sales,
+            'gross_gain_loss': gross_gain_loss,
+            'federal_tax': federal_tax,
+            'state_tax': state_tax,
+            'total_tax': total_tax,
+            'net_proceeds': net_proceeds,
+            'net_gain_loss': net_gain_loss,
+        }
+        items.append(item)
+        if sale is not None:
+            priced_count += 1
+        for key in totals:
+            value = item.get(key)
+            if isinstance(value, (int, float)):
+                totals[key] += value
+
+    summary = {
+        'total': len(items),
+        'priced_count': priced_count,
+        'gross_sales': totals['gross_sales'],
+        'total_tax': totals['total_tax'],
+        'net_proceeds': totals['net_proceeds'],
+        'net_gain_loss': totals['net_gain_loss'],
+        'commission': totals['commission'],
+        'net_sales': totals['net_sales'],
+    }
+
+    return render_template(
+        'sell_options.html',
+        current_category='__admin__',
+        categories=CATEGORIES,
+        counts=get_counts(),
+        items=items,
+        summary=summary,
+        totals=totals,
     )
 
 

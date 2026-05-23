@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}Sell Options · StuffApp{% endblock %}
+
+{% block content %}
+<div class="sell-options-page">
+  <div class="sell-options-head">
+    <div>
+      <div class="admin-crumbs"><a href="{{ url_for('admin_index') }}">Admin</a> &rsaquo; Sell Options</div>
+      <h1>Sell Options</h1>
+      <p>Watches marked Sell, with current commission, tax, and proceeds math.</p>
+    </div>
+    <button type="button" onclick="window.print()">Print</button>
+  </div>
+
+  <div class="sell-kpis">
+    <div class="sell-kpi">
+      <span>Watches</span>
+      <strong>{{ summary.total }}</strong>
+    </div>
+    <div class="sell-kpi">
+      <span>Gross</span>
+      <strong>{{ summary.gross_sales|currency }}</strong>
+    </div>
+    <div class="sell-kpi">
+      <span>Tax</span>
+      <strong>{{ summary.total_tax|currency }}</strong>
+    </div>
+    <div class="sell-kpi">
+      <span>Net Proceeds</span>
+      <strong>{{ summary.net_proceeds|currency }}</strong>
+    </div>
+    <div class="sell-kpi">
+      <span>Net Gain / Loss</span>
+      <strong class="{{ 'gain' if summary.net_gain_loss >= 0 else 'loss' }}">{{ summary.net_gain_loss|currency }}</strong>
+    </div>
+  </div>
+
+  <section class="sell-card">
+    <h2>Summary</h2>
+    <table class="sell-summary-table">
+      <tr><td>Gross Sales</td><td>{{ totals.gross_sales|currency }}</td></tr>
+      <tr><td>Commission</td><td>{{ totals.commission|currency }}</td></tr>
+      <tr><td>Net Sales</td><td>{{ totals.net_sales|currency }}</td></tr>
+      <tr><td>Federal Tax</td><td>{{ totals.federal_tax|currency }}</td></tr>
+      <tr><td>State Tax</td><td>{{ totals.state_tax|currency }}</td></tr>
+      <tr><td>Total Tax</td><td>{{ totals.total_tax|currency }}</td></tr>
+      <tr><td>Net Proceeds</td><td>{{ totals.net_proceeds|currency }}</td></tr>
+      <tr><td>Gross Gain / Loss</td><td class="{{ 'gain' if totals.gross_gain_loss >= 0 else 'loss' }}">{{ totals.gross_gain_loss|currency }}</td></tr>
+      <tr><td>Net Gain / Loss</td><td class="{{ 'gain' if totals.net_gain_loss >= 0 else 'loss' }}">{{ totals.net_gain_loss|currency }}</td></tr>
+    </table>
+  </section>
+
+  <section class="sell-card sell-ledger-card">
+    <h2>Sell Watch Details</h2>
+    {% if items %}
+    <table class="sell-ledger">
+      <thead>
+        <tr>
+          <th>Watch</th>
+          <th>Ref</th>
+          <th>Year</th>
+          <th>Owner</th>
+          <th>Property</th>
+          <th>Status</th>
+          <th>Sold To</th>
+          <th>Tax</th>
+          <th>Purchase</th>
+          <th>Gross</th>
+          <th>Comm.</th>
+          <th>Net Sale</th>
+          <th>Gross G/L</th>
+          <th>Fed</th>
+          <th>State</th>
+          <th>Total Tax</th>
+          <th>Net Proceeds</th>
+          <th>Net G/L</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td class="sell-title-cell">
+            {% if item.image %}
+            <img src="{{ url_for('uploaded_file', filename=item.image) }}" alt="">
+            {% endif %}
+            <a href="{{ url_for('detail_view', category='watches', record_id=item.row['id']) }}">{{ item.title }}</a>
+            <span>{{ item.brand }} {{ item.model }}</span>
+          </td>
+          <td>{{ item.ref }}</td>
+          <td>{{ item.year }}</td>
+          <td>{{ item.owner }}</td>
+          <td>{{ item.property }}</td>
+          <td>{{ item.status }}</td>
+          <td>{{ item.sold_to }}</td>
+          <td>{{ item.tax_state }} <small>{{ item.federal_rate_display }} / {{ item.state_rate_display }}</small></td>
+          <td class="money">{{ item.purchase|currency }}</td>
+          <td class="money">{{ item.gross_sales|currency }}</td>
+          <td class="money">{{ item.commission|currency }} <small>{{ (item.commission_rate * 100)|round(2) }}%</small></td>
+          <td class="money">{{ item.net_sales|currency }}</td>
+          <td class="money {{ 'gain' if item.gross_gain_loss is not none and item.gross_gain_loss >= 0 else 'loss' }}">{{ item.gross_gain_loss|currency }}</td>
+          <td class="money">{{ item.federal_tax|currency }}</td>
+          <td class="money">{{ item.state_tax|currency }}</td>
+          <td class="money">{{ item.total_tax|currency }}</td>
+          <td class="money">{{ item.net_proceeds|currency }}</td>
+          <td class="money {{ 'gain' if item.net_gain_loss is not none and item.net_gain_loss >= 0 else 'loss' }}">{{ item.net_gain_loss|currency }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th colspan="8">Total</th>
+          <th class="money">{{ totals.purchase|currency }}</th>
+          <th class="money">{{ totals.gross_sales|currency }}</th>
+          <th class="money">{{ totals.commission|currency }}</th>
+          <th class="money">{{ totals.net_sales|currency }}</th>
+          <th class="money {{ 'gain' if totals.gross_gain_loss >= 0 else 'loss' }}">{{ totals.gross_gain_loss|currency }}</th>
+          <th class="money">{{ totals.federal_tax|currency }}</th>
+          <th class="money">{{ totals.state_tax|currency }}</th>
+          <th class="money">{{ totals.total_tax|currency }}</th>
+          <th class="money">{{ totals.net_proceeds|currency }}</th>
+          <th class="money {{ 'gain' if totals.net_gain_loss >= 0 else 'loss' }}">{{ totals.net_gain_loss|currency }}</th>
+        </tr>
+      </tfoot>
+    </table>
+    {% else %}
+    <p class="empty-report">No watches are marked Sell.</p>
+    {% endif %}
+  </section>
+</div>
+
+<style>
+.sell-options-page {
+  max-width: 1420px;
+  margin: 24px auto;
+  padding: 0 16px 32px;
+  font-family: var(--font);
+}
+.sell-options-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.sell-options-head h1 { margin: 4px 0; font-size: 24px; }
+.sell-options-head p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.sell-options-head button {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 6px;
+  color: var(--blue);
+  font: inherit;
+  font-weight: 600;
+  padding: 7px 10px;
+}
+.admin-crumbs { font-size: 12px; color: var(--text-secondary); }
+.admin-crumbs a { color: var(--blue); text-decoration: none; }
+.sell-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.sell-kpi,
+.sell-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-soft);
+}
+.sell-kpi { padding: 12px 14px; }
+.sell-kpi span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+.sell-kpi strong { font-size: 20px; }
+.sell-card { margin-bottom: 14px; overflow: hidden; }
+.sell-card h2 {
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+}
+.sell-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.sell-summary-table td {
+  border-bottom: 1px solid var(--border-light);
+  padding: 7px 12px;
+}
+.sell-summary-table td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.sell-ledger {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.sell-ledger th,
+.sell-ledger td {
+  border-bottom: 1px solid var(--border-light);
+  padding: 6px 7px;
+  vertical-align: top;
+}
+.sell-ledger th {
+  background: #f1f5fb;
+  color: var(--text-secondary);
+  text-align: left;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.sell-ledger tfoot th {
+  border-top: 2px solid var(--border);
+  background: #f8fafc;
+}
+.sell-title-cell {
+  min-width: 210px;
+}
+.sell-title-cell img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  float: left;
+  margin-right: 8px;
+}
+.sell-title-cell a {
+  display: block;
+  color: var(--text);
+  font-weight: 700;
+  text-decoration: none;
+}
+.sell-title-cell span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.money {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.money small,
+.sell-ledger small {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.gain { color: #057a55; }
+.loss { color: #b91c1c; }
+.empty-report { margin: 0; padding: 20px; color: var(--text-secondary); }
+@media (max-width: 900px) {
+  .sell-options-head { display: block; }
+  .sell-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sell-ledger-card { overflow-x: auto; }
+}
+@media print {
+  .topnav, .sell-options-head button { display: none !important; }
+  .sell-options-page { max-width: none; margin: 0; padding: 0; }
+  .sell-kpis { grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .sell-kpi, .sell-card { box-shadow: none; break-inside: avoid; }
+  .sell-ledger { font-size: 9px; }
+  .sell-ledger th, .sell-ledger td { padding: 4px; }
+}
+</style>
+{% endblock %}
