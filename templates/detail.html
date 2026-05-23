@@ -3159,6 +3159,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
       // was in flight.
       if (stripUsdConversion(el.value) !== stripped) return;
       el.value = stripped + ' / $' + usd;
+      syncLinkedPurchaseField(el);
       if (el.classList && el.classList.contains('watch-order-deposit') &&
           typeof window.updateWatchOrderMath === 'function') {
         window.updateWatchOrderMath(true);
@@ -3210,6 +3211,20 @@ document.querySelectorAll('.comp-item').forEach(item => {
     const formatted = Math.round(num).toLocaleString('en-US');
     el.value = meta.prefix + formatted;
     applyUsdConversion(el);
+    syncLinkedPurchaseField(el);
+  }
+  function syncLinkedPurchaseField(source) {
+    if (!source || !source.name || !sellPanel) return;
+    const priceInput = form.querySelector('input[name="price"]');
+    const sellPurchaseInput = sellPanel.querySelector('[name="sell_purchase_price"]');
+    if (source.name === 'price' && sellPurchaseInput && sellPurchaseInput.value !== source.value) {
+      sellPurchaseInput.value = source.value;
+      saveField('sell_purchase_price', source.value);
+      updateSellMath();
+    } else if (source.name === 'sell_purchase_price' && priceInput && priceInput.value !== source.value) {
+      priceInput.value = source.value;
+      saveField('price', source.value);
+    }
   }
   form.querySelectorAll('input.price-input').forEach(el => {
     el.addEventListener('focus', () => {
@@ -3249,7 +3264,13 @@ document.querySelectorAll('.comp-item').forEach(item => {
     return `${y}-${m}-${day}`;
   }
   function sellMoneyNumber(raw) {
-    const s = stripUsdConversion(String(raw || '').trim());
+    const text = String(raw || '').trim();
+    const usdMatch = text.match(/\/\s*(?:US\$|USD|\$)\s*([-+]?\d[\d,]*(?:\.\d+)?)\s*$/i);
+    if (usdMatch) {
+      const usd = parseFloat(usdMatch[1].replace(/,/g, ''));
+      return isFinite(usd) ? usd : null;
+    }
+    const s = stripUsdConversion(text);
     if (!s) return null;
     const cleaned = s.replace(/[^0-9.\-]/g, '');
     if (!cleaned || cleaned === '-' || cleaned === '.' || cleaned === '-.') return null;

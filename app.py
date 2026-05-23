@@ -4897,6 +4897,16 @@ def save_field(category, record_id):
     now = datetime.utcnow().isoformat()
     db.execute(f"UPDATE {table} SET {field_name} = ?, updated_at = ? WHERE id = ?",
                [value if value != '' else None, now, record_id])
+    if category in SELL_PANEL_CATEGORIES:
+        linked_field = None
+        if field_name == 'price' and 'sell_purchase_price' in valid_fields:
+            linked_field = 'sell_purchase_price'
+        elif field_name == 'sell_purchase_price' and 'price' in valid_fields:
+            linked_field = 'price'
+        if linked_field:
+            db.execute(
+                f"UPDATE {table} SET {linked_field} = ?, updated_at = ? WHERE id = ?",
+                [value if value != '' else None, now, record_id])
 
     if category == 'watches' and field_name == 'status' \
             and str(value or '').strip().lower() == 'own':
@@ -12454,8 +12464,23 @@ def admin_sell_options():
 def _money_number(value):
     if value in (None, ''):
         return None
+    s = str(value).strip()
+    # Fields like "£1,000,000 / $1,291,900" carry the historical
+    # purchase-date USD equivalent after the slash. Report math should
+    # use that dollar equivalent, not the leading foreign-currency
+    # nominal amount.
+    usd_match = re.search(
+        r'/\s*(?:US\$|USD|\$)\s*([-+]?\d[\d,]*(?:\.\d+)?)\s*$',
+        s,
+        re.IGNORECASE,
+    )
+    if usd_match:
+        try:
+            return float(usd_match.group(1).replace(',', ''))
+        except (TypeError, ValueError):
+            return None
     try:
-        return float(str(value).replace(',', '').replace('$', ''))
+        return float(s.replace(',', '').replace('$', ''))
     except (TypeError, ValueError):
         return None
 
