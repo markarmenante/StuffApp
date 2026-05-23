@@ -906,6 +906,9 @@ input[type="number"]::-webkit-outer-spin-button {
 .sell-panel-summary {
   cursor: pointer;
   user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .sell-panel-summary::-webkit-details-marker {
   display: none;
@@ -919,20 +922,42 @@ input[type="number"]::-webkit-outer-spin-button {
   content: '▾';
 }
 .sell-panel-hint {
-  margin-left: 8px;
   color: var(--text-hint, #888);
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
 }
+.sell-tax-state-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+}
+.sell-tax-state-pill {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-secondary, #555);
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 10px;
+  line-height: 1.45;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.sell-tax-state-pill.active {
+  background: #111827;
+  border-color: #111827;
+  color: #fff;
+}
 .sell-panel-grid .dcell input[readonly] {
   color: var(--text-secondary, #555);
   background: #f8f8f8;
 }
-.sell-gain-loss.is-gain {
+.sell-tax-output.is-gain {
   color: #0f7a3a;
 }
-.sell-gain-loss.is-loss {
+.sell-tax-output.is-loss {
   color: #b3261e;
 }
 

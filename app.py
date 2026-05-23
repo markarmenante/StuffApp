@@ -837,8 +837,9 @@ FIELDS = {
 SELL_PANEL_FIELDS = [
     {'name': 'sell_purchase_price', 'label': 'Sell Purchase Price', 'type': 'text'},
     {'name': 'sell_estimated_sales_price', 'label': 'Estimated Sales Price', 'type': 'text'},
+    {'name': 'sell_tax_state', 'label': 'Sales Tax State', 'type': 'text'},
     {'name': 'sell_federal_tax', 'label': 'Federal Tax (31.8%)', 'type': 'text'},
-    {'name': 'sell_ny_tax', 'label': 'NY Tax (10.9%)', 'type': 'text'},
+    {'name': 'sell_state_tax', 'label': 'State Tax', 'type': 'text'},
     {'name': 'sell_after_tax_amount', 'label': 'After Tax Amount', 'type': 'text'},
     {'name': 'sell_gross_gain_loss', 'label': 'Gross Gain / Loss', 'type': 'text'},
     {'name': 'sell_net_gain_loss', 'label': 'Net Gain / Loss', 'type': 'text'},
@@ -2490,6 +2491,26 @@ def get_typeahead(table, *fields, owner_filter=None):
     return result
 
 
+def get_global_vendor_typeahead():
+    """Return vendor names from all inventory tables for cross-category prompts."""
+    db = get_db()
+    vendors = set()
+    for cfg in CATEGORIES.values():
+        table = cfg.get('table')
+        if not table:
+            continue
+        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        if 'vendor' not in cols:
+            continue
+        rows = db.execute(
+            f"SELECT DISTINCT vendor AS v FROM {table} "
+            "WHERE vendor IS NOT NULL AND vendor != '' "
+            "ORDER BY vendor"
+        ).fetchall()
+        vendors.update((r['v'] or '').strip() for r in rows if (r['v'] or '').strip())
+    return sorted(vendors, key=lambda s: s.lower())
+
+
 TYPEAHEAD_FIELDS = {
     'watches':      ('brand', 'dial_color', 'strap_color', 'vendor'),
     'coins':        ('region', 'mint', 'denomination', 'vendor'),
@@ -2513,9 +2534,11 @@ def build_typeahead(category):
     if not fields:
         return {}
     owner_filter = current_owner_name() if category == 'items' else None
-    return get_typeahead(
+    ta = get_typeahead(
         CATEGORIES[category]['table'], *fields, owner_filter=owner_filter
     )
+    ta['sold_to'] = get_global_vendor_typeahead()
+    return ta
 
 
 def allowed_file(filename):
