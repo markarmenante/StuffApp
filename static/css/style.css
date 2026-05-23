@@ -950,6 +950,23 @@ input[type="number"]::-webkit-outer-spin-button {
   border-color: #111827;
   color: #fff;
 }
+.sell-rates-pill {
+  border: 1px solid #9fd8ad;
+  background: #e7f8ec;
+  color: #126c2e;
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 10px;
+  line-height: 1.45;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.sell-rates-pill.is-stale {
+  border-color: #f3b1b1;
+  background: #fde8e8;
+  color: #b3261e;
+}
 .sell-panel-grid .dcell input[readonly] {
   color: var(--text-secondary, #555);
   background: #f8f8f8;
