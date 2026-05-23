@@ -75,9 +75,6 @@
         {% for item in items %}
         <tr data-watch-id="{{ item.row['id'] }}" class="{{ 'is-excluded' if not item.included }}">
           <td class="sell-title-cell">
-            {% if item.image %}
-            <img src="{{ url_for('uploaded_file', filename=item.image) }}" alt="">
-            {% endif %}
             <a href="{{ url_for('detail_view', category='watches', record_id=item.row['id']) }}">{{ item.title }}</a>
             <span>{{ item.brand }} {{ item.model }}</span>
           </td>
@@ -203,9 +200,7 @@
 .sell-ledger th,
 .sell-ledger td {
   border-bottom: 1px solid var(--border-light);
-  overflow: hidden;
   padding: 6px 5px;
-  text-overflow: ellipsis;
   vertical-align: top;
 }
 .sell-ledger th {
@@ -218,16 +213,6 @@
 .sell-ledger tfoot th {
   border-top: 2px solid var(--border);
   background: #f8fafc;
-}
-.sell-title-cell {
-  width: 19%;
-}
-.sell-title-cell img {
-  width: 30px;
-  height: 30px;
-  object-fit: contain;
-  float: left;
-  margin-right: 8px;
 }
 .sell-title-cell a {
   display: block;
@@ -274,11 +259,13 @@
   color: var(--text-secondary);
 }
 .money {
+  overflow: visible;
   text-align: right;
+  text-overflow: clip;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.sell-ledger th:nth-child(1) { width: 19%; }
+.sell-ledger th:nth-child(1) { width: 16%; }
 .sell-ledger th:nth-child(2) { width: 5%; }
 .sell-ledger th:nth-child(3) { width: 4%; }
 .sell-ledger th:nth-child(4),
@@ -290,7 +277,10 @@
 .sell-ledger th:nth-child(10),
 .sell-ledger th:nth-child(11),
 .sell-ledger th:nth-child(12),
-.sell-ledger th:nth-child(13) { width: 6%; }
+.sell-ledger th:nth-child(13) { width: 7.5%; }
+.sell-ledger tfoot .money {
+  font-size: 10px;
+}
 .money small,
 .sell-ledger small {
   display: block;

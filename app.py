@@ -11972,6 +11972,18 @@ def _report_record_title(category, row):
     return ' '.join(parts).strip() or (row['id'][:8] if 'id' in row.keys() else '')
 
 
+def _sell_options_watch_title(row, columns):
+    title = ''
+    for field in ('model', 'description', 'brand'):
+        if field in columns:
+            title = str(row[field] or '').strip()
+            if title:
+                break
+    if not title:
+        title = _report_record_title('watches', row)
+    return re.sub(r'\s*\([A-Z]\d{2,}\)\s*$', '', title).strip() or title
+
+
 def _report_property_predicate(category, properties):
     """SQL fragment + params restricting `category` rows to the given
     property names. Returns ('', []) when no filter applies (all
@@ -12379,14 +12391,9 @@ def admin_sell_options():
             if 'sell_keep' in columns and str(row['sell_keep'] or '').strip() == 'Sell'
             else 'Keep'
         )
-        image = ''
-        if 'image_obv' in columns:
-            image = (row['image_obv'] or '').strip()
-            if image and not is_image_filter(image):
-                image = ''
         item = {
             'row': row,
-            'title': _report_record_title('watches', row),
+            'title': _sell_options_watch_title(row, columns),
             'brand': row['brand'] if 'brand' in columns else '',
             'model': row['model'] if 'model' in columns else '',
             'ref': row['reference'] if 'reference' in columns else '',
@@ -12400,7 +12407,6 @@ def admin_sell_options():
             'tax_state': tax_state,
             'federal_rate_display': _format_percent(federal_rate),
             'state_rate_display': _format_percent(state_rate),
-            'image': image,
             'purchase': purchase,
             'gross_sales': sale,
             'commission_rate': commission_rate,
