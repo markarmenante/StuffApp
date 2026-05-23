@@ -57,11 +57,8 @@
       <thead>
         <tr>
           <th>Watch</th>
-          <th>Ref</th>
-          <th>Year</th>
-          <th>Owner</th>
           <th>Property</th>
-          <th>Status</th>
+          <th>Decision</th>
           <th>Sold To</th>
           <th>Tax</th>
           <th>Purchase</th>
@@ -78,7 +75,7 @@
       </thead>
       <tbody>
         {% for item in items %}
-        <tr>
+        <tr data-watch-id="{{ item.row['id'] }}" class="{{ 'is-excluded' if not item.included }}">
           <td class="sell-title-cell">
             {% if item.image %}
             <img src="{{ url_for('uploaded_file', filename=item.image) }}" alt="">
@@ -86,11 +83,16 @@
             <a href="{{ url_for('detail_view', category='watches', record_id=item.row['id']) }}">{{ item.title }}</a>
             <span>{{ item.brand }} {{ item.model }}</span>
           </td>
-          <td>{{ item.ref }}</td>
-          <td>{{ item.year }}</td>
-          <td>{{ item.owner }}</td>
           <td>{{ item.property }}</td>
-          <td>{{ item.status }}</td>
+          <td>
+            <button type="button"
+                    class="sell-report-pill {{ 'is-sell' if item.included else 'is-keep' }}"
+                    data-sell-report-toggle
+                    data-record-id="{{ item.row['id'] }}"
+                    data-decision="{{ item.decision }}">
+              {{ item.decision }}
+            </button>
+          </td>
           <td>{{ item.sold_to }}</td>
           <td>{{ item.tax_state }} <small>{{ item.federal_rate_display }} / {{ item.state_rate_display }}</small></td>
           <td class="money">{{ item.purchase|currency }}</td>
@@ -108,7 +110,7 @@
       </tbody>
       <tfoot>
         <tr>
-          <th colspan="8">Total</th>
+          <th colspan="5">Total</th>
           <th class="money">{{ totals.purchase|currency }}</th>
           <th class="money">{{ totals.gross_sales|currency }}</th>
           <th class="money">{{ totals.commission|currency }}</th>
@@ -239,6 +241,39 @@
   color: var(--text-secondary);
   font-size: 11px;
 }
+.sell-report-pill {
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  line-height: 1;
+  padding: 6px 10px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sell-report-pill.is-keep {
+  border-color: #34d399;
+  background: #d1fae5;
+  color: #065f46;
+}
+.sell-report-pill:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+.sell-ledger tr.is-excluded td {
+  color: var(--text-secondary);
+  opacity: .72;
+}
+.sell-ledger tr.is-excluded .money,
+.sell-ledger tr.is-excluded .gain,
+.sell-ledger tr.is-excluded .loss {
+  color: var(--text-secondary);
+}
 .money {
   text-align: right;
   white-space: nowrap;
@@ -266,6 +301,36 @@
   .sell-kpi, .sell-card { box-shadow: none; break-inside: avoid; }
   .sell-ledger { font-size: 9px; }
   .sell-ledger th, .sell-ledger td { padding: 4px; }
+  .sell-report-pill { display: none; }
 }
 </style>
+<script>
+document.querySelectorAll('[data-sell-report-toggle]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const recordId = btn.dataset.recordId;
+    if (!recordId || btn.disabled) return;
+    const nextValue = btn.dataset.decision === 'Sell' ? 'Keep' : 'Sell';
+    btn.disabled = true;
+    btn.textContent = nextValue;
+    btn.classList.toggle('is-sell', nextValue === 'Sell');
+    btn.classList.toggle('is-keep', nextValue !== 'Sell');
+    try {
+      const response = await fetch(`/watches/${encodeURIComponent(recordId)}/save-field`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({field: 'sell_keep', value: nextValue}),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      window.location.reload();
+    } catch (err) {
+      alert('Could not update Sell Options: ' + (err.message || err));
+      btn.disabled = false;
+      btn.textContent = btn.dataset.decision;
+      btn.classList.toggle('is-sell', btn.dataset.decision === 'Sell');
+      btn.classList.toggle('is-keep', btn.dataset.decision !== 'Sell');
+    }
+  });
+});
+</script>
 {% endblock %}

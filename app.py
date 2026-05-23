@@ -12276,10 +12276,25 @@ def admin_sell_options():
     columns = _table_column_names(db, 'watches')
     wheres, params = [], []
     _apply_row_filter_clauses('watches', wheres, params)
+    consideration_clauses = []
     if 'sell_keep' in columns:
-        wheres.append("LOWER(COALESCE(NULLIF(sell_keep,''),'Keep')) = 'sell'")
-    else:
-        wheres.append('1 = 0')
+        consideration_clauses.append(
+            "LOWER(COALESCE(NULLIF(sell_keep,''),'Keep')) = 'sell'"
+        )
+    for col in (
+        'sell_purchase_price', 'sell_estimated_sales_price',
+        'sell_commission_percent', 'sell_net_sales_price',
+        'sell_gross_gain_loss', 'sell_net_gain_loss',
+        'sell_federal_tax', 'sell_state_tax', 'sold_to',
+    ):
+        if col in columns:
+            consideration_clauses.append(
+                f"COALESCE(TRIM(CAST({col} AS TEXT)), '') != ''"
+            )
+    wheres.append(
+        '(' + ' OR '.join(consideration_clauses) + ')'
+        if consideration_clauses else '1 = 0'
+    )
 
     where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     rows = db.execute(
@@ -12359,6 +12374,11 @@ def admin_sell_options():
             if gross_gain_loss is not None and total_tax is not None else None
         )
         status = row['status'] if 'status' in columns and row['status'] else ''
+        decision = (
+            'Sell'
+            if 'sell_keep' in columns and str(row['sell_keep'] or '').strip() == 'Sell'
+            else 'Keep'
+        )
         image = ''
         if 'image_obv' in columns:
             image = (row['image_obv'] or '').strip()
@@ -12374,6 +12394,8 @@ def admin_sell_options():
             'owner': row['owner'] if 'owner' in columns else '',
             'property': row['property'] if 'property' in columns else '',
             'status': status,
+            'decision': decision,
+            'included': decision == 'Sell',
             'sold_to': row['sold_to'] if 'sold_to' in columns else '',
             'tax_state': tax_state,
             'federal_rate_display': _format_percent(federal_rate),
@@ -12392,8 +12414,10 @@ def admin_sell_options():
             'net_gain_loss': net_gain_loss,
         }
         items.append(item)
-        if sale is not None:
+        if item['included'] and sale is not None:
             priced_count += 1
+        if not item['included']:
+            continue
         for key in totals:
             value = item.get(key)
             if isinstance(value, (int, float)):
