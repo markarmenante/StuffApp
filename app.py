@@ -27,6 +27,8 @@ DATA_DIR = os.environ.get('DATA_DIR', BASE_DIR)
 DATABASE = os.path.join(DATA_DIR, 'stuffapp.db')
 UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'tif', 'tiff', 'heic', 'heif'}
+OPTIMIZED_IMAGE_MAX_EDGE = int(os.environ.get('STUFFAPP_IMAGE_MAX_EDGE', '2800'))
+OPTIMIZED_IMAGE_JPEG_QUALITY = int(os.environ.get('STUFFAPP_IMAGE_JPEG_QUALITY', '88'))
 
 # iPhones export photos as HEIC; browsers can't render it. Register the HEIF
 # opener so PIL can decode HEIC bytes, then convert to JPEG on upload.
@@ -99,6 +101,27 @@ CATEGORIES = {
         'label_field': 'name', 'sublabel_field': 'phone', 'image_field': 'head_shot',
     },
 }
+
+ITEM_IMAGE_FIELDS_BY_CATEGORY = {
+    'watches':      {'image_obv'},
+    'coins':        {'image_1', 'image_2'},
+    'cameras':      {'image'},
+    'lenses':       {'image'},
+    'pens':         {'image'},
+    'art':          {'image'},
+    'items':        {'image'},
+    'vehicles':     {'image'},
+    'recordings':   {'image'},
+    'audio':        {'image'},
+    'rifles':       {'image'},
+    'credit_cards': {'image_front', 'image_back'},
+    'properties':   {'image'},
+    'persons':      {'head_shot'},
+}
+
+
+def _is_item_image_field(category, field_name):
+    return field_name in ITEM_IMAGE_FIELDS_BY_CATEGORY.get(category, set())
 
 # Fields per category: name, label, type, options (for select/checkbox-group)
 COMPLICATIONS_OPTIONS = [
@@ -2562,7 +2585,78 @@ def _looks_like_heic(data):
     return len(data) >= 12 and data[4:8] == b'ftyp' and data[8:12] in _HEIF_BRANDS
 
 
-def save_upload(file_obj):
+def _is_supported_raster_ext(ext):
+    return (ext or '').lower().lstrip('.') in {
+        'png', 'jpg', 'jpeg', 'webp', 'tif', 'tiff', 'heic', 'heif', 'gif',
+    }
+
+
+def _flatten_image_for_jpeg(img):
+    """Return an RGB image with alpha composited over white."""
+    from PIL import Image
+
+    if img.mode == 'P' and 'transparency' in img.info:
+        img = img.convert('RGBA')
+    has_alpha = img.mode in ('RGBA', 'LA') or (
+        img.mode == 'P' and 'transparency' in img.info
+    )
+    if has_alpha:
+        rgba = img.convert('RGBA')
+        bg = Image.new('RGB', rgba.size, (255, 255, 255))
+        bg.paste(rgba, mask=rgba.split()[-1])
+        return bg
+    if img.mode not in ('RGB', 'L'):
+        img = img.convert('RGB')
+    elif img.mode == 'L':
+        img = img.convert('RGB')
+    return img
+
+
+def _open_upload_image(data):
+    from io import BytesIO
+    from PIL import Image, ImageOps
+
+    img = Image.open(BytesIO(data))
+    img = ImageOps.exif_transpose(img)
+    return img
+
+
+def _encode_optimized_image(data, source_name, *, force=False):
+    """Return (bytes, ext, info) for an optimized item-display image.
+
+    Item photos are app display assets, not archival documents, so they
+    are normalized into a bounded, metadata-light JPEG. Documents and
+    receipts intentionally bypass this helper.
+    """
+    ext = (source_name.rsplit('.', 1)[-1].lower()
+           if source_name and '.' in source_name else 'jpg')
+    if not _is_supported_raster_ext(ext):
+        return None
+    img = _open_upload_image(data)
+    orig_size = img.size
+    img = _flatten_image_for_jpeg(img)
+    if max(img.size) > OPTIMIZED_IMAGE_MAX_EDGE:
+        img.thumbnail((OPTIMIZED_IMAGE_MAX_EDGE, OPTIMIZED_IMAGE_MAX_EDGE))
+    from io import BytesIO
+    out = BytesIO()
+    img.save(
+        out,
+        format='JPEG',
+        quality=OPTIMIZED_IMAGE_JPEG_QUALITY,
+        optimize=True,
+        progressive=True,
+    )
+    optimized = out.getvalue()
+    return optimized, 'jpg', {
+        'orig_size': orig_size,
+        'new_size': img.size,
+        'orig_bytes': len(data),
+        'new_bytes': len(optimized),
+        'changed': force or ext not in ('jpg', 'jpeg') or optimized != data,
+    }
+
+
+def save_upload(file_obj, *, optimize_image=False):
     """Save an uploaded file and return the stored filename.
 
     Decode-and-re-encode runs whenever the image is HEIC/HEIF OR has
@@ -2584,31 +2678,37 @@ def save_upload(file_obj):
     try:
         from io import BytesIO
         from PIL import Image
-        img = Image.open(BytesIO(data))
+        if optimize_image:
+            optimized = _encode_optimized_image(
+                data, file_obj.filename, force=True
+            )
+            if optimized:
+                data, ext, info = optimized
+                app.logger.info(
+                    'save_upload: optimized item image %r %s→%s %s→%s bytes',
+                    file_obj.filename, info['orig_size'], info['new_size'],
+                    info['orig_bytes'], info['new_bytes']
+                )
+        if not optimize_image:
+            img = Image.open(BytesIO(data))
         # Promote palette-with-transparency to RGBA so alpha gets
         # flattened by the next branch (PNGs saved with type-3 palette
         # + tRNS chunk land here).
-        if img.mode == 'P' and 'transparency' in img.info:
-            img = img.convert('RGBA')
-        has_alpha = img.mode in ('RGBA', 'LA')
+            if img.mode == 'P' and 'transparency' in img.info:
+                img = img.convert('RGBA')
+            has_alpha = img.mode in ('RGBA', 'LA')
 
-        if is_heic or has_alpha:
-            if has_alpha:
-                bg = Image.new('RGB', img.size, (255, 255, 255))
-                alpha = img.split()[-1]
-                bg.paste(img.convert('RGB'), mask=alpha)
-                img = bg
-            elif img.mode != 'RGB':
-                img = img.convert('RGB')
-            out = BytesIO()
-            img.save(out, format='JPEG', quality=90)
-            data = out.getvalue()
-            ext = 'jpg'
-            app.logger.info(
-                'save_upload: re-encoded as JPEG (heic=%s, had_alpha=%s, '
-                'orig_ext=%s)', is_heic, has_alpha,
-                file_obj.filename.rsplit('.', 1)[-1].lower()
-            )
+            if is_heic or has_alpha:
+                img = _flatten_image_for_jpeg(img)
+                out = BytesIO()
+                img.save(out, format='JPEG', quality=90)
+                data = out.getvalue()
+                ext = 'jpg'
+                app.logger.info(
+                    'save_upload: re-encoded as JPEG (heic=%s, had_alpha=%s, '
+                    'orig_ext=%s)', is_heic, has_alpha,
+                    file_obj.filename.rsplit('.', 1)[-1].lower()
+                )
     except Exception as e:
         # Decode failed (SVG, unsupported format, malformed data). We
         # still write the original bytes — the file just bypasses the
@@ -4234,7 +4334,9 @@ def new_record(category):
                 continue
             if field['type'] == 'file':
                 f = request.files.get(fname)
-                stored = save_upload(f)
+                stored = save_upload(
+                    f, optimize_image=_is_item_image_field(category, fname)
+                )
                 if stored:
                     data[fname] = stored
                     if f and f.filename:
@@ -4488,7 +4590,9 @@ def detail_view(category, record_id):
             if field['type'] == 'file':
                 f = request.files.get(fname)
                 if f and f.filename:
-                    stored = save_upload(f)
+                    stored = save_upload(
+                        f, optimize_image=_is_item_image_field(category, fname)
+                    )
                     if stored:
                         updates[fname] = stored
                 # else keep existing value (don't overwrite)
@@ -5022,7 +5126,7 @@ def topic_upload_image(topic_id):
     f = request.files.get('image')
     if not f or not f.filename or not allowed_file(f.filename):
         return jsonify({'error': 'No file'}), 400
-    stored = save_upload(f)
+    stored = save_upload(f, optimize_image=True)
     if not stored:
         return jsonify({'error': 'Upload failed'}), 500
     db.execute(
@@ -5030,7 +5134,10 @@ def topic_upload_image(topic_id):
         [stored, topic_id],
     )
     db.commit()
-    return jsonify({'url': url_for('uploaded_file', filename=stored)})
+    return jsonify({
+        'url': url_for('uploaded_file', filename=stored),
+        'thumb_url': url_for('file_thumb', filename=stored),
+    })
 
 
 @app.route('/uploads/<filename>')
@@ -5045,10 +5152,11 @@ _FILE_THUMB_DIR = os.path.join(UPLOAD_FOLDER, '.thumbs')
 
 @app.route('/file-thumb/<filename>')
 def file_thumb(filename):
-    """Render a small preview for an uploaded document.
+    """Render a small cached preview for an uploaded file.
 
     PDFs: first page rendered via pypdfium2.
     HEIC/HEIF: rendered via pillow-heif (browsers don't display them).
+    JPEG/PNG/WebP/TIFF/GIF item images: bounded cached thumbnail.
     Cached as JPEG under .thumbs/. Failures log a reason and 404 so the
     template can fall back to its existing 📄 icon.
 
@@ -5068,7 +5176,8 @@ def file_thumb(filename):
     if not os.path.exists(src):
         return _bail(f'source file missing at {src}')
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in ('.pdf', '.heic', '.heif'):
+    if ext not in ('.pdf', '.heic', '.heif', '.jpg', '.jpeg', '.png',
+                   '.webp', '.tif', '.tiff', '.gif'):
         return _bail(f'unsupported extension: {ext!r}')
 
     try:
@@ -5080,7 +5189,7 @@ def file_thumb(filename):
     if not os.path.exists(thumb_path) or \
             os.path.getmtime(thumb_path) < os.path.getmtime(src):
         try:
-            from PIL import Image
+            from PIL import Image, ImageOps
             if ext == '.pdf':
                 try:
                     import pypdfium2 as pdfium
@@ -5093,16 +5202,17 @@ def file_thumb(filename):
                     pil = bitmap.to_pil()
                 finally:
                     doc.close()
-            else:  # .heic / .heif
+            elif ext in ('.heic', '.heif'):
                 try:
                     import pillow_heif
                     pillow_heif.register_heif_opener()
                 except ImportError as e:
                     return _bail(f'pillow-heif not installed: {e}', code=500)
-                pil = Image.open(src)
+                pil = ImageOps.exif_transpose(Image.open(src))
+            else:
+                pil = ImageOps.exif_transpose(Image.open(src))
             pil.thumbnail((320, 320))
-            if pil.mode not in ('RGB', 'L'):
-                pil = pil.convert('RGB')
+            pil = _flatten_image_for_jpeg(pil)
             pil.save(thumb_path, format='JPEG', quality=82)
         except Exception as e:
             import traceback
@@ -6539,7 +6649,7 @@ def upload_image(category, record_id):
     if not _user_can_see_row(category, existing):
         return jsonify({'error': 'Forbidden'}), 403
 
-    stored = save_upload(f)
+    stored = save_upload(f, optimize_image=_is_item_image_field(category, image_field))
     if not stored:
         return jsonify({'error': 'Upload failed'}), 500
 
@@ -6549,7 +6659,10 @@ def upload_image(category, record_id):
                                   image_field, f.filename)
     db.commit()
 
-    return jsonify({'url': url_for('uploaded_file', filename=stored)})
+    return jsonify({
+        'url': url_for('uploaded_file', filename=stored),
+        'thumb_url': url_for('file_thumb', filename=stored),
+    })
 
 
 # File-typed columns whose underlying file we INTENTIONALLY keep on disk
@@ -9826,6 +9939,26 @@ def admin_index():
     """
     actions = [
         {
+            'label': "Item images: optimize existing uploads (dry run)",
+            'desc':  "Scans only fixed item-image fields (watch photos, coin "
+                     "obverse/reverse, cover images, card fronts/backs, etc.) "
+                     "and reports which oversized PNG/JPEG/HEIC/WebP/TIFF files "
+                     "would be converted to bounded display JPEGs. Documents, "
+                     "receipts, license scans, and health-card scans are not touched.",
+            'url':   url_for('admin_optimize_item_images'),
+            'extra': {'dry': '1'},
+        },
+        {
+            'label': "Item images: optimize existing uploads",
+            'desc':  "Applies the item-image optimization, updates DB file "
+                     "references to the new compact JPEGs, and deletes old "
+                     "source files only when no DB row/document still references "
+                     "them. Run the dry run first.",
+            'url':   url_for('admin_optimize_item_images'),
+            'extra': {'dry': '0'},
+            'confirm': True,
+        },
+        {
             'label': "Receipt phantoms: scan (dry run)",
             'desc':  "Reports per-category counts of legacy receipt-column "
                      "phantoms that the receipt→documents migration left "
@@ -10155,6 +10288,160 @@ def _collect_referenced_uploads(db):
                     if fn:
                         referenced.add(fn)
     return referenced
+
+
+def _iter_item_image_slots(db):
+    """Yield fixed app-image fields that should be display-optimized.
+
+    Documents JSON entries, receipts, scans, license images, and health
+    cards are deliberately excluded.
+    """
+    for category, fields in ITEM_IMAGE_FIELDS_BY_CATEGORY.items():
+        info = CATEGORIES.get(category)
+        if not info:
+            continue
+        table = info['table']
+        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        present = [f for f in sorted(fields) if f in cols]
+        if not present or 'id' not in cols:
+            continue
+        sel = ', '.join(['id'] + present)
+        try:
+            rows = db.execute(f"SELECT {sel} FROM {table}").fetchall()
+        except sqlite3.OperationalError:
+            continue
+        for row in rows:
+            for field in present:
+                filename = (row[field] or '').strip()
+                if filename:
+                    yield category, table, row['id'], field, filename
+
+
+def _existing_image_needs_optimization(filename, data):
+    ext = os.path.splitext(filename)[1].lower().lstrip('.')
+    if not _is_supported_raster_ext(ext):
+        return False, 'not a raster image'
+    try:
+        img = _open_upload_image(data)
+    except Exception as e:
+        return False, f'cannot decode: {e.__class__.__name__}'
+    if ext not in ('jpg', 'jpeg'):
+        return True, f'{ext} → jpg'
+    if max(img.size) > OPTIMIZED_IMAGE_MAX_EDGE:
+        return True, f'{img.size[0]}x{img.size[1]} exceeds {OPTIMIZED_IMAGE_MAX_EDGE}px'
+    if len(data) > 900_000:
+        return True, f'{len(data)} bytes exceeds 900KB'
+    return False, 'already compact jpg'
+
+
+def _delete_cached_thumb(filename):
+    thumb = os.path.join(_FILE_THUMB_DIR, filename + '.jpg')
+    if os.path.exists(thumb):
+        try:
+            os.unlink(thumb)
+        except OSError:
+            pass
+
+
+@app.route('/admin/optimize-item-images', methods=['POST'])
+def admin_optimize_item_images():
+    """Dry-run/apply optimizer for existing fixed item-image fields.
+
+    This intentionally avoids document JSON, receipts, license/health-card
+    scans, and other archival file slots.
+    """
+    if request.form.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    dry = request.form.get('dry', '1') != '0'
+    db = get_db()
+    now = datetime.utcnow().isoformat()
+    report = {
+        'dry_run': dry,
+        'scanned': 0,
+        'optimized': 0,
+        'skipped': 0,
+        'missing': 0,
+        'old_bytes': 0,
+        'new_bytes': 0,
+        'deleted_old_files': 0,
+        'sample': [],
+    }
+    old_names = set()
+    for category, table, row_id, field, filename in _iter_item_image_slots(db):
+        report['scanned'] += 1
+        path = os.path.join(UPLOAD_FOLDER, filename)
+        if not os.path.isfile(path):
+            report['missing'] += 1
+            if len(report['sample']) < 40:
+                report['sample'].append({
+                    'category': category, 'id': row_id, 'field': field,
+                    'filename': filename, 'action': 'missing',
+                })
+            continue
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read()
+        except OSError as e:
+            report['skipped'] += 1
+            if len(report['sample']) < 40:
+                report['sample'].append({
+                    'category': category, 'id': row_id, 'field': field,
+                    'filename': filename, 'action': f'read failed: {e}',
+                })
+            continue
+        needs, reason = _existing_image_needs_optimization(filename, data)
+        if not needs:
+            report['skipped'] += 1
+            continue
+        try:
+            optimized = _encode_optimized_image(data, filename, force=True)
+        except Exception as e:
+            report['skipped'] += 1
+            if len(report['sample']) < 40:
+                report['sample'].append({
+                    'category': category, 'id': row_id, 'field': field,
+                    'filename': filename, 'action': f'encode failed: {e.__class__.__name__}',
+                })
+            continue
+        if not optimized:
+            report['skipped'] += 1
+            continue
+        new_data, new_ext, info = optimized
+        report['optimized'] += 1
+        report['old_bytes'] += len(data)
+        report['new_bytes'] += len(new_data)
+        new_name = f"{uuid.uuid4().hex}.{new_ext}"
+        if len(report['sample']) < 40:
+            report['sample'].append({
+                'category': category, 'id': row_id, 'field': field,
+                'filename': filename, 'new_filename': new_name,
+                'reason': reason,
+                'old_bytes': len(data), 'new_bytes': len(new_data),
+                'old_size': info['orig_size'], 'new_size': info['new_size'],
+            })
+        if dry:
+            continue
+        with open(os.path.join(UPLOAD_FOLDER, new_name), 'wb') as fh:
+            fh.write(new_data)
+        db.execute(
+            f"UPDATE {table} SET {field} = ?, updated_at = ? WHERE id = ?",
+            [new_name, now, row_id],
+        )
+        old_names.add(filename)
+    if not dry:
+        db.commit()
+        still_referenced = _collect_referenced_uploads(db)
+        for old_name in old_names:
+            if old_name in still_referenced:
+                continue
+            try:
+                os.unlink(os.path.join(UPLOAD_FOLDER, old_name))
+                _delete_cached_thumb(old_name)
+                report['deleted_old_files'] += 1
+            except OSError:
+                pass
+    report['saved_bytes'] = report['old_bytes'] - report['new_bytes']
+    return jsonify(report)
 
 
 def _norm(s):
@@ -14038,7 +14325,9 @@ def sweep_files():
                     })
                     continue
 
-            stored = save_upload(f)
+            stored = save_upload(
+                f, optimize_image=bool(chosen_field and _is_item_image_field(cat, chosen_field))
+            )
             if not stored:
                 report['skipped'].append({'file': rel, 'reason': 'save_upload failed (unsupported type?)'})
                 continue

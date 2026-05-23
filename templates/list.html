@@ -168,7 +168,7 @@
          title="Drop an image here to upload">
       {% set img = row[cat_info.image_field] if cat_info.image_field else none %}
       {% if img and img|is_image %}
-        <img src="{{ url_for('uploaded_file', filename=img) }}" alt="" loading="lazy">
+        <img src="{{ url_for('file_thumb', filename=img) }}" alt="" loading="lazy">
       {% else %}
         <span class="no-img">{{ cat_info.icon }}</span>
       {% endif %}
@@ -185,7 +185,7 @@
          title="Drop the reverse image here">
       {% set img2 = row['image_2'] %}
       {% if img2 and img2|is_image %}
-        <img src="{{ url_for('uploaded_file', filename=img2) }}" alt="" loading="lazy">
+        <img src="{{ url_for('file_thumb', filename=img2) }}" alt="" loading="lazy">
       {% else %}
         <span class="no-img">{{ cat_info.icon }}</span>
       {% endif %}
@@ -713,13 +713,14 @@ window.shareCardRow = async function (ev, btn) {
         thumb.classList.remove('uploading');
         if (data.url) {
           var img = thumb.querySelector('img');
+          var displayUrl = data.thumb_url || data.url;
           var noImg = thumb.querySelector('.no-img');
           if (img) {
-            img.src = data.url;
+            img.src = displayUrl;
           } else {
             if (noImg) noImg.remove();
             var newImg = document.createElement('img');
-            newImg.src = data.url;
+            newImg.src = displayUrl;
             newImg.alt = '';
             thumb.insertBefore(newImg, thumb.firstChild);
           }
