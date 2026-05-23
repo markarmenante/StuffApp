@@ -477,3 +477,14 @@ CREATE TABLE IF NOT EXISTS tombstones (
     deleted_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at);
+
+-- Native mobile clients keep a local read cache. File tombstones above
+-- remove local bytes; these record tombstones remove deleted rows.
+CREATE TABLE IF NOT EXISTS mobile_record_tombstones (
+    id TEXT PRIMARY KEY,
+    category TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    deleted_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_record_tombstones_deleted_at
+    ON mobile_record_tombstones(deleted_at);

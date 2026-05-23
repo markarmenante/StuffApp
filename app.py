@@ -4832,6 +4832,15 @@ def delete_record(category, record_id):
             if fn:
                 _record_tombstone(db, category, existing,
                                   (d.get('title') or '').strip(), fn)
+    try:
+        db.execute(
+            "INSERT INTO mobile_record_tombstones "
+            "(id, category, record_id, deleted_at) VALUES (?, ?, ?, ?)",
+            [str(uuid.uuid4()), category, record_id,
+             datetime.utcnow().isoformat()],
+        )
+    except sqlite3.OperationalError:
+        pass
     db.execute(f"DELETE FROM {table} WHERE id = ?", [record_id])
     if gap_group:
         _renumber_coin_groups(db, [gap_group])
@@ -12909,6 +12918,256 @@ def offline_manifest():
         'images': _dedup(images),
         'docs': _dedup(docs),
         'generated_at': datetime.utcnow().isoformat() + 'Z',
+    })
+
+
+# ---------------------------------------------------------------------------
+# Native mobile sync API. The web app remains source of truth; an iOS
+# client can pull a local SQLite/file cache from these endpoints and
+# replay queued edits through the existing field/document APIs when online.
+# ---------------------------------------------------------------------------
+
+def _mobile_upload_stat(filename):
+    if not filename:
+        return {}
+    path = os.path.join(UPLOAD_FOLDER, filename)
+    try:
+        st = os.stat(path)
+    except OSError:
+        return {}
+    return {
+        'size': st.st_size,
+        'mtime': datetime.utcfromtimestamp(st.st_mtime).isoformat() + 'Z',
+    }
+
+
+def _mobile_file_entry(filename, label='', field='', doc_set=''):
+    filename = (filename or '').strip()
+    if not filename:
+        return None
+    entry = {
+        'filename': filename,
+        'label': label or '',
+        'field': field or '',
+        'doc_set': doc_set or '',
+        'is_image': bool(is_image_filter(filename)),
+        'url': url_for('uploaded_file', filename=filename),
+        'thumb_url': url_for('file_thumb', filename=filename)
+                     if is_image_filter(filename) else None,
+    }
+    entry.update(_mobile_upload_stat(filename))
+    return entry
+
+
+def _mobile_row_files(category, row, cols):
+    files = []
+    seen = set()
+
+    def add(entry):
+        if not entry or entry['filename'] in seen:
+            return
+        seen.add(entry['filename'])
+        files.append(entry)
+
+    for field in visible_fields(category):
+        if field.get('type') != 'file':
+            continue
+        name = field['name']
+        if name not in cols:
+            continue
+        try:
+            filename = row[name]
+        except (KeyError, IndexError):
+            filename = ''
+        add(_mobile_file_entry(filename, field.get('label') or name, name))
+
+    for doc_set, json_col in DOC_SETS_BY_CATEGORY.get(category, {}).items():
+        if json_col not in cols:
+            continue
+        try:
+            raw = row[json_col]
+        except (KeyError, IndexError):
+            raw = None
+        if not raw:
+            continue
+        try:
+            docs = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(docs, list):
+            continue
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            add(_mobile_file_entry(
+                doc.get('filename'),
+                doc.get('title') or 'Document',
+                json_col,
+                doc_set,
+            ))
+    return files
+
+
+def _mobile_row_payload(category, row, cols):
+    data = {}
+    for col in cols:
+        try:
+            data[col] = row[col]
+        except (KeyError, IndexError):
+            data[col] = None
+    return {
+        'category': category,
+        'id': row['id'],
+        'updated_at': data.get('updated_at'),
+        'data': data,
+        'files': _mobile_row_files(category, row, set(cols)),
+    }
+
+
+def _mobile_categories_payload():
+    allowed = g.get('allowed_cats') or set()
+    return {
+        slug: {
+            'name': info['name'],
+            'singular': info['singular'],
+            'label_field': info['label_field'],
+            'sublabel_field': info['sublabel_field'],
+            'image_field': info['image_field'],
+            'fields': [
+                {k: v for k, v in field.items()
+                 if k in ('name', 'label', 'type', 'options', 'readonly')}
+                for field in visible_fields(slug)
+            ],
+        }
+        for slug, info in CATEGORIES.items()
+        if slug in allowed
+    }
+
+
+def _mobile_visible_rows(since=None):
+    db = get_db()
+    allowed = g.get('allowed_cats') or set()
+    out = {}
+    all_files = {}
+    max_updated_at = None
+
+    for slug, info in CATEGORIES.items():
+        if slug not in allowed:
+            continue
+        table = info['table']
+        try:
+            cols = [r['name'] for r in db.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()]
+        except sqlite3.OperationalError:
+            continue
+        wheres, params = [], []
+        _apply_row_filter_clauses(slug, wheres, params)
+        if since and 'updated_at' in cols:
+            wheres.append("(updated_at IS NOT NULL AND updated_at >= ?)")
+            params.append(since)
+        where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+        try:
+            rows = db.execute(
+                f"SELECT * FROM {table} {where_sql}", params
+            ).fetchall()
+        except sqlite3.OperationalError:
+            continue
+
+        payload_rows = []
+        for row in rows:
+            if not _user_can_see_row(slug, row):
+                continue
+            payload = _mobile_row_payload(slug, row, cols)
+            payload_rows.append(payload)
+            updated_at = payload.get('updated_at')
+            if updated_at and (max_updated_at is None or updated_at > max_updated_at):
+                max_updated_at = updated_at
+            for file_entry in payload['files']:
+                all_files[file_entry['filename']] = file_entry
+        out[slug] = payload_rows
+
+    return out, list(all_files.values()), max_updated_at
+
+
+def _mobile_record_tombstones(since=None):
+    db = get_db()
+    allowed = g.get('allowed_cats') or set()
+    wheres, params = [], []
+    if since:
+        wheres.append("(deleted_at IS NOT NULL AND deleted_at >= ?)")
+        params.append(since)
+    if allowed:
+        ph = ','.join(['?' for _ in allowed])
+        wheres.append(f"(category IN ({ph}))")
+        params.extend(sorted(allowed))
+    where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+    try:
+        rows = db.execute(
+            f"SELECT category, record_id, deleted_at "
+            f"FROM mobile_record_tombstones {where_sql} "
+            f"ORDER BY deleted_at", params
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [dict(r) for r in rows]
+
+
+def _mobile_file_tombstones(since=None):
+    db = get_db()
+    allowed = g.get('allowed_cats') or set()
+    wheres, params = [], []
+    if since:
+        wheres.append("(deleted_at IS NOT NULL AND deleted_at >= ?)")
+        params.append(since)
+    if allowed:
+        ph = ','.join(['?' for _ in allowed])
+        wheres.append(f"(category IN ({ph}))")
+        params.extend(sorted(allowed))
+    where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+    try:
+        rows = db.execute(
+            f"SELECT category, filename, label, deleted_at "
+            f"FROM tombstones {where_sql} ORDER BY deleted_at", params
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [dict(r) for r in rows]
+
+
+@app.route('/api/mobile/snapshot', methods=['GET'])
+def mobile_snapshot():
+    """Full record + file manifest for a native offline cache."""
+    if not g.get('current_user'):
+        abort(403)
+    records, files, max_updated_at = _mobile_visible_rows()
+    generated_at = datetime.utcnow().isoformat() + 'Z'
+    return jsonify({
+        'schema_version': 1,
+        'generated_at': generated_at,
+        'max_updated_at': max_updated_at or generated_at,
+        'categories': _mobile_categories_payload(),
+        'records': records,
+        'files': files,
+    })
+
+
+@app.route('/api/mobile/changes', methods=['GET'])
+def mobile_changes():
+    """Incremental changes for native clients. Pass ?since=<ISO time>."""
+    if not g.get('current_user'):
+        abort(403)
+    since = (request.args.get('since') or '').strip() or None
+    records, files, max_updated_at = _mobile_visible_rows(since=since)
+    generated_at = datetime.utcnow().isoformat() + 'Z'
+    return jsonify({
+        'schema_version': 1,
+        'generated_at': generated_at,
+        'max_updated_at': max_updated_at or generated_at,
+        'records': records,
+        'files': files,
+        'record_tombstones': _mobile_record_tombstones(since=since),
+        'file_tombstones': _mobile_file_tombstones(since=since),
     })
 
 
