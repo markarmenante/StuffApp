@@ -97,7 +97,9 @@
 {% if category in ['watches','coins','cameras','lenses','pens','art','items','vehicles','recordings','audio','rifles','properties'] %}
 {% set _has_sell = (
   val('sell_purchase_price') or val('sell_estimated_sales_price') or
-  val('sell_federal_tax') or val('sell_ny_tax') or val('sold_to') or
+  val('sell_federal_tax') or val('sell_ny_tax') or
+  val('sell_after_tax_amount') or val('sell_gross_gain_loss') or
+  val('sell_net_gain_loss') or val('sold_to') or
   (val('status')|lower == 'sold')
 ) %}
 {% set _sell_purchase = val('sell_purchase_price') if val('sell_purchase_price') else (val('price')|currency) %}
@@ -131,24 +133,31 @@
       <span class="clabel">Sold To</span>
     </div>
   </div>
-  <div class="dgrid dg4 sell-panel-grid">
+  <div class="dgrid dg5 sell-panel-grid">
     <div class="dcell">
       <input type="text" name="sell_federal_tax" value="{{ val('sell_federal_tax')|currency }}"
-             class="price-input sell-money" inputmode="numeric">
-      <span class="clabel">Estimated Federal Tax</span>
+             class="sell-tax-output" readonly>
+      <span class="clabel">Federal Tax (31.8%)</span>
     </div>
     <div class="dcell">
       <input type="text" name="sell_ny_tax" value="{{ val('sell_ny_tax')|currency }}"
-             class="price-input sell-money" inputmode="numeric">
-      <span class="clabel">Estimated NY Tax</span>
+             class="sell-tax-output" readonly>
+      <span class="clabel">NY Tax (10.9%)</span>
     </div>
     <div class="dcell">
-      <input type="text" class="sell-after-tax" readonly>
+      <input type="text" name="sell_after_tax_amount" value="{{ val('sell_after_tax_amount')|currency }}"
+             class="sell-after-tax sell-tax-output" readonly>
       <span class="clabel">After Tax Amount</span>
     </div>
     <div class="dcell">
-      <input type="text" class="sell-gain-loss" readonly>
-      <span class="clabel">Gain / Loss</span>
+      <input type="text" name="sell_gross_gain_loss" value="{{ val('sell_gross_gain_loss')|currency }}"
+             class="sell-gross-gain-loss sell-tax-output" readonly>
+      <span class="clabel">Gross Gain / Loss</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="sell_net_gain_loss" value="{{ val('sell_net_gain_loss')|currency }}"
+             class="sell-net-gain-loss sell-tax-output" readonly>
+      <span class="clabel">Net Gain / Loss</span>
     </div>
   </div>
 </details>
@@ -3198,6 +3207,8 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // Sell panel: keep the duplicated Own/Sold status in sync with the
   // canonical status field, and calculate proceeds live.
   const sellPanel = form.querySelector('.sell-panel');
+  const SELL_FEDERAL_TAX_RATE = 0.318; // 28% collectibles rate + 3.8% NIIT.
+  const SELL_NY_TAX_RATE = 0.109;
   function sellMoneyNumber(raw) {
     const s = stripUsdConversion(String(raw || '').trim());
     if (!s) return null;
@@ -3211,21 +3222,42 @@ document.querySelectorAll('.comp-item').forEach(item => {
     const sign = value < 0 ? '-' : '';
     return sign + '$' + Math.abs(Math.round(value)).toLocaleString('en-US');
   }
+  function setComputedSellMoney(input, value) {
+    if (!input) return;
+    const text = value == null ? '' : moneyDisplay(value);
+    if (input.value === text) return;
+    input.value = text;
+    if (recordExists && input.name) {
+      saveField(input.name, text);
+    }
+  }
   function updateSellMath() {
     if (!sellPanel) return;
     const purchase = sellMoneyNumber(sellPanel.querySelector('[name="sell_purchase_price"]')?.value);
     const sale = sellMoneyNumber(sellPanel.querySelector('[name="sell_estimated_sales_price"]')?.value);
-    const federal = sellMoneyNumber(sellPanel.querySelector('[name="sell_federal_tax"]')?.value) || 0;
-    const ny = sellMoneyNumber(sellPanel.querySelector('[name="sell_ny_tax"]')?.value) || 0;
+    const gain = sale == null || purchase == null ? null : sale - purchase;
+    const taxableGain = gain == null ? null : Math.max(0, gain);
+    const federal = taxableGain == null ? null : taxableGain * SELL_FEDERAL_TAX_RATE;
+    const ny = taxableGain == null ? null : taxableGain * SELL_NY_TAX_RATE;
+    const totalTax = federal == null || ny == null ? null : federal + ny;
+    const afterTaxValue = sale == null || totalTax == null ? null : sale - totalTax;
+    const netGain = gain == null || totalTax == null ? null : gain - totalTax;
+    setComputedSellMoney(sellPanel.querySelector('[name="sell_federal_tax"]'), federal);
+    setComputedSellMoney(sellPanel.querySelector('[name="sell_ny_tax"]'), ny);
     const afterTax = sellPanel.querySelector('.sell-after-tax');
-    const gainLoss = sellPanel.querySelector('.sell-gain-loss');
-    if (afterTax) afterTax.value = sale == null ? '' : moneyDisplay(sale - federal - ny);
-    if (gainLoss) {
-      const value = sale == null || purchase == null ? null : sale - purchase;
-      gainLoss.value = value == null ? '' : moneyDisplay(value);
-      gainLoss.classList.toggle('is-gain', value != null && value >= 0);
-      gainLoss.classList.toggle('is-loss', value != null && value < 0);
-    }
+    const grossGainLoss = sellPanel.querySelector('.sell-gross-gain-loss');
+    const netGainLoss = sellPanel.querySelector('.sell-net-gain-loss');
+    setComputedSellMoney(afterTax, afterTaxValue);
+    setComputedSellMoney(grossGainLoss, gain);
+    setComputedSellMoney(netGainLoss, netGain);
+    [
+      [grossGainLoss, gain],
+      [netGainLoss, netGain],
+    ].forEach(([input, value]) => {
+      if (!input) return;
+      input.classList.toggle('is-gain', value != null && value >= 0);
+      input.classList.toggle('is-loss', value != null && value < 0);
+    });
   }
   if (sellPanel) {
     sellPanel.querySelectorAll('.sell-money').forEach(input => {

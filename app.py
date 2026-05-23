@@ -837,8 +837,11 @@ FIELDS = {
 SELL_PANEL_FIELDS = [
     {'name': 'sell_purchase_price', 'label': 'Sell Purchase Price', 'type': 'text'},
     {'name': 'sell_estimated_sales_price', 'label': 'Estimated Sales Price', 'type': 'text'},
-    {'name': 'sell_federal_tax', 'label': 'Estimated Federal Tax', 'type': 'text'},
-    {'name': 'sell_ny_tax', 'label': 'Estimated NY Tax', 'type': 'text'},
+    {'name': 'sell_federal_tax', 'label': 'Federal Tax (31.8%)', 'type': 'text'},
+    {'name': 'sell_ny_tax', 'label': 'NY Tax (10.9%)', 'type': 'text'},
+    {'name': 'sell_after_tax_amount', 'label': 'After Tax Amount', 'type': 'text'},
+    {'name': 'sell_gross_gain_loss', 'label': 'Gross Gain / Loss', 'type': 'text'},
+    {'name': 'sell_net_gain_loss', 'label': 'Net Gain / Loss', 'type': 'text'},
     {'name': 'sold_to', 'label': 'Sold To', 'type': 'text'},
 ]
 SELL_PANEL_CATEGORIES = (
