@@ -45,7 +45,7 @@ struct ContentView: View {
         }
         .task {
             await viewModel.loadLocalCache()
-            if viewModel.records.isEmpty {
+            if !viewModel.records.isEmpty {
                 await viewModel.sync()
             }
         }
@@ -79,7 +79,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("No offline cache yet")
                     .font(.title3.weight(.semibold))
-                Text("Open the live Stuff app once, sign in if asked, then sync to keep records and files on this iPhone.")
+                Text("Open the live Stuff app once, sign in if asked, tap Done, then sync to keep records and files on this iPhone.")
                     .foregroundStyle(.secondary)
             }
 

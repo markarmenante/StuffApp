@@ -6,9 +6,14 @@ enum StuffCookieBridge {
     static func syncWebCookiesToURLSession() async {
         let cookieStore = WKWebsiteDataStore.default().httpCookieStore
         let cookies = await cookieStore.allCookies()
-        for cookie in cookies where cookie.domain.contains("stuff.armenante.com") {
+        for cookie in cookies where shouldCopy(cookie) {
             HTTPCookieStorage.shared.setCookie(cookie)
         }
+    }
+
+    private static func shouldCopy(_ cookie: HTTPCookie) -> Bool {
+        let domain = cookie.domain.lowercased()
+        return domain.contains("armenante.com") || domain.contains("cloudflareaccess.com")
     }
 }
 

@@ -4,6 +4,8 @@ actor StuffSyncClient {
     enum SyncError: Error {
         case badResponse(Int)
         case invalidFileURL(String)
+        case signInRequired
+        case invalidJSON(String)
     }
 
     private let session: URLSession
@@ -45,7 +47,17 @@ actor StuffSyncClient {
         }
         let (data, response) = try await session.data(from: url)
         try validate(response)
-        return try decoder.decode(T.self, from: data)
+        if let http = response as? HTTPURLResponse {
+            let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+            if !contentType.contains("json") {
+                throw SyncError.signInRequired
+            }
+        }
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw SyncError.invalidJSON(error.localizedDescription)
+        }
     }
 
     private func downloadMissingFiles(
@@ -82,7 +94,25 @@ actor StuffSyncClient {
             return
         }
         guard (200..<300).contains(http.statusCode) else {
+            if [401, 403].contains(http.statusCode) || (300..<400).contains(http.statusCode) {
+                throw SyncError.signInRequired
+            }
             throw SyncError.badResponse(http.statusCode)
+        }
+    }
+}
+
+extension StuffSyncClient.SyncError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .badResponse(let status):
+            return "Stuff sync failed with HTTP \(status)."
+        case .invalidFileURL(let path):
+            return "Stuff sync found an invalid file URL: \(path)."
+        case .signInRequired:
+            return "Open Live Stuff, sign in, tap Done, then Sync."
+        case .invalidJSON(let detail):
+            return "Stuff returned data the iPhone app could not read: \(detail)"
         }
     }
 }
