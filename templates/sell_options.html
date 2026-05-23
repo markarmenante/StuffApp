@@ -54,6 +54,21 @@
     <h2>Sell Watch Details</h2>
     {% if items %}
     <table class="sell-ledger">
+      <colgroup>
+        <col class="col-watch">
+        <col class="col-decision">
+        <col class="col-tax">
+        <col class="col-money">
+        <col class="col-money">
+        <col class="col-money">
+        <col class="col-money">
+        <col class="col-money">
+        <col class="col-money">
+        <col class="col-money">
+        <col class="col-money">
+        <col class="col-money">
+        <col class="col-money">
+      </colgroup>
       <thead>
         <tr>
           <th>Watch</th>
@@ -103,17 +118,19 @@
       </tbody>
       <tfoot>
         <tr>
-          <th colspan="3">Total</th>
-          <th class="money">{{ totals.purchase|currency }}</th>
-          <th class="money">{{ totals.gross_sales|currency }}</th>
-          <th class="money">{{ totals.commission|currency }}</th>
-          <th class="money">{{ totals.net_sales|currency }}</th>
-          <th class="money {{ 'gain' if totals.gross_gain_loss >= 0 else 'loss' }}">{{ totals.gross_gain_loss|currency }}</th>
-          <th class="money">{{ totals.federal_tax|currency }}</th>
-          <th class="money">{{ totals.state_tax|currency }}</th>
-          <th class="money">{{ totals.total_tax|currency }}</th>
-          <th class="money">{{ totals.net_proceeds|currency }}</th>
-          <th class="money {{ 'gain' if totals.net_gain_loss >= 0 else 'loss' }}">{{ totals.net_gain_loss|currency }}</th>
+          <th>Total</th>
+          <td></td>
+          <td></td>
+          <td class="money">{{ totals.purchase|currency }}</td>
+          <td class="money">{{ totals.gross_sales|currency }}</td>
+          <td class="money">{{ totals.commission|currency }}</td>
+          <td class="money">{{ totals.net_sales|currency }}</td>
+          <td class="money {{ 'gain' if totals.gross_gain_loss >= 0 else 'loss' }}">{{ totals.gross_gain_loss|currency }}</td>
+          <td class="money">{{ totals.federal_tax|currency }}</td>
+          <td class="money">{{ totals.state_tax|currency }}</td>
+          <td class="money">{{ totals.total_tax|currency }}</td>
+          <td class="money">{{ totals.net_proceeds|currency }}</td>
+          <td class="money {{ 'gain' if totals.net_gain_loss >= 0 else 'loss' }}">{{ totals.net_gain_loss|currency }}</td>
         </tr>
       </tfoot>
     </table>
@@ -210,9 +227,11 @@
   font-size: 11px;
   white-space: nowrap;
 }
-.sell-ledger tfoot th {
+.sell-ledger tfoot th,
+.sell-ledger tfoot td {
   border-top: 2px solid var(--border);
   background: #f8fafc;
+  font-weight: 700;
 }
 .sell-title-cell a {
   display: block;
@@ -265,22 +284,10 @@
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.sell-ledger th:nth-child(1) { width: 16%; }
-.sell-ledger th:nth-child(2) { width: 5%; }
-.sell-ledger th:nth-child(3) { width: 4%; }
-.sell-ledger th:nth-child(4),
-.sell-ledger th:nth-child(5),
-.sell-ledger th:nth-child(6),
-.sell-ledger th:nth-child(7),
-.sell-ledger th:nth-child(8),
-.sell-ledger th:nth-child(9),
-.sell-ledger th:nth-child(10),
-.sell-ledger th:nth-child(11),
-.sell-ledger th:nth-child(12),
-.sell-ledger th:nth-child(13) { width: 7.5%; }
-.sell-ledger tfoot .money {
-  font-size: 10px;
-}
+.sell-ledger .col-watch { width: 16%; }
+.sell-ledger .col-decision { width: 5%; }
+.sell-ledger .col-tax { width: 4%; }
+.sell-ledger .col-money { width: 7.5%; }
 .money small,
 .sell-ledger small {
   display: block;
