@@ -861,7 +861,7 @@ SELL_PANEL_FIELDS = [
     {'name': 'sell_keep', 'label': 'Sell / Keep', 'type': 'text'},
     {'name': 'sell_purchase_price', 'label': 'Sell Purchase Price', 'type': 'text'},
     {'name': 'sell_estimated_sales_price', 'label': 'Estimated Sales Price', 'type': 'text'},
-    {'name': 'sell_commission_percent', 'label': 'Fee / Commission %', 'type': 'text'},
+    {'name': 'sell_commission_percent', 'label': 'Commission', 'type': 'text'},
     {'name': 'sell_net_sales_price', 'label': 'Net Sales Price', 'type': 'text'},
     {'name': 'sell_tax_state', 'label': 'Sales Tax State', 'type': 'text'},
     {'name': 'sell_federal_tax_rate', 'label': 'Federal Tax Rate', 'type': 'text'},
@@ -870,7 +870,6 @@ SELL_PANEL_FIELDS = [
     {'name': 'sell_tax_rates_checked_at', 'label': 'Tax Rates Checked', 'type': 'text'},
     {'name': 'sell_federal_tax', 'label': 'Federal Tax (31.8%)', 'type': 'text'},
     {'name': 'sell_state_tax', 'label': 'State Tax', 'type': 'text'},
-    {'name': 'sell_after_tax_amount', 'label': 'After Tax Amount', 'type': 'text'},
     {'name': 'sell_gross_gain_loss', 'label': 'Gross Gain / Loss', 'type': 'text'},
     {'name': 'sell_net_gain_loss', 'label': 'Net Gain / Loss', 'type': 'text'},
     {'name': 'sold_to', 'label': 'Sold To', 'type': 'text'},
@@ -2933,7 +2932,15 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
         for term in terms:
             num_term = _normalize_numeric_term(term)
             folded_term = _strip_diacritics(term)
+            folded_lc = folded_term.lower()
             conds = []
+            if category in SELL_PANEL_CATEGORIES and folded_lc in {'sell', 'keep'}:
+                conds.append(
+                    "LOWER(COALESCE(NULLIF(sell_keep,''),'Keep')) = ?"
+                )
+                params.append(folded_lc)
+                wheres.append('(' + ' OR '.join(conds) + ')')
+                continue
             for col in text_fields:
                 if col == 'sell_keep':
                     conds.append("NODIA(COALESCE(NULLIF(sell_keep,''),'Keep')) LIKE ?")

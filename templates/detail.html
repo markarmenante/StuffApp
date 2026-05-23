@@ -99,7 +99,7 @@
   val('sell_purchase_price') or val('sell_estimated_sales_price') or
   val('sell_commission_percent') or
   val('sell_federal_tax') or val('sell_ny_tax') or val('sell_state_tax') or
-  val('sell_net_sales_price') or val('sell_after_tax_amount') or val('sell_gross_gain_loss') or
+  val('sell_net_sales_price') or val('sell_gross_gain_loss') or
   val('sell_net_gain_loss') or val('sold_to') or val('sell_keep') == 'Sell' or
   (val('status')|lower == 'sold')
 ) %}
@@ -108,7 +108,7 @@
 {% set _sell_keep = val('sell_keep') if val('sell_keep') in ['Sell','Keep'] else 'Keep' %}
 {% set _sell_tax_state = val('sell_tax_state') if val('sell_tax_state') in ['NY','CA'] else 'NY' %}
 {% set _sell_rate_checked = val('sell_tax_rates_checked_at') if val('sell_tax_rates_checked_at') else '2026-05-23' %}
-<details class="sell-panel" {% if _has_sell %}open{% endif %}>
+<details class="sell-panel" {% if _has_sell and _sell_keep == 'Sell' %}open{% endif %}>
   <summary class="section-bar sell-panel-summary">
     <span>Sales</span>
     <button type="button" class="sell-keep-pill {{ 'is-sell' if _sell_keep == 'Sell' else 'is-keep' }}"
@@ -129,26 +129,24 @@
   <input type="hidden" name="sell_tax_rates_checked_at" value="{{ _sell_rate_checked }}">
   <div class="dgrid dg5 sell-panel-grid">
     <div class="dcell">
-      <select data-sell-status-select>
-        <option value="Own" {{ 'selected' if _sell_status == 'Own' }}>Own</option>
-        <option value="Sold" {{ 'selected' if _sell_status == 'Sold' }}>Sold</option>
-      </select>
-      <span class="clabel">Status</span>
-    </div>
-    <div class="dcell">
       <input type="text" name="sell_purchase_price" value="{{ _sell_purchase }}"
              class="price-input sell-money" inputmode="numeric">
-      <span class="clabel">Purchase Price</span>
+      <span class="clabel">Purchase</span>
     </div>
     <div class="dcell">
       <input type="text" name="sell_estimated_sales_price" value="{{ val('sell_estimated_sales_price')|currency }}"
              class="price-input sell-money" inputmode="numeric">
-      <span class="clabel">Estimated Sales Price</span>
+      <span class="clabel">Sale Est.</span>
     </div>
     <div class="dcell">
       <input type="text" name="sell_commission_percent" value="{{ val('sell_commission_percent') }}"
              class="sell-commission-percent" inputmode="decimal">
-      <span class="clabel">Fee / Commission %</span>
+      <span class="clabel">Commission</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="sell_net_sales_price" value="{{ val('sell_net_sales_price')|currency }}"
+             class="sell-net-sales-price sell-tax-output" readonly>
+      <span class="clabel">Net Sale</span>
     </div>
     <div class="dcell ta-wrap">
       <input type="text" name="sold_to" value="{{ val('sold_to') }}" autocomplete="off"
@@ -158,14 +156,14 @@
   </div>
   <div class="dgrid dg5 sell-panel-grid">
     <div class="dcell">
-      <input type="text" name="sell_net_sales_price" value="{{ val('sell_net_sales_price')|currency }}"
-             class="sell-net-sales-price sell-tax-output" readonly>
-      <span class="clabel">Net Sales Price</span>
+      <input type="text" name="sell_gross_gain_loss" value="{{ val('sell_gross_gain_loss')|currency }}"
+             class="sell-gross-gain-loss sell-tax-output" readonly>
+      <span class="clabel">Gross G/L</span>
     </div>
     <div class="dcell">
       <input type="text" name="sell_federal_tax" value="{{ val('sell_federal_tax')|currency }}"
              class="sell-tax-output" readonly>
-      <span class="clabel sell-federal-tax-label">Federal Tax (31.8%)</span>
+      <span class="clabel sell-federal-tax-label">Fed Tax</span>
     </div>
     <div class="dcell">
       <input type="text" name="sell_state_tax" value="{{ val('sell_state_tax')|currency }}"
@@ -173,21 +171,16 @@
       <span class="clabel sell-state-tax-label">State Tax</span>
     </div>
     <div class="dcell">
-      <input type="text" name="sell_after_tax_amount" value="{{ val('sell_after_tax_amount')|currency }}"
-             class="sell-after-tax sell-tax-output" readonly>
-      <span class="clabel">After Tax Amount</span>
-    </div>
-  </div>
-  <div class="dgrid dg2 sell-panel-grid">
-    <div class="dcell">
-      <input type="text" name="sell_gross_gain_loss" value="{{ val('sell_gross_gain_loss')|currency }}"
-             class="sell-gross-gain-loss sell-tax-output" readonly>
-      <span class="clabel">Gross Gain / Loss</span>
-    </div>
-    <div class="dcell">
       <input type="text" name="sell_net_gain_loss" value="{{ val('sell_net_gain_loss')|currency }}"
              class="sell-net-gain-loss sell-tax-output" readonly>
-      <span class="clabel">Net Gain / Loss</span>
+      <span class="clabel">Net G/L</span>
+    </div>
+    <div class="dcell">
+      <select data-sell-status-select>
+        <option value="Own" {{ 'selected' if _sell_status == 'Own' }}>Own</option>
+        <option value="Sold" {{ 'selected' if _sell_status == 'Sold' }}>Sold</option>
+      </select>
+      <span class="clabel">Status</span>
     </div>
   </div>
 </details>
@@ -3299,19 +3292,16 @@ document.querySelectorAll('.comp-item').forEach(item => {
     const federal = taxableGain == null ? null : taxableGain * federalRate;
     const stateTax = taxableGain == null ? null : taxableGain * stateRate;
     const totalTax = federal == null || stateTax == null ? null : federal + stateTax;
-    const afterTaxValue = netSalesPrice == null || totalTax == null ? null : netSalesPrice - totalTax;
     const netGain = gain == null || totalTax == null ? null : gain - totalTax;
     setComputedSellMoney(sellPanel.querySelector('[name="sell_net_sales_price"]'), netSalesPrice);
     setComputedSellMoney(sellPanel.querySelector('[name="sell_federal_tax"]'), federal);
     setComputedSellMoney(sellPanel.querySelector('[name="sell_state_tax"]'), stateTax);
     const stateTaxLabel = sellPanel.querySelector('.sell-state-tax-label');
-    if (stateTaxLabel) stateTaxLabel.textContent = `${taxState} Tax (${(stateRate * 100).toFixed(1)}%)`;
+    if (stateTaxLabel) stateTaxLabel.textContent = `${taxState} (${(stateRate * 100).toFixed(1)}%)`;
     const federalTaxLabel = sellPanel.querySelector('.sell-federal-tax-label');
-    if (federalTaxLabel) federalTaxLabel.textContent = `Federal Tax (${(federalRate * 100).toFixed(1)}%)`;
-    const afterTax = sellPanel.querySelector('.sell-after-tax');
+    if (federalTaxLabel) federalTaxLabel.textContent = `Fed (${(federalRate * 100).toFixed(1)}%)`;
     const grossGainLoss = sellPanel.querySelector('.sell-gross-gain-loss');
     const netGainLoss = sellPanel.querySelector('.sell-net-gain-loss');
-    setComputedSellMoney(afterTax, afterTaxValue);
     setComputedSellMoney(grossGainLoss, gain);
     setComputedSellMoney(netGainLoss, netGain);
     [
