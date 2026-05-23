@@ -835,8 +835,11 @@ FIELDS = {
 }
 
 SELL_PANEL_FIELDS = [
+    {'name': 'sell_keep', 'label': 'Sell / Keep', 'type': 'text'},
     {'name': 'sell_purchase_price', 'label': 'Sell Purchase Price', 'type': 'text'},
     {'name': 'sell_estimated_sales_price', 'label': 'Estimated Sales Price', 'type': 'text'},
+    {'name': 'sell_commission_percent', 'label': 'Fee / Commission %', 'type': 'text'},
+    {'name': 'sell_net_sales_price', 'label': 'Net Sales Price', 'type': 'text'},
     {'name': 'sell_tax_state', 'label': 'Sales Tax State', 'type': 'text'},
     {'name': 'sell_federal_tax_rate', 'label': 'Federal Tax Rate', 'type': 'text'},
     {'name': 'sell_ny_tax_rate', 'label': 'NY Tax Rate', 'type': 'text'},
@@ -2832,7 +2835,10 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
             folded_term = _strip_diacritics(term)
             conds = []
             for col in text_fields:
-                conds.append(f"NODIA({col}) LIKE ?")
+                if col == 'sell_keep':
+                    conds.append("NODIA(COALESCE(NULLIF(sell_keep,''),'Keep')) LIKE ?")
+                else:
+                    conds.append(f"NODIA({col}) LIKE ?")
                 params.append(f'%{folded_term}%')
             for col in numeric_fields:
                 conds.append(f"{col} LIKE ?")

@@ -97,18 +97,22 @@
 {% if category in ['watches','coins','cameras','lenses','pens','art','items','vehicles','recordings','audio','rifles','properties'] %}
 {% set _has_sell = (
   val('sell_purchase_price') or val('sell_estimated_sales_price') or
+  val('sell_commission_percent') or
   val('sell_federal_tax') or val('sell_ny_tax') or val('sell_state_tax') or
-  val('sell_after_tax_amount') or val('sell_gross_gain_loss') or
-  val('sell_net_gain_loss') or val('sold_to') or
+  val('sell_net_sales_price') or val('sell_after_tax_amount') or val('sell_gross_gain_loss') or
+  val('sell_net_gain_loss') or val('sold_to') or val('sell_keep') == 'Sell' or
   (val('status')|lower == 'sold')
 ) %}
 {% set _sell_purchase = val('sell_purchase_price') if val('sell_purchase_price') else (val('price')|currency) %}
 {% set _sell_status = 'Sold' if val('status') == 'Sold' else 'Own' %}
+{% set _sell_keep = val('sell_keep') if val('sell_keep') in ['Sell','Keep'] else 'Keep' %}
 {% set _sell_tax_state = val('sell_tax_state') if val('sell_tax_state') in ['NY','CA'] else 'NY' %}
 {% set _sell_rate_checked = val('sell_tax_rates_checked_at') if val('sell_tax_rates_checked_at') else '2026-05-23' %}
 <details class="sell-panel" {% if _has_sell %}open{% endif %}>
   <summary class="section-bar sell-panel-summary">
     <span>Sales</span>
+    <button type="button" class="sell-keep-pill {{ 'is-sell' if _sell_keep == 'Sell' else 'is-keep' }}"
+            data-sell-keep="{{ _sell_keep }}">{{ _sell_keep }}</button>
     <span class="sell-tax-state-toggle" aria-label="Delivery tax state">
       <button type="button" class="sell-tax-state-pill {{ 'active' if _sell_tax_state == 'NY' }}" data-sell-tax-state="NY">NY</button>
       <button type="button" class="sell-tax-state-pill {{ 'active' if _sell_tax_state == 'CA' }}" data-sell-tax-state="CA">CA</button>
@@ -117,12 +121,13 @@
             data-rates-checked-at="{{ _sell_rate_checked }}">Rates</button>
     <span class="sell-panel-hint">proceeds and tax estimate</span>
   </summary>
+  <input type="hidden" name="sell_keep" value="{{ _sell_keep }}">
   <input type="hidden" name="sell_tax_state" value="{{ _sell_tax_state }}">
   <input type="hidden" name="sell_federal_tax_rate" value="{{ val('sell_federal_tax_rate') if val('sell_federal_tax_rate') else '0.318' }}">
   <input type="hidden" name="sell_ny_tax_rate" value="{{ val('sell_ny_tax_rate') if val('sell_ny_tax_rate') else '0.109' }}">
   <input type="hidden" name="sell_ca_tax_rate" value="{{ val('sell_ca_tax_rate') if val('sell_ca_tax_rate') else '0.133' }}">
   <input type="hidden" name="sell_tax_rates_checked_at" value="{{ _sell_rate_checked }}">
-  <div class="dgrid dg4 sell-panel-grid">
+  <div class="dgrid dg5 sell-panel-grid">
     <div class="dcell">
       <select data-sell-status-select>
         <option value="Own" {{ 'selected' if _sell_status == 'Own' }}>Own</option>
@@ -140,6 +145,11 @@
              class="price-input sell-money" inputmode="numeric">
       <span class="clabel">Estimated Sales Price</span>
     </div>
+    <div class="dcell">
+      <input type="text" name="sell_commission_percent" value="{{ val('sell_commission_percent') }}"
+             class="sell-commission-percent" inputmode="decimal">
+      <span class="clabel">Fee / Commission %</span>
+    </div>
     <div class="dcell ta-wrap">
       <input type="text" name="sold_to" value="{{ val('sold_to') }}" autocomplete="off"
              class="ta-input" data-ta="{{ ta.get('sold_to', ta.get('vendor', []))|join('||') }}">
@@ -147,6 +157,11 @@
     </div>
   </div>
   <div class="dgrid dg5 sell-panel-grid">
+    <div class="dcell">
+      <input type="text" name="sell_net_sales_price" value="{{ val('sell_net_sales_price')|currency }}"
+             class="sell-net-sales-price sell-tax-output" readonly>
+      <span class="clabel">Net Sales Price</span>
+    </div>
     <div class="dcell">
       <input type="text" name="sell_federal_tax" value="{{ val('sell_federal_tax')|currency }}"
              class="sell-tax-output" readonly>
@@ -162,6 +177,8 @@
              class="sell-after-tax sell-tax-output" readonly>
       <span class="clabel">After Tax Amount</span>
     </div>
+  </div>
+  <div class="dgrid dg2 sell-panel-grid">
     <div class="dcell">
       <input type="text" name="sell_gross_gain_loss" value="{{ val('sell_gross_gain_loss')|currency }}"
              class="sell-gross-gain-loss sell-tax-output" readonly>
@@ -3246,6 +3263,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
     const num = parseFloat(cleaned);
     return isFinite(num) ? num : null;
   }
+  function sellPercentNumber(raw) {
+    const cleaned = String(raw || '').replace(/[^0-9.\-]/g, '');
+    if (!cleaned || cleaned === '-' || cleaned === '.' || cleaned === '-.') return 0;
+    const num = parseFloat(cleaned);
+    return isFinite(num) ? Math.max(0, num) / 100 : 0;
+  }
   function moneyDisplay(value) {
     if (value == null || !isFinite(value)) return '';
     const sign = value < 0 ? '-' : '';
@@ -3264,18 +3287,21 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (!sellPanel) return;
     const purchase = sellMoneyNumber(sellPanel.querySelector('[name="sell_purchase_price"]')?.value);
     const sale = sellMoneyNumber(sellPanel.querySelector('[name="sell_estimated_sales_price"]')?.value);
+    const commissionRate = sellPercentNumber(sellPanel.querySelector('[name="sell_commission_percent"]')?.value);
+    const netSalesPrice = sale == null ? null : sale - (sale * commissionRate);
     const taxState = sellPanel.querySelector('[name="sell_tax_state"]')?.value === 'CA' ? 'CA' : 'NY';
     const federalRate = sellRateNumber('sell_federal_tax_rate', SELL_CURRENT_TAX_RATES.federal);
     const stateRate = taxState === 'CA'
       ? sellRateNumber('sell_ca_tax_rate', SELL_CURRENT_TAX_RATES.CA)
       : sellRateNumber('sell_ny_tax_rate', SELL_CURRENT_TAX_RATES.NY);
-    const gain = sale == null || purchase == null ? null : sale - purchase;
+    const gain = netSalesPrice == null || purchase == null ? null : netSalesPrice - purchase;
     const taxableGain = gain == null ? null : Math.max(0, gain);
     const federal = taxableGain == null ? null : taxableGain * federalRate;
     const stateTax = taxableGain == null ? null : taxableGain * stateRate;
     const totalTax = federal == null || stateTax == null ? null : federal + stateTax;
-    const afterTaxValue = sale == null || totalTax == null ? null : sale - totalTax;
+    const afterTaxValue = netSalesPrice == null || totalTax == null ? null : netSalesPrice - totalTax;
     const netGain = gain == null || totalTax == null ? null : gain - totalTax;
+    setComputedSellMoney(sellPanel.querySelector('[name="sell_net_sales_price"]'), netSalesPrice);
     setComputedSellMoney(sellPanel.querySelector('[name="sell_federal_tax"]'), federal);
     setComputedSellMoney(sellPanel.querySelector('[name="sell_state_tax"]'), stateTax);
     const stateTaxLabel = sellPanel.querySelector('.sell-state-tax-label');
@@ -3302,8 +3328,20 @@ document.querySelectorAll('.comp-item').forEach(item => {
       input.addEventListener('input', updateSellMath);
       input.addEventListener('blur', () => setTimeout(updateSellMath, 0));
     });
+    const commissionInput = sellPanel.querySelector('[name="sell_commission_percent"]');
+    if (commissionInput) {
+      commissionInput.addEventListener('input', updateSellMath);
+      commissionInput.addEventListener('blur', () => {
+        const pct = sellPercentNumber(commissionInput.value) * 100;
+        commissionInput.value = pct ? `${pct.toLocaleString('en-US', { maximumFractionDigits: 2 })}%` : '';
+        saveField('sell_commission_percent', commissionInput.value);
+        updateSellMath();
+      });
+    }
     const taxStateInput = sellPanel.querySelector('[name="sell_tax_state"]');
     const taxStatePills = sellPanel.querySelectorAll('[data-sell-tax-state]');
+    const sellKeepInput = sellPanel.querySelector('[name="sell_keep"]');
+    const sellKeepPill = sellPanel.querySelector('.sell-keep-pill');
     const ratesPill = sellPanel.querySelector('.sell-rates-pill');
     const ratesCheckedInput = sellPanel.querySelector('[name="sell_tax_rates_checked_at"]');
     function updateRatesPill() {
@@ -3321,6 +3359,19 @@ document.querySelectorAll('.comp-item').forEach(item => {
       const input = sellPanel.querySelector(`[name="${name}"]`);
       if (input) input.value = value;
       saveField(name, value);
+    }
+    if (sellKeepPill && sellKeepInput) {
+      sellKeepPill.addEventListener('click', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const value = sellKeepInput.value === 'Sell' ? 'Keep' : 'Sell';
+        sellKeepInput.value = value;
+        sellKeepPill.dataset.sellKeep = value;
+        sellKeepPill.textContent = value;
+        sellKeepPill.classList.toggle('is-sell', value === 'Sell');
+        sellKeepPill.classList.toggle('is-keep', value !== 'Sell');
+        saveField('sell_keep', value);
+      });
     }
     taxStatePills.forEach(pill => {
       pill.addEventListener('click', ev => {

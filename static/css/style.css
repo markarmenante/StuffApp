@@ -933,6 +933,28 @@ input[type="number"]::-webkit-outer-spin-button {
   gap: 4px;
   margin-left: 2px;
 }
+.sell-keep-pill {
+  border: 1px solid #9fd8ad;
+  background: #e7f8ec;
+  color: #126c2e;
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 10px;
+  line-height: 1.45;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.sell-keep-pill.is-sell {
+  border-color: #f7cc68;
+  background: #fff4c2;
+  color: #9a5b00;
+}
+.sell-keep-pill.is-keep {
+  border-color: #9fd8ad;
+  background: #e7f8ec;
+  color: #126c2e;
+}
 .sell-tax-state-pill {
   border: 1px solid var(--border);
   background: #fff;
@@ -966,6 +988,9 @@ input[type="number"]::-webkit-outer-spin-button {
   border-color: #f3b1b1;
   background: #fde8e8;
   color: #b3261e;
+}
+.sell-panel-grid.dg5 {
+  grid-template-columns: repeat(5, 1fr);
 }
 .sell-panel-grid .dcell input[readonly] {
   color: var(--text-secondary, #555);
@@ -2415,6 +2440,10 @@ input[type="date"] { -webkit-appearance: none; }
      are one-shot maintenance flows that the user runs from a desktop;
      no value cluttering the phone nav with them. */
   .nav-export, .nav-sweep, .nav-admin { display: none !important; }
+
+  .sell-panel-grid.dg5 {
+    grid-template-columns: 1fr;
+  }
 
   /* Typography: tighten list + detail density without shrinking inputs. */
   .item-brand  { font-size: 18px; }
