@@ -834,6 +834,21 @@ FIELDS = {
     ],
 }
 
+SELL_PANEL_FIELDS = [
+    {'name': 'sell_purchase_price', 'label': 'Sell Purchase Price', 'type': 'text'},
+    {'name': 'sell_estimated_sales_price', 'label': 'Estimated Sales Price', 'type': 'text'},
+    {'name': 'sell_federal_tax', 'label': 'Estimated Federal Tax', 'type': 'text'},
+    {'name': 'sell_ny_tax', 'label': 'Estimated NY Tax', 'type': 'text'},
+    {'name': 'sold_to', 'label': 'Sold To', 'type': 'text'},
+]
+SELL_PANEL_CATEGORIES = (
+    'watches', 'coins', 'cameras', 'lenses', 'pens', 'art', 'items',
+    'vehicles', 'recordings', 'audio', 'rifles', 'properties',
+)
+
+for _sell_cat in SELL_PANEL_CATEGORIES:
+    FIELDS[_sell_cat].extend(dict(field) for field in SELL_PANEL_FIELDS)
+
 
 def _parse_hide_fields(raw):
     """STUFFAPP_HIDE_FIELDS format: 'cat:field1,field2;cat2:field3'.
@@ -1089,6 +1104,11 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN expected_delivery_date TEXT',
         'ALTER TABLE watches ADD COLUMN actual_delivery_date TEXT',
         'ALTER TABLE watches ADD COLUMN order_balance REAL',
+        *[
+            f'ALTER TABLE {CATEGORIES[cat]["table"]} ADD COLUMN {field["name"]} TEXT'
+            for cat in SELL_PANEL_CATEGORIES
+            for field in SELL_PANEL_FIELDS
+        ],
         'ALTER TABLE art ADD COLUMN cat_id TEXT',
         'ALTER TABLE persons ADD COLUMN license_number TEXT',
         'ALTER TABLE persons ADD COLUMN passport_number TEXT',

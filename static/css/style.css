@@ -899,6 +899,43 @@ input[type="number"]::-webkit-outer-spin-button {
   color: var(--text-hint, #888); font-style: italic; font-weight: 400;
 }
 
+.sell-panel {
+  border-top: 2px solid var(--border);
+  border-bottom: 1px solid var(--border-light);
+}
+.sell-panel-summary {
+  cursor: pointer;
+  user-select: none;
+}
+.sell-panel-summary::-webkit-details-marker {
+  display: none;
+}
+.sell-panel-summary::before {
+  content: '▸';
+  margin-right: 6px;
+  color: var(--text-secondary, #666);
+}
+.sell-panel[open] .sell-panel-summary::before {
+  content: '▾';
+}
+.sell-panel-hint {
+  margin-left: 8px;
+  color: var(--text-hint, #888);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.sell-panel-grid .dcell input[readonly] {
+  color: var(--text-secondary, #555);
+  background: #f8f8f8;
+}
+.sell-gain-loss.is-gain {
+  color: #0f7a3a;
+}
+.sell-gain-loss.is-loss {
+  color: #b3261e;
+}
+
 /* Value Estimate section-bar — title left, pill right, both inline. */
 .section-bar.value-estimate-bar {
   display: flex; align-items: center; justify-content: space-between;

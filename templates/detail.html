@@ -93,6 +93,67 @@
 </div>
 {% endif %}
 {% endmacro %}
+{% macro sellpanel() %}
+{% if category in ['watches','coins','cameras','lenses','pens','art','items','vehicles','recordings','audio','rifles','properties'] %}
+{% set _has_sell = (
+  val('sell_purchase_price') or val('sell_estimated_sales_price') or
+  val('sell_federal_tax') or val('sell_ny_tax') or val('sold_to') or
+  (val('status')|lower == 'sold')
+) %}
+{% set _sell_purchase = val('sell_purchase_price') if val('sell_purchase_price') else (val('price')|currency) %}
+{% set _sell_status = 'Sold' if val('status') == 'Sold' else 'Own' %}
+<details class="sell-panel" {% if _has_sell %}open{% endif %}>
+  <summary class="section-bar sell-panel-summary">
+    <span>Sell</span>
+    <span class="sell-panel-hint">proceeds and tax estimate</span>
+  </summary>
+  <div class="dgrid dg4 sell-panel-grid">
+    <div class="dcell">
+      <select data-sell-status-select>
+        <option value="Own" {{ 'selected' if _sell_status == 'Own' }}>Own</option>
+        <option value="Sold" {{ 'selected' if _sell_status == 'Sold' }}>Sold</option>
+      </select>
+      <span class="clabel">Status</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="sell_purchase_price" value="{{ _sell_purchase }}"
+             class="price-input sell-money" inputmode="numeric">
+      <span class="clabel">Purchase Price</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="sell_estimated_sales_price" value="{{ val('sell_estimated_sales_price')|currency }}"
+             class="price-input sell-money" inputmode="numeric">
+      <span class="clabel">Estimated Sales Price</span>
+    </div>
+    <div class="dcell ta-wrap">
+      <input type="text" name="sold_to" value="{{ val('sold_to') }}" autocomplete="off"
+             class="ta-input" data-ta="{{ ta.get('sold_to', [])|join('||') }}">
+      <span class="clabel">Sold To</span>
+    </div>
+  </div>
+  <div class="dgrid dg4 sell-panel-grid">
+    <div class="dcell">
+      <input type="text" name="sell_federal_tax" value="{{ val('sell_federal_tax')|currency }}"
+             class="price-input sell-money" inputmode="numeric">
+      <span class="clabel">Estimated Federal Tax</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="sell_ny_tax" value="{{ val('sell_ny_tax')|currency }}"
+             class="price-input sell-money" inputmode="numeric">
+      <span class="clabel">Estimated NY Tax</span>
+    </div>
+    <div class="dcell">
+      <input type="text" class="sell-after-tax" readonly>
+      <span class="clabel">After Tax Amount</span>
+    </div>
+    <div class="dcell">
+      <input type="text" class="sell-gain-loss" readonly>
+      <span class="clabel">Gain / Loss</span>
+    </div>
+  </div>
+</details>
+{% endif %}
+{% endmacro %}
 {% macro imgcell(field, label) %}
 {% set f = r[field] if r else none %}
 <div class="dcell file-cell drop-zone" data-field="{{ field }}"
@@ -622,6 +683,8 @@ document.addEventListener('DOMContentLoaded', function () {
       </div>
     </div>
   </div>
+
+  {{ sellpanel() }}
 
   <!-- Value Estimate block — section-bar header (matches Topics /
        People / Notes) with the lookup pill scaled to size and the
@@ -3130,6 +3193,59 @@ document.querySelectorAll('.comp-item').forEach(item => {
     _dateInput.addEventListener('change', () => {
       form.querySelectorAll('input.price-input').forEach(applyUsdConversion);
     });
+  }
+
+  // Sell panel: keep the duplicated Own/Sold status in sync with the
+  // canonical status field, and calculate proceeds live.
+  const sellPanel = form.querySelector('.sell-panel');
+  function sellMoneyNumber(raw) {
+    const s = stripUsdConversion(String(raw || '').trim());
+    if (!s) return null;
+    const cleaned = s.replace(/[^0-9.\-]/g, '');
+    if (!cleaned || cleaned === '-' || cleaned === '.' || cleaned === '-.') return null;
+    const num = parseFloat(cleaned);
+    return isFinite(num) ? num : null;
+  }
+  function moneyDisplay(value) {
+    if (value == null || !isFinite(value)) return '';
+    const sign = value < 0 ? '-' : '';
+    return sign + '$' + Math.abs(Math.round(value)).toLocaleString('en-US');
+  }
+  function updateSellMath() {
+    if (!sellPanel) return;
+    const purchase = sellMoneyNumber(sellPanel.querySelector('[name="sell_purchase_price"]')?.value);
+    const sale = sellMoneyNumber(sellPanel.querySelector('[name="sell_estimated_sales_price"]')?.value);
+    const federal = sellMoneyNumber(sellPanel.querySelector('[name="sell_federal_tax"]')?.value) || 0;
+    const ny = sellMoneyNumber(sellPanel.querySelector('[name="sell_ny_tax"]')?.value) || 0;
+    const afterTax = sellPanel.querySelector('.sell-after-tax');
+    const gainLoss = sellPanel.querySelector('.sell-gain-loss');
+    if (afterTax) afterTax.value = sale == null ? '' : moneyDisplay(sale - federal - ny);
+    if (gainLoss) {
+      const value = sale == null || purchase == null ? null : sale - purchase;
+      gainLoss.value = value == null ? '' : moneyDisplay(value);
+      gainLoss.classList.toggle('is-gain', value != null && value >= 0);
+      gainLoss.classList.toggle('is-loss', value != null && value < 0);
+    }
+  }
+  if (sellPanel) {
+    sellPanel.querySelectorAll('.sell-money').forEach(input => {
+      input.addEventListener('input', updateSellMath);
+      input.addEventListener('blur', () => setTimeout(updateSellMath, 0));
+    });
+    const sellStatus = sellPanel.querySelector('[data-sell-status-select]');
+    const canonicalStatus = form.querySelector('select[name="status"]');
+    if (sellStatus && canonicalStatus) {
+      sellStatus.addEventListener('change', () => {
+        canonicalStatus.value = sellStatus.value;
+        saveField('status', sellStatus.value);
+      });
+      canonicalStatus.addEventListener('change', () => {
+        if (canonicalStatus.value === 'Own' || canonicalStatus.value === 'Sold') {
+          sellStatus.value = canonicalStatus.value;
+        }
+      });
+    }
+    updateSellMath();
   }
 
   // Watch order panel: deposit accepts either dollars or a percentage
