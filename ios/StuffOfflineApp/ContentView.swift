@@ -6,13 +6,19 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List {
-                ForEach(viewModel.orderedCategories, id: \.0) { slug, category in
-                    Button {
-                        viewModel.selectedCategory = slug
-                    } label: {
-                        Label(category.name, systemImage: iconName(for: slug))
-                            .foregroundStyle(viewModel.selectedCategory == slug ? .blue : .primary)
+            Group {
+                if viewModel.orderedCategories.isEmpty {
+                    firstRunView
+                } else {
+                    List {
+                        ForEach(viewModel.orderedCategories, id: \.0) { slug, category in
+                            Button {
+                                viewModel.selectedCategory = slug
+                            } label: {
+                                Label(category.name, systemImage: iconName(for: slug))
+                                    .foregroundStyle(viewModel.selectedCategory == slug ? .blue : .primary)
+                            }
+                        }
                     }
                 }
             }
@@ -60,6 +66,56 @@ struct ContentView: View {
                     }
             }
         }
+    }
+
+    private var firstRunView: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Spacer()
+
+            Image(systemName: "shippingbox")
+                .font(.system(size: 42, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("No offline cache yet")
+                    .font(.title3.weight(.semibold))
+                Text("Open the live Stuff app once, sign in if asked, then sync to keep records and files on this iPhone.")
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.isSyncing {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(viewModel.statusText)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.footnote)
+            } else {
+                Text(viewModel.errorMessage ?? viewModel.statusText)
+                    .font(.footnote)
+                    .foregroundStyle(viewModel.errorMessage == nil ? Color.secondary : Color.red)
+            }
+
+            HStack {
+                Button {
+                    showingWebApp = true
+                } label: {
+                    Label("Open Live Stuff", systemImage: "safari")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    Task { await viewModel.sync() }
+                } label: {
+                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isSyncing)
+            }
+
+            Spacer()
+        }
+        .padding()
     }
 
     private func iconName(for category: String) -> String {
