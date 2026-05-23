@@ -6,10 +6,14 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $viewModel.selectedCategory) {
+            List {
                 ForEach(viewModel.orderedCategories, id: \.0) { slug, category in
-                    Label(category.name, systemImage: iconName(for: slug))
-                        .tag(slug)
+                    Button {
+                        viewModel.selectedCategory = slug
+                    } label: {
+                        Label(category.name, systemImage: iconName(for: slug))
+                            .foregroundStyle(viewModel.selectedCategory == slug ? .blue : .primary)
+                    }
                 }
             }
             .navigationTitle("Stuff")
@@ -113,7 +117,7 @@ struct RecordListView: View {
             }
             Text(viewModel.errorMessage ?? viewModel.statusText)
                 .font(.footnote)
-                .foregroundStyle(viewModel.errorMessage == nil ? .secondary : .red)
+                .foregroundStyle(viewModel.errorMessage == nil ? Color.secondary : Color.red)
                 .lineLimit(1)
             Spacer()
             Button {

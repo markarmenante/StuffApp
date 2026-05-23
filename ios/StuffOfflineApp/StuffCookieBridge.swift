@@ -2,6 +2,7 @@ import Foundation
 import WebKit
 
 enum StuffCookieBridge {
+    @MainActor
     static func syncWebCookiesToURLSession() async {
         let cookieStore = WKWebsiteDataStore.default().httpCookieStore
         let cookies = await cookieStore.allCookies()

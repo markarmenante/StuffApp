@@ -9,3 +9,5 @@ art_images/
 .env
 stuffapp-backup-*.zip
 .claude/worktrees/
+ios/Stuff.xcodeproj/project.xcworkspace/
+ios/Stuff.xcodeproj/xcuserdata/
