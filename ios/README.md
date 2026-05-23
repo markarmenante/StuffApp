@@ -26,7 +26,10 @@ The API honors the same Cloudflare/user/category/row permissions as the web UI.
 
 ## Native Client Shape
 
-The starter Swift files in `StuffOfflineApp/` implement the sync layer:
+Open `Stuff.xcodeproj` in Xcode and run the `Stuff` scheme on the iPhone or
+iPhone simulator.
+
+The Swift files in `StuffOfflineApp/` implement the native app:
 
 - `StuffConfig.swift`
   Server URL and local folder names.
@@ -40,6 +43,17 @@ The starter Swift files in `StuffOfflineApp/` implement the sync layer:
 - `StuffSyncClient.swift`
   Snapshot/change fetches and local file downloads.
 
-Next step is an Xcode project with a SwiftUI UI over `StuffLocalStore`, plus a
-small online web view fallback for workflows that are not worth re-building on
-iPhone yet.
+- `ContentView.swift`
+  SwiftUI offline browsing UI for categories, records, details, and local files.
+
+- `StuffWebView.swift`
+  Embedded live web app for workflows that should keep using the server UI.
+
+- `StuffCookieBridge.swift`
+  Copies the Cloudflare/web cookies from the web view into URLSession before
+  sync so the native API calls inherit the signed-in session.
+
+Edits are intentionally online-only for now: tap **Edit Live**, make the change
+in the server app, then close it. The native app syncs afterward and refreshes
+the local cache. Offline mode is for access and review, which keeps the web app
+as the only source of truth.

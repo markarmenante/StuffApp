@@ -43,6 +43,14 @@ actor StuffLocalStore {
         try write(changes.maxUpdatedAt, to: "last-sync.json")
     }
 
+    func loadSnapshot() -> StuffMobileSnapshot? {
+        try? read("snapshot.json")
+    }
+
+    func loadLastChanges() -> StuffMobileChanges? {
+        try? read("last-changes.json")
+    }
+
     func lastSyncTime() -> String? {
         guard let value: String = try? read("last-sync.json") else {
             return nil
