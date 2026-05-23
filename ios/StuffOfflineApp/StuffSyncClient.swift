@@ -1,6 +1,22 @@
 import Foundation
 
 actor StuffSyncClient {
+    struct SyncSummary {
+        let downloadedFiles: Int
+        let skippedFiles: Int
+
+        var fileText: String {
+            if downloadedFiles == 0 && skippedFiles == 0 {
+                return "Files already cached"
+            }
+            var parts = ["\(downloadedFiles) files downloaded"]
+            if skippedFiles > 0 {
+                parts.append("\(skippedFiles) missing skipped")
+            }
+            return parts.joined(separator: ", ")
+        }
+    }
+
     enum SyncError: Error {
         case badResponse(Int)
         case badResponseAt(String, Int)
@@ -18,28 +34,28 @@ actor StuffSyncClient {
         self.store = store
     }
 
-    func bootstrap(progress: ((String) -> Void)? = nil) async throws {
+    func bootstrap(progress: ((String) -> Void)? = nil) async throws -> SyncSummary {
         progress?("Downloading Stuff snapshot")
         let snapshot: StuffMobileSnapshot = try await getJSON("/api/mobile/snapshot")
         try await store.saveSnapshot(snapshot)
-        try await downloadMissingFiles(snapshot.files, progress: progress)
+        return try await downloadMissingFiles(snapshot.files, progress: progress)
     }
 
-    func pullChanges(progress: ((String) -> Void)? = nil) async throws {
+    func pullChanges(progress: ((String) -> Void)? = nil) async throws -> SyncSummary {
         guard let lastSync = await store.lastSyncTime() else {
-            try await bootstrap(progress: progress)
-            return
+            return try await bootstrap(progress: progress)
         }
         progress?("Checking Stuff changes")
         let encoded = lastSync.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? lastSync
         let changes: StuffMobileChanges = try await getJSON("/api/mobile/changes?since=\(encoded)")
         try await store.saveChanges(changes)
-        try await downloadMissingFiles(changes.files, progress: progress)
+        let summary = try await downloadMissingFiles(changes.files, progress: progress)
         for tombstone in changes.fileTombstones {
             if let filename = tombstone.filename {
                 await store.removeLocalFile(named: filename)
             }
         }
+        return summary
     }
 
     private func getJSON<T: Decodable>(_ path: String) async throws -> T {
@@ -64,7 +80,7 @@ actor StuffSyncClient {
     private func downloadMissingFiles(
         _ files: [StuffFile],
         progress: ((String) -> Void)?
-    ) async throws {
+    ) async throws -> SyncSummary {
         var downloaded = 0
         var skipped = 0
         for file in files {
@@ -87,6 +103,7 @@ actor StuffSyncClient {
         if skipped > 0 {
             progress?("Skipped \(skipped) missing files")
         }
+        return SyncSummary(downloadedFiles: downloaded, skippedFiles: skipped)
     }
 
     private func download(_ file: StuffFile) async throws -> Bool {

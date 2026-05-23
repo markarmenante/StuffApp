@@ -6,51 +6,19 @@ struct ContentView: View {
     @AppStorage("stuff.syncOnOpen") private var syncOnOpen = true
 
     var body: some View {
-        NavigationSplitView {
+        NavigationStack {
             Group {
                 if viewModel.orderedCategories.isEmpty {
                     firstRunView
                 } else {
-                    List {
-                        ForEach(viewModel.orderedCategories, id: \.0) { slug, category in
-                            Button {
-                                viewModel.selectedCategory = slug
-                            } label: {
-                                Label(category.name, systemImage: iconName(for: slug))
-                                    .foregroundStyle(viewModel.selectedCategory == slug ? .blue : .primary)
-                            }
-                        }
-                    }
+                    StuffHomeView(
+                        showingWebApp: $showingWebApp,
+                        syncOnOpen: $syncOnOpen
+                    )
+                    .environmentObject(viewModel)
+                    .toolbar(.hidden, for: .navigationBar)
                 }
             }
-            .navigationTitle("Stuff")
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Menu {
-                        Toggle("Sync on Open", isOn: $syncOnOpen)
-                        Text(syncOnOpen ? "Syncs when the app opens" : "Manual sync only")
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Sync settings")
-
-                    Button {
-                        showingWebApp = true
-                    } label: {
-                        Image(systemName: "safari")
-                    }
-                    .accessibilityLabel("Open live web app")
-                }
-            }
-        } content: {
-            RecordListView()
-                .environmentObject(viewModel)
-        } detail: {
-            ContentUnavailableView(
-                "Select an item",
-                systemImage: "square.grid.2x2",
-                description: Text("Cached records are available offline after sync.")
-            )
         }
         .task {
             await viewModel.loadLocalCache()
@@ -79,6 +47,8 @@ struct ContentView: View {
 
     private var firstRunView: some View {
         VStack(alignment: .leading, spacing: 18) {
+            appHeader
+
             Spacer()
 
             Image(systemName: "shippingbox")
@@ -129,24 +99,138 @@ struct ContentView: View {
             Spacer()
         }
         .padding()
+        .toolbar(.hidden, for: .navigationBar)
     }
 
-    private func iconName(for category: String) -> String {
-        switch category {
-        case "watches": return "clock"
-        case "coins": return "circle.hexagongrid"
-        case "properties": return "house"
-        case "credit_cards": return "creditcard"
-        case "persons": return "person.2"
-        case "cameras": return "camera"
-        case "lenses": return "camera.aperture"
-        case "pens": return "pencil.tip"
-        case "art": return "paintpalette"
-        case "vehicles": return "car"
-        case "recordings": return "music.note"
-        case "audio": return "hifispeaker"
-        case "rifles": return "scope"
-        default: return "shippingbox"
+    private var appHeader: some View {
+        HStack {
+            Text("Stuff")
+                .font(.system(size: 38, weight: .black))
+            Spacer()
+            headerActions
+        }
+    }
+
+    private var headerActions: some View {
+        HStack(spacing: 0) {
+            Menu {
+                Toggle("Sync on Open", isOn: $syncOnOpen)
+                Text(syncOnOpen ? "Syncs when the app opens" : "Manual sync only")
+            } label: {
+                Image(systemName: "gearshape")
+                    .frame(width: 42, height: 34)
+            }
+            .accessibilityLabel("Sync settings")
+
+            Divider()
+                .frame(height: 20)
+
+            Button {
+                showingWebApp = true
+            } label: {
+                Image(systemName: "safari")
+                    .frame(width: 42, height: 34)
+            }
+            .accessibilityLabel("Open live web app")
+        }
+        .buttonStyle(.plain)
+        .font(.title3.weight(.semibold))
+        .foregroundStyle(.primary)
+        .background(.regularMaterial, in: Capsule())
+    }
+}
+
+struct StuffHomeView: View {
+    @EnvironmentObject private var viewModel: StuffOfflineViewModel
+    @Binding var showingWebApp: Bool
+    @Binding var syncOnOpen: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            CategoryToolbar()
+                .environmentObject(viewModel)
+            RecordListView()
+                .environmentObject(viewModel)
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Stuff")
+                .font(.system(size: 38, weight: .black))
+            if let category = viewModel.categories[viewModel.selectedCategory] {
+                Text(stuffCategoryDisplayName(viewModel.selectedCategory, category.name))
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(spacing: 0) {
+                Menu {
+                    Toggle("Sync on Open", isOn: $syncOnOpen)
+                    Text(syncOnOpen ? "Syncs when the app opens" : "Manual sync only")
+                } label: {
+                    Image(systemName: "gearshape")
+                        .frame(width: 42, height: 34)
+                }
+                .accessibilityLabel("Sync settings")
+
+                Divider()
+                    .frame(height: 20)
+
+                Button {
+                    showingWebApp = true
+                } label: {
+                    Image(systemName: "safari")
+                        .frame(width: 42, height: 34)
+                }
+                .accessibilityLabel("Open live web app")
+            }
+            .buttonStyle(.plain)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(.primary)
+            .background(.regularMaterial, in: Capsule())
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(Color(.systemGroupedBackground))
+    }
+}
+
+struct CategoryToolbar: View {
+    @EnvironmentObject private var viewModel: StuffOfflineViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(viewModel.orderedCategories, id: \.0) { slug, category in
+                    Button {
+                        viewModel.selectedCategory = slug
+                    } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: stuffIconName(for: slug))
+                                .font(.title2.weight(.medium))
+                            Text(stuffCategoryDisplayName(slug, category.name))
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                        }
+                        .frame(width: 86, height: 68)
+                        .foregroundStyle(viewModel.selectedCategory == slug ? Color.primary : Color.secondary)
+                        .background(viewModel.selectedCategory == slug ? Color(.systemGray4) : Color(.systemGray5))
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                        .frame(height: 68)
+                }
+            }
+        }
+        .background(Color(.systemGray5))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 1)
         }
     }
 }
@@ -164,7 +248,7 @@ struct RecordListView: View {
                     .environmentObject(viewModel)
             }
         }
-        .navigationTitle(viewModel.categories[viewModel.selectedCategory]?.name ?? "Stuff")
+        .listStyle(.plain)
         .overlay {
             if viewModel.selectedRecords.isEmpty {
                 ContentUnavailableView(
@@ -204,6 +288,35 @@ struct RecordListView: View {
         }
         .padding()
         .background(.bar)
+    }
+}
+
+private func stuffIconName(for category: String) -> String {
+    switch category {
+    case "watches": return "clock"
+    case "coins": return "circle.hexagongrid"
+    case "properties": return "house"
+    case "credit_cards": return "creditcard"
+    case "persons": return "person.2"
+    case "cameras": return "camera"
+    case "lenses": return "camera.aperture"
+    case "pens": return "pencil.tip"
+    case "art": return "paintpalette"
+    case "vehicles": return "car"
+    case "recordings": return "music.note"
+    case "audio": return "hifispeaker"
+    case "rifles": return "scope"
+    default: return "shippingbox"
+    }
+}
+
+private func stuffCategoryDisplayName(_ slug: String, _ fallback: String) -> String {
+    switch slug {
+    case "properties": return "Property"
+    case "credit_cards": return "Cards"
+    case "persons": return "People"
+    case "recordings": return "Music"
+    default: return fallback
     }
 }
 

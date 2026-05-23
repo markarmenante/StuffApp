@@ -28,9 +28,22 @@ final class StuffOfflineViewModel: ObservableObject {
     }
 
     var orderedCategories: [(String, StuffCategory)] {
-        categories
+        let preferredOrder = [
+            "watches", "coins", "properties", "credit_cards", "persons",
+            "cameras", "lenses", "pens", "art", "vehicles", "recordings",
+            "audio", "rifles", "items"
+        ]
+        let rank = Dictionary(uniqueKeysWithValues: preferredOrder.enumerated().map { ($0.element, $0.offset) })
+        return categories
             .map { ($0.key, $0.value) }
-            .sorted { $0.1.name < $1.1.name }
+            .sorted {
+                let left = rank[$0.0] ?? Int.max
+                let right = rank[$1.0] ?? Int.max
+                if left == right {
+                    return $0.1.name < $1.1.name
+                }
+                return left < right
+            }
     }
 
     var selectedRecords: [StuffRecord] {
@@ -96,12 +109,12 @@ final class StuffOfflineViewModel: ObservableObject {
         statusText = "Syncing"
         do {
             await StuffCookieBridge.syncWebCookiesToURLSession()
-            try await client.pullChanges { [weak self] message in
+            let summary = try await client.pullChanges { [weak self] message in
                 Task { @MainActor in self?.statusText = message }
             }
             await loadLocalCache()
             markSyncedNow()
-            statusText = "Synced"
+            statusText = "Synced · \(summary.fileText)"
         } catch {
             errorMessage = error.localizedDescription
             statusText = "Sync failed"
