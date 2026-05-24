@@ -6889,10 +6889,16 @@ def _parse_watch_order_deposit(value, purchase_price):
             return purchase_price * pct / 100.0, pct
         except (TypeError, ValueError):
             return None, None
-    deposit = _parse_order_money(s)
     pct = None
-    if deposit is not None and purchase_price:
-        pct = deposit / float(purchase_price) * 100.0
+    pct_match = re.search(r'\((-?\d+(?:\.\d+)?)\s*%\)', s)
+    if pct_match:
+        try:
+            pct = float(pct_match.group(1))
+        except (TypeError, ValueError):
+            pct = None
+    deposit = _parse_order_money(s)
+    if pct is not None and purchase_price is not None:
+        deposit = purchase_price * pct / 100.0
     return deposit, pct
 
 
@@ -7048,21 +7054,27 @@ def _update_watch_order_field(db, record_id, field_name, raw_value):
 
 def _refresh_watch_order_balance(db, record_id):
     row = db.execute(
-        "SELECT price, order_purchase_price, order_deposit, order_deposit_2 "
+        "SELECT price, order_purchase_price, order_deposit, order_deposit_2, "
+        "order_deposit_percent "
         "FROM watches WHERE id = ?",
         [record_id],
     ).fetchone()
     if not row:
         return
     purchase = _watch_order_purchase_amount(row)
+    deposit = _parse_order_money(row['order_deposit'])
+    pct = row['order_deposit_percent']
+    if pct is not None and purchase is not None:
+        deposit = purchase * float(pct) / 100.0
     balance = _watch_order_balance(
         purchase,
-        _parse_order_money(row['order_deposit']),
+        deposit,
         _parse_order_money(row['order_deposit_2']),
     )
     db.execute(
-        "UPDATE watches SET order_balance = ?, updated_at = ? WHERE id = ?",
-        [balance, datetime.utcnow().isoformat(), record_id],
+        "UPDATE watches SET order_deposit = ?, order_balance = ?, "
+        "updated_at = ? WHERE id = ?",
+        [deposit, balance, datetime.utcnow().isoformat(), record_id],
     )
 
 

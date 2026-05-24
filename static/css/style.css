@@ -1003,10 +1003,26 @@ input[type="number"]::-webkit-outer-spin-button {
   color: #b3261e;
 }
 
-/* Value Estimate section-bar — title left, pill right, both inline. */
+/* Value Estimate notes — collapsible section-bar. */
+.value-estimate-panel {
+  border-bottom: 1px solid var(--border-light);
+}
 .section-bar.value-estimate-bar {
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.value-estimate-bar::-webkit-details-marker {
+  display: none;
+}
+.value-estimate-bar::before {
+  content: '▸';
+  margin-right: 6px;
+  color: var(--text-secondary, #666);
+}
+.value-estimate-panel[open] .value-estimate-bar::before {
+  content: '▾';
 }
 .value-estimate-title { flex: 1 1 auto; }
 .value-search-pill {

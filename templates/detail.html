@@ -727,18 +727,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
   {{ sellpanel() }}
 
-  <!-- Value Estimate block — section-bar header (matches Topics /
-       People / Notes) with the results table below. -->
-  <div class="section-bar value-estimate-bar">
-    <span class="value-estimate-title">Value Estimate Notes</span>
-  </div>
-  <div class="dgrid dg1">
-    <div class="dcell dcell-results">
-      <div id="resultsDisplay" class="results-display">{{ val('results')|format_results }}</div>
-      <textarea id="resultsRaw" name="results" rows="3" class="results-raw">{{ r['results'] if r and r['results'] else '' }}</textarea>
-      <span class="clabel">Results</span>
+  <!-- Value Estimate notes: collapsible because lookup notes can get long. -->
+  <details class="value-estimate-panel">
+    <summary class="section-bar value-estimate-bar">
+      <span class="value-estimate-title">Value Estimate Notes</span>
+    </summary>
+    <div class="dgrid dg1">
+      <div class="dcell dcell-results">
+        <div id="resultsDisplay" class="results-display">{{ val('results')|format_results }}</div>
+        <textarea id="resultsRaw" name="results" rows="3" class="results-raw">{{ r['results'] if r and r['results'] else '' }}</textarea>
+        <span class="clabel">Results</span>
+      </div>
     </div>
-  </div>
+  </details>
 
   {{ notescell('notes','Notes') }}
 
@@ -3462,6 +3463,13 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (!Number.isFinite(n)) return '';
     return (Math.round(n * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%';
   }
+  function orderDepositPercent(raw) {
+    const text = String(raw || '').trim();
+    const fullPct = text.match(/^(-?\d+(?:\.\d+)?)\s*%$/);
+    if (fullPct) return parseFloat(fullPct[1]);
+    const savedPct = text.match(/\((-?\d+(?:\.\d+)?)\s*%\)/);
+    return savedPct ? parseFloat(savedPct[1]) : null;
+  }
   function monthsLateText(expected, actual) {
     if (!expected) return '';
     const exp = new Date(expected + 'T00:00:00');
@@ -3513,24 +3521,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
     const purchase = orderMoneyNumber(purchaseInput?.value);
     let deposit = orderMoneyNumber(depositInput?.value);
     const deposit2 = orderMoneyNumber(deposit2Input?.value) || 0;
-    let pct = null;
     const depositRaw = stripOrderPercent(depositInput?.value || '').trim();
-    const pctMatch = depositRaw.match(/^(-?\d+(?:\.\d+)?)\s*%$/);
-    if (pctMatch && purchase !== null) {
-      pct = parseFloat(pctMatch[1]);
+    let pct = orderDepositPercent(depositInput?.value || '');
+    if (pct !== null && purchase !== null) {
       if (Number.isFinite(pct)) {
         deposit = purchase * pct / 100;
         if (formatDeposit) depositInput.value = formatOrderMoney(deposit) + ' (' + pct + '%)';
-      }
-    } else if (deposit !== null && purchase) {
-      pct = deposit / purchase * 100;
-      const meta = detectCurrency(depositRaw);
-      const hasUsdTail = /\/\s*\$[\d,]+/.test(depositRaw);
-      if (formatDeposit && depositInput && depositInput.value && (meta.code === 'USD' || hasUsdTail)) {
-        const base = hasUsdTail || meta.code !== 'USD'
-          ? depositRaw
-          : formatOrderMoney(deposit);
-        depositInput.value = base + ' (' + formatOrderPercent(pct) + ')';
       }
     }
     if (balanceInput) {
@@ -3569,7 +3565,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
       input.addEventListener('change', () => updateWatchOrderMath(false));
     });
     form.querySelector('input[name="price"]')?.addEventListener('input', () => {
-      updateWatchOrderMath(false);
+      updateWatchOrderMath(true);
     });
     updateWatchOrderMath(false);
   }
