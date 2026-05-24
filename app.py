@@ -12172,9 +12172,13 @@ def recordings_catalog_pdf():
     doc.build(story, onFirstPage=_page_footer, onLaterPages=_page_footer)
     buf.seek(0)
     fname = f'{location_title} Catalog — {datetime.utcnow().strftime("%Y-%m-%d")}.pdf'
-    return send_file(buf, as_attachment=False,
-                     download_name=fname,
-                     mimetype='application/pdf')
+    response = send_file(buf, as_attachment=False,
+                         download_name=fname,
+                         mimetype='application/pdf',
+                         max_age=0)
+    response.headers['Cache-Control'] = 'no-store, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 
 # ---------------------------------------------------------------------------

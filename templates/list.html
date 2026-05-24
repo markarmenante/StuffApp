@@ -104,7 +104,7 @@
      title="Audio at Truckee (Martis)">Martis</a>
   {% endif %}
   {% if category == 'recordings' and not at_property %}
-  <a href="{{ url_for('recordings_catalog_pdf', filter=coin_filter if coin_filter in ('carp', 'martis') else None) }}"
+  <a href="{{ url_for('recordings_catalog_pdf', filter=coin_filter if coin_filter in ('carp', 'martis') else None, layout='tight') }}"
      class="toolbar-btn pill"
      title="Printable catalog of available recordings{% if coin_filter == 'carp' %} at Carpinteria{% elif coin_filter == 'martis' %} at Truckee{% else %} at Carpinteria or Truckee{% endif %}"
      target="_blank">Catalog</a>
