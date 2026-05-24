@@ -669,13 +669,12 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="dcell ta-wrap"><input type="text" name="strap_color" value="{{ val('strap_color') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('strap_color', [])|join('||') }}" style="text-align:center"><span class="clabel">Color</span></div>
   </div>
 
-  {% set _order_status = (r['status'] if r and 'status' in r.keys() and r['status'] else ('Ordered' if is_new else '')) %}
+  {% set _order_status = (r['status'] if r and 'status' in r.keys() and r['status'] else ('Own' if is_new else '')) %}
   {% set _has_commission = (_order_status == 'Ordered') or val('order_deposit') or val('order_deposit_2') or val('expected_delivery_date') or val('actual_delivery_date') %}
-  <div id="watchOrderPanel" class="watch-order-panel {{ 'is-commission-active' if _has_commission else 'is-purchase-active' }}">
+  <div id="watchOrderPanel" class="watch-order-panel {{ 'is-commissioned-active' if _has_commission else '' }}">
     <div class="section-bar watch-order-bar">
       <span>Purchase History</span>
-      <button type="button" class="watch-history-pill {{ '' if _has_commission else 'is-active' }}" data-watch-history-mode="purchase">Purchase</button>
-      <button type="button" class="watch-history-pill {{ 'is-active' if _has_commission else '' }}" data-watch-history-mode="commission">Commission</button>
+      <button type="button" class="watch-history-pill {{ 'is-active' if _has_commission else '' }}" data-watch-commissioned>Commissioned</button>
       <span class="watch-order-spacer"></span>
       <span id="valueSearchedAt" class="value-fetch-stamp">{% if r and r['value_searched_at'] %}as of {{ r['value_searched_at']|short_date }}{% endif %}</span>
       <button type="button" id="valueBtn" class="value-search-pill"
@@ -760,7 +759,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <span class="blabel">Location</span>
     </div>
     <div class="bottom-cell">
-      {% set _s = val('status') if val('status') else ('Ordered' if is_new else '') %}
+      {% set _s = val('status') if val('status') else ('Own' if is_new else '') %}
       <select name="status" class="status-select {{ 'status-ordered' if _s=='Ordered' }}"
               onchange="this.classList.toggle('status-ordered', this.value==='Ordered')">
         <option value=""></option>
@@ -3484,14 +3483,23 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (rem) parts.push(rem + ' mo');
     return parts.join(' ') + ' late';
   }
-  function setWatchHistoryMode(mode) {
+  function setWatchCommissioned(isCommissioned) {
     if (!watchOrderPanel) return;
-    const isCommission = mode === 'commission';
-    watchOrderPanel.classList.toggle('is-commission-active', isCommission);
-    watchOrderPanel.classList.toggle('is-purchase-active', !isCommission);
-    watchOrderPanel.querySelectorAll('[data-watch-history-mode]').forEach(btn => {
-      btn.classList.toggle('is-active', btn.dataset.watchHistoryMode === mode);
-    });
+    watchOrderPanel.classList.toggle('is-commissioned-active', isCommissioned);
+    watchOrderPanel.querySelector('[data-watch-commissioned]')?.classList.toggle('is-active', isCommissioned);
+    const statusSelect = form.querySelector('select[name="status"]');
+    if (statusSelect) {
+      const nextStatus = isCommissioned ? 'Ordered' : 'Own';
+      if (statusSelect.value !== nextStatus) {
+        statusSelect.value = nextStatus;
+        statusSelect.classList.toggle('status-ordered', isCommissioned);
+        if (typeof recordExists === 'undefined' || recordExists) {
+          statusSelect.dispatchEvent(new Event('input', { bubbles: true }));
+          statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+    }
+    updateWatchOrderMath(false);
   }
   function updateWatchOrderMath(formatDeposit) {
     if (!watchOrderPanel) return;
@@ -3533,8 +3541,9 @@ document.querySelectorAll('.comp-item').forEach(item => {
     }
   }
   if (watchOrderPanel) {
-    watchOrderPanel.querySelectorAll('[data-watch-history-mode]').forEach(btn => {
-      btn.addEventListener('click', () => setWatchHistoryMode(btn.dataset.watchHistoryMode));
+    const commissionedPill = watchOrderPanel.querySelector('[data-watch-commissioned]');
+    commissionedPill?.addEventListener('click', () => {
+      setWatchCommissioned(!watchOrderPanel.classList.contains('is-commissioned-active'));
     });
     watchOrderPanel.querySelectorAll('.watch-order-money').forEach(input => {
       input.addEventListener('focus', () => {
@@ -3569,6 +3578,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
     statusSelect.addEventListener('change', () => {
       const isOrdered = statusSelect.value === 'Ordered';
       statusSelect.classList.toggle('status-ordered', isOrdered);
+      if (watchOrderPanel) {
+        watchOrderPanel.classList.toggle('is-commissioned-active', isOrdered);
+        watchOrderPanel.querySelector('[data-watch-commissioned]')?.classList.toggle('is-active', isOrdered);
+      }
       if (watchOrderPanel && statusSelect.value === 'Own') {
         const actualInput = watchOrderPanel.querySelector('input[name="actual_delivery_date"]');
         const expectedInput = watchOrderPanel.querySelector('input[name="expected_delivery_date"]');

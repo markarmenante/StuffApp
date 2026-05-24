@@ -1289,8 +1289,7 @@ input[type="date"] { -webkit-appearance: none; }
   border-color: #111827;
   color: #fff;
 }
-.watch-order-panel.is-purchase-active .watch-commission,
-.watch-order-panel.is-commission-active .watch-purchase { display: none; }
+.watch-order-panel:not(.is-commissioned-active) .watch-commission { display: none; }
 @media (max-width: 640px) {
   .watch-order-bar { gap: 6px; }
   .watch-order-bar .value-fetch-stamp { display: none; }
