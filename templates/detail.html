@@ -4788,7 +4788,7 @@ async function shareMedicationList(ev, btn) {
   const text = lines.join('\n');
   try {
     if (navigator.share) {
-      await navigator.share({ title: `${personName} medications`, text });
+      await navigator.share({ text });
       return;
     }
   } catch (err) {
