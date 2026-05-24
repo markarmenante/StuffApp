@@ -6881,6 +6881,115 @@ def _parse_order_money(value):
         return None
 
 
+def _order_money_components(value):
+    """Return the leading currency amount plus USD tail for strings like
+    "£315,250 / $434,635". Plain USD/numeric values return only usd."""
+    if value is None or value == '':
+        return None
+    if isinstance(value, (int, float)):
+        return {'prefix': '$', 'native': None, 'usd': float(value)}
+    s = str(value).strip()
+    if not s:
+        return None
+    usd = None
+    usd_tail = re.search(r'/\s*\$([\d,]+(?:\.\d+)?)', s)
+    if usd_tail:
+        try:
+            usd = float(usd_tail.group(1).replace(',', ''))
+        except (TypeError, ValueError):
+            usd = None
+    leading = re.sub(r'\([^)]*\)', '', s)
+    leading = re.sub(r'\s*/\s*\$[\d,]+(?:\.\d+)?\s*$', '', leading).strip()
+    m = re.match(
+        r'^(?P<prefix>A\$|US\$|\$|€|£|¥|CHF\s*|EUR\s+|USD\s+|AUD\s+|AUS\s+|GBP\s+|JPY\s+|YEN\s+)'
+        r'\s*(?P<num>-?[\d,]+(?:\.\d+)?)',
+        leading,
+        re.IGNORECASE,
+    )
+    native = None
+    prefix = '$'
+    if m:
+        raw_prefix = m.group('prefix').strip()
+        prefix_map = {
+            'A$': 'A$', 'AUD': 'A$', 'AUS': 'A$',
+            '€': '€', 'EUR': '€',
+            '£': '£', 'GBP': '£',
+            '¥': '¥', 'JPY': '¥', 'YEN': '¥',
+            'CHF': 'CHF ',
+            'US$': '$', 'USD': '$', '$': '$',
+        }
+        prefix = prefix_map.get(raw_prefix.upper(), raw_prefix)
+        try:
+            native = float(m.group('num').replace(',', ''))
+        except (TypeError, ValueError):
+            native = None
+    elif usd is None:
+        usd = _parse_order_money(value)
+    if usd is None and prefix == '$':
+        usd = native
+    return {'prefix': prefix, 'native': native, 'usd': usd}
+
+
+def _format_prefixed_money(prefix, amount):
+    if amount is None:
+        return ''
+    try:
+        n = float(amount)
+    except (TypeError, ValueError):
+        return ''
+    sign = '-' if n < 0 else ''
+    return f"{sign}{prefix}{abs(round(n)):,.0f}"
+
+
+def _watch_order_balance_display(record):
+    price_raw = _row_get(record, 'price')
+    purchase_parts = _order_money_components(price_raw)
+    deposit_raw = _row_get(record, 'order_deposit')
+    deposit_parts = _order_money_components(deposit_raw)
+    deposit2_raw = _row_get(record, 'order_deposit_2')
+    deposit2_parts = _order_money_components(deposit2_raw)
+
+    purchase = purchase_parts['usd'] if purchase_parts else _watch_order_purchase_amount(record)
+    deposit_value, pct = _watch_order_deposit_values(record)
+    deposit = (deposit_parts['usd'] if deposit_parts and deposit_parts.get('usd') is not None
+               else _parse_order_money(deposit_value))
+    if pct not in (None, '') and purchase is not None:
+        try:
+            deposit = purchase * float(pct) / 100.0
+        except (TypeError, ValueError):
+            pass
+    deposit2 = (deposit2_parts['usd'] if deposit2_parts and deposit2_parts.get('usd') is not None
+                else _watch_order_deposit_2_amount(record))
+    usd_balance = _watch_order_balance(purchase, deposit, deposit2)
+
+    if (purchase_parts and purchase_parts.get('native') is not None
+            and purchase_parts.get('prefix') != '$'
+            and purchase_parts.get('usd') is not None):
+        native_deposit = None
+        if pct not in (None, ''):
+            try:
+                native_deposit = purchase_parts['native'] * float(pct) / 100.0
+            except (TypeError, ValueError):
+                native_deposit = None
+        elif (deposit_parts and deposit_parts.get('prefix') == purchase_parts.get('prefix')
+              and deposit_parts.get('native') is not None):
+            native_deposit = deposit_parts['native']
+        native_deposit = native_deposit or 0
+
+        native_deposit2 = 0
+        if (deposit2_parts and deposit2_parts.get('prefix') == purchase_parts.get('prefix')
+                and deposit2_parts.get('native') is not None):
+            native_deposit2 = deposit2_parts['native']
+
+        native_balance = purchase_parts['native'] - native_deposit - native_deposit2
+        native_text = _format_prefixed_money(purchase_parts['prefix'], native_balance)
+        usd_text = _format_prefixed_money('$', usd_balance)
+        if native_text and usd_text:
+            return f"{native_text} / {usd_text}"
+
+    return currency_filter(usd_balance)
+
+
 def _parse_watch_order_deposit(value, purchase_price):
     s = (value or '').strip()
     m = re.fullmatch(r'\s*(-?\d+(?:\.\d+)?)\s*%\s*', s)
@@ -7159,13 +7268,7 @@ def watch_order_deposit_filter(record):
 
 @app.template_filter('watch_order_balance')
 def watch_order_balance_filter(record):
-    purchase = _watch_order_purchase_amount(record)
-    deposit, _pct = _watch_order_deposit_values(record)
-    return currency_filter(_watch_order_balance(
-        purchase,
-        deposit,
-        _watch_order_deposit_2_amount(record),
-    ))
+    return _watch_order_balance_display(record)
 
 
 @app.template_filter('delivery_lateness')

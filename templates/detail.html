@@ -3459,6 +3459,56 @@ document.querySelectorAll('.comp-item').forEach(item => {
   function formatOrderMoney(n) {
     return Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '';
   }
+  function orderMoneyParts(raw) {
+    const noPct = stripOrderPercent(raw);
+    const text = String(noPct || '').trim();
+    if (!text) return null;
+    const usd = orderMoneyNumber(text);
+    const leading = stripUsdConversion(text).replace(/\([^)]*\)/g, '').trim();
+    const match = leading.match(/^\s*(A\$|AUD|AUS|€|EUR|£|GBP|¥|JPY|YEN|CHF\s*|US\$|USD|\$)\s*([-+]?\d[\d,]*(?:\.\d+)?)/i);
+    if (!match) return { prefix: '$', native: null, usd };
+    const rawPrefix = match[1].trim().toUpperCase();
+    const prefix = rawPrefix === 'AUD' || rawPrefix === 'AUS' || rawPrefix === 'A$' ? 'A$'
+      : rawPrefix === 'EUR' || rawPrefix === '€' ? '€'
+      : rawPrefix === 'GBP' || rawPrefix === '£' ? '£'
+      : rawPrefix === 'JPY' || rawPrefix === 'YEN' || rawPrefix === '¥' ? '¥'
+      : rawPrefix === 'CHF' ? 'CHF '
+      : '$';
+    const native = parseFloat(match[2].replace(/,/g, ''));
+    return { prefix, native: Number.isFinite(native) ? native : null, usd };
+  }
+  function formatPrefixedOrderMoney(prefix, n) {
+    if (!Number.isFinite(n)) return '';
+    const sign = n < 0 ? '-' : '';
+    return sign + prefix + Math.abs(Math.round(n)).toLocaleString('en-US');
+  }
+  function formatOrderBalance(purchaseRaw, depositRaw, deposit2Raw, pct) {
+    const purchaseParts = orderMoneyParts(purchaseRaw);
+    const depositParts = orderMoneyParts(depositRaw);
+    const deposit2Parts = orderMoneyParts(deposit2Raw);
+    const purchase = purchaseParts?.usd ?? orderMoneyNumber(purchaseRaw);
+    let deposit = depositParts?.usd ?? orderMoneyNumber(depositRaw) ?? 0;
+    const deposit2 = deposit2Parts?.usd ?? orderMoneyNumber(deposit2Raw) ?? 0;
+    if (pct !== null && Number.isFinite(pct) && purchase !== null) {
+      deposit = purchase * pct / 100;
+    }
+    if (purchase === null) return '';
+    const usdBalance = purchase - deposit - deposit2;
+    if (purchaseParts?.native !== null && purchaseParts?.prefix && purchaseParts.prefix !== '$' && purchaseParts.usd !== null) {
+      let nativeDeposit = 0;
+      if (pct !== null && Number.isFinite(pct)) {
+        nativeDeposit = purchaseParts.native * pct / 100;
+      } else if (depositParts?.prefix === purchaseParts.prefix && depositParts.native !== null) {
+        nativeDeposit = depositParts.native;
+      }
+      const nativeDeposit2 = deposit2Parts?.prefix === purchaseParts.prefix && deposit2Parts.native !== null
+        ? deposit2Parts.native
+        : 0;
+      return formatPrefixedOrderMoney(purchaseParts.prefix, purchaseParts.native - nativeDeposit - nativeDeposit2)
+        + ' / ' + formatOrderMoney(usdBalance);
+    }
+    return formatOrderMoney(usdBalance);
+  }
   function formatOrderPercent(n) {
     if (!Number.isFinite(n)) return '';
     return (Math.round(n * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%';
@@ -3530,7 +3580,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
       }
     }
     if (balanceInput) {
-      balanceInput.value = purchase === null ? '' : formatOrderMoney(purchase - (deposit || 0) - deposit2);
+      balanceInput.value = formatOrderBalance(
+        purchaseInput?.value || '',
+        depositInput?.value || '',
+        deposit2Input?.value || '',
+        pct,
+      );
     }
     if (lateInput) {
       lateInput.value = monthsLateText(expectedInput?.value || '', actualInput?.value || '');
