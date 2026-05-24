@@ -4317,6 +4317,7 @@ def list_view(category):
                            at_property_url=at_property_url,
                            prop_status=prop_status,
                            prop_type=prop_type,
+                           today_iso=date.today().isoformat(),
                            result_count=len(rows),
                            has_ordered=has_ordered,
                            has_no_longer_owned=has_no_longer_owned,
@@ -7170,6 +7171,18 @@ def watch_order_balance_filter(record):
 @app.template_filter('delivery_lateness')
 def delivery_lateness_filter(expected, actual=None):
     return _watch_order_lateness(expected, actual)
+
+
+@app.template_filter('date_plus_years')
+def date_plus_years_filter(value, years):
+    try:
+        d = datetime.strptime(str(value)[:10], '%Y-%m-%d').date()
+        try:
+            return d.replace(year=d.year + int(years)).isoformat()
+        except ValueError:
+            return d.replace(year=d.year + int(years), day=28).isoformat()
+    except (TypeError, ValueError, AttributeError):
+        return ''
 
 
 @app.template_filter('lug_fmt')

@@ -547,6 +547,23 @@ input[type="number"]::-webkit-outer-spin-button {
   white-space: nowrap;
 }
 .item-cat-id { font-size: 17px; color: var(--text-hint); align-self: flex-end; margin-left: auto; padding-left: 12px; white-space: nowrap; }
+.watch-id-badge.item-cat-id {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.watch-order-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #d93025;
+  border: 1px solid rgba(0,0,0,.22);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.75);
+  flex: 0 0 auto;
+}
+.watch-order-dot.is-promised { background: #f4c542; }
+.watch-order-dot.is-late-2y { background: #d93025; }
 .coin-position-actions .item-cat-id {
   align-self: center;
   margin-left: 0;
