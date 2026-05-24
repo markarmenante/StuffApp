@@ -104,6 +104,10 @@
      title="Audio at Truckee (Martis)">Martis</a>
   {% endif %}
   {% if category == 'recordings' and not at_property %}
+  <a href="{{ url_for('recordings_catalog_pdf') }}"
+     class="toolbar-btn pill"
+     title="Printable catalog of available recordings at Carpinteria or Truckee"
+     target="_blank">Catalog</a>
   <a href="{{ url_for('list_view', category='recordings', q=q or None, filter=None if coin_filter == 'carp' else 'carp') }}"
      class="toolbar-btn pill {% if coin_filter == 'carp' %}active{% endif %}"
      title="Music at Carpinteria">Carp</a>

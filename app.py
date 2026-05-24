@@ -11948,6 +11948,227 @@ def record_print_pdf(category, record_id):
                      mimetype='application/pdf')
 
 
+@app.route('/recordings/catalog.pdf', methods=['GET'])
+def recordings_catalog_pdf():
+    """Letter-size printable catalog of available recordings at the
+    Carpinteria or Truckee/Martis properties."""
+    if not g.get('current_user'):
+        abort(403)
+    allowed = g.get('allowed_cats') or set()
+    if 'recordings' not in allowed:
+        abort(403)
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                     Paragraph, Spacer, Image, KeepTogether)
+    from xml.sax.saxutils import escape
+    import io as _io
+
+    def _p(text, style):
+        return Paragraph(escape(str(text or '')), style)
+
+    def _property_label(value):
+        aliases = _property_alias_group(value)
+        if 'truckee' in aliases or 'martis' in aliases:
+            return 'Truckee'
+        if 'carpinteria' in aliases or 'carp' in aliases:
+            return 'Carpinteria'
+        return (value or '').strip()
+
+    def _property_mark(value):
+        label = _property_label(value)
+        return 'T' if label == 'Truckee' else 'C' if label == 'Carpinteria' else ''
+
+    def _recording_format(row):
+        typ = (row['type'] or '').strip()
+        speed = (row['speed'] or '').strip()
+        speed = (speed
+                 .replace('⅓', '1/3')
+                 .replace('⅔', '2/3')
+                 .replace('½', '1/2'))
+        sound = (row['sound'] or '').strip()
+        parts = []
+        if speed:
+            parts.append(speed)
+        if sound:
+            parts.append(sound)
+        if typ:
+            parts.append(typ)
+        return ' · '.join(parts)
+
+    def _recording_image(row, max_size):
+        img_path = _report_primary_image('recordings', row)
+        if not img_path:
+            ph = Table([['']], colWidths=[max_size], rowHeights=[max_size])
+            ph.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#e5e7eb')),
+                ('BOX', (0, 0), (-1, -1), 0.25, colors.HexColor('#d1d5db')),
+            ]))
+            return ph
+        try:
+            ir = ImageReader(img_path)
+            iw, ih = ir.getSize()
+            scale = min(max_size / iw, max_size / ih)
+            return Image(img_path, width=iw * scale, height=ih * scale)
+        except Exception:
+            return ''
+
+    carp_aliases = _property_alias_group('Carpinteria')
+    truckee_aliases = _property_alias_group('Truckee')
+    location_aliases = sorted(set(carp_aliases + truckee_aliases))
+    ph = ','.join(['?' for _ in location_aliases])
+    wheres = [
+        f"LOWER(TRIM(COALESCE(property,''))) IN ({ph})",
+        "(LOWER(TRIM(COALESCE(status,''))) "
+        "NOT IN ('sold','gifted','lost','loaned'))",
+        "(LOWER(TRIM(COALESCE(location_status,''))) "
+        "NOT IN ('missing','gifted','consigned'))",
+    ]
+    params = list(location_aliases)
+    _apply_row_filter_clauses('recordings', wheres, params)
+    sql = (
+        "SELECT * FROM recordings "
+        f"WHERE {' AND '.join(wheres)} "
+        f"ORDER BY {CATEGORY_ORDER_BY['recordings']}"
+    )
+    rows = get_db().execute(sql, params).fetchall()
+    rows = [r for r in rows if _user_can_see_row('recordings', r)]
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=letter,
+        leftMargin=0.35 * inch, rightMargin=0.35 * inch,
+        topMargin=0.35 * inch, bottomMargin=0.4 * inch,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'catTitle', parent=styles['Heading1'], fontName='Helvetica-Bold',
+        fontSize=18, leading=21, spaceAfter=2,
+    )
+    sub_style = ParagraphStyle(
+        'catSub', parent=styles['Normal'], fontSize=8.5, leading=11,
+        textColor=colors.HexColor('#666666'), spaceAfter=8,
+    )
+    artist_style = ParagraphStyle(
+        'catArtist', parent=styles['Normal'], fontName='Helvetica-Bold',
+        fontSize=11, leading=13,
+    )
+    title_italic = ParagraphStyle(
+        'catAlbum', parent=styles['Normal'], fontName='Helvetica-Oblique',
+        fontSize=10.5, leading=13,
+    )
+    meta_style = ParagraphStyle(
+        'catMeta', parent=styles['Normal'], fontSize=9.5, leading=12,
+    )
+    small_style = ParagraphStyle(
+        'catSmall', parent=styles['Normal'], fontSize=7.5, leading=9,
+        textColor=colors.HexColor('#666666'),
+    )
+    loc_style = ParagraphStyle(
+        'catLoc', parent=styles['Normal'], fontName='Helvetica-Bold',
+        fontSize=12, leading=14, alignment=TA_CENTER,
+        textColor=colors.HexColor('#666666'),
+    )
+    right_style = ParagraphStyle(
+        'catRight', parent=styles['Normal'], fontSize=10, leading=12,
+        alignment=TA_RIGHT,
+    )
+
+    story = [
+        Paragraph('Available Recordings Catalog', title_style),
+        Paragraph(
+            f'Carpinteria and Truckee · {len(rows)} available recording'
+            f'{"s" if len(rows) != 1 else ""} · '
+            f'{datetime.utcnow().strftime("%Y-%m-%d")}',
+            sub_style,
+        ),
+    ]
+
+    header = Table(
+        [[_p('Cover', small_style), _p('Artist / Title', small_style),
+          _p('Format', small_style), _p('Genre / Year', small_style),
+          _p('Loc', small_style)]],
+        colWidths=[1.0 * inch, 3.45 * inch, 1.1 * inch, 1.45 * inch, 0.55 * inch],
+    )
+    header.setStyle(TableStyle([
+        ('LINEBELOW', (0, 0), (-1, 0), 0.6, colors.HexColor('#999999')),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#666666')),
+    ]))
+    story.append(header)
+
+    if not rows:
+        story.append(Spacer(1, 18))
+        story.append(Paragraph('No available recordings found for Carpinteria or Truckee.', sub_style))
+    else:
+        for idx, row in enumerate(rows):
+            cover = _recording_image(row, 0.82 * inch)
+            artist = row['artist'] or 'Unknown artist'
+            title = row['title'] or ''
+            title_block = [_p(artist, artist_style)]
+            if title:
+                title_block.append(_p(title, title_italic))
+            if row['players']:
+                title_block.append(_p(row['players'], small_style))
+            title_cell = Table(
+                [[x] for x in title_block],
+                colWidths=[3.4 * inch],
+            )
+            title_cell.setStyle(TableStyle([
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+            ]))
+
+            fmt = _recording_format(row)
+            genre_bits = [v for v in (row['genre'], row['year_recorded']) if v]
+            genre = ' · '.join(str(v) for v in genre_bits)
+            loc = _property_mark(row['property'])
+
+            row_tbl = Table(
+                [[cover, title_cell, _p(fmt, right_style),
+                  _p(genre, meta_style), _p(loc, loc_style)]],
+                colWidths=[1.0 * inch, 3.45 * inch, 1.1 * inch, 1.45 * inch, 0.55 * inch],
+                rowHeights=[0.95 * inch],
+            )
+            bg = colors.white if idx % 2 else colors.HexColor('#f3f4f6')
+            row_tbl.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), bg),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.35, colors.HexColor('#b5b5b5')),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            story.append(KeepTogether(row_tbl))
+
+    def _page_footer(canvas, doc_obj):
+        canvas.saveState()
+        canvas.setFont('Helvetica', 7)
+        canvas.setFillColor(colors.HexColor('#777777'))
+        canvas.drawRightString(
+            doc_obj.pagesize[0] - doc_obj.rightMargin,
+            0.22 * inch,
+            f'Page {doc_obj.page}',
+        )
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_page_footer, onLaterPages=_page_footer)
+    buf.seek(0)
+    fname = f'Recordings Catalog — {datetime.utcnow().strftime("%Y-%m-%d")}.pdf'
+    return send_file(buf, as_attachment=False,
+                     download_name=fname,
+                     mimetype='application/pdf')
+
+
 # ---------------------------------------------------------------------------
 # Inventory report — compact one-document summary across categories.
 # Two layouts (detailed=thumbnail card, compact=spreadsheet row), filtered
