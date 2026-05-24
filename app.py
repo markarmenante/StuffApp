@@ -11988,6 +11988,14 @@ def recordings_catalog_pdf():
             return 'Tape'
         return typ
 
+    def _location_mark(value):
+        aliases = _property_alias_group(value)
+        if 'truckee' in aliases or 'martis' in aliases:
+            return 'M'
+        if 'carpinteria' in aliases or 'carp' in aliases:
+            return 'C'
+        return ''
+
     def _recording_image(row, max_size):
         img_path = _report_primary_image('recordings', row)
         if not img_path:
@@ -12017,6 +12025,7 @@ def recordings_catalog_pdf():
         truckee_aliases = _property_alias_group('Truckee')
         location_aliases = sorted(set(carp_aliases + truckee_aliases))
         location_title = 'Recordings'
+    show_location_mark = raw_filter not in ('carp', 'martis')
     ph = ','.join(['?' for _ in location_aliases])
     wheres = [
         f"LOWER(TRIM(COALESCE(property,''))) IN ({ph})",
@@ -12102,7 +12111,13 @@ def recordings_catalog_pdf():
             cover = _recording_image(row, 0.64 * inch)
             artist = row['artist'] or 'Unknown artist'
             title = row['title'] or ''
-            title_block = [_p(artist, artist_style)]
+            location_mark = _location_mark(row['property']) if show_location_mark else ''
+            artist_text = escape(str(artist))
+            if location_mark:
+                artist_text += (
+                    f' <font size="7" color="#777777">{location_mark}</font>'
+                )
+            title_block = [Paragraph(artist_text, artist_style)]
             if title:
                 title_block.append(_p(title, title_italic))
             title_cell = Table(
