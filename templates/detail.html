@@ -2350,17 +2350,30 @@ document.addEventListener('DOMContentLoaded', function () {
           {{ cell('spouse_name_and_phone','Contact',rows=4) }}
         </div>
         <div class="med-table dcell">
+          <button type="button" class="doc-share-btn med-share-btn"
+                  onclick="shareMedicationList(event, this)"
+                  title="Share medication list via Messages / Mail"
+                  aria-label="Share medications">
+            <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+                 stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2 V17"/>
+              <path d="M6 8 L12 2 L18 8"/>
+              <path d="M5 13 H3 V25 H21 V13 H19"/>
+            </svg>
+          </button>
           <div class="med-row med-head">
             <span>Medication</span><span>Dosage</span><span>Note</span><span></span>
           </div>
-          {% for i in range(1, 8) %}
-          <div class="med-row" data-med-idx="{{ i }}">
+          {% for i in range(1, 13) %}
+          <div class="med-row{% if i > 7 %} med-row-extra{% endif %}" data-med-idx="{{ i }}">
             <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
             <input type="text" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
             <input type="text" name="med_note_{{ i }}" value="{{ val('med_note_' ~ i) }}">
             <button type="button" class="med-del-btn" title="Delete this medication">×</button>
           </div>
           {% endfor %}
+          <button type="button" class="med-add-btn">+ Medication</button>
           <span class="clabel">Medications</span>
         </div>
         <div class="dgrid dg1">{{ cell('health_notes','Notes',rows=2) }}</div>
@@ -4658,7 +4671,8 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
 // event so the existing per-field autosave persists the change.
 (function medsDelete() {
   const MED_FIELDS = ['med_name', 'med_dose', 'med_note'];
-  const MAX = 7;
+  const MAX = 12;
+  const BASE_VISIBLE = 7;
   const form = document.getElementById('mainForm');
   if (!form) return;
 
@@ -4669,9 +4683,18 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
     });
   }
   function refreshEmptyClass() {
-    form.querySelectorAll('.med-row[data-med-idx]').forEach(row => {
+    let lastFilled = 0;
+    const rows = Array.from(form.querySelectorAll('.med-row[data-med-idx]'));
+    rows.forEach(row => {
       const idx = parseInt(row.dataset.medIdx);
-      row.classList.toggle('med-row-empty', rowIsEmpty(idx));
+      const empty = rowIsEmpty(idx);
+      row.classList.toggle('med-row-empty', empty);
+      if (!empty) lastFilled = Math.max(lastFilled, idx);
+    });
+    const visibleThrough = Math.min(MAX, Math.max(BASE_VISIBLE, lastFilled + 1));
+    rows.forEach(row => {
+      const idx = parseInt(row.dataset.medIdx);
+      row.classList.toggle('row-hidden', idx > visibleThrough);
     });
   }
   refreshEmptyClass();
@@ -4706,7 +4729,77 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
       refreshEmptyClass();
     });
   });
+  const addBtn = form.querySelector('.med-add-btn');
+  if (addBtn) {
+    addBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      for (let i = 1; i <= MAX; i++) {
+        if (!rowIsEmpty(i)) continue;
+        const row = form.querySelector(`.med-row[data-med-idx="${i}"]`);
+        if (row) row.classList.remove('row-hidden');
+        const input = form.querySelector(`[name="med_name_${i}"]`);
+        if (input) input.focus();
+        refreshEmptyClass();
+        return;
+      }
+      addBtn.textContent = 'Medication list full';
+      setTimeout(() => { addBtn.textContent = '+ Medication'; }, 1400);
+    });
+  }
 })();
+
+async function shareMedicationList(ev, btn) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const form = document.getElementById('mainForm');
+  if (!form) return;
+  const personName = (form.querySelector('[name="name"]')?.value || 'Medication List').trim();
+  const rows = Array.from(form.querySelectorAll('.med-row[data-med-idx]'))
+    .map(row => {
+      const idx = row.dataset.medIdx;
+      const name = (form.querySelector(`[name="med_name_${idx}"]`)?.value || '').trim();
+      const dose = (form.querySelector(`[name="med_dose_${idx}"]`)?.value || '').trim();
+      const note = (form.querySelector(`[name="med_note_${idx}"]`)?.value || '').trim();
+      return { name, dose, note };
+    })
+    .filter(med => med.name || med.dose || med.note);
+  if (!rows.length) {
+    if (btn) {
+      const original = btn.getAttribute('aria-label') || 'Share medications';
+      btn.setAttribute('aria-label', 'No medications');
+      setTimeout(() => btn.setAttribute('aria-label', original), 1200);
+    }
+    alert('No medications to share.');
+    return;
+  }
+  const lines = [`${personName} medications`, ''];
+  rows.forEach((med, index) => {
+    const parts = [];
+    if (med.name) parts.push(med.name);
+    if (med.dose) parts.push(med.dose);
+    let line = `${index + 1}. ${parts.join(' - ') || med.note}`;
+    if (med.note && (med.name || med.dose)) line += ` (${med.note})`;
+    lines.push(line);
+  });
+  const text = lines.join('\n');
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: `${personName} medications`, text });
+      return;
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    alert('Medication list copied.');
+  } catch (_) {
+    window.location.href = 'mailto:?subject=' +
+      encodeURIComponent(`${personName} medications`) +
+      '&body=' + encodeURIComponent(text);
+  }
+}
 
 // Generic per-row × delete + shift-up + auto-grow visibility. Used by
 // alarm-codes and people (and meds in spirit). Behaviour:

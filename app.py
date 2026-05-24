@@ -423,6 +423,9 @@ if os.environ.get('STUFFAPP_OWNER_OPTIONS'):
     }
 
 
+PERSON_MEDICATION_SLOTS = 12
+
+
 FIELDS = {
     'watches': [
         {'name': 'brand',           'label': 'Brand',             'type': 'text'},
@@ -837,9 +840,9 @@ FIELDS = {
         {'name': 'global_entry',          'label': 'Global Entry',           'type': 'file'},
         {'name': 'global_entry_number',   'label': 'Global Entry Number',    'type': 'text'},
         {'name': 'eye_prescription',      'label': 'Eye Prescription',       'type': 'file'},
-        *[{'name': f'med_name_{i}', 'label': f'Medication {i}', 'type': 'text'} for i in range(1, 8)],
-        *[{'name': f'med_dose_{i}', 'label': f'Dosage {i}',     'type': 'text'} for i in range(1, 8)],
-        *[{'name': f'med_note_{i}', 'label': f'Med Note {i}',   'type': 'text'} for i in range(1, 8)],
+        *[{'name': f'med_name_{i}', 'label': f'Medication {i}', 'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[{'name': f'med_dose_{i}', 'label': f'Dosage {i}',     'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[{'name': f'med_note_{i}', 'label': f'Med Note {i}',   'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         # Persons IDs tab — slots 1+2 reuse the existing license_obverse /
         # license_reverse columns with a hardwired "License Front/Back"
         # title; slots 3..8 are user-supplied (file + editable title).
@@ -1150,9 +1153,9 @@ def init_db():
         'ALTER TABLE persons ADD COLUMN health_insurance_number TEXT',
         'ALTER TABLE persons ADD COLUMN other_health_1 TEXT',
         'ALTER TABLE persons ADD COLUMN other_health_2 TEXT',
-        *[f'ALTER TABLE persons ADD COLUMN med_name_{i} TEXT' for i in range(1, 8)],
-        *[f'ALTER TABLE persons ADD COLUMN med_dose_{i} TEXT' for i in range(1, 8)],
-        *[f'ALTER TABLE persons ADD COLUMN med_note_{i} TEXT' for i in range(1, 8)],
+        *[f'ALTER TABLE persons ADD COLUMN med_name_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[f'ALTER TABLE persons ADD COLUMN med_dose_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[f'ALTER TABLE persons ADD COLUMN med_note_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         # IDs / Health 8-tile docs (slots 3..8 are user-titled)
         *[f'ALTER TABLE persons ADD COLUMN id_doc_{i} TEXT'           for i in range(3, 9)],
         *[f'ALTER TABLE persons ADD COLUMN id_doc_{i}_title TEXT'     for i in range(3, 9)],
@@ -2348,13 +2351,13 @@ def _backfill_meds_from_prescriptions(db):
     safe and won't clobber edits."""
     rows = db.execute(
         "SELECT id, prescriptions, "
-        + ", ".join(f"med_name_{i}" for i in range(1, 8))
+        + ", ".join(f"med_name_{i}" for i in range(1, PERSON_MEDICATION_SLOTS + 1))
         + " FROM persons WHERE prescriptions IS NOT NULL AND prescriptions != ''"
     ).fetchall()
     for row in rows:
-        if any((row[f'med_name_{i}'] or '').strip() for i in range(1, 8)):
+        if any((row[f'med_name_{i}'] or '').strip() for i in range(1, PERSON_MEDICATION_SLOTS + 1)):
             continue  # already migrated or hand-edited
-        meds = _parse_prescription_lines(row['prescriptions'])[:7]
+        meds = _parse_prescription_lines(row['prescriptions'])[:PERSON_MEDICATION_SLOTS]
         if not meds:
             continue
         cols, vals = [], []

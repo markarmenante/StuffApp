@@ -1618,6 +1618,7 @@ input[type="date"] { -webkit-appearance: none; }
 
 /* Medications table inside the Health pill panel */
 .med-table { padding: 6px 10px 4px; position: relative; }
+.med-share-btn { top: 5px; right: 8px; }
 .med-table .med-row {
   display: grid;
   grid-template-columns: 1.4fr 0.8fr 1.6fr 22px;
@@ -1639,6 +1640,19 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .med-del-btn.armed:hover { background: #a52a1f; border-color: #a52a1f; }
 .med-row.med-row-empty .med-del-btn { visibility: hidden; }
+.med-add-btn {
+  margin: 6px 0 0;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 6px;
+  color: var(--blue);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 8px;
+}
+.med-add-btn:hover { background: var(--cell-bg); }
 .med-table .med-row.med-head {
   font-size: 10px; color: var(--text-label);
   padding: 2px 2px 4px;
