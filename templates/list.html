@@ -212,12 +212,10 @@
             {% if row['movement_num'] %}<span><span class="lbl">Mvt</span> {{ row['movement_num'] }}</span>{% endif %}
             {% set _watch_status = (row['status'] or '')|trim|lower %}
             {% set _watch_promised = (row['expected_delivery_date'] or '')[:10] %}
-            {% set _watch_actual = (row['actual_delivery_date'] or '')[:10] %}
-            {% set _watch_compare = _watch_actual or today_iso %}
             {% set _watch_late_class = '' %}
-            {% set _show_watch_dot = _watch_status == 'ordered' and _watch_promised %}
-            {% if _show_watch_dot and _watch_compare >= _watch_promised %}
-              {% set _watch_late_class = 'is-late-2y' if _watch_compare >= (_watch_promised|date_plus_years(2)) else 'is-promised' %}
+            {% set _show_watch_dot = _watch_status == 'ordered' and _watch_promised and _watch_promised > today_iso %}
+            {% if _show_watch_dot %}
+              {% set _watch_late_class = 'is-late-2y' if _watch_promised >= (today_iso|date_plus_years(2)) else 'is-promised' %}
             {% endif %}
             {% if row['cat_id'] or _show_watch_dot %}
             <span class="watch-id-badge item-cat-id">
