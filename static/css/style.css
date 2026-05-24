@@ -557,7 +557,7 @@ input[type="number"]::-webkit-outer-spin-button {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #9aa0a6;
+  background: #d93025;
   border: 1px solid rgba(0,0,0,.22);
   box-shadow: 0 0 0 1px rgba(255,255,255,.75);
   flex: 0 0 auto;

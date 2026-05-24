@@ -215,13 +215,14 @@
             {% set _watch_actual = (row['actual_delivery_date'] or '')[:10] %}
             {% set _watch_compare = _watch_actual or today_iso %}
             {% set _watch_late_class = '' %}
-            {% if _watch_status == 'ordered' and _watch_promised and _watch_compare >= _watch_promised %}
+            {% set _show_watch_dot = _watch_status == 'ordered' and _watch_promised %}
+            {% if _show_watch_dot and _watch_compare >= _watch_promised %}
               {% set _watch_late_class = 'is-late-2y' if _watch_compare >= (_watch_promised|date_plus_years(2)) else 'is-promised' %}
             {% endif %}
-            {% if row['cat_id'] or _watch_status == 'ordered' %}
+            {% if row['cat_id'] or _show_watch_dot %}
             <span class="watch-id-badge item-cat-id">
-              {% if _watch_status == 'ordered' %}
-              <span class="watch-order-dot {{ _watch_late_class }}" title="Ordered{% if _watch_promised %}: promised {{ _watch_promised|short_date }}{% endif %}" aria-label="Ordered"></span>
+              {% if _show_watch_dot %}
+              <span class="watch-order-dot {{ _watch_late_class }}" title="Ordered: promised {{ _watch_promised|short_date }}" aria-label="Ordered"></span>
               {% endif %}
               {% if row['cat_id'] %}<span>{{ row['cat_id'] }}</span>{% endif %}
             </span>
