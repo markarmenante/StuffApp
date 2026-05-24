@@ -1006,6 +1006,14 @@ input[type="number"]::-webkit-outer-spin-button {
   background: #fde8e8;
   color: #b3261e;
 }
+.sell-panel.is-keep-state .sell-tax-state-pill,
+.sell-panel.is-keep-state .sell-tax-state-pill.active,
+.sell-panel.is-keep-state .sell-rates-pill,
+.sell-panel.is-keep-state .sell-rates-pill.is-stale {
+  border-color: #d1d5db;
+  background: #e5e7eb;
+  color: #6b7280;
+}
 .sell-panel-grid.dg5 {
   grid-template-columns: repeat(5, 1fr);
 }

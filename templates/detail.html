@@ -108,7 +108,7 @@
 {% set _sell_keep = val('sell_keep') if val('sell_keep') in ['Sell','Keep'] else 'Keep' %}
 {% set _sell_tax_state = val('sell_tax_state') if val('sell_tax_state') in ['NY','CA'] else 'NY' %}
 {% set _sell_rate_checked = val('sell_tax_rates_checked_at') if val('sell_tax_rates_checked_at') else '2026-05-23' %}
-<details class="sell-panel" {% if _has_sell and _sell_keep == 'Sell' %}open{% endif %}>
+<details class="sell-panel {{ 'is-keep-state' if _sell_keep == 'Keep' else '' }}" {% if _has_sell and _sell_keep == 'Sell' %}open{% endif %}>
   <summary class="section-bar sell-panel-summary">
     <span>Sales</span>
     <button type="button" class="sell-keep-pill {{ 'is-sell' if _sell_keep == 'Sell' else 'is-keep' }}"
@@ -3388,7 +3388,9 @@ document.querySelectorAll('.comp-item').forEach(item => {
         ev.preventDefault();
         ev.stopPropagation();
         const value = sellKeepInput.value === 'Sell' ? 'Keep' : 'Sell';
+        sellPanel.open = true;
         sellKeepInput.value = value;
+        sellPanel.classList.toggle('is-keep-state', value !== 'Sell');
         sellKeepPill.dataset.sellKeep = value;
         sellKeepPill.textContent = value;
         sellKeepPill.classList.toggle('is-sell', value === 'Sell');
