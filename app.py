@@ -842,6 +842,7 @@ FIELDS = {
         {'name': 'eye_prescription',      'label': 'Eye Prescription',       'type': 'file'},
         *[{'name': f'med_name_{i}', 'label': f'Medication {i}', 'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[{'name': f'med_dose_{i}', 'label': f'Dosage {i}',     'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[{'name': f'med_directions_{i}', 'label': f'Directions {i}', 'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[{'name': f'med_note_{i}', 'label': f'Med Note {i}',   'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         # Persons IDs tab — slots 1+2 reuse the existing license_obverse /
         # license_reverse columns with a hardwired "License Front/Back"
@@ -1155,6 +1156,7 @@ def init_db():
         'ALTER TABLE persons ADD COLUMN other_health_2 TEXT',
         *[f'ALTER TABLE persons ADD COLUMN med_name_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[f'ALTER TABLE persons ADD COLUMN med_dose_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[f'ALTER TABLE persons ADD COLUMN med_directions_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[f'ALTER TABLE persons ADD COLUMN med_note_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         # IDs / Health 8-tile docs (slots 3..8 are user-titled)
         *[f'ALTER TABLE persons ADD COLUMN id_doc_{i} TEXT'           for i in range(3, 9)],

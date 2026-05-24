@@ -2363,12 +2363,13 @@ document.addEventListener('DOMContentLoaded', function () {
             </svg>
           </button>
           <div class="med-row med-head">
-            <span>Medication</span><span>Dosage</span><span>Note</span><span></span>
+            <span>Medication</span><span>Dosage</span><span>Directions</span><span>Note</span><span></span>
           </div>
           {% for i in range(1, 13) %}
           <div class="med-row{% if i > 7 %} med-row-extra{% endif %}" data-med-idx="{{ i }}">
             <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
             <input type="text" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
+            <input type="text" name="med_directions_{{ i }}" value="{{ val('med_directions_' ~ i) }}">
             <input type="text" name="med_note_{{ i }}" value="{{ val('med_note_' ~ i) }}">
             <button type="button" class="med-del-btn" title="Delete this medication">×</button>
           </div>
@@ -4670,7 +4671,7 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
 // clearing the last slot. Each affected slot's input fires a blur
 // event so the existing per-field autosave persists the change.
 (function medsDelete() {
-  const MED_FIELDS = ['med_name', 'med_dose', 'med_note'];
+  const MED_FIELDS = ['med_name', 'med_dose', 'med_directions', 'med_note'];
   const MAX = 12;
   const BASE_VISIBLE = 7;
   const form = document.getElementById('mainForm');
@@ -4760,10 +4761,11 @@ async function shareMedicationList(ev, btn) {
       const idx = row.dataset.medIdx;
       const name = (form.querySelector(`[name="med_name_${idx}"]`)?.value || '').trim();
       const dose = (form.querySelector(`[name="med_dose_${idx}"]`)?.value || '').trim();
+      const directions = (form.querySelector(`[name="med_directions_${idx}"]`)?.value || '').trim();
       const note = (form.querySelector(`[name="med_note_${idx}"]`)?.value || '').trim();
-      return { name, dose, note };
+      return { name, dose, directions, note };
     })
-    .filter(med => med.name || med.dose || med.note);
+    .filter(med => med.name || med.dose || med.directions || med.note);
   if (!rows.length) {
     if (btn) {
       const original = btn.getAttribute('aria-label') || 'Share medications';
@@ -4778,8 +4780,9 @@ async function shareMedicationList(ev, btn) {
     const parts = [];
     if (med.name) parts.push(med.name);
     if (med.dose) parts.push(med.dose);
+    if (med.directions) parts.push(med.directions);
     let line = `${index + 1}. ${parts.join(' - ') || med.note}`;
-    if (med.note && (med.name || med.dose)) line += ` (${med.note})`;
+    if (med.note && (med.name || med.dose || med.directions)) line += ` (${med.note})`;
     lines.push(line);
   });
   const text = lines.join('\n');
