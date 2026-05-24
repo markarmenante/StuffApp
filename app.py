@@ -12024,7 +12024,7 @@ def recordings_catalog_pdf():
         carp_aliases = _property_alias_group('Carpinteria')
         truckee_aliases = _property_alias_group('Truckee')
         location_aliases = sorted(set(carp_aliases + truckee_aliases))
-        location_title = 'Recordings'
+        location_title = 'Carpinteria + Truckee'
     show_location_mark = raw_filter not in ('carp', 'martis')
     ph = ','.join(['?' for _ in location_aliases])
     wheres = [
