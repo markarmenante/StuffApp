@@ -670,8 +670,20 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   {% set _order_status = (r['status'] if r and 'status' in r.keys() and r['status'] else ('Ordered' if is_new else '')) %}
-  <div id="watchOrderPanel" class="watch-order-panel{% if _order_status == 'Ordered' %} is-order-active{% endif %}">
-    <div class="section-bar watch-order-bar">Purchase History</div>
+  {% set _has_commission = (_order_status == 'Ordered') or val('order_deposit') or val('order_deposit_2') or val('expected_delivery_date') or val('actual_delivery_date') %}
+  <div id="watchOrderPanel" class="watch-order-panel {{ 'is-commission-active' if _has_commission else 'is-purchase-active' }}">
+    <div class="section-bar watch-order-bar">
+      <span>Purchase History</span>
+      <button type="button" class="watch-history-pill {{ '' if _has_commission else 'is-active' }}" data-watch-history-mode="purchase">Purchase</button>
+      <button type="button" class="watch-history-pill {{ 'is-active' if _has_commission else '' }}" data-watch-history-mode="commission">Commission</button>
+      <span class="watch-order-spacer"></span>
+      <span id="valueSearchedAt" class="value-fetch-stamp">{% if r and r['value_searched_at'] %}as of {{ r['value_searched_at']|short_date }}{% endif %}</span>
+      <button type="button" id="valueBtn" class="value-search-pill"
+              {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"
+              data-searched-at="{{ r['value_searched_at'] if r and r['value_searched_at'] else '' }}"{% endif %}>
+        Search Value
+      </button>
+    </div>
     <div class="dgrid dg4 watch-purchase">
       {{ datecell('date','Purchase Date') }}
       <div class="dcell">
@@ -687,25 +699,25 @@ document.addEventListener('DOMContentLoaded', function () {
         <span class="clabel">Value</span>
       </div>
     </div>
-    <div class="dgrid dg4 watch-order-grid watch-order-only">
-      <div class="dcell">
-        <input type="text" name="order_purchase_price" value="{{ r|watch_order_purchase if r else '' }}"
-               class="watch-order-money watch-order-purchase" inputmode="numeric">
-        <span class="clabel">Purchase Price</span>
-      </div>
+    <div class="dgrid dg3 watch-order-grid watch-commission">
       <div class="dcell">
         <input type="text" name="order_deposit"
                value="{{ r|watch_order_deposit if r else '' }}"
                class="watch-order-money watch-order-deposit" inputmode="numeric">
         <span class="clabel">Deposit</span>
       </div>
-      {{ datecell('expected_delivery_date','Promised Delivery Date', false) }}
+      <div class="dcell">
+        <input type="text" name="order_deposit_2" value="{{ val('order_deposit_2')|currency }}"
+               class="watch-order-money watch-order-deposit-2" inputmode="numeric">
+        <span class="clabel">Deposit 2</span>
+      </div>
       <div class="dcell">
         <input type="text" value="{{ r|watch_order_balance if r else '' }}" class="watch-order-balance" readonly>
         <span class="clabel">Balance</span>
       </div>
     </div>
-    <div class="dgrid dg2 watch-order-delivery-grid watch-order-only">
+    <div class="dgrid dg3 watch-order-delivery-grid watch-commission">
+      {{ datecell('expected_delivery_date','Promised Delivery Date', false) }}
       {{ datecell('actual_delivery_date','Actual Delivery Date', false) }}
       <div class="dcell">
         <input type="text" value="{{ val('expected_delivery_date')|delivery_lateness(val('actual_delivery_date')) }}" class="watch-order-late" placeholder="Needs promised date" readonly>
@@ -717,17 +729,9 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ sellpanel() }}
 
   <!-- Value Estimate block — section-bar header (matches Topics /
-       People / Notes) with the lookup pill scaled to size and the
-       results table below. Timestamp sits inline next to the title. -->
+       People / Notes) with the results table below. -->
   <div class="section-bar value-estimate-bar">
-    <span class="value-estimate-title">Value Estimate
-      <span id="valueSearchedAt" class="value-fetch-stamp">{% if r and r['value_searched_at'] %} as of {{ r['value_searched_at']|short_date }}{% endif %}</span>
-    </span>
-    <button type="button" id="valueBtn" class="value-search-pill"
-            {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"
-            data-searched-at="{{ r['value_searched_at'] if r and r['value_searched_at'] else '' }}"{% endif %}>
-      Search Value
-    </button>
+    <span class="value-estimate-title">Value Estimate Notes</span>
   </div>
   <div class="dgrid dg1">
     <div class="dcell dcell-results">
@@ -3172,10 +3176,6 @@ document.querySelectorAll('.comp-item').forEach(item => {
       if (stripUsdConversion(el.value) !== stripped) return;
       el.value = stripped + ' / $' + usd;
       syncLinkedPurchaseField(el);
-      if (el.classList && el.classList.contains('watch-order-deposit') &&
-          typeof window.updateWatchOrderMath === 'function') {
-        window.updateWatchOrderMath(true);
-      }
       // Dispatch 'input' so the autosave's text-input handler picks
       // up the new value and persists it. 'change' was being ignored
       // (autosave only watches input/blur for text fields), so the
@@ -3441,8 +3441,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
 
   // Watch order panel: deposit accepts either dollars or a percentage
-  // of purchase price. When a watch graduates to Own, mirror the
-  // order purchase price into the normal Price field and stamp actual
+  // of purchase price. When a watch graduates to Own, stamp actual
   // delivery date if blank; the server applies the same rule.
   const watchOrderPanel = document.getElementById('watchOrderPanel');
   function orderMoneyNumber(raw) {
@@ -3485,21 +3484,27 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (rem) parts.push(rem + ' mo');
     return parts.join(' ') + ' late';
   }
-  function updateWatchOrderPanelVisibility() {
+  function setWatchHistoryMode(mode) {
     if (!watchOrderPanel) return;
-    const status = form.querySelector('select[name="status"]')?.value || '';
-    watchOrderPanel.classList.toggle('is-order-active', status === 'Ordered');
+    const isCommission = mode === 'commission';
+    watchOrderPanel.classList.toggle('is-commission-active', isCommission);
+    watchOrderPanel.classList.toggle('is-purchase-active', !isCommission);
+    watchOrderPanel.querySelectorAll('[data-watch-history-mode]').forEach(btn => {
+      btn.classList.toggle('is-active', btn.dataset.watchHistoryMode === mode);
+    });
   }
   function updateWatchOrderMath(formatDeposit) {
     if (!watchOrderPanel) return;
-    const purchaseInput = watchOrderPanel.querySelector('input[name="order_purchase_price"]');
+    const purchaseInput = form.querySelector('input[name="price"]');
     const depositInput = watchOrderPanel.querySelector('input[name="order_deposit"]');
+    const deposit2Input = watchOrderPanel.querySelector('input[name="order_deposit_2"]');
     const balanceInput = watchOrderPanel.querySelector('.watch-order-balance');
     const lateInput = watchOrderPanel.querySelector('.watch-order-late');
     const expectedInput = watchOrderPanel.querySelector('input[name="expected_delivery_date"]');
     const actualInput = watchOrderPanel.querySelector('input[name="actual_delivery_date"]');
     const purchase = orderMoneyNumber(purchaseInput?.value);
     let deposit = orderMoneyNumber(depositInput?.value);
+    const deposit2 = orderMoneyNumber(deposit2Input?.value) || 0;
     let pct = null;
     const depositRaw = stripOrderPercent(depositInput?.value || '').trim();
     const pctMatch = depositRaw.match(/^(-?\d+(?:\.\d+)?)\s*%$/);
@@ -3521,13 +3526,16 @@ document.querySelectorAll('.comp-item').forEach(item => {
       }
     }
     if (balanceInput) {
-      balanceInput.value = purchase === null ? '' : formatOrderMoney(purchase - (deposit || 0));
+      balanceInput.value = purchase === null ? '' : formatOrderMoney(purchase - (deposit || 0) - deposit2);
     }
     if (lateInput) {
       lateInput.value = monthsLateText(expectedInput?.value || '', actualInput?.value || '');
     }
   }
   if (watchOrderPanel) {
+    watchOrderPanel.querySelectorAll('[data-watch-history-mode]').forEach(btn => {
+      btn.addEventListener('click', () => setWatchHistoryMode(btn.dataset.watchHistoryMode));
+    });
     watchOrderPanel.querySelectorAll('.watch-order-money').forEach(input => {
       input.addEventListener('focus', () => {
         input.value = stripUsdConversion(stripOrderPercent(input.value));
@@ -3551,31 +3559,26 @@ document.querySelectorAll('.comp-item').forEach(item => {
     watchOrderPanel.querySelectorAll('input[type="date"]').forEach(input => {
       input.addEventListener('change', () => updateWatchOrderMath(false));
     });
+    form.querySelector('input[name="price"]')?.addEventListener('input', () => {
+      updateWatchOrderMath(false);
+    });
     updateWatchOrderMath(false);
-    updateWatchOrderPanelVisibility();
   }
-  window.updateWatchOrderMath = updateWatchOrderMath;
   const statusSelect = form.querySelector('select[name="status"]');
   if (statusSelect) {
     statusSelect.addEventListener('change', () => {
       const isOrdered = statusSelect.value === 'Ordered';
       statusSelect.classList.toggle('status-ordered', isOrdered);
       if (watchOrderPanel && statusSelect.value === 'Own') {
-        const purchaseInput = watchOrderPanel.querySelector('input[name="order_purchase_price"]');
         const actualInput = watchOrderPanel.querySelector('input[name="actual_delivery_date"]');
         const expectedInput = watchOrderPanel.querySelector('input[name="expected_delivery_date"]');
         const depositInput = watchOrderPanel.querySelector('input[name="order_deposit"]');
-        const priceInput = form.querySelector('input[name="price"]');
-        const hasOrderData = [purchaseInput, depositInput, expectedInput]
+        const deposit2Input = watchOrderPanel.querySelector('input[name="order_deposit_2"]');
+        const hasOrderData = [depositInput, deposit2Input, expectedInput]
           .some(input => ((input && input.value) || '').trim());
-        if (purchaseInput && priceInput && purchaseInput.value) {
-          priceInput.value = purchaseInput.value;
-          formatPriceField(priceInput);
-        }
         if (hasOrderData && actualInput && !actualInput.value) actualInput.value = todayIsoDate();
         updateWatchOrderMath(false);
       }
-      updateWatchOrderPanelVisibility();
     });
   }
 

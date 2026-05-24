@@ -1263,8 +1263,40 @@ input[type="date"] { -webkit-appearance: none; }
 .watch-purchase .dcell input,
 .watch-purchase .dcell select { text-align: center; }
 .watch-order-panel { margin-top: 0; }
-.watch-order-panel:not(.is-order-active) .watch-order-only { display: none; }
-.watch-order-bar { border-top: none; }
+.watch-order-bar {
+  border-top: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.watch-order-spacer { flex: 1 1 auto; }
+.watch-order-bar .value-fetch-stamp { white-space: nowrap; }
+.watch-history-pill {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-secondary, #555);
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 10px;
+  line-height: 1.45;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+  text-transform: none;
+}
+.watch-history-pill.is-active {
+  background: #111827;
+  border-color: #111827;
+  color: #fff;
+}
+.watch-order-panel.is-purchase-active .watch-commission,
+.watch-order-panel.is-commission-active .watch-purchase { display: none; }
+@media (max-width: 640px) {
+  .watch-order-bar { gap: 6px; }
+  .watch-order-bar .value-fetch-stamp { display: none; }
+  .watch-history-pill,
+  .value-search-pill { padding-inline: 8px; }
+}
 .watch-order-grid .dcell input,
 .watch-order-grid .dcell select,
 .watch-order-delivery-grid .dcell input,

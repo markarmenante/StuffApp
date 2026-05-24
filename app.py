@@ -457,8 +457,8 @@ FIELDS = {
         {'name': 'date',            'label': 'Purchase Date',     'type': 'date'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
-        {'name': 'order_purchase_price', 'label': 'Order Purchase Price', 'type': 'text'},
         {'name': 'order_deposit',    'label': 'Order Deposit',     'type': 'text'},
+        {'name': 'order_deposit_2',  'label': 'Order Deposit 2',   'type': 'text'},
         {'name': 'expected_delivery_date', 'label': 'Promised Delivery Date', 'type': 'date'},
         {'name': 'actual_delivery_date', 'label': 'Actual Delivery Date', 'type': 'date'},
         {'name': 'service_date',    'label': 'Service Date',      'type': 'date'},
@@ -1137,6 +1137,7 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN calibre_notes TEXT',
         'ALTER TABLE watches ADD COLUMN order_purchase_price REAL',
         'ALTER TABLE watches ADD COLUMN order_deposit REAL',
+        'ALTER TABLE watches ADD COLUMN order_deposit_2 REAL',
         'ALTER TABLE watches ADD COLUMN order_deposit_percent REAL',
         'ALTER TABLE watches ADD COLUMN expected_delivery_date TEXT',
         'ALTER TABLE watches ADD COLUMN actual_delivery_date TEXT',
@@ -4861,7 +4862,9 @@ def save_field(category, record_id):
                 'error': f'Cannot set {field_name} outside your allowed values'
             }), 403
 
-    if category == 'watches' and field_name in ('order_purchase_price', 'order_deposit'):
+    if category == 'watches' and field_name in ('order_purchase_price',
+                                                'order_deposit',
+                                                'order_deposit_2'):
         if _update_watch_order_field(db, record_id, field_name, value):
             db.commit()
             return jsonify({'ok': True})
@@ -4912,6 +4915,8 @@ def save_field(category, record_id):
             db.execute(
                 f"UPDATE {table} SET {linked_field} = ?, updated_at = ? WHERE id = ?",
                 [value if value != '' else None, now, record_id])
+    if category == 'watches' and field_name == 'price':
+        _refresh_watch_order_balance(db, record_id)
 
     if category == 'watches' and field_name == 'status' \
             and str(value or '').strip().lower() == 'own':
@@ -6900,11 +6905,12 @@ def _row_get(record, name):
 
 
 def _watch_order_purchase_amount(record):
+    price = _parse_order_money(_row_get(record, 'price'))
+    if price is not None:
+        return price
     order_purchase = _row_get(record, 'order_purchase_price')
     if order_purchase not in (None, ''):
         return order_purchase
-    if str(_row_get(record, 'status') or '').strip() == 'Ordered':
-        return _parse_order_money(_row_get(record, 'price'))
     return None
 
 
@@ -6933,12 +6939,14 @@ def _watch_order_deposit_values(record):
     return None, pct
 
 
-def _watch_order_balance(purchase_price, deposit):
+def _watch_order_deposit_2_amount(record):
+    return _parse_order_money(_row_get(record, 'order_deposit_2'))
+
+
+def _watch_order_balance(purchase_price, deposit, deposit_2=None):
     if purchase_price is None:
         return None
-    if deposit is None:
-        return purchase_price
-    return purchase_price - deposit
+    return purchase_price - (deposit or 0) - (deposit_2 or 0)
 
 
 def _watch_order_lateness(expected, actual=None):
@@ -6977,12 +6985,13 @@ def _watch_order_lateness(expected, actual=None):
 
 
 def _apply_watch_order_form_fields(target, form):
-    purchase = _parse_order_money(form.get('order_purchase_price'))
+    purchase = _parse_order_money(form.get('price') or form.get('order_purchase_price'))
     deposit, pct = _parse_watch_order_deposit(form.get('order_deposit'), purchase)
-    target['order_purchase_price'] = purchase
+    deposit_2 = _parse_order_money(form.get('order_deposit_2'))
     target['order_deposit'] = deposit
+    target['order_deposit_2'] = deposit_2
     target['order_deposit_percent'] = pct
-    target['order_balance'] = _watch_order_balance(purchase, deposit)
+    target['order_balance'] = _watch_order_balance(purchase, deposit, deposit_2)
 
 
 def _has_watch_order_data(record):
@@ -6991,30 +7000,30 @@ def _has_watch_order_data(record):
 
     return any(
         _field_value(k) not in (None, '')
-        for k in ('order_purchase_price', 'order_deposit', 'expected_delivery_date')
+        for k in ('order_purchase_price', 'order_deposit', 'order_deposit_2',
+                  'expected_delivery_date')
     )
 
 
 def _graduate_watch_order_if_owned(target, status_value):
     if str(status_value or '').strip().lower() != 'own':
         return
-    purchase = target.get('order_purchase_price')
-    if purchase is not None:
-        target['price'] = purchase
     if _has_watch_order_data(target) and not target.get('actual_delivery_date'):
         target['actual_delivery_date'] = date.today().isoformat()
 
 
 def _update_watch_order_field(db, record_id, field_name, raw_value):
     row = db.execute(
-        "SELECT order_purchase_price, order_deposit, order_deposit_percent "
+        "SELECT price, order_purchase_price, order_deposit, order_deposit_2, "
+        "order_deposit_percent "
         "FROM watches WHERE id = ?",
         [record_id],
     ).fetchone()
     if not row:
         return False
-    purchase = row['order_purchase_price']
+    purchase = _watch_order_purchase_amount(row)
     deposit = row['order_deposit']
+    deposit_2 = row['order_deposit_2']
     pct = row['order_deposit_percent']
     if field_name == 'order_purchase_price':
         purchase = _parse_order_money(raw_value)
@@ -7022,23 +7031,45 @@ def _update_watch_order_field(db, record_id, field_name, raw_value):
             deposit = purchase * float(pct) / 100.0
     elif field_name == 'order_deposit':
         deposit, pct = _parse_watch_order_deposit(raw_value, purchase)
+    elif field_name == 'order_deposit_2':
+        deposit_2 = _parse_order_money(raw_value)
     else:
         return False
-    balance = _watch_order_balance(purchase, deposit)
+    balance = _watch_order_balance(purchase, deposit, deposit_2)
     now = datetime.utcnow().isoformat()
     db.execute(
-        "UPDATE watches SET order_purchase_price = ?, order_deposit = ?, "
+        "UPDATE watches SET order_deposit = ?, order_deposit_2 = ?, "
         "order_deposit_percent = ?, order_balance = ?, updated_at = ? "
         "WHERE id = ?",
-        [purchase, deposit, pct, balance, now, record_id],
+        [deposit, deposit_2, pct, balance, now, record_id],
     )
     return True
 
 
+def _refresh_watch_order_balance(db, record_id):
+    row = db.execute(
+        "SELECT price, order_purchase_price, order_deposit, order_deposit_2 "
+        "FROM watches WHERE id = ?",
+        [record_id],
+    ).fetchone()
+    if not row:
+        return
+    purchase = _watch_order_purchase_amount(row)
+    balance = _watch_order_balance(
+        purchase,
+        _parse_order_money(row['order_deposit']),
+        _parse_order_money(row['order_deposit_2']),
+    )
+    db.execute(
+        "UPDATE watches SET order_balance = ?, updated_at = ? WHERE id = ?",
+        [balance, datetime.utcnow().isoformat(), record_id],
+    )
+
+
 def _graduate_watch_order_status(db, record_id):
     row = db.execute(
-        "SELECT order_purchase_price, order_deposit, expected_delivery_date, "
-        "actual_delivery_date "
+        "SELECT price, order_purchase_price, order_deposit, order_deposit_2, "
+        "expected_delivery_date, actual_delivery_date "
         "FROM watches WHERE id = ?",
         [record_id],
     ).fetchone()
@@ -7046,9 +7077,6 @@ def _graduate_watch_order_status(db, record_id):
         return
     updates = []
     params = []
-    if row['order_purchase_price'] is not None:
-        updates.append('price = ?')
-        params.append(row['order_purchase_price'])
     if _has_watch_order_data(row) and not row['actual_delivery_date']:
         updates.append('actual_delivery_date = ?')
         params.append(date.today().isoformat())
@@ -7120,7 +7148,11 @@ def watch_order_deposit_filter(record):
 def watch_order_balance_filter(record):
     purchase = _watch_order_purchase_amount(record)
     deposit, _pct = _watch_order_deposit_values(record)
-    return currency_filter(_watch_order_balance(purchase, deposit))
+    return currency_filter(_watch_order_balance(
+        purchase,
+        deposit,
+        _watch_order_deposit_2_amount(record),
+    ))
 
 
 @app.template_filter('delivery_lateness')
