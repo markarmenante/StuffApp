@@ -669,27 +669,25 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="dcell ta-wrap"><input type="text" name="strap_color" value="{{ val('strap_color') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('strap_color', [])|join('||') }}" style="text-align:center"><span class="clabel">Color</span></div>
   </div>
 
-  <!-- Purchase row -->
-  <div class="dgrid dg4 watch-purchase">
-    {{ datecell('date','Date') }}
-    <div class="dcell">
-      <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric">
-      <span class="clabel">Price</span>
-    </div>
-    <div class="dcell ta-wrap">
-      <input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center">
-      <span class="clabel">Vendor</span>
-    </div>
-    <div class="dcell">
-      <input type="text" name="value" value="{{ val('value')|currency }}" class="price-input" inputmode="numeric">
-      <span class="clabel">Value</span>
-    </div>
-  </div>
-
   {% set _order_status = (r['status'] if r and 'status' in r.keys() and r['status'] else ('Ordered' if is_new else '')) %}
-  <div id="watchOrderPanel" class="watch-order-panel{% if _order_status != 'Ordered' %} is-hidden{% endif %}">
-    <div class="section-bar watch-order-bar">Order History</div>
-    <div class="dgrid dg4 watch-order-grid">
+  <div id="watchOrderPanel" class="watch-order-panel{% if _order_status == 'Ordered' %} is-order-active{% endif %}">
+    <div class="section-bar watch-order-bar">Purchase History</div>
+    <div class="dgrid dg4 watch-purchase">
+      {{ datecell('date','Purchase Date') }}
+      <div class="dcell">
+        <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric">
+        <span class="clabel">Price</span>
+      </div>
+      <div class="dcell ta-wrap">
+        <input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center">
+        <span class="clabel">Vendor</span>
+      </div>
+      <div class="dcell">
+        <input type="text" name="value" value="{{ val('value')|currency }}" class="price-input" inputmode="numeric">
+        <span class="clabel">Value</span>
+      </div>
+    </div>
+    <div class="dgrid dg4 watch-order-grid watch-order-only">
       <div class="dcell">
         <input type="text" name="order_purchase_price" value="{{ r|watch_order_purchase if r else '' }}"
                class="watch-order-money watch-order-purchase" inputmode="numeric">
@@ -707,7 +705,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <span class="clabel">Balance</span>
       </div>
     </div>
-    <div class="dgrid dg2 watch-order-delivery-grid">
+    <div class="dgrid dg2 watch-order-delivery-grid watch-order-only">
       {{ datecell('actual_delivery_date','Actual Delivery Date', false) }}
       <div class="dcell">
         <input type="text" value="{{ val('expected_delivery_date')|delivery_lateness(val('actual_delivery_date')) }}" class="watch-order-late" placeholder="Needs promised date" readonly>
@@ -3490,7 +3488,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
   function updateWatchOrderPanelVisibility() {
     if (!watchOrderPanel) return;
     const status = form.querySelector('select[name="status"]')?.value || '';
-    watchOrderPanel.classList.toggle('is-hidden', status !== 'Ordered');
+    watchOrderPanel.classList.toggle('is-order-active', status === 'Ordered');
   }
   function updateWatchOrderMath(formatDeposit) {
     if (!watchOrderPanel) return;

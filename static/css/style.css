@@ -1011,15 +1011,15 @@ input[type="number"]::-webkit-outer-spin-button {
 .value-estimate-title { flex: 1 1 auto; }
 .value-search-pill {
   flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 3px 12px;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 10px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 999px;
   background: #fff;
   color: var(--text-secondary, #555);
   cursor: pointer;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 .value-search-pill:hover:not(:disabled) {
   background: var(--cell-bg);
@@ -1263,7 +1263,7 @@ input[type="date"] { -webkit-appearance: none; }
 .watch-purchase .dcell input,
 .watch-purchase .dcell select { text-align: center; }
 .watch-order-panel { margin-top: 0; }
-.watch-order-panel.is-hidden { display: none; }
+.watch-order-panel:not(.is-order-active) .watch-order-only { display: none; }
 .watch-order-bar { border-top: none; }
 .watch-order-grid .dcell input,
 .watch-order-grid .dcell select,
