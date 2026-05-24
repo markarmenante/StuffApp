@@ -12669,6 +12669,14 @@ def _coin_date_label(row):
     return ''
 
 
+def _coin_year_label(value):
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        return ''
+    return f"{abs(year)} BC" if year < 0 else f"{year} AD"
+
+
 def _coin_scope_predicate(scope):
     if scope == 'ancient':
         return 'date_1 < 500', []
@@ -12704,14 +12712,18 @@ def _coin_collection_narrative(scope_label, q, summary, top_regions,
             + (f" for “{q}”." if q else ".")
         ]
 
-    scope_phrase = scope_label.lower()
+    report_phrase = scope_label.lower()
     search_phrase = f" matching “{q}”" if q else ''
     ancient = summary['ancient_count']
     modern = summary['modern_count']
-    oldest = summary.get('oldest_label') or 'undated'
-    newest = summary.get('newest_label') or 'undated'
+    oldest = summary.get('ancient_oldest_label') or ''
+    newest = summary.get('ancient_newest_label') or ''
+    ancient_range = ''
+    if oldest and newest:
+        ancient_range = oldest if oldest == newest else f"{oldest} to {newest}"
     refs = summary['with_refs']
     priced = summary['known_price_count']
+    us_count = summary.get('us_count', 0)
 
     region_text = ', '.join(
         f"{r['label']} ({r['count']})" for r in top_regions[:3]
@@ -12730,15 +12742,27 @@ def _coin_collection_narrative(scope_label, q, summary, top_regions,
         if r['label'] != 'Unspecified'
     )
 
+    opening = f"This {report_phrase} report{search_phrase} covers {total} coins"
+    if ancient:
+        opening += f", with {ancient} ancient coins"
+        if ancient_range:
+            opening += f" spanning {ancient_range}"
+    opening += "."
+
     lines = [
-        f"This {scope_phrase} coin report{search_phrase} covers {total} coins, "
-        f"spanning {oldest} to {newest}. It currently breaks out as "
-        f"{ancient} ancient and {modern} modern or undated records.",
+        opening,
         f"Reference coverage is {refs} of {total} records, with {priced} priced "
         f"records totaling {_format_money(summary['total_spend'])}. The report "
         "is meant to surface pedigree, catalog trail, and acquisition context "
         "alongside the basic inventory facts.",
     ]
+    if us_count or modern:
+        parts = []
+        if us_count:
+            parts.append(f"U.S. coins account for {us_count} records")
+        if modern:
+            parts.append(f"modern or undated records account for {modern}")
+        lines.append("Separately, " + '; '.join(parts) + ".")
     if region_text:
         lines.append(f"The strongest regional concentrations are {region_text}.")
     if authority_text:
@@ -12880,8 +12904,9 @@ def admin_coin_collections():
     with_images = 0
     ancient_count = 0
     modern_count = 0
-    oldest_label = ''
-    newest_label = ''
+    date_1_years = []
+    ancient_date_1_years = []
+    us_count = 0
     era_counts = {
         'Archaic / Early': 0,
         'Classical': 0,
@@ -12890,8 +12915,14 @@ def admin_coin_collections():
         'Modern / Undated': 0,
     }
     reference_counts = {}
+    ancient_reference_counts = {}
 
     for row in rows:
+        is_ancient = False
+        if (row['region'] or '').strip().lower() in {
+            'united states', 'u.s.', 'u.s.a.', 'us', 'usa',
+        }:
+            us_count += 1
         price = _money_number(row['price'])
         if price is not None:
             total_spend += price
@@ -12903,7 +12934,10 @@ def admin_coin_collections():
         if row['date_1'] not in (None, ''):
             try:
                 d = int(row['date_1'])
+                date_1_years.append(d)
                 if d < 500:
+                    is_ancient = True
+                    ancient_date_1_years.append(d)
                     ancient_count += 1
                     if d <= -480:
                         era_counts['Archaic / Early'] += 1
@@ -12923,11 +12957,6 @@ def admin_coin_collections():
             modern_count += 1
             era_counts['Modern / Undated'] += 1
 
-        if date_label:
-            if not oldest_label:
-                oldest_label = date_label
-            newest_label = date_label
-
         refs = (row['coin_references'] or '').strip()
         if refs:
             with_refs += 1
@@ -12938,6 +12967,10 @@ def admin_coin_collections():
             ]:
                 if re.search(rf'\b{re.escape(pattern)}\b', refs, re.IGNORECASE):
                     reference_counts[pattern] = reference_counts.get(pattern, 0) + 1
+                    if is_ancient:
+                        ancient_reference_counts[pattern] = (
+                            ancient_reference_counts.get(pattern, 0) + 1
+                        )
 
         coins.append({
             'row': row,
@@ -12947,6 +12980,7 @@ def admin_coin_collections():
             'price_display': _format_money(row['price']),
             'image': image if image and is_image_filter(image) else '',
             'has_refs': bool(refs),
+            'is_ancient': is_ancient,
         })
 
     scope_labels = {
@@ -12963,9 +12997,20 @@ def admin_coin_collections():
         'known_price_count': known_price_count,
         'total_spend': total_spend,
         'avg_spend': total_spend / known_price_count if known_price_count else 0,
-        'oldest_label': oldest_label,
-        'newest_label': newest_label,
+        'us_count': us_count,
+        'oldest_label': _coin_year_label(min(date_1_years)) if date_1_years else '',
+        'newest_label': _coin_year_label(max(date_1_years)) if date_1_years else '',
+        'ancient_oldest_label': (
+            _coin_year_label(min(ancient_date_1_years))
+            if ancient_date_1_years else ''
+        ),
+        'ancient_newest_label': (
+            _coin_year_label(max(ancient_date_1_years))
+            if ancient_date_1_years else ''
+        ),
     }
+    ancient_coins = [item for item in coins if item['is_ancient']]
+    narrative_coins = ancient_coins if ancient_coins else coins
     by_region = _coin_collection_buckets(coins, 'region', 12)
     by_authority = _coin_collection_buckets(coins, 'authority', 12)
     by_metal = _coin_collection_buckets(coins, 'metal', 10)
@@ -12976,9 +13021,23 @@ def admin_coin_collections():
         {'label': label, 'count': count}
         for label, count in era_counts.items()
     ]
+    narrative_era_rows = [
+        row for row in era_rows
+        if row['label'] != 'Modern / Undated'
+    ] if ancient_coins else era_rows
+    narrative_reference_counts = (
+        ancient_reference_counts if ancient_coins else reference_counts
+    )
     top_references = [
         {'label': label, 'count': reference_counts[label]}
         for label in sorted(reference_counts, key=lambda k: (-reference_counts[k], k.lower()))
+    ][:10]
+    narrative_references = [
+        {'label': label, 'count': narrative_reference_counts[label]}
+        for label in sorted(
+            narrative_reference_counts,
+            key=lambda k: (-narrative_reference_counts[k], k.lower()),
+        )
     ][:10]
     most_expensive = sorted(
         [item for item in coins if item['price_number'] is not None],
@@ -12986,8 +13045,10 @@ def admin_coin_collections():
         reverse=True,
     )[:8]
     narrative = _coin_collection_narrative(
-        scope_labels[scope], q, summary, by_region, by_authority,
-        top_references, era_rows,
+        scope_labels[scope], q, summary,
+        _coin_collection_buckets(narrative_coins, 'region', 12),
+        _coin_collection_buckets(narrative_coins, 'authority', 12),
+        narrative_references, narrative_era_rows,
     )
 
     return render_template(
