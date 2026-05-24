@@ -674,7 +674,7 @@ document.addEventListener('DOMContentLoaded', function () {
   <div id="watchOrderPanel" class="watch-order-panel {{ 'is-commissioned-active' if _has_commission else '' }}">
     <div class="section-bar watch-order-bar">
       <span>Purchase History</span>
-      <button type="button" class="watch-history-pill {{ 'is-active' if _has_commission else '' }}" data-watch-commissioned>Commissioned</button>
+      <button type="button" class="watch-history-pill {{ 'is-active' if _has_commission else '' }}" data-watch-commissioned>{{ 'Commissioned' if _has_commission else 'Purchased' }}</button>
       <span class="watch-order-spacer"></span>
       <span id="valueSearchedAt" class="value-fetch-stamp">{% if r and r['value_searched_at'] %}as of {{ r['value_searched_at']|short_date }}{% endif %}</span>
       <button type="button" id="valueBtn" class="value-search-pill"
@@ -3544,7 +3544,11 @@ document.querySelectorAll('.comp-item').forEach(item => {
   function setWatchCommissioned(isCommissioned) {
     if (!watchOrderPanel) return;
     watchOrderPanel.classList.toggle('is-commissioned-active', isCommissioned);
-    watchOrderPanel.querySelector('[data-watch-commissioned]')?.classList.toggle('is-active', isCommissioned);
+    const commissionedPill = watchOrderPanel.querySelector('[data-watch-commissioned]');
+    if (commissionedPill) {
+      commissionedPill.classList.toggle('is-active', isCommissioned);
+      commissionedPill.textContent = isCommissioned ? 'Commissioned' : 'Purchased';
+    }
     const statusSelect = form.querySelector('select[name="status"]');
     if (statusSelect) {
       const nextStatus = isCommissioned ? 'Ordered' : 'Own';
@@ -3631,7 +3635,11 @@ document.querySelectorAll('.comp-item').forEach(item => {
       statusSelect.classList.toggle('status-ordered', isOrdered);
       if (watchOrderPanel) {
         watchOrderPanel.classList.toggle('is-commissioned-active', isOrdered);
-        watchOrderPanel.querySelector('[data-watch-commissioned]')?.classList.toggle('is-active', isOrdered);
+        const commissionedPill = watchOrderPanel.querySelector('[data-watch-commissioned]');
+        if (commissionedPill) {
+          commissionedPill.classList.toggle('is-active', isOrdered);
+          commissionedPill.textContent = isOrdered ? 'Commissioned' : 'Purchased';
+        }
       }
       if (watchOrderPanel && statusSelect.value === 'Own') {
         const actualInput = watchOrderPanel.querySelector('input[name="actual_delivery_date"]');

@@ -985,8 +985,8 @@ input[type="number"]::-webkit-outer-spin-button {
   cursor: pointer;
 }
 .sell-tax-state-pill.active {
-  background: #111827;
-  border-color: #111827;
+  background: #6b7280;
+  border-color: #6b7280;
   color: #fff;
 }
 .sell-rates-pill {
