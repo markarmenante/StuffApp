@@ -1779,15 +1779,54 @@ input[type="date"] { -webkit-appearance: none; }
   -webkit-overflow-scrolling: touch;
 }
 .med-share-btn { top: 5px; right: 8px; }
+.med-ingredient-lookup-btn {
+  top: 5px;
+  right: 36px;
+  width: auto;
+  min-width: 58px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: #126d35;
+}
 .med-table .med-row {
   display: grid;
   grid-template-columns:
-    minmax(9rem, 1.15fr)
+    minmax(13rem, 1.25fr)
+    minmax(12rem, 1.2fr)
     minmax(6rem, 0.7fr)
     minmax(12rem, 1.5fr)
     minmax(10rem, 1.35fr)
     22px;
   align-items: stretch;
+}
+.med-name-wrap {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 1fr);
+  align-items: center;
+  gap: 5px;
+  border-right: 1px solid var(--border-light);
+}
+.med-type-pills {
+  display: inline-flex;
+  gap: 2px;
+  padding-left: 4px;
+}
+.med-type-pill {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.med-type-pill.active {
+  background: #eeeeee;
+  color: #111;
+  border-color: #b8b8b8;
+  font-weight: 700;
 }
 .med-del-btn {
   width: 18px; height: 18px; align-self: center; margin: 0 2px;
@@ -1825,7 +1864,8 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .med-table .med-row.med-head > span { padding: 0 4px; text-align: left; }
 .med-table .med-row:not(.med-head):nth-child(odd) { background: var(--cell-bg); }
-.med-table .med-row:not(.med-head) > input {
+.med-table .med-row:not(.med-head) > input,
+.med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"] {
   /* Match the standard .dcell input typography (14px / #111) so the
      medications table reads in the same voice as the rest of the form. */
   border: none; outline: none; background: transparent;
@@ -1833,8 +1873,10 @@ input[type="date"] { -webkit-appearance: none; }
   font-weight: 400; text-align: left;
   padding: 4px 6px; width: 100%; border-right: 1px solid var(--border-light);
 }
+.med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"] { border-right: none; }
 .med-table .med-row:not(.med-head) > input:last-child { border-right: none; }
-.med-table .med-row:not(.med-head) > input:focus { background: #fffde8; }
+.med-table .med-row:not(.med-head) > input:focus,
+.med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"]:focus { background: #fffde8; }
 
 /* List tables: rows beyond the visible window collapse via .row-hidden
    so the table stays compact until the user actually fills slots. */

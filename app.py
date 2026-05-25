@@ -253,6 +253,13 @@ def normalize_field_value(table, field_name, value):
         return _normalize_four_digit_year(value)
     if field_name == 'status' and value.strip().lower() == 'owned':
         return 'Own'
+    if re.fullmatch(r'med_type_\d+', field_name or ''):
+        med_type = value.strip().upper()
+        if med_type == 'RX':
+            return 'Rx'
+        if med_type == 'OTC':
+            return 'OTC'
+        return ''
     aliases = FIELD_ALIASES.get((table, field_name))
     if not aliases:
         return value
@@ -842,6 +849,8 @@ FIELDS = {
         {'name': 'global_entry_number',   'label': 'Global Entry Number',    'type': 'text'},
         {'name': 'eye_prescription',      'label': 'Eye Prescription',       'type': 'file'},
         *[{'name': f'med_name_{i}', 'label': f'Medication {i}', 'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[{'name': f'med_type_{i}', 'label': f'Med Type {i}', 'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[{'name': f'med_active_ingredients_{i}', 'label': f'Active Ingredients {i}', 'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[{'name': f'med_dose_{i}', 'label': f'Dosage {i}',     'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[{'name': f'med_directions_{i}', 'label': f'Directions {i}', 'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[{'name': f'med_note_{i}', 'label': f'Med Note {i}',   'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
@@ -1168,6 +1177,8 @@ def init_db():
         'ALTER TABLE persons ADD COLUMN other_health_1 TEXT',
         'ALTER TABLE persons ADD COLUMN other_health_2 TEXT',
         *[f'ALTER TABLE persons ADD COLUMN med_name_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[f'ALTER TABLE persons ADD COLUMN med_type_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
+        *[f'ALTER TABLE persons ADD COLUMN med_active_ingredients_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[f'ALTER TABLE persons ADD COLUMN med_dose_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[f'ALTER TABLE persons ADD COLUMN med_directions_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[f'ALTER TABLE persons ADD COLUMN med_note_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
@@ -2382,6 +2393,76 @@ def _backfill_meds_from_prescriptions(db):
         db.execute(f"UPDATE persons SET {', '.join(cols)} WHERE id = ?",
                    vals + [row['id']])
     db.commit()
+
+
+def _med_lookup_terms(name, note):
+    """Medication lookup candidates from the medication name plus note/brand."""
+    raw = []
+    for part in (note, name, f'{note} {name}' if note and name else ''):
+        text = re.sub(r'\s+', ' ', (part or '')).strip()
+        if not text:
+            continue
+        text = re.sub(r'\b(?:brand|generic|for)\s*:\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\([^)]*\)', '', text).strip()
+        text = re.sub(r'\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|iu|units?)\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\s+', ' ', text).strip(' -/,;')
+        if text and text.lower() not in {x.lower() for x in raw}:
+            raw.append(text)
+    return raw
+
+
+def _rxnav_json(url):
+    import urllib.request
+    req = urllib.request.Request(url, headers={'User-Agent': 'StuffApp/1.0'})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+
+def _rxnav_ingredients_for_term(term):
+    import urllib.parse
+    q = urllib.parse.urlencode({'name': term})
+    data = _rxnav_json(f'https://rxnav.nlm.nih.gov/REST/drugs.json?{q}')
+    groups = data.get('drugGroup', {}).get('conceptGroup', []) or []
+    concepts = []
+    for group in groups:
+        for prop in group.get('conceptProperties') or []:
+            rxcui = (prop.get('rxcui') or '').strip()
+            name = (prop.get('name') or prop.get('synonym') or '').strip()
+            if rxcui and name:
+                concepts.append((rxcui, name))
+    if not concepts:
+        return ''
+
+    for rxcui, _ in concepts[:6]:
+        rel = _rxnav_json(f'https://rxnav.nlm.nih.gov/REST/rxcui/{urllib.parse.quote(rxcui)}/allrelated.json')
+        names = []
+        for group in rel.get('allRelatedGroup', {}).get('conceptGroup') or []:
+            tty = (group.get('tty') or '').upper()
+            if tty not in {'IN', 'PIN', 'MIN'}:
+                continue
+            for prop in group.get('conceptProperties') or []:
+                name = (prop.get('name') or '').strip()
+                if name and name.lower() not in {x.lower() for x in names}:
+                    names.append(name)
+        if names:
+            return ', '.join(sorted(names, key=str.lower))
+    return ''
+
+
+def lookup_med_active_ingredients(name, note):
+    """Return active ingredient text from RxNav/NLM for a med row."""
+    last_err = None
+    for term in _med_lookup_terms(name, note):
+        try:
+            ingredients = _rxnav_ingredients_for_term(term)
+        except Exception as exc:
+            last_err = exc
+            continue
+        if ingredients:
+            return ingredients
+    if last_err:
+        raise RuntimeError(str(last_err))
+    return ''
 
 
 def get_counts():
@@ -5023,6 +5104,49 @@ def detail_view(category, record_id):
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=current_vlists(category),
                            ta=build_typeahead(category))
+
+
+@app.route('/persons/<record_id>/medication-ingredients', methods=['POST'])
+def persons_medication_ingredients(record_id):
+    """Populate medication active ingredients from RxNav/NLM."""
+    db = get_db()
+    person = db.execute("SELECT * FROM persons WHERE id = ?", [record_id]).fetchone()
+    if person is None:
+        return jsonify({'ok': False, 'error': 'Record not found'}), 404
+    if not _user_can_see_row('persons', person):
+        return jsonify({'ok': False, 'error': 'Forbidden'}), 403
+
+    updates, errors = [], []
+    cache = {}
+    sets, params = [], []
+    for i in range(1, PERSON_MEDICATION_SLOTS + 1):
+        name = (person[f'med_name_{i}'] or '').strip()
+        note = (person[f'med_note_{i}'] or '').strip()
+        if not (name or note):
+            continue
+        key = (name.lower(), note.lower())
+        if key not in cache:
+            try:
+                cache[key] = lookup_med_active_ingredients(name, note)
+            except RuntimeError as exc:
+                errors.append({'index': i, 'error': str(exc)})
+                cache[key] = ''
+        ingredients = cache[key]
+        if not ingredients:
+            continue
+        if ingredients != (person[f'med_active_ingredients_{i}'] or '').strip():
+            sets.append(f'med_active_ingredients_{i} = ?')
+            params.append(ingredients)
+        updates.append({'index': i, 'active_ingredients': ingredients})
+
+    if sets:
+        sets.append('updated_at = ?')
+        params.append(datetime.utcnow().isoformat())
+        params.append(record_id)
+        db.execute(f"UPDATE persons SET {', '.join(sets)} WHERE id = ?", params)
+        db.commit()
+
+    return jsonify({'ok': True, 'updates': updates, 'errors': errors})
 
 
 @app.route('/<category>/<record_id>/save-field', methods=['POST'])

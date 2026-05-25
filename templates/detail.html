@@ -2436,6 +2436,10 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="med-table dcell"
              data-med-max="{{ person_medication_slots }}"
              data-med-base-visible="7">
+          <button type="button" class="doc-share-btn med-ingredient-lookup-btn"
+                  onclick="lookupMedicationIngredients(event, this)"
+                  title="Lookup active ingredients from medication + note/brand"
+                  aria-label="Lookup active ingredients">Lookup</button>
           <button type="button" class="doc-share-btn med-share-btn"
                   onclick="shareMedicationList(event, this)"
                   title="Share medication list via Messages / Mail"
@@ -2449,11 +2453,20 @@ document.addEventListener('DOMContentLoaded', function () {
             </svg>
           </button>
           <div class="med-row med-head">
-            <span>Medication</span><span>Dosage</span><span>Directions</span><span>Note</span><span></span>
+            <span>Medication</span><span>Active Ingredients</span><span>Dosage</span><span>Directions</span><span>Note</span><span></span>
           </div>
           {% for i in range(1, person_medication_slots + 1) %}
           <div class="med-row{% if i > 7 %} med-row-extra{% endif %}" data-med-idx="{{ i }}">
-            <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
+            <div class="med-name-wrap">
+              {% set _mt = val('med_type_' ~ i) %}
+              <input type="hidden" name="med_type_{{ i }}" value="{{ _mt }}">
+              <div class="med-type-pills" role="group" aria-label="Medication type">
+                <button type="button" class="med-type-pill{% if _mt == 'Rx' %} active{% endif %}" data-value="Rx" aria-pressed="{{ 'true' if _mt == 'Rx' else 'false' }}">Rx</button>
+                <button type="button" class="med-type-pill{% if _mt == 'OTC' %} active{% endif %}" data-value="OTC" aria-pressed="{{ 'true' if _mt == 'OTC' else 'false' }}">OTC</button>
+              </div>
+              <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
+            </div>
+            <input type="text" name="med_active_ingredients_{{ i }}" value="{{ val('med_active_ingredients_' ~ i) }}">
             <input type="text" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
             <input type="text" name="med_directions_{{ i }}" value="{{ val('med_directions_' ~ i) }}">
             <input type="text" name="med_note_{{ i }}" value="{{ val('med_note_' ~ i) }}">
@@ -4960,7 +4973,14 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
 // clearing the last slot. Each affected slot's input fires a blur
 // event so the existing per-field autosave persists the change.
 (function medsDelete() {
-  const MED_FIELDS = ['med_name', 'med_dose', 'med_directions', 'med_note'];
+  const MED_FIELDS = [
+    'med_type',
+    'med_name',
+    'med_active_ingredients',
+    'med_dose',
+    'med_directions',
+    'med_note',
+  ];
   const form = document.getElementById('mainForm');
   if (!form) return;
   const medTable = form.querySelector('.med-table');
@@ -5018,6 +5038,7 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
         });
       }
       refreshEmptyClass();
+      if (window.refreshMedTypePills) window.refreshMedTypePills();
     });
   });
   const addBtn = form.querySelector('.med-add-btn');
@@ -5040,6 +5061,93 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
   }
 })();
 
+function refreshMedTypePills() {
+  const form = document.getElementById('mainForm');
+  if (!form) return;
+  form.querySelectorAll('.med-row[data-med-idx]').forEach(row => {
+    const idx = row.dataset.medIdx;
+    const hidden = form.querySelector(`[name="med_type_${idx}"]`);
+    const value = (hidden?.value || '').trim();
+    row.querySelectorAll('.med-type-pill').forEach(btn => {
+      const active = btn.dataset.value === value;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  });
+}
+window.refreshMedTypePills = refreshMedTypePills;
+
+(function medTypePillWiring() {
+  const form = document.getElementById('mainForm');
+  if (!form) return;
+  refreshMedTypePills();
+  form.querySelectorAll('.med-type-pill').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const row = btn.closest('.med-row[data-med-idx]');
+      if (!row) return;
+      const hidden = form.querySelector(`[name="med_type_${row.dataset.medIdx}"]`);
+      if (!hidden) return;
+      hidden.value = btn.dataset.value || '';
+      hidden.dispatchEvent(new Event('input', { bubbles: true }));
+      hidden.dispatchEvent(new Event('blur'));
+      refreshMedTypePills();
+    });
+  });
+})();
+
+async function lookupMedicationIngredients(ev, btn) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const form = document.getElementById('mainForm');
+  if (!form) return;
+  const hasMeds = Array.from(form.querySelectorAll('.med-row[data-med-idx]'))
+    .some(row => {
+      const idx = row.dataset.medIdx;
+      return (form.querySelector(`[name="med_name_${idx}"]`)?.value || '').trim()
+        || (form.querySelector(`[name="med_note_${idx}"]`)?.value || '').trim();
+    });
+  if (!hasMeds) {
+    alert('No medications to look up.');
+    return;
+  }
+  const original = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Looking...';
+  }
+  try {
+    if (window.ensureRecord) await window.ensureRecord();
+    const url = window.location.pathname.replace(/\/$/, '') + '/medication-ingredients';
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'X-Requested-With': 'fetch' },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    let applied = 0;
+    (data.updates || []).forEach(update => {
+      const input = form.querySelector(`[name="med_active_ingredients_${update.index}"]`);
+      if (!input || !update.active_ingredients) return;
+      if (input.value !== update.active_ingredients) {
+        input.value = update.active_ingredients;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('blur'));
+      }
+      applied += 1;
+    });
+    if (!applied) alert('No active ingredients found.');
+  } catch (err) {
+    alert('Ingredient lookup failed: ' + (err.message || err));
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = original || 'Lookup';
+    }
+  }
+}
+
 async function shareMedicationList(ev, btn) {
   ev.preventDefault();
   ev.stopPropagation();
@@ -5049,13 +5157,15 @@ async function shareMedicationList(ev, btn) {
   const rows = Array.from(form.querySelectorAll('.med-row[data-med-idx]'))
     .map(row => {
       const idx = row.dataset.medIdx;
+      const type = (form.querySelector(`[name="med_type_${idx}"]`)?.value || '').trim();
       const name = (form.querySelector(`[name="med_name_${idx}"]`)?.value || '').trim();
+      const active = (form.querySelector(`[name="med_active_ingredients_${idx}"]`)?.value || '').trim();
       const dose = (form.querySelector(`[name="med_dose_${idx}"]`)?.value || '').trim();
       const directions = (form.querySelector(`[name="med_directions_${idx}"]`)?.value || '').trim();
       const note = (form.querySelector(`[name="med_note_${idx}"]`)?.value || '').trim();
-      return { name, dose, directions, note };
+      return { type, name, active, dose, directions, note };
     })
-    .filter(med => med.name || med.dose || med.directions || med.note);
+    .filter(med => med.type || med.name || med.active || med.dose || med.directions || med.note);
   if (!rows.length) {
     if (btn) {
       const original = btn.getAttribute('aria-label') || 'Share medications';
@@ -5068,7 +5178,9 @@ async function shareMedicationList(ev, btn) {
   const lines = [`${personName} medications`, ''];
   rows.forEach((med, index) => {
     const parts = [];
+    if (med.type) parts.push(med.type);
     if (med.name) parts.push(med.name);
+    if (med.active) parts.push(med.active);
     if (med.dose) parts.push(med.dose);
     if (med.directions) parts.push(med.directions);
     let line = `${index + 1}. ${parts.join(' - ') || med.note}`;
