@@ -11991,6 +11991,14 @@ def recordings_catalog_pdf():
             return 'Tape'
         return typ
 
+    def _speed_or_format_text(row, media):
+        if media == 'CD':
+            fmt = (row['other'] or '').strip()
+            if fmt.lower() == 'red book':
+                return 'RB'
+            return fmt or 'RB'
+        return _speed_text(row['speed'])
+
     def _location_mark(value):
         aliases = _property_alias_group(value)
         if 'truckee' in aliases or 'martis' in aliases:
@@ -12104,7 +12112,7 @@ def recordings_catalog_pdf():
     header = Table(
         [[_p('Cover', small_style), _p('Artist / Title', small_style),
           _p('Media', small_style), _p('Sound', small_style),
-          _p('Speed', small_style), _p('Genre', small_style),
+          _p('Spd/Fmt', small_style), _p('Genre', small_style),
           _p('Year', small_style), _p('#', small_style)]],
         colWidths=[0.78 * inch, 3.5 * inch, 0.7 * inch, 0.7 * inch,
                    0.72 * inch, 0.88 * inch, 0.45 * inch, 0.32 * inch],
@@ -12147,7 +12155,7 @@ def recordings_catalog_pdf():
 
             media = _media_type(row)
             sound = row['sound'] or ''
-            speed = _speed_text(row['speed'])
+            speed_or_format = _speed_or_format_text(row, media)
             genre = row['genre'] or ''
             year = row['year_recorded'] or ''
             sound_markup = (
@@ -12156,9 +12164,9 @@ def recordings_catalog_pdf():
                 else escape(str(sound))
             )
             speed_markup = (
-                f'<b>{escape(str(speed))}</b>'
-                if media == 'Vinyl' and str(speed).strip() == '45'
-                else escape(str(speed))
+                f'<b>{escape(str(speed_or_format))}</b>'
+                if media == 'Vinyl' and str(speed_or_format).strip() == '45'
+                else escape(str(speed_or_format))
             )
 
             row_tbl = Table(
