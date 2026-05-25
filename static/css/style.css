@@ -1781,9 +1781,10 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .med-actions {
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
-  padding: 0 0 5px;
+  padding: 0 2px 0 4px;
 }
 .med-action-pill {
   display: inline-flex;
@@ -1791,9 +1792,9 @@ input[type="date"] { -webkit-appearance: none; }
   justify-content: center;
   gap: 5px;
   width: auto;
-  min-width: 70px;
-  height: 24px;
-  padding: 0 10px;
+  min-width: 62px;
+  height: 22px;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: #fff;
@@ -1812,6 +1813,12 @@ input[type="date"] { -webkit-appearance: none; }
   color: #126d35;
 }
 .med-ingredient-lookup-btn:hover { background: rgba(18, 109, 53, 0.08); }
+.med-action-pill.done {
+  background: #e6f6ea;
+  border-color: #5fb872;
+  color: #1f6b34;
+}
+.med-action-pill.done:hover { background: #d6efdc; }
 .med-table .med-row {
   display: grid;
   grid-template-columns:
@@ -1886,8 +1893,19 @@ input[type="date"] { -webkit-appearance: none; }
   font-size: 10px; color: var(--text-label);
   padding: 2px 2px 4px;
   border-bottom: 1px solid var(--border);
+  align-items: center;
 }
 .med-table .med-row.med-head > span { padding: 0 4px; text-align: left; }
+.med-table .med-row.med-head .med-name-head {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 1fr);
+  gap: 5px;
+  padding-left: 4px;
+}
+.med-table .med-row.med-head .med-name-head > span:first-child {
+  min-width: 38px;
+  text-align: center;
+}
 .med-table .med-row:not(.med-head):nth-child(odd) { background: var(--cell-bg); }
 .med-table .med-row:not(.med-head) > input,
 .med-table .med-row:not(.med-head) > textarea,

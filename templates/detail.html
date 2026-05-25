@@ -2436,7 +2436,9 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="med-table dcell"
              data-med-max="{{ person_medication_slots }}"
              data-med-base-visible="7">
-          <div class="med-actions">
+          <div class="med-row med-head">
+            <span class="med-name-head"><span>Type</span><span>Brand / Product</span></span><span>Active Ingredients</span><span>Dosage</span><span>Directions</span><span>Note</span>
+            <span class="med-actions">
             <button type="button" class="med-action-pill med-ingredient-lookup-btn"
                     onclick="lookupMedicationIngredients(event, this)"
                     title="Lookup active ingredients and directions from medication + note/brand"
@@ -2454,9 +2456,7 @@ document.addEventListener('DOMContentLoaded', function () {
               </svg>
               <span>Share</span>
             </button>
-          </div>
-          <div class="med-row med-head">
-            <span>Medication</span><span>Active Ingredients</span><span>Dosage</span><span>Directions</span><span>Note</span><span></span>
+            </span>
           </div>
           {% for i in range(1, person_medication_slots + 1) %}
           <div class="med-row{% if i > 7 %} med-row-extra{% endif %}" data-med-idx="{{ i }}">
@@ -5185,6 +5185,7 @@ async function lookupMedicationIngredients(ev, btn) {
       }
       if (changed) applied += 1;
     });
+    if (btn) btn.classList.add('done');
     if (!applied) alert('No medication details found.');
   } catch (err) {
     alert('Ingredient lookup failed: ' + (err.message || err));
@@ -5239,6 +5240,7 @@ async function shareMedicationList(ev, btn) {
   try {
     if (navigator.share) {
       await navigator.share({ text });
+      if (btn) btn.classList.add('done');
       return;
     }
   } catch (err) {
@@ -5246,8 +5248,10 @@ async function shareMedicationList(ev, btn) {
   }
   try {
     await navigator.clipboard.writeText(text);
+    if (btn) btn.classList.add('done');
     alert('Medication list copied.');
   } catch (_) {
+    if (btn) btn.classList.add('done');
     window.location.href = 'mailto:?subject=' +
       encodeURIComponent(`${personName} medications`) +
       '&body=' + encodeURIComponent(text);
