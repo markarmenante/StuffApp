@@ -4072,6 +4072,13 @@ def fetch_recording_notes(rec):
         f"\"Soul-Jazz\"). Omit the <genre_2> tag if no useful "
         f"sub-classification fits."
     )
+    year_block = (
+        "\nAlso return the best four-digit catalog year for this recording "
+        "in a <year_recorded>YYYY</year_recorded> tag. Prefer the original "
+        "album/release year used by music catalogs; if that is not clear, "
+        "use the original recording year. Omit the tag if you can't determine "
+        "a single year with reasonable confidence."
+    )
 
     prompt = f"""You are a music critic + recording historian writing a
 brief reference note for a single album / recording in a personal
@@ -4099,7 +4106,7 @@ separate tag below.
 Wrap the bullets in <markdown>…</markdown>. Then, immediately
 after, list 2–4 source URLs (bare https://…, comma-separated) in
 a <urls>…</urls> tag. No prose outside these tags, no code
-fences, no JSON.{players_block}{tracks_block}{genre_block}"""
+fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}"""
 
     client = anthropic.Anthropic(api_key=api_key)
     import time as _time
@@ -4219,9 +4226,19 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}"""
         cand = re.sub(r'</?cite\b[^>]*>', '', cand, flags=re.IGNORECASE).strip()
         new_genre_2 = re.sub(r'\s+', ' ', cand).strip(' ,"\'')
 
+    new_year_recorded = ''
+    ym = re.search(r'<year_recorded>(.*?)</year_recorded>', text, re.DOTALL | re.IGNORECASE)
+    if ym:
+        cand = _html.unescape(ym.group(1)).strip()
+        cand = re.sub(r'</?cite\b[^>]*>', '', cand, flags=re.IGNORECASE)
+        m_year = re.search(r'\b(18|19|20)\d{2}\b', cand)
+        if m_year:
+            new_year_recorded = m_year.group(0)
+
     return {'markdown': md, 'players': new_players,
             'tracks': new_tracks, 'urls': urls,
-            'genre': new_genre, 'genre_2': new_genre_2}
+            'genre': new_genre, 'genre_2': new_genre_2,
+            'year_recorded': new_year_recorded}
 
 
 # ---------------------------------------------------------------------------
@@ -6044,7 +6061,8 @@ def _recording_duplicate_rows(db, rec):
     if not title_key or not artist:
         return []
     rows = db.execute(
-        "SELECT id, artist, title, notes, players, tracks, notes_urls, genre, genre_2 "
+        "SELECT id, artist, title, notes, players, tracks, notes_urls, "
+        "genre, genre_2, year_recorded "
         "FROM recordings WHERE id != ?",
         (rec['id'],),
     ).fetchall()
@@ -6119,6 +6137,7 @@ def recording_fetch_notes(record_id):
     new_tracks = data.get('tracks') or ''
     new_genre = data.get('genre') or ''
     new_genre_2 = data.get('genre_2') or ''
+    new_year_recorded = data.get('year_recorded') or ''
     try:
         existing_players = (rec['players'] or '').strip()
     except (IndexError, KeyError):
@@ -6135,6 +6154,10 @@ def recording_fetch_notes(record_id):
         existing_genre_2 = (rec['genre_2'] or '').strip()
     except (IndexError, KeyError):
         existing_genre_2 = ''
+    try:
+        existing_year_recorded = (rec['year_recorded'] or '').strip()
+    except (IndexError, KeyError):
+        existing_year_recorded = ''
 
     final_genre, final_genre_2 = _merge_recording_genres(
         existing_genre, existing_genre_2, new_genre, new_genre_2
@@ -6149,6 +6172,8 @@ def recording_fetch_notes(record_id):
         sets.append('genre = ?'); params.append(final_genre)
     if final_genre_2 != existing_genre_2:
         sets.append('genre_2 = ?'); params.append(final_genre_2)
+    if new_year_recorded and new_year_recorded != existing_year_recorded:
+        sets.append('year_recorded = ?'); params.append(new_year_recorded)
     if sets:
         sets.append('updated_at = ?'); params.append(datetime.utcnow().isoformat())
         params.append(record_id)
@@ -6185,7 +6210,7 @@ def recording_fetch_notes(record_id):
     new_notes = data.get('markdown') or ''
     if title_norm and artist_norm and (
         new_notes or new_players or new_tracks or new_urls
-        or new_genre or new_genre_2
+        or new_genre or new_genre_2 or new_year_recorded
     ):
         sib_rows = _recording_duplicate_rows(db, rec)
         for sib in sib_rows:
@@ -6223,6 +6248,8 @@ def recording_fetch_notes(record_id):
                 sib_sets.append('genre = ?'); sib_params.append(sib_final_genre)
             if sib_final_genre_2 != sib_existing_genre_2:
                 sib_sets.append('genre_2 = ?'); sib_params.append(sib_final_genre_2)
+            if new_year_recorded and (sib['year_recorded'] or '').strip() != new_year_recorded:
+                sib_sets.append('year_recorded = ?'); sib_params.append(new_year_recorded)
 
             if sib_sets:
                 sib_sets.append('updated_at = ?')
@@ -6251,6 +6278,7 @@ def recording_fetch_notes(record_id):
         # merge itself.
         'genre': final_genre,
         'genre_2': final_genre_2,
+        'year_recorded': new_year_recorded or existing_year_recorded,
         'siblings_updated': siblings_updated,
     })
 

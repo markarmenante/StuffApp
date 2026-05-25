@@ -1943,6 +1943,14 @@ document.addEventListener('DOMContentLoaded', function () {
             genre2Inp.dispatchEvent(new Event('blur'));
           }
         });
+        safe('year_recorded', () => {
+          if (!data.year_recorded) return;
+          const yearInp = document.querySelector('input[name="year_recorded"]');
+          if (yearInp && yearInp.value !== data.year_recorded) {
+            yearInp.value = data.year_recorded;
+            yearInp.dispatchEvent(new Event('blur'));
+          }
+        });
 
         // Brief inline hint when the same lookup propagated to other
         // copies of this album (matched on artist + title).
