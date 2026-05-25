@@ -2469,10 +2469,13 @@ document.addEventListener('DOMContentLoaded', function () {
                       aria-pressed="{{ 'true' if _mt else 'false' }}">{{ _mt or 'Type' }}</button>
               <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
             </div>
-            <input type="text" name="med_active_ingredients_{{ i }}" value="{{ val('med_active_ingredients_' ~ i) }}">
+            <textarea name="med_active_ingredients_{{ i }}" rows="1"
+                      data-med-expand="1">{{ val('med_active_ingredients_' ~ i) }}</textarea>
             <input type="text" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
-            <input type="text" name="med_directions_{{ i }}" value="{{ val('med_directions_' ~ i) }}">
-            <input type="text" name="med_note_{{ i }}" value="{{ val('med_note_' ~ i) }}">
+            <textarea name="med_directions_{{ i }}" rows="1"
+                      data-med-expand="1">{{ val('med_directions_' ~ i) }}</textarea>
+            <textarea name="med_note_{{ i }}" rows="1"
+                      data-med-expand="1">{{ val('med_note_' ~ i) }}</textarea>
             <button type="button" class="med-del-btn" title="Delete this medication">×</button>
           </div>
           {% endfor %}
@@ -5141,6 +5144,21 @@ async function lookupMedicationIngredients(ev, btn) {
   }
   try {
     if (window.ensureRecord) await window.ensureRecord();
+    if (window.saveField) {
+      const saveJobs = [];
+      form.querySelectorAll('.med-row[data-med-idx]').forEach(row => {
+        const idx = row.dataset.medIdx;
+        const name = form.querySelector(`[name="med_name_${idx}"]`);
+        const note = form.querySelector(`[name="med_note_${idx}"]`);
+        const type = form.querySelector(`[name="med_type_${idx}"]`);
+        const hasRowValue = [name, note, type].some(el => ((el && el.value) || '').trim());
+        if (!hasRowValue) return;
+        [name, note, type].forEach(el => {
+          if (el && el.name) saveJobs.push(window.saveField(el.name, el.value || ''));
+        });
+      });
+      await Promise.all(saveJobs);
+    }
     const url = window.location.pathname.replace(/\/$/, '') + '/medication-ingredients';
     const response = await fetch(url, {
       method: 'POST',
@@ -6405,6 +6423,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   function init(ta) {
     if (ta.dataset.no_autogrow !== undefined ||
         ta.dataset.noAutogrow !== undefined) return;
+    if (ta.dataset.medExpand !== undefined) return;
     if (ta._autogrowReady) return;
     ta._autogrowReady = true;
     ta.style.boxSizing = 'border-box';

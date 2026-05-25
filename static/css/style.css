@@ -1777,6 +1777,7 @@ input[type="date"] { -webkit-appearance: none; }
   position: relative;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
 }
 .med-actions {
   display: flex;
@@ -1815,12 +1816,13 @@ input[type="date"] { -webkit-appearance: none; }
   display: grid;
   grid-template-columns:
     minmax(var(--med-name-col, 13rem), 1.15fr)
-    minmax(16rem, 1.55fr)
+    minmax(24rem, 1.75fr)
     minmax(6rem, 0.7fr)
-    minmax(18rem, 1.8fr)
-    minmax(6rem, 0.55fr)
+    minmax(26rem, 1.95fr)
+    minmax(7rem, 0.55fr)
     22px;
   align-items: stretch;
+  min-width: max-content;
 }
 .med-name-wrap {
   display: grid;
@@ -1888,6 +1890,7 @@ input[type="date"] { -webkit-appearance: none; }
 .med-table .med-row.med-head > span { padding: 0 4px; text-align: left; }
 .med-table .med-row:not(.med-head):nth-child(odd) { background: var(--cell-bg); }
 .med-table .med-row:not(.med-head) > input,
+.med-table .med-row:not(.med-head) > textarea,
 .med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"] {
   /* Match the standard .dcell input typography (14px / #111) so the
      medications table reads in the same voice as the rest of the form. */
@@ -1895,11 +1898,30 @@ input[type="date"] { -webkit-appearance: none; }
   font-family: var(--font); font-size: 14px; color: #111111;
   font-weight: 400; text-align: left;
   padding: 4px 6px; width: 100%; border-right: 1px solid var(--border-light);
+  line-height: 1.25;
 }
 .med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"] { border-right: none; }
 .med-table .med-row:not(.med-head) > input:last-child { border-right: none; }
 .med-table .med-row:not(.med-head) > input:focus,
+.med-table .med-row:not(.med-head) > textarea:focus,
 .med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"]:focus { background: #fffde8; }
+.med-table .med-row:not(.med-head) > textarea {
+  min-height: 26px;
+  height: 26px;
+  max-height: 26px;
+  overflow: hidden;
+  white-space: nowrap;
+  resize: none;
+}
+.med-table .med-row:not(.med-head) > textarea:hover,
+.med-table .med-row:not(.med-head) > textarea:focus {
+  min-height: 72px;
+  max-height: 180px;
+  white-space: normal;
+  overflow-y: auto;
+  z-index: 2;
+  box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.16);
+}
 
 /* List tables: rows beyond the visible window collapse via .row-hidden
    so the table stays compact until the user actually fills slots. */

@@ -2457,6 +2457,159 @@ def _clean_med_text(text):
     return text
 
 
+def _med_token_set(text):
+    return {
+        token
+        for token in re.findall(r'[a-z0-9]+', (text or '').lower())
+        if len(token) > 1 and token not in {
+            'the', 'and', 'for', 'with', 'plus', 'extra', 'strength',
+            'supplement', 'supplements', 'vitamin',
+        }
+    }
+
+
+def _dsld_json(url):
+    import urllib.request
+    req = urllib.request.Request(url, headers={'User-Agent': 'StuffApp/1.0', 'Accept': 'application/json'})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+
+def _med_lookup_brand(name, note):
+    text = f'{note or ""} {name or ""}'
+    first = re.sub(r'\s+', ' ', text).strip().split(' ', 1)[0] if text.strip() else ''
+    return re.sub(r'[^A-Za-z0-9&.-]', '', first)
+
+
+def _dsld_search_hits(term, name, note):
+    import urllib.parse
+    queries = []
+    brand = _med_lookup_brand(name, note)
+    if brand and len(brand) > 2:
+        queries.append({'brand': brand, 'q': term, 'size': '8'})
+    queries.append({'q': term, 'size': '8'})
+    hits = []
+    seen = set()
+    for params in queries:
+        q = urllib.parse.urlencode(params)
+        try:
+            data = _dsld_json(f'https://api.ods.od.nih.gov/dsld/v8/search-filter?{q}')
+        except Exception:
+            continue
+        for hit in data.get('hits') or []:
+            dsld_id = str(hit.get('_id') or hit.get('_source', {}).get('dsldId') or '').strip()
+            if not dsld_id or dsld_id in seen:
+                continue
+            seen.add(dsld_id)
+            hits.append(hit)
+    return hits
+
+
+def _dsld_hit_score(hit, term, name, note):
+    src = hit.get('_source') or {}
+    brand = src.get('brand') or ''
+    product = src.get('productName') or ''
+    haystack = f'{brand} {product}'.lower()
+    wanted = _med_token_set(f'{note} {name}')
+    title_tokens = _med_token_set(f'{brand} {product}')
+    score = float(hit.get('_score') or 0)
+    score += len(wanted & title_tokens) * 25
+    requested_brand = _med_lookup_brand(name, note).lower()
+    if requested_brand and requested_brand in brand.lower():
+        score += 80
+    if str(src.get('offMarket') or '') == '1':
+        score -= 15
+    if wanted and not wanted.issubset(title_tokens | _med_token_set(haystack)):
+        missing = wanted - title_tokens
+        score -= len(missing) * 8
+    return score
+
+
+def _format_dsld_amount(data):
+    qty = data.get('sfbQuantityQuantity')
+    unit = data.get('unitName') or ''
+    if qty in (None, ''):
+        return ''
+    try:
+        n = float(qty)
+        qty = str(int(n)) if n.is_integer() else str(n).rstrip('0').rstrip('.')
+    except (TypeError, ValueError):
+        qty = str(qty)
+    return f'{qty} {unit}'.strip()
+
+
+def _dsld_ingredient_text(ingredient):
+    data = ingredient.get('data') or {}
+    name = _clean_med_text(ingredient.get('name') or '')
+    children = []
+    for child in ingredient.get('childInfo') or []:
+        child_name = _clean_med_text(child.get('name') or '')
+        if child_name:
+            prefix = _clean_med_text(child.get('prefix') or '')
+            if prefix and not prefix.endswith(' '):
+                prefix += ' '
+            children.append(f'{prefix}{child_name}'.strip())
+    alt = _clean_med_text(ingredient.get('altName') or '').strip('() ')
+    amount = _format_dsld_amount(data)
+    display = name
+    if children:
+        display += ' (' + ', '.join(children) + ')'
+    elif alt:
+        display += f' ({alt})'
+    if amount:
+        display += f' {amount}'
+    return display.strip()
+
+
+def _dsld_details_for_label(label):
+    facts = label.get('dietarySupplementsFacts') or []
+    ingredients = []
+    directions = ''
+    for fact in facts:
+        for ingredient in fact.get('ingredients') or []:
+            text = _dsld_ingredient_text(ingredient)
+            if text and text.lower() not in {x.lower() for x in ingredients}:
+                ingredients.append(text)
+        usage = fact.get('usageSuggestion') or {}
+        if not directions:
+            directions = _clean_med_text(usage.get('text') or '')
+    if not directions:
+        for group in label.get('statementGroups') or []:
+            if 'direction' not in (group.get('groupName') or '').lower():
+                continue
+            directions = _clean_med_text(' '.join(group.get('statements') or []))
+            if directions:
+                break
+    return {
+        'active_ingredients': ', '.join(ingredients),
+        'directions': directions,
+    }
+
+
+def _dsld_supplement_details_for_term(term, name, note):
+    hits = _dsld_search_hits(term, name, note)
+    if not hits:
+        return {}
+    best = max(hits, key=lambda hit: _dsld_hit_score(hit, term, name, note))
+    src = best.get('_source') or {}
+    requested = _med_token_set(f'{note} {name}')
+    found = _med_token_set(f"{src.get('brand') or ''} {src.get('productName') or ''}")
+    requested_brand = _med_lookup_brand(name, note).lower()
+    brand_match = requested_brand and requested_brand in (src.get('brand') or '').lower()
+    if not brand_match and requested:
+        required_overlap = min(2, len(requested))
+        if len(requested & found) < required_overlap:
+            return {}
+    best_id = str(best.get('_id') or best.get('_source', {}).get('dsldId') or '').strip()
+    if not best_id:
+        return {}
+    label = _dsld_json(f'https://api.ods.od.nih.gov/dsld/v8/label/{best_id}')
+    details = _dsld_details_for_label(label)
+    if details.get('active_ingredients') or details.get('directions'):
+        return details
+    return {}
+
+
 def _elysium_signal_details_for_term(term):
     """Return active details for Elysium Signal, which is a supplement.
 
@@ -2626,6 +2779,13 @@ def lookup_medication_details(name, note, med_type=''):
                 return details
             try:
                 details = _dailymed_details_for_term(term)
+            except Exception as exc:
+                last_err = exc
+                details = {}
+            if details.get('active_ingredients') or details.get('directions'):
+                return details
+            try:
+                details = _dsld_supplement_details_for_term(term, name, note)
             except Exception as exc:
                 last_err = exc
                 details = {}
