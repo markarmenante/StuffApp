@@ -3213,6 +3213,11 @@ document.querySelectorAll('.comp-item').forEach(item => {
   const form = document.getElementById('mainForm');
   const formCategory = form.dataset.category || '';
   const isNewRecord = form.dataset.isNew === 'true';
+  let formSubmitting = false;
+  form.addEventListener('submit', () => {
+    formSubmitting = true;
+    window.__stuffAllowUnload = true;
+  });
 
   if (isNewRecord && !['watches', 'coins'].includes(formCategory)) {
     const defaultStatus = form.querySelector('select[name="status"]');
@@ -3916,6 +3921,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }, true);
 
   window.addEventListener('beforeunload', function (event) {
+    if (formSubmitting || window.__stuffAllowUnload) return;
     if (!needsLocationBeforeLeave()) return;
     event.preventDefault();
     event.returnValue = '';

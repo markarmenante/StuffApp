@@ -132,6 +132,7 @@ function setupDirtyTracking() {
 
 function setupBeforeUnload() {
   window.addEventListener('beforeunload', (e) => {
+    if (window.__stuffAllowUnload) return;
     if (formDirty) {
       e.preventDefault();
       e.returnValue = '';
