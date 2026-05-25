@@ -4055,6 +4055,17 @@ def fetch_recording_notes(rec):
         label = (rec['label'] or '').strip()
     except (IndexError, KeyError):
         label = ''
+    try:
+        existing_notes = (rec['notes'] or '').strip()
+    except (IndexError, KeyError):
+        existing_notes = ''
+    if existing_notes:
+        # Notes can accumulate multiple lookups and personal annotations.
+        # Keep enough context to disambiguate editions / personnel / label
+        # clues without crowding out the lookup instructions.
+        existing_notes = re.sub(r'\s+', ' ', existing_notes).strip()
+        if len(existing_notes) > 1800:
+            existing_notes = existing_notes[:1800].rsplit(' ', 1)[0].rstrip() + '...'
     # players column may not exist on older DBs that haven't run the
     # ALTER yet — sqlite3.Row raises IndexError on missing columns.
     try:
@@ -4155,6 +4166,7 @@ Genre:   {genre or '(unspecified)'}
 Label:   {label or '(unspecified)'}
 Players: {players or '(unspecified)'}
 Format:  {fmt or '(unspecified)'}
+Existing notes: {existing_notes or '(none)'}
 
 Cover whichever of these are notable for this specific recording:
 - critical reception / canonical status
@@ -4162,6 +4174,12 @@ Cover whichever of these are notable for this specific recording:
 - standout tracks
 - awards or chart performance
 - the artist's career context at the time
+
+Use the existing notes as clues for disambiguation, edition-specific
+details, personnel, label, pressing, and prior context. Verify them
+against web sources where possible. Do not simply repeat existing
+notes unless they are important and source-supported; correct them if
+sources clearly contradict them.
 
 Style: 4–8 short bullets starting with "- ". Plain factual prose,
 no headers, no fluff, no marketing copy. Under ~1400 chars total.
