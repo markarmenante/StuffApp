@@ -1623,19 +1623,24 @@ document.addEventListener('DOMContentLoaded', function () {
           <label class="radio-opt"><input type="radio" name="sound" value="Stereo" {{ 'checked' if val('sound')=='Stereo' }}> Stereo</label>
           <label class="radio-opt"><input type="radio" name="sound" value="Mono"   {{ 'checked' if val('sound')=='Mono'   }}> Mono</label>
         </div>
+        {% set _standard_rec_other = ['', '140g', '180g', '200g', 'CCIR', 'NAB', 'Red Book', 'SACD'] %}
+        {% set _custom_vinyl_pressing = val('other') if val('type') in ['Vinyl', 'LP', '45', '78', 'EP'] and val('other') not in _standard_rec_other else '' %}
         <div class="rec-radio-block rec-subtype">
           <label class="radio-opt rec-vinyl-only"><input type="radio" name="other" value="140g" {{ 'checked' if val('other')=='140g' }}> 140g</label>
           <label class="radio-opt rec-vinyl-only"><input type="radio" name="other" value="180g" {{ 'checked' if val('other')=='180g' }}> 180g</label>
           <label class="radio-opt rec-vinyl-only"><input type="radio" name="other" value="200g" {{ 'checked' if val('other')=='200g' }}> 200g</label>
+          <input type="text" id="recCustomPressing" class="rec-custom-pressing rec-vinyl-only"
+                 value="{{ _custom_vinyl_pressing }}" placeholder="Pressing" autocomplete="off">
           <label class="radio-opt rec-tape-only"><input type="radio" name="other" value="CCIR"  {{ 'checked' if val('other')=='CCIR'  }}> CCIR</label>
           <label class="radio-opt rec-tape-only"><input type="radio" name="other" value="NAB"   {{ 'checked' if val('other')=='NAB'   }}> NAB</label>
           <label class="radio-opt rec-cd-only"><input type="radio" name="other" value="Red Book" {{ 'checked' if val('other')=='Red Book' }}> Red Book</label>
           <label class="radio-opt rec-cd-only"><input type="radio" name="other" value="SACD"     {{ 'checked' if val('other')=='SACD'     }}> SACD</label>
         </div>
       </div>
-      <div class="dgrid recording-meta">
+      <div class="dgrid dg3 recording-meta">
         {{ selcell('genre','Genre', vlists.recording_genre) }}
         {{ cell('genre_2','Genre 2') }}
+        {{ cell('label','Label') }}
       </div>
       <div class="dgrid dg3 recording-purchase">
         {{ datecell('date','Date') }}
@@ -1951,6 +1956,31 @@ document.addEventListener('DOMContentLoaded', function () {
           if (yearInp && yearInp.value !== data.year_recorded) {
             yearInp.value = data.year_recorded;
             yearInp.dispatchEvent(new Event('blur'));
+          }
+        });
+        safe('label', () => {
+          if (!data.label) return;
+          const labelInp = document.querySelector('input[name="label"]');
+          if (labelInp && labelInp.value !== data.label) {
+            labelInp.value = data.label;
+            labelInp.dispatchEvent(new Event('blur'));
+          }
+        });
+        safe('vinyl_pressing', () => {
+          if (!data.vinyl_pressing) return;
+          const pressingRadio = Array.from(
+            document.querySelectorAll('input[name="other"]')
+          ).find(r => r.value === data.vinyl_pressing);
+          if (pressingRadio && !pressingRadio.checked) {
+            pressingRadio.checked = true;
+            pressingRadio.dispatchEvent(new Event('change'));
+            const custom = document.getElementById('recCustomPressing');
+            if (custom) custom.value = '';
+          } else if (!pressingRadio) {
+            const custom = document.getElementById('recCustomPressing');
+            if (custom && custom.value !== data.vinyl_pressing) {
+              custom.value = data.vinyl_pressing;
+            }
           }
         });
 
@@ -3064,6 +3094,27 @@ document.getElementById('valueBtn')?.addEventListener('click', async (e) => {
     typeRadios.forEach(r => r.addEventListener('change', applyType));
     applyType();
   }
+
+  const customPressing = document.getElementById('recCustomPressing');
+  if (customPressing) {
+    customPressing.addEventListener('input', () => {
+      if (!customPressing.value.trim()) return;
+      document.querySelectorAll('input[name="other"]').forEach(r => { r.checked = false; });
+    });
+    customPressing.addEventListener('blur', () => {
+      const value = customPressing.value.trim();
+      if (value && typeof window.saveField === 'function') {
+        window.saveField('other', value);
+      }
+    });
+    document.querySelectorAll('input[name="other"]').forEach(r => {
+      r.addEventListener('change', () => {
+        if (r.checked && ['140g', '180g', '200g'].includes(r.value)) {
+          customPressing.value = '';
+        }
+      });
+    });
+  }
 })();
 
 // Cameras: swap Format (film) <-> Megapixels + Sensor (digital) based
@@ -3789,6 +3840,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
         .then(d => { if (d.ok) showToast(); });
     }).catch(err => console.warn('Auto-save failed:', err));
   }
+  window.saveField = saveField;
 
   // Text / textarea — save on blur. We used to prefer el.dataset.raw
   // when present (coin date inputs render "175 BC" but stash "-175"

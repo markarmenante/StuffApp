@@ -1456,6 +1456,21 @@ input[type="date"] { -webkit-appearance: none; }
   align-items: center;
 }
 .rec-radio-block .radio-opt { font-size: 14px; white-space: nowrap; }
+.rec-custom-pressing {
+  width: 118px;
+  min-width: 92px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.2;
+  background: #fff;
+}
+.rec-custom-pressing:focus {
+  outline: none;
+  border-color: #999;
+}
 /* Vertical divider that sits to the right of every block except the
    last, separating Type | Speed | Sound | Subtype visually. */
 .rec-radio-block-divider { padding-right: 20px; border-right: 1px solid var(--border); }

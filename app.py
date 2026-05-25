@@ -676,6 +676,7 @@ FIELDS = {
          'options': ['', 'LP', '45', '78', 'EP', 'CD', 'Cassette', '8-Track', 'Reel', 'Digital', 'Other']},
         {'name': 'genre',           'label': 'Genre',             'type': 'text'},
         {'name': 'genre_2',         'label': 'Genre 2',           'type': 'text'},
+        {'name': 'label',           'label': 'Label',             'type': 'text'},
         {'name': 'players',         'label': 'Players',           'type': 'text'},
         {'name': 'tracks',          'label': 'Tracks',            'type': 'textarea'},
         {'name': 'year_recorded',   'label': 'Year Recorded',     'type': 'text'},
@@ -1129,6 +1130,7 @@ def init_db():
         'ALTER TABLE recordings ADD COLUMN players TEXT',
         'ALTER TABLE recordings ADD COLUMN notes_urls TEXT',
         'ALTER TABLE recordings ADD COLUMN tracks TEXT',
+        'ALTER TABLE recordings ADD COLUMN label TEXT',
         'ALTER TABLE coins ADD COLUMN history_region TEXT',
         'ALTER TABLE coins ADD COLUMN history_authority TEXT',
         'ALTER TABLE coins ADD COLUMN history_searched_at TEXT',
@@ -4026,11 +4028,16 @@ def fetch_recording_notes(rec):
     if not (title or artist):
         raise RuntimeError('Need a title or artist before fetching notes.')
 
+    rec_type = (rec['type'] or '').strip()
     year   = (rec['year_recorded'] or '').strip()
     genre  = ' / '.join(x for x in [
         (rec['genre'] or '').strip(),
         (rec['genre_2'] or '').strip(),
     ] if x)
+    try:
+        label = (rec['label'] or '').strip()
+    except (IndexError, KeyError):
+        label = ''
     # players column may not exist on older DBs that haven't run the
     # ALTER yet — sqlite3.Row raises IndexError on missing columns.
     try:
@@ -4102,6 +4109,22 @@ def fetch_recording_notes(rec):
         "use the original recording year. Omit the tag if you can't determine "
         "a single year with reasonable confidence."
     )
+    label_block = (
+        "\nAlso return the record label or imprint for this album in a "
+        "<recording_label>...</recording_label> tag. Prefer the label for "
+        "the original release; use the specific reissue label only when the "
+        "provided format or source context clearly points to a reissue. Omit "
+        "the tag if you can't determine a label with reasonable confidence."
+    )
+    vinyl_pressing_block = ''
+    if rec_type.lower() in ('vinyl', 'lp', '45', '78', 'ep'):
+        vinyl_pressing_block = (
+            "\nIf this specific copy has a known vinyl pressing type, return "
+            "it in a <vinyl_pressing>...</vinyl_pressing> tag. Use a compact "
+            "value such as 140g, 180g, 200g, UHQR, MoFi One-Step, Half-Speed, "
+            "Direct-to-Disc, Promo, or Test Pressing. Omit the tag unless "
+            "source evidence clearly supports the pressing detail."
+        )
 
     prompt = f"""You are a music critic + recording historian writing a
 brief reference note for a single album / recording in a personal
@@ -4111,6 +4134,7 @@ Title:   {title or '(unknown)'}
 Artist:  {artist or '(unknown)'}
 Year:    {year or '(unknown)'}
 Genre:   {genre or '(unspecified)'}
+Label:   {label or '(unspecified)'}
 Players: {players or '(unspecified)'}
 Format:  {fmt or '(unspecified)'}
 
@@ -4129,7 +4153,7 @@ separate tag below.
 Wrap the bullets in <markdown>…</markdown>. Then, immediately
 after, list 2–4 source URLs (bare https://…, comma-separated) in
 a <urls>…</urls> tag. No prose outside these tags, no code
-fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}"""
+fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}{label_block}{vinyl_pressing_block}"""
 
     client = anthropic.Anthropic(api_key=api_key)
     import time as _time
@@ -4258,10 +4282,32 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}"""
         if m_year:
             new_year_recorded = m_year.group(0)
 
+    new_label = ''
+    lm = re.search(r'<recording_label>(.*?)</recording_label>', text, re.DOTALL | re.IGNORECASE)
+    if lm:
+        cand = _html.unescape(lm.group(1)).strip()
+        cand = re.sub(r'</?cite\b[^>]*>', '', cand, flags=re.IGNORECASE)
+        new_label = re.sub(r'\s+', ' ', cand).strip(' ,"\'')
+
+    new_vinyl_pressing = ''
+    vpm = re.search(r'<vinyl_pressing>(.*?)</vinyl_pressing>', text, re.DOTALL | re.IGNORECASE)
+    if vpm:
+        cand = _html.unescape(vpm.group(1)).strip()
+        cand = re.sub(r'</?cite\b[^>]*>', '', cand, flags=re.IGNORECASE)
+        m_weight = re.search(r'\b(140|180|200)\s*(?:g|gram|grams)\b', cand, re.IGNORECASE)
+        if m_weight:
+            new_vinyl_pressing = f'{m_weight.group(1)}g'
+        else:
+            cand = re.sub(r'\s+', ' ', cand).strip(' ,"\'')
+            if cand and len(cand) <= 40 and not re.search(r'https?://|[<>]', cand):
+                new_vinyl_pressing = cand
+
     return {'markdown': md, 'players': new_players,
             'tracks': new_tracks, 'urls': urls,
             'genre': new_genre, 'genre_2': new_genre_2,
-            'year_recorded': new_year_recorded}
+            'year_recorded': new_year_recorded,
+            'label': new_label,
+            'vinyl_pressing': new_vinyl_pressing}
 
 
 # ---------------------------------------------------------------------------
@@ -6089,7 +6135,7 @@ def _recording_duplicate_rows(db, rec):
         return []
     rows = db.execute(
         "SELECT id, artist, title, notes, players, tracks, notes_urls, "
-        "genre, genre_2, year_recorded "
+        "genre, genre_2, year_recorded, label, type, other "
         "FROM recordings WHERE id != ?",
         (rec['id'],),
     ).fetchall()
@@ -6165,6 +6211,8 @@ def recording_fetch_notes(record_id):
     new_genre = data.get('genre') or ''
     new_genre_2 = data.get('genre_2') or ''
     new_year_recorded = data.get('year_recorded') or ''
+    new_label = data.get('label') or ''
+    new_vinyl_pressing = data.get('vinyl_pressing') or ''
     try:
         existing_players = (rec['players'] or '').strip()
     except (IndexError, KeyError):
@@ -6185,6 +6233,19 @@ def recording_fetch_notes(record_id):
         existing_year_recorded = (rec['year_recorded'] or '').strip()
     except (IndexError, KeyError):
         existing_year_recorded = ''
+    try:
+        existing_label = (rec['label'] or '').strip()
+    except (IndexError, KeyError):
+        existing_label = ''
+    try:
+        existing_other = (rec['other'] or '').strip()
+    except (IndexError, KeyError):
+        existing_other = ''
+    try:
+        existing_type = (rec['type'] or '').strip()
+    except (IndexError, KeyError):
+        existing_type = ''
+    is_vinyl_record = existing_type.lower() in ('vinyl', 'lp', '45', '78', 'ep')
 
     final_genre, final_genre_2 = _merge_recording_genres(
         existing_genre, existing_genre_2, new_genre, new_genre_2
@@ -6201,6 +6262,10 @@ def recording_fetch_notes(record_id):
         sets.append('genre_2 = ?'); params.append(final_genre_2)
     if new_year_recorded and new_year_recorded != existing_year_recorded:
         sets.append('year_recorded = ?'); params.append(new_year_recorded)
+    if new_label and not existing_label:
+        sets.append('label = ?'); params.append(new_label)
+    if new_vinyl_pressing and is_vinyl_record and not existing_other:
+        sets.append('other = ?'); params.append(new_vinyl_pressing)
     if sets:
         sets.append('updated_at = ?'); params.append(datetime.utcnow().isoformat())
         params.append(record_id)
@@ -6237,7 +6302,8 @@ def recording_fetch_notes(record_id):
     new_notes = data.get('markdown') or ''
     if title_norm and artist_norm and (
         new_notes or new_players or new_tracks or new_urls
-        or new_genre or new_genre_2 or new_year_recorded
+        or new_genre or new_genre_2 or new_year_recorded or new_label
+        or new_vinyl_pressing
     ):
         sib_rows = _recording_duplicate_rows(db, rec)
         for sib in sib_rows:
@@ -6277,6 +6343,15 @@ def recording_fetch_notes(record_id):
                 sib_sets.append('genre_2 = ?'); sib_params.append(sib_final_genre_2)
             if new_year_recorded and (sib['year_recorded'] or '').strip() != new_year_recorded:
                 sib_sets.append('year_recorded = ?'); sib_params.append(new_year_recorded)
+            if new_label and not (sib['label'] or '').strip():
+                sib_sets.append('label = ?'); sib_params.append(new_label)
+            sib_type = (sib['type'] or '').strip().lower()
+            if (
+                new_vinyl_pressing
+                and sib_type in ('vinyl', 'lp', '45', '78', 'ep')
+                and not (sib['other'] or '').strip()
+            ):
+                sib_sets.append('other = ?'); sib_params.append(new_vinyl_pressing)
 
             if sib_sets:
                 sib_sets.append('updated_at = ?')
@@ -6306,6 +6381,12 @@ def recording_fetch_notes(record_id):
         'genre': final_genre,
         'genre_2': final_genre_2,
         'year_recorded': new_year_recorded or existing_year_recorded,
+        'label': new_label or existing_label,
+        'vinyl_pressing': (
+            new_vinyl_pressing
+            if new_vinyl_pressing and is_vinyl_record and not existing_other
+            else ''
+        ),
         'siblings_updated': siblings_updated,
     })
 
