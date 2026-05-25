@@ -33,7 +33,7 @@
      target="_blank">Cards &mdash; {{ _pgs }} {{ 'page' if _pgs == 1 else 'pages' }}</a>
   <button type="button" class="toolbar-btn pill coin-tray-clear" id="coinTrayClear" title="Clear selected coin cards">Clear</button>
   {# Two independent selection pills:
-     era cycles Ancient -> Modern -> All, location cycles CA -> NY -> All.
+     location cycles CA -> NY -> All, period cycles Ancient -> Modern -> All.
      The selected axes are still encoded in one filter param so existing
      list/detail/print/map URLs keep working. #}
   {%- set _coin_parts = (coin_filter or '').split('_') -%}
@@ -43,13 +43,13 @@
   {%- set _loc_next = 'ny' if _coin_loc == 'ca' else (None if _coin_loc == 'ny' else 'ca') -%}
   {%- set _era_filter = (_coin_loc ~ '_' ~ _era_next) if (_coin_loc and _era_next) else (_era_next or _coin_loc) -%}
   {%- set _loc_filter = (_loc_next ~ '_' ~ _coin_era) if (_loc_next and _coin_era) else (_coin_era or _loc_next) -%}
-  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_era_filter) }}"
-     class="toolbar-btn pill {% if _coin_era %}active{% endif %}"
-     title="Cycle era: Ancient → Modern → All">{{ 'Ancient' if _coin_era == 'ancient' else ('Modern' if _coin_era == 'modern' else 'All') }}</a>
-
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_loc_filter) }}"
      class="toolbar-btn pill {% if _coin_loc %}active{% endif %}"
      title="Cycle location: CA → NY → All">{{ 'CA' if _coin_loc == 'ca' else ('NY' if _coin_loc == 'ny' else 'All') }}</a>
+
+  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_era_filter) }}"
+     class="toolbar-btn pill {% if _coin_era %}active{% endif %}"
+     title="Cycle period: Ancient → Modern → All">{{ 'Ancient' if _coin_era == 'ancient' else ('Modern' if _coin_era == 'modern' else 'All') }}</a>
   {% if has_ordered or coin_filter == 'ordered' %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
