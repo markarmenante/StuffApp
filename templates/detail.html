@@ -2439,23 +2439,23 @@ document.addEventListener('DOMContentLoaded', function () {
           <div class="med-row med-head">
             <span class="med-name-head"><span>Type</span><span>Brand / Product</span></span><span>Active Ingredients</span><span>Directions</span>
             <span class="med-actions">
-            <button type="button" class="med-action-pill med-ingredient-lookup-btn"
-                    onclick="lookupMedicationIngredients(event, this)"
-                    title="Lookup active ingredients and directions from medication + note/brand"
-                    aria-label="Lookup medication details">Lookup</button>
-            <button type="button" class="med-action-pill med-share-btn"
-                    onclick="shareMedicationList(event, this)"
-                    title="Share medication list via Messages / Mail"
-                    aria-label="Share medications">
-              <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
-                   stroke="currentColor" stroke-width="2"
-                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M12 2 V17"/>
-                <path d="M6 8 L12 2 L18 8"/>
-                <path d="M5 13 H3 V25 H21 V13 H19"/>
-              </svg>
-              <span>Share</span>
-            </button>
+              <button type="button" class="med-action-pill med-ingredient-lookup-btn"
+                      onclick="lookupMedicationIngredients(event, this)"
+                      title="Lookup active ingredients and directions from medication + note/brand"
+                      aria-label="Lookup medication details">Lookup</button>
+              <button type="button" class="med-action-pill med-share-btn"
+                      onclick="shareMedicationList(event, this)"
+                      title="Share medication list via Messages / Mail"
+                      aria-label="Share medications">
+                <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+                     stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2 V17"/>
+                  <path d="M6 8 L12 2 L18 8"/>
+                  <path d="M5 13 H3 V25 H21 V13 H19"/>
+                </svg>
+                <span>Share</span>
+              </button>
             </span>
           </div>
           {% for i in range(1, person_medication_slots + 1) %}
