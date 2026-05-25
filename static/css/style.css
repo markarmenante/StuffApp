@@ -1525,6 +1525,18 @@ input[type="date"] { -webkit-appearance: none; }
   outline: none;
 }
 .rec-notes-textarea:focus { border-color: var(--blue); background: #fff; }
+.rec-notes-preview {
+  min-height: 280px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: var(--cell-bg);
+  font-size: 13px;
+}
+.rec-notes-preview:focus {
+  border-color: var(--blue);
+  background: #fff;
+}
 
 /* "Notes" pill in the header. Click to pull a Claude-generated
    blurb; turns green while loading and stays green after success. */

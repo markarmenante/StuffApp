@@ -1682,7 +1682,14 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
     <div class="rec-notes-refs" id="recNotesRefs"
          data-urls="{{ val('notes_urls') }}"></div>
-    <textarea name="notes" rows="10" placeholder="Notes" class="rec-notes-textarea">{{ val('notes') }}</textarea>
+    <div class="markdown-note-preview rec-notes-preview{% if not val('notes') %} is-empty{% endif %}"
+         data-md-preview-for="notes"
+         tabindex="0"
+         title="Click to edit"
+         {% if not val('notes') %}style="display:none"{% endif %}>{{ val('notes')|format_results }}</div>
+    <textarea name="notes" rows="10" placeholder="Notes"
+              class="rec-notes-textarea markdown-note-editor"
+              {% if val('notes') %}style="display:none"{% endif %}>{{ val('notes') }}</textarea>
   </div>
 
   {# Tracks block: pills only — the canonical newline-separated list
@@ -1889,7 +1896,11 @@ document.addEventListener('DOMContentLoaded', function () {
         safe('notes', () => {
           const sep = notesTa.value.trim() ? '\n\n' : '';
           notesTa.value = notesTa.value + sep + data.notes;
+          notesTa.dispatchEvent(new Event('input', { bubbles: true }));
           notesTa.dispatchEvent(new Event('blur'));
+          if (window.refreshMarkdownNotePreview) {
+            window.refreshMarkdownNotePreview(notesTa, true);
+          }
           if (window._autosizeTextarea) window._autosizeTextarea(notesTa);
         });
         safe('source pills', () => { if (data.urls) setSourcePills(data.urls); });
@@ -2586,6 +2597,7 @@ function formatResultsHtml(text) {
   if (inList) out.push('</ul>');
   return out.join('');
 }
+window.formatResultsHtml = formatResultsHtml;
 
 // Re-render preview whenever the raw textarea changes
 document.getElementById('resultsRaw')?.addEventListener('input', (e) => {
@@ -2605,6 +2617,7 @@ function refreshMarkdownNotePreview(textarea, preferPreview = false) {
     preview.style.display = '';
   }
 }
+window.refreshMarkdownNotePreview = refreshMarkdownNotePreview;
 
 (function setupMarkdownNotePreviews() {
   document.querySelectorAll('.markdown-note-preview').forEach(preview => {
