@@ -1668,7 +1668,7 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
       </div>
       <div class="dgrid dg3 recording-meta">
-        {{ selcell('genre','Genre', vlists.recording_genre) }}
+        {{ tacell('genre','Genre', vlists.recording_genre) }}
         {{ cell('genre_2','Genre 2') }}
         {{ cell('label','Label') }}
       </div>
@@ -1966,10 +1966,11 @@ document.addEventListener('DOMContentLoaded', function () {
         // in the form so the user sees the correction without a reload.
         safe('genre', () => {
           if (!data.genre) return;
-          const genreSel = document.querySelector('select[name="genre"]');
-          if (genreSel && genreSel.value !== data.genre) {
-            genreSel.value = data.genre;
-            genreSel.dispatchEvent(new Event('change'));
+          const genreInp = document.querySelector('[name="genre"]');
+          if (genreInp && genreInp.value !== data.genre) {
+            genreInp.value = data.genre;
+            genreInp.dispatchEvent(new Event('input', { bubbles: true }));
+            genreInp.dispatchEvent(new Event('blur'));
           }
         });
         safe('genre_2', () => {

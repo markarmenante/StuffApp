@@ -4104,15 +4104,16 @@ def fetch_recording_notes(rec):
                     "with reasonable confidence.") if want_tracks else ""
 
     # Always verify genre + sub-genre on Lookup. The model returns its
-    # best assessment regardless of whether the DB already has values,
-    # so a wrong existing genre gets corrected. Genre is constrained to
-    # the recording_genre dropdown values; sub-genre is free text.
+    # best assessment regardless of whether the DB already has values.
+    # Prefer the known genre list for consistency, but Genre is free
+    # text in the UI and can accept values outside the historical list.
     allowed_genres = list(VALUE_LISTS.get('recording_genre', []))
     genres_csv = ', '.join(allowed_genres)
     genre_block = (
         f"\nAlso classify the recording. Return the primary genre in a "
-        f"<genre>...</genre> tag — it MUST be exactly one of: "
-        f"{genres_csv}. Pick the closest fit; if you can't decide with "
+        f"<genre>...</genre> tag. Prefer one of these known genres when "
+        f"it fits: {genres_csv}. If none fits cleanly, return a concise "
+        f"music-store genre value instead. If you can't decide with "
         f"reasonable confidence, omit the <genre> tag entirely. Then "
         f"return a more specific sub-genre in a <genre_2>...</genre_2> "
         f"tag (free text — e.g. \"Bebop\", \"Hard Rock\", \"Bossa Nova\", "
@@ -4271,18 +4272,21 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}{label_blo
             new_tracks = '\n'.join(lines)
 
     # Optional <genre>...</genre> + <genre_2>...</genre_2> blocks. Genre
-    # is validated against the recording_genre dropdown (case-
-    # insensitive); a model-returned value not in the list is dropped.
+    # prefers canonical capitalization from recording_genre when there
+    # is a match, but otherwise accepts concise free text.
     new_genre = ''
     gm = re.search(r'<genre>(.*?)</genre>', text, re.DOTALL | re.IGNORECASE)
     if gm:
         cand = _html.unescape(gm.group(1)).strip()
-        cand = re.sub(r'</?cite\b[^>]*>', '', cand, flags=re.IGNORECASE).strip()
+        cand = re.sub(r'</?cite\b[^>]*>', '', cand, flags=re.IGNORECASE)
+        cand = re.sub(r'\s+', ' ', cand).strip(' ,"\'')
         cand_l = cand.lower()
         for allowed in allowed_genres:
             if allowed.lower() == cand_l:
                 new_genre = allowed
                 break
+        if not new_genre and cand and len(cand) <= 40 and not re.search(r'https?://|[<>]', cand):
+            new_genre = cand
     new_genre_2 = ''
     g2m = re.search(r'<genre_2>(.*?)</genre_2>', text, re.DOTALL | re.IGNORECASE)
     if g2m:
