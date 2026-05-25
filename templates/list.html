@@ -370,6 +370,9 @@
         {%- set _fmt = 'Vinyl' if row['type'] in _vinyl_types
                         else ('Tape' if _is_tape
                               else (row['type'] or '')) -%}
+        {%- set _prop_lc = (row['property'] or '')|lower|trim -%}
+        {%- set _rec_loc = 'C' if _prop_lc in ('carpinteria', 'carp', 'montecito')
+                           else ('M' if _prop_lc in ('martis', 'truckee', 'martis camp') else '') -%}
         <div class="item-line1">
           <span class="item-brand">{{ row['artist'] or '—' }}</span>
         </div>
@@ -377,17 +380,17 @@
           {% if row['title'] %}<div class="idr idr-rec-title"><span>{{ row['title'] }}</span></div>{% endif %}
           <div class="idr idr-rec-format">
             {% if _fmt %}<span>{{ _fmt }}</span>{% endif %}
-            {% if row['speed'] %}<span>{{ row['speed'] }}</span>{% endif %}
-            {% if row['sound'] %}<span>{{ row['sound'] }}</span>{% endif %}
+            {% if row['speed'] %}<span>{% if _fmt == 'Vinyl' and row['speed']|trim == '45' %}<strong>{{ row['speed'] }}</strong>{% else %}{{ row['speed'] }}{% endif %}</span>{% endif %}
+            {% if row['sound'] %}<span>{% if row['sound']|lower|trim == 'mono' %}<strong><em>{{ row['sound'] }}</em></strong>{% else %}{{ row['sound'] }}{% endif %}</span>{% endif %}
             {# `other` holds tape EQ (CCIR/NAB) for reels and pressing
                weight (140g/180g) for vinyl. Only the tape variant is
                useful in the list. #}
             {% if _is_tape and row['other'] %}<span>{{ row['other'] }}</span>{% endif %}
           </div>
-          {% if row['property'] or row['genre'] or row['year_recorded'] %}
+          {% if row['genre'] or row['genre_2'] or row['year_recorded'] or _rec_loc %}
           <div class="idr">
             <span>
-              {{ row['property'] }}{% if row['property'] and row['genre'] %} {% endif %}{{ row['genre'] }}{% if (row['property'] or row['genre']) and row['year_recorded'] %} {% endif %}{{ row['year_recorded'] }}
+              {% if row['genre'] %}{{ row['genre'] }}{% endif %}{% if row['genre_2'] %}{% if row['genre'] %}, {% endif %}{{ row['genre_2'] }}{% endif %}{% if row['year_recorded'] %}{% if row['genre'] or row['genre_2'] %}, {% endif %}{{ row['year_recorded'] }}{% endif %}{% if _rec_loc %}{% if row['genre'] or row['genre_2'] or row['year_recorded'] %} - {% endif %}{{ _rec_loc }}{% endif %}
             </span>
           </div>
           {% endif %}
