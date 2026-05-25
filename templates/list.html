@@ -45,11 +45,11 @@
   {%- set _loc_filter = (_loc_next ~ '_' ~ _coin_era) if (_loc_next and _coin_era) else (_coin_era or _loc_next) -%}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_loc_filter) }}"
      class="toolbar-btn pill {% if _coin_loc %}active{% endif %}"
-     title="Cycle location: CA → NY → All">{{ 'CA' if _coin_loc == 'ca' else ('NY' if _coin_loc == 'ny' else 'All') }}</a>
+     title="Cycle location: CA → NY → All">{{ 'CA' if _coin_loc == 'ca' else ('NY' if _coin_loc == 'ny' else 'Reg: All') }}</a>
 
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_era_filter) }}"
      class="toolbar-btn pill {% if _coin_era %}active{% endif %}"
-     title="Cycle period: Ancient → Modern → All">{{ 'Ancient' if _coin_era == 'ancient' else ('Modern' if _coin_era == 'modern' else 'All') }}</a>
+     title="Cycle period: Ancient → Modern → All">{{ 'Ancient' if _coin_era == 'ancient' else ('Modern' if _coin_era == 'modern' else 'Era: All') }}</a>
   {% if has_ordered or coin_filter == 'ordered' %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
