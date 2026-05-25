@@ -2436,22 +2436,25 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="med-table dcell"
              data-med-max="{{ person_medication_slots }}"
              data-med-base-visible="7">
-          <button type="button" class="doc-share-btn med-ingredient-lookup-btn"
-                  onclick="lookupMedicationIngredients(event, this)"
-                  title="Lookup active ingredients from medication + note/brand"
-                  aria-label="Lookup active ingredients">Lookup</button>
-          <button type="button" class="doc-share-btn med-share-btn"
-                  onclick="shareMedicationList(event, this)"
-                  title="Share medication list via Messages / Mail"
-                  aria-label="Share medications">
-            <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
-                 stroke="currentColor" stroke-width="2"
-                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12 2 V17"/>
-              <path d="M6 8 L12 2 L18 8"/>
-              <path d="M5 13 H3 V25 H21 V13 H19"/>
-            </svg>
-          </button>
+          <div class="med-actions">
+            <button type="button" class="med-action-pill med-ingredient-lookup-btn"
+                    onclick="lookupMedicationIngredients(event, this)"
+                    title="Lookup active ingredients and directions from medication + note/brand"
+                    aria-label="Lookup medication details">Lookup</button>
+            <button type="button" class="med-action-pill med-share-btn"
+                    onclick="shareMedicationList(event, this)"
+                    title="Share medication list via Messages / Mail"
+                    aria-label="Share medications">
+              <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+                   stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2 V17"/>
+                <path d="M6 8 L12 2 L18 8"/>
+                <path d="M5 13 H3 V25 H21 V13 H19"/>
+              </svg>
+              <span>Share</span>
+            </button>
+          </div>
           <div class="med-row med-head">
             <span>Medication</span><span>Active Ingredients</span><span>Dosage</span><span>Directions</span><span>Note</span><span></span>
           </div>
@@ -5129,16 +5132,24 @@ async function lookupMedicationIngredients(ev, btn) {
     if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
     let applied = 0;
     (data.updates || []).forEach(update => {
-      const input = form.querySelector(`[name="med_active_ingredients_${update.index}"]`);
-      if (!input || !update.active_ingredients) return;
-      if (input.value !== update.active_ingredients) {
-        input.value = update.active_ingredients;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('blur'));
+      let changed = false;
+      const ingredientsInput = form.querySelector(`[name="med_active_ingredients_${update.index}"]`);
+      if (ingredientsInput && update.active_ingredients && ingredientsInput.value !== update.active_ingredients) {
+        ingredientsInput.value = update.active_ingredients;
+        ingredientsInput.dispatchEvent(new Event('input', { bubbles: true }));
+        ingredientsInput.dispatchEvent(new Event('blur'));
+        changed = true;
       }
-      applied += 1;
+      const directionsInput = form.querySelector(`[name="med_directions_${update.index}"]`);
+      if (directionsInput && update.directions && directionsInput.value !== update.directions) {
+        directionsInput.value = update.directions;
+        directionsInput.dispatchEvent(new Event('input', { bubbles: true }));
+        directionsInput.dispatchEvent(new Event('blur'));
+        changed = true;
+      }
+      if (changed) applied += 1;
     });
-    if (!applied) alert('No active ingredients found.');
+    if (!applied) alert('No medication details found.');
   } catch (err) {
     alert('Ingredient lookup failed: ' + (err.message || err));
   } finally {

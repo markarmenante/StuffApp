@@ -2398,7 +2398,7 @@ def _backfill_meds_from_prescriptions(db):
 def _med_lookup_terms(name, note):
     """Medication lookup candidates from the medication name plus note/brand."""
     raw = []
-    for part in (note, name, f'{note} {name}' if note and name else ''):
+    for part in (f'{note} {name}' if note and name else '', name, note):
         text = re.sub(r'\s+', ' ', (part or '')).strip()
         if not text:
             continue
@@ -2449,20 +2449,205 @@ def _rxnav_ingredients_for_term(term):
     return ''
 
 
-def lookup_med_active_ingredients(name, note):
-    """Return active ingredient text from RxNav/NLM for a med row."""
+def _clean_med_text(text):
+    text = re.sub(r'\s+', ' ', (text or '')).strip()
+    text = text.replace(' ■ ', '; ').replace('■ ', '').replace(' ■', '')
+    text = re.sub(r'\s*;\s*;\s*', '; ', text)
+    text = re.sub(r'\s+', ' ', text).strip(' ;')
+    return text
+
+
+def _elysium_signal_details_for_term(term):
+    """Return active details for Elysium Signal, which is a supplement.
+
+    RxNav covers drugs well, but supplement brands like Elysium Signal are
+    usually absent there. Keep this narrowly scoped to the product name so a
+    generic medication row containing "signal" does not get a false match.
+    """
+    normalized = re.sub(r'\s+', ' ', (term or '').strip()).lower()
+    if not normalized:
+        return {}
+    if 'elysium' not in normalized or 'signal' not in normalized:
+        return {}
+
+    import html
+    import urllib.request
+    url = 'https://www.elysiumhealth.com/pages/signal-supplement-facts'
+    req = urllib.request.Request(url, headers={'User-Agent': 'StuffApp/1.0'})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        page = resp.read().decode('utf-8', 'ignore')
+
+    match = re.search(r'"description"\s*:\s*"([^"]*NMN[^"]*)"', page, flags=re.DOTALL)
+    label = html.unescape(match.group(1)) if match else page
+    label = label.replace('\\/', '/')
+    directions_match = re.search(
+        r'Suggested Use\s*</[^>]+>\s*<[^>]+>\s*([^<]+)',
+        page,
+        flags=re.IGNORECASE,
+    )
+    directions = _clean_med_text(html.unescape(directions_match.group(1))) if directions_match else ''
+
+    has_nmn = re.search(r'NMN\s*\(β-Nicotinamide Mononucleotide\)', label, flags=re.IGNORECASE)
+    has_honokiol = re.search(r'Honokiol\s*\(from\s+Magnolia officinalis\s*\[?bark\]?\)', label, flags=re.IGNORECASE)
+    has_viniferin = re.search(
+        r'Grape Vine\s*\(Vitis vinifera\)\s*Extract\s*\(Standardized to Viniferin\)',
+        label,
+        flags=re.IGNORECASE,
+    )
+    if has_nmn and has_honokiol and has_viniferin:
+        ingredients = (
+            'NMN (β-Nicotinamide Mononucleotide), '
+            'Honokiol (from Magnolia officinalis bark), '
+            'Grape Vine (Vitis vinifera) Extract (standardized to Viniferin)'
+        )
+        return {'active_ingredients': ingredients, 'directions': directions}
+    return {}
+
+
+def _dailymed_directions_for_setid(setid):
+    import io
+    import urllib.parse
+    import urllib.request
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    setid = (setid or '').strip()
+    if not setid:
+        return ''
+    url = 'https://dailymed.nlm.nih.gov/dailymed/getFile.cfm?' + urllib.parse.urlencode({
+        'setid': setid,
+        'type': 'zip',
+    })
+    req = urllib.request.Request(url, headers={'User-Agent': 'StuffApp/1.0'})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = resp.read()
+    if not data.startswith(b'PK'):
+        return ''
+    archive = zipfile.ZipFile(io.BytesIO(data))
+    xml_names = [name for name in archive.namelist() if name.lower().endswith('.xml')]
+    if not xml_names:
+        return ''
+    root = ET.fromstring(archive.read(xml_names[0]))
+
+    def local_name(elem):
+        return elem.tag.rsplit('}', 1)[-1]
+
+    for section in root.iter():
+        if local_name(section) != 'section':
+            continue
+        title_text = ''
+        text_text = ''
+        for child in section:
+            name = local_name(child)
+            if name == 'title':
+                title_text = _clean_med_text(' '.join(child.itertext()))
+            elif name == 'text':
+                text_text = _clean_med_text(' '.join(child.itertext()))
+        if title_text.lower() == 'directions' and text_text:
+            return text_text[:700]
+        if title_text.lower() != 'directions':
+            for child in section:
+                if local_name(child) != 'code':
+                    continue
+                display = (child.attrib.get('displayName') or '').lower()
+                if 'dosage' in display and text_text:
+                    return text_text[:700]
+    return ''
+
+
+def _dailymed_details_for_term(term):
+    """Return OTC label details from DailyMed when the title matches directly."""
+    import urllib.parse
+
+    term = re.sub(r'\s+', ' ', (term or '').strip())
+    if not term:
+        return {}
+    q = urllib.parse.urlencode({'drug_name': term, 'pagesize': '10'})
+    data = _rxnav_json(f'https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json?{q}')
+    rows = data.get('data') or []
+    if not rows:
+        return {}
+
+    needle = term.lower()
+
+    def score(row):
+        title = (row.get('title') or '').strip()
+        lower = title.lower()
+        points = 0
+        if lower.startswith(needle):
+            points += 100
+        if f' {needle} ' in f' {lower} ':
+            points += 20
+        if 'convenience kit' in lower or lower.endswith(' kit') or ') kit ' in lower:
+            points -= 30
+        return (-points, len(title))
+
+    for row in sorted(rows, key=score):
+        title = (row.get('title') or '').strip()
+        if not title.lower().startswith(needle):
+            continue
+        match = re.search(r'\(([^()]*)\)', title)
+        if not match:
+            continue
+        ingredients = match.group(1)
+        ingredients = re.sub(r'\s+', ' ', ingredients).strip()
+        if not ingredients:
+            continue
+        parts = []
+        for part in re.split(r'\s*,\s*|\s+AND\s+', ingredients, flags=re.IGNORECASE):
+            part = re.sub(r'\b(?:HYDROCHLORIDE|HYDROBROMIDE|CITRATE)\b', lambda m: m.group(0).lower(), part)
+            part = re.sub(r'\s+', ' ', part).strip()
+            if part and part.lower() not in {x.lower() for x in parts}:
+                parts.append(part.lower())
+        if parts:
+            directions = ''
+            try:
+                directions = _dailymed_directions_for_setid(row.get('setid'))
+            except Exception:
+                directions = ''
+            return {'active_ingredients': ', '.join(parts), 'directions': directions}
+    return {}
+
+
+def lookup_medication_details(name, note, med_type=''):
+    """Return ingredient and direction details for a medication/supplement row."""
+    terms = _med_lookup_terms(name, note)
+    is_rx = (med_type or '').strip().lower() == 'rx'
     last_err = None
-    for term in _med_lookup_terms(name, note):
+
+    if not is_rx:
+        for term in terms:
+            try:
+                details = _elysium_signal_details_for_term(term)
+            except Exception as exc:
+                last_err = exc
+                details = {}
+            if details.get('active_ingredients') or details.get('directions'):
+                return details
+            try:
+                details = _dailymed_details_for_term(term)
+            except Exception as exc:
+                last_err = exc
+                details = {}
+            if details.get('active_ingredients') or details.get('directions'):
+                return details
+
+    for term in terms:
         try:
             ingredients = _rxnav_ingredients_for_term(term)
         except Exception as exc:
             last_err = exc
             continue
         if ingredients:
-            return ingredients
+            return {'active_ingredients': ingredients, 'directions': ''}
     if last_err:
         raise RuntimeError(str(last_err))
-    return ''
+    return {}
+
+
+def lookup_med_active_ingredients(name, note, med_type=''):
+    """Compatibility wrapper for callers that only need ingredients."""
+    return lookup_medication_details(name, note, med_type).get('active_ingredients', '')
 
 
 def get_counts():
@@ -5122,22 +5307,32 @@ def persons_medication_ingredients(record_id):
     for i in range(1, PERSON_MEDICATION_SLOTS + 1):
         name = (person[f'med_name_{i}'] or '').strip()
         note = (person[f'med_note_{i}'] or '').strip()
+        med_type = (person[f'med_type_{i}'] or '').strip()
         if not (name or note):
             continue
-        key = (name.lower(), note.lower())
+        key = (name.lower(), note.lower(), med_type.lower())
         if key not in cache:
             try:
-                cache[key] = lookup_med_active_ingredients(name, note)
+                cache[key] = lookup_medication_details(name, note, med_type)
             except RuntimeError as exc:
                 errors.append({'index': i, 'error': str(exc)})
-                cache[key] = ''
-        ingredients = cache[key]
-        if not ingredients:
+                cache[key] = {}
+        details = cache[key]
+        ingredients = (details.get('active_ingredients') or '').strip()
+        directions = (details.get('directions') or '').strip()
+        if not (ingredients or directions):
             continue
         if ingredients != (person[f'med_active_ingredients_{i}'] or '').strip():
             sets.append(f'med_active_ingredients_{i} = ?')
             params.append(ingredients)
-        updates.append({'index': i, 'active_ingredients': ingredients})
+        if directions and directions != (person[f'med_directions_{i}'] or '').strip():
+            sets.append(f'med_directions_{i} = ?')
+            params.append(directions)
+        updates.append({
+            'index': i,
+            'active_ingredients': ingredients,
+            'directions': directions,
+        })
 
     if sets:
         sets.append('updated_at = ?')

@@ -1778,24 +1778,47 @@ input[type="date"] { -webkit-appearance: none; }
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
-.med-share-btn { top: 5px; right: 8px; }
-.med-ingredient-lookup-btn {
-  top: 5px;
-  right: 36px;
+.med-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 0 5px;
+}
+.med-action-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   width: auto;
-  min-width: 58px;
-  padding: 0 8px;
+  min-width: 70px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+  font-family: var(--font);
   font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--blue);
+}
+.med-action-pill:hover { background: rgba(0, 122, 255, 0.08); }
+.med-action-pill:focus { outline: none; box-shadow: 0 0 0 2px rgba(0,122,255,0.18); }
+.med-action-pill:disabled { opacity: 0.45; cursor: default; }
+.med-ingredient-lookup-btn {
+  border-color: #9dcfaa;
   color: #126d35;
 }
+.med-ingredient-lookup-btn:hover { background: rgba(18, 109, 53, 0.08); }
 .med-table .med-row {
   display: grid;
   grid-template-columns:
-    minmax(13rem, 1.25fr)
-    minmax(12rem, 1.2fr)
+    minmax(13rem, 1.15fr)
+    minmax(16rem, 1.55fr)
     minmax(6rem, 0.7fr)
-    minmax(12rem, 1.5fr)
-    minmax(10rem, 1.35fr)
+    minmax(18rem, 1.8fr)
+    minmax(6rem, 0.55fr)
     22px;
   align-items: stretch;
 }
