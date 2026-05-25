@@ -12020,14 +12020,17 @@ def recordings_catalog_pdf():
     if raw_filter == 'carp':
         location_aliases = _property_alias_group('Carpinteria')
         location_title = 'Carpinteria'
+        numbered_media = 'Vinyl'
     elif raw_filter == 'martis':
         location_aliases = _property_alias_group('Truckee')
         location_title = 'Truckee'
+        numbered_media = 'CD'
     else:
         carp_aliases = _property_alias_group('Carpinteria')
         truckee_aliases = _property_alias_group('Truckee')
         location_aliases = sorted(set(carp_aliases + truckee_aliases))
         location_title = 'Carpinteria + Truckee'
+        numbered_media = None
     show_location_mark = raw_filter not in ('carp', 'martis')
     ph = ','.join(['?' for _ in location_aliases])
     wheres = [
@@ -12046,6 +12049,13 @@ def recordings_catalog_pdf():
     )
     rows = get_db().execute(sql, params).fetchall()
     rows = [r for r in rows if _user_can_see_row('recordings', r)]
+    row_numbers = {}
+    if numbered_media:
+        n = 1
+        for row in rows:
+            if _media_type(row) == numbered_media:
+                row_numbers[row['id']] = n
+                n += 1
 
     buf = _io.BytesIO()
     doc = SimpleDocTemplate(
@@ -12115,7 +12125,10 @@ def recordings_catalog_pdf():
             artist = row['artist'] or 'Unknown artist'
             title = row['title'] or ''
             location_mark = _location_mark(row['property']) if show_location_mark else ''
+            row_number = row_numbers.get(row['id'])
             artist_text = escape(str(artist))
+            if row_number:
+                artist_text = f'{row_number}. {artist_text}'
             if location_mark:
                 artist_text += (
                     f' <font size="7" color="#777777">{location_mark}</font>'
