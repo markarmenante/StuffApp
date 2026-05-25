@@ -2433,7 +2433,9 @@ document.addEventListener('DOMContentLoaded', function () {
           {{ cell('primary_care_physician','Physician',rows=4) }}
           {{ cell('spouse_name_and_phone','Contact',rows=4) }}
         </div>
-        <div class="med-table dcell">
+        <div class="med-table dcell"
+             data-med-max="{{ person_medication_slots }}"
+             data-med-base-visible="7">
           <button type="button" class="doc-share-btn med-share-btn"
                   onclick="shareMedicationList(event, this)"
                   title="Share medication list via Messages / Mail"
@@ -2449,7 +2451,7 @@ document.addEventListener('DOMContentLoaded', function () {
           <div class="med-row med-head">
             <span>Medication</span><span>Dosage</span><span>Directions</span><span>Note</span><span></span>
           </div>
-          {% for i in range(1, 13) %}
+          {% for i in range(1, person_medication_slots + 1) %}
           <div class="med-row{% if i > 7 %} med-row-extra{% endif %}" data-med-idx="{{ i }}">
             <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
             <input type="text" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
@@ -4959,10 +4961,11 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
 // event so the existing per-field autosave persists the change.
 (function medsDelete() {
   const MED_FIELDS = ['med_name', 'med_dose', 'med_directions', 'med_note'];
-  const MAX = 12;
-  const BASE_VISIBLE = 7;
   const form = document.getElementById('mainForm');
   if (!form) return;
+  const medTable = form.querySelector('.med-table');
+  const MAX = parseInt(medTable?.dataset.medMax || '12', 10);
+  const BASE_VISIBLE = parseInt(medTable?.dataset.medBaseVisible || '7', 10);
 
   function rowIsEmpty(idx) {
     return MED_FIELDS.every(f => {

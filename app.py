@@ -423,7 +423,7 @@ if os.environ.get('STUFFAPP_OWNER_OPTIONS'):
     }
 
 
-PERSON_MEDICATION_SLOTS = 12
+PERSON_MEDICATION_SLOTS = 24
 
 
 FIELDS = {
@@ -8153,6 +8153,7 @@ def inject_globals():
         'count_visible': lambda cat, names: sum(
             1 for n in names if n not in HIDE_FIELDS.get(cat, set())),
         'is_tenant': TENANT_CATEGORIES is not None,
+        'person_medication_slots': PERSON_MEDICATION_SLOTS,
     }
 
 
