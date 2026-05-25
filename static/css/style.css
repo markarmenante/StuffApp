@@ -1806,12 +1806,8 @@ input[type="date"] { -webkit-appearance: none; }
   gap: 5px;
   border-right: 1px solid var(--border-light);
 }
-.med-type-pills {
-  display: inline-flex;
-  gap: 2px;
-  padding-left: 4px;
-}
-.med-type-pill {
+.med-type-toggle {
+  min-width: 38px;
   border: 1px solid var(--border);
   background: #fff;
   color: var(--text-secondary);
@@ -1819,14 +1815,18 @@ input[type="date"] { -webkit-appearance: none; }
   font: inherit;
   font-size: 11px;
   line-height: 1;
-  padding: 3px 6px;
+  margin-left: 4px;
+  padding: 3px 7px;
   cursor: pointer;
 }
-.med-type-pill.active {
+.med-type-toggle.active {
   background: #eeeeee;
   color: #111;
   border-color: #b8b8b8;
   font-weight: 700;
+}
+.med-type-toggle.otc {
+  color: #4d4d4d;
 }
 .med-del-btn {
   width: 18px; height: 18px; align-self: center; margin: 0 2px;

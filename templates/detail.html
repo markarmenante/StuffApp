@@ -2460,10 +2460,10 @@ document.addEventListener('DOMContentLoaded', function () {
             <div class="med-name-wrap">
               {% set _mt = val('med_type_' ~ i) %}
               <input type="hidden" name="med_type_{{ i }}" value="{{ _mt }}">
-              <div class="med-type-pills" role="group" aria-label="Medication type">
-                <button type="button" class="med-type-pill{% if _mt == 'Rx' %} active{% endif %}" data-value="Rx" aria-pressed="{{ 'true' if _mt == 'Rx' else 'false' }}">Rx</button>
-                <button type="button" class="med-type-pill{% if _mt == 'OTC' %} active{% endif %}" data-value="OTC" aria-pressed="{{ 'true' if _mt == 'OTC' else 'false' }}">OTC</button>
-              </div>
+              <button type="button"
+                      class="med-type-toggle{% if _mt %} active{% endif %}"
+                      aria-label="Medication type"
+                      aria-pressed="{{ 'true' if _mt else 'false' }}">{{ _mt or 'Type' }}</button>
               <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
             </div>
             <input type="text" name="med_active_ingredients_{{ i }}" value="{{ val('med_active_ingredients_' ~ i) }}">
@@ -5068,11 +5068,12 @@ function refreshMedTypePills() {
     const idx = row.dataset.medIdx;
     const hidden = form.querySelector(`[name="med_type_${idx}"]`);
     const value = (hidden?.value || '').trim();
-    row.querySelectorAll('.med-type-pill').forEach(btn => {
-      const active = btn.dataset.value === value;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-    });
+    const btn = row.querySelector('.med-type-toggle');
+    if (!btn) return;
+    btn.textContent = value || 'Type';
+    btn.classList.toggle('active', !!value);
+    btn.classList.toggle('otc', value === 'OTC');
+    btn.setAttribute('aria-pressed', value ? 'true' : 'false');
   });
 }
 window.refreshMedTypePills = refreshMedTypePills;
@@ -5081,7 +5082,7 @@ window.refreshMedTypePills = refreshMedTypePills;
   const form = document.getElementById('mainForm');
   if (!form) return;
   refreshMedTypePills();
-  form.querySelectorAll('.med-type-pill').forEach(btn => {
+  form.querySelectorAll('.med-type-toggle').forEach(btn => {
     btn.addEventListener('click', (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
@@ -5089,7 +5090,7 @@ window.refreshMedTypePills = refreshMedTypePills;
       if (!row) return;
       const hidden = form.querySelector(`[name="med_type_${row.dataset.medIdx}"]`);
       if (!hidden) return;
-      hidden.value = btn.dataset.value || '';
+      hidden.value = hidden.value === 'Rx' ? 'OTC' : 'Rx';
       hidden.dispatchEvent(new Event('input', { bubbles: true }));
       hidden.dispatchEvent(new Event('blur'));
       refreshMedTypePills();
