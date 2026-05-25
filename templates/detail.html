@@ -1942,10 +1942,10 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         safe('source pills', () => { if (data.urls) setSourcePills(data.urls); });
 
-        // Fill-if-empty for both players and tracks. Server already
-        // gates on the same condition; this is a defensive guard.
+        // Players overwrites because Lookup is the user's verify/correct
+        // action; tracks stay fill-if-empty because editions can differ.
         safe('players', () => {
-          if (playersInp && data.players && !playersInp.value.trim()) {
+          if (playersInp && data.players && playersInp.value !== data.players) {
             playersInp.value = data.players;
             playersInp.dispatchEvent(new Event('blur'));
             renderPlayerPills();

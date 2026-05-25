@@ -4080,9 +4080,6 @@ def fetch_recording_notes(rec):
     ] if x]
     fmt = ' · '.join(fmt_bits)
 
-    # Only ask Claude to populate Players when the field is empty —
-    # we never want to clobber a user-entered roster.
-    want_players = not players
     players_block = ("\nAlso return a comma-separated list of the "
                      "key musicians on this recording (lead artist + "
                      "sidemen / band members), each followed by their "
@@ -4094,7 +4091,8 @@ def fetch_recording_notes(rec):
                      "in a <players>...</players> tag immediately "
                      "after the <markdown> block. Omit the <players> "
                      "tag entirely if you can't determine personnel "
-                     "with reasonable confidence.") if want_players else ""
+                     "with reasonable confidence. If existing Players "
+                     "are wrong, return the corrected list.")
 
     # Always ask for the tracklist when the DB doesn't have one yet —
     # Claude's track names feed the per-track Spotify pill row in the
@@ -4256,17 +4254,17 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}{label_blo
             seen.add(u)
             urls.append(u)
 
-    # Optional <players>...</players> block — only meaningful when the
-    # caller asked for it (i.e. the field was empty going in).
+    # Optional <players>...</players> block. Lookup is considered the
+    # verification action, so a returned list can replace stale earlier
+    # lookup output.
     new_players = ''
-    if want_players:
-        pm = re.search(r'<players>(.*?)</players>', text, re.DOTALL | re.IGNORECASE)
-        if pm:
-            new_players = _html.unescape(pm.group(1)).strip()
-            new_players = re.sub(r'</?cite\b[^>]*>', '', new_players, flags=re.IGNORECASE)
-            # Collapse any internal newlines / extra whitespace in the
-            # comma-separated list so it lands clean in the input.
-            new_players = re.sub(r'\s+', ' ', new_players).strip(' ,')
+    pm = re.search(r'<players>(.*?)</players>', text, re.DOTALL | re.IGNORECASE)
+    if pm:
+        new_players = _html.unescape(pm.group(1)).strip()
+        new_players = re.sub(r'</?cite\b[^>]*>', '', new_players, flags=re.IGNORECASE)
+        # Collapse any internal newlines / extra whitespace in the
+        # comma-separated list so it lands clean in the input.
+        new_players = re.sub(r'\s+', ' ', new_players).strip(' ,')
 
     # Optional <tracks>...</tracks> block. One title per line; we
     # normalize to a newline-separated string so the UI can split on
@@ -6227,10 +6225,9 @@ def recording_fetch_notes(record_id):
         except sqlite3.OperationalError:
             pass
 
-    # Persist players + tracks if the model returned them and the
-    # column is currently empty. fetch_recording_notes already gates
-    # the model request on emptiness, so this is just the write side
-    # of the same condition.
+    # Persist lookup-derived metadata. Players overwrites because
+    # lookup is the user's verify/correct action; tracks remain
+    # fill-if-empty because edition tracklists can differ.
     #
     # Genre + genre_2 are merged (never overwritten):
     #   - genre stays whatever's in the DB if non-empty. A blank genre
@@ -6287,7 +6284,7 @@ def recording_fetch_notes(record_id):
     )
 
     sets, params = [], []
-    if new_players and not existing_players:
+    if new_players and new_players != existing_players:
         sets.append('players = ?'); params.append(new_players)
     if new_tracks and not existing_tracks:
         sets.append('tracks = ?'); params.append(new_tracks)
