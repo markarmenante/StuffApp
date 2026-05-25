@@ -3754,22 +3754,38 @@ document.querySelectorAll('.comp-item').forEach(item => {
     const options = Array.from(p.options || [])
       .map(option => (option.value || option.textContent || '').trim())
       .filter(Boolean);
-    locationPromptActive = true;
-    const entered = window.prompt(
-      'Location required. Enter location' + (options.length ? ' (' + options.join(', ') + ')' : '') + ':',
-      options[0] || ''
-    );
-    if (!entered || !entered.trim()) {
+    if (!options.length) {
       if (p && typeof p.focus === 'function') p.focus();
-      locationPromptActive = false;
       return;
     }
-    const location = entered.trim();
-    if (p.tagName === 'SELECT' && !options.includes(location)) {
-      p.add(new Option(location, location));
-    }
-    p.value = location;
-    saveField(p.name, location).finally(() => { locationPromptActive = false; });
+    locationPromptActive = true;
+    const existing = document.querySelector('.location-choice-backdrop');
+    if (existing) existing.remove();
+    const backdrop = document.createElement('div');
+    backdrop.className = 'location-choice-backdrop';
+    backdrop.innerHTML = [
+      '<div class="location-choice-panel" role="dialog" aria-modal="true" aria-label="Choose location">',
+      '  <div class="location-choice-title">Location</div>',
+      '  <div class="location-choice-subtitle">Choose where this item lives.</div>',
+      '  <div class="location-choice-options"></div>',
+      '</div>'
+    ].join('');
+    const optionWrap = backdrop.querySelector('.location-choice-options');
+    options.forEach(location => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'location-choice-pill';
+      btn.textContent = location;
+      btn.addEventListener('click', () => {
+        p.value = location;
+        backdrop.remove();
+        saveField(p.name, location).finally(() => { locationPromptActive = false; });
+      });
+      optionWrap.appendChild(btn);
+    });
+    document.body.appendChild(backdrop);
+    const first = backdrop.querySelector('.location-choice-pill');
+    if (first) first.focus();
   }
 
   function ensureRecord() {

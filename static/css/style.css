@@ -1503,6 +1503,58 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .recording-meta .dcell input[name="label"] { text-align: left; }
 
+.location-choice-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.56);
+  backdrop-filter: blur(2px);
+}
+.location-choice-panel {
+  width: min(420px, calc(100vw - 40px));
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18);
+}
+.location-choice-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.location-choice-subtitle {
+  margin-top: 4px;
+  color: #666;
+  font-size: 13px;
+}
+.location-choice-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.location-choice-pill {
+  min-height: 34px;
+  padding: 6px 14px;
+  border: 1px solid #bbb;
+  border-radius: 999px;
+  background: #f7f7f8;
+  color: var(--text);
+  font: 15px var(--font);
+  cursor: pointer;
+}
+.location-choice-pill:hover,
+.location-choice-pill:focus {
+  outline: none;
+  border-color: #666;
+  background: #ededee;
+}
+
 /* Players cell grows to fill the remaining vertical space in
    .watch-specs so its bottom aligns with the cover image (and with
    the top of the Notes block below the body). Mirrors the
