@@ -457,6 +457,36 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 {% endif %}
 
+{% if is_new and not focus_field %}
+<script>
+// Fresh add forms should be ready for typing immediately.
+document.addEventListener('DOMContentLoaded', function () {
+  if (document.activeElement && document.activeElement !== document.body) return;
+  var form = document.getElementById('mainForm');
+  if (!form) return;
+  var candidates = Array.from(form.querySelectorAll([
+    'input[name]:not([type="hidden"]):not([type="file"]):not([type="radio"]):not([type="checkbox"])',
+    'textarea[name]',
+    'select[name]'
+  ].join(',')));
+  var first = candidates.find(function (el) {
+    if (el.disabled || el.readOnly) return false;
+    if (el.tabIndex < 0) return false;
+    if (el.offsetParent === null) return false;
+    if (el.closest('[hidden], .row-hidden')) return false;
+    return true;
+  });
+  if (!first) return;
+  window.requestAnimationFrame(function () {
+    first.focus({ preventScroll: true });
+    if (typeof first.select === 'function' && first.tagName === 'INPUT') {
+      first.select();
+    }
+  });
+});
+</script>
+{% endif %}
+
   <!-- ══════════════════════════════════════════════════════════
        WATCHES
   ══════════════════════════════════════════════════════════ -->
