@@ -5202,6 +5202,25 @@ async function shareMedicationList(ev, btn) {
   ev.stopPropagation();
   const form = document.getElementById('mainForm');
   if (!form) return;
+  if (window.ensureRecord) await window.ensureRecord();
+  if (window.saveField) {
+    const saveJobs = [];
+    form.querySelectorAll('.med-row[data-med-idx]').forEach(row => {
+      const idx = row.dataset.medIdx;
+      [
+        `med_type_${idx}`,
+        `med_name_${idx}`,
+        `med_active_ingredients_${idx}`,
+        `med_dose_${idx}`,
+        `med_directions_${idx}`,
+        `med_note_${idx}`,
+      ].forEach(name => {
+        const el = form.querySelector(`[name="${name}"]`);
+        if (el && ((el.value || '').trim())) saveJobs.push(window.saveField(el.name, el.value || ''));
+      });
+    });
+    await Promise.all(saveJobs);
+  }
   const personName = (form.querySelector('[name="name"]')?.value || 'Medication List').trim();
   const rows = Array.from(form.querySelectorAll('.med-row[data-med-idx]'))
     .map(row => {
@@ -5226,15 +5245,12 @@ async function shareMedicationList(ev, btn) {
   }
   const lines = [`${personName} medications`, ''];
   rows.forEach((med, index) => {
-    const parts = [];
-    if (med.type) parts.push(med.type);
-    if (med.name) parts.push(med.name);
-    if (med.active) parts.push(med.active);
-    if (med.dose) parts.push(med.dose);
-    if (med.directions) parts.push(med.directions);
-    let line = `${index + 1}. ${parts.join(' - ') || med.note}`;
-    if (med.note && (med.name || med.dose || med.directions)) line += ` (${med.note})`;
-    lines.push(line);
+    const header = [med.type, med.name].filter(Boolean).join(' - ') || med.note || 'Medication';
+    lines.push(`${index + 1}. ${header}`);
+    if (med.active) lines.push(`   Active ingredients: ${med.active}`);
+    if (med.dose) lines.push(`   Dosage: ${med.dose}`);
+    if (med.directions) lines.push(`   Directions: ${med.directions}`);
+    if (med.note && med.note !== header) lines.push(`   Note: ${med.note}`);
   });
   const text = lines.join('\n');
   try {
