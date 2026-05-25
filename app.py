@@ -3367,6 +3367,10 @@ CATEGORY_FILTERS = {
         'no_longer_owned': ("LOWER(TRIM(COALESCE(status,''))) IN ('sold','gifted','lost')", []),
     },
     'coins': {
+        'ancient':    ("date_1 <  500", []),
+        'modern':     ("date_1 >= 500", []),
+        'ca':         ("property_name IN ('Carp','Carpinteria')", []),
+        'ny':         ("property_name = 'NYC'", []),
         'ca_ancient': ("date_1 <  500 AND property_name IN ('Carp','Carpinteria')", []),
         'ny_ancient': ("date_1 <  500 AND property_name = 'NYC'", []),
         'ca_modern':  ("date_1 >= 500 AND property_name IN ('Carp','Carpinteria')", []),
@@ -3404,6 +3408,40 @@ CATEGORY_FILTERS = {
         'sold_residential': ("LOWER(TRIM(COALESCE(status,''))) = 'sold' AND LOWER(TRIM(COALESCE(type,''))) = 'residential'", []),
     },
 }
+
+
+# Coin list filters are two independent axes encoded in one URL param:
+# era (ancient/modern/all) and location (ca/ny/all). The older
+# ca_ancient-style keys remain canonical for combined filters because
+# renumbering and existing links already use them.
+def _split_coin_filter(f):
+    if not f or f == 'ordered':
+        return None, None
+    parts = f.split('_')
+    era = next((p for p in parts if p in ('ancient', 'modern')), None)
+    loc = next((p for p in parts if p in ('ca', 'ny')), None)
+    return era, loc
+
+
+def _join_coin_filter(era, loc):
+    if loc and era:
+        return f'{loc}_{era}'
+    return era or loc or None
+
+
+def _coin_filter_label(f):
+    if not f:
+        return 'All Coins'
+    if f == 'ordered':
+        return 'Ordered'
+    era, loc = _split_coin_filter(f)
+    parts = []
+    if loc:
+        parts.append(loc.upper())
+    if era:
+        parts.append(era.title())
+    return ' '.join(parts) if parts else f
+
 
 # For properties, a filter key is split into two axes: status (own/sold)
 # and type (commercial/residential). These helpers let the template
@@ -6671,9 +6709,8 @@ def art_apply_lookup(record_id):
 def coins_map_view():
     """Distribution map of ancient coins across the Mediterranean.
 
-    Honours the same filter pills the list view uses: ?filter=ca_ancient or
-    ?filter=ny_ancient apply the matching WHERE clause. No filter falls
-    back to the default ancient threshold (date_1 < 500).
+    Honours the same filter pills the list view uses. No filter falls back
+    to the default ancient threshold (date_1 < 500).
     """
     db = get_db()
     coin_filter = (request.args.get('filter') or '').strip() or None
@@ -6682,12 +6719,11 @@ def coins_map_view():
     filters = CATEGORY_FILTERS.get('coins', {})
     if coin_filter and coin_filter in filters:
         where, params = filters[coin_filter]
-        label = 'CA Ancient' if coin_filter == 'ca_ancient' else \
-                'NY Ancient' if coin_filter == 'ny_ancient' else coin_filter
+        label = _coin_filter_label(coin_filter)
     else:
         where = "date_1 IS NOT NULL AND CAST(date_1 AS INTEGER) < 500"
         params = []
-        label = 'ancient (date < 500)'
+        label = 'Ancient'
     sql = (f"SELECT {base_cols} FROM coins WHERE {where} ORDER BY date_1")
     rows = db.execute(sql, params).fetchall()
     coins = [dict(r) for r in rows]

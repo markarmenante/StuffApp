@@ -32,45 +32,24 @@
      title="Print PDF cards (42 per page)"
      target="_blank">Cards &mdash; {{ _pgs }} {{ 'page' if _pgs == 1 else 'pages' }}</a>
   <button type="button" class="toolbar-btn pill coin-tray-clear" id="coinTrayClear" title="Clear selected coin cards">Clear</button>
-  {# Two era pills, each cycling its own axis:
-     Ancient pill: off -> CA Ancient -> NY Ancient -> off
-     Modern pill : off -> CA Modern  -> NY Modern  -> off
-     When one era is active the other pill is rendered greyed-out
-     and non-interactive. Renumber button appears next to whichever
-     sub-filter is currently active and writes the matching prefix. #}
-  {%- set _ancient_next = {
-        None: 'ca_ancient',
-        'ca_ancient': 'ny_ancient',
-        'ny_ancient': None,
-  } -%}
-  {%- set _modern_next = {
-        None: 'ca_modern',
-        'ca_modern': 'ny_modern',
-        'ny_modern': None,
-  } -%}
-  {%- set _ancient_label = {
-        'ca_ancient': 'CA Ancient',
-        'ny_ancient': 'NY Ancient',
-  }.get(coin_filter, 'CA / NY Ancient') -%}
-  {%- set _modern_label = {
-        'ca_modern': 'CA Modern',
-        'ny_modern': 'NY Modern',
-  }.get(coin_filter, 'CA / NY Modern') -%}
-  {%- set _is_ancient = coin_filter in ('ca_ancient', 'ny_ancient') -%}
-  {%- set _is_modern  = coin_filter in ('ca_modern',  'ny_modern')  -%}
+  {# Two independent selection pills:
+     era cycles Ancient -> Modern -> All, location cycles CA -> NY -> All.
+     The selected axes are still encoded in one filter param so existing
+     list/detail/print/map URLs keep working. #}
+  {%- set _coin_parts = (coin_filter or '').split('_') -%}
+  {%- set _coin_era = 'ancient' if 'ancient' in _coin_parts else ('modern' if 'modern' in _coin_parts else None) -%}
+  {%- set _coin_loc = 'ca' if 'ca' in _coin_parts else ('ny' if 'ny' in _coin_parts else None) -%}
+  {%- set _era_next = 'modern' if _coin_era == 'ancient' else (None if _coin_era == 'modern' else 'ancient') -%}
+  {%- set _loc_next = 'ny' if _coin_loc == 'ca' else (None if _coin_loc == 'ny' else 'ca') -%}
+  {%- set _era_filter = (_coin_loc ~ '_' ~ _era_next) if (_coin_loc and _era_next) else (_era_next or _coin_loc) -%}
+  {%- set _loc_filter = (_loc_next ~ '_' ~ _coin_era) if (_loc_next and _coin_era) else (_coin_era or _loc_next) -%}
+  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_era_filter) }}"
+     class="toolbar-btn pill {% if _coin_era %}active{% endif %}"
+     title="Cycle era: Ancient → Modern → All">{{ 'Ancient' if _coin_era == 'ancient' else ('Modern' if _coin_era == 'modern' else 'All') }}</a>
 
-  {# Clicking the opposite-era pill jumps straight into that era
-     (starting at ca_...) rather than being blocked. The greyed
-     style is purely visual — it always stays clickable. #}
-  {% set _ancient_href = _ancient_next.get(coin_filter) if _is_ancient else 'ca_ancient' %}
-  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_ancient_href) }}"
-     class="toolbar-btn pill {% if _is_ancient %}active{% elif _is_modern %}muted{% endif %}"
-     title="Cycle: off → CA Ancient → NY Ancient → off (date_1 &lt; 500)">{{ _ancient_label }}</a>
-
-  {% set _modern_href = _modern_next.get(coin_filter) if _is_modern else 'ca_modern' %}
-  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_modern_href) }}"
-     class="toolbar-btn pill {% if _is_modern %}active{% elif _is_ancient %}muted{% endif %}"
-     title="Cycle: off → CA Modern → NY Modern → off (date_1 ≥ 500)">{{ _modern_label }}</a>
+  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_loc_filter) }}"
+     class="toolbar-btn pill {% if _coin_loc %}active{% endif %}"
+     title="Cycle location: CA → NY → All">{{ 'CA' if _coin_loc == 'ca' else ('NY' if _coin_loc == 'ny' else 'All') }}</a>
   {% if has_ordered or coin_filter == 'ordered' %}
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
