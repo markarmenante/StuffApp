@@ -4023,6 +4023,16 @@ def _clean_recording_label(value):
     return label[:80].strip()
 
 
+def _recording_notes_look_generated(notes):
+    """Heuristic for legacy lookup text so refreshed lookups can replace it."""
+    text = (notes or '').strip()
+    if not text:
+        return True
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    bullet_lines = [line for line in lines if re.match(r'^[-•*]\s+', line)]
+    return bool(bullet_lines) and len(bullet_lines) >= max(2, len(lines) // 2)
+
+
 def fetch_recording_notes(rec):
     """Claude-driven review + historical-context summary for a recording.
     Returns dict {markdown: str}. Raises RuntimeError on missing key
@@ -4091,26 +4101,34 @@ def fetch_recording_notes(rec):
                      "in a <players>...</players> tag immediately "
                      "after the <markdown> block. Omit the <players> "
                      "tag entirely if you can't determine personnel "
-                     "with reasonable confidence. If existing Players "
-                     "are wrong, return the corrected list.")
+                     "with reasonable confidence. Existing Players may "
+                     "be stale; if existing notes or web sources point "
+                     "to different performers for this copy, return the "
+                     "corrected list.")
 
-    # Always ask for the tracklist when the DB doesn't have one yet —
-    # Claude's track names feed the per-track Spotify pill row in the
-    # UI. Each track on its own line (no numbering, no quotes), wrapped
-    # in <tracks>...</tracks>. Skip the tag if track-level data isn't
-    # findable for this recording.
+    # Ask for the tracklist on every lookup. Lookup is the user's
+    # correction pass for the open record, so it must be able to replace
+    # stale track data from a prior misidentified recording. Duplicate
+    # sibling records remain fill-if-empty later because editions and
+    # formats can differ.
     try:
         existing_tracks = (rec['tracks'] or '').strip()
     except (IndexError, KeyError):
         existing_tracks = ''
-    want_tracks = not existing_tracks
+    want_tracks = True
     tracks_block = ("\nAlso return the tracklist for the recording, "
                     "one track title per line, in album order, no "
                     "numbering and no surrounding quotes. Wrap the "
                     "list in a <tracks>...</tracks> tag (after any "
                     "<players> tag if present). Omit the <tracks> "
                     "tag entirely if you can't recover the tracklist "
-                    "with reasonable confidence.") if want_tracks else ""
+                    "with reasonable confidence. The tracklist must be "
+                    "for THIS record identity. If Title/Artist/Label/"
+                    "Format/Existing notes point to a different "
+                    "recording than Existing Players, do not use the "
+                    "tracklist from the better-known conflicting "
+                    "recording; omit <tracks> unless you can verify the "
+                    "current copy's tracklist.") if want_tracks else ""
 
     # Always verify genre + sub-genre on Lookup. The model returns its
     # best assessment regardless of whether the DB already has values.
@@ -4166,6 +4184,20 @@ Players: {players or '(unspecified)'}
 Format:  {fmt or '(unspecified)'}
 Existing notes: {existing_notes or '(none)'}
 
+Record identity priority:
+- Treat Title, Artist, Format, Label, and Existing notes as the current
+  record's identity.
+- Existing Players may be stale from a prior lookup. If Existing notes
+  mention a conductor, ensemble, cast, label, edition, or performers
+  that conflict with existing Players, use web sources to decide and
+  correct Players.
+- The <players> tag must identify performers for THIS record, not a
+  different well-known recording mentioned in stale notes.
+- The <tracks> tag, if returned, must also belong to THIS record, not a
+  different recording suggested by stale Players or stale prior notes.
+- Return one clean consolidated current note, not an addendum to the
+  existing notes and not a near-duplicate rewrite of old bullets.
+
 Cover whichever of these are notable for this specific recording:
 - critical reception / canonical status
 - recording history (studio, dates, key personnel beyond the headliner)
@@ -4177,7 +4209,8 @@ Use the existing notes as clues for disambiguation, edition-specific
 details, personnel, label, pressing, and prior context. Verify them
 against web sources where possible. Do not simply repeat existing
 notes unless they are important and source-supported; correct them if
-sources clearly contradict them.
+sources clearly contradict them. If existing Players and existing notes
+conflict, prioritize source-verified notes context over stale Players.
 
 Style: 4–8 short bullets starting with "- ". Plain factual prose,
 no headers, no fluff, no marketing copy. Under ~1400 chars total.
@@ -6226,8 +6259,9 @@ def recording_fetch_notes(record_id):
             pass
 
     # Persist lookup-derived metadata. Players overwrites because
-    # lookup is the user's verify/correct action; tracks remain
-    # fill-if-empty because edition tracklists can differ.
+    # lookup is the user's verify/correct action for the open record;
+    # sibling tracks remain fill-if-empty because edition tracklists can
+    # differ.
     #
     # Genre + genre_2 are merged (never overwritten):
     #   - genre stays whatever's in the DB if non-empty. A blank genre
@@ -6245,6 +6279,11 @@ def recording_fetch_notes(record_id):
     new_year_recorded = data.get('year_recorded') or ''
     new_label = data.get('label') or ''
     new_vinyl_pressing = data.get('vinyl_pressing') or ''
+    new_notes = data.get('markdown') or ''
+    try:
+        existing_notes = (rec['notes'] or '').strip()
+    except (IndexError, KeyError):
+        existing_notes = ''
     try:
         existing_players = (rec['players'] or '').strip()
     except (IndexError, KeyError):
@@ -6284,9 +6323,11 @@ def recording_fetch_notes(record_id):
     )
 
     sets, params = [], []
+    if new_notes and new_notes != existing_notes:
+        sets.append('notes = ?'); params.append(new_notes)
     if new_players and new_players != existing_players:
         sets.append('players = ?'); params.append(new_players)
-    if new_tracks and not existing_tracks:
+    if new_tracks and new_tracks != existing_tracks:
         sets.append('tracks = ?'); params.append(new_tracks)
     if final_genre != existing_genre:
         sets.append('genre = ?'); params.append(final_genre)
@@ -6315,14 +6356,14 @@ def recording_fetch_notes(record_id):
     # excluding this record). Saves the user from re-running Lookup on
     # every pressing in their collection.
     #
-    #   notes       — APPEND the lookup output to each sibling's notes
-    #                 (separated by a blank line) so per-copy notes
-    #                 like "bought 2018 from Shady Records" survive.
-    #                 Skipped if the new notes already appear in the
-    #                 sibling's notes (re-runs are idempotent).
+    #   notes       — replace generated lookup notes, append only when
+    #                 the sibling appears to contain manual copy-specific
+    #                 notes. Re-runs are idempotent.
     #   players     — OVERWRITE. Personnel is a fact about the
     #                 recording, not the copy.
-    #   tracks      — OVERWRITE. Same reasoning.
+    #   tracks      — fill if blank. Tracklists can vary across
+    #                 editions/formats, so don't replace an existing
+    #                 sibling tracklist.
     #   notes_urls  — UNION. Source URLs accumulate across runs.
     #   genre       — fill if blank, never overwrite.
     #   genre_2     — append any lookup-derived genre / sub-genre that
@@ -6331,7 +6372,6 @@ def recording_fetch_notes(record_id):
     siblings_updated = 0
     title_norm = (rec['title']  or '').strip()
     artist_norm = (rec['artist'] or '').strip()
-    new_notes = data.get('markdown') or ''
     if title_norm and artist_norm and (
         new_notes or new_players or new_tracks or new_urls
         or new_genre or new_genre_2 or new_year_recorded or new_label
@@ -6342,13 +6382,16 @@ def recording_fetch_notes(record_id):
             sib_sets, sib_params = [], []
 
             sib_notes = (sib['notes'] or '').rstrip()
-            if new_notes and new_notes not in sib_notes:
-                appended = (sib_notes + '\n\n' + new_notes) if sib_notes else new_notes
-                sib_sets.append('notes = ?'); sib_params.append(appended)
+            if new_notes and new_notes != sib_notes:
+                if _recording_notes_look_generated(sib_notes):
+                    sib_sets.append('notes = ?'); sib_params.append(new_notes)
+                elif new_notes not in sib_notes:
+                    appended = sib_notes + '\n\n' + new_notes
+                    sib_sets.append('notes = ?'); sib_params.append(appended)
 
             if new_players and (sib['players'] or '').strip() != new_players:
                 sib_sets.append('players = ?'); sib_params.append(new_players)
-            if new_tracks and (sib['tracks'] or '').strip() != new_tracks:
+            if new_tracks and not (sib['tracks'] or '').strip():
                 sib_sets.append('tracks = ?'); sib_params.append(new_tracks)
 
             # Merge URLs: existing sibling URLs first, then any new ones

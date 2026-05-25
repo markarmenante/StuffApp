@@ -423,7 +423,7 @@
               id="recLookupBtn"
               class="watch-lookup-btn rec-lookup-btn{% if _rec_searched %} done{% endif %}"
               data-url="{{ url_for('recording_fetch_notes', record_id=r['id']) }}"
-              title="{% if _rec_searched %}Lookup already run — click to re-run and append{% else %}Pull review + tracklist + personnel via Claude web search{% endif %}">
+              title="{% if _rec_searched %}Lookup already run — click to refresh notes and metadata{% else %}Pull review + tracklist + personnel via Claude web search{% endif %}">
         🔎 Lookup
       </button>
       {% endif %}
@@ -1755,7 +1755,7 @@ document.addEventListener('DOMContentLoaded', function () {
   <script>
   // Recordings detail wiring:
   //   - Lookup button (top floating-nav) → POST /recordings/<id>/fetch-notes,
-  //     append notes, populate players + tracks if empty, refresh the
+  //     refresh notes, correct players + tracks, refresh the
   //     URL-source pill row.
   //   - Players field renders one pill per comma-separated entry.
   //     Pill click opens a Claude.ai chat seeded with a query about
@@ -1931,8 +1931,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Network/HTTP succeeded — everything below is best-effort UI
         // sync. Any error here gets logged to console, never alerted.
         safe('notes', () => {
-          const sep = notesTa.value.trim() ? '\n\n' : '';
-          notesTa.value = notesTa.value + sep + data.notes;
+          notesTa.value = data.notes || '';
           notesTa.dispatchEvent(new Event('input', { bubbles: true }));
           notesTa.dispatchEvent(new Event('blur'));
           if (window.refreshMarkdownNotePreview) {
@@ -1942,8 +1941,9 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         safe('source pills', () => { if (data.urls) setSourcePills(data.urls); });
 
-        // Players overwrites because Lookup is the user's verify/correct
-        // action; tracks stay fill-if-empty because editions can differ.
+        // Players and tracks overwrite on the open record because Lookup
+        // is the user's verify/correct action. Duplicate records stay more
+        // conservative on the server.
         safe('players', () => {
           if (playersInp && data.players && playersInp.value !== data.players) {
             playersInp.value = data.players;
@@ -1952,7 +1952,7 @@ document.addEventListener('DOMContentLoaded', function () {
           }
         });
         safe('tracks', () => {
-          if (tracksInp && data.tracks && !tracksInp.value.trim()) {
+          if (tracksInp && data.tracks && tracksInp.value !== data.tracks) {
             tracksInp.value = data.tracks;
             tracksInp.dispatchEvent(new Event('blur'));
             renderTrackPills();
