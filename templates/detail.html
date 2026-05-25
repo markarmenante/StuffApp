@@ -3769,8 +3769,8 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
 
   // Location required for new rows. Autosave creates the row on first
-  // edit, then asks for Location after the first successful field save
-  // so the initial tab/field flow is not interrupted.
+  // edit; remind only when the user tries to leave the saved record
+  // while Location is still blank.
   function locationField() {
     return form.querySelector('[name="property_name"]') || form.querySelector('[name="property"]');
   }
@@ -3779,44 +3779,51 @@ document.querySelectorAll('.comp-item').forEach(item => {
     return p && !((p.value || '').trim());
   }
   let locationPromptActive = false;
-  function promptForLocationAfterSave() {
-    if (!isNewRecord || !recordExists || !locationEmpty() || locationPromptActive) return;
+  function needsLocationBeforeLeave() {
+    return isNewRecord && recordExists && locationEmpty();
+  }
+  function promptForLocationBeforeLeave() {
+    if (!needsLocationBeforeLeave()) return Promise.resolve(true);
+    if (locationPromptActive) return Promise.resolve(false);
     const p = locationField();
     const options = Array.from(p.options || [])
       .map(option => (option.value || option.textContent || '').trim())
       .filter(Boolean);
     if (!options.length) {
       if (p && typeof p.focus === 'function') p.focus();
-      return;
+      return Promise.resolve(false);
     }
     locationPromptActive = true;
-    const existing = document.querySelector('.location-choice-backdrop');
-    if (existing) existing.remove();
-    const backdrop = document.createElement('div');
-    backdrop.className = 'location-choice-backdrop';
-    backdrop.innerHTML = [
-      '<div class="location-choice-panel" role="dialog" aria-modal="true" aria-label="Choose location">',
-      '  <div class="location-choice-title">Location</div>',
-      '  <div class="location-choice-subtitle">Choose where this item lives.</div>',
-      '  <div class="location-choice-options"></div>',
-      '</div>'
-    ].join('');
-    const optionWrap = backdrop.querySelector('.location-choice-options');
-    options.forEach(location => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'location-choice-pill';
-      btn.textContent = location;
-      btn.addEventListener('click', () => {
-        p.value = location;
-        backdrop.remove();
-        saveField(p.name, location).finally(() => { locationPromptActive = false; });
+    return new Promise(resolve => {
+      const existing = document.querySelector('.location-choice-backdrop');
+      if (existing) existing.remove();
+      const backdrop = document.createElement('div');
+      backdrop.className = 'location-choice-backdrop';
+      backdrop.innerHTML = [
+        '<div class="location-choice-panel" role="dialog" aria-modal="true" aria-label="Choose location">',
+        '  <div class="location-choice-title">Location</div>',
+        '  <div class="location-choice-subtitle">Choose where this item lives.</div>',
+        '  <div class="location-choice-options"></div>',
+        '</div>'
+      ].join('');
+      const optionWrap = backdrop.querySelector('.location-choice-options');
+      options.forEach(location => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'location-choice-pill';
+        btn.textContent = location;
+        btn.addEventListener('click', () => {
+          p.value = location;
+          backdrop.remove();
+          saveField(p.name, location).then(() => resolve(true)).catch(() => resolve(false))
+            .finally(() => { locationPromptActive = false; });
+        });
+        optionWrap.appendChild(btn);
       });
-      optionWrap.appendChild(btn);
+      document.body.appendChild(backdrop);
+      const first = backdrop.querySelector('.location-choice-pill');
+      if (first) first.focus();
     });
-    document.body.appendChild(backdrop);
-    const first = backdrop.querySelector('.location-choice-pill');
-    if (first) first.focus();
   }
 
   function ensureRecord() {
@@ -3884,12 +3891,35 @@ document.querySelectorAll('.comp-item').forEach(item => {
         .then(d => {
           if (d.ok) {
             showToast();
-            promptForLocationAfterSave();
           }
         });
     }).catch(err => console.warn('Auto-save failed:', err));
   }
   window.saveField = saveField;
+
+  document.addEventListener('click', function (event) {
+    const link = event.target.closest('a[href]');
+    if (!link || !needsLocationBeforeLeave()) return;
+    if (link.target && link.target !== '_self') return;
+    if (link.hasAttribute('download')) return;
+    const rawHref = link.getAttribute('href') || '';
+    if (!rawHref || rawHref === '#') return;
+    if (/^(mailto|tel|sms|javascript):/i.test(rawHref)) return;
+    const url = new URL(rawHref, window.location.href);
+    if (url.href === window.location.href || (url.pathname === window.location.pathname && url.search === window.location.search && url.hash)) {
+      return;
+    }
+    event.preventDefault();
+    promptForLocationBeforeLeave().then(ok => {
+      if (ok) window.location.href = url.href;
+    });
+  }, true);
+
+  window.addEventListener('beforeunload', function (event) {
+    if (!needsLocationBeforeLeave()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
 
   // Text / textarea — save on blur. We used to prefer el.dataset.raw
   // when present (coin date inputs render "175 BC" but stash "-175"
