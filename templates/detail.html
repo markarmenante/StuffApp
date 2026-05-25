@@ -4196,9 +4196,8 @@ document.querySelectorAll(
 })();
 
 // Typeahead: visible dropdown of matches + inline grey ghost suffix
-// (on left-aligned inputs only). Normal typing keys stay literal;
-// Right Arrow accepts the ghost, arrow keys + Enter or click pick from
-// the dropdown.
+// (on left-aligned inputs only). Right Arrow or Spacebar accepts the
+// ghost, arrow keys + Enter or click pick from the dropdown.
 function _escHtml(s) {
   return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -4317,10 +4316,9 @@ document.querySelectorAll('.ta-input').forEach(inp => {
     prefixMatch = ''; updateGhost();
   }, 150));
   inp.addEventListener('keydown', e => {
-    // Only ArrowRight accepts the inline ghost when the caret is at the
-    // end. Space and Tab must remain literal/navigation keys so names
-    // like "Ry Cooder" can be typed without being hijacked by "Ryuichi".
-    if ((e.key === 'ArrowRight')
+    // Global typeahead rule: ArrowRight or Spacebar accepts the inline
+    // ghost when the caret is at the end.
+    if ((e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Spacebar')
         && prefixMatch
         && (activeIdx < 0)
         && inp.selectionStart === inp.value.length) {
