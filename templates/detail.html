@@ -3773,9 +3773,8 @@ document.querySelectorAll('.comp-item').forEach(item => {
     });
   }
 
-  // Location required for new rows. Autosave creates the row on first
-  // edit; remind only when the user tries to leave the saved record
-  // while Location is still blank.
+  // Location required for new rows. Use the same picker before Save or
+  // any same-window attempt to leave an add form while Location is blank.
   function locationField() {
     return form.querySelector('[name="property_name"]') || form.querySelector('[name="property"]');
   }
@@ -3785,11 +3784,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
   let locationPromptActive = false;
   function needsLocationBeforeLeave() {
-    return isNewRecord && recordExists && locationEmpty();
+    return isNewRecord && locationEmpty();
   }
-  function promptForLocationBeforeLeave() {
+  function promptForLocationBeforeLeave(opts = {}) {
     if (!needsLocationBeforeLeave()) return Promise.resolve(true);
     if (locationPromptActive) return Promise.resolve(false);
+    const saveAfterPick = opts.saveAfterPick !== false;
     const p = locationField();
     const options = Array.from(p.options || [])
       .map(option => (option.value || option.textContent || '').trim())
@@ -3820,8 +3820,14 @@ document.querySelectorAll('.comp-item').forEach(item => {
         btn.addEventListener('click', () => {
           p.value = location;
           backdrop.remove();
-          saveField(p.name, location).then(() => resolve(true)).catch(() => resolve(false))
-            .finally(() => { locationPromptActive = false; });
+          const done = () => { locationPromptActive = false; };
+          if (saveAfterPick && recordExists) {
+            saveField(p.name, location).then(() => resolve(true)).catch(() => resolve(false))
+              .finally(done);
+          } else {
+            done();
+            resolve(true);
+          }
         });
         optionWrap.appendChild(btn);
       });
@@ -3902,6 +3908,23 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
   window.saveField = saveField;
 
+  form.addEventListener('submit', function (event) {
+    if (!needsLocationBeforeLeave()) return;
+    event.preventDefault();
+    formSubmitting = false;
+    window.__stuffAllowUnload = false;
+    promptForLocationBeforeLeave({ saveAfterPick: false }).then(ok => {
+      if (!ok) return;
+      formSubmitting = true;
+      window.__stuffAllowUnload = true;
+      if (typeof form.requestSubmit === 'function') {
+        form.requestSubmit();
+      } else {
+        form.submit();
+      }
+    });
+  });
+
   document.addEventListener('click', function (event) {
     const link = event.target.closest('a[href]');
     if (!link || !needsLocationBeforeLeave()) return;
@@ -3916,7 +3939,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
     }
     event.preventDefault();
     promptForLocationBeforeLeave().then(ok => {
-      if (ok) window.location.href = url.href;
+      if (ok) {
+        window.__stuffAllowUnload = true;
+        window.location.href = url.href;
+      }
     });
   }, true);
 
