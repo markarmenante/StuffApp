@@ -5990,6 +5990,71 @@ def _merge_recording_genres(existing_genre, existing_genre_2,
     return final_genre, final_genre_2
 
 
+def _recording_match_text(value):
+    """Normalize recording artist/title text for duplicate-copy matching."""
+    text = (value or '').lower()
+    text = text.replace('&', ' and ')
+    text = text.replace('’', "'").replace('‘', "'").replace('`', "'")
+    text = re.sub(r"\b([a-z0-9]+)'s\b", r'\1', text)
+    text = unicodedata.normalize('NFKD', text)
+    text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r'[^a-z0-9]+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _recording_title_key(title):
+    tokens = _recording_match_text(title).split()
+    if len(tokens) > 1:
+        tokens = [t for t in tokens if t not in {'a', 'an', 'the'}]
+    return ' '.join(tokens)
+
+
+def _recording_artist_tokens(artist):
+    return [
+        t for t in _recording_match_text(artist).split()
+        if t not in {'a', 'an', 'the', 'and', 'or', 's'}
+    ]
+
+
+def _recording_artists_compatible(left, right):
+    left_tokens = _recording_artist_tokens(left)
+    right_tokens = _recording_artist_tokens(right)
+    if not left_tokens or not right_tokens:
+        return False
+    if left_tokens == right_tokens:
+        return True
+    left_text = ' '.join(left_tokens)
+    right_text = ' '.join(right_tokens)
+    if re.search(rf'\b{re.escape(left_text)}\b', right_text):
+        return True
+    if re.search(rf'\b{re.escape(right_text)}\b', left_text):
+        return True
+    shorter, longer = (
+        (set(left_tokens), set(right_tokens))
+        if len(left_tokens) <= len(right_tokens)
+        else (set(right_tokens), set(left_tokens))
+    )
+    return len(shorter) >= 2 and shorter.issubset(longer)
+
+
+def _recording_duplicate_rows(db, rec):
+    """Return sibling copies of the same recording across formats/locations."""
+    title_key = _recording_title_key(rec['title'] or '')
+    artist = rec['artist'] or ''
+    if not title_key or not artist:
+        return []
+    rows = db.execute(
+        "SELECT id, artist, title, notes, players, tracks, notes_urls, genre, genre_2 "
+        "FROM recordings WHERE id != ?",
+        (rec['id'],),
+    ).fetchall()
+    return [
+        row for row in rows
+        if _recording_title_key(row['title'] or '') == title_key
+        and _recording_artists_compatible(artist, row['artist'] or '')
+    ]
+
+
 @app.route('/recordings/<record_id>/fetch-notes', methods=['POST'])
 def recording_fetch_notes(record_id):
     """Generate a brief review/historical note for a recording via
@@ -6122,14 +6187,7 @@ def recording_fetch_notes(record_id):
         new_notes or new_players or new_tracks or new_urls
         or new_genre or new_genre_2
     ):
-        sib_rows = db.execute(
-            "SELECT id, notes, players, tracks, notes_urls, genre, genre_2 "
-            "FROM recordings "
-            "WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) "
-            "  AND LOWER(TRIM(artist)) = LOWER(TRIM(?)) "
-            "  AND id != ?",
-            (title_norm, artist_norm, record_id),
-        ).fetchall()
+        sib_rows = _recording_duplicate_rows(db, rec)
         for sib in sib_rows:
             sib_sets, sib_params = [], []
 
