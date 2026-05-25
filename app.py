@@ -11972,6 +11972,9 @@ def recordings_catalog_pdf():
     def _p(text, style):
         return Paragraph(escape(str(text or '')), style)
 
+    def _markup_p(markup, style):
+        return Paragraph(str(markup or ''), style)
+
     def _speed_text(value):
         speed = (value or '').strip()
         speed = (speed
@@ -12136,10 +12139,21 @@ def recordings_catalog_pdf():
             speed = _speed_text(row['speed'])
             genre = row['genre'] or ''
             year = row['year_recorded'] or ''
+            sound_markup = (
+                f'<b><i>{escape(str(sound))}</i></b>'
+                if str(sound).strip().lower() == 'mono'
+                else escape(str(sound))
+            )
+            speed_markup = (
+                f'<b>{escape(str(speed))}</b>'
+                if media == 'Vinyl' and str(speed).strip() == '45'
+                else escape(str(speed))
+            )
 
             row_tbl = Table(
                 [[cover, title_cell, _p(media, center_style),
-                  _p(sound, center_style), _p(speed, center_style),
+                  _markup_p(sound_markup, center_style),
+                  _markup_p(speed_markup, center_style),
                   _p(genre, meta_style), _p(year, center_style)]],
                 colWidths=[0.78 * inch, 3.55 * inch, 0.7 * inch, 0.7 * inch,
                            0.72 * inch, 1.0 * inch, 0.45 * inch],
