@@ -274,6 +274,26 @@ input[type="number"]::-webkit-outer-spin-button {
   background: #fff3cd; border-color: #c8961a; color: #6b5210;
 }
 .toolbar-btn.pill.pill-stale:hover { background: #ffeeba; }
+.toolbar-btn.pill.ordered-filter-pill {
+  min-width: 34px;
+  padding-inline: 10px;
+}
+.toolbar-btn.pill.ordered-filter-pill.active {
+  background: #fff6bf;
+  border-color: #d6a300;
+}
+.toolbar-btn.pill.ordered-filter-pill.active:hover {
+  background: #ffef9a;
+}
+.ordered-filter-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #f4c542;
+  border: 1px solid rgba(0,0,0,.18);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.75);
+  flex: 0 0 auto;
+}
 .coin-tray-clear:disabled {
   opacity: 0.35;
   cursor: default;
