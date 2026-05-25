@@ -5011,9 +5011,25 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
       row.classList.toggle('row-hidden', idx > visibleThrough);
     });
   }
+  function refreshMedNameColumn() {
+    if (!medTable) return;
+    let longest = 0;
+    form.querySelectorAll('.med-row[data-med-idx] input[name^="med_name_"]').forEach(input => {
+      longest = Math.max(longest, (input.value || input.placeholder || '').trim().length);
+    });
+    const widthCh = Math.min(42, Math.max(14, longest + 9));
+    medTable.style.setProperty('--med-name-col', `${widthCh}ch`);
+  }
   refreshEmptyClass();
+  refreshMedNameColumn();
   form.querySelectorAll('.med-row[data-med-idx] input').forEach(inp => {
-    inp.addEventListener('blur', refreshEmptyClass);
+    inp.addEventListener('blur', () => {
+      refreshEmptyClass();
+      if (inp.name && inp.name.startsWith('med_name_')) refreshMedNameColumn();
+    });
+    if (inp.name && inp.name.startsWith('med_name_')) {
+      inp.addEventListener('input', refreshMedNameColumn);
+    }
   });
 
   form.querySelectorAll('.med-del-btn').forEach(btn => {
@@ -5041,6 +5057,7 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
         });
       }
       refreshEmptyClass();
+      refreshMedNameColumn();
       if (window.refreshMedTypePills) window.refreshMedTypePills();
     });
   });
@@ -5056,6 +5073,7 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
         const input = form.querySelector(`[name="med_name_${i}"]`);
         if (input) input.focus();
         refreshEmptyClass();
+        refreshMedNameColumn();
         return;
       }
       addBtn.textContent = 'Medication list full';
