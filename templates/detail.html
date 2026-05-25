@@ -4165,8 +4165,9 @@ document.querySelectorAll(
 })();
 
 // Typeahead: visible dropdown of matches + inline grey ghost suffix
-// (on left-aligned inputs only). Tab / Right Arrow / Enter accepts the
-// best prefix match; arrow keys + click pick from the dropdown.
+// (on left-aligned inputs only). Normal typing keys stay literal;
+// Right Arrow accepts the ghost, arrow keys + Enter or click pick from
+// the dropdown.
 function _escHtml(s) {
   return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -4285,9 +4286,10 @@ document.querySelectorAll('.ta-input').forEach(inp => {
     prefixMatch = ''; updateGhost();
   }, 150));
   inp.addEventListener('keydown', e => {
-    // Space / Tab / ArrowRight / Enter accept the inline ghost when
-    // caret is at end. Space is the muscle-memory path for these fields.
-    if ((e.key === ' ' || e.key === 'Spacebar' || e.key === 'Tab' || e.key === 'ArrowRight' || e.key === 'Enter')
+    // Only ArrowRight accepts the inline ghost when the caret is at the
+    // end. Space and Tab must remain literal/navigation keys so names
+    // like "Ry Cooder" can be typed without being hijacked by "Ryuichi".
+    if ((e.key === 'ArrowRight')
         && prefixMatch
         && (activeIdx < 0)
         && inp.selectionStart === inp.value.length) {
@@ -4298,9 +4300,8 @@ document.querySelectorAll('.ta-input').forEach(inp => {
     if (menu.style.display === 'none') return;
     if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); }
-    else if (e.key === 'Enter' || e.key === 'Tab') {
+    else if (e.key === 'Enter') {
       if (activeIdx >= 0) { e.preventDefault(); pick(items[activeIdx].dataset.val || items[activeIdx].textContent); }
-      else if (items.length === 1) { e.preventDefault(); pick(items[0].dataset.val || items[0].textContent); }
       return;
     } else if (e.key === 'Escape') {
       menu.style.display = 'none'; activeIdx = -1;
