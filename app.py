@@ -3980,7 +3980,7 @@ def resolve_anthropic_lookup_model(api_key, configured_model):
                 return model_id
     except Exception:
         pass
-    return 'claude-sonnet-4-6' if family == 'sonnet' else model
+    return 'claude-sonnet-4-20250514' if family == 'sonnet' else model
 
 
 def anthropic_lookup_model(api_key, env_name=None):
@@ -3992,7 +3992,7 @@ def anthropic_lookup_model(api_key, env_name=None):
 
 
 def anthropic_web_search_tool(max_uses):
-    tool_type = (os.environ.get('ANTHROPIC_WEB_SEARCH_TOOL') or '').strip() or 'web_search_20260209'
+    tool_type = (os.environ.get('ANTHROPIC_WEB_SEARCH_TOOL') or '').strip() or 'web_search_20250305'
     try:
         uses = int(os.environ.get('ANTHROPIC_WEB_SEARCH_MAX_USES', max_uses) or max_uses)
     except ValueError:
