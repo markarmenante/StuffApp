@@ -1575,7 +1575,7 @@ document.addEventListener('DOMContentLoaded', function () {
            data-ta="{{ ta.get('artist', [])|join('||') }}">
     <button type="button" id="likeHeart"
             class="like-heart like-heart-inline {% if val('like_field') == 'Yes' %}liked{% endif %}"
-            aria-label="Toggle like" title="Toggle like">&#10084;</button>
+            aria-label="Toggle like" title="Toggle like" tabindex="-1">&#10084;</button>
     <input type="hidden" name="like_field" id="likeHiddenInput"
            value="{{ 'Yes' if val('like_field') == 'Yes' else '' }}">
   </div>
@@ -3738,8 +3738,8 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
 
   // Location required for new rows. Autosave creates the row on first
-  // edit, so prompt once before that first create instead of letting a
-  // hidden 400 eat the user's first keystroke.
+  // edit, then asks for Location after the first successful field save
+  // so the initial tab/field flow is not interrupted.
   function locationField() {
     return form.querySelector('[name="property_name"]') || form.querySelector('[name="property"]');
   }
@@ -3747,36 +3747,33 @@ document.querySelectorAll('.comp-item').forEach(item => {
     const p = locationField();
     return p && !((p.value || '').trim());
   }
-  function promptForLocationIfNeeded() {
-    if (!isNewRecord || !locationEmpty()) return true;
+  let locationPromptActive = false;
+  function promptForLocationAfterSave() {
+    if (!isNewRecord || !recordExists || !locationEmpty() || locationPromptActive) return;
     const p = locationField();
     const options = Array.from(p.options || [])
       .map(option => (option.value || option.textContent || '').trim())
       .filter(Boolean);
+    locationPromptActive = true;
     const entered = window.prompt(
       'Location required. Enter location' + (options.length ? ' (' + options.join(', ') + ')' : '') + ':',
       options[0] || ''
     );
     if (!entered || !entered.trim()) {
       if (p && typeof p.focus === 'function') p.focus();
-      return false;
+      locationPromptActive = false;
+      return;
     }
     const location = entered.trim();
     if (p.tagName === 'SELECT' && !options.includes(location)) {
       p.add(new Option(location, location));
     }
     p.value = location;
-    return true;
+    saveField(p.name, location).finally(() => { locationPromptActive = false; });
   }
-  form.addEventListener('submit', function (e) {
-    if (!promptForLocationIfNeeded()) {
-      e.preventDefault();
-    }
-  });
 
   function ensureRecord() {
     if (recordExists) return Promise.resolve();
-    if (!promptForLocationIfNeeded()) return Promise.reject(new Error('Location required'));
     if (creatingPromise) return creatingPromise;
     const fd = new FormData(form);
     // keepalive so a Back-button before the response lands still
@@ -3837,7 +3834,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
         keepalive: true,
       })
         .then(r => r.json())
-        .then(d => { if (d.ok) showToast(); });
+        .then(d => {
+          if (d.ok) {
+            showToast();
+            promptForLocationAfterSave();
+          }
+        });
     }).catch(err => console.warn('Auto-save failed:', err));
   }
   window.saveField = saveField;

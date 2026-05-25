@@ -4556,16 +4556,13 @@ def new_record(category):
                         data['owner'] = d
 
         # Required fields on create. Owner is needed for row-filter /
-        # per-user access from the moment the record exists. Location
-        # is required too; the new-record autosave prompts for it before
-        # first create so this server-side check catches only direct or
-        # stale submissions.
+        # per-user access from the moment the record exists. Location is
+        # collected by the client immediately after the first successful
+        # autosave so the initial create/save can finish without blocking
+        # the user's field flow.
         missing = []
         if not (data.get('owner') or '').strip():
             missing.append('Owner')
-        location_field = create_location_field(category)
-        if location_field and not (data.get(location_field) or '').strip():
-            missing.append('Location')
         if missing:
             err = 'Missing required field(s): ' + ', '.join(missing)
             # AJAX autosave-on-/new flow: client expects JSON.
@@ -4577,7 +4574,6 @@ def new_record(category):
             # already entered (preserves their work) and focus the first
             # missing field. A redirect here would wipe everything.
             focus_map = {
-                'Location': location_field,
                 'Owner': 'owner',
                 'Date': 'date_1' if category == 'coins' else 'date',
             }
