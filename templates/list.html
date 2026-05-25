@@ -92,28 +92,26 @@
   {% endif %}
   {% endif %}
   {# When the user came from the Property tab via ?at=, hide the
-     redundant Carp / Martis location pills — they target the same
-     filter, build URLs without ?at=, and would silently break the
+     redundant location pill — it targets the same filter, builds URLs
+     without ?at=, and would silently break the
      navigation chain back to the originating Property. #}
   {% if category == 'audio' and not at_property %}
-  <a href="{{ url_for('list_view', category='audio', q=q or None, filter=None if coin_filter == 'carp' else 'carp') }}"
-     class="toolbar-btn pill {% if coin_filter == 'carp' %}active{% endif %}"
-     title="Audio at Carpinteria">Carp</a>
-  <a href="{{ url_for('list_view', category='audio', q=q or None, filter=None if coin_filter == 'martis' else 'martis') }}"
-     class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
-     title="Audio at Truckee (Martis)">Martis</a>
+  {%- set _audio_loc_next = 'martis' if coin_filter == 'carp' else (None if coin_filter == 'martis' else 'carp') -%}
+  {%- set _audio_loc_label = 'Carp' if coin_filter == 'carp' else ('Martis' if coin_filter == 'martis' else 'All') -%}
+  <a href="{{ url_for('list_view', category='audio', q=q or None, filter=_audio_loc_next) }}"
+     class="toolbar-btn pill {% if coin_filter in ('carp', 'martis') %}active{% endif %}"
+     title="Cycle location: All → Carp → Martis">{{ _audio_loc_label }}</a>
   {% endif %}
   {% if category == 'recordings' and not at_property %}
   <a href="{{ url_for('recordings_catalog_pdf', filter=coin_filter if coin_filter in ('carp', 'martis') else None, layout='tight') }}"
      class="toolbar-btn pill"
      title="Printable catalog of available recordings{% if coin_filter == 'carp' %} at Carpinteria{% elif coin_filter == 'martis' %} at Truckee{% else %} at Carpinteria or Truckee{% endif %}"
      target="_blank">Catalog</a>
-  <a href="{{ url_for('list_view', category='recordings', q=q or None, filter=None if coin_filter == 'carp' else 'carp') }}"
-     class="toolbar-btn pill {% if coin_filter == 'carp' %}active{% endif %}"
-     title="Music at Carpinteria">Carp</a>
-  <a href="{{ url_for('list_view', category='recordings', q=q or None, filter=None if coin_filter == 'martis' else 'martis') }}"
-     class="toolbar-btn pill {% if coin_filter == 'martis' %}active{% endif %}"
-     title="Music at Truckee (Martis)">Martis</a>
+  {%- set _recording_loc_next = 'martis' if coin_filter == 'carp' else (None if coin_filter == 'martis' else 'carp') -%}
+  {%- set _recording_loc_label = 'Carp' if coin_filter == 'carp' else ('Martis' if coin_filter == 'martis' else 'All') -%}
+  <a href="{{ url_for('list_view', category='recordings', q=q or None, filter=_recording_loc_next) }}"
+     class="toolbar-btn pill {% if coin_filter in ('carp', 'martis') %}active{% endif %}"
+     title="Cycle location: All → Carp → Martis">{{ _recording_loc_label }}</a>
   {% endif %}
   {% if category == 'properties' and not at_property %}
   {# Single pill flips between Own and Sold. Default = own. #}
