@@ -1497,8 +1497,11 @@ input[type="date"] { -webkit-appearance: none; }
 
 /* Genre column sized to fit the longest canonical value ("Funk/Soul" /
    "Classical" — 9 chars) with a touch of padding; Genre 2 free-text
-   fills the rest of the row. */
-.recording-meta { grid-template-columns: 12ch 1fr; }
+   fills the middle, Label keeps a clean fixed lane on the right. */
+.recording-meta {
+  grid-template-columns: minmax(10ch, 12ch) minmax(18ch, 1fr) minmax(14ch, 22ch);
+}
+.recording-meta .dcell input[name="label"] { text-align: left; }
 
 /* Players cell grows to fill the remaining vertical space in
    .watch-specs so its bottom aligns with the cover image (and with

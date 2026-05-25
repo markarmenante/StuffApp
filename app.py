@@ -4006,6 +4006,23 @@ def anthropic_web_search_tool(max_uses):
     }
 
 
+def _clean_recording_label(value):
+    """Normalize lookup-returned record labels for the compact UI field."""
+    label = re.sub(r'\s+', ' ', (value or '')).strip(' ,"\'')
+    if not label:
+        return ''
+    label = re.sub(r'\s*/\s*', ' / ', label)
+    label = re.sub(r'\s*&\s*', ' & ', label)
+    label = re.sub(r'\s{2,}', ' ', label).strip()
+    label = re.sub(
+        r'\s*\((?:catalog(?:ue)?|cat\.?|matrix|release|reissue|imprint)\b[^)]*\)\s*',
+        '',
+        label,
+        flags=re.IGNORECASE,
+    ).strip(' ,"\'')
+    return label[:80].strip()
+
+
 def fetch_recording_notes(rec):
     """Claude-driven review + historical-context summary for a recording.
     Returns dict {markdown: str}. Raises RuntimeError on missing key
@@ -4287,7 +4304,7 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}{label_blo
     if lm:
         cand = _html.unescape(lm.group(1)).strip()
         cand = re.sub(r'</?cite\b[^>]*>', '', cand, flags=re.IGNORECASE)
-        new_label = re.sub(r'\s+', ' ', cand).strip(' ,"\'')
+        new_label = _clean_recording_label(cand)
 
     new_vinyl_pressing = ''
     vpm = re.search(r'<vinyl_pressing>(.*?)</vinyl_pressing>', text, re.DOTALL | re.IGNORECASE)
