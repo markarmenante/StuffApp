@@ -919,6 +919,16 @@ def visible_fields(category):
     return [f for f in fields if f['name'] not in hidden]
 
 
+def create_location_field(category):
+    """Field that stores the required location/property for new records."""
+    names = {f['name'] for f in visible_fields(category)}
+    if 'property_name' in names:
+        return 'property_name'
+    if 'property' in names:
+        return 'property'
+    return None
+
+
 # List-view extra info fields per category
 LIST_EXTRA_FIELDS = {
     'watches':      ['metal', 'reference', 'vendor', 'property'],
@@ -4448,6 +4458,11 @@ def new_record(category):
             _apply_watch_order_form_fields(data, request.form)
             _graduate_watch_order_if_owned(data, data.get('status'))
 
+        if category not in ('watches', 'coins') and 'status' in {
+            f['name'] for f in visible_fields(category)
+        } and not (data.get('status') or '').strip():
+            data['status'] = 'Own'
+
         # Auto-fill empty *_title / *_label columns with the uploaded
         # file's basename for each file field that has a paired title
         # column. Only fills when the user didn't supply a title via
@@ -4481,18 +4496,17 @@ def new_record(category):
                     if d:
                         data['owner'] = d
 
-        # Required fields on create. Owner only — needed for the
-        # row-filter / per-user access check from the moment the
-        # record exists. Property is intentionally NOT required here:
-        # the autosave-on-new flow would silently 400 every keystroke
-        # for users who hadn't filled Property yet, and nothing got
-        # persisted. Property can be filled in afterwards via the
-        # normal save_field path. Same for coin date: a coin should come
-        # into existence when the user starts typing Authority / Region /
-        # Denomination, then Date can be filled later.
+        # Required fields on create. Owner is needed for row-filter /
+        # per-user access from the moment the record exists. Location
+        # is required too; the new-record autosave prompts for it before
+        # first create so this server-side check catches only direct or
+        # stale submissions.
         missing = []
         if not (data.get('owner') or '').strip():
             missing.append('Owner')
+        location_field = create_location_field(category)
+        if location_field and not (data.get(location_field) or '').strip():
+            missing.append('Location')
         if missing:
             err = 'Missing required field(s): ' + ', '.join(missing)
             # AJAX autosave-on-/new flow: client expects JSON.
@@ -4504,7 +4518,7 @@ def new_record(category):
             # already entered (preserves their work) and focus the first
             # missing field. A redirect here would wipe everything.
             focus_map = {
-                'Property': 'property_name' if category == 'coins' else 'property',
+                'Location': location_field,
                 'Owner': 'owner',
                 'Date': 'date_1' if category == 'coins' else 'date',
             }

@@ -349,7 +349,9 @@
 <div class="detail-page detail-page-{{ category }}">
 <form method="post"
       action="{% if is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
-      enctype="multipart/form-data" id="mainForm" autocomplete="off">
+      enctype="multipart/form-data" id="mainForm" autocomplete="off"
+      data-category="{{ category }}"
+      data-is-new="{{ 'true' if is_new else 'false' }}">
 
   <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
   <div class="detail-nav-overlay">
@@ -752,7 +754,7 @@ document.addEventListener('DOMContentLoaded', function () {
   <!-- Bottom: Property | Status | Owner -->
   <div class="detail-bottom">
     <div class="bottom-cell">
-      {% set _prop = val('property') if val('property') else ('Carpinteria' if is_new else '') %}
+      {% set _prop = val('property') %}
       <select name="property">
         <option value=""></option>
         {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if _prop==o }}>{{ o }}</option>{% endfor %}
@@ -1032,7 +1034,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <span class="blabel">Cat ID (auto)</span>
     </div>
     <div class="bottom-cell">
-      {% set _pn = val('property_name') if val('property_name') else ('Carpinteria' if is_new else '') %}
+      {% set _pn = val('property_name') %}
       <select name="property_name">
         <option value=""></option>
         {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if _pn==o }}>{{ o }}</option>{% endfor %}
@@ -3127,6 +3129,13 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
 
   const form = document.getElementById('mainForm');
+  const formCategory = form.dataset.category || '';
+  const isNewRecord = form.dataset.isNew === 'true';
+
+  if (isNewRecord && !['watches', 'coins'].includes(formCategory)) {
+    const defaultStatus = form.querySelector('select[name="status"]');
+    if (defaultStatus && !defaultStatus.value) defaultStatus.value = 'Own';
+  }
 
   // Shared currency-field formatter. Any future money field should use
   // this behavior: currency prefix detection, historical USD conversion,
@@ -3677,26 +3686,46 @@ document.querySelectorAll('.comp-item').forEach(item => {
     });
   }
 
-  // Property required: when this category's form has a Property
-  // dropdown, block the explicit Save click (and warn on back-link
-  // navigation) until it's set. Autosave isn't blocked — the row
-  // can still come into existence with property=NULL — so the user
-  // doesn't lose typing if they hop away mid-form.
-  function propertyEmpty() {
-    const p = form.querySelector('[name="property"]');
+  // Location required for new rows. Autosave creates the row on first
+  // edit, so prompt once before that first create instead of letting a
+  // hidden 400 eat the user's first keystroke.
+  function locationField() {
+    return form.querySelector('[name="property_name"]') || form.querySelector('[name="property"]');
+  }
+  function locationEmpty() {
+    const p = locationField();
     return p && !((p.value || '').trim());
   }
-  form.addEventListener('submit', function (e) {
-    if (propertyEmpty()) {
-      e.preventDefault();
-      alert('Property required');
-      const p = form.querySelector('[name="property"]');
+  function promptForLocationIfNeeded() {
+    if (!isNewRecord || !locationEmpty()) return true;
+    const p = locationField();
+    const options = Array.from(p.options || [])
+      .map(option => (option.value || option.textContent || '').trim())
+      .filter(Boolean);
+    const entered = window.prompt(
+      'Location required. Enter location' + (options.length ? ' (' + options.join(', ') + ')' : '') + ':',
+      options[0] || ''
+    );
+    if (!entered || !entered.trim()) {
       if (p && typeof p.focus === 'function') p.focus();
+      return false;
+    }
+    const location = entered.trim();
+    if (p.tagName === 'SELECT' && !options.includes(location)) {
+      p.add(new Option(location, location));
+    }
+    p.value = location;
+    return true;
+  }
+  form.addEventListener('submit', function (e) {
+    if (!promptForLocationIfNeeded()) {
+      e.preventDefault();
     }
   });
 
   function ensureRecord() {
     if (recordExists) return Promise.resolve();
+    if (!promptForLocationIfNeeded()) return Promise.reject(new Error('Location required'));
     if (creatingPromise) return creatingPromise;
     const fd = new FormData(form);
     // keepalive so a Back-button before the response lands still
