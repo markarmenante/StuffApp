@@ -12105,9 +12105,9 @@ def recordings_catalog_pdf():
         [[_p('Cover', small_style), _p('Artist / Title', small_style),
           _p('Media', small_style), _p('Sound', small_style),
           _p('Speed', small_style), _p('Genre', small_style),
-          _p('Year', small_style)]],
-        colWidths=[0.78 * inch, 3.55 * inch, 0.7 * inch, 0.7 * inch,
-                   0.72 * inch, 1.0 * inch, 0.45 * inch],
+          _p('Year', small_style), _p('#', small_style)]],
+        colWidths=[0.78 * inch, 3.5 * inch, 0.7 * inch, 0.7 * inch,
+                   0.72 * inch, 0.88 * inch, 0.45 * inch, 0.32 * inch],
     )
     header.setStyle(TableStyle([
         ('LINEBELOW', (0, 0), (-1, 0), 0.6, colors.HexColor('#999999')),
@@ -12127,8 +12127,6 @@ def recordings_catalog_pdf():
             location_mark = _location_mark(row['property']) if show_location_mark else ''
             row_number = row_numbers.get(row['id'])
             artist_text = escape(str(artist))
-            if row_number:
-                artist_text = f'{row_number}. {artist_text}'
             if location_mark:
                 artist_text += (
                     f' <font size="7" color="#777777">{location_mark}</font>'
@@ -12167,9 +12165,10 @@ def recordings_catalog_pdf():
                 [[cover, title_cell, _p(media, center_style),
                   _markup_p(sound_markup, center_style),
                   _markup_p(speed_markup, center_style),
-                  _p(genre, meta_style), _p(year, center_style)]],
-                colWidths=[0.78 * inch, 3.55 * inch, 0.7 * inch, 0.7 * inch,
-                           0.72 * inch, 1.0 * inch, 0.45 * inch],
+                  _p(genre, meta_style), _p(year, center_style),
+                  _p(row_number or '', center_style)]],
+                colWidths=[0.78 * inch, 3.5 * inch, 0.7 * inch, 0.7 * inch,
+                           0.72 * inch, 0.88 * inch, 0.45 * inch, 0.32 * inch],
                 rowHeights=[0.72 * inch],
             )
             bg = colors.white if idx % 2 else colors.HexColor('#f3f4f6')
