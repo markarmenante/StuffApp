@@ -6263,15 +6263,8 @@ def recording_fetch_notes(record_id):
     # sibling tracks remain fill-if-empty because edition tracklists can
     # differ.
     #
-    # Genre + genre_2 are merged (never overwritten):
-    #   - genre stays whatever's in the DB if non-empty. A blank genre
-    #     is filled with the lookup's primary value, which then counts
-    #     as "already covered" for the genre_2 merge below.
-    #   - any lookup value (primary or sub-genre) that isn't already
-    #     present in genre OR genre_2 (case-insensitive token match)
-    #     gets appended to genre_2 as a comma-separated tail. Re-runs
-    #     are idempotent because everything that landed last time is
-    #     in the existing tokens.
+    # Genre + genre_2 overwrite when lookup returns a confident value.
+    # Lookup is the user's verify/correct action for classification too.
     new_players = data.get('players') or ''
     new_tracks = data.get('tracks') or ''
     new_genre = data.get('genre') or ''
@@ -6318,9 +6311,8 @@ def recording_fetch_notes(record_id):
         existing_type = ''
     is_vinyl_record = existing_type.lower() in ('vinyl', 'lp', '45', '78', 'ep')
 
-    final_genre, final_genre_2 = _merge_recording_genres(
-        existing_genre, existing_genre_2, new_genre, new_genre_2
-    )
+    final_genre = new_genre if new_genre else existing_genre
+    final_genre_2 = new_genre_2 if new_genre_2 else existing_genre_2
 
     sets, params = [], []
     if new_notes and new_notes != existing_notes:
@@ -6365,10 +6357,8 @@ def recording_fetch_notes(record_id):
     #                 editions/formats, so don't replace an existing
     #                 sibling tracklist.
     #   notes_urls  — UNION. Source URLs accumulate across runs.
-    #   genre       — fill if blank, never overwrite.
-    #   genre_2     — append any lookup-derived genre / sub-genre that
-    #                 isn't already represented in the sibling's
-    #                 (genre, genre_2) pair.
+    #   genre       — overwrite when lookup returns a confident value.
+    #   genre_2     — overwrite when lookup returns a confident value.
     siblings_updated = 0
     title_norm = (rec['title']  or '').strip()
     artist_norm = (rec['artist'] or '').strip()
@@ -6408,14 +6398,10 @@ def recording_fetch_notes(record_id):
 
             sib_existing_genre = (sib['genre'] or '').strip()
             sib_existing_genre_2 = (sib['genre_2'] or '').strip()
-            sib_final_genre, sib_final_genre_2 = _merge_recording_genres(
-                sib_existing_genre, sib_existing_genre_2,
-                new_genre, new_genre_2,
-            )
-            if sib_final_genre != sib_existing_genre:
-                sib_sets.append('genre = ?'); sib_params.append(sib_final_genre)
-            if sib_final_genre_2 != sib_existing_genre_2:
-                sib_sets.append('genre_2 = ?'); sib_params.append(sib_final_genre_2)
+            if new_genre and new_genre != sib_existing_genre:
+                sib_sets.append('genre = ?'); sib_params.append(new_genre)
+            if new_genre_2 and new_genre_2 != sib_existing_genre_2:
+                sib_sets.append('genre_2 = ?'); sib_params.append(new_genre_2)
             if new_year_recorded and (sib['year_recorded'] or '').strip() != new_year_recorded:
                 sib_sets.append('year_recorded = ?'); sib_params.append(new_year_recorded)
             if new_label and not (sib['label'] or '').strip():
