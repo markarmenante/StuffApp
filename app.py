@@ -2459,6 +2459,19 @@ def get_property_choices():
     return out
 
 
+def property_choices_for_category(category=None):
+    choices = get_property_choices()
+    restricted = {
+        'coins': ['Carpinteria', 'NYC'],
+        'recordings': ['Carpinteria', 'Martis'],
+        'audio': ['Carpinteria', 'Martis'],
+    }.get(category)
+    if not restricted:
+        return choices
+    available = set(choices)
+    return [name for name in restricted if name in available or name]
+
+
 def current_vlists(category=None):
     """Per-request VALUE_LISTS with 'property' resolved from the DB.
     For the items category we also resolve a few values from the
@@ -2505,11 +2518,11 @@ def current_vlists(category=None):
             items_owner = members + ['YM']
         return {
             **VALUE_LISTS,
-            'property': get_property_choices(),
+            'property': property_choices_for_category(category),
             'items_owner': items_owner,
             'items_status': ['Own', 'Sold', 'Gifted', 'Lost'],
         }
-    return {**VALUE_LISTS, 'property': get_property_choices()}
+    return {**VALUE_LISTS, 'property': property_choices_for_category(category)}
 
 
 def get_typeahead(table, *fields, owner_filter=None):
