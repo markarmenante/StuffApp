@@ -2395,7 +2395,7 @@ def _backfill_meds_from_prescriptions(db):
     db.commit()
 
 
-def _med_lookup_terms(name, note):
+def _med_lookup_terms(name, note, preserve_sku=False):
     """Medication lookup candidates from the medication name plus note/brand."""
     raw = []
     for part in (f'{note} {name}' if note and name else '', name, note):
@@ -2403,11 +2403,17 @@ def _med_lookup_terms(name, note):
         if not text:
             continue
         text = re.sub(r'\b(?:brand|generic|for)\s*:\s*', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'\([^)]*\)', '', text).strip()
-        text = re.sub(r'\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|iu|units?)\b', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'\s+', ' ', text).strip(' -/,;')
-        if text and text.lower() not in {x.lower() for x in raw}:
-            raw.append(text)
+        candidates = [text]
+        stripped = re.sub(r'\([^)]*\)', '', text).strip()
+        stripped = re.sub(r'\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|iu|units?)\b', '', stripped, flags=re.IGNORECASE)
+        if not preserve_sku:
+            candidates = [stripped]
+        elif stripped.lower() != text.lower():
+            candidates.append(stripped)
+        for candidate in candidates:
+            candidate = re.sub(r'\s+', ' ', candidate).strip(' -/,;')
+            if candidate and candidate.lower() not in {x.lower() for x in raw}:
+                raw.append(candidate)
     return raw
 
 
@@ -2457,15 +2463,33 @@ def _clean_med_text(text):
     return text
 
 
-def _med_token_set(text):
-    return {
-        token
-        for token in re.findall(r'[a-z0-9]+', (text or '').lower())
-        if len(token) > 1 and token not in {
+def _med_token_list(text):
+    tokens = []
+    for token in re.findall(r'[a-z0-9]+', (text or '').lower()):
+        if len(token) <= 1 or token in {
             'the', 'and', 'for', 'with', 'plus', 'extra', 'strength',
-            'supplement', 'supplements', 'vitamin',
-        }
-    }
+            'supplement', 'supplements', 'capsule', 'capsules', 'tablet',
+            'tablets', 'serving', 'daily',
+        }:
+            continue
+        if token == 'natures':
+            token = 'nature'
+        tokens.append(token)
+    return tokens
+
+
+def _med_token_set(text):
+    return set(_med_token_list(text))
+
+
+def _med_requested_brand_tokens(name, note):
+    tokens = _med_token_list(note or name)
+    if not tokens:
+        return set()
+    brand = {tokens[0]}
+    if tokens[0] in {'nature', 'wonder'} and len(tokens) > 1:
+        brand.add(tokens[1])
+    return brand
 
 
 def _dsld_json(url):
@@ -2523,6 +2547,40 @@ def _dsld_hit_score(hit, term, name, note):
         missing = wanted - title_tokens
         score -= len(missing) * 8
     return score
+
+
+def _dsld_hit_confidence(hit, name, note):
+    src = hit.get('_source') or {}
+    brand_tokens = _med_requested_brand_tokens(name, note)
+    found_brand = _med_token_set(src.get('brand') or '')
+    found_title = _med_token_set(f"{src.get('brand') or ''} {src.get('productName') or ''}")
+    requested = _med_token_set(f'{note} {name}')
+    if not requested or not found_title:
+        return 0.0
+
+    if brand_tokens:
+        brand_overlap = brand_tokens & found_brand
+        if not brand_overlap:
+            return 0.0
+        if len(brand_tokens) > 1 and len(brand_overlap) < len(brand_tokens):
+            return 0.0
+    else:
+        brand_overlap = set()
+
+    product_tokens = requested - brand_tokens
+    product_overlap = product_tokens & found_title
+    if product_tokens and not product_overlap:
+        return 0.0
+    if len(product_tokens) >= 3 and len(product_overlap) / len(product_tokens) < 0.5:
+        return 0.0
+
+    confidence = 0.35
+    confidence += min(0.35, 0.12 * len(brand_overlap))
+    if product_tokens:
+        confidence += min(0.30, len(product_overlap) / len(product_tokens) * 0.30)
+    if str(src.get('offMarket') or '') == '1':
+        confidence -= 0.12
+    return max(0.0, min(1.0, confidence))
 
 
 def _format_dsld_amount(data):
@@ -2590,7 +2648,28 @@ def _dsld_supplement_details_for_term(term, name, note):
     hits = _dsld_search_hits(term, name, note)
     if not hits:
         return {}
-    best = max(hits, key=lambda hit: _dsld_hit_score(hit, term, name, note))
+    ranked = sorted(hits, key=lambda hit: _dsld_hit_score(hit, term, name, note), reverse=True)
+    accepted = [
+        (hit, _dsld_hit_score(hit, term, name, note), _dsld_hit_confidence(hit, name, note))
+        for hit in ranked
+        if _dsld_hit_confidence(hit, name, note) >= 0.62
+    ]
+    if not accepted:
+        return {}
+    best, best_score, best_confidence = accepted[0]
+    if len(accepted) > 1:
+        second, second_score, second_confidence = accepted[1]
+        second_src = second.get('_source') or {}
+        best_src = best.get('_source') or {}
+        same_product = (
+            (second_src.get('brand') or '').lower(),
+            (second_src.get('productName') or '').lower(),
+        ) == (
+            (best_src.get('brand') or '').lower(),
+            (best_src.get('productName') or '').lower(),
+        )
+        if not same_product and second_confidence >= best_confidence - 0.05 and second_score >= best_score - 12:
+            return {}
     src = best.get('_source') or {}
     requested = _med_token_set(f'{note} {name}')
     found = _med_token_set(f"{src.get('brand') or ''} {src.get('productName') or ''}")
@@ -2790,8 +2869,8 @@ def _dailymed_details_for_term(term):
 
 def lookup_medication_details(name, note, med_type=''):
     """Return ingredient and direction details for a medication/supplement row."""
-    terms = _med_lookup_terms(name, note)
     is_rx = (med_type or '').strip().lower() == 'rx'
+    terms = _med_lookup_terms(name, note, preserve_sku=not is_rx)
     last_err = None
 
     if not is_rx:
