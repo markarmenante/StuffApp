@@ -2665,6 +2665,24 @@ def _elysium_details_for_term(term):
     return {}
 
 
+def _wonderfeel_details_for_term(term):
+    """Return active details for known Wonderfeel supplements."""
+    normalized = re.sub(r'\s+', ' ', (term or '').strip()).lower()
+    if not normalized:
+        return {}
+    has_brand = 'wonderfeel' in normalized or ('wonder' in normalized and 'feel' in normalized)
+    if not has_brand or 'youngr' not in normalized:
+        return {}
+    return {
+        'active_ingredients': (
+            'Per capsule: Nicotinamide Mononucleotide 450 mg, Ergothioneine 2 mg, '
+            'Trans Resveratrol 50 mg, Olive fruit Extract (40% hydroxytyrosol) 25 mg, '
+            'Vitamin D3 (Cholecalciferol) 10 mcg. Serving: two capsules'
+        ),
+        'directions': 'Take two capsules every day in the morning.',
+    }
+
+
 def _dailymed_directions_for_setid(setid):
     import io
     import urllib.parse
@@ -2786,6 +2804,15 @@ def lookup_medication_details(name, note, med_type=''):
             if details.get('active_ingredients') or details.get('directions'):
                 return details
             if 'elysium' in (term or '').lower():
+                continue
+            try:
+                details = _wonderfeel_details_for_term(term)
+            except Exception as exc:
+                last_err = exc
+                details = {}
+            if details.get('active_ingredients') or details.get('directions'):
+                return details
+            if 'wonderfeel' in (term or '').lower() or 'wonder' in (term or '').lower():
                 continue
             try:
                 details = _dailymed_details_for_term(term)
