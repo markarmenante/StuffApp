@@ -3216,19 +3216,17 @@ results_markdown rules:
 - Use null for consensus_usd / watchcharts_median_usd if not available."""
 
     client = anthropic.Anthropic(api_key=api_key)
+    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_WATCH_LOOKUP_MODEL')
+    web_search = anthropic_web_search_tool(5)
 
     import time as _time
     last_err = None
     for attempt in range(3):
         try:
             resp = client.messages.create(
-                model='claude-sonnet-4-5',
+                model=lookup_model,
                 max_tokens=1536,
-                tools=[{
-                    'type': 'web_search_20250305',
-                    'name': 'web_search',
-                    'max_uses': 5,
-                }],
+                tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
             break
@@ -3700,18 +3698,16 @@ Reply with ONLY the markdown, wrapped in a <markdown>…</markdown> tag.
 No prose, no code fences, no JSON."""
 
     client = anthropic.Anthropic(api_key=api_key)
+    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
+    web_search = anthropic_web_search_tool(4)
     import time as _time
     last_err = None
     for attempt in range(3):
         try:
             resp = client.messages.create(
-                model='claude-sonnet-4-5',
+                model=lookup_model,
                 max_tokens=2000,
-                tools=[{
-                    'type': 'web_search_20250305',
-                    'name': 'web_search',
-                    'max_uses': 4,
-                }],
+                tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
             break
@@ -3885,19 +3881,17 @@ Reply with ONLY a JSON object, no prose, no code fences:
 {{"markdown": "4–7 short lines. Prefix factual claims with '- '. Lead with pedigree / reference evidence when present, then add necessary historical context. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~900 chars total."}}"""
 
     client = anthropic.Anthropic(api_key=api_key)
+    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
+    web_search = anthropic_web_search_tool(4)
 
     import time as _time
     last_err = None
     for attempt in range(3):
         try:
             resp = client.messages.create(
-                model='claude-sonnet-4-5',
+                model=lookup_model,
                 max_tokens=1200,
-                tools=[{
-                    'type': 'web_search_20250305',
-                    'name': 'web_search',
-                    'max_uses': 4,
-                }],
+                tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
             break
@@ -3930,11 +3924,68 @@ Reply with ONLY a JSON object, no prose, no code fences:
     return {'markdown': md}
 
 
+def resolve_anthropic_lookup_model(api_key, configured_model):
+    """Resolve auto/latest lookup model settings through Anthropic's Models API."""
+    model = (configured_model or '').strip() or 'auto-sonnet'
+    selector = model.lower().replace('_', '-')
+    family = None
+    if selector in {'auto', 'latest', 'latest-sonnet', 'auto-sonnet'}:
+        family = 'sonnet'
+    elif selector in {'latest-opus', 'auto-opus'}:
+        family = 'opus'
+    elif selector in {'latest-haiku', 'auto-haiku'}:
+        family = 'haiku'
+    else:
+        return model
+
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            'https://api.anthropic.com/v1/models?limit=100',
+            headers={
+                'x-api-key': api_key,
+                'anthropic-version': '2023-06-01',
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+        for item in payload.get('data', []):
+            model_id = (item.get('id') or '').strip()
+            display_name = (item.get('display_name') or '').strip()
+            haystack = f'{model_id} {display_name}'.lower()
+            if model_id and family in haystack:
+                return model_id
+    except Exception:
+        pass
+    return 'claude-sonnet-4-6' if family == 'sonnet' else model
+
+
+def anthropic_lookup_model(api_key, env_name=None):
+    configured = ''
+    if env_name:
+        configured = os.environ.get(env_name) or ''
+    configured = configured or os.environ.get('ANTHROPIC_LOOKUP_MODEL') or 'auto-sonnet'
+    return resolve_anthropic_lookup_model(api_key, configured)
+
+
+def anthropic_web_search_tool(max_uses):
+    tool_type = (os.environ.get('ANTHROPIC_WEB_SEARCH_TOOL') or '').strip() or 'web_search_20260209'
+    try:
+        uses = int(os.environ.get('ANTHROPIC_WEB_SEARCH_MAX_USES', max_uses) or max_uses)
+    except ValueError:
+        uses = max_uses
+    return {
+        'type': tool_type,
+        'name': 'web_search',
+        'max_uses': uses,
+    }
+
+
 def fetch_recording_notes(rec):
     """Claude-driven review + historical-context summary for a recording.
     Returns dict {markdown: str}. Raises RuntimeError on missing key
-    or empty model output. Mirrors the coin-context pattern: Sonnet
-    with web_search, output wrapped in <markdown>...</markdown>.
+    or empty model output. Uses Anthropic with web_search, output
+    wrapped in <markdown>...</markdown>.
     """
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
@@ -3943,6 +3994,9 @@ def fetch_recording_notes(rec):
         import anthropic
     except ImportError:
         raise RuntimeError("anthropic package not installed.")
+
+    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_RECORDING_MODEL')
+    web_search = anthropic_web_search_tool(4)
 
     title  = (rec['title']  or '').strip()
     artist = (rec['artist'] or '').strip()
@@ -4053,13 +4107,9 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}"""
     for attempt in range(3):
         try:
             resp = client.messages.create(
-                model='claude-sonnet-4-5',
+                model=lookup_model,
                 max_tokens=2000,
-                tools=[{
-                    'type': 'web_search_20250305',
-                    'name': 'web_search',
-                    'max_uses': 4,
-                }],
+                tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
             break
@@ -5710,6 +5760,8 @@ Reply with ONLY a JSON object, no prose, no code fences:
 }}"""
 
     client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_ART_LOOKUP_MODEL')
+    web_search = anthropic_web_search_tool(3)
     import time as _time
     last_err = None
     transient_errs = (
@@ -5721,16 +5773,9 @@ Reply with ONLY a JSON object, no prose, no code fences:
     for attempt in range(3):
         try:
             resp = client.messages.create(
-                model='claude-sonnet-4-5',
+                model=lookup_model,
                 max_tokens=1024,
-                tools=[{
-                    'type': 'web_search_20250305',
-                    'name': 'web_search',
-                    # Same budget either way — when bio is on file the
-                    # piece search needs every search to land something
-                    # useful before falling back to null.
-                    'max_uses': 3,
-                }],
+                tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
             break
@@ -6375,6 +6420,8 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null only when you 
 """
 
     client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
+    web_search = anthropic_web_search_tool(4)
     import time as _time
     last_err = None
     transient_errs = (
@@ -6387,13 +6434,9 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null only when you 
     for attempt in range(3):
         try:
             resp = client.messages.create(
-                model='claude-sonnet-4-5',
+                model=lookup_model,
                 max_tokens=1024,
-                tools=[{
-                    'type': 'web_search_20250305',
-                    'name': 'web_search',
-                    'max_uses': 4,
-                }],
+                tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
             break
