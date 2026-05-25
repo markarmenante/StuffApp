@@ -1775,9 +1775,13 @@ input[type="date"] { -webkit-appearance: none; }
 .med-table {
   padding: 6px 10px 4px;
   position: relative;
-  overflow-x: auto;
+  overflow-x: auto !important;
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .med-actions {
   display: flex;
@@ -1822,21 +1826,23 @@ input[type="date"] { -webkit-appearance: none; }
 .med-table .med-row {
   display: grid;
   grid-template-columns:
-    minmax(var(--med-name-col, 13rem), 1.15fr)
-    minmax(24rem, 1.75fr)
-    minmax(6rem, 0.7fr)
-    minmax(26rem, 1.95fr)
-    minmax(7rem, 0.55fr)
+    minmax(var(--med-name-col, 13rem), 17rem)
+    minmax(20rem, 0.9fr)
+    minmax(22rem, 1fr)
     22px;
-  align-items: stretch;
+  align-items: start;
   min-width: max-content;
 }
 .med-name-wrap {
   display: grid;
   grid-template-columns: auto minmax(8rem, 1fr);
-  align-items: center;
+  align-items: start;
   gap: 5px;
   border-right: 1px solid var(--border-light);
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: inherit;
 }
 .med-type-toggle {
   min-width: 38px;
@@ -1901,6 +1907,11 @@ input[type="date"] { -webkit-appearance: none; }
   grid-template-columns: auto minmax(8rem, 1fr);
   gap: 5px;
   padding-left: 4px;
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: #fff;
+  border-right: 1px solid var(--border-light);
 }
 .med-table .med-row.med-head .med-name-head > span:first-child {
   min-width: 38px;
@@ -1925,21 +1936,15 @@ input[type="date"] { -webkit-appearance: none; }
 .med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"]:focus { background: #fffde8; }
 .med-table .med-row:not(.med-head) > textarea {
   min-height: 26px;
-  height: 26px;
-  max-height: 26px;
-  overflow: hidden;
-  white-space: nowrap;
-  resize: none;
-}
-.med-table .med-row:not(.med-head) > textarea:hover,
-.med-table .med-row:not(.med-head) > textarea:focus {
-  min-height: 72px;
+  height: auto;
   max-height: 180px;
-  white-space: normal;
   overflow-y: auto;
-  z-index: 2;
-  box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.16);
+  white-space: normal;
+  resize: none;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
+.med-table .med-row:not(.med-head) > textarea:focus { box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.16); }
 
 /* List tables: rows beyond the visible window collapse via .row-hidden
    so the table stays compact until the user actually fills slots. */

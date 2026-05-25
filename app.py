@@ -2610,50 +2610,58 @@ def _dsld_supplement_details_for_term(term, name, note):
     return {}
 
 
-def _elysium_signal_details_for_term(term):
-    """Return active details for Elysium Signal, which is a supplement.
+def _elysium_details_for_term(term):
+    """Return active details for known Elysium supplements.
 
     RxNav covers drugs well, but supplement brands like Elysium Signal are
-    usually absent there. Keep this narrowly scoped to the product name so a
-    generic medication row containing "signal" does not get a false match.
+    usually absent there. Keep this narrowly scoped to Elysium product names so
+    generic supplement lookups do not drift into the wrong Elysium formula.
     """
     normalized = re.sub(r'\s+', ' ', (term or '').strip()).lower()
     if not normalized:
         return {}
-    if 'elysium' not in normalized or 'signal' not in normalized:
+    if 'elysium' not in normalized:
         return {}
 
-    import html
-    import urllib.request
-    url = 'https://www.elysiumhealth.com/pages/signal-supplement-facts'
-    req = urllib.request.Request(url, headers={'User-Agent': 'StuffApp/1.0'})
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        page = resp.read().decode('utf-8', 'ignore')
-
-    match = re.search(r'"description"\s*:\s*"([^"]*NMN[^"]*)"', page, flags=re.DOTALL)
-    label = html.unescape(match.group(1)) if match else page
-    label = label.replace('\\/', '/')
-    directions_match = re.search(
-        r'Suggested Use\s*</[^>]+>\s*<[^>]+>\s*([^<]+)',
-        page,
-        flags=re.IGNORECASE,
-    )
-    directions = _clean_med_text(html.unescape(directions_match.group(1))) if directions_match else ''
-
-    has_nmn = re.search(r'NMN\s*\(β-Nicotinamide Mononucleotide\)', label, flags=re.IGNORECASE)
-    has_honokiol = re.search(r'Honokiol\s*\(from\s+Magnolia officinalis\s*\[?bark\]?\)', label, flags=re.IGNORECASE)
-    has_viniferin = re.search(
-        r'Grape Vine\s*\(Vitis vinifera\)\s*Extract\s*\(Standardized to Viniferin\)',
-        label,
-        flags=re.IGNORECASE,
-    )
-    if has_nmn and has_honokiol and has_viniferin:
-        ingredients = (
-            'NMN (β-Nicotinamide Mononucleotide), '
-            'Honokiol (from Magnolia officinalis bark), '
-            'Grape Vine (Vitis vinifera) Extract (standardized to Viniferin)'
-        )
-        return {'active_ingredients': ingredients, 'directions': directions}
+    product_facts = {
+        'signal': {
+            'active_ingredients': (
+                'NMN (β-Nicotinamide Mononucleotide) 250 mg; '
+                'SIRT3 Activation Complex: Honokiol (from Magnolia officinalis bark), '
+                'Grape Vine (Vitis vinifera) Extract (standardized to Viniferin) 150 mg'
+            ),
+            'directions': 'Take two (2) tablets every morning with or without food.',
+        },
+        'format': {
+            'active_ingredients': (
+                'Daily Supplement: Vitamin C (as Ascorbic Acid) 90 mg, '
+                'Zinc (as Zinc Picolinate) 5.5 mg, Selenium (as L-Selenomethionine) 27 mcg, '
+                'Inflammaging Complex: Brassica oleracea sprout extract (providing Sulforaphane), '
+                'Tamarindus indica seed and Curcuma longa rhizome extracts, '
+                'Elderberry fruit extract 650 mg. Senolytic: Senolytic Complex: '
+                'Quercetin Phytosome (Quercetin from Sophora japonica flower, Sunflower Lecithin), '
+                'Fisetin (from Rhus succedanea stem), Chinese Ginseng (Panax notoginseng root) Extract, '
+                'Chestnut Rose (Rosa roxburghii fruit) Extract 1150 mg'
+            ),
+            'directions': (
+                'Daily Supplement: Take two (2) capsules every morning with or without food. '
+                'Senolytic: Take four (4) capsules on two consecutive days with or without food.'
+            ),
+        },
+        'mosaic': {
+            'active_ingredients': (
+                'Vitamin A (from Beta-Carotene) 70.8 mcg RAE; '
+                'Phytonutrient Carotenoid Complex: Tomato fruit extract '
+                '(providing lycopene, phytoene, phytofluene, and tocopherols), '
+                'Rosemary leaf extract (providing carnosic acid) 395 mg; '
+                'Hyaluronic Acid (Sodium Hyaluronate) 120 mg'
+            ),
+            'directions': 'Take one (1) softgel in the morning, with or without food.',
+        },
+    }
+    for product, details in product_facts.items():
+        if product in normalized:
+            return details
     return {}
 
 
@@ -2771,12 +2779,14 @@ def lookup_medication_details(name, note, med_type=''):
     if not is_rx:
         for term in terms:
             try:
-                details = _elysium_signal_details_for_term(term)
+                details = _elysium_details_for_term(term)
             except Exception as exc:
                 last_err = exc
                 details = {}
             if details.get('active_ingredients') or details.get('directions'):
                 return details
+            if 'elysium' in (term or '').lower():
+                continue
             try:
                 details = _dailymed_details_for_term(term)
             except Exception as exc:
@@ -5466,9 +5476,9 @@ def persons_medication_ingredients(record_id):
     sets, params = [], []
     for i in range(1, PERSON_MEDICATION_SLOTS + 1):
         name = (person[f'med_name_{i}'] or '').strip()
-        note = (person[f'med_note_{i}'] or '').strip()
+        note = ''
         med_type = (person[f'med_type_{i}'] or '').strip()
-        if not (name or note):
+        if not name:
             continue
         key = (name.lower(), note.lower(), med_type.lower())
         if key not in cache:

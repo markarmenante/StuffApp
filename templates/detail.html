@@ -2437,7 +2437,7 @@ document.addEventListener('DOMContentLoaded', function () {
              data-med-max="{{ person_medication_slots }}"
              data-med-base-visible="7">
           <div class="med-row med-head">
-            <span class="med-name-head"><span>Type</span><span>Brand / Product</span></span><span>Active Ingredients</span><span>Dosage</span><span>Directions</span><span>Note</span>
+            <span class="med-name-head"><span>Type</span><span>Brand / Product</span></span><span>Active Ingredients</span><span>Directions</span>
             <span class="med-actions">
             <button type="button" class="med-action-pill med-ingredient-lookup-btn"
                     onclick="lookupMedicationIngredients(event, this)"
@@ -2471,11 +2471,10 @@ document.addEventListener('DOMContentLoaded', function () {
             </div>
             <textarea name="med_active_ingredients_{{ i }}" rows="1"
                       data-med-expand="1">{{ val('med_active_ingredients_' ~ i) }}</textarea>
-            <input type="text" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
             <textarea name="med_directions_{{ i }}" rows="1"
                       data-med-expand="1">{{ val('med_directions_' ~ i) }}</textarea>
-            <textarea name="med_note_{{ i }}" rows="1"
-                      data-med-expand="1">{{ val('med_note_' ~ i) }}</textarea>
+            <input type="hidden" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
+            <input type="hidden" name="med_note_{{ i }}" value="{{ val('med_note_' ~ i) }}">
             <button type="button" class="med-del-btn" title="Delete this medication">×</button>
           </div>
           {% endfor %}
@@ -4987,6 +4986,12 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
     'med_directions',
     'med_note',
   ];
+  const MED_VISIBLE_FIELDS = [
+    'med_type',
+    'med_name',
+    'med_active_ingredients',
+    'med_directions',
+  ];
   const form = document.getElementById('mainForm');
   if (!form) return;
   const medTable = form.querySelector('.med-table');
@@ -4994,7 +4999,7 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
   const BASE_VISIBLE = parseInt(medTable?.dataset.medBaseVisible || '7', 10);
 
   function rowIsEmpty(idx) {
-    return MED_FIELDS.every(f => {
+    return MED_VISIBLE_FIELDS.every(f => {
       const el = form.querySelector(`[name="${f}_${idx}"]`);
       return !el || !el.value.trim();
     });
@@ -5025,11 +5030,12 @@ document.querySelectorAll('.property-item-pill.no-items').forEach(pill => {
   }
   refreshEmptyClass();
   refreshMedNameColumn();
-  form.querySelectorAll('.med-row[data-med-idx] input').forEach(inp => {
+  form.querySelectorAll('.med-row[data-med-idx] input, .med-row[data-med-idx] textarea').forEach(inp => {
     inp.addEventListener('blur', () => {
       refreshEmptyClass();
       if (inp.name && inp.name.startsWith('med_name_')) refreshMedNameColumn();
     });
+    inp.addEventListener('input', refreshEmptyClass);
     if (inp.name && inp.name.startsWith('med_name_')) {
       inp.addEventListener('input', refreshMedNameColumn);
     }
@@ -5130,8 +5136,7 @@ async function lookupMedicationIngredients(ev, btn) {
   const hasMeds = Array.from(form.querySelectorAll('.med-row[data-med-idx]'))
     .some(row => {
       const idx = row.dataset.medIdx;
-      return (form.querySelector(`[name="med_name_${idx}"]`)?.value || '').trim()
-        || (form.querySelector(`[name="med_note_${idx}"]`)?.value || '').trim();
+      return (form.querySelector(`[name="med_name_${idx}"]`)?.value || '').trim();
     });
   if (!hasMeds) {
     alert('No medications to look up.');
@@ -5149,11 +5154,10 @@ async function lookupMedicationIngredients(ev, btn) {
       form.querySelectorAll('.med-row[data-med-idx]').forEach(row => {
         const idx = row.dataset.medIdx;
         const name = form.querySelector(`[name="med_name_${idx}"]`);
-        const note = form.querySelector(`[name="med_note_${idx}"]`);
         const type = form.querySelector(`[name="med_type_${idx}"]`);
-        const hasRowValue = [name, note, type].some(el => ((el && el.value) || '').trim());
+        const hasRowValue = [name, type].some(el => ((el && el.value) || '').trim());
         if (!hasRowValue) return;
-        [name, note, type].forEach(el => {
+        [name, type].forEach(el => {
           if (el && el.name) saveJobs.push(window.saveField(el.name, el.value || ''));
         });
       });
@@ -5211,9 +5215,7 @@ async function shareMedicationList(ev, btn) {
         `med_type_${idx}`,
         `med_name_${idx}`,
         `med_active_ingredients_${idx}`,
-        `med_dose_${idx}`,
         `med_directions_${idx}`,
-        `med_note_${idx}`,
       ].forEach(name => {
         const el = form.querySelector(`[name="${name}"]`);
         if (el && ((el.value || '').trim())) saveJobs.push(window.saveField(el.name, el.value || ''));
@@ -5228,12 +5230,10 @@ async function shareMedicationList(ev, btn) {
       const type = (form.querySelector(`[name="med_type_${idx}"]`)?.value || '').trim();
       const name = (form.querySelector(`[name="med_name_${idx}"]`)?.value || '').trim();
       const active = (form.querySelector(`[name="med_active_ingredients_${idx}"]`)?.value || '').trim();
-      const dose = (form.querySelector(`[name="med_dose_${idx}"]`)?.value || '').trim();
       const directions = (form.querySelector(`[name="med_directions_${idx}"]`)?.value || '').trim();
-      const note = (form.querySelector(`[name="med_note_${idx}"]`)?.value || '').trim();
-      return { type, name, active, dose, directions, note };
+      return { type, name, active, directions };
     })
-    .filter(med => med.type || med.name || med.active || med.dose || med.directions || med.note);
+    .filter(med => med.type || med.name || med.active || med.directions);
   if (!rows.length) {
     if (btn) {
       const original = btn.getAttribute('aria-label') || 'Share medications';
@@ -5245,12 +5245,10 @@ async function shareMedicationList(ev, btn) {
   }
   const lines = [`${personName} medications`, ''];
   rows.forEach((med, index) => {
-    const header = [med.type, med.name].filter(Boolean).join(' - ') || med.note || 'Medication';
+    const header = [med.type, med.name].filter(Boolean).join(' - ') || 'Medication';
     lines.push(`${index + 1}. ${header}`);
     if (med.active) lines.push(`   Active ingredients: ${med.active}`);
-    if (med.dose) lines.push(`   Dosage: ${med.dose}`);
     if (med.directions) lines.push(`   Directions: ${med.directions}`);
-    if (med.note && med.note !== header) lines.push(`   Note: ${med.note}`);
   });
   const text = lines.join('\n');
   try {
@@ -6443,7 +6441,6 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   function init(ta) {
     if (ta.dataset.no_autogrow !== undefined ||
         ta.dataset.noAutogrow !== undefined) return;
-    if (ta.dataset.medExpand !== undefined) return;
     if (ta._autogrowReady) return;
     ta._autogrowReady = true;
     ta.style.boxSizing = 'border-box';
