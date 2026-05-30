@@ -5465,6 +5465,12 @@ def detail_view(category, record_id):
                                     category='cameras',
                                     record_id=cam['id'])
 
+    # Report pages pass their current path here so Detail's Back button
+    # returns to the report instead of falling through to the category list.
+    report_back = (request.args.get('report_back') or '').strip()
+    if back_href is None and report_back.startswith('/') and not report_back.startswith('//'):
+        back_href = report_back
+
     # Preserve the list's search/filter when returning via Back, so
     # "search Gela → click coin → Back" lands on the same filtered list
     # scrolled to the same record.

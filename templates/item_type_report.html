@@ -2,6 +2,7 @@
 {% block title %}Inventory Report · StuffApp{% endblock %}
 
 {% block content %}
+{% set report_back = request.full_path.rstrip('?') %}
 <div class="item-report-page">
   <div class="item-report-head">
     <div>
@@ -82,7 +83,7 @@
       <table class="item-mini-table">
         {% for item in most_expensive %}
         <tr>
-          <td><a href="{{ url_for('detail_view', category=item.category, record_id=item.row['id']) }}">{{ item.category_name }} · {{ item.title }}</a></td>
+          <td><a href="{{ url_for('detail_view', category=item.category, record_id=item.row['id'], report_back=report_back) }}">{{ item.category_name }} · {{ item.title }}</a></td>
           <td>{{ item.price_display }}</td>
         </tr>
         {% else %}
@@ -120,7 +121,7 @@
             {% if item.image %}
             <img src="{{ url_for('uploaded_file', filename=item.image) }}" alt="">
             {% endif %}
-            <a href="{{ url_for('detail_view', category=item.category, record_id=item.row['id']) }}">{{ item.title }}</a>
+            <a href="{{ url_for('detail_view', category=item.category, record_id=item.row['id'], report_back=report_back) }}">{{ item.title }}</a>
           </td>
           <td class="item-detail-cell">
             {% for detail in item.details %}

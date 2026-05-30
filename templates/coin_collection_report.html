@@ -2,6 +2,7 @@
 {% block title %}{{ scope_label }} Report · StuffApp{% endblock %}
 
 {% block content %}
+{% set report_back = request.full_path.rstrip('?') %}
 <div class="coin-report-page">
   <div class="coin-report-head">
     <div>
@@ -119,7 +120,7 @@
       <table class="coin-mini-table">
         {% for item in most_expensive %}
         <tr>
-          <td><a href="{{ url_for('detail_view', category='coins', record_id=item.row['id']) }}">{{ item.title }}</a></td>
+          <td><a href="{{ url_for('detail_view', category='coins', record_id=item.row['id'], report_back=report_back) }}">{{ item.title }}</a></td>
           <td>{{ item.price_display }}</td>
         </tr>
         {% endfor %}
@@ -154,7 +155,7 @@
             {% if item.image %}
             <img src="{{ url_for('uploaded_file', filename=item.image) }}" alt="">
             {% endif %}
-            <a href="{{ url_for('detail_view', category='coins', record_id=row['id']) }}">{{ item.title }}</a>
+            <a href="{{ url_for('detail_view', category='coins', record_id=row['id'], report_back=report_back) }}">{{ item.title }}</a>
           </td>
           <td>{{ row['region'] or '' }}</td>
           <td>{{ row['authority'] or '' }}</td>
