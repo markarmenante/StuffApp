@@ -15,38 +15,38 @@
   <div class="sell-kpis">
     <div class="sell-kpi">
       <span>Watches</span>
-      <strong>{{ summary.total }}</strong>
+      <strong data-sell-summary="total">{{ summary.total }}</strong>
     </div>
     <div class="sell-kpi">
       <span>Gross</span>
-      <strong>{{ summary.gross_sales|currency }}</strong>
+      <strong data-sell-summary="gross_sales">{{ summary.gross_sales|currency }}</strong>
     </div>
     <div class="sell-kpi">
       <span>Tax</span>
-      <strong>{{ summary.total_tax|currency }}</strong>
+      <strong data-sell-summary="total_tax">{{ summary.total_tax|currency }}</strong>
     </div>
     <div class="sell-kpi">
       <span>Net Proceeds</span>
-      <strong>{{ summary.net_proceeds|currency }}</strong>
+      <strong data-sell-summary="net_proceeds">{{ summary.net_proceeds|currency }}</strong>
     </div>
     <div class="sell-kpi">
       <span>Net Gain / Loss</span>
-      <strong class="{{ 'gain' if summary.net_gain_loss >= 0 else 'loss' }}">{{ summary.net_gain_loss|currency }}</strong>
+      <strong data-sell-summary="net_gain_loss" class="{{ 'gain' if summary.net_gain_loss >= 0 else 'loss' }}">{{ summary.net_gain_loss|currency }}</strong>
     </div>
   </div>
 
   <section class="sell-card">
     <h2>Summary</h2>
     <table class="sell-summary-table">
-      <tr><td>Gross Sales</td><td>{{ totals.gross_sales|currency }}</td></tr>
-      <tr><td>Commission</td><td>{{ totals.commission|currency }}</td></tr>
-      <tr><td>Net Sales</td><td>{{ totals.net_sales|currency }}</td></tr>
-      <tr><td>Federal Tax</td><td>{{ totals.federal_tax|currency }}</td></tr>
-      <tr><td>State Tax</td><td>{{ totals.state_tax|currency }}</td></tr>
-      <tr><td>Total Tax</td><td>{{ totals.total_tax|currency }}</td></tr>
-      <tr><td>Net Proceeds</td><td>{{ totals.net_proceeds|currency }}</td></tr>
-      <tr><td>Gross Gain / Loss</td><td class="{{ 'gain' if totals.gross_gain_loss >= 0 else 'loss' }}">{{ totals.gross_gain_loss|currency }}</td></tr>
-      <tr><td>Net Gain / Loss</td><td class="{{ 'gain' if totals.net_gain_loss >= 0 else 'loss' }}">{{ totals.net_gain_loss|currency }}</td></tr>
+      <tr><td>Gross Sales</td><td data-sell-total="gross_sales">{{ totals.gross_sales|currency }}</td></tr>
+      <tr><td>Commission</td><td data-sell-total="commission">{{ totals.commission|currency }}</td></tr>
+      <tr><td>Net Sales</td><td data-sell-total="net_sales">{{ totals.net_sales|currency }}</td></tr>
+      <tr><td>Federal Tax</td><td data-sell-total="federal_tax">{{ totals.federal_tax|currency }}</td></tr>
+      <tr><td>State Tax</td><td data-sell-total="state_tax">{{ totals.state_tax|currency }}</td></tr>
+      <tr><td>Total Tax</td><td data-sell-total="total_tax">{{ totals.total_tax|currency }}</td></tr>
+      <tr><td>Net Proceeds</td><td data-sell-total="net_proceeds">{{ totals.net_proceeds|currency }}</td></tr>
+      <tr><td>Gross Gain / Loss</td><td data-sell-total="gross_gain_loss" class="{{ 'gain' if totals.gross_gain_loss >= 0 else 'loss' }}">{{ totals.gross_gain_loss|currency }}</td></tr>
+      <tr><td>Net Gain / Loss</td><td data-sell-total="net_gain_loss" class="{{ 'gain' if totals.net_gain_loss >= 0 else 'loss' }}">{{ totals.net_gain_loss|currency }}</td></tr>
     </table>
   </section>
 
@@ -88,7 +88,20 @@
       </thead>
       <tbody>
         {% for item in items %}
-        <tr data-watch-id="{{ item.row['id'] }}" class="{{ 'is-excluded' if not item.included }}">
+        <tr data-sell-report-row
+            data-watch-id="{{ item.row['id'] }}"
+            data-included="{{ '1' if item.included else '0' }}"
+            data-purchase="{{ item.purchase if item.purchase is not none else 0 }}"
+            data-gross_sales="{{ item.gross_sales if item.gross_sales is not none else 0 }}"
+            data-commission="{{ item.commission if item.commission is not none else 0 }}"
+            data-net_sales="{{ item.net_sales if item.net_sales is not none else 0 }}"
+            data-gross_gain_loss="{{ item.gross_gain_loss if item.gross_gain_loss is not none else 0 }}"
+            data-federal_tax="{{ item.federal_tax if item.federal_tax is not none else 0 }}"
+            data-state_tax="{{ item.state_tax if item.state_tax is not none else 0 }}"
+            data-total_tax="{{ item.total_tax if item.total_tax is not none else 0 }}"
+            data-net_proceeds="{{ item.net_proceeds if item.net_proceeds is not none else 0 }}"
+            data-net_gain_loss="{{ item.net_gain_loss if item.net_gain_loss is not none else 0 }}"
+            class="{{ 'is-excluded' if not item.included }}">
           <td class="sell-title-cell">
             <a href="{{ url_for('detail_view', category='watches', record_id=item.row['id']) }}">{{ item.title }}</a>
             <span>{{ item.brand }} {{ item.model }}</span>
@@ -121,16 +134,16 @@
           <th>Total</th>
           <td></td>
           <td></td>
-          <td class="money">{{ totals.purchase|currency }}</td>
-          <td class="money">{{ totals.gross_sales|currency }}</td>
-          <td class="money">{{ totals.commission|currency }}</td>
-          <td class="money">{{ totals.net_sales|currency }}</td>
-          <td class="money {{ 'gain' if totals.gross_gain_loss >= 0 else 'loss' }}">{{ totals.gross_gain_loss|currency }}</td>
-          <td class="money">{{ totals.federal_tax|currency }}</td>
-          <td class="money">{{ totals.state_tax|currency }}</td>
-          <td class="money">{{ totals.total_tax|currency }}</td>
-          <td class="money">{{ totals.net_proceeds|currency }}</td>
-          <td class="money {{ 'gain' if totals.net_gain_loss >= 0 else 'loss' }}">{{ totals.net_gain_loss|currency }}</td>
+          <td class="money" data-sell-total="purchase">{{ totals.purchase|currency }}</td>
+          <td class="money" data-sell-total="gross_sales">{{ totals.gross_sales|currency }}</td>
+          <td class="money" data-sell-total="commission">{{ totals.commission|currency }}</td>
+          <td class="money" data-sell-total="net_sales">{{ totals.net_sales|currency }}</td>
+          <td class="money {{ 'gain' if totals.gross_gain_loss >= 0 else 'loss' }}" data-sell-total="gross_gain_loss">{{ totals.gross_gain_loss|currency }}</td>
+          <td class="money" data-sell-total="federal_tax">{{ totals.federal_tax|currency }}</td>
+          <td class="money" data-sell-total="state_tax">{{ totals.state_tax|currency }}</td>
+          <td class="money" data-sell-total="total_tax">{{ totals.total_tax|currency }}</td>
+          <td class="money" data-sell-total="net_proceeds">{{ totals.net_proceeds|currency }}</td>
+          <td class="money {{ 'gain' if totals.net_gain_loss >= 0 else 'loss' }}" data-sell-total="net_gain_loss">{{ totals.net_gain_loss|currency }}</td>
         </tr>
       </tfoot>
     </table>
@@ -314,11 +327,56 @@
 }
 </style>
 <script>
+const SELL_TOTAL_KEYS = [
+  'purchase', 'gross_sales', 'commission', 'net_sales',
+  'gross_gain_loss', 'federal_tax', 'state_tax', 'total_tax',
+  'net_proceeds', 'net_gain_loss',
+];
+function sellReportMoney(value) {
+  const n = Number(value) || 0;
+  const sign = n < 0 ? '-' : '';
+  return sign + '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
+}
+function sellReportPaintSigned(el, value) {
+  if (!el) return;
+  el.classList.toggle('gain', value >= 0);
+  el.classList.toggle('loss', value < 0);
+}
+function updateSellReportTotals() {
+  const totals = Object.fromEntries(SELL_TOTAL_KEYS.map(key => [key, 0]));
+  let count = 0;
+  document.querySelectorAll('[data-sell-report-row]').forEach(row => {
+    if (row.dataset.included !== '1') return;
+    count += 1;
+    SELL_TOTAL_KEYS.forEach(key => {
+      totals[key] += Number(row.dataset[key] || 0) || 0;
+    });
+  });
+  document.querySelectorAll('[data-sell-summary="total"]').forEach(el => {
+    el.textContent = String(count);
+  });
+  ['gross_sales', 'total_tax', 'net_proceeds', 'net_gain_loss'].forEach(key => {
+    document.querySelectorAll(`[data-sell-summary="${key}"]`).forEach(el => {
+      el.textContent = sellReportMoney(totals[key]);
+      if (key === 'net_gain_loss') sellReportPaintSigned(el, totals[key]);
+    });
+  });
+  SELL_TOTAL_KEYS.forEach(key => {
+    document.querySelectorAll(`[data-sell-total="${key}"]`).forEach(el => {
+      el.textContent = sellReportMoney(totals[key]);
+      if (key === 'gross_gain_loss' || key === 'net_gain_loss') {
+        sellReportPaintSigned(el, totals[key]);
+      }
+    });
+  });
+}
 document.querySelectorAll('[data-sell-report-toggle]').forEach(btn => {
   btn.addEventListener('click', async () => {
     const recordId = btn.dataset.recordId;
     if (!recordId || btn.disabled) return;
+    const previousValue = btn.dataset.decision;
     const nextValue = btn.dataset.decision === 'Sell' ? 'Keep' : 'Sell';
+    const row = btn.closest('[data-sell-report-row]');
     btn.disabled = true;
     btn.textContent = nextValue;
     btn.classList.toggle('is-sell', nextValue === 'Sell');
@@ -331,15 +389,22 @@ document.querySelectorAll('[data-sell-report-toggle]').forEach(btn => {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-      window.location.reload();
+      btn.dataset.decision = nextValue;
+      if (row) {
+        row.dataset.included = nextValue === 'Sell' ? '1' : '0';
+        row.classList.toggle('is-excluded', nextValue !== 'Sell');
+      }
+      updateSellReportTotals();
+      btn.disabled = false;
     } catch (err) {
       alert('Could not update Sell Options: ' + (err.message || err));
       btn.disabled = false;
-      btn.textContent = btn.dataset.decision;
-      btn.classList.toggle('is-sell', btn.dataset.decision === 'Sell');
-      btn.classList.toggle('is-keep', btn.dataset.decision !== 'Sell');
+      btn.textContent = previousValue;
+      btn.classList.toggle('is-sell', previousValue === 'Sell');
+      btn.classList.toggle('is-keep', previousValue !== 'Sell');
     }
   });
 });
+updateSellReportTotals();
 </script>
 {% endblock %}

@@ -13662,25 +13662,12 @@ def admin_sell_options():
     _apply_row_filter_clauses('watches', wheres, params)
     if 'status' in columns:
         wheres.append(_own_status_predicate())
-    consideration_clauses = []
     if 'sell_keep' in columns:
-        consideration_clauses.append(
+        wheres.append(
             "LOWER(COALESCE(NULLIF(sell_keep,''),'Keep')) = 'sell'"
         )
-    for col in (
-        'sell_purchase_price', 'sell_estimated_sales_price',
-        'sell_commission_percent', 'sell_net_sales_price',
-        'sell_gross_gain_loss', 'sell_net_gain_loss',
-        'sell_federal_tax', 'sell_state_tax', 'sold_to',
-    ):
-        if col in columns:
-            consideration_clauses.append(
-                f"COALESCE(TRIM(CAST({col} AS TEXT)), '') != ''"
-            )
-    wheres.append(
-        '(' + ' OR '.join(consideration_clauses) + ')'
-        if consideration_clauses else '1 = 0'
-    )
+    else:
+        wheres.append('1 = 0')
 
     where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     rows = db.execute(
