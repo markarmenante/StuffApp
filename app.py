@@ -13660,6 +13660,8 @@ def admin_sell_options():
     columns = _table_column_names(db, 'watches')
     wheres, params = [], []
     _apply_row_filter_clauses('watches', wheres, params)
+    if 'status' in columns:
+        wheres.append(_own_status_predicate())
     consideration_clauses = []
     if 'sell_keep' in columns:
         consideration_clauses.append(
