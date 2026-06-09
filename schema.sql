@@ -403,6 +403,23 @@ CREATE INDEX IF NOT EXISTS idx_topics_property_id ON topics(property_id);
 CREATE INDEX IF NOT EXISTS idx_watch_service_events_watch_id
     ON watch_service_events(watch_id);
 
+CREATE TABLE IF NOT EXISTS record_documents (
+    id TEXT PRIMARY KEY,
+    category TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    doc_set TEXT NOT NULL DEFAULT 'main',
+    position INTEGER NOT NULL DEFAULT 0,
+    title TEXT,
+    filename TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(category, record_id, doc_set, position)
+);
+CREATE INDEX IF NOT EXISTS idx_record_documents_record
+    ON record_documents(category, record_id, doc_set, position);
+CREATE INDEX IF NOT EXISTS idx_record_documents_filename
+    ON record_documents(filename);
+
 CREATE TABLE IF NOT EXISTS persons (
     id TEXT PRIMARY KEY,
     name TEXT,
@@ -489,6 +506,24 @@ CREATE TABLE IF NOT EXISTS persons (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS person_medications (
+    id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    med_type TEXT,
+    name TEXT,
+    active_ingredients TEXT,
+    dose TEXT,
+    directions TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE CASCADE,
+    UNIQUE(person_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_person_medications_person
+    ON person_medications(person_id, position);
 
 -- Tombstones for deletes that the incremental Files sync needs to
 -- propagate to the local StuffFiles folder. Every server-side delete

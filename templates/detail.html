@@ -201,7 +201,7 @@
   </label>
 </div>
 {% endmacro %}
-{# Dynamic-documents tile: renders one entry of the JSON `documents`
+{# Dynamic-documents tile: renders one entry from record_documents
    column. idx=-1 marks the trailing always-blank tile that becomes a
    real document on first drop/type (handled in JS, see "Dynamic
    documents" block at the bottom of this template). #}
@@ -236,7 +236,7 @@
 </div>
 {% endmacro %}
 
-{# Dynamic-documents row: renders an unbounded JSON-backed doc set
+{# Dynamic-documents row: renders an unbounded table-backed doc set
    (one entry per dict in `docs`). Always appends a trailing blank
    tile that becomes a real doc on first interaction. The dynDocs JS
    block at the bottom of this template wires drop / type / × / ⋮⋮
@@ -822,10 +822,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   {{ notescell('notes','Notes') }}
 
-  {# Unbounded JSON-backed documents row. Legacy receipt + container_1/2
-     columns were folded into `documents` at boot via _backfill_docs_json
-     + _migrate_receipt_into_documents (idempotent — see app.py). #}
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {# Unbounded table-backed documents row. Legacy receipt + container_1/2
+     columns are still folded through `documents` during boot, then
+     backfilled into record_documents (idempotent — see app.py). #}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
 
   <!-- Bottom: Property | Status | Owner -->
@@ -1075,13 +1075,13 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  {# Unbounded JSON-backed docs row. Legacy document_1 / document_2
+  {# Unbounded table-backed docs row. Legacy document_1 / document_2
      and the legacy receipt column all fold into `documents` at boot
      (see _backfill_docs_json + _migrate_coins_receipt_into_documents
      in app.py). Receipt is no longer a fixed cell; it lives as a
      normal doc tile titled "Receipt" that the user can rename,
      reorder, share, or delete. #}
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
 
   <!-- Bottom -->
@@ -1369,7 +1369,7 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   {{ notescell('notes','Notes') }}
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -1484,13 +1484,13 @@ document.addEventListener('DOMContentLoaded', function () {
       {{ notescell('object_notes','Object Notes') }}
     </div>
   </div>
-  {# Unbounded JSON-backed docs row. Legacy doc_2 + receipt columns
+  {# Unbounded table-backed docs row. Legacy doc_2 + receipt columns
      were folded into `documents` at boot via _backfill_docs_json +
      _migrate_art_receipt_into_documents (idempotent — see app.py).
      Sits OUTSIDE .art-body so the artwork image's flex height ends
      at Object Notes' bottom instead of stretching down past the
      docs row. #}
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1573,7 +1573,7 @@ document.addEventListener('DOMContentLoaded', function () {
       {{ notescell('notes','Notes') }}
     </div>
   </div>
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
 
   <!-- ══════════════════════════════════════════════════════════
@@ -1620,11 +1620,11 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   {{ notescell('notes','Notes') }}
-  {# Vehicle documents — unbounded JSON-backed row. Legacy fixed
+  {# Vehicle documents — unbounded table-backed row. Legacy fixed
      columns (insurance/invoice/registration/auto_title with their
      *_label titles + vehicle_doc_5..8 with *_title) were folded into
      `documents` at boot via _backfill_docs_json — see app.py. #}
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -1790,7 +1790,7 @@ document.addEventListener('DOMContentLoaded', function () {
          data-track-album="{{ val('title') }}"></div>
     <input type="hidden" name="tracks" id="recTracksInput" value="{{ val('tracks') }}">
   </div>
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -2119,7 +2119,7 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   {{ notescell('notes','Notes') }}
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -2180,7 +2180,7 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   {{ notescell('notes','Notes') }}
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
@@ -2430,7 +2430,7 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
   {% endif %}
 
-  <!-- Dynamic documents — JSON-backed, unbounded. Each existing entry
+  <!-- Dynamic documents — table-backed, unbounded. Each existing entry
        gets a tile; a permanent trailing blank tile lets the user drop
        a new file or type a title to create the next document. The JS
        handler (see "Dynamic documents" block near the end of this
@@ -2439,7 +2439,7 @@ document.addEventListener('DOMContentLoaded', function () {
   <div class="section-bar">Documents</div>
   {# Read directly off `r` so the JSON isn't HTML-escaped by the val()
      macro on its way to the filter (escaped quotes break json.loads). #}
-  {% set _documents = ((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json %}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents) }}
 
   <div class="detail-bottom">
@@ -2506,22 +2506,23 @@ document.addEventListener('DOMContentLoaded', function () {
             </span>
           </div>
           {% for i in range(1, person_medication_slots + 1) %}
+          {% set _med = person_medications_by_position.get(i) if person_medications_by_position else none %}
           <div class="med-row{% if i > 7 %} med-row-extra{% endif %}" data-med-idx="{{ i }}">
             <div class="med-name-wrap">
-              {% set _mt = val('med_type_' ~ i) %}
+              {% set _mt = (_med.get('med_type') if _med else val('med_type_' ~ i)) %}
               <input type="hidden" name="med_type_{{ i }}" value="{{ _mt }}">
               <button type="button"
                       class="med-type-toggle{% if _mt %} active{% endif %}"
                       aria-label="Medication type"
                       aria-pressed="{{ 'true' if _mt else 'false' }}">{{ _mt or 'Type' }}</button>
-              <input type="text" name="med_name_{{ i }}" value="{{ val('med_name_' ~ i) }}">
+              <input type="text" name="med_name_{{ i }}" value="{{ _med.get('name') if _med else val('med_name_' ~ i) }}">
             </div>
             <textarea name="med_active_ingredients_{{ i }}" rows="1"
-                      data-med-expand="1">{{ val('med_active_ingredients_' ~ i) }}</textarea>
+                      data-med-expand="1">{{ _med.get('active_ingredients') if _med else val('med_active_ingredients_' ~ i) }}</textarea>
             <textarea name="med_directions_{{ i }}" rows="1"
-                      data-med-expand="1">{{ val('med_directions_' ~ i) }}</textarea>
-            <input type="hidden" name="med_dose_{{ i }}" value="{{ val('med_dose_' ~ i) }}">
-            <input type="hidden" name="med_note_{{ i }}" value="{{ val('med_note_' ~ i) }}">
+                      data-med-expand="1">{{ _med.get('directions') if _med else val('med_directions_' ~ i) }}</textarea>
+            <input type="hidden" name="med_dose_{{ i }}" value="{{ _med.get('dose') if _med else val('med_dose_' ~ i) }}">
+            <input type="hidden" name="med_note_{{ i }}" value="{{ _med.get('note') if _med else val('med_note_' ~ i) }}">
             <button type="button" class="med-del-btn" title="Delete this medication">×</button>
           </div>
           {% endfor %}
@@ -2536,7 +2537,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {# IDs tab — License Front/Back stay as fixed tiles (their semantic
      license_number field is bound to the front; share button on the
      front bundles both files). Everything else moves into the
-     `id_documents` JSON column rendered by dyndocrow below. #}
+     `ids` document set rendered by dyndocrow below. #}
   <div class="dgrid dg2 person-doc-group persons-doc-row" data-group="ids" hidden>
     <div class="persons-doc">
       <div class="persons-doc-title persons-doc-title-fixed">License Front<span class="persons-doc-title-hint"> - share sends Front and Back</span></div>
@@ -2548,7 +2549,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
   <div class="person-doc-group" data-group="ids" hidden>
-    {% set _id_documents = ((r['id_documents'] if r and 'id_documents' in r.keys() else None) or '')|from_json %}
+    {% set _id_documents = (record_documents_by_set.get('ids') if record_documents_by_set else None) or (((r['id_documents'] if r and 'id_documents' in r.keys() else None) or '')|from_json) %}
     {{ dyndocrow(_id_documents, set='ids',
                  css_classes='dgrid dg4 persons-doc-row',
                  tile_class='persons-doc',
@@ -2558,7 +2559,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {# Health tab — Health Card Front/Back stay fixed (semantic
      health_insurance_number field bound to the front; share button
      bundles both). Everything else moves into the `health_documents`
-     JSON column rendered by dyndocrow below. #}
+     `health` document set rendered by dyndocrow below. #}
   <div class="dgrid dg2 person-doc-group persons-doc-row" data-group="health">
     <div class="persons-doc">
       <div class="persons-doc-title persons-doc-title-fixed">Health Card Front<span class="persons-doc-title-hint"> - share sends Front and Back</span></div>
@@ -2570,7 +2571,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
   <div class="person-doc-group" data-group="health">
-    {% set _health_documents = ((r['health_documents'] if r and 'health_documents' in r.keys() else None) or '')|from_json %}
+    {% set _health_documents = (record_documents_by_set.get('health') if record_documents_by_set else None) or (((r['health_documents'] if r and 'health_documents' in r.keys() else None) or '')|from_json) %}
     {{ dyndocrow(_health_documents, set='health',
                  css_classes='dgrid dg4 persons-doc-row',
                  tile_class='persons-doc',
@@ -5168,7 +5169,7 @@ async function shareDocFiles(ev, btn) {
 
 // Share the file attached to a single dynamic-doc tile. Picks up the
 // file URL from the tile's <a class="doc-link"> and the title from
-// the tile's title input. No bundle support — JSON-backed docs aren't
+// the tile's title input. No bundle support — table-backed docs aren't
 // paired the way License Front + License Back are.
 async function shareDynDocFile(ev, btn) {
   ev.preventDefault();

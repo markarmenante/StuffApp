@@ -431,6 +431,17 @@ if os.environ.get('STUFFAPP_OWNER_OPTIONS'):
 
 
 PERSON_MEDICATION_SLOTS = 24
+PERSON_MEDICATION_FIELD_COLUMNS = {
+    'med_type': 'med_type',
+    'med_name': 'name',
+    'med_active_ingredients': 'active_ingredients',
+    'med_dose': 'dose',
+    'med_directions': 'directions',
+    'med_note': 'note',
+}
+PERSON_MEDICATION_FIELD_RE = re.compile(
+    r'^(med_type|med_name|med_active_ingredients|med_dose|med_directions|med_note)_(\d+)$'
+)
 
 
 FIELDS = {
@@ -1064,7 +1075,7 @@ def init_db():
         # don't break mid-deploy. They'll be dropped once every read
         # path moves to the JSON column.
         'ALTER TABLE properties ADD COLUMN documents TEXT',
-        # Same JSON-backed documents column for the simpler categories
+        # Same legacy JSON cache column for the simpler categories
         # that previously had 1-2 fixed user-doc slots. Receipts stay
         # as their own fixed column on each — only the "free" doc slots
         # move into JSON. Backfilled at boot from the legacy columns.
@@ -1135,6 +1146,37 @@ def init_db():
          'usd_rate REAL NOT NULL, '
          'fetched_at TEXT NOT NULL, '
          'PRIMARY KEY (currency, date))'),
+        ('CREATE TABLE IF NOT EXISTS record_documents ('
+         'id TEXT PRIMARY KEY, '
+         'category TEXT NOT NULL, '
+         'record_id TEXT NOT NULL, '
+         "doc_set TEXT NOT NULL DEFAULT 'main', "
+         'position INTEGER NOT NULL DEFAULT 0, '
+         'title TEXT, '
+         'filename TEXT, '
+         "created_at TEXT DEFAULT (datetime('now')), "
+         "updated_at TEXT DEFAULT (datetime('now')), "
+         'UNIQUE(category, record_id, doc_set, position))'),
+        ('CREATE INDEX IF NOT EXISTS idx_record_documents_record '
+         'ON record_documents(category, record_id, doc_set, position)'),
+        ('CREATE INDEX IF NOT EXISTS idx_record_documents_filename '
+         'ON record_documents(filename)'),
+        ('CREATE TABLE IF NOT EXISTS person_medications ('
+         'id TEXT PRIMARY KEY, '
+         'person_id TEXT NOT NULL, '
+         'position INTEGER NOT NULL, '
+         'med_type TEXT, '
+         'name TEXT, '
+         'active_ingredients TEXT, '
+         'dose TEXT, '
+         'directions TEXT, '
+         'note TEXT, '
+         "created_at TEXT DEFAULT (datetime('now')), "
+         "updated_at TEXT DEFAULT (datetime('now')), "
+         'FOREIGN KEY(person_id) REFERENCES persons(id) ON DELETE CASCADE, '
+         'UNIQUE(person_id, position))'),
+        ('CREATE INDEX IF NOT EXISTS idx_person_medications_person '
+         'ON person_medications(person_id, position)'),
         'ALTER TABLE topics ADD COLUMN image TEXT',
         'ALTER TABLE recordings ADD COLUMN players TEXT',
         'ALTER TABLE recordings ADD COLUMN notes_urls TEXT',
@@ -1293,6 +1335,7 @@ def init_db():
         db.commit()
 
     _backfill_meds_from_prescriptions(db)
+    _backfill_person_medications_table(db)
     _backfill_persons_doc_slots(db)
     _backfill_properties_documents_json(db)
     _backfill_docs_json(db, 'watches', 'documents', [
@@ -1391,6 +1434,7 @@ def init_db():
     # The trailing "+ Add document" slot is rendered by the macro, so
     # an in-array empty has no purpose and just wastes screen space.
     _compact_empty_doc_slots(db)
+    _backfill_record_documents_table(db)
 
     # Pen cartridges: fold the "Pilot-Namiki" variant into the canonical
     # "Pilot/Namiki" so the strict select doesn't reject existing rows.
@@ -2392,6 +2436,235 @@ def _backfill_meds_from_prescriptions(db):
             cols.append(f'med_dose_{i} = ?'); vals.append(dose)
         db.execute(f"UPDATE persons SET {', '.join(cols)} WHERE id = ?",
                    vals + [row['id']])
+    db.commit()
+
+
+def _parse_person_medication_field(field_name):
+    m = PERSON_MEDICATION_FIELD_RE.fullmatch(field_name or '')
+    if not m:
+        return None
+    position = int(m.group(2))
+    if position < 1 or position > PERSON_MEDICATION_SLOTS:
+        return None
+    prefix = m.group(1)
+    return prefix, PERSON_MEDICATION_FIELD_COLUMNS[prefix], position
+
+
+def _person_medication_row_empty(row):
+    return not any(
+        ((row.get(col) or '').strip())
+        for col in PERSON_MEDICATION_FIELD_COLUMNS.values()
+    )
+
+
+def _person_medications_from_person_row(row):
+    """Extract normalized medication rows from the legacy persons columns."""
+    if not row:
+        return []
+    keys = set(row.keys())
+    meds = []
+    for position in range(1, PERSON_MEDICATION_SLOTS + 1):
+        med = {'position': position}
+        for prefix, column in PERSON_MEDICATION_FIELD_COLUMNS.items():
+            legacy_col = f'{prefix}_{position}'
+            value = row[legacy_col] if legacy_col in keys else None
+            med[column] = (value or '').strip()
+        if not _person_medication_row_empty(med):
+            meds.append(med)
+    return meds
+
+
+def _person_medication_rows(db, person_id):
+    try:
+        rows = db.execute(
+            "SELECT * FROM person_medications "
+            "WHERE person_id = ? ORDER BY position",
+            [person_id],
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out = []
+    for row in rows:
+        med = {'id': row['id'], 'position': row['position']}
+        for column in PERSON_MEDICATION_FIELD_COLUMNS.values():
+            med[column] = (row[column] or '').strip()
+        out.append(med)
+    return out
+
+
+def _person_medications_by_position(db, person_id):
+    rows = _person_medication_rows(db, person_id)
+    if not rows:
+        person = db.execute(
+            "SELECT * FROM persons WHERE id = ?", [person_id]
+        ).fetchone()
+        legacy_rows = _person_medications_from_person_row(person)
+        if legacy_rows:
+            _replace_person_medications(
+                db, person_id, legacy_rows, sync_legacy=False,
+                bump_person=False,
+            )
+            rows = _person_medication_rows(db, person_id)
+    return {int(row['position']): row for row in rows}
+
+
+def _replace_person_medications(db, person_id, meds, now=None,
+                                sync_legacy=True, bump_person=True):
+    now = now or datetime.utcnow().isoformat()
+    db.execute("DELETE FROM person_medications WHERE person_id = ?", [person_id])
+    for med in meds or []:
+        try:
+            position = int(med.get('position') or 0)
+        except (TypeError, ValueError):
+            continue
+        if position < 1 or position > PERSON_MEDICATION_SLOTS:
+            continue
+        clean = {
+            column: (med.get(column) or '').strip()
+            for column in PERSON_MEDICATION_FIELD_COLUMNS.values()
+        }
+        clean['position'] = position
+        if _person_medication_row_empty(clean):
+            continue
+        db.execute(
+            "INSERT INTO person_medications "
+            "(id, person_id, position, med_type, name, active_ingredients, "
+            "dose, directions, note, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                str(uuid.uuid4()), person_id, position,
+                clean.get('med_type') or None,
+                clean.get('name') or None,
+                clean.get('active_ingredients') or None,
+                clean.get('dose') or None,
+                clean.get('directions') or None,
+                clean.get('note') or None,
+                now, now,
+            ],
+        )
+    if sync_legacy:
+        _sync_person_medication_legacy(db, person_id, now=now)
+    elif bump_person:
+        db.execute("UPDATE persons SET updated_at = ? WHERE id = ?",
+                   [now, person_id])
+
+
+def _upsert_person_medication_values(db, person_id, position, values,
+                                     now=None, sync_legacy=True):
+    now = now or datetime.utcnow().isoformat()
+    row = db.execute(
+        "SELECT * FROM person_medications "
+        "WHERE person_id = ? AND position = ?",
+        [person_id, position],
+    ).fetchone()
+    med = {'position': position}
+    if row:
+        med['id'] = row['id']
+        for column in PERSON_MEDICATION_FIELD_COLUMNS.values():
+            med[column] = (row[column] or '').strip()
+    else:
+        med['id'] = str(uuid.uuid4())
+        for column in PERSON_MEDICATION_FIELD_COLUMNS.values():
+            med[column] = ''
+    for column, value in (values or {}).items():
+        if column in PERSON_MEDICATION_FIELD_COLUMNS.values():
+            med[column] = (value or '').strip()
+    if _person_medication_row_empty(med):
+        db.execute(
+            "DELETE FROM person_medications "
+            "WHERE person_id = ? AND position = ?",
+            [person_id, position],
+        )
+    elif row:
+        db.execute(
+            "UPDATE person_medications SET "
+            "med_type = ?, name = ?, active_ingredients = ?, dose = ?, "
+            "directions = ?, note = ?, updated_at = ? WHERE id = ?",
+            [
+                med.get('med_type') or None,
+                med.get('name') or None,
+                med.get('active_ingredients') or None,
+                med.get('dose') or None,
+                med.get('directions') or None,
+                med.get('note') or None,
+                now,
+                med['id'],
+            ],
+        )
+    else:
+        db.execute(
+            "INSERT INTO person_medications "
+            "(id, person_id, position, med_type, name, active_ingredients, "
+            "dose, directions, note, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                med['id'], person_id, position,
+                med.get('med_type') or None,
+                med.get('name') or None,
+                med.get('active_ingredients') or None,
+                med.get('dose') or None,
+                med.get('directions') or None,
+                med.get('note') or None,
+                now, now,
+            ],
+        )
+    if sync_legacy:
+        _sync_person_medication_legacy(db, person_id, now=now)
+
+
+def _update_person_medication_field(db, person_id, field_name, value, now=None):
+    parsed = _parse_person_medication_field(field_name)
+    if not parsed:
+        return False
+    _prefix, column, position = parsed
+    _upsert_person_medication_values(
+        db, person_id, position, {column: value}, now=now,
+        sync_legacy=True,
+    )
+    return True
+
+
+def _sync_person_medication_legacy(db, person_id, now=None):
+    now = now or datetime.utcnow().isoformat()
+    meds = _person_medication_rows(db, person_id)
+    by_position = {int(med['position']): med for med in meds}
+    sets, params = [], []
+    for position in range(1, PERSON_MEDICATION_SLOTS + 1):
+        med = by_position.get(position, {})
+        for prefix, column in PERSON_MEDICATION_FIELD_COLUMNS.items():
+            sets.append(f'{prefix}_{position} = ?')
+            params.append((med.get(column) or '').strip() or None)
+    sets.append('updated_at = ?')
+    params.append(now)
+    params.append(person_id)
+    db.execute(
+        f"UPDATE persons SET {', '.join(sets)} WHERE id = ?",
+        params,
+    )
+
+
+def _backfill_person_medications_table(db):
+    try:
+        db.execute("SELECT 1 FROM person_medications LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        return
+    try:
+        rows = db.execute("SELECT * FROM persons").fetchall()
+    except sqlite3.OperationalError:
+        return
+    for row in rows:
+        has_rows = db.execute(
+            "SELECT 1 FROM person_medications WHERE person_id = ? LIMIT 1",
+            [row['id']],
+        ).fetchone()
+        if has_rows:
+            continue
+        meds = _person_medications_from_person_row(row)
+        if meds:
+            _replace_person_medications(
+                db, row['id'], meds, sync_legacy=False,
+                bump_person=False,
+            )
     db.commit()
 
 
@@ -5288,6 +5561,15 @@ def new_record(category):
         placeholders = ', '.join(['?' for _ in data])
         db.execute(f"INSERT INTO {CATEGORIES[category]['table']} ({cols}) VALUES ({placeholders})",
                    list(data.values()))
+        if category == 'persons':
+            created_person = db.execute(
+                "SELECT * FROM persons WHERE id = ?", [record_id]
+            ).fetchone()
+            _replace_person_medications(
+                db, record_id,
+                _person_medications_from_person_row(created_person),
+                sync_legacy=False, bump_person=False,
+            )
 
         # Resequence Display Position for only the new coin's group
         # (Carp Ancient, Carp Modern, NY Ancient, or NY Modern).
@@ -5347,6 +5629,8 @@ def _render_new_form(category, data=None, focus_field=None):
                            service_overdue=None,
                            service_years=None,
                            watch_service_events=[],
+                           record_documents_by_set={},
+                           person_medications_by_position={},
                            today_iso=date.today().isoformat(),
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=current_vlists(category),
@@ -5458,6 +5742,15 @@ def detail_view(category, record_id):
         set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
         db.execute(f"UPDATE {table} SET {set_clause} WHERE id = ?",
                    list(updates.values()) + [record_id])
+        if category == 'persons':
+            updated_person = db.execute(
+                "SELECT * FROM persons WHERE id = ?", [record_id]
+            ).fetchone()
+            _replace_person_medications(
+                db, record_id,
+                _person_medications_from_person_row(updated_person),
+                now=now, sync_legacy=False, bump_person=False,
+            )
         if groups_to_resequence:
             _renumber_coin_groups(db, groups_to_resequence)
         db.commit()
@@ -5617,6 +5910,17 @@ def detail_view(category, record_id):
     watch_service_events = []
     if category == 'watches':
         watch_service_events = _watch_service_events(db, record_id)
+    record_documents_by_set = {}
+    if category in DOCUMENTS_CATEGORIES:
+        for doc_set, col in DOC_SETS_BY_CATEGORY.get(category, {}).items():
+            record_documents_by_set[doc_set] = (
+                _docs_load(db, table, record_id, col) or []
+            )
+    person_medications_by_position = {}
+    if category == 'persons':
+        person_medications_by_position = _person_medications_by_position(
+            db, record_id,
+        )
 
     return render_template('detail.html',
                            category=category,
@@ -5639,6 +5943,8 @@ def detail_view(category, record_id):
                            service_overdue=service_overdue,
                            service_years=service_years,
                            watch_service_events=watch_service_events,
+                           record_documents_by_set=record_documents_by_set,
+                           person_medications_by_position=person_medications_by_position,
                            today_iso=None,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=current_vlists(category),
@@ -5742,11 +6048,14 @@ def persons_medication_ingredients(record_id):
 
     updates, errors = [], []
     cache = {}
-    sets, params = [], []
+    changed = False
+    meds_by_position = _person_medications_by_position(db, record_id)
+    now = datetime.utcnow().isoformat()
     for i in range(1, PERSON_MEDICATION_SLOTS + 1):
-        name = (person[f'med_name_{i}'] or '').strip()
-        note = ''
-        med_type = (person[f'med_type_{i}'] or '').strip()
+        med = meds_by_position.get(i, {})
+        name = (med.get('name') or '').strip()
+        note = (med.get('note') or '').strip()
+        med_type = (med.get('med_type') or '').strip()
         if not name:
             continue
         key = (name.lower(), note.lower(), med_type.lower())
@@ -5761,23 +6070,25 @@ def persons_medication_ingredients(record_id):
         directions = (details.get('directions') or '').strip()
         if not (ingredients or directions):
             continue
-        if ingredients != (person[f'med_active_ingredients_{i}'] or '').strip():
-            sets.append(f'med_active_ingredients_{i} = ?')
-            params.append(ingredients)
-        if directions and directions != (person[f'med_directions_{i}'] or '').strip():
-            sets.append(f'med_directions_{i} = ?')
-            params.append(directions)
+        row_changes = {}
+        if ingredients != (med.get('active_ingredients') or '').strip():
+            row_changes['active_ingredients'] = ingredients
+        if directions and directions != (med.get('directions') or '').strip():
+            row_changes['directions'] = directions
+        if row_changes:
+            _upsert_person_medication_values(
+                db, record_id, i, row_changes, now=now,
+                sync_legacy=False,
+            )
+            changed = True
         updates.append({
             'index': i,
             'active_ingredients': ingredients,
             'directions': directions,
         })
 
-    if sets:
-        sets.append('updated_at = ?')
-        params.append(datetime.utcnow().isoformat())
-        params.append(record_id)
-        db.execute(f"UPDATE persons SET {', '.join(sets)} WHERE id = ?", params)
+    if changed:
+        _sync_person_medication_legacy(db, record_id, now=now)
         db.commit()
 
     return jsonify({'ok': True, 'updates': updates, 'errors': errors})
@@ -5858,6 +6169,11 @@ def save_field(category, record_id):
                 value = m.group(1)
 
     value = normalize_field_value(table, field_name, str(value).strip() if value else '')
+
+    if category == 'persons' and _parse_person_medication_field(field_name):
+        if _update_person_medication_field(db, record_id, field_name, value):
+            db.commit()
+            return jsonify({'ok': True})
 
     # Grab the old value before writing so we can decide whether a
     # coin-group resequence is needed on property_name / date_1 changes.
@@ -5965,18 +6281,7 @@ def delete_record(category, record_id):
     for json_col in DOC_SETS_BY_CATEGORY.get(category, {}).values():
         if json_col not in cols:
             continue
-        try:
-            raw = existing[json_col]
-        except (KeyError, IndexError):
-            raw = None
-        if not raw:
-            continue
-        try:
-            docs = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(docs, list):
-            continue
+        docs = _docs_load(db, table, record_id, json_col) or []
         for d in docs:
             if not isinstance(d, dict):
                 continue
@@ -5990,6 +6295,14 @@ def delete_record(category, record_id):
             "(id, category, record_id, deleted_at) VALUES (?, ?, ?, ?)",
             [str(uuid.uuid4()), category, record_id,
              datetime.utcnow().isoformat()],
+        )
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute(
+            "DELETE FROM record_documents "
+            "WHERE category = ? AND record_id = ?",
+            [category, record_id],
         )
     except sqlite3.OperationalError:
         pass
@@ -8220,11 +8533,15 @@ def _sync_watch_service_date_from_events(db, watch_id):
         [watch_id],
     ).fetchone()
     latest = row['latest'] if row else None
+    now = datetime.utcnow().isoformat()
     if latest:
         db.execute(
             "UPDATE watches SET service_date = ?, updated_at = ? WHERE id = ?",
-            [latest, datetime.utcnow().isoformat(), watch_id],
+            [latest, now, watch_id],
         )
+    else:
+        db.execute("UPDATE watches SET updated_at = ? WHERE id = ?",
+                   [now, watch_id])
     return latest
 
 
@@ -8600,11 +8917,12 @@ def from_json_filter(value):
 
 
 # ---------------------------------------------------------------------------
-# Documents JSON helpers + endpoints
+# Documents table helpers + endpoints
 # ---------------------------------------------------------------------------
-# Per-category map of doc-set name → JSON column name. The set name
-# appears in the route URL so categories with multiple independent
-# doc-rows (persons: ids + health) can route through the same handlers.
+# Per-category map of doc-set name → legacy JSON cache column name. The
+# set name appears in the route URL so categories with multiple
+# independent doc-rows (persons: ids + health) can route through the same
+# handlers. The normalized record_documents table is the source of truth.
 # Categories with a single row use 'main' → 'documents' by convention.
 DOC_SETS_BY_CATEGORY = {
     'properties': {'main': 'documents'},
@@ -8625,14 +8943,135 @@ DOCUMENTS_CATEGORIES = set(DOC_SETS_BY_CATEGORY.keys())
 
 
 def _docs_col(category, doc_set):
-    """Return the JSON column name for (category, doc_set), or None if
-    the pair isn't enabled."""
+    """Return the legacy JSON cache column for (category, doc_set), or
+    None if the pair isn't enabled."""
     return DOC_SETS_BY_CATEGORY.get(category, {}).get(doc_set)
 
 
 def _docs_cols_for(category):
     """All JSON columns this category uses for documents (zero or more)."""
     return list(DOC_SETS_BY_CATEGORY.get(category, {}).values())
+
+
+def _category_for_table(table):
+    return next(
+        (cat for cat, info in CATEGORIES.items()
+         if info.get('table') == table),
+        None,
+    )
+
+
+def _docs_set_for_col(category, col):
+    for doc_set, json_col in DOC_SETS_BY_CATEGORY.get(category, {}).items():
+        if json_col == col:
+            return doc_set
+    return None
+
+
+def _docs_parse_json(raw):
+    try:
+        docs = json.loads(raw or '[]')
+    except (TypeError, ValueError):
+        docs = []
+    if not isinstance(docs, list):
+        docs = []
+    return _docs_normalize(docs)
+
+
+def _docs_normalize(docs):
+    out = []
+    for entry in docs or []:
+        if not isinstance(entry, dict):
+            continue
+        title = (entry.get('title') or '').strip()
+        filename = (entry.get('filename') or '').strip()
+        if not (title or filename):
+            continue
+        out.append({'title': title, 'filename': filename})
+    return out
+
+
+def _record_documents_for(db, category, record_id, doc_set):
+    try:
+        rows = db.execute(
+            "SELECT title, filename FROM record_documents "
+            "WHERE category = ? AND record_id = ? AND doc_set = ? "
+            "ORDER BY position, created_at, id",
+            [category, record_id, doc_set],
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return _docs_normalize([
+        {'title': row['title'], 'filename': row['filename']}
+        for row in rows
+    ])
+
+
+def _write_record_documents_table(db, category, record_id, doc_set, docs,
+                                  now=None):
+    clean = _docs_normalize(docs)
+    now = now or datetime.utcnow().isoformat()
+    try:
+        db.execute(
+            "DELETE FROM record_documents "
+            "WHERE category = ? AND record_id = ? AND doc_set = ?",
+            [category, record_id, doc_set],
+        )
+        for position, entry in enumerate(clean):
+            db.execute(
+                "INSERT INTO record_documents "
+                "(id, category, record_id, doc_set, position, title, filename, "
+                "created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    str(uuid.uuid4()), category, record_id, doc_set, position,
+                    entry.get('title') or None,
+                    entry.get('filename') or None,
+                    now, now,
+                ],
+            )
+    except sqlite3.OperationalError:
+        pass
+    return clean
+
+
+def _backfill_record_documents_table(db):
+    try:
+        db.execute("SELECT 1 FROM record_documents LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        return
+    for category, sets in DOC_SETS_BY_CATEGORY.items():
+        table = CATEGORIES[category]['table']
+        try:
+            cols = {
+                r['name']
+                for r in db.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+        except sqlite3.OperationalError:
+            continue
+        present_sets = {
+            doc_set: col for doc_set, col in sets.items() if col in cols
+        }
+        if not present_sets:
+            continue
+        select_cols = ', '.join(['id'] + list(present_sets.values()))
+        rows = db.execute(f"SELECT {select_cols} FROM {table}").fetchall()
+        for row in rows:
+            for doc_set, col in present_sets.items():
+                has_rows = db.execute(
+                    "SELECT 1 FROM record_documents "
+                    "WHERE category = ? AND record_id = ? AND doc_set = ? "
+                    "LIMIT 1",
+                    [category, row['id'], doc_set],
+                ).fetchone()
+                if has_rows:
+                    continue
+                docs = _docs_parse_json(row[col])
+                if docs:
+                    _write_record_documents_table(
+                        db, category, row['id'], doc_set, docs,
+                    )
+    db.commit()
 
 
 # Title keywords used to route a Sweep upload to the right doc-set on
@@ -8678,42 +9117,56 @@ def _route_sweep_doc_set(category, label):
 
 
 def _docs_load(db, table, record_id, col='documents'):
-    """Read the documents JSON for a record from `col`, normalizing to
-    a list of {title, filename} dicts. Returns None if record missing,
-    [] when the column is null/malformed."""
-    row = db.execute(
-        f"SELECT {col} FROM {table} WHERE id = ?", [record_id]
-    ).fetchone()
+    """Read document entries for a record.
+
+    The normalized record_documents table is the source of truth. The
+    legacy JSON column remains as a compatibility cache and as a fallback
+    for databases that have not been backfilled yet.
+    """
+    try:
+        row = db.execute(
+            f"SELECT {col} FROM {table} WHERE id = ?", [record_id]
+        ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
     if not row:
         return None
-    try:
-        docs = json.loads(row[col] or '[]')
-    except (TypeError, ValueError):
-        docs = []
-    if not isinstance(docs, list):
-        docs = []
-    # Defensive: drop any stray entries that aren't dicts so the
-    # endpoints can assume shape.
-    return [d for d in docs if isinstance(d, dict)]
+    category = _category_for_table(table)
+    doc_set = _docs_set_for_col(category, col) if category else None
+    if category and doc_set:
+        table_docs = _record_documents_for(db, category, record_id, doc_set)
+        if table_docs:
+            return table_docs
+    json_docs = _docs_parse_json(row[col])
+    if category and doc_set and json_docs:
+        _write_record_documents_table(db, category, record_id, doc_set,
+                                      json_docs)
+    return json_docs
 
 
 def _docs_save(db, table, record_id, docs, col='documents'):
-    db.execute(
-        f"UPDATE {table} SET {col} = ?, updated_at = ? WHERE id = ?",
-        [json.dumps(docs), datetime.utcnow().isoformat(), record_id],
-    )
+    _docs_update(db, table, record_id, docs, col)
     db.commit()
 
 
 def _docs_update(db, table, record_id, docs, col='documents', now=None):
-    """Update a document JSON column without committing.
+    """Update documents without committing.
 
     Used when multiple document columns must change atomically; callers
     commit once after every column update succeeds.
     """
+    now = now or datetime.utcnow().isoformat()
+    category = _category_for_table(table)
+    doc_set = _docs_set_for_col(category, col) if category else None
+    clean = _docs_normalize(docs)
+    if category and doc_set:
+        clean = _write_record_documents_table(
+            get_db() if db is None else db, category, record_id, doc_set,
+            clean, now=now,
+        )
     db.execute(
         f"UPDATE {table} SET {col} = ?, updated_at = ? WHERE id = ?",
-        [json.dumps(docs), now or datetime.utcnow().isoformat(), record_id],
+        [json.dumps(clean), now, record_id],
     )
 
 
@@ -9251,6 +9704,25 @@ def _upload_visible_to_current_user(filename):
             except sqlite3.OperationalError:
                 row = None
             if row:
+                return True
+
+        try:
+            doc_refs = db.execute(
+                "SELECT record_id FROM record_documents "
+                "WHERE category = ? AND filename = ?",
+                [cat, name],
+            ).fetchall()
+        except sqlite3.OperationalError:
+            doc_refs = []
+        for ref in doc_refs:
+            try:
+                row = db.execute(
+                    f"SELECT * FROM {table} WHERE id = ?",
+                    [ref['record_id']],
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = None
+            if row and _user_can_see_row(cat, row):
                 return True
 
         doc_cols = [c for c in _docs_cols_for(cat) if c in cols]
@@ -11570,6 +12042,14 @@ def _collect_referenced_uploads(db):
     # more JSON columns holding [{title, filename}, …] arrays. Files
     # referenced only via these arrays were getting marked as orphans
     # because the FIELDS-driven walk above misses them.
+    try:
+        for row in db.execute(
+            "SELECT filename FROM record_documents "
+            "WHERE filename IS NOT NULL AND TRIM(filename) != ''"
+        ).fetchall():
+            referenced.add(row['filename'])
+    except sqlite3.OperationalError:
+        pass
     for cat, sets in DOC_SETS_BY_CATEGORY.items():
         table = CATEGORIES[cat]['table']
         cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -12094,6 +12574,111 @@ EXPORT_CATEGORY_LABELS = {
 EXPORT_LABEL_TO_CATEGORY = {v: k for k, v in EXPORT_CATEGORY_LABELS.items()}
 
 
+def _record_data_snapshot(db, category, table, row):
+    """Per-record Files snapshot, including normalized child tables."""
+    payload = dict(row)
+    if category in DOCUMENTS_CATEGORIES:
+        docs_by_set = {}
+        for doc_set, json_col in DOC_SETS_BY_CATEGORY.get(category, {}).items():
+            if json_col not in row.keys():
+                continue
+            docs_by_set[doc_set] = _docs_load(
+                db, table, row['id'], json_col
+            ) or []
+        if docs_by_set:
+            payload['record_documents'] = docs_by_set
+    if category == 'watches':
+        events = _watch_service_events(db, row['id'])
+        if events:
+            payload['watch_service_events'] = events
+    if category == 'persons':
+        meds = _person_medication_rows(db, row['id'])
+        if meds:
+            payload['person_medications'] = meds
+    return payload
+
+
+def _csv_bytes(headers, rows):
+    import io
+    import csv as _csv
+    sio = io.StringIO()
+    w = _csv.writer(sio, quoting=_csv.QUOTE_MINIMAL)
+    w.writerow(headers)
+    for row in rows:
+        w.writerow(['' if v is None else v for v in row])
+    return sio.getvalue().encode('utf-8')
+
+
+def _write_related_files_csvs(zf, db, category, cat_label, visible_ids):
+    """Write CSVs for normalized child tables that no longer live in
+    the base category CSV."""
+    if not visible_ids:
+        return
+    ph = ','.join(['?'] * len(visible_ids))
+    if category in DOCUMENTS_CATEGORIES:
+        headers = [
+            'category', 'record_id', 'doc_set', 'position',
+            'title', 'filename', 'created_at', 'updated_at',
+        ]
+        try:
+            rows = db.execute(
+                "SELECT category, record_id, doc_set, position, title, "
+                "filename, created_at, updated_at FROM record_documents "
+                f"WHERE category = ? AND record_id IN ({ph}) "
+                "ORDER BY record_id, doc_set, position",
+                [category] + list(visible_ids),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        zf.writestr(
+            f'StuffFiles/{cat_label}/{cat_label} Documents.csv',
+            _csv_bytes(headers, ([r[h] for h in headers] for r in rows)),
+        )
+    if category == 'watches':
+        headers = [
+            'id', 'watch_id', 'date_sent', 'vendor', 'reason', 'cost',
+            'date_returned', 'created_at', 'updated_at',
+        ]
+        try:
+            rows = db.execute(
+                "SELECT id, watch_id, date_sent, vendor, reason, cost, "
+                "date_returned, created_at, updated_at "
+                "FROM watch_service_events "
+                f"WHERE watch_id IN ({ph}) "
+                "ORDER BY watch_id, "
+                "COALESCE(NULLIF(date_sent, ''), NULLIF(date_returned, ''), created_at), "
+                "created_at",
+                list(visible_ids),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        zf.writestr(
+            'StuffFiles/Watches/Watch Service Events.csv',
+            _csv_bytes(headers, ([r[h] for h in headers] for r in rows)),
+        )
+    if category == 'persons':
+        headers = [
+            'id', 'person_id', 'position', 'med_type', 'name',
+            'active_ingredients', 'dose', 'directions', 'note',
+            'created_at', 'updated_at',
+        ]
+        try:
+            rows = db.execute(
+                "SELECT id, person_id, position, med_type, name, "
+                "active_ingredients, dose, directions, note, created_at, "
+                "updated_at FROM person_medications "
+                f"WHERE person_id IN ({ph}) "
+                "ORDER BY person_id, position",
+                list(visible_ids),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        zf.writestr(
+            'StuffFiles/People/People Medications.csv',
+            _csv_bytes(headers, ([r[h] for h in headers] for r in rows)),
+        )
+
+
 @app.route('/export-files', methods=['GET'])
 def admin_export_files():
     """Stream a zip containing every file the current user has access to,
@@ -12258,7 +12843,8 @@ def admin_export_files():
                     f'{_next_unique(base_dir, ident, "_data", ".json")}'
                 )
                 payload = json.dumps(
-                    dict(row), default=str, indent=2,
+                    _record_data_snapshot(db, cat, table, row),
+                    default=str, indent=2,
                     ensure_ascii=False, sort_keys=True,
                 )
                 zf.writestr(arcname, payload)
@@ -12275,15 +12861,10 @@ def admin_export_files():
                 # time strip + a row mutation since boot) doesn't get
                 # re-emitted — would have shown up as the same file at
                 # two different arcnames in the same record folder.
-                for json_col in _docs_cols_for(cat):
+                for doc_set, json_col in DOC_SETS_BY_CATEGORY.get(cat, {}).items():
                     if json_col not in cols:
                         continue
-                    try:
-                        json_docs = json.loads(row[json_col] or '[]')
-                    except (TypeError, ValueError):
-                        json_docs = []
-                    if not isinstance(json_docs, list):
-                        continue
+                    json_docs = _docs_load(db, table, row['id'], json_col) or []
                     for i, d in enumerate(json_docs, 1):
                         if not isinstance(d, dict):
                             continue
@@ -12335,6 +12916,10 @@ def admin_export_files():
                     w.writerow(['' if r[c] is None else r[c] for c in col_names])
                 zf.writestr(f'StuffFiles/{cat_label}/{cat_label}.csv',
                             sio.getvalue().encode('utf-8'))
+            _write_related_files_csvs(
+                zf, db, cat, cat_label,
+                [r['id'] for r in csv_rows_full if 'id' in r.keys()],
+            )
 
         # _tombstones.json: deletions newer than `since` that are in a
         # category the caller has access to. Each entry carries the
@@ -12456,6 +13041,61 @@ def _files_export_stale(db, user, allowed):
         m = row and row['m']
         if m and (latest is None or m > latest):
             latest = m
+        if cat in DOCUMENTS_CATEGORIES:
+            doc_wheres = ["rd.category = ?"]
+            doc_params = [cat]
+            _apply_row_filter_clauses(cat, doc_wheres, doc_params)
+            try:
+                row = db.execute(
+                    "SELECT MAX(rd.updated_at) AS m "
+                    f"FROM record_documents rd JOIN {info['table']} "
+                    f"ON {info['table']}.id = rd.record_id "
+                    f"WHERE {' AND '.join(doc_wheres)}",
+                    doc_params,
+                ).fetchone()
+                m = row and row['m']
+                if m and (latest is None or m > latest):
+                    latest = m
+            except sqlite3.OperationalError:
+                pass
+        if cat == 'watches':
+            svc_wheres, svc_params = [], []
+            _apply_row_filter_clauses('watches', svc_wheres, svc_params)
+            svc_where = (
+                f"WHERE {' AND '.join(svc_wheres)}" if svc_wheres else ''
+            )
+            try:
+                row = db.execute(
+                    "SELECT MAX(wse.updated_at) AS m "
+                    "FROM watch_service_events wse "
+                    "JOIN watches ON watches.id = wse.watch_id "
+                    f"{svc_where}",
+                    svc_params,
+                ).fetchone()
+                m = row and row['m']
+                if m and (latest is None or m > latest):
+                    latest = m
+            except sqlite3.OperationalError:
+                pass
+        if cat == 'persons':
+            med_wheres, med_params = [], []
+            _apply_row_filter_clauses('persons', med_wheres, med_params)
+            med_where = (
+                f"WHERE {' AND '.join(med_wheres)}" if med_wheres else ''
+            )
+            try:
+                row = db.execute(
+                    "SELECT MAX(pm.updated_at) AS m "
+                    "FROM person_medications pm "
+                    "JOIN persons ON persons.id = pm.person_id "
+                    f"{med_where}",
+                    med_params,
+                ).fetchone()
+                m = row and row['m']
+                if m and (latest is None or m > latest):
+                    latest = m
+            except sqlite3.OperationalError:
+                pass
     # Tombstones: a delete in an allowed category since `last` should
     # also flip the indicator to stale so the user knows there's a
     # mirror-deletion waiting in the next syncDown.
@@ -15423,6 +16063,111 @@ def _is_data_snapshot_path(path):
     return bool(re.search(r'\s+[—–-]\s+_data(\s+\(\d+\))?$', name))
 
 
+def _snapshot_document_sets(snapshot, category):
+    """Return [(json_col, docs)] from a _data.json snapshot.
+
+    New exports carry normalized docs under record_documents keyed by
+    doc-set name; older exports only have the legacy JSON columns.
+    """
+    if not isinstance(snapshot, dict):
+        return []
+    nested = snapshot.get('record_documents')
+    out = []
+    if isinstance(nested, dict):
+        for doc_set, docs in nested.items():
+            json_col = _docs_col(category, doc_set)
+            if not json_col and doc_set in _docs_cols_for(category):
+                json_col = doc_set
+            if json_col and isinstance(docs, list):
+                out.append((json_col, _docs_normalize(docs)))
+        if out:
+            return out
+    for json_col in DOC_SETS_BY_CATEGORY.get(category, {}).values():
+        out.append((json_col, _docs_parse_json(snapshot.get(json_col))))
+    return out
+
+
+def _restore_snapshot_child_tables(db, category, row_id, snapshot, now):
+    """Restore non-file child-table metadata from _data.json.
+
+    File-bearing document rows are intentionally not restored here:
+    sweep's regular file pass writes fresh upload filenames from the
+    files on disk. Restoring old UUID filenames from _data.json would
+    point at files that may not exist in the rebuilt upload directory.
+    """
+    if not isinstance(snapshot, dict):
+        return
+    if category == 'persons':
+        meds = snapshot.get('person_medications')
+        if isinstance(meds, list):
+            has_rows = db.execute(
+                "SELECT 1 FROM person_medications "
+                "WHERE person_id = ? LIMIT 1",
+                [row_id],
+            ).fetchone()
+            if not has_rows:
+                clean = []
+                for med in meds:
+                    if not isinstance(med, dict):
+                        continue
+                    item = {'position': med.get('position')}
+                    for column in PERSON_MEDICATION_FIELD_COLUMNS.values():
+                        item[column] = med.get(column)
+                    clean.append(item)
+                if clean:
+                    _replace_person_medications(
+                        db, row_id, clean, now=now,
+                        sync_legacy=True, bump_person=False,
+                    )
+    elif category == 'watches':
+        events = snapshot.get('watch_service_events')
+        if isinstance(events, list):
+            has_rows = db.execute(
+                "SELECT 1 FROM watch_service_events "
+                "WHERE watch_id = ? LIMIT 1",
+                [row_id],
+            ).fetchone()
+            if not has_rows:
+                for event in events:
+                    if not isinstance(event, dict):
+                        continue
+                    payload = _watch_service_payload(event)
+                    db.execute(
+                        "INSERT INTO watch_service_events "
+                        "(id, watch_id, date_sent, vendor, reason, cost, "
+                        "date_returned, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        [
+                            str(uuid.uuid4()), row_id,
+                            payload['date_sent'],
+                            payload['vendor'],
+                            payload['reason'],
+                            payload['cost'],
+                            payload['date_returned'],
+                            event.get('created_at') or now,
+                            event.get('updated_at') or now,
+                        ],
+                    )
+                _sync_watch_service_date_from_events(db, row_id)
+    if category in DOCUMENTS_CATEGORIES:
+        table = CATEGORIES[category]['table']
+        for json_col, docs in _snapshot_document_sets(snapshot, category):
+            title_only = [
+                d for d in docs
+                if (d.get('title') or '').strip()
+                and not (d.get('filename') or '').strip()
+            ]
+            if not title_only:
+                continue
+            doc_set = _docs_set_for_col(category, json_col)
+            existing = (
+                _record_documents_for(db, category, row_id, doc_set)
+                if doc_set else []
+            )
+            if not existing:
+                _docs_update(db, table, row_id, title_only, json_col, now)
+
+
 def _process_sweep_deletes(record_state, allowed, db, now, dry_run, max_deletes=50):
     """For each record in this sweep batch that included a `_data.json`
     snapshot, compare what files the snapshot says the row owns against
@@ -15484,13 +16229,7 @@ def _process_sweep_deletes(record_state, allowed, db, now, dry_run, max_deletes=
                     label = t
             ext = os.path.splitext(fname)[1] or ''
             expected.append(('slot', field, label, ext, fname))
-        for json_col in DOC_SETS_BY_CATEGORY.get(cat, {}).values():
-            try:
-                docs = json.loads(snapshot.get(json_col) or '[]')
-            except (TypeError, ValueError):
-                docs = []
-            if not isinstance(docs, list):
-                continue
+        for json_col, docs in _snapshot_document_sets(snapshot, cat):
             for d in docs:
                 if not isinstance(d, dict):
                     continue
@@ -15546,15 +16285,7 @@ def _process_sweep_deletes(record_state, allowed, db, now, dry_run, max_deletes=
                     [now, row_id],
                 )
             else:  # 'doc'
-                cur = db.execute(
-                    f"SELECT {field} FROM {table} WHERE id = ?", [row_id]
-                ).fetchone()
-                try:
-                    cur_docs = json.loads((cur[field] if cur else None) or '[]')
-                except (TypeError, ValueError):
-                    cur_docs = []
-                if not isinstance(cur_docs, list):
-                    cur_docs = []
+                cur_docs = _docs_load(db, table, row_id, field) or []
                 label_norm = _norm(label)
                 # Splice the matching entry. Try (title + filename) first
                 # for precision; if filename drifted (e.g. user re-uploaded
@@ -15594,11 +16325,7 @@ def _process_sweep_deletes(record_state, allowed, db, now, dry_run, max_deletes=
                                   '(probably already removed via UI)',
                     })
                     continue
-                db.execute(
-                    f"UPDATE {table} SET {field} = ?, updated_at = ? "
-                    f"WHERE id = ?",
-                    [json.dumps(new_docs), now, row_id],
-                )
+                _docs_update(db, table, row_id, new_docs, field, now)
             _record_tombstone(db, cat, row, label, fname)
             deleted.append(entry)
         except Exception as exc:
@@ -15939,6 +16666,9 @@ def sweep_files():
                                 for k, v in updates.items():
                                     r_cached[k] = v
                                 break
+                    _restore_snapshot_child_tables(
+                        db, cat, row['id'], data_obj, now,
+                    )
                     report['uploaded'].append({
                         'file':   rel,
                         'record': f"{cat}/{row['id'][:8]} (snapshot filled {len(updates)} blank cols)",
@@ -15979,6 +16709,9 @@ def sweep_files():
                 new_row = dict(db.execute(
                     f"SELECT * FROM {table} WHERE id = ?", [seed['id']]
                 ).fetchone())
+                _restore_snapshot_child_tables(
+                    db, cat, new_row['id'], data_obj, now,
+                )
                 g_norm = _norm(plan['group'](new_row))
                 i_norm = _norm(plan['ident'](new_row))
                 indexes[cat].append((g_norm, i_norm, new_row))
@@ -16160,12 +16893,9 @@ def sweep_files():
             # the bare filename basename.
             if not chosen_field and cat in DOCUMENTS_CATEGORIES:
                 docs_col_pre = _route_sweep_doc_set(cat, parsed.get('label') or '')
-                try:
-                    existing_docs = json.loads(row[docs_col_pre] or '[]') if docs_col_pre in row.keys() else []
-                except (TypeError, ValueError):
-                    existing_docs = []
-                if not isinstance(existing_docs, list):
-                    existing_docs = []
+                existing_docs = _docs_load(
+                    db, table, _g(row, 'id'), docs_col_pre
+                ) or []
                 candidate_title = ((parsed.get('label') or '').strip()
                                    or (parsed.get('original_basename') or '').strip())
                 candidate_norm = _norm(candidate_title)
@@ -16215,12 +16945,7 @@ def sweep_files():
                 # roughly in their original tab. Misroutes can be fixed
                 # by deleting + re-uploading on the right tab.
                 docs_col = _route_sweep_doc_set(cat, parsed.get('label') or '')
-                try:
-                    docs = json.loads(row[docs_col] or '[]') if docs_col in row.keys() else []
-                except (TypeError, ValueError):
-                    docs = []
-                if not isinstance(docs, list):
-                    docs = []
+                docs = _docs_load(db, table, _g(row, 'id'), docs_col) or []
                 # Title fallback: when the parsed label is empty (filename
                 # didn't decompose into "<title>.<ext>" cleanly), use the
                 # original basename so the doc renders with a real name
@@ -16231,10 +16956,7 @@ def sweep_files():
                     'title':    doc_title,
                     'filename': stored,
                 })
-                db.execute(
-                    f"UPDATE {table} SET {docs_col} = ?, updated_at = ? WHERE id = ?",
-                    [json.dumps(docs), now, _g(row, 'id')],
-                )
+                _docs_update(db, table, _g(row, 'id'), docs, docs_col, now)
                 row[docs_col] = json.dumps(docs)
                 row['updated_at'] = now
                 report['uploaded'].append({
@@ -16652,11 +17374,8 @@ def persons_restore_docs():
                 docs.append({'title': title, 'filename': fn})
             if not docs:
                 continue
-            db.execute(
-                f"UPDATE persons SET {json_col} = ?, updated_at = ? "
-                f"WHERE id = ?",
-                [json.dumps(docs), datetime.utcnow().isoformat(), row['id']],
-            )
+            _docs_update(db, 'persons', row['id'], docs, json_col,
+                         datetime.utcnow().isoformat())
             restored += 1
         out[json_col] = restored
     db.commit()
@@ -16709,11 +17428,8 @@ def properties_restore_docs():
             docs.append({'title': title, 'filename': fn})
         if not docs:
             continue
-        db.execute(
-            "UPDATE properties SET documents = ?, updated_at = ? "
-            "WHERE id = ?",
-            [json.dumps(docs), datetime.utcnow().isoformat(), row['id']],
-        )
+        _docs_update(db, 'properties', row['id'], docs, 'documents',
+                     datetime.utcnow().isoformat())
         restored += 1
     db.commit()
     return jsonify(restored=restored,
