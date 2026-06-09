@@ -657,11 +657,11 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
       </div>
       {% set _service_events = watch_service_events|default([], true) %}
-      <details id="watchServicePanel" class="watch-service-panel" open>
-        <summary class="section-bar watch-service-bar">
+      <div id="watchServicePanel" class="watch-service-panel">
+        <div class="section-bar watch-service-bar">
           <span class="watch-service-title">Service</span>
           <button type="button" class="watch-service-add" data-service-add>Record Service Event</button>
-        </summary>
+        </div>
         <div class="dgrid dg2 watch-service-summary">
           <div class="dcell svc-date-cell">
             <input type="date" name="service_date" value="{{ val('service_date') }}" class="svc-date-input">
@@ -681,39 +681,45 @@ document.addEventListener('DOMContentLoaded', function () {
             <span class="clabel">Since (calc)</span>
           </div>
         </div>
-        <div class="watch-service-empty" data-service-empty {% if _service_events %}hidden{% endif %}>No service events recorded.</div>
-        <div class="watch-service-events" data-service-events>
-          {% for ev in _service_events %}
-          <div class="dgrid watch-service-event-grid" data-service-event-id="{{ ev.id }}">
-            <div class="dcell date-overlay-cell">
-              <input type="date" value="{{ ev.date_sent or '' }}" class="date-overlay-input" data-service-field="date_sent">
-              <span class="date-overlay-display">{% if ev.date_sent %}{{ ev.date_sent[5:7] }}/{{ ev.date_sent[8:10] }}/{{ ev.date_sent[0:4] }}{% endif %}</span>
-              <span class="clabel">Sent</span>
+        <details class="watch-service-rows-panel" data-service-rows>
+          <summary class="watch-service-events-toggle">
+            <span>Service Events</span>
+            <span class="watch-service-count" data-service-count>{{ _service_events|length }}</span>
+          </summary>
+          <div class="watch-service-empty" data-service-empty {% if _service_events %}hidden{% endif %}>No service events recorded.</div>
+          <div class="watch-service-events" data-service-events>
+            {% for ev in _service_events %}
+            <div class="dgrid watch-service-event-grid" data-service-event-id="{{ ev.id }}">
+              <div class="dcell date-overlay-cell">
+                <input type="date" value="{{ ev.date_sent or '' }}" class="date-overlay-input" data-service-field="date_sent">
+                <span class="date-overlay-display">{% if ev.date_sent %}{{ ev.date_sent[5:7] }}/{{ ev.date_sent[8:10] }}/{{ ev.date_sent[0:4] }}{% endif %}</span>
+                <span class="clabel">Sent</span>
+              </div>
+              <div class="dcell">
+                <input type="text" value="{{ ev.vendor or '' }}" data-service-field="vendor">
+                <span class="clabel">Vendor</span>
+              </div>
+              <div class="dcell watch-service-reason-cell">
+                <input type="text" value="{{ ev.reason or '' }}" data-service-field="reason">
+                <span class="clabel">Reason</span>
+              </div>
+              <div class="dcell">
+                <input type="text" value="{{ ev.cost or '' }}" data-service-field="cost">
+                <span class="clabel">Cost</span>
+              </div>
+              <div class="dcell date-overlay-cell">
+                <input type="date" value="{{ ev.date_returned or '' }}" class="date-overlay-input" data-service-field="date_returned">
+                <span class="date-overlay-display">{% if ev.date_returned %}{{ ev.date_returned[5:7] }}/{{ ev.date_returned[8:10] }}/{{ ev.date_returned[0:4] }}{% endif %}</span>
+                <span class="clabel">Returned</span>
+              </div>
+              <div class="dcell watch-service-delete-cell">
+                <button type="button" class="watch-service-delete" data-service-delete aria-label="Delete service event">&times;</button>
+              </div>
             </div>
-            <div class="dcell">
-              <input type="text" value="{{ ev.vendor or '' }}" data-service-field="vendor">
-              <span class="clabel">Vendor</span>
-            </div>
-            <div class="dcell watch-service-reason-cell">
-              <input type="text" value="{{ ev.reason or '' }}" data-service-field="reason">
-              <span class="clabel">Reason</span>
-            </div>
-            <div class="dcell">
-              <input type="text" value="{{ ev.cost or '' }}" data-service-field="cost">
-              <span class="clabel">Cost</span>
-            </div>
-            <div class="dcell date-overlay-cell">
-              <input type="date" value="{{ ev.date_returned or '' }}" class="date-overlay-input" data-service-field="date_returned">
-              <span class="date-overlay-display">{% if ev.date_returned %}{{ ev.date_returned[5:7] }}/{{ ev.date_returned[8:10] }}/{{ ev.date_returned[0:4] }}{% endif %}</span>
-              <span class="clabel">Returned</span>
-            </div>
-            <div class="dcell watch-service-delete-cell">
-              <button type="button" class="watch-service-delete" data-service-delete aria-label="Delete service event">&times;</button>
-            </div>
+            {% endfor %}
           </div>
-          {% endfor %}
-        </div>
-      </details>
+        </details>
+      </div>
     </div>
   </div>
 
@@ -4143,9 +4149,11 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
 
   const watchServicePanel = document.getElementById('watchServicePanel');
+  const serviceRowsPanel = watchServicePanel && watchServicePanel.querySelector('[data-service-rows]');
   const serviceEventsWrap = watchServicePanel && watchServicePanel.querySelector('[data-service-events]');
   const serviceAddBtn = watchServicePanel && watchServicePanel.querySelector('[data-service-add]');
   const serviceEmpty = watchServicePanel && watchServicePanel.querySelector('[data-service-empty]');
+  const serviceCount = watchServicePanel && watchServicePanel.querySelector('[data-service-count]');
   const serviceTimers = new WeakMap();
   const serviceLastPayload = new WeakMap();
 
@@ -4170,7 +4178,9 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
   function updateServiceEmptyState() {
     if (!serviceEmpty || !serviceEventsWrap) return;
-    serviceEmpty.hidden = Boolean(serviceEventsWrap.querySelector('[data-service-event-id]'));
+    const count = serviceEventsWrap.querySelectorAll('[data-service-event-id]').length;
+    serviceEmpty.hidden = count > 0;
+    if (serviceCount) serviceCount.textContent = String(count);
   }
 
   function collectServicePayload(row) {
@@ -4304,7 +4314,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
     serviceAddBtn.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
-      if (watchServicePanel) watchServicePanel.open = true;
+      if (serviceRowsPanel) serviceRowsPanel.open = true;
       ensureRecord()
         .then(() => fetch(serviceBaseUrl(), {
           method: 'POST',

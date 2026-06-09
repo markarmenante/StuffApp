@@ -3361,6 +3361,12 @@ def _own_status_predicate(column='status'):
 CATEGORY_FILTERS = {
     'watches': {
         'ordered': ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
+        'in_service': (
+            "EXISTS (SELECT 1 FROM watch_service_events wse "
+            "WHERE wse.watch_id = watches.id "
+            "AND (wse.date_returned IS NULL OR TRIM(wse.date_returned) = ''))",
+            [],
+        ),
         # Inverts the default list view: shows ONLY watches that have
         # actually left the collection (sold / gifted / lost). The
         # default list (no filter) hides these — see build_search_query.
@@ -5089,6 +5095,16 @@ def list_view(category):
             f"SELECT EXISTS(SELECT 1 FROM {table} "
             f"WHERE LOWER(TRIM(COALESCE(status,''))) IN ('sold','gifted','lost'))"
         ).fetchone()[0] == 1
+    has_in_service = False
+    if category == 'watches':
+        has_in_service = db.execute(
+            "SELECT EXISTS("
+            "SELECT 1 FROM watch_service_events wse "
+            "JOIN watches w ON w.id = wse.watch_id "
+            "WHERE (wse.date_returned IS NULL OR TRIM(wse.date_returned) = '') "
+            "AND LOWER(TRIM(COALESCE(w.status,''))) NOT IN ('sold','gifted','lost')"
+            ")"
+        ).fetchone()[0] == 1
     watch_service_event_ids = set()
     if category == 'watches' and rows:
         ids = [row['id'] for row in rows]
@@ -5118,6 +5134,7 @@ def list_view(category):
                            result_count=len(rows),
                            has_ordered=has_ordered,
                            has_no_longer_owned=has_no_longer_owned,
+                           has_in_service=has_in_service,
                            watch_service_event_ids=watch_service_event_ids,
                            extra_fields=extra_fields,
                            fields=visible_fields(category))
@@ -5633,6 +5650,8 @@ def watch_service_event_create(record_id):
     db = get_db()
     _require_watch_for_service_event(db, record_id)
     payload = _watch_service_payload(request.get_json(silent=True) or {})
+    if not payload['date_sent']:
+        payload['date_sent'] = date.today().isoformat()
     event_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
     db.execute(

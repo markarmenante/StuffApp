@@ -65,6 +65,11 @@
      class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
      title="Watches with status Ordered">Commissioned</a>
   {% endif %}
+  {% if has_in_service or coin_filter == 'in_service' %}
+  <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'in_service' else 'in_service') }}"
+     class="toolbar-btn pill {% if coin_filter == 'in_service' %}active{% endif %}"
+     title="Watches with an open service event">In Service</a>
+  {% endif %}
   {% if has_no_longer_owned or coin_filter == 'no_longer_owned' %}
   <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'no_longer_owned' else 'no_longer_owned') }}"
      class="toolbar-btn pill {% if coin_filter == 'no_longer_owned' %}active{% endif %}"
