@@ -18,6 +18,12 @@ Actual GitHub checkout:
 /Users/markarmenante/Documents/GitHub/stuffapp
 ```
 
+GitHub repo:
+
+```text
+markarmenante/StuffApp
+```
+
 Quick local start:
 
 ```bash

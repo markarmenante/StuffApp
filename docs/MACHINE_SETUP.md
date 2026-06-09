@@ -9,7 +9,7 @@ workspace from scratch.
 mkdir -p "$HOME/Documents/GitHub" "$HOME/Developer"
 
 test -d "$HOME/Documents/GitHub/stuffapp/.git" || \
-  git clone https://github.com/markarmenante/stuffapp.git "$HOME/Documents/GitHub/stuffapp"
+  git clone https://github.com/markarmenante/StuffApp.git "$HOME/Documents/GitHub/stuffapp"
 
 test -d "$HOME/Documents/GitHub/n552ym/.git" || \
   git clone https://github.com/markarmenante/n552ym.git "$HOME/Documents/GitHub/n552ym"
@@ -32,7 +32,7 @@ StuffApp: https://stuff.armenante.com on Railway
 N552YM:   https://n552ym.vercel.app/trips on Vercel
 ```
 
-StuffApp source is `markarmenante/stuffapp`, without a dash. Do not use
+StuffApp source is `markarmenante/StuffApp`, without a dash. Do not use
 `markarmenante/stuff-app` or `/Users/markarmenante/Documents/GitHub/stuff-app`
 for production StuffApp work; that is the stale Next/Vercel rebuild.
 
