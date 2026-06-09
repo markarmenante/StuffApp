@@ -659,7 +659,14 @@ document.addEventListener('DOMContentLoaded', function () {
       {% set _service_events = watch_service_events|default([], true) %}
       <div id="watchServicePanel" class="watch-service-panel">
         <div class="section-bar watch-service-bar">
-          <span class="watch-service-title">Service</span>
+          <button type="button"
+                  class="watch-service-toggle"
+                  data-service-toggle
+                  aria-expanded="{{ 'true' if watch_service_has_open_return else 'false' }}"
+                  aria-controls="watchServiceRows">
+            <span class="watch-service-arrow" aria-hidden="true"></span>
+            <span class="watch-service-title">Service</span>
+          </button>
           <button type="button" class="watch-service-add" data-service-add>Record Service Event</button>
         </div>
         <div class="dgrid dg2 watch-service-summary">
@@ -681,11 +688,8 @@ document.addEventListener('DOMContentLoaded', function () {
             <span class="clabel">Since (calc)</span>
           </div>
         </div>
-        <details class="watch-service-rows-panel" data-service-rows>
-          <summary class="watch-service-events-toggle">
-            <span>Service Events</span>
-            <span class="watch-service-count" data-service-count>{{ _service_events|length }}</span>
-          </summary>
+        <details id="watchServiceRows" class="watch-service-rows-panel" data-service-rows {% if watch_service_has_open_return %}open{% endif %}>
+          <summary class="watch-service-events-toggle" aria-label="Service event rows"></summary>
           <div class="watch-service-empty" data-service-empty {% if _service_events %}hidden{% endif %}>No service events recorded.</div>
           <div class="watch-service-events" data-service-events>
             {% for ev in _service_events %}
@@ -4151,10 +4155,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
   const watchServicePanel = document.getElementById('watchServicePanel');
   const serviceRowsPanel = watchServicePanel && watchServicePanel.querySelector('[data-service-rows]');
+  const serviceToggle = watchServicePanel && watchServicePanel.querySelector('[data-service-toggle]');
   const serviceEventsWrap = watchServicePanel && watchServicePanel.querySelector('[data-service-events]');
   const serviceAddBtn = watchServicePanel && watchServicePanel.querySelector('[data-service-add]');
   const serviceEmpty = watchServicePanel && watchServicePanel.querySelector('[data-service-empty]');
-  const serviceCount = watchServicePanel && watchServicePanel.querySelector('[data-service-count]');
   const serviceTimers = new WeakMap();
   const serviceLastPayload = new WeakMap();
 
@@ -4166,6 +4170,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
     return value && value.length >= 10
       ? `${value.slice(5,7)}/${value.slice(8,10)}/${value.slice(0,4)}`
       : '';
+  }
+
+  function syncServiceRowsOpenState() {
+    if (!serviceRowsPanel) return;
+    const isOpen = !!serviceRowsPanel.open;
+    if (serviceToggle) serviceToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
   }
 
   function escapeHtml(value) {
@@ -4181,7 +4191,6 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (!serviceEmpty || !serviceEventsWrap) return;
     const count = serviceEventsWrap.querySelectorAll('[data-service-event-id]').length;
     serviceEmpty.hidden = count > 0;
-    if (serviceCount) serviceCount.textContent = String(count);
   }
 
   function collectServicePayload(row) {
@@ -4311,11 +4320,27 @@ document.querySelectorAll('.comp-item').forEach(item => {
     updateServiceEmptyState();
   }
 
+  if (serviceRowsPanel) {
+    serviceRowsPanel.addEventListener('toggle', syncServiceRowsOpenState);
+    syncServiceRowsOpenState();
+  }
+
+  if (serviceToggle && serviceRowsPanel) {
+    serviceToggle.addEventListener('click', event => {
+      event.preventDefault();
+      serviceRowsPanel.open = !serviceRowsPanel.open;
+      syncServiceRowsOpenState();
+    });
+  }
+
   if (serviceAddBtn && serviceEventsWrap) {
     serviceAddBtn.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
-      if (serviceRowsPanel) serviceRowsPanel.open = true;
+      if (serviceRowsPanel) {
+        serviceRowsPanel.open = true;
+        syncServiceRowsOpenState();
+      }
       ensureRecord()
         .then(() => fetch(serviceBaseUrl(), {
           method: 'POST',

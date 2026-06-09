@@ -5629,6 +5629,7 @@ def _render_new_form(category, data=None, focus_field=None):
                            service_overdue=None,
                            service_years=None,
                            watch_service_events=[],
+                           watch_service_has_open_return=False,
                            record_documents_by_set={},
                            person_medications_by_position={},
                            today_iso=date.today().isoformat(),
@@ -5908,8 +5909,13 @@ def detail_view(category, record_id):
         except Exception:
             pass
     watch_service_events = []
+    watch_service_has_open_return = False
     if category == 'watches':
         watch_service_events = _watch_service_events(db, record_id)
+        watch_service_has_open_return = any(
+            not (ev.get('date_returned') or '').strip()
+            for ev in watch_service_events
+        )
     record_documents_by_set = {}
     if category in DOCUMENTS_CATEGORIES:
         for doc_set, col in DOC_SETS_BY_CATEGORY.get(category, {}).items():
@@ -5943,6 +5949,7 @@ def detail_view(category, record_id):
                            service_overdue=service_overdue,
                            service_years=service_years,
                            watch_service_events=watch_service_events,
+                           watch_service_has_open_return=watch_service_has_open_return,
                            record_documents_by_set=record_documents_by_set,
                            person_medications_by_position=person_medications_by_position,
                            today_iso=None,
