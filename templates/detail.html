@@ -656,24 +656,64 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">Calibre Notes</span>
         </div>
       </div>
-      <div class="dgrid dg2">
-        <div class="dcell svc-date-cell">
-          <input type="date" name="service_date" value="{{ val('service_date') }}" class="svc-date-input">
-          <span class="svc-date-compact">{% if val('service_date') %}{{ val('service_date')[5:7] }}/{{ val('service_date')[2:4] }}{% endif %}</span>
-          <span class="clabel">Svc</span>
+      {% set _service_events = watch_service_events|default([], true) %}
+      <details id="watchServicePanel" class="watch-service-panel" open>
+        <summary class="section-bar watch-service-bar">
+          <span class="watch-service-title">Service</span>
+          <button type="button" class="watch-service-add" data-service-add>Record Service Event</button>
+        </summary>
+        <div class="dgrid dg2 watch-service-summary">
+          <div class="dcell svc-date-cell">
+            <input type="date" name="service_date" value="{{ val('service_date') }}" class="svc-date-input">
+            <span class="svc-date-compact">{% if val('service_date') %}{{ val('service_date')[5:7] }}/{{ val('service_date')[2:4] }}{% endif %}</span>
+            <span class="clabel">Svc</span>
+          </div>
+          <div class="dcell svc-since-cell {% if service_overdue %}service-overdue{% endif %}">
+            {# Years-since-service is derived from Svc date; clicking it
+               explains rather than silently no-op'ing. #}
+            <input type="text"
+                   class="svc-since-input"
+                   value="{{ ('%d yrs'|format(service_years)) if service_years is not none else '' }}"
+                   readonly
+                   title="Calculated from the Svc date. Edit the Svc field to change."
+                   onclick="alert('Years since service is calculated from the Svc date and can’t be entered directly. Set the Svc date instead.')"
+                   style="color:#888;cursor:not-allowed">
+            <span class="clabel">Since (calc)</span>
+          </div>
         </div>
-        <div class="dcell {% if service_overdue %}service-overdue{% endif %}">
-          {# Years-since-service is derived from Svc date; clicking it
-             explains rather than silently no-op'ing. #}
-          <input type="text"
-                 value="{{ ('%d yrs'|format(service_years)) if service_years is not none else '' }}"
-                 readonly
-                 title="Calculated from the Svc date. Edit the Svc field to change."
-                 onclick="alert('Years since service is calculated from the Svc date and can’t be entered directly. Set the Svc date instead.')"
-                 style="color:#888;cursor:not-allowed">
-          <span class="clabel">Since (calc)</span>
+        <div class="watch-service-empty" data-service-empty {% if _service_events %}hidden{% endif %}>No service events recorded.</div>
+        <div class="watch-service-events" data-service-events>
+          {% for ev in _service_events %}
+          <div class="dgrid watch-service-event-grid" data-service-event-id="{{ ev.id }}">
+            <div class="dcell date-overlay-cell">
+              <input type="date" value="{{ ev.date_sent or '' }}" class="date-overlay-input" data-service-field="date_sent">
+              <span class="date-overlay-display">{% if ev.date_sent %}{{ ev.date_sent[5:7] }}/{{ ev.date_sent[8:10] }}/{{ ev.date_sent[0:4] }}{% endif %}</span>
+              <span class="clabel">Sent</span>
+            </div>
+            <div class="dcell">
+              <input type="text" value="{{ ev.vendor or '' }}" data-service-field="vendor">
+              <span class="clabel">Vendor</span>
+            </div>
+            <div class="dcell watch-service-reason-cell">
+              <input type="text" value="{{ ev.reason or '' }}" data-service-field="reason">
+              <span class="clabel">Reason</span>
+            </div>
+            <div class="dcell">
+              <input type="text" value="{{ ev.cost or '' }}" data-service-field="cost">
+              <span class="clabel">Cost</span>
+            </div>
+            <div class="dcell date-overlay-cell">
+              <input type="date" value="{{ ev.date_returned or '' }}" class="date-overlay-input" data-service-field="date_returned">
+              <span class="date-overlay-display">{% if ev.date_returned %}{{ ev.date_returned[5:7] }}/{{ ev.date_returned[8:10] }}/{{ ev.date_returned[0:4] }}{% endif %}</span>
+              <span class="clabel">Returned</span>
+            </div>
+            <div class="dcell watch-service-delete-cell">
+              <button type="button" class="watch-service-delete" data-service-delete aria-label="Delete service event">&times;</button>
+            </div>
+          </div>
+          {% endfor %}
         </div>
-      </div>
+      </details>
     </div>
   </div>
 
@@ -4058,13 +4098,231 @@ document.querySelectorAll('.comp-item').forEach(item => {
     });
   });
 
-  // Service date: keep the compact MM/YY overlay in sync
-  const svcDate = form.querySelector('input[name=service_date]');
-  const svcCompact = svcDate && svcDate.parentElement.querySelector('.svc-date-compact');
-  if (svcDate && svcCompact) {
-    svcDate.addEventListener('change', () => {
-      const v = svcDate.value;  // ISO YYYY-MM-DD or ''
+  function serviceYearsFrom(value) {
+    if (!value) return '';
+    const d = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return '';
+    const today = new Date();
+    const years = Math.floor((today - d) / (365.25 * 24 * 60 * 60 * 1000));
+    return Number.isFinite(years) && years >= 0 ? `${years} yrs` : '';
+  }
+
+  function serviceThresholdYears() {
+    const checked = Array.from(form.querySelectorAll('input[name="complications"]:checked'))
+      .filter(cb => (cb.value || '').trim());
+    return checked.length > 5 ? 10 : 15;
+  }
+
+  function updateServiceSummary(serviceDate) {
+    const svcDate = form.querySelector('input[name=service_date]');
+    const svcCompact = svcDate && svcDate.parentElement.querySelector('.svc-date-compact');
+    const sinceCell = form.querySelector('.svc-since-cell');
+    const sinceInput = form.querySelector('.svc-since-input');
+    if (svcDate && serviceDate !== null && serviceDate !== undefined) {
+      svcDate.value = serviceDate || '';
+    }
+    const v = svcDate ? svcDate.value : (serviceDate || '');
+    if (svcCompact) {
       svcCompact.textContent = v ? `${v.slice(5,7)}/${v.slice(2,4)}` : '';
+    }
+    const yearsText = serviceYearsFrom(v);
+    if (sinceInput) sinceInput.value = yearsText;
+    if (sinceCell) {
+      const years = parseInt(yearsText, 10);
+      sinceCell.classList.toggle(
+        'service-overdue',
+        Number.isFinite(years) && years > serviceThresholdYears()
+      );
+    }
+  }
+
+  // Service date: keep the compact MM/YY overlay and Since field in sync
+  const svcDate = form.querySelector('input[name=service_date]');
+  if (svcDate) {
+    svcDate.addEventListener('change', () => updateServiceSummary(svcDate.value));
+  }
+
+  const watchServicePanel = document.getElementById('watchServicePanel');
+  const serviceEventsWrap = watchServicePanel && watchServicePanel.querySelector('[data-service-events]');
+  const serviceAddBtn = watchServicePanel && watchServicePanel.querySelector('[data-service-add]');
+  const serviceEmpty = watchServicePanel && watchServicePanel.querySelector('[data-service-empty]');
+  const serviceTimers = new WeakMap();
+  const serviceLastPayload = new WeakMap();
+
+  function serviceBaseUrl() {
+    return `${form.action.replace(/\/$/, '')}/service-events`;
+  }
+
+  function serviceDateDisplay(value) {
+    return value && value.length >= 10
+      ? `${value.slice(5,7)}/${value.slice(8,10)}/${value.slice(0,4)}`
+      : '';
+  }
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function updateServiceEmptyState() {
+    if (!serviceEmpty || !serviceEventsWrap) return;
+    serviceEmpty.hidden = Boolean(serviceEventsWrap.querySelector('[data-service-event-id]'));
+  }
+
+  function collectServicePayload(row) {
+    const payload = {};
+    row.querySelectorAll('[data-service-field]').forEach(input => {
+      payload[input.dataset.serviceField] = input.value;
+    });
+    return payload;
+  }
+
+  function syncServiceDateOverlay(input) {
+    const display = input.parentElement && input.parentElement.querySelector('.date-overlay-display');
+    if (display) display.textContent = serviceDateDisplay(input.value);
+  }
+
+  function rowServiceUrl(row) {
+    return `${serviceBaseUrl()}/${encodeURIComponent(row.dataset.serviceEventId || '')}`;
+  }
+
+  function saveServiceRow(row) {
+    if (!row || !row.dataset.serviceEventId) return Promise.resolve();
+    const payload = collectServicePayload(row);
+    const serialized = JSON.stringify(payload);
+    if (serviceLastPayload.get(row) === serialized) return Promise.resolve();
+    serviceLastPayload.set(row, serialized);
+    return ensureRecord()
+      .then(() => fetch(rowServiceUrl(row), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: serialized,
+        keepalive: true,
+      }))
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.ok) {
+          updateServiceSummary(d.service_date);
+          showToast();
+        }
+      })
+      .catch(err => console.warn('Service save failed:', err));
+  }
+
+  function scheduleServiceSave(row) {
+    const existing = serviceTimers.get(row);
+    if (existing) clearTimeout(existing);
+    serviceTimers.set(row, setTimeout(() => {
+      serviceTimers.delete(row);
+      saveServiceRow(row);
+    }, 300));
+  }
+
+  function flushServiceSave(row) {
+    const existing = serviceTimers.get(row);
+    if (existing) {
+      clearTimeout(existing);
+      serviceTimers.delete(row);
+    }
+    return saveServiceRow(row);
+  }
+
+  function serviceRowHtml(event) {
+    return `
+      <div class="dgrid watch-service-event-grid" data-service-event-id="${escapeHtml(event.id)}">
+        <div class="dcell date-overlay-cell">
+          <input type="date" value="${escapeHtml(event.date_sent)}" class="date-overlay-input" data-service-field="date_sent">
+          <span class="date-overlay-display">${escapeHtml(serviceDateDisplay(event.date_sent))}</span>
+          <span class="clabel">Sent</span>
+        </div>
+        <div class="dcell">
+          <input type="text" value="${escapeHtml(event.vendor)}" data-service-field="vendor">
+          <span class="clabel">Vendor</span>
+        </div>
+        <div class="dcell watch-service-reason-cell">
+          <input type="text" value="${escapeHtml(event.reason)}" data-service-field="reason">
+          <span class="clabel">Reason</span>
+        </div>
+        <div class="dcell">
+          <input type="text" value="${escapeHtml(event.cost)}" data-service-field="cost">
+          <span class="clabel">Cost</span>
+        </div>
+        <div class="dcell date-overlay-cell">
+          <input type="date" value="${escapeHtml(event.date_returned)}" class="date-overlay-input" data-service-field="date_returned">
+          <span class="date-overlay-display">${escapeHtml(serviceDateDisplay(event.date_returned))}</span>
+          <span class="clabel">Returned</span>
+        </div>
+        <div class="dcell watch-service-delete-cell">
+          <button type="button" class="watch-service-delete" data-service-delete aria-label="Delete service event">&times;</button>
+        </div>
+      </div>`;
+  }
+
+  function bindServiceRow(row) {
+    if (!row) return;
+    serviceLastPayload.set(row, JSON.stringify(collectServicePayload(row)));
+    row.querySelectorAll('[data-service-field]').forEach(input => {
+      if (input.type === 'date') {
+        input.addEventListener('change', () => {
+          syncServiceDateOverlay(input);
+          flushServiceSave(row);
+        });
+      } else {
+        input.addEventListener('input', () => scheduleServiceSave(row));
+        input.addEventListener('blur', () => flushServiceSave(row));
+      }
+    });
+    const deleteBtn = row.querySelector('[data-service-delete]');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => {
+        if (!confirm('Delete this service event?')) return;
+        fetch(rowServiceUrl(row), { method: 'DELETE' })
+          .then(r => r.json())
+          .then(d => {
+            if (d && d.ok) {
+              row.remove();
+              updateServiceSummary(d.service_date);
+              updateServiceEmptyState();
+              showToast();
+            }
+          })
+          .catch(err => console.warn('Service delete failed:', err));
+      });
+    }
+  }
+
+  if (serviceEventsWrap) {
+    serviceEventsWrap.querySelectorAll('[data-service-event-id]').forEach(bindServiceRow);
+    updateServiceEmptyState();
+  }
+
+  if (serviceAddBtn && serviceEventsWrap) {
+    serviceAddBtn.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (watchServicePanel) watchServicePanel.open = true;
+      ensureRecord()
+        .then(() => fetch(serviceBaseUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        }))
+        .then(r => r.json())
+        .then(d => {
+          if (!d || !d.ok || !d.event) throw new Error('Service event create failed');
+          serviceEventsWrap.insertAdjacentHTML('beforeend', serviceRowHtml(d.event));
+          const row = serviceEventsWrap.lastElementChild;
+          bindServiceRow(row);
+          updateServiceEmptyState();
+          const firstInput = row && row.querySelector('[data-service-field]');
+          if (firstInput) firstInput.focus();
+          showToast();
+        })
+        .catch(err => console.warn('Service event create failed:', err));
     });
   }
 

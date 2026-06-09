@@ -198,12 +198,18 @@
             {% set _watch_compare = _watch_actual or today_iso %}
             {% set _watch_late_class = '' %}
             {% set _show_watch_dot = _watch_status == 'ordered' and _watch_promised and _watch_compare > _watch_promised %}
+            {% set _watch_has_service = row['id'] in (watch_service_event_ids or []) %}
             {% if _show_watch_dot %}
               {% set _watch_late_class = 'is-late-2y' if _watch_compare >= (_watch_promised|date_plus_years(2)) else 'is-promised' %}
             {% endif %}
-            {% if _show_watch_dot %}
+            {% if _show_watch_dot or _watch_has_service %}
             <span class="watch-id-badge item-cat-id">
+              {% if _show_watch_dot %}
               <span class="watch-order-dot {{ _watch_late_class }}" title="Ordered: promised {{ _watch_promised|short_date }}" aria-label="Ordered"></span>
+              {% endif %}
+              {% if _watch_has_service %}
+              <span class="watch-service-dot" title="Service history" aria-label="Service history"></span>
+              {% endif %}
             </span>
             {% endif %}
           </div>

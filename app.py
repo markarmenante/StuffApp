@@ -5089,6 +5089,17 @@ def list_view(category):
             f"SELECT EXISTS(SELECT 1 FROM {table} "
             f"WHERE LOWER(TRIM(COALESCE(status,''))) IN ('sold','gifted','lost'))"
         ).fetchone()[0] == 1
+    watch_service_event_ids = set()
+    if category == 'watches' and rows:
+        ids = [row['id'] for row in rows]
+        placeholders = ','.join(['?'] * len(ids))
+        watch_service_event_ids = {
+            row['watch_id'] for row in db.execute(
+                "SELECT DISTINCT watch_id FROM watch_service_events "
+                f"WHERE watch_id IN ({placeholders})",
+                ids,
+            ).fetchall()
+        }
     return render_template('list.html',
                            category=category,
                            cat_info=cat_info,
@@ -5107,6 +5118,7 @@ def list_view(category):
                            result_count=len(rows),
                            has_ordered=has_ordered,
                            has_no_longer_owned=has_no_longer_owned,
+                           watch_service_event_ids=watch_service_event_ids,
                            extra_fields=extra_fields,
                            fields=visible_fields(category))
 
@@ -5317,6 +5329,7 @@ def _render_new_form(category, data=None, focus_field=None):
                            back_href=None,
                            service_overdue=None,
                            service_years=None,
+                           watch_service_events=[],
                            today_iso=date.today().isoformat(),
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=current_vlists(category),
@@ -5584,6 +5597,9 @@ def detail_view(category, record_id):
             service_overdue = years > threshold
         except Exception:
             pass
+    watch_service_events = []
+    if category == 'watches':
+        watch_service_events = _watch_service_events(db, record_id)
 
     return render_template('detail.html',
                            category=category,
@@ -5605,10 +5621,94 @@ def detail_view(category, record_id):
                            back_href=back_href,
                            service_overdue=service_overdue,
                            service_years=service_years,
+                           watch_service_events=watch_service_events,
                            today_iso=None,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=current_vlists(category),
                            ta=build_typeahead(category))
+
+
+@app.route('/watches/<record_id>/service-events', methods=['POST'])
+def watch_service_event_create(record_id):
+    db = get_db()
+    _require_watch_for_service_event(db, record_id)
+    payload = _watch_service_payload(request.get_json(silent=True) or {})
+    event_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "INSERT INTO watch_service_events "
+        "(id, watch_id, date_sent, vendor, reason, cost, date_returned, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            event_id,
+            record_id,
+            payload['date_sent'],
+            payload['vendor'],
+            payload['reason'],
+            payload['cost'],
+            payload['date_returned'],
+            now,
+            now,
+        ],
+    )
+    service_date = _sync_watch_service_date_from_events(db, record_id)
+    db.commit()
+    row = db.execute(
+        "SELECT * FROM watch_service_events WHERE id = ?",
+        [event_id],
+    ).fetchone()
+    return jsonify({'ok': True, 'event': _service_event_dict(row),
+                    'service_date': service_date})
+
+
+@app.route('/watches/<record_id>/service-events/<event_id>', methods=['POST', 'PATCH'])
+def watch_service_event_update(record_id, event_id):
+    db = get_db()
+    _require_watch_for_service_event(db, record_id)
+    existing = db.execute(
+        "SELECT id FROM watch_service_events WHERE id = ? AND watch_id = ?",
+        [event_id, record_id],
+    ).fetchone()
+    if existing is None:
+        return jsonify({'error': 'Record not found'}), 404
+    payload = _watch_service_payload(request.get_json(silent=True) or {})
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "UPDATE watch_service_events SET "
+        "date_sent = ?, vendor = ?, reason = ?, cost = ?, date_returned = ?, updated_at = ? "
+        "WHERE id = ? AND watch_id = ?",
+        [
+            payload['date_sent'],
+            payload['vendor'],
+            payload['reason'],
+            payload['cost'],
+            payload['date_returned'],
+            now,
+            event_id,
+            record_id,
+        ],
+    )
+    service_date = _sync_watch_service_date_from_events(db, record_id)
+    db.commit()
+    row = db.execute(
+        "SELECT * FROM watch_service_events WHERE id = ? AND watch_id = ?",
+        [event_id, record_id],
+    ).fetchone()
+    return jsonify({'ok': True, 'event': _service_event_dict(row),
+                    'service_date': service_date})
+
+
+@app.route('/watches/<record_id>/service-events/<event_id>', methods=['DELETE'])
+def watch_service_event_delete(record_id, event_id):
+    db = get_db()
+    _require_watch_for_service_event(db, record_id)
+    db.execute(
+        "DELETE FROM watch_service_events WHERE id = ? AND watch_id = ?",
+        [event_id, record_id],
+    )
+    service_date = _sync_watch_service_date_from_events(db, record_id)
+    db.commit()
+    return jsonify({'ok': True, 'service_date': service_date})
 
 
 @app.route('/persons/<record_id>/medication-ingredients', methods=['POST'])
@@ -8033,6 +8133,80 @@ def _watch_order_lateness(expected, actual=None):
     if rem_months:
         parts.append(f"{rem_months} mo")
     return ' '.join(parts) + ' late'
+
+
+def _clean_service_date(value):
+    raw = str(value or '').strip()
+    if len(raw) >= 10 and re.match(r'^\d{4}-\d{2}-\d{2}$', raw[:10]):
+        return raw[:10]
+    return None
+
+
+def _clean_service_text(value, max_len=None):
+    text = str(value or '').strip()
+    if max_len and len(text) > max_len:
+        text = text[:max_len]
+    return text or None
+
+
+def _service_event_dict(row):
+    if not row:
+        return None
+    return {
+        'id': row['id'],
+        'watch_id': row['watch_id'],
+        'date_sent': row['date_sent'],
+        'vendor': row['vendor'],
+        'reason': row['reason'],
+        'cost': row['cost'],
+        'date_returned': row['date_returned'],
+        'created_at': row['created_at'],
+        'updated_at': row['updated_at'],
+    }
+
+
+def _watch_service_events(db, watch_id):
+    rows = db.execute(
+        "SELECT * FROM watch_service_events WHERE watch_id = ? "
+        "ORDER BY COALESCE(NULLIF(date_sent, ''), NULLIF(date_returned, ''), created_at) DESC, "
+        "created_at DESC",
+        [watch_id],
+    ).fetchall()
+    return [_service_event_dict(row) for row in rows]
+
+
+def _watch_service_payload(data):
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        'date_sent': _clean_service_date(data.get('date_sent')),
+        'vendor': _clean_service_text(data.get('vendor'), 200),
+        'reason': _clean_service_text(data.get('reason'), 1000),
+        'cost': _clean_service_text(data.get('cost'), 100),
+        'date_returned': _clean_service_date(data.get('date_returned')),
+    }
+
+
+def _require_watch_for_service_event(db, record_id):
+    row = db.execute("SELECT * FROM watches WHERE id = ?", [record_id]).fetchone()
+    if row is None or not _user_can_see_row('watches', row):
+        abort(404)
+    return row
+
+
+def _sync_watch_service_date_from_events(db, watch_id):
+    row = db.execute(
+        "SELECT MAX(date_returned) AS latest FROM watch_service_events "
+        "WHERE watch_id = ? AND date_returned IS NOT NULL AND TRIM(date_returned) != ''",
+        [watch_id],
+    ).fetchone()
+    latest = row['latest'] if row else None
+    if latest:
+        db.execute(
+            "UPDATE watches SET service_date = ?, updated_at = ? WHERE id = ?",
+            [latest, datetime.utcnow().isoformat(), watch_id],
+        )
+    return latest
 
 
 def _apply_watch_order_form_fields(target, form):

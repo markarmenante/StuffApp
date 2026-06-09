@@ -585,6 +585,15 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .watch-order-dot.is-promised { background: #f4c542; }
 .watch-order-dot.is-late-2y { background: #d93025; }
+.watch-service-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #bfe3ff;
+  border: 1px solid rgba(45,110,155,.35);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.75);
+  flex: 0 0 auto;
+}
 .coin-position-actions .item-cat-id {
   align-self: center;
   margin-left: 0;
@@ -1369,6 +1378,91 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .watch-order-late[readonly] { font-weight: 600; }
 .watch-order-late::placeholder { color: #777; opacity: 1; }
+.watch-service-panel {
+  display: block;
+  border-bottom: 1px solid var(--border);
+}
+.watch-service-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.watch-service-bar::-webkit-details-marker { display: none; }
+.watch-service-bar::before {
+  content: ">";
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  transition: transform .16s ease;
+}
+.watch-service-panel[open] .watch-service-bar::before { transform: rotate(90deg); }
+.watch-service-title { flex: 1 1 auto; }
+.watch-service-add {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-secondary, #555);
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 10px;
+  line-height: 1.45;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+  text-transform: none;
+}
+.watch-service-add:hover { background: rgba(0,0,0,.04); }
+.watch-service-summary .dcell input,
+.watch-service-event-grid .dcell input {
+  text-align: center;
+}
+.watch-service-events {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+.watch-service-event-grid {
+  grid-template-columns: 1fr 1.2fr 2fr 1fr 1fr 34px;
+}
+.watch-service-delete-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.watch-service-delete {
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(155,28,28,.25);
+  border-radius: 999px;
+  background: #fff;
+  color: #9b1c1c;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.watch-service-delete:hover {
+  background: #fff5f5;
+}
+.watch-service-empty {
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+}
+.watch-service-empty[hidden] { display: none; }
+@media (max-width: 640px) {
+  .watch-service-event-grid {
+    grid-template-columns: 1fr;
+  }
+  .watch-service-delete-cell {
+    min-height: 30px;
+  }
+  .watch-service-add {
+    padding-inline: 8px;
+  }
+}
 .camera-purchase .dcell input,
 .camera-purchase .dcell select { text-align: center; }
 

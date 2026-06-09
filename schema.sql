@@ -60,6 +60,19 @@ CREATE TABLE IF NOT EXISTS watches (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS watch_service_events (
+    id TEXT PRIMARY KEY,
+    watch_id TEXT NOT NULL,
+    date_sent DATE,
+    vendor TEXT,
+    reason TEXT,
+    cost TEXT,
+    date_returned DATE,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (watch_id) REFERENCES watches(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS coins (
     id TEXT PRIMARY KEY,
     coin_id TEXT,
@@ -387,6 +400,8 @@ CREATE TABLE IF NOT EXISTS topics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_topics_property_id ON topics(property_id);
+CREATE INDEX IF NOT EXISTS idx_watch_service_events_watch_id
+    ON watch_service_events(watch_id);
 
 CREATE TABLE IF NOT EXISTS persons (
     id TEXT PRIMARY KEY,
