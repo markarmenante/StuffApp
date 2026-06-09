@@ -667,7 +667,12 @@ document.addEventListener('DOMContentLoaded', function () {
             <span class="watch-service-arrow" aria-hidden="true"></span>
             <span class="watch-service-title">Service</span>
           </button>
-          <button type="button" class="watch-service-add" data-service-add>Record Service Event</button>
+          <div class="watch-service-actions">
+            <button type="button" class="watch-service-add" data-service-add>Record Service Event</button>
+            <span class="watch-service-count"
+                  data-service-count
+                  aria-label="{{ _service_events|length }} service event{{ '' if _service_events|length == 1 else 's' }}">{{ _service_events|length }}</span>
+          </div>
         </div>
         <div class="dgrid dg2 watch-service-summary">
           <div class="dcell svc-date-cell">
@@ -4159,6 +4164,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
   const serviceEventsWrap = watchServicePanel && watchServicePanel.querySelector('[data-service-events]');
   const serviceAddBtn = watchServicePanel && watchServicePanel.querySelector('[data-service-add]');
   const serviceEmpty = watchServicePanel && watchServicePanel.querySelector('[data-service-empty]');
+  const serviceCount = watchServicePanel && watchServicePanel.querySelector('[data-service-count]');
   const serviceTimers = new WeakMap();
   const serviceLastPayload = new WeakMap();
 
@@ -4191,6 +4197,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (!serviceEmpty || !serviceEventsWrap) return;
     const count = serviceEventsWrap.querySelectorAll('[data-service-event-id]').length;
     serviceEmpty.hidden = count > 0;
+    if (serviceCount) {
+      serviceCount.textContent = String(count);
+      serviceCount.setAttribute('aria-label', `${count} service event${count === 1 ? '' : 's'}`);
+    }
   }
 
   function collectServicePayload(row) {

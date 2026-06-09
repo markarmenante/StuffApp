@@ -1420,6 +1420,12 @@ input[type="date"] { -webkit-appearance: none; }
   transform: rotate(90deg);
 }
 .watch-service-title { flex: 1 1 auto; }
+.watch-service-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
 .watch-service-add {
   border: 1px solid var(--border);
   background: #fff;
@@ -1434,6 +1440,22 @@ input[type="date"] { -webkit-appearance: none; }
   text-transform: none;
 }
 .watch-service-add:hover { background: rgba(0,0,0,.04); }
+.watch-service-count {
+  min-width: 22px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0;
+  padding: 0 7px;
+}
 .watch-service-summary .dcell input,
 .watch-service-event-grid .dcell input {
   text-align: center;
@@ -1504,6 +1526,10 @@ input[type="date"] { -webkit-appearance: none; }
   }
   .watch-service-add {
     padding-inline: 8px;
+  }
+  .watch-service-count {
+    min-width: 20px;
+    padding-inline: 6px;
   }
 }
 .camera-purchase .dcell input,
