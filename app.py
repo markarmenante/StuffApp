@@ -5378,14 +5378,15 @@ def list_view(category):
             "AND LOWER(TRIM(COALESCE(w.status,''))) NOT IN ('sold','gifted','lost')"
             ")"
         ).fetchone()[0] == 1
-    watch_service_event_ids = set()
+    watch_open_service_event_ids = set()
     if category == 'watches' and rows:
         ids = [row['id'] for row in rows]
         placeholders = ','.join(['?'] * len(ids))
-        watch_service_event_ids = {
+        watch_open_service_event_ids = {
             row['watch_id'] for row in db.execute(
                 "SELECT DISTINCT watch_id FROM watch_service_events "
-                f"WHERE watch_id IN ({placeholders})",
+                f"WHERE watch_id IN ({placeholders}) "
+                "AND (date_returned IS NULL OR TRIM(date_returned) = '')",
                 ids,
             ).fetchall()
         }
@@ -5408,7 +5409,7 @@ def list_view(category):
                            has_ordered=has_ordered,
                            has_no_longer_owned=has_no_longer_owned,
                            has_in_service=has_in_service,
-                           watch_service_event_ids=watch_service_event_ids,
+                           watch_open_service_event_ids=watch_open_service_event_ids,
                            extra_fields=extra_fields,
                            fields=visible_fields(category))
 
