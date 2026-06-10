@@ -443,6 +443,44 @@ PERSON_MEDICATION_FIELD_RE = re.compile(
     r'^(med_type|med_name|med_active_ingredients|med_dose|med_directions|med_note)_(\d+)$'
 )
 
+# Properties keep two slot lists (people, alarm codes) as numbered legacy
+# columns on the properties row, normalized into child tables the same way
+# person medications are: the child table is canonical, every write syncs
+# the legacy columns back so older readers (exports, mobile cache) keep
+# working unchanged.
+PROPERTY_PEOPLE_SLOTS = 10
+PROPERTY_ALARM_SLOTS = 8
+PROPERTY_SLOT_SPECS = {
+    'people': {
+        'table': 'property_people',
+        'slots': PROPERTY_PEOPLE_SLOTS,
+        'columns': ('name', 'role', 'phone', 'email', 'note'),
+        'field_columns': {
+            'people_name': 'name',
+            'people_role': 'role',
+            'people_phone': 'phone',
+            'people_email': 'email',
+            'people_note': 'note',
+        },
+        'field_re': re.compile(
+            r'^(people_name|people_role|people_phone|people_email|people_note)_(\d+)$'
+        ),
+    },
+    'alarm_codes': {
+        'table': 'property_alarm_codes',
+        'slots': PROPERTY_ALARM_SLOTS,
+        'columns': ('entry', 'code', 'note'),
+        'field_columns': {
+            'alarm_codes_entry': 'entry',
+            'alarm_codes_code': 'code',
+            'alarm_codes_note': 'note',
+        },
+        'field_re': re.compile(
+            r'^(alarm_codes_entry|alarm_codes_code|alarm_codes_note)_(\d+)$'
+        ),
+    },
+}
+
 
 FIELDS = {
     'watches': [
@@ -1000,6 +1038,9 @@ def get_db():
         g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        # Wait up to 5s for a competing writer (gunicorn runs 4 threads)
+        # instead of failing immediately with "database is locked".
+        g.db.execute("PRAGMA busy_timeout = 5000")
         # Register the diacritic-folding collation on every fresh
         # connection — collations are per-connection in sqlite3.
         g.db.create_collation('NODIACRITIC', _nodiacritic_collation)
@@ -1177,6 +1218,34 @@ def init_db():
          'UNIQUE(person_id, position))'),
         ('CREATE INDEX IF NOT EXISTS idx_person_medications_person '
          'ON person_medications(person_id, position)'),
+        ('CREATE TABLE IF NOT EXISTS property_people ('
+         'id TEXT PRIMARY KEY, '
+         'property_id TEXT NOT NULL, '
+         'position INTEGER NOT NULL, '
+         'name TEXT, '
+         'role TEXT, '
+         'phone TEXT, '
+         'email TEXT, '
+         'note TEXT, '
+         "created_at TEXT DEFAULT (datetime('now')), "
+         "updated_at TEXT DEFAULT (datetime('now')), "
+         'FOREIGN KEY(property_id) REFERENCES properties(id) ON DELETE CASCADE, '
+         'UNIQUE(property_id, position))'),
+        ('CREATE INDEX IF NOT EXISTS idx_property_people_property '
+         'ON property_people(property_id, position)'),
+        ('CREATE TABLE IF NOT EXISTS property_alarm_codes ('
+         'id TEXT PRIMARY KEY, '
+         'property_id TEXT NOT NULL, '
+         'position INTEGER NOT NULL, '
+         'entry TEXT, '
+         'code TEXT, '
+         'note TEXT, '
+         "created_at TEXT DEFAULT (datetime('now')), "
+         "updated_at TEXT DEFAULT (datetime('now')), "
+         'FOREIGN KEY(property_id) REFERENCES properties(id) ON DELETE CASCADE, '
+         'UNIQUE(property_id, position))'),
+        ('CREATE INDEX IF NOT EXISTS idx_property_alarm_codes_property '
+         'ON property_alarm_codes(property_id, position)'),
         'ALTER TABLE topics ADD COLUMN image TEXT',
         'ALTER TABLE recordings ADD COLUMN players TEXT',
         'ALTER TABLE recordings ADD COLUMN notes_urls TEXT',
@@ -1336,6 +1405,7 @@ def init_db():
 
     _backfill_meds_from_prescriptions(db)
     _backfill_person_medications_table(db)
+    _backfill_property_slot_tables(db)
     _backfill_persons_doc_slots(db)
     _backfill_properties_documents_json(db)
     _backfill_docs_json(db, 'watches', 'documents', [
@@ -2665,6 +2735,213 @@ def _backfill_person_medications_table(db):
                 db, row['id'], meds, sync_legacy=False,
                 bump_person=False,
             )
+    db.commit()
+
+
+# Property slot lists (people, alarm codes) — same canonical-child-table /
+# legacy-column-sync machinery as person medications above, parameterized
+# by PROPERTY_SLOT_SPECS so both lists share one implementation.
+
+def _property_slot_row_empty(spec, row):
+    return not any(
+        ((row.get(col) or '').strip())
+        for col in spec['columns']
+    )
+
+
+def _property_slots_from_property_row(spec, row):
+    """Extract normalized slot rows from the legacy properties columns."""
+    if not row:
+        return []
+    keys = set(row.keys())
+    items = []
+    for position in range(1, spec['slots'] + 1):
+        item = {'position': position}
+        for prefix, column in spec['field_columns'].items():
+            legacy_col = f'{prefix}_{position}'
+            value = row[legacy_col] if legacy_col in keys else None
+            item[column] = (value or '').strip()
+        if not _property_slot_row_empty(spec, item):
+            items.append(item)
+    return items
+
+
+def _property_slot_rows(db, spec, property_id):
+    try:
+        rows = db.execute(
+            f"SELECT * FROM {spec['table']} "
+            "WHERE property_id = ? ORDER BY position",
+            [property_id],
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out = []
+    for row in rows:
+        item = {'id': row['id'], 'position': row['position']}
+        for column in spec['columns']:
+            item[column] = (row[column] or '').strip()
+        out.append(item)
+    return out
+
+
+def _replace_property_slots(db, spec, property_id, items, now=None,
+                            sync_legacy=True, bump_property=True):
+    now = now or datetime.utcnow().isoformat()
+    db.execute(f"DELETE FROM {spec['table']} WHERE property_id = ?",
+               [property_id])
+    cols = ', '.join(spec['columns'])
+    placeholders = ', '.join('?' for _ in spec['columns'])
+    for item in items or []:
+        try:
+            position = int(item.get('position') or 0)
+        except (TypeError, ValueError):
+            continue
+        if position < 1 or position > spec['slots']:
+            continue
+        clean = {
+            column: (item.get(column) or '').strip()
+            for column in spec['columns']
+        }
+        clean['position'] = position
+        if _property_slot_row_empty(spec, clean):
+            continue
+        db.execute(
+            f"INSERT INTO {spec['table']} "
+            f"(id, property_id, position, {cols}, created_at, updated_at) "
+            f"VALUES (?, ?, ?, {placeholders}, ?, ?)",
+            [
+                str(uuid.uuid4()), property_id, position,
+                *[clean.get(c) or None for c in spec['columns']],
+                now, now,
+            ],
+        )
+    if sync_legacy:
+        _sync_property_slot_legacy(db, spec, property_id, now=now)
+    elif bump_property:
+        db.execute("UPDATE properties SET updated_at = ? WHERE id = ?",
+                   [now, property_id])
+
+
+def _upsert_property_slot_values(db, spec, property_id, position, values,
+                                 now=None, sync_legacy=True):
+    now = now or datetime.utcnow().isoformat()
+    row = db.execute(
+        f"SELECT * FROM {spec['table']} "
+        "WHERE property_id = ? AND position = ?",
+        [property_id, position],
+    ).fetchone()
+    item = {'position': position}
+    if row:
+        item['id'] = row['id']
+        for column in spec['columns']:
+            item[column] = (row[column] or '').strip()
+    else:
+        item['id'] = str(uuid.uuid4())
+        for column in spec['columns']:
+            item[column] = ''
+    for column, value in (values or {}).items():
+        if column in spec['columns']:
+            item[column] = (value or '').strip()
+    if _property_slot_row_empty(spec, item):
+        db.execute(
+            f"DELETE FROM {spec['table']} "
+            "WHERE property_id = ? AND position = ?",
+            [property_id, position],
+        )
+    elif row:
+        sets = ', '.join(f'{c} = ?' for c in spec['columns'])
+        db.execute(
+            f"UPDATE {spec['table']} SET {sets}, updated_at = ? "
+            "WHERE id = ?",
+            [
+                *[item.get(c) or None for c in spec['columns']],
+                now, item['id'],
+            ],
+        )
+    else:
+        cols = ', '.join(spec['columns'])
+        placeholders = ', '.join('?' for _ in spec['columns'])
+        db.execute(
+            f"INSERT INTO {spec['table']} "
+            f"(id, property_id, position, {cols}, created_at, updated_at) "
+            f"VALUES (?, ?, ?, {placeholders}, ?, ?)",
+            [
+                item['id'], property_id, position,
+                *[item.get(c) or None for c in spec['columns']],
+                now, now,
+            ],
+        )
+    if sync_legacy:
+        _sync_property_slot_legacy(db, spec, property_id, now=now)
+
+
+def _parse_property_slot_field(field_name):
+    for spec in PROPERTY_SLOT_SPECS.values():
+        m = spec['field_re'].fullmatch(field_name or '')
+        if not m:
+            continue
+        position = int(m.group(2))
+        if position < 1 or position > spec['slots']:
+            return None
+        return spec, spec['field_columns'][m.group(1)], position
+    return None
+
+
+def _update_property_slot_field(db, property_id, field_name, value, now=None):
+    parsed = _parse_property_slot_field(field_name)
+    if not parsed:
+        return False
+    spec, column, position = parsed
+    _upsert_property_slot_values(
+        db, spec, property_id, position, {column: value}, now=now,
+        sync_legacy=True,
+    )
+    return True
+
+
+def _sync_property_slot_legacy(db, spec, property_id, now=None):
+    now = now or datetime.utcnow().isoformat()
+    items = _property_slot_rows(db, spec, property_id)
+    by_position = {int(item['position']): item for item in items}
+    sets, params = [], []
+    for position in range(1, spec['slots'] + 1):
+        item = by_position.get(position, {})
+        for prefix, column in spec['field_columns'].items():
+            sets.append(f'{prefix}_{position} = ?')
+            params.append((item.get(column) or '').strip() or None)
+    sets.append('updated_at = ?')
+    params.append(now)
+    params.append(property_id)
+    db.execute(
+        f"UPDATE properties SET {', '.join(sets)} WHERE id = ?",
+        params,
+    )
+
+
+def _backfill_property_slot_tables(db):
+    try:
+        rows = db.execute("SELECT * FROM properties").fetchall()
+    except sqlite3.OperationalError:
+        return
+    for spec in PROPERTY_SLOT_SPECS.values():
+        try:
+            db.execute(f"SELECT 1 FROM {spec['table']} LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
+            continue
+        for row in rows:
+            has_rows = db.execute(
+                f"SELECT 1 FROM {spec['table']} "
+                "WHERE property_id = ? LIMIT 1",
+                [row['id']],
+            ).fetchone()
+            if has_rows:
+                continue
+            items = _property_slots_from_property_row(spec, row)
+            if items:
+                _replace_property_slots(
+                    db, spec, row['id'], items, sync_legacy=False,
+                    bump_property=False,
+                )
     db.commit()
 
 
@@ -5571,6 +5848,16 @@ def new_record(category):
                 _person_medications_from_person_row(created_person),
                 sync_legacy=False, bump_person=False,
             )
+        elif category == 'properties':
+            created_property = db.execute(
+                "SELECT * FROM properties WHERE id = ?", [record_id]
+            ).fetchone()
+            for spec in PROPERTY_SLOT_SPECS.values():
+                _replace_property_slots(
+                    db, spec, record_id,
+                    _property_slots_from_property_row(spec, created_property),
+                    sync_legacy=False, bump_property=False,
+                )
 
         # Resequence Display Position for only the new coin's group
         # (Carp Ancient, Carp Modern, NY Ancient, or NY Modern).
@@ -5753,6 +6040,16 @@ def detail_view(category, record_id):
                 _person_medications_from_person_row(updated_person),
                 now=now, sync_legacy=False, bump_person=False,
             )
+        elif category == 'properties':
+            updated_property = db.execute(
+                "SELECT * FROM properties WHERE id = ?", [record_id]
+            ).fetchone()
+            for spec in PROPERTY_SLOT_SPECS.values():
+                _replace_property_slots(
+                    db, spec, record_id,
+                    _property_slots_from_property_row(spec, updated_property),
+                    now=now, sync_legacy=False, bump_property=False,
+                )
         if groups_to_resequence:
             _renumber_coin_groups(db, groups_to_resequence)
         db.commit()
@@ -6180,6 +6477,11 @@ def save_field(category, record_id):
 
     if category == 'persons' and _parse_person_medication_field(field_name):
         if _update_person_medication_field(db, record_id, field_name, value):
+            db.commit()
+            return jsonify({'ok': True})
+
+    if category == 'properties' and _parse_property_slot_field(field_name):
+        if _update_property_slot_field(db, record_id, field_name, value):
             db.commit()
             return jsonify({'ok': True})
 
@@ -12603,6 +12905,11 @@ def _record_data_snapshot(db, category, table, row):
         meds = _person_medication_rows(db, row['id'])
         if meds:
             payload['person_medications'] = meds
+    if category == 'properties':
+        for spec in PROPERTY_SLOT_SPECS.values():
+            items = _property_slot_rows(db, spec, row['id'])
+            if items:
+                payload[spec['table']] = items
     return payload
 
 
@@ -16127,6 +16434,31 @@ def _restore_snapshot_child_tables(db, category, row_id, snapshot, now):
                         db, row_id, clean, now=now,
                         sync_legacy=True, bump_person=False,
                     )
+    elif category == 'properties':
+        for spec in PROPERTY_SLOT_SPECS.values():
+            items = snapshot.get(spec['table'])
+            if not isinstance(items, list):
+                continue
+            has_rows = db.execute(
+                f"SELECT 1 FROM {spec['table']} "
+                "WHERE property_id = ? LIMIT 1",
+                [row_id],
+            ).fetchone()
+            if has_rows:
+                continue
+            clean = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                entry = {'position': item.get('position')}
+                for column in spec['columns']:
+                    entry[column] = item.get(column)
+                clean.append(entry)
+            if clean:
+                _replace_property_slots(
+                    db, spec, row_id, clean, now=now,
+                    sync_legacy=True, bump_property=False,
+                )
     elif category == 'watches':
         events = snapshot.get('watch_service_events')
         if isinstance(events, list):

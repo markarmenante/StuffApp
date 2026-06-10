@@ -1,9 +1,11 @@
 -- StuffApp Schema
--- All tables use TEXT primary keys (UUID)
+-- Generated from the live (fully migrated) database on 2026-06-10.
+-- init_db() executes this file on every boot, so every statement
+-- must stay idempotent (IF NOT EXISTS). Runtime ALTER TABLE
+-- migrations in app.py may still add columns on top of this.
+-- Regenerate after schema changes with:
+--   sqlite3 stuffapp.db .schema | sed -e 's/^CREATE TABLE /CREATE TABLE IF NOT EXISTS /' -e 's/^CREATE INDEX /CREATE INDEX IF NOT EXISTS /'
 
--- Users + per-category authorization. The Cloudflare Access edge
--- authenticates a user by email; this table maps that email to a set
--- of allowed categories (CSV of slugs, or '*' for owner = everything).
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
@@ -12,8 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     categories TEXT DEFAULT '',          -- '*' for owner, else CSV of slugs
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, row_filters TEXT, last_export_at TEXT);
 CREATE TABLE IF NOT EXISTS watches (
     id TEXT PRIMARY KEY,
     brand TEXT,
@@ -58,8 +59,7 @@ CREATE TABLE IF NOT EXISTS watches (
     document TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, specs_searched_at TEXT, documents TEXT, location_status TEXT, cat_id TEXT, balance_wheel TEXT, calibre_notes TEXT, order_purchase_price REAL, order_deposit REAL, order_deposit_2 REAL, order_deposit_percent REAL, expected_delivery_date TEXT, actual_delivery_date TEXT, order_balance REAL, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT, escape_wheel TEXT);
 CREATE TABLE IF NOT EXISTS watch_service_events (
     id TEXT PRIMARY KEY,
     watch_id TEXT NOT NULL,
@@ -72,7 +72,6 @@ CREATE TABLE IF NOT EXISTS watch_service_events (
     updated_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (watch_id) REFERENCES watches(id) ON DELETE CASCADE
 );
-
 CREATE TABLE IF NOT EXISTS coins (
     id TEXT PRIMARY KEY,
     coin_id TEXT,
@@ -115,8 +114,7 @@ CREATE TABLE IF NOT EXISTS coins (
     document_2 TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, official TEXT, specs_searched_at TEXT, documents TEXT, history_region TEXT, history_authority TEXT, history_searched_at TEXT, history_context TEXT, coin_references_research TEXT, image_audit_match TEXT, image_audit_confidence REAL, image_audit_reason TEXT, image_audit_at TEXT, cat_id TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS cameras (
     id TEXT PRIMARY KEY,
     make TEXT,
@@ -137,8 +135,7 @@ CREATE TABLE IF NOT EXISTS cameras (
     image TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, documents TEXT, location_status TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS lenses (
     id TEXT PRIMARY KEY,
     make TEXT,
@@ -158,8 +155,7 @@ CREATE TABLE IF NOT EXISTS lenses (
     image TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, documents TEXT, location_status TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS pens (
     id TEXT PRIMARY KEY,
     make TEXT,
@@ -180,8 +176,7 @@ CREATE TABLE IF NOT EXISTS pens (
     receipt TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, documents TEXT, location_status TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS art (
     id TEXT PRIMARY KEY,
     title TEXT,
@@ -202,8 +197,7 @@ CREATE TABLE IF NOT EXISTS art (
     doc_2 TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, object_notes TEXT, art_searched_at TEXT, documents TEXT, location_status TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT, cat_id TEXT);
 CREATE TABLE IF NOT EXISTS items (
     id TEXT PRIMARY KEY,
     name TEXT,
@@ -229,8 +223,7 @@ CREATE TABLE IF NOT EXISTS items (
     documents TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS vehicles (
     id TEXT PRIMARY KEY,
     make TEXT,
@@ -256,8 +249,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
     vehicle_doc_8 TEXT, vehicle_doc_8_title TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, auto_title TEXT, insurance_label TEXT, invoice_label TEXT, registration_label TEXT, auto_title_label TEXT, documents TEXT, location_status TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS recordings (
     id TEXT PRIMARY KEY,
     title TEXT,
@@ -282,8 +274,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     receipt TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, documents TEXT, location_status TEXT, players TEXT, notes_urls TEXT, tracks TEXT, label TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS rifles (
     id TEXT PRIMARY KEY,
     make TEXT,
@@ -301,8 +292,7 @@ CREATE TABLE IF NOT EXISTS rifles (
     receipt TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, documents TEXT, location_status TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS credit_cards (
     id TEXT PRIMARY KEY,
     name TEXT,
@@ -319,7 +309,6 @@ CREATE TABLE IF NOT EXISTS credit_cards (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
-
 CREATE TABLE IF NOT EXISTS properties (
     id TEXT PRIMARY KEY,
     name TEXT,
@@ -368,8 +357,7 @@ CREATE TABLE IF NOT EXISTS properties (
     people_name_10 TEXT, people_role_10 TEXT, people_phone_10 TEXT, people_email_10 TEXT, people_note_10 TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, documents TEXT, wifi_name_2 TEXT, wifi_2 TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS audio (
     id TEXT PRIMARY KEY,
     make TEXT,
@@ -387,8 +375,7 @@ CREATE TABLE IF NOT EXISTS audio (
     receipt TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
-);
-
+, documents TEXT, location_status TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS topics (
     id TEXT PRIMARY KEY,
     property_id TEXT,
@@ -398,28 +385,9 @@ CREATE TABLE IF NOT EXISTS topics (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
-
 CREATE INDEX IF NOT EXISTS idx_topics_property_id ON topics(property_id);
 CREATE INDEX IF NOT EXISTS idx_watch_service_events_watch_id
     ON watch_service_events(watch_id);
-
-CREATE TABLE IF NOT EXISTS record_documents (
-    id TEXT PRIMARY KEY,
-    category TEXT NOT NULL,
-    record_id TEXT NOT NULL,
-    doc_set TEXT NOT NULL DEFAULT 'main',
-    position INTEGER NOT NULL DEFAULT 0,
-    title TEXT,
-    filename TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(category, record_id, doc_set, position)
-);
-CREATE INDEX IF NOT EXISTS idx_record_documents_record
-    ON record_documents(category, record_id, doc_set, position);
-CREATE INDEX IF NOT EXISTS idx_record_documents_filename
-    ON record_documents(filename);
-
 CREATE TABLE IF NOT EXISTS persons (
     id TEXT PRIMARY KEY,
     name TEXT,
@@ -505,8 +473,44 @@ CREATE TABLE IF NOT EXISTS persons (
     health_doc_8 TEXT, health_doc_8_title TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
+, id_documents TEXT, health_documents TEXT);
+CREATE TABLE IF NOT EXISTS tombstones (
+    id TEXT PRIMARY KEY,
+    category TEXT,
+    cat_label TEXT,
+    group_path TEXT,
+    ident_path TEXT,
+    label TEXT,
+    filename TEXT,
+    deleted_at TEXT DEFAULT (datetime('now'))
 );
-
+CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at);
+CREATE TABLE IF NOT EXISTS mobile_record_tombstones (
+    id TEXT PRIMARY KEY,
+    category TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    deleted_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_record_tombstones_deleted_at
+    ON mobile_record_tombstones(deleted_at);
+CREATE TABLE IF NOT EXISTS fx_rates (currency TEXT NOT NULL, date TEXT NOT NULL, usd_rate REAL NOT NULL, fetched_at TEXT NOT NULL, PRIMARY KEY (currency, date));
+CREATE TABLE IF NOT EXISTS migration_state (key TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS record_documents (
+    id TEXT PRIMARY KEY,
+    category TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    doc_set TEXT NOT NULL DEFAULT 'main',
+    position INTEGER NOT NULL DEFAULT 0,
+    title TEXT,
+    filename TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(category, record_id, doc_set, position)
+);
+CREATE INDEX IF NOT EXISTS idx_record_documents_record
+    ON record_documents(category, record_id, doc_set, position);
+CREATE INDEX IF NOT EXISTS idx_record_documents_filename
+    ON record_documents(filename);
 CREATE TABLE IF NOT EXISTS person_medications (
     id TEXT PRIMARY KEY,
     person_id TEXT NOT NULL,
@@ -524,34 +528,7 @@ CREATE TABLE IF NOT EXISTS person_medications (
 );
 CREATE INDEX IF NOT EXISTS idx_person_medications_person
     ON person_medications(person_id, position);
-
--- Tombstones for deletes that the incremental Files sync needs to
--- propagate to the local StuffFiles folder. Every server-side delete
--- of a referenced file (UI X-button, record DELETE, etc.) writes a
--- row capturing enough info to reconstruct the export-shaped local
--- path: StuffFiles/<cat_label>/<group_path>/<ident_path> — <label>.<ext>.
--- The /export-files endpoint surfaces deletions newer than the
--- client's `since` timestamp inside `_tombstones.json` so syncDown
--- can remove the matching local files.
-CREATE TABLE IF NOT EXISTS tombstones (
-    id TEXT PRIMARY KEY,
-    category TEXT,
-    cat_label TEXT,
-    group_path TEXT,
-    ident_path TEXT,
-    label TEXT,
-    filename TEXT,
-    deleted_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at);
-
--- Native mobile clients keep a local read cache. File tombstones above
--- remove local bytes; these record tombstones remove deleted rows.
-CREATE TABLE IF NOT EXISTS mobile_record_tombstones (
-    id TEXT PRIMARY KEY,
-    category TEXT NOT NULL,
-    record_id TEXT NOT NULL,
-    deleted_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_mobile_record_tombstones_deleted_at
-    ON mobile_record_tombstones(deleted_at);
+CREATE TABLE IF NOT EXISTS property_people (id TEXT PRIMARY KEY, property_id TEXT NOT NULL, position INTEGER NOT NULL, name TEXT, role TEXT, phone TEXT, email TEXT, note TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), FOREIGN KEY(property_id) REFERENCES properties(id) ON DELETE CASCADE, UNIQUE(property_id, position));
+CREATE INDEX IF NOT EXISTS idx_property_people_property ON property_people(property_id, position);
+CREATE TABLE IF NOT EXISTS property_alarm_codes (id TEXT PRIMARY KEY, property_id TEXT NOT NULL, position INTEGER NOT NULL, entry TEXT, code TEXT, note TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), FOREIGN KEY(property_id) REFERENCES properties(id) ON DELETE CASCADE, UNIQUE(property_id, position));
+CREATE INDEX IF NOT EXISTS idx_property_alarm_codes_property ON property_alarm_codes(property_id, position);
