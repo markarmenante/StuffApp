@@ -8712,6 +8712,29 @@ def _parse_watch_order_deposit(value, purchase_price):
     return deposit, pct
 
 
+def _format_order_deposit_store(raw_value, pct, price_value, deposit_usd):
+    """The string to persist for a deposit, preserving the native
+    currency the user entered — the same dual "<native> / $<usd>" shape
+    the price field stores. Percentage deposits are expanded into that
+    pair from the price's native amount; explicit amounts keep whatever
+    currency string the client already formatted on blur."""
+    if isinstance(raw_value, (int, float)):
+        return raw_value
+    if pct is not None:
+        price_parts = _order_money_components(price_value)
+        if (price_parts and price_parts.get('native') is not None
+                and price_parts.get('prefix') not in (None, '$')):
+            native = price_parts['native'] * float(pct) / 100.0
+            native_text = _format_prefixed_money(price_parts['prefix'], native)
+            usd_text = _format_prefixed_money('$', deposit_usd)
+            if native_text and usd_text:
+                return f"{native_text} / {usd_text}"
+        if deposit_usd is not None:
+            return _format_prefixed_money('$', deposit_usd)
+    s = ('' if raw_value is None else str(raw_value)).strip()
+    return s or None
+
+
 def _row_get(record, name):
     if not record:
         return None
@@ -8879,13 +8902,23 @@ def _sync_watch_service_date_from_events(db, watch_id):
 
 
 def _apply_watch_order_form_fields(target, form):
-    purchase = _parse_order_money(form.get('price') or form.get('order_purchase_price'))
-    deposit, pct = _parse_watch_order_deposit(form.get('order_deposit'), purchase)
-    deposit_2 = _parse_order_money(form.get('order_deposit_2'))
-    target['order_deposit'] = deposit
-    target['order_deposit_2'] = deposit_2
+    price_value = form.get('price') or form.get('order_purchase_price')
+    purchase = _parse_order_money(price_value)
+    raw_deposit = form.get('order_deposit')
+    deposit_num, pct = _parse_watch_order_deposit(raw_deposit, purchase)
+    # Persist the native-currency string (like price) so the deposit can
+    # render as "€8,500 / $9,808" instead of collapsing to USD.
+    target['order_deposit'] = _format_order_deposit_store(
+        raw_deposit, pct, price_value, deposit_num)
+    raw_deposit_2 = form.get('order_deposit_2')
+    target['order_deposit_2'] = (
+        (str(raw_deposit_2).strip() or None)
+        if raw_deposit_2 not in (None, '') else None)
     target['order_deposit_percent'] = pct
-    target['order_balance'] = _watch_order_balance(purchase, deposit, deposit_2)
+    if pct is not None and purchase is not None:
+        deposit_num = purchase * float(pct) / 100.0
+    target['order_balance'] = _watch_order_balance(
+        purchase, deposit_num, _parse_order_money(target['order_deposit_2']))
 
 
 def _has_watch_order_data(record):
@@ -8916,26 +8949,40 @@ def _update_watch_order_field(db, record_id, field_name, raw_value):
     if not row:
         return False
     purchase = _watch_order_purchase_amount(row)
-    deposit = row['order_deposit']
-    deposit_2 = row['order_deposit_2']
+    price_value = row['price']
+    # Persisted strings preserve the native currency (like price); start
+    # from whatever is already stored and only rewrite the field that
+    # changed.
+    deposit_store = row['order_deposit']
+    deposit2_store = row['order_deposit_2']
     pct = row['order_deposit_percent']
     if field_name == 'order_purchase_price':
         purchase = _parse_order_money(raw_value)
         if pct is not None and purchase is not None:
-            deposit = purchase * float(pct) / 100.0
+            # Re-expand a percentage deposit against the new price.
+            deposit_store = _format_order_deposit_store(
+                None, pct, price_value, purchase * float(pct) / 100.0)
     elif field_name == 'order_deposit':
-        deposit, pct = _parse_watch_order_deposit(raw_value, purchase)
+        deposit_num, pct = _parse_watch_order_deposit(raw_value, purchase)
+        deposit_store = _format_order_deposit_store(
+            raw_value, pct, price_value, deposit_num)
     elif field_name == 'order_deposit_2':
-        deposit_2 = _parse_order_money(raw_value)
+        deposit2_store = (
+            (str(raw_value).strip() or None)
+            if raw_value not in (None, '') else None)
     else:
         return False
-    balance = _watch_order_balance(purchase, deposit, deposit_2)
+    deposit_num = _parse_order_money(deposit_store)
+    if pct is not None and purchase is not None:
+        deposit_num = purchase * float(pct) / 100.0
+    balance = _watch_order_balance(
+        purchase, deposit_num, _parse_order_money(deposit2_store))
     now = datetime.utcnow().isoformat()
     db.execute(
         "UPDATE watches SET order_deposit = ?, order_deposit_2 = ?, "
         "order_deposit_percent = ?, order_balance = ?, updated_at = ? "
         "WHERE id = ?",
-        [deposit, deposit_2, pct, balance, now, record_id],
+        [deposit_store, deposit2_store, pct, balance, now, record_id],
     )
     return True
 
@@ -8950,19 +8997,27 @@ def _refresh_watch_order_balance(db, record_id):
     if not row:
         return
     purchase = _watch_order_purchase_amount(row)
-    deposit = _parse_order_money(row['order_deposit'])
     pct = row['order_deposit_percent']
+    deposit_store = row['order_deposit']
     if pct is not None and purchase is not None:
-        deposit = purchase * float(pct) / 100.0
+        # Percentage deposit re-expands against the (possibly new) price;
+        # keep its native-currency string in step.
+        deposit_num = purchase * float(pct) / 100.0
+        deposit_store = _format_order_deposit_store(
+            None, pct, row['price'], deposit_num)
+    else:
+        # Explicit-amount deposit: leave the stored native string intact,
+        # only the balance needs recomputing.
+        deposit_num = _parse_order_money(deposit_store)
     balance = _watch_order_balance(
         purchase,
-        deposit,
+        deposit_num,
         _parse_order_money(row['order_deposit_2']),
     )
     db.execute(
         "UPDATE watches SET order_deposit = ?, order_balance = ?, "
         "updated_at = ? WHERE id = ?",
-        [deposit, balance, datetime.utcnow().isoformat(), record_id],
+        [deposit_store, balance, datetime.utcnow().isoformat(), record_id],
     )
 
 
