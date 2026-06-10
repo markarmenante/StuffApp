@@ -33,5 +33,5 @@ StuffApp: Railway behind Cloudflare, https://stuff.armenante.com
 N552YM:   Vercel, https://n552ym.vercel.app/trips
 ```
 
-Never treat `/Users/markarmenante/Documents/GitHub/stuff-app` as production
-StuffApp. It is the stale Next/Vercel rebuild with the dash in the repo name.
+The stale `stuff-app` Next/Vercel rebuild (the repo with the dash in the
+name) was retired and deleted in June 2026.

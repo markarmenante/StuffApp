@@ -46,5 +46,5 @@ Related app:
 N552YM: /Users/markarmenante/Developer/n552ym
 ```
 
-Do not use `/Users/markarmenante/Documents/GitHub/stuff-app` for production
-StuffApp work. That dashed repo is the stale Next/Vercel rebuild.
+The old `stuff-app` (dashed) Next/Vercel rebuild was retired and deleted in
+June 2026. This Flask app is the only StuffApp.

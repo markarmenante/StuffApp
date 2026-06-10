@@ -27,9 +27,8 @@ StuffApp: https://stuff.armenante.com on Railway
 N552YM:   https://n552ym.vercel.app/trips on Vercel
 ```
 
-Do not use `/Users/markarmenante/Documents/GitHub/stuff-app` or the old iCloud
-`Stuff/stuff-app` checkout for production StuffApp work. Those are stale
-Next.js/Vercel rebuilds.
+The stale `stuff-app` Next/Vercel rebuilds (GitHub checkout and old iCloud
+`Stuff/stuff-app`) were retired and deleted in June 2026.
 
 Shared breadcrumbs:
 

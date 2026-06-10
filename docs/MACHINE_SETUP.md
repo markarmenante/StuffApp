@@ -32,9 +32,9 @@ StuffApp: https://stuff.armenante.com on Railway
 N552YM:   https://n552ym.vercel.app/trips on Vercel
 ```
 
-StuffApp source is `markarmenante/StuffApp`, without a dash. Do not use
-`markarmenante/stuff-app` or `/Users/markarmenante/Documents/GitHub/stuff-app`
-for production StuffApp work; that is the stale Next/Vercel rebuild.
+StuffApp source is `markarmenante/StuffApp`, without a dash. The stale
+`markarmenante/stuff-app` Next/Vercel rebuild was retired and deleted in
+June 2026.
 
 ## Start StuffApp Locally
 
