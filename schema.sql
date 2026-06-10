@@ -54,8 +54,6 @@ CREATE TABLE IF NOT EXISTS watches (
     image_obv TEXT,
     image_rev TEXT,
     receipt TEXT,
-    container_1 TEXT,
-    container_2 TEXT,
     document TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
@@ -110,8 +108,6 @@ CREATE TABLE IF NOT EXISTS coins (
     image_1 TEXT,
     image_2 TEXT,
     receipt TEXT,
-    document_1 TEXT,
-    document_2 TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 , official TEXT, specs_searched_at TEXT, documents TEXT, history_region TEXT, history_authority TEXT, history_searched_at TEXT, history_context TEXT, coin_references_research TEXT, image_audit_match TEXT, image_audit_confidence REAL, image_audit_reason TEXT, image_audit_at TEXT, cat_id TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
@@ -194,7 +190,6 @@ CREATE TABLE IF NOT EXISTS art (
     status TEXT,
     image TEXT,
     receipt TEXT,
-    doc_2 TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 , object_notes TEXT, art_searched_at TEXT, documents TEXT, location_status TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT, cat_id TEXT);
@@ -243,10 +238,6 @@ CREATE TABLE IF NOT EXISTS vehicles (
     insurance TEXT,
     invoice TEXT,
     registration TEXT,
-    vehicle_doc_5 TEXT, vehicle_doc_5_title TEXT,
-    vehicle_doc_6 TEXT, vehicle_doc_6_title TEXT,
-    vehicle_doc_7 TEXT, vehicle_doc_7_title TEXT,
-    vehicle_doc_8 TEXT, vehicle_doc_8_title TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 , auto_title TEXT, insurance_label TEXT, invoice_label TEXT, registration_label TEXT, auto_title_label TEXT, documents TEXT, location_status TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
@@ -327,16 +318,6 @@ CREATE TABLE IF NOT EXISTS properties (
     owner TEXT,
     archive TEXT,
     image TEXT,
-    doc_1 TEXT, doc_1_title TEXT,
-    doc_2 TEXT, doc_2_title TEXT,
-    doc_3 TEXT, doc_3_title TEXT,
-    doc_4 TEXT, doc_4_title TEXT,
-    doc_5 TEXT, doc_5_title TEXT,
-    doc_6 TEXT, doc_6_title TEXT,
-    doc_7 TEXT, doc_7_title TEXT,
-    doc_8 TEXT, doc_8_title TEXT,
-    doc_9 TEXT, doc_9_title TEXT,
-    doc_10 TEXT, doc_10_title TEXT,
     alarm_codes_entry_1 TEXT, alarm_codes_code_1 TEXT, alarm_codes_note_1 TEXT,
     alarm_codes_entry_2 TEXT, alarm_codes_code_2 TEXT, alarm_codes_note_2 TEXT,
     alarm_codes_entry_3 TEXT, alarm_codes_code_3 TEXT, alarm_codes_note_3 TEXT,
@@ -459,18 +440,6 @@ CREATE TABLE IF NOT EXISTS persons (
     med_name_22 TEXT, med_type_22 TEXT, med_active_ingredients_22 TEXT, med_dose_22 TEXT, med_directions_22 TEXT, med_note_22 TEXT,
     med_name_23 TEXT, med_type_23 TEXT, med_active_ingredients_23 TEXT, med_dose_23 TEXT, med_directions_23 TEXT, med_note_23 TEXT,
     med_name_24 TEXT, med_type_24 TEXT, med_active_ingredients_24 TEXT, med_dose_24 TEXT, med_directions_24 TEXT, med_note_24 TEXT,
-    id_doc_3 TEXT, id_doc_3_title TEXT,
-    id_doc_4 TEXT, id_doc_4_title TEXT,
-    id_doc_5 TEXT, id_doc_5_title TEXT,
-    id_doc_6 TEXT, id_doc_6_title TEXT,
-    id_doc_7 TEXT, id_doc_7_title TEXT,
-    id_doc_8 TEXT, id_doc_8_title TEXT,
-    health_doc_3 TEXT, health_doc_3_title TEXT,
-    health_doc_4 TEXT, health_doc_4_title TEXT,
-    health_doc_5 TEXT, health_doc_5_title TEXT,
-    health_doc_6 TEXT, health_doc_6_title TEXT,
-    health_doc_7 TEXT, health_doc_7_title TEXT,
-    health_doc_8 TEXT, health_doc_8_title TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 , id_documents TEXT, health_documents TEXT);

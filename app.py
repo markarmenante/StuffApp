@@ -529,8 +529,6 @@ FIELDS = {
         {'name': 'location_status', 'label': 'Disposition',       'type': 'select',
          'options': ['', 'Storage', 'Consigned', 'Missing', 'Gifted']},
         {'name': 'image_obv',       'label': 'Image',             'type': 'file'},
-        {'name': 'container_1',     'label': 'Container 1',       'type': 'file'},
-        {'name': 'container_2',     'label': 'Container 2',       'type': 'file'},
         {'name': 'document',        'label': 'Document',          'type': 'file'},
     ],
     'coins': [
@@ -573,8 +571,6 @@ FIELDS = {
          'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image_1',         'label': 'Image (Obverse)',   'type': 'file'},
         {'name': 'image_2',         'label': 'Image (Reverse)',   'type': 'file'},
-        {'name': 'document_1',      'label': 'Document 1',        'type': 'file'},
-        {'name': 'document_2',      'label': 'Document 2',        'type': 'file'},
     ],
     'cameras': [
         {'name': 'make',            'label': 'Brand',             'type': 'text'},
@@ -663,7 +659,6 @@ FIELDS = {
         {'name': 'location_status', 'label': 'Disposition',       'type': 'select',
          'options': ['', 'Storage', 'Consigned', 'Missing', 'Gifted']},
         {'name': 'image',           'label': 'Image',             'type': 'file'},
-        {'name': 'doc_2',           'label': 'Doc 2',             'type': 'file'},
     ],
     'items': [
         {'name': 'name',            'label': 'Name',              'type': 'text'},
@@ -718,12 +713,8 @@ FIELDS = {
         {'name': 'invoice_label',       'label': 'Invoice Title',       'type': 'text'},
         {'name': 'registration_label',  'label': 'Registration Title',  'type': 'text'},
         {'name': 'auto_title_label',    'label': 'Auto Title Label',    'type': 'text'},
-        # Slots 5..8 — fully user-supplied (file + editable title) to
-        # match the property docs pattern.
-        *[v for i in range(5, 9) for v in (
-            {'name': f'vehicle_doc_{i}',       'label': f'Vehicle Doc {i}',       'type': 'file'},
-            {'name': f'vehicle_doc_{i}_title', 'label': f'Vehicle Doc {i} Title', 'type': 'text'},
-        )],
+        # Legacy vehicle_doc_5..8 slots dropped — documents now live in
+        # the record_documents table (rendered via the dyn-doc row).
     ],
     'recordings': [
         {'name': 'title',           'label': 'Title',             'type': 'text'},
@@ -828,10 +819,8 @@ FIELDS = {
         # Ten freeform document slots with editable titles. Two rows of
         # five on the detail page so the user can drop deeds/insurance/
         # warranties/etc. with their own labels.
-        *[v for i in range(1, 11) for v in (
-            {'name': f'doc_{i}_title', 'label': f'Doc {i} Title', 'type': 'text'},
-            {'name': f'doc_{i}',       'label': f'Doc {i}',       'type': 'file'},
-        )],
+        # Legacy doc_1..10 slots dropped — documents now live in the
+        # record_documents table (rendered via the dyn-doc row).
         # Alarm code list — 8 rows of (Entry, Code, Notes) under the
         # existing alarm fields, with delete-row + shift-up like meds.
         *[v for i in range(1, 9) for v in (
@@ -905,18 +894,12 @@ FIELDS = {
         *[{'name': f'med_note_{i}', 'label': f'Med Note {i}',   'type': 'text'} for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         # Persons IDs tab — slots 1+2 reuse the existing license_obverse /
         # license_reverse columns with a hardwired "License Front/Back"
-        # title; slots 3..8 are user-supplied (file + editable title).
-        *[v for i in range(3, 9) for v in (
-            {'name': f'id_doc_{i}',       'label': f'ID Doc {i}',       'type': 'file'},
-            {'name': f'id_doc_{i}_title', 'label': f'ID Doc {i} Title', 'type': 'text'},
-        )],
+        # title. Legacy id_doc_3..8 slots dropped — documents now live in
+        # record_documents (the 'ids' dyn-doc row).
         # Persons Health tab — slots 1+2 reuse health_card_obv/rev with
-        # a hardwired "Health Card Front/Back" title; slots 3..8 are
-        # user-supplied (file + editable title).
-        *[v for i in range(3, 9) for v in (
-            {'name': f'health_doc_{i}',       'label': f'Health Doc {i}',       'type': 'file'},
-            {'name': f'health_doc_{i}_title', 'label': f'Health Doc {i} Title', 'type': 'text'},
-        )],
+        # a hardwired "Health Card Front/Back" title. Legacy
+        # health_doc_3..8 slots dropped — documents now live in
+        # record_documents (the 'health' dyn-doc row).
     ],
 }
 
@@ -1083,38 +1066,12 @@ def init_db():
         'ALTER TABLE vehicles ADD COLUMN invoice_label TEXT',
         'ALTER TABLE vehicles ADD COLUMN registration_label TEXT',
         'ALTER TABLE vehicles ADD COLUMN auto_title_label TEXT',
-        # Vehicle docs slots 5..8 (full user-supplied title + file)
-        *[f'ALTER TABLE vehicles ADD COLUMN vehicle_doc_{i} TEXT'        for i in range(5, 9)],
-        *[f'ALTER TABLE vehicles ADD COLUMN vehicle_doc_{i}_title TEXT'  for i in range(5, 9)],
-        'ALTER TABLE watches ADD COLUMN container_1 TEXT',
-        'ALTER TABLE watches ADD COLUMN container_2 TEXT',
-        'ALTER TABLE art ADD COLUMN doc_2 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_1 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_1_title TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_2 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_2_title TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_3 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_3_title TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_4 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_4_title TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_5 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_5_title TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_6 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_6_title TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_7 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_7_title TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_8 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_8_title TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_9 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_9_title TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_10 TEXT',
-        'ALTER TABLE properties ADD COLUMN doc_10_title TEXT',
+        # Legacy fixed doc slots (vehicle_doc_5..8, watches container_1/2,
+        # art doc_2, properties doc_1..10) are no longer added here — they
+        # were folded into record_documents and physically dropped by the
+        # drop_legacy_doc_columns_v1 migration below.
         # Flexible documents column — JSON array of {title, filename}
-        # objects, replacing the fixed doc_1..10 + doc_N_title slots.
-        # The legacy columns above are kept dual-populated during the
-        # transition so older code paths and the export/sweep flows
-        # don't break mid-deploy. They'll be dropped once every read
-        # path moves to the JSON column.
+        # objects, the cache layer that fed record_documents.
         'ALTER TABLE properties ADD COLUMN documents TEXT',
         # Same legacy JSON cache column for the simpler categories
         # that previously had 1-2 fixed user-doc slots. Receipts stay
@@ -1293,11 +1250,9 @@ def init_db():
         *[f'ALTER TABLE persons ADD COLUMN med_dose_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[f'ALTER TABLE persons ADD COLUMN med_directions_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
         *[f'ALTER TABLE persons ADD COLUMN med_note_{i} TEXT' for i in range(1, PERSON_MEDICATION_SLOTS + 1)],
-        # IDs / Health 8-tile docs (slots 3..8 are user-titled)
-        *[f'ALTER TABLE persons ADD COLUMN id_doc_{i} TEXT'           for i in range(3, 9)],
-        *[f'ALTER TABLE persons ADD COLUMN id_doc_{i}_title TEXT'     for i in range(3, 9)],
-        *[f'ALTER TABLE persons ADD COLUMN health_doc_{i} TEXT'       for i in range(3, 9)],
-        *[f'ALTER TABLE persons ADD COLUMN health_doc_{i}_title TEXT' for i in range(3, 9)],
+        # Legacy id_doc_3..8 / health_doc_3..8 fixed slots are no longer
+        # added — folded into record_documents and dropped by the
+        # drop_legacy_doc_columns_v1 migration below.
     ):
         try:
             db.execute(stmt)
@@ -1528,6 +1483,55 @@ def init_db():
             ('docs_legacy_json_cleanup_v1', datetime.utcnow().isoformat()),
         )
     db.commit()
+
+    # Drop the legacy fixed document columns now that record_documents is
+    # the source of truth and the backfills above have run one final time.
+    # One-shot (sentinel) and defensive (per-column try/except), so an
+    # older SQLite without ALTER TABLE DROP COLUMN, or an already-dropped
+    # column, just skips. The JSON cache columns (documents/id_documents/
+    # health_documents) are intentionally kept — they back the mobile
+    # fallback and are cheap. Data is recoverable from record_documents.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('drop_legacy_doc_columns_v1',),
+    ).fetchone():
+        _legacy_doc_columns = {
+            'properties': (
+                [f'doc_{i}' for i in range(1, 11)]
+                + [f'doc_{i}_title' for i in range(1, 11)]
+            ),
+            'vehicles': (
+                [f'vehicle_doc_{i}' for i in range(5, 9)]
+                + [f'vehicle_doc_{i}_title' for i in range(5, 9)]
+            ),
+            'persons': (
+                [f'id_doc_{i}' for i in range(3, 9)]
+                + [f'id_doc_{i}_title' for i in range(3, 9)]
+                + [f'health_doc_{i}' for i in range(3, 9)]
+                + [f'health_doc_{i}_title' for i in range(3, 9)]
+            ),
+            'watches': ['container_1', 'container_2'],
+            'art': ['doc_2'],
+            'coins': ['document_1', 'document_2'],
+        }
+        for _table, _columns in _legacy_doc_columns.items():
+            _present = {
+                r['name'] for r in db.execute(
+                    f"PRAGMA table_info({_table})"
+                ).fetchall()
+            }
+            for _col in _columns:
+                if _col not in _present:
+                    continue
+                try:
+                    db.execute(f'ALTER TABLE {_table} DROP COLUMN {_col}')
+                except sqlite3.OperationalError:
+                    pass
+        db.execute(
+            "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+            ('drop_legacy_doc_columns_v1', datetime.utcnow().isoformat()),
+        )
+        db.commit()
 
     # Pen cartridges: fold the "Pilot-Namiki" variant into the canonical
     # "Pilot/Namiki" so the strict select doesn't reject existing rows.
@@ -5858,6 +5862,15 @@ def new_record(category):
                 flash(err, 'error')
                 return _render_new_form(category, data=data, focus_field=fld)
 
+        # Only write columns that physically exist — keeps the INSERT
+        # resilient to dropped legacy columns that may still linger in
+        # FIELDS for a category.
+        real_cols = {
+            r['name'] for r in db.execute(
+                f"PRAGMA table_info({CATEGORIES[category]['table']})"
+            ).fetchall()
+        }
+        data = {k: v for k, v in data.items() if k in real_cols}
         cols = ', '.join(data.keys())
         placeholders = ', '.join(['?' for _ in data])
         db.execute(f"INSERT INTO {CATEGORIES[category]['table']} ({cols}) VALUES ({placeholders})",
@@ -6051,6 +6064,14 @@ def detail_view(category, record_id):
                 if old_group: groups_to_resequence.append(old_group)
                 if new_group: groups_to_resequence.append(new_group)
 
+        # Skip any column that no longer exists (e.g. a dropped legacy
+        # doc slot still present in FIELDS) so the UPDATE can't fail.
+        real_cols = {
+            r['name'] for r in db.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()
+        }
+        updates = {k: v for k, v in updates.items() if k in real_cols}
         set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
         db.execute(f"UPDATE {table} SET {set_clause} WHERE id = ?",
                    list(updates.values()) + [record_id])
@@ -18502,8 +18523,7 @@ FM_FIELD_MAP = {
     ('Watch', 'Document'):        ('watches',      'document'),
     ('Coin', 'Image1'):           ('coins',        'image_1'),
     ('Coin', 'Image2'):           ('coins',        'image_2'),
-    ('Coin', 'Document1'):        ('coins',        'document_1'),
-    ('Coin', 'Document2'):        ('coins',        'document_2'),
+    # Coin Document1/Document2 dropped — docs live in record_documents.
     ('Camera', 'Image'):          ('cameras',      'image'),
     ('Lens', 'Image'):            ('lenses',       'image'),
     ('Pen', 'Image'):             ('pens',         'image'),
