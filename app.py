@@ -1425,16 +1425,27 @@ def init_db():
     # cover. Same issue happens elsewhere too (vehicles' Auto Title
     # column got the cover image, etc.), so the strip-phantom helper
     # below sweeps every item table for cover-image duplicates.
-    for _t in ('art', 'coins', 'watches', 'pens', 'rifles', 'audio',
-               'cameras', 'lenses'):
-        _migrate_receipt_into_documents(db, _t)
-        # Collapse historical "Receipt"-titled duplicates left behind
-        # by an earlier boot that ran the migration with only a
-        # filename-based dedupe — see _dedupe_receipt_docs for the
-        # full story.
-        _dedupe_receipt_docs(db, _t)
-    _strip_phantom_cover_image_docs(db)
-    _strip_redundant_receipts(db)
+    # These rewrite/strip the legacy JSON document columns and used to
+    # run on *every* boot — destructive, no tombstones, able to drop a
+    # legitimate doc if a heuristic misfired. Now that record_documents
+    # is the source of truth they only need to run once more, to clean
+    # the JSON before the final backfill into record_documents below.
+    # Gated by a sentinel so subsequent boots skip them entirely.
+    _docs_legacy_cleanup_done = db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('docs_legacy_json_cleanup_v1',),
+    ).fetchone()
+    if not _docs_legacy_cleanup_done:
+        for _t in ('art', 'coins', 'watches', 'pens', 'rifles', 'audio',
+                   'cameras', 'lenses'):
+            _migrate_receipt_into_documents(db, _t)
+            # Collapse historical "Receipt"-titled duplicates left behind
+            # by an earlier boot that ran the migration with only a
+            # filename-based dedupe — see _dedupe_receipt_docs for the
+            # full story.
+            _dedupe_receipt_docs(db, _t)
+        _strip_phantom_cover_image_docs(db)
+        _strip_redundant_receipts(db)
     _backfill_docs_json(db, 'vehicles', 'documents', [
         ('insurance',     'insurance_label',     'Insurance'),
         ('invoice',       'invoice_label',       'Invoice'),
@@ -1503,8 +1514,20 @@ def init_db():
     # when documents_delete blanked entries in place instead of popping.
     # The trailing "+ Add document" slot is rendered by the macro, so
     # an in-array empty has no purpose and just wastes screen space.
-    _compact_empty_doc_slots(db)
+    # Same one-shot gate as the strips above (it mutates legacy JSON).
+    if not _docs_legacy_cleanup_done:
+        _compact_empty_doc_slots(db)
+    # Always runs: copies any not-yet-migrated legacy JSON docs into
+    # record_documents (the canonical store). Idempotent — skips records
+    # whose record_documents rows already exist, so it is a cheap safety
+    # net rather than churn.
     _backfill_record_documents_table(db)
+    if not _docs_legacy_cleanup_done:
+        db.execute(
+            "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+            ('docs_legacy_json_cleanup_v1', datetime.utcnow().isoformat()),
+        )
+    db.commit()
 
     # Pen cartridges: fold the "Pilot-Namiki" variant into the canonical
     # "Pilot/Namiki" so the strict select doesn't reject existing rows.
@@ -9462,8 +9485,11 @@ def _docs_save(db, table, record_id, docs, col='documents'):
 def _docs_update(db, table, record_id, docs, col='documents', now=None):
     """Update documents without committing.
 
-    Used when multiple document columns must change atomically; callers
-    commit once after every column update succeeds.
+    record_documents is the sole stored representation. The legacy JSON
+    columns are no longer written; we still bump the parent row's
+    updated_at so incremental sync/export notices the change. Used when
+    multiple document sets must change atomically; callers commit once
+    after every set update succeeds.
     """
     now = now or datetime.utcnow().isoformat()
     category = _category_for_table(table)
@@ -9474,10 +9500,17 @@ def _docs_update(db, table, record_id, docs, col='documents', now=None):
             get_db() if db is None else db, category, record_id, doc_set,
             clean, now=now,
         )
-    db.execute(
-        f"UPDATE {table} SET {col} = ?, updated_at = ? WHERE id = ?",
-        [json.dumps(clean), now, record_id],
-    )
+        db.execute(
+            f"UPDATE {table} SET updated_at = ? WHERE id = ?",
+            [now, record_id],
+        )
+    else:
+        # Unknown doc_set has no normalized home — keep the JSON column
+        # so nothing is silently dropped. (No current caller hits this.)
+        db.execute(
+            f"UPDATE {table} SET {col} = ?, updated_at = ? WHERE id = ?",
+            [json.dumps(clean), now, record_id],
+        )
 
 
 def _auto_title_from_basename(category, record_id, basename):
@@ -11113,18 +11146,10 @@ def watches_needing_relocation():
                     pass
             _emit(label, fname)
 
-        # JSON-column documents (e.g. the `documents` array on watches).
+        # Dynamic documents — read from record_documents (the source of
+        # truth) via _docs_load so this preview matches the real export.
         for json_col in docs_cols:
-            try:
-                raw = r[json_col]
-            except (KeyError, IndexError):
-                continue
-            try:
-                docs = json.loads(raw or '[]')
-            except (TypeError, ValueError):
-                docs = []
-            if not isinstance(docs, list):
-                continue
+            docs = _docs_load(db, 'watches', r['id'], json_col) or []
             for i, d in enumerate(docs, 1):
                 if not isinstance(d, dict):
                     continue
@@ -16152,21 +16177,21 @@ def _mobile_row_files(category, row, cols):
             filename = ''
         add(_mobile_file_entry(filename, field.get('label') or name, name))
 
+    # Documents come from record_documents (the source of truth). The
+    # legacy JSON column name is still reported as the entry's `field`
+    # and the doc_set is preserved, so the mobile/iOS wire format is
+    # unchanged — only the source moved.
+    db = get_db()
+    record_id = row['id'] if 'id' in cols else None
     for doc_set, json_col in DOC_SETS_BY_CATEGORY.get(category, {}).items():
-        if json_col not in cols:
-            continue
-        try:
-            raw = row[json_col]
-        except (KeyError, IndexError):
-            raw = None
-        if not raw:
-            continue
-        try:
-            docs = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(docs, list):
-            continue
+        docs = (_record_documents_for(db, category, record_id, doc_set)
+                if record_id else [])
+        if not docs and json_col in cols:
+            # Fallback for any row not yet backfilled into record_documents.
+            try:
+                docs = _docs_parse_json(row[json_col])
+            except (KeyError, IndexError):
+                docs = []
         for doc in docs:
             if not isinstance(doc, dict):
                 continue
@@ -16186,6 +16211,18 @@ def _mobile_row_payload(category, row, cols, sort_index=None):
             data[col] = row[col]
         except (KeyError, IndexError):
             data[col] = None
+    # Keep the legacy JSON document columns the mobile client still reads
+    # consistent with record_documents (the source of truth) and with the
+    # file manifest below. Frozen-but-stale JSON in the row is overwritten
+    # with the synthesized current value.
+    db = get_db()
+    for doc_set, json_col in DOC_SETS_BY_CATEGORY.get(category, {}).items():
+        if json_col not in data:
+            continue
+        docs = _record_documents_for(db, category, row['id'], doc_set)
+        if not docs:
+            docs = _docs_parse_json(data.get(json_col))
+        data[json_col] = json.dumps(docs)
     return {
         'category': category,
         'id': row['id'],
