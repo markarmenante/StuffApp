@@ -3955,6 +3955,14 @@ document.querySelectorAll('.comp-item').forEach(item => {
           inp.setAttribute('onchange',
             `uploadViaInput(this, '${url}', '${field}')`);
         });
+        // Dynamic-document rows start with a record-less base of
+        // "/documents/<set>" on the add form; promote each to the real
+        // "/<cat>/<id>/documents/<set>" so drops/picks work without a
+        // reload — the same fix the photo zones get just above.
+        document.querySelectorAll('.dyn-doc-row').forEach(row => {
+          const b = row.dataset.docsBase || '';
+          if (b.startsWith('/documents/')) row.dataset.docsBase = d.detail_url + b;
+        });
       })
       .catch(err => {
         creatingPromise = null;
@@ -5773,15 +5781,21 @@ document.addEventListener('click', function (ev) {
 }, true);
 
 document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
-  const base = row.dataset.docsBase || '';
-  // Refuse to wire up on the new-record form — the API needs a saved
-  // record_id, and the autosave-on-new path isn't there for every
-  // category yet. The blank tile will start working after first save.
-  // When is_new, the template emits `/documents/<set>` with no record
-  // prefix; reject that and any other base that doesn't look like
-  // `/<cat>/<id>/documents/<set>`.
-  if (!base || base.startsWith('/documents/')) return;
-  if (!/\/documents\/[^/]+$/.test(base)) return;
+  // The base URL is read live (getBase) rather than captured once: on
+  // the add form it starts as "/documents/<set>" with no record id, and
+  // ensureRecord() rewrites row.dataset.docsBase to the real
+  // "/<cat>/<id>/documents/<set>" once the record auto-creates on first
+  // edit. ensureBase() forces that creation before any API call so a
+  // document dropped on a brand-new watch attaches without a reload.
+  function getBase() { return row.dataset.docsBase || ''; }
+  async function ensureBase() {
+    if (window.ensureRecord) await window.ensureRecord();
+    const b = getBase();
+    if (!b || b.startsWith('/documents/')) {
+      throw new Error('Save the record first, then add documents.');
+    }
+    return b;
+  }
   const placeholderPrefix = row.dataset.docPlaceholder || 'Doc';
 
   function tileAt(idx) {
@@ -5813,23 +5827,27 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   // cell from the server's response so the preview / × button render
   // correctly without a full page reload.
   async function append({ file, title }) {
+    const b = await ensureBase();
     const fd = new FormData();
     if (title) fd.append('title', title);
     if (file)  fd.append('file',  file);
-    const d = await postFD(`${base}/append`, fd);
+    const d = await postFD(`${b}/append`, fd);
     promoteEmptyTile(d.idx, d.title || '', d.filename || '');
     spawnEmptyTile();
   }
   async function setTitle(idx, title) {
-    return postJSON(`${base}/${idx}/title`, { title });
+    const b = await ensureBase();
+    return postJSON(`${b}/${idx}/title`, { title });
   }
   async function setFile(idx, file) {
+    const b = await ensureBase();
     const fd = new FormData();
     fd.append('file', file);
-    return postFD(`${base}/${idx}/file`, fd);
+    return postFD(`${b}/${idx}/file`, fd);
   }
   async function deleteTile(idx) {
-    return postJSON(`${base}/${idx}/delete`, {});
+    const b = await ensureBase();
+    return postJSON(`${b}/${idx}/delete`, {});
   }
 
   function fileCellHTML(idx, filename) {
