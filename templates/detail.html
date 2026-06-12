@@ -2403,7 +2403,7 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="people-row" data-people-idx="{{ i }}">
       <input type="text" name="people_name_{{ i }}"  value="{{ val('people_name_'  ~ i) }}">
       <div class="people-cell-phone">
-        <input type="text" inputmode="tel" name="people_phone_{{ i }}" value="{{ val('people_phone_' ~ i) }}">
+        <input type="text" inputmode="tel" class="us-phone-input" name="people_phone_{{ i }}" value="{{ val('people_phone_' ~ i)|us_phone }}">
         <button type="button" class="ppl-act" data-action="tel" data-target="people_phone_{{ i }}" title="Call">📞</button>
         <button type="button" class="ppl-act" data-action="sms" data-target="people_phone_{{ i }}" title="Text">💬</button>
       </div>
@@ -4046,7 +4046,38 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // The server already accepts both raw signed integers ("-180") and
   // formatted display strings ("180 BC", "1952 AD"), so just send
   // el.value and let the server parse it.
-  function valueFor(el) {
+  function isPropertyPeoplePhoneField(el) {
+    return !!(el && /^people_phone_\d+$/.test(el.name || ''));
+  }
+  function formatUsPhoneValue(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const extMatch = raw.match(/\s*(?:ext\.?|extension|x)\s*(\d{1,8})\s*$/i);
+    const ext = extMatch ? extMatch[1] : '';
+    const main = extMatch ? raw.slice(0, extMatch.index).trim() : raw;
+    const compactMain = main.replace(/[^\d+]/g, '');
+    if (compactMain.startsWith('+') && !compactMain.startsWith('+1')) {
+      return raw;
+    }
+    const digits = main.replace(/\D/g, '');
+    const hasCountryCode = digits.length === 11 && digits.startsWith('1');
+    const phone = hasCountryCode ? digits.slice(1) : digits;
+    if (phone.length !== 10) return raw;
+    const formatted = `${hasCountryCode ? '+1 ' : ''}(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}`;
+    return ext ? `${formatted} x${ext}` : formatted;
+  }
+  function formatUsPhoneInput(el) {
+    if (!el) return '';
+    const formatted = formatUsPhoneValue(el.value);
+    if (formatted !== String(el.value || '').trim()) {
+      el.value = formatted;
+    }
+    return el.value;
+  }
+  function valueFor(el, opts) {
+    if (opts && opts.formatPhone && isPropertyPeoplePhoneField(el)) {
+      return formatUsPhoneInput(el);
+    }
     return el.value;
   }
   // Debounced save while the user is still typing — no need to wait for
@@ -4057,7 +4088,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
   function saveNow(el) {
     const t = pendingTimers.get(el);
     if (t) { clearTimeout(t); pendingTimers.delete(el); }
-    const v = valueFor(el);
+    const v = valueFor(el, { formatPhone: true });
     if (lastSaved.get(el) === v) return;
     lastSaved.set(el, v);
     saveField(el.name, v);
@@ -5741,10 +5772,14 @@ document.querySelectorAll('.topic-del-btn').forEach(btn => {
       btn.classList.toggle('is-disabled', !has);
     });
   }
+  form.querySelectorAll('.people-cell-phone input').forEach(formatUsPhoneInput);
   refreshActions();
   form.querySelectorAll('.people-cell-phone input, .people-cell-email input').forEach(inp => {
     inp.addEventListener('input', refreshActions);
-    inp.addEventListener('blur', refreshActions);
+    inp.addEventListener('blur', () => {
+      if (inp.closest('.people-cell-phone')) formatUsPhoneInput(inp);
+      refreshActions();
+    });
   });
   form.addEventListener('click', e => {
     const btn = e.target.closest('.ppl-act');

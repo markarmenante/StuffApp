@@ -2919,6 +2919,8 @@ def _update_property_slot_field(db, property_id, field_name, value, now=None):
     if not parsed:
         return False
     spec, column, position = parsed
+    if spec.get('table') == 'property_people' and column == 'phone':
+        value = _format_us_phone(value)
     _upsert_property_slot_values(
         db, spec, property_id, position, {column: value}, now=now,
         sync_legacy=True,
@@ -8513,6 +8515,37 @@ def delete_file_field(category, record_id):
 _CURRENCY_PREFIX_RE = re.compile(
     r'^\s*(A\$|US\$|\$|€|£|¥|CHF\s|EUR\s|USD\s|AUD\s|AUS\s|GBP\s|JPY\s|YEN\s|CHF$|EUR$|USD$|AUD$|AUS$|GBP$|JPY$|YEN$)',
     re.IGNORECASE)
+
+
+def _format_us_phone(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    ext_match = re.search(
+        r'\s*(?:ext\.?|extension|x)\s*(\d{1,8})\s*$',
+        raw,
+        re.IGNORECASE,
+    )
+    ext = ext_match.group(1) if ext_match else ''
+    main = raw[:ext_match.start()].strip() if ext_match else raw
+    compact_main = re.sub(r'[^\d+]', '', main)
+    if compact_main.startswith('+') and not compact_main.startswith('+1'):
+        return raw
+    digits = re.sub(r'\D', '', main)
+    has_country_code = len(digits) == 11 and digits.startswith('1')
+    phone = digits[1:] if has_country_code else digits
+    if len(phone) != 10:
+        return raw
+    formatted = (
+        f"{'+1 ' if has_country_code else ''}"
+        f"({phone[:3]}) {phone[3:6]}-{phone[6:]}"
+    )
+    return f"{formatted} x{ext}" if ext else formatted
+
+
+@app.template_filter('us_phone')
+def us_phone_filter(value):
+    return _format_us_phone(value)
 
 
 @app.route('/fx-rate')
