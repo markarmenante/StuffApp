@@ -5992,29 +5992,22 @@ def detail_view(category, record_id):
     nav_q = (request.args.get('q') or '').strip()
     nav_filter = (request.args.get('filter') or '').strip() or None
     nav_at = (request.args.get('at') or '').strip() or None
-    if nav_q or nav_filter or nav_at:
-        try:
-            nav_sql, nav_params = build_search_query(
-                category, nav_q, dot=False, coin_filter=nav_filter,
-                at_property=nav_at)
-        except Exception:
-            nav_sql, nav_params = None, None
-        if nav_sql:
-            id_sql = re.sub(r'^SELECT \*', 'SELECT id', nav_sql, count=1)
-            all_ids = [r['id'] for r in db.execute(id_sql, nav_params).fetchall()]
-        else:
-            nav_wheres, nav_params2 = [], []
-            _apply_row_filter_clauses(category, nav_wheres, nav_params2)
-            nav_where = f"WHERE {' AND '.join(nav_wheres)}" if nav_wheres else ''
-            all_ids = [r['id'] for r in db.execute(
-                f"SELECT id FROM {table} {nav_where} ORDER BY created_at DESC",
-                nav_params2).fetchall()]
+    try:
+        nav_sql, nav_params = build_search_query(
+            category, nav_q, dot=False, coin_filter=nav_filter,
+            at_property=nav_at)
+    except Exception:
+        nav_sql, nav_params = None, None
+    if nav_sql:
+        id_sql = re.sub(r'^SELECT \*', 'SELECT id', nav_sql, count=1)
+        all_ids = [r['id'] for r in db.execute(id_sql, nav_params).fetchall()]
     else:
         nav_wheres, nav_params2 = [], []
         _apply_row_filter_clauses(category, nav_wheres, nav_params2)
         nav_where = f"WHERE {' AND '.join(nav_wheres)}" if nav_wheres else ''
+        order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
         all_ids = [r['id'] for r in db.execute(
-            f"SELECT id FROM {table} {nav_where} ORDER BY created_at DESC",
+            f"SELECT id FROM {table} {nav_where} ORDER BY {order_by}",
             nav_params2).fetchall()]
     idx = all_ids.index(record_id) if record_id in all_ids else -1
     prev_id = all_ids[idx - 1] if idx > 0 else None
