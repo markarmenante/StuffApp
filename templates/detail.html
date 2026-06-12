@@ -6295,6 +6295,15 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     panel.classList.remove('is-empty');
   }
 
+  function coinResearchHttpError(status, text) {
+    const raw = text || '';
+    if (/<!doctype|<html|<\/html>/i.test(raw)) {
+      return `Server returned ${status}. The research service timed out or returned a temporary gateway error. Please try again.`;
+    }
+    const cleaned = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    return `Server returned ${status}${cleaned ? ': ' + cleaned.slice(0, 160) : ''}`;
+  }
+
   document.querySelectorAll('.hist-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const field = btn.dataset.field;
@@ -6324,7 +6333,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         const ct = res.headers.get('content-type') || '';
         if (!ct.includes('application/json')) {
           const t = await res.text();
-          throw new Error(`Server returned ${res.status}. ${t.slice(0,120)}`);
+          throw new Error(coinResearchHttpError(res.status, t));
         }
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed');
@@ -6472,7 +6481,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         const ct = res.headers.get('content-type') || '';
         if (!ct.includes('application/json')) {
           const t = await res.text();
-          throw new Error(`Server returned ${res.status}. ${t.slice(0,120)}`);
+          throw new Error(coinResearchHttpError(res.status, t));
         }
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed');

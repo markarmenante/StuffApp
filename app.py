@@ -5023,6 +5023,51 @@ Reply with ONLY a JSON object, no prose:
     }
 
 
+def _coin_research_retry_settings():
+    try:
+        timeout = float(os.environ.get('ANTHROPIC_COIN_RESEARCH_TIMEOUT', '110'))
+    except (TypeError, ValueError):
+        timeout = 110.0
+    try:
+        attempts = int(os.environ.get('ANTHROPIC_COIN_RESEARCH_ATTEMPTS', '2'))
+    except (TypeError, ValueError):
+        attempts = 2
+    timeout = max(30.0, min(timeout, 120.0))
+    attempts = max(1, min(attempts, 2))
+    return timeout, attempts
+
+
+def _bounded_retry_wait(err, fallback, cap=15):
+    wait = fallback
+    try:
+        ra = err.response.headers.get('retry-after') if getattr(err, 'response', None) else None
+        if ra:
+            wait = max(wait, int(float(ra)))
+    except Exception:
+        pass
+    return max(1, min(wait, cap))
+
+
+def _friendly_lookup_error(label, err):
+    raw = str(err or '').strip()
+    if not raw:
+        return f'{label} failed.'
+    status_match = (
+        re.search(r'\b(?:status|code|http)\D{0,12}([45]\d{2})\b', raw, re.IGNORECASE)
+        or re.search(r'\b([45]\d{2})\b', raw)
+    )
+    status = status_match.group(1) if status_match else ''
+    if re.search(r'<!doctype|<html|</html>', raw, re.IGNORECASE):
+        if status:
+            return f'{label} temporarily unavailable (HTTP {status}). Please try again.'
+        return f'{label} temporarily unavailable. Please try again.'
+    if status in {'429', '500', '502', '503', '504', '529'}:
+        return f'{label} temporarily unavailable (HTTP {status}). Please try again.'
+    cleaned = re.sub(r'<[^>]+>', ' ', raw)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned[:280] if cleaned else f'{label} failed.'
+
+
 def fetch_coin_context(coin):
     """Claude-driven historical-environment summary for a coin, drawing
     on region, authority, mint, date, and description together.
@@ -5107,7 +5152,8 @@ after relevant bullets. Under ~1600 chars total.
 Reply with ONLY the markdown, wrapped in a <markdown>…</markdown> tag.
 No prose, no code fences, no JSON."""
 
-    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    timeout, attempts = _coin_research_retry_settings()
+    client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
     lookup_model = anthropic_lookup_model(
         api_key,
         ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
@@ -5123,7 +5169,7 @@ No prose, no code fences, no JSON."""
         anthropic.APITimeoutError,
         anthropic.InternalServerError,
     )
-    for attempt in range(3):
+    for attempt in range(attempts):
         try:
             resp = client.messages.create(
                 model=lookup_model,
@@ -5134,17 +5180,12 @@ No prose, no code fences, no JSON."""
             break
         except transient_errs as e:
             last_err = e
-            wait = 10 * (attempt + 1)
-            try:
-                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
-                if ra: wait = max(wait, int(float(ra)))
-            except Exception:
-                pass
-            if attempt == 2:
-                raise RuntimeError(f'Coin research lookup failed after retries: {last_err}')
+            wait = _bounded_retry_wait(e, 8 * (attempt + 1))
+            if attempt == attempts - 1:
+                raise RuntimeError(_friendly_lookup_error('Coin research lookup', last_err))
             _time.sleep(wait)
     else:
-        raise RuntimeError(f'Rate limited after retries: {last_err}')
+        raise RuntimeError(_friendly_lookup_error('Coin research lookup', last_err))
 
     text = ''
     for block in resp.content:
@@ -5272,7 +5313,8 @@ Focus on:
 Reply with ONLY a JSON object, no prose, no code fences:
 {{"markdown": "4–7 short lines. Prefix factual claims with '- '. Lead with pedigree / reference evidence when present, then add necessary historical context. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~900 chars total."}}"""
 
-    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    timeout, attempts = _coin_research_retry_settings()
+    client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
     lookup_model = anthropic_lookup_model(
         api_key,
         ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
@@ -5289,7 +5331,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
         anthropic.APITimeoutError,
         anthropic.InternalServerError,
     )
-    for attempt in range(3):
+    for attempt in range(attempts):
         try:
             resp = client.messages.create(
                 model=lookup_model,
@@ -5300,17 +5342,12 @@ Reply with ONLY a JSON object, no prose, no code fences:
             break
         except transient_errs as e:
             last_err = e
-            wait = 10 * (attempt + 1)
-            try:
-                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
-                if ra: wait = max(wait, int(float(ra)))
-            except Exception:
-                pass
-            if attempt == 2:
-                raise RuntimeError(f'Coin history lookup failed after retries: {last_err}')
+            wait = _bounded_retry_wait(e, 8 * (attempt + 1))
+            if attempt == attempts - 1:
+                raise RuntimeError(_friendly_lookup_error('Coin history lookup', last_err))
             _time.sleep(wait)
     else:
-        raise RuntimeError(f'Rate limited after retries: {last_err}')
+        raise RuntimeError(_friendly_lookup_error('Coin history lookup', last_err))
 
     text = ''
     for block in resp.content:
@@ -8166,7 +8203,7 @@ def coin_fetch_context(record_id):
     try:
         data = fetch_coin_context(coin)
     except RuntimeError as e:
-        return jsonify({'error': str(e)}), 503
+        return jsonify({'error': _friendly_lookup_error('Coin research lookup', e)}), 503
     except Exception as e:
         import traceback
         print(traceback.format_exc(), flush=True)
@@ -8208,7 +8245,7 @@ def coin_fetch_history(record_id):
     try:
         data = fetch_coin_history(field, topic, coin)
     except RuntimeError as e:
-        return jsonify({'error': str(e)}), 503
+        return jsonify({'error': _friendly_lookup_error('Coin history lookup', e)}), 503
     except Exception as e:
         import traceback
         print(traceback.format_exc(), flush=True)
