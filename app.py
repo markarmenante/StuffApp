@@ -14049,6 +14049,7 @@ def record_print_pdf(category, record_id):
     fields = FIELDS.get(category, [])
     file_fields = [f['name'] for f in fields if f.get('type') == 'file']
     primary_img = None
+    displayed_file_fields = set()
     for cand in (CATEGORIES[category].get('image_field'),
                  'image', 'image_obv', 'image_1', 'image_front', 'head_shot'):
         if not cand: continue
@@ -14059,6 +14060,7 @@ def record_print_pdf(category, record_id):
             p = os.path.join(UPLOAD_FOLDER, v)
             if os.path.isfile(p):
                 primary_img = p
+                displayed_file_fields.add(cand)
                 break
 
     # Long-text fields render as full-width sections below the spec
@@ -14333,7 +14335,43 @@ def record_print_pdf(category, record_id):
         # Generic (non-watches) layout — image at top, then a 2-col
         # key/value table for short fields, plus full-width sections
         # for long-text fields underneath.
-        if primary_img:
+        if category == 'coins':
+            coin_images = []
+            for field_name, label in (('image_1', 'Obverse'), ('image_2', 'Reverse')):
+                v = _val(field_name)
+                if not (v and is_image_filter(v)):
+                    continue
+                p = os.path.join(UPLOAD_FOLDER, v)
+                if os.path.isfile(p):
+                    coin_images.append((label, p))
+                    displayed_file_fields.add(field_name)
+            if coin_images:
+                image_cells = []
+                col_width = doc.width / len(coin_images)
+                for label, path in coin_images:
+                    try:
+                        ir = ImageReader(path)
+                        iw, ih = ir.getSize()
+                        max_w, max_h = col_width - 0.2 * inch, 3.1 * inch
+                        scale = min(max_w / iw, max_h / ih)
+                        image_cells.append([
+                            Image(path, width=iw * scale, height=ih * scale),
+                            Paragraph(f'<font size=7 color="#888">{label}</font>', cell_style),
+                        ])
+                    except Exception:
+                        image_cells.append('')
+                image_table = Table([image_cells], colWidths=[col_width] * len(image_cells))
+                image_table.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                    ('TOPPADDING', (0, 0), (-1, -1), 0),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ]))
+                story.append(image_table)
+                story.append(Spacer(1, 8))
+        elif primary_img:
             try:
                 ir = ImageReader(primary_img)
                 iw, ih = ir.getSize()
@@ -14399,9 +14437,7 @@ def record_print_pdf(category, record_id):
                 story.append(Paragraph(para, long_section_style))
 
     # Append remaining file fields as a small "Documents" list
-    other_files = [f for f in file_fields if not (primary_img and
-                  os.path.basename(primary_img) == (
-                      (lambda v: v if v else '')(row[f] if f in row.keys() else '')))]
+    other_files = [f for f in file_fields if f not in displayed_file_fields]
     docs = []
     for f in other_files:
         try:
