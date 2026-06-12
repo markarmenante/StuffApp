@@ -4848,7 +4848,7 @@ Description: {desc or '(not specified)'}
 Pedigree / References: {refs or '(not specified)'}
 Grade / Conditions:    {grade_notes or '(not specified)'}
 
-Use up to 4 concise web searches to ground the facts. Cover, in this order:
+Use up to 6 concise web searches to ground the facts. Cover, in this order:
 
 1. Historical environment — the political / military situation at this
    mint during the date range; who was in power (dynasty, magistrate,
@@ -4886,11 +4886,22 @@ after relevant bullets. Under ~1600 chars total.
 Reply with ONLY the markdown, wrapped in a <markdown>…</markdown> tag.
 No prose, no code fences, no JSON."""
 
-    client = anthropic.Anthropic(api_key=api_key)
-    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
-    web_search = anthropic_web_search_tool(4)
+    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    lookup_model = anthropic_lookup_model(
+        api_key,
+        ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
+        default='auto-fable',
+    )
+    web_search = anthropic_web_search_tool(
+        6, default_tool='web_search_20260209')
     import time as _time
     last_err = None
+    transient_errs = (
+        anthropic.RateLimitError,
+        anthropic.APIConnectionError,
+        anthropic.APITimeoutError,
+        anthropic.InternalServerError,
+    )
     for attempt in range(3):
         try:
             resp = client.messages.create(
@@ -4900,7 +4911,7 @@ No prose, no code fences, no JSON."""
                 messages=[{'role': 'user', 'content': prompt}],
             )
             break
-        except anthropic.RateLimitError as e:
+        except transient_errs as e:
             last_err = e
             wait = 10 * (attempt + 1)
             try:
@@ -4908,6 +4919,8 @@ No prose, no code fences, no JSON."""
                 if ra: wait = max(wait, int(float(ra)))
             except Exception:
                 pass
+            if attempt == 2:
+                raise RuntimeError(f'Coin research lookup failed after retries: {last_err}')
             _time.sleep(wait)
     else:
         raise RuntimeError(f'Rate limited after retries: {last_err}')
@@ -5022,7 +5035,7 @@ Description: {desc[:500] if desc else '(not specified)'}
 Pedigree / References: {refs[:500] if refs else '(not specified)'}
 Grade / Conditions: {grade_notes[:300] if grade_notes else '(not specified)'}
 
-Use up to 4 concise web searches to ground facts. Stress pedigree and
+Use up to 6 concise web searches to ground facts. Stress pedigree and
 references wherever the record gives you a lead: collection pedigree,
 prior sale, hoard provenance, die-study, catalog numbers, rarity notes,
 or standard references (SNG, HGC, RIC, RPC, Crawford, Ravel, Calciati,
@@ -5038,12 +5051,23 @@ Focus on:
 Reply with ONLY a JSON object, no prose, no code fences:
 {{"markdown": "4–7 short lines. Prefix factual claims with '- '. Lead with pedigree / reference evidence when present, then add necessary historical context. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~900 chars total."}}"""
 
-    client = anthropic.Anthropic(api_key=api_key)
-    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
-    web_search = anthropic_web_search_tool(4)
+    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    lookup_model = anthropic_lookup_model(
+        api_key,
+        ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
+        default='auto-fable',
+    )
+    web_search = anthropic_web_search_tool(
+        6, default_tool='web_search_20260209')
 
     import time as _time
     last_err = None
+    transient_errs = (
+        anthropic.RateLimitError,
+        anthropic.APIConnectionError,
+        anthropic.APITimeoutError,
+        anthropic.InternalServerError,
+    )
     for attempt in range(3):
         try:
             resp = client.messages.create(
@@ -5053,7 +5077,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
                 messages=[{'role': 'user', 'content': prompt}],
             )
             break
-        except anthropic.RateLimitError as e:
+        except transient_errs as e:
             last_err = e
             wait = 10 * (attempt + 1)
             try:
@@ -5061,6 +5085,8 @@ Reply with ONLY a JSON object, no prose, no code fences:
                 if ra: wait = max(wait, int(float(ra)))
             except Exception:
                 pass
+            if attempt == 2:
+                raise RuntimeError(f'Coin history lookup failed after retries: {last_err}')
             _time.sleep(wait)
     else:
         raise RuntimeError(f'Rate limited after retries: {last_err}')
@@ -5087,7 +5113,9 @@ def resolve_anthropic_lookup_model(api_key, configured_model):
     model = (configured_model or '').strip() or 'auto-sonnet'
     selector = model.lower().replace('_', '-')
     family = None
-    if selector in {'auto', 'latest', 'latest-sonnet', 'auto-sonnet'}:
+    if selector in {'latest-fable', 'auto-fable'}:
+        family = 'fable'
+    elif selector in {'auto', 'latest', 'latest-sonnet', 'auto-sonnet'}:
         family = 'sonnet'
     elif selector in {'latest-opus', 'auto-opus'}:
         family = 'opus'
@@ -5115,19 +5143,29 @@ def resolve_anthropic_lookup_model(api_key, configured_model):
                 return model_id
     except Exception:
         pass
-    return 'claude-sonnet-4-20250514' if family == 'sonnet' else model
+    fallbacks = {
+        'fable': 'claude-fable-5',
+        'opus': 'claude-opus-4-8',
+        'sonnet': 'claude-sonnet-4-6',
+        'haiku': 'claude-haiku-4-5-20251001',
+    }
+    return fallbacks.get(family, model)
 
 
-def anthropic_lookup_model(api_key, env_name=None):
+def anthropic_lookup_model(api_key, env_name=None, default='auto-sonnet'):
     configured = ''
-    if env_name:
-        configured = os.environ.get(env_name) or ''
-    configured = configured or os.environ.get('ANTHROPIC_LOOKUP_MODEL') or 'auto-sonnet'
+    env_names = env_name if isinstance(env_name, (tuple, list)) else [env_name]
+    for name in env_names:
+        if name:
+            configured = os.environ.get(name) or ''
+            if configured:
+                break
+    configured = configured or os.environ.get('ANTHROPIC_LOOKUP_MODEL') or default
     return resolve_anthropic_lookup_model(api_key, configured)
 
 
-def anthropic_web_search_tool(max_uses):
-    tool_type = (os.environ.get('ANTHROPIC_WEB_SEARCH_TOOL') or '').strip() or 'web_search_20250305'
+def anthropic_web_search_tool(max_uses, default_tool='web_search_20250305'):
+    tool_type = (os.environ.get('ANTHROPIC_WEB_SEARCH_TOOL') or '').strip() or default_tool
     try:
         uses = int(os.environ.get('ANTHROPIC_WEB_SEARCH_MAX_USES', max_uses) or max_uses)
     except ValueError:
