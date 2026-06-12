@@ -713,7 +713,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 <span class="clabel">Reason</span>
               </div>
               <div class="dcell">
-                <input type="text" value="{{ ev.cost or '' }}" data-service-field="cost">
+                <input type="text" value="{{ ev.cost or '' }}" class="service-cost-input" inputmode="numeric" data-service-field="cost">
                 <span class="clabel">Cost</span>
               </div>
               <div class="dcell date-overlay-cell">
@@ -3353,14 +3353,14 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // outbound HTTP is needed again — resilient to API URL changes,
   // network flakes, and Railway egress issues.
   const _fxCache = {};
-  function applyUsdConversion(el) {
+  function applyUsdConversion(el, dateOverride) {
     const stripped = stripUsdConversion((el.value || '').trim());
     if (!stripped) return;
     const meta = detectCurrency(stripped);
     if (meta.code === 'USD') return;
     const num = parseFloat(stripped.replace(/[^0-9.\-]/g, ''));
     if (!isFinite(num)) return;
-    const dateStr = transactionDate();
+    const dateStr = dateOverride || transactionDate();
     const key = `${meta.code}|${dateStr}`;
     function paint(rate) {
       if (!rate) return;
@@ -3408,7 +3408,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
       })
       .catch(() => {});
   }
-  function formatPriceField(el) {
+  function formatPriceField(el, dateOverride) {
     const raw = stripUsdConversion((el.value || '').trim());
     if (!raw) return;
     const meta = detectCurrency(raw);
@@ -3416,7 +3416,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (!isFinite(num)) return;
     const formatted = Math.round(num).toLocaleString('en-US');
     el.value = meta.prefix + formatted;
-    applyUsdConversion(el);
+    applyUsdConversion(el, dateOverride);
     syncLinkedPurchaseField(el);
   }
   function syncLinkedPurchaseField(source) {
@@ -4163,7 +4163,15 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // Service date: keep the compact MM/YY overlay and Since field in sync
   const svcDate = form.querySelector('input[name=service_date]');
   if (svcDate) {
-    svcDate.addEventListener('change', () => updateServiceSummary(svcDate.value));
+    svcDate.addEventListener('change', () => {
+      updateServiceSummary(svcDate.value);
+      if (serviceEventsWrap) {
+        serviceEventsWrap.querySelectorAll('[data-service-event-id]').forEach(row => {
+          formatServiceCost(row);
+          flushServiceSave(row);
+        });
+      }
+    });
   }
 
   const watchServicePanel = document.getElementById('watchServicePanel');
@@ -4217,6 +4225,20 @@ document.querySelectorAll('.comp-item').forEach(item => {
       payload[input.dataset.serviceField] = input.value;
     });
     return payload;
+  }
+
+  function serviceCostDate(row) {
+    if (!row) return transactionDate();
+    const sent = row.querySelector('[data-service-field="date_sent"]')?.value;
+    const returned = row.querySelector('[data-service-field="date_returned"]')?.value;
+    const summary = form.querySelector('input[name="service_date"]')?.value;
+    return sent || returned || summary || transactionDate();
+  }
+
+  function formatServiceCost(row) {
+    const costInput = row && row.querySelector('[data-service-field="cost"]');
+    if (!costInput || !costInput.value.trim()) return;
+    formatPriceField(costInput, serviceCostDate(row));
   }
 
   function syncServiceDateOverlay(input) {
@@ -4286,7 +4308,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
           <span class="clabel">Reason</span>
         </div>
         <div class="dcell">
-          <input type="text" value="${escapeHtml(event.cost)}" data-service-field="cost">
+          <input type="text" value="${escapeHtml(event.cost)}" class="service-cost-input" inputmode="numeric" data-service-field="cost">
           <span class="clabel">Cost</span>
         </div>
         <div class="dcell date-overlay-cell">
@@ -4307,11 +4329,22 @@ document.querySelectorAll('.comp-item').forEach(item => {
       if (input.type === 'date') {
         input.addEventListener('change', () => {
           syncServiceDateOverlay(input);
+          formatServiceCost(row);
           flushServiceSave(row);
         });
       } else {
         input.addEventListener('input', () => scheduleServiceSave(row));
-        input.addEventListener('blur', () => flushServiceSave(row));
+        input.addEventListener('blur', () => {
+          if (input.dataset.serviceField === 'cost') {
+            formatServiceCost(row);
+          }
+          flushServiceSave(row);
+        });
+        if (input.dataset.serviceField === 'cost') {
+          input.addEventListener('focus', () => {
+            input.value = stripUsdConversion(input.value);
+          });
+        }
       }
     });
     const deleteBtn = row.querySelector('[data-service-delete]');
