@@ -430,11 +430,13 @@
       {% if category != 'persons' %}
       {%- set _nav_q = request.args.get('q') or None -%}
       {%- set _nav_filter = request.args.get('filter') or None -%}
+      {%- set _nav_at = request.args.get('at') or None -%}
+      {%- set _nav_dot = request.args.get('dot') or None -%}
       {%- set _nav_report_back = request.args.get('report_back') or None -%}
       <a class="detail-nav-btn {{ 'disabled' if not prev_id }}"
-         href="{{ url_for('detail_view', category=category, record_id=prev_id, q=_nav_q, filter=_nav_filter, report_back=_nav_report_back) if prev_id else '#' }}">&lt;</a>
+         href="{{ url_for('detail_view', category=category, record_id=prev_id, q=_nav_q, filter=_nav_filter, at=_nav_at, dot=_nav_dot, report_back=_nav_report_back) if prev_id else '#' }}">&lt;</a>
       <a class="detail-nav-btn {{ 'disabled' if not next_id }}"
-         href="{{ url_for('detail_view', category=category, record_id=next_id, q=_nav_q, filter=_nav_filter, report_back=_nav_report_back) if next_id else '#' }}">&gt;</a>
+         href="{{ url_for('detail_view', category=category, record_id=next_id, q=_nav_q, filter=_nav_filter, at=_nav_at, dot=_nav_dot, report_back=_nav_report_back) if next_id else '#' }}">&gt;</a>
       {% endif %}
     {% endif %}
     <a class="back-link" href="{{ back_href if back_href else url_for('list_view', category=category) ~ ('#item-' ~ r['id'] if r and r['id'] else '') }}">← Back</a>

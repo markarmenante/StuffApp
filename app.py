@@ -5992,9 +5992,10 @@ def detail_view(category, record_id):
     nav_q = (request.args.get('q') or '').strip()
     nav_filter = (request.args.get('filter') or '').strip() or None
     nav_at = (request.args.get('at') or '').strip() or None
+    nav_dot = request.args.get('dot', '') == '1'
     try:
         nav_sql, nav_params = build_search_query(
-            category, nav_q, dot=False, coin_filter=nav_filter,
+            category, nav_q, dot=nav_dot, coin_filter=nav_filter,
             at_property=nav_at)
     except Exception:
         nav_sql, nav_params = None, None
@@ -6139,9 +6140,11 @@ def detail_view(category, record_id):
         back_q = (request.args.get('q') or '').strip() or None
         back_filter = (request.args.get('filter') or '').strip() or None
         back_at = (request.args.get('at') or '').strip() or None
-        if back_q or back_filter or back_at:
+        back_dot = request.args.get('dot') or None
+        if back_q or back_filter or back_at or back_dot:
             back_href = url_for('list_view', category=category,
-                                q=back_q, filter=back_filter, at=back_at) \
+                                q=back_q, filter=back_filter, at=back_at,
+                                dot=back_dot) \
                         + f'#item-{record_id}'
 
     # Camera detail: list every lens with the same mount and property,

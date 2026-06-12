@@ -146,7 +146,7 @@
   {% if category == 'properties' and ns.prev == 'Residential' and (row['type'] or '') == 'Commercial' %}
   <div class="property-type-divider" aria-hidden="true"></div>
   {% endif %}
-  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None) }}">
+  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None, dot='1' if dot else None) }}">
 
     <!-- Thumbnail -->
     {% if category != 'persons' %}
