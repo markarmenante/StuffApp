@@ -1331,6 +1331,20 @@ input[type="date"] { -webkit-appearance: none; }
 .coin-specs .dcell select { text-align: center; }
 .coin-purchase .dcell input,
 .coin-purchase .dcell select { text-align: center; }
+.coin-reference-source-row .dcell {
+  border-bottom: none;
+}
+.coin-reference-notes-row .dcell {
+  border-top: 1px solid var(--border);
+}
+.coin-reference-notes-cell {
+  padding-top: 6px;
+  padding-bottom: 3px;
+}
+.coin-reference-notes-cell textarea {
+  line-height: 1.45;
+  min-height: 0;
+}
 .watch-purchase .dcell input,
 .watch-purchase .dcell select { text-align: center; }
 .watch-order-panel { margin-top: 0; }

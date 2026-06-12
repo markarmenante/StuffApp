@@ -374,10 +374,7 @@ def _cleanup_coin_research_headings(db):
         if match:
             before = refs[:match.start()].strip()
             refs_research = match.group(2).strip()
-            new_refs = (
-                f"{before}\n\n{refs_research}" if before and refs_research
-                else (before or refs_research)
-            ).strip()
+            new_refs = before
         if new_condition != condition or new_refs != refs or (
             has_refs_research and refs_research != (row['coin_references_research'] or '').strip()
         ):
@@ -546,6 +543,7 @@ FIELDS = {
         {'name': 'date_2_text',     'label': 'Date To (text)',    'type': 'text'},
         {'name': 'description',     'label': 'Description',       'type': 'textarea'},
         {'name': 'coin_references',  'label': 'References / Pedigree', 'type': 'textarea'},
+        {'name': 'coin_references_research', 'label': 'Reference Notes', 'type': 'textarea'},
         {'name': 'notes',           'label': 'Notes / Grade',     'type': 'textarea'},
         {'name': 'history_context', 'label': 'Historical Context','type': 'textarea'},
         {'name': 'grade',           'label': 'Grade',             'type': 'text'},
@@ -4862,16 +4860,17 @@ Use up to 4 concise web searches to ground the facts. Cover, in this order:
    Hellenistic realism, archaic incuse reverse, Roman provincial
    portrait conventions). Name the style when it's identifiable.
 
-3. Numismatic importance — lead with the pedigree / reference evidence
-   when present: collection pedigree, prior sale, hoard, die-study,
-   rarity, catalog placement, or significance within the series (first
-   portrait of a ruler, earliest use of a legend, benchmark type in a
-   standard catalog). Explain terse catalog citations in collector-
-   friendly language when possible. For example, if references include
-   "SNG Kayhan 880; SNG von Aulock 8046; BMC Caria pg. 183, 1; Babelon,
-   Les Perses, pl. X, 8", say what each source is, what region/series
-   it supports, and whether the citation confirms the type, rarity,
-   mint attribution, or iconographic reading. Skip padding; only include
+3. Pedigree and reference notes — write a scholarly, catalogue-style
+   discussion of the cited pedigree and reference information. Lead
+   with collection pedigree, prior sale, hoard, die-study, rarity,
+   catalog placement, or significance within the series (first portrait
+   of a ruler, earliest use of a legend, benchmark type in a standard
+   catalog). Explain terse catalog citations in collector-friendly
+   language when possible. For example, if references include "SNG
+   Kayhan 880; SNG von Aulock 8046; BMC Caria pg. 183, 1; Babelon, Les
+   Perses, pl. X, 8", say what each source is, what region/series it
+   supports, and whether the citation confirms the type, rarity, mint
+   attribution, or iconographic reading. Skip padding; only include
    what actually applies.
 
 4. How this coin reflected the times — propaganda choices, civic pride,
@@ -4879,7 +4878,7 @@ Use up to 4 concise web searches to ground the facts. Cover, in this order:
    trade denomination. Tie the imagery or metal directly to the moment.
 
 Write four short sections using these bold labels on their own lines:
-**Historical environment**, **Style**, **Numismatic importance**,
+**Historical environment**, **Style**, **Pedigree and reference notes**,
 **Reflection of the times**. Each label is followed by 1–3 bullets
 starting with '- '. Include 2–4 source URLs as trailing bare URLs
 after relevant bullets. Under ~1600 chars total.
@@ -4946,17 +4945,17 @@ No prose, no code fences, no JSON."""
 
 COIN_CONTEXT_SECTION_RE = re.compile(
     r'(?im)^\s*(?:\*\*)?\s*'
-    r'(Historical environment|Style|Numismatic importance|Reflection of the times)'
+    r'(Historical environment|Style|Numismatic importance|Pedigree and reference notes|Reflection of the times)'
     r'\s*(?:\*\*)?\s*:?\s*$'
 )
 
 
 def _split_coin_context_markdown(markdown):
-    """Return (historical_context, numismatic_importance_body).
+    """Return (historical_context, reference_notes).
 
     The History lookup asks for four labeled sections. Store the
-    numismatic-importance section with pedigree/references, while the
-    remaining sections stay in the historical-context field.
+    pedigree/reference section in its own notes field, while the remaining
+    sections stay in the historical-context field.
     """
     md = (markdown or '').strip()
     if not md:
@@ -4966,7 +4965,7 @@ def _split_coin_context_markdown(markdown):
         return md, ''
 
     context_parts = []
-    importance_parts = []
+    reference_parts = []
     if matches[0].start() > 0:
         context_parts.append(md[:matches[0].start()].strip())
 
@@ -4975,45 +4974,14 @@ def _split_coin_context_markdown(markdown):
         next_start = matches[idx + 1].start() if idx + 1 < len(matches) else len(md)
         section_body = md[match.end():next_start].strip()
         section_text = md[match.start():next_start].strip()
-        if heading == 'numismatic importance':
-            importance_parts.append(section_body)
+        if heading in ('numismatic importance', 'pedigree and reference notes'):
+            reference_parts.append(section_body)
         else:
             context_parts.append(section_text)
 
     historical_context = '\n\n'.join(part for part in context_parts if part).strip()
-    numismatic_importance = '\n\n'.join(part for part in importance_parts if part).strip()
-    return historical_context, numismatic_importance
-
-
-def _merge_coin_numismatic_importance(existing_refs, importance, previous_generated=''):
-    """Append/replace the generated numismatic reference notes.
-
-    Existing pedigree/reference text is preserved. If the Research button
-    is run again, replace the previously appended block at the end rather
-    than stacking duplicates.
-    """
-    refs = (existing_refs or '').strip()
-    body = (importance or '').strip()
-    if not body:
-        return refs
-
-    generated = re.sub(r'(?is)\A\s*Numismatic importance\s*:?\s*\n+', '', body).strip()
-    if not refs:
-        return generated
-
-    refs = re.sub(
-        r'(?is)\n{2,}Numismatic importance\s*:?\s*\n.*\Z',
-        '',
-        refs,
-    ).strip()
-    previous = (previous_generated or '').strip()
-    if previous:
-        refs = refs.replace(f"\n\n{previous}", '').replace(previous, '').strip()
-    if not refs:
-        return generated
-    if generated in refs:
-        return refs
-    return f"{refs}\n\n{generated}"
+    reference_notes = '\n\n'.join(part for part in reference_parts if part).strip()
+    return historical_context, reference_notes
 
 
 def fetch_coin_history(field_name, topic, coin):
@@ -7946,25 +7914,20 @@ def coin_fetch_context(record_id):
         detail = str(e) or e.__class__.__name__
         return jsonify({'error': f'Context lookup failed: {detail}'}), 500
     now = datetime.utcnow().isoformat()
-    history_context, numismatic_importance = _split_coin_context_markdown(data['markdown'])
-    coin_references = _merge_coin_numismatic_importance(
-        coin['coin_references'],
-        numismatic_importance,
-        coin['coin_references_research'] if 'coin_references_research' in coin.keys() else '',
-    )
+    history_context, reference_notes = _split_coin_context_markdown(data['markdown'])
     condition = _merge_coin_condition_history(coin['condition'], history_context)
     db.execute(
-        "UPDATE coins SET coin_references = ?, condition = ?, history_context = NULL, "
+        "UPDATE coins SET condition = ?, history_context = NULL, "
         "coin_references_research = ?, history_searched_at = ?, updated_at = ? WHERE id = ?",
-        (coin_references, condition, numismatic_importance, now, now, record_id),
+        (condition, reference_notes, now, now, record_id),
     )
     db.commit()
     return jsonify({
         'markdown': history_context,
         'condition': condition,
         'history_context': history_context,
-        'numismatic_importance': numismatic_importance,
-        'coin_references': coin_references,
+        'reference_notes': reference_notes,
+        'coin_references_research': reference_notes,
         'searched_at': now,
     })
 
