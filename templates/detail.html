@@ -390,21 +390,14 @@
       {% endif %}
     {% endif %}
     {% if category == 'coins' and _is_owner %}
-    {# Check + History pills render even on the new-coin form. The
-       autosave-on-new path creates the record on first interaction,
-       and the Check JS calls ensureRecord() before fetching so the
-       record_id is in place before the lookup URL is built. #}
-    <button type="button"
-            id="coinSpecLookupBtn"
-            class="coin-lookup-btn coin-check-btn{% if r and r['specs_searched_at'] %} done{% endif %}"
-            data-url="{% if not is_new %}{{ url_for('coin_lookup_specs', record_id=r['id']) }}{% endif %}"
-            title="{% if r and r['specs_searched_at'] %}Specs lookup last run {{ r['specs_searched_at'][:10] }} — click to re-run{% else %}Check region / authority / denomination / metal / date / official / weight / size / grade against reputable numismatic sources{% endif %}">
-      🔎 Check
-    </button>
+    {# Research renders even on the new-coin form. The autosave-on-new
+       path creates the record on first interaction, and the Research JS
+       calls ensureRecord() before running spec lookup + research. #}
     <button type="button"
             class="coin-lookup-btn coin-history-btn{% if r and r['history_searched_at'] %} done{% endif %}"
             data-url="{% if not is_new %}{{ url_for('coin_fetch_context', record_id=r['id']) }}{% endif %}"
-            title="{% if r and r['history_searched_at'] %}Research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Research the historical environment plus a scholarly discussion of cited pedigree and reference information{% endif %}">
+            data-spec-url="{% if not is_new %}{{ url_for('coin_lookup_specs', record_id=r['id']) }}{% endif %}"
+            title="{% if r and r['history_searched_at'] %}Research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Check identifying fields, then research the historical environment plus a scholarly discussion of cited pedigree and reference information{% endif %}">
       🔎 Research
     </button>
     {% endif %}
@@ -2970,7 +2963,7 @@ document.querySelectorAll('.watch-lookup-btn:not(.print-pdf-btn):not(.rec-lookup
   }
 }));
 
-function showLookupReview(applyUrl, filled, overwritten, sources) {
+function showLookupReview(applyUrl, filled, overwritten, sources, options = {}) {
   // Build the modal.
   const overlay = document.createElement('div');
   overlay.className = 'lookup-review-overlay';
@@ -3032,39 +3025,46 @@ function showLookupReview(applyUrl, filled, overwritten, sources) {
     list.appendChild(row('overwrite', f, info.current, info.new));
   });
 
-  if (!list.children.length) {
-    alert('Already up to date. Every field the lookup checked matches '
-          + 'this watch.'
-          + (sources ? '\n\nChecked: ' + sources : ''));
-    return;
-  }
-
-  overlay.addEventListener('click', async (ev) => {
-    const act = ev.target.dataset.act;
-    if (act === 'cancel' || ev.target === overlay) {
-      overlay.remove();
+  return new Promise((resolve) => {
+    if (!list.children.length) {
+      if (!options.silentEmpty) {
+        alert(options.emptyMessage || ('Already up to date. Every field the lookup checked matches '
+              + 'this watch.'
+              + (sources ? '\n\nChecked: ' + sources : '')));
+      }
+      resolve({ applied: false, skipped: true });
       return;
     }
-    if (act !== 'apply') return;
-    const updates = {};
-    overlay.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      if (cb.checked) updates[cb.dataset.field] = JSON.parse(cb.dataset.value);
-    });
-    try {
-      const res = await fetch(applyUrl, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({updates}),
+
+    overlay.addEventListener('click', async (ev) => {
+      const act = ev.target.dataset.act;
+      if (act === 'cancel' || ev.target === overlay) {
+        overlay.remove();
+        resolve({ applied: false, cancelled: true });
+        return;
+      }
+      if (act !== 'apply') return;
+      const updates = {};
+      overlay.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        if (cb.checked) updates[cb.dataset.field] = JSON.parse(cb.dataset.value);
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Apply failed');
-      overlay.remove();
-      if (data.updated) window.location.reload();
-    } catch (err) {
-      alert('Apply failed: ' + err.message);
-    }
+      try {
+        const res = await fetch(applyUrl, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({updates}),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Apply failed');
+        overlay.remove();
+        resolve({ applied: Boolean(data.updated), data, updates });
+        if (data.updated && options.reloadOnApply !== false) window.location.reload();
+      } catch (err) {
+        alert('Apply failed: ' + err.message);
+      }
+    });
+    document.body.appendChild(overlay);
   });
-  document.body.appendChild(overlay);
 }
 
 function escapeHtml(s) {
@@ -6354,117 +6354,113 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     });
   });
 
-  // ── Region ✓ button: fill missing region/authority/denomination/
-  //     metal/dates/official. Same checkbox-review modal as the watch
-  //     lookup — pure-fill responses auto-apply with one round-trip,
-  //     responses with overwrites pop the showLookupReview dialog so
-  //     the user can pick which suggestions to accept.
-  const specBtn = document.getElementById('coinSpecLookupBtn');
-  if (specBtn) {
-    specBtn.addEventListener('click', async () => {
-      if (specBtn.classList.contains('busy')) return;
-      specBtn.classList.add('busy');
-      const prevText = specBtn.textContent;
-      specBtn.textContent = '⏳';
-      try {
-        // New-coin path: data-url is empty until the record exists.
-        // ensureRecord() (provided by the autosave-on-new hookup) does
-        // a one-shot POST to /coins/new with the current form values
-        // and updates form.action to /coins/<new-id>. Once that
-        // resolves, derive the lookup URL from the saved detail URL.
-        if (!specBtn.dataset.url) {
-          if (typeof ensureRecord !== 'function') {
-            alert('Save the record first.');
-            return;
-          }
-          await ensureRecord();
-          const detailPath = (document.getElementById('mainForm') || {}).action || '';
-          if (!detailPath) throw new Error('No record URL after save');
-          specBtn.dataset.url = detailPath + '/lookup-specs';
-          // Patch the History pill the same way so its first click
-          // also has a valid URL without another reload.
-          document.querySelectorAll('.coin-history-btn').forEach(b => {
-            if (!b.dataset.url) b.dataset.url = detailPath + '/context';
-          });
-        }
-        const url = specBtn.dataset.url;
-        // Cap the wait so the browser doesn't sit forever if the
-        // upstream proxy (Cloudflare ~100s edge timeout, Railway,
-        // etc.) silently drops the response. AbortController gives
-        // us a clean signal to message the user instead of the
-        // generic browser "Failed to fetch".
-        const ctl = new AbortController();
-        const timeoutId = setTimeout(() => ctl.abort(), 280000);
-        let resp;
-        try {
-          resp = await fetch(url, {
-            method: 'POST',
-            headers: { 'Accept': 'application/json' },
-            signal: ctl.signal,
-          });
-        } finally {
-          clearTimeout(timeoutId);
-        }
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) {
-          alert(data.error || 'Lookup failed');
-          return;
-        }
-        const filled = data.filled || {};
-        const overwritten = data.overwritten || {};
-        // Lookup ran successfully — flip Check pill to green for this
-        // session (server has also persisted specs_searched_at).
-        if (data.specs_searched_at) specBtn.classList.add('done');
-        if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
-          alert('No new information found.'
-                + (data.sources ? '\n\nChecked: ' + data.sources : ''));
-          return;
-        }
-        const applyUrl = url.replace('/lookup-specs', '/apply-lookup-specs');
-        // Pure-fill: nothing to second-guess, so apply directly.
-        if (!Object.keys(overwritten).length) {
-          const res2 = await fetch(applyUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ updates: filled }),
-          });
-          const d = await res2.json();
-          if (!res2.ok) throw new Error(d.error || 'Apply failed');
-          if (d.updated) window.location.reload();
-          return;
-        }
-        // Anything to overwrite → checkbox review modal.
-        showLookupReview(applyUrl, filled, overwritten, data.sources || '');
-      } catch (err) {
-        // Translate the two common failure modes into something the
-        // user can act on. AbortError = our 280s timer fired. A bare
-        // TypeError "Failed to fetch" means the connection died
-        // before any response — usually an upstream-proxy edge
-        // timeout (Railway / Cloudflare) or transient network blip.
-        let msg;
-        if (err && err.name === 'AbortError') {
-          msg = 'Lookup took too long — the server didn\'t respond within ~5 minutes. Try again, or with fewer fields filled in for the model to work with.';
-        } else if (err && /Failed to fetch/i.test(err.message || '')) {
-          msg = 'Network error reaching the server. The lookup may have run too long for the upstream proxy. Wait a few seconds and retry — the server usually finishes in the background.';
-        } else {
-          msg = 'Lookup failed: ' + (err.message || err);
-        }
-        alert(msg);
-      } finally {
-        specBtn.classList.remove('busy');
-        specBtn.textContent = prevText;
-      }
+  function coinLookupFailureMessage(err) {
+    if (err && err.name === 'AbortError') {
+      return 'Lookup took too long — the server did not respond within ~5 minutes. Try again, or with fewer fields filled in for the model to work with.';
+    }
+    if (err && /Failed to fetch/i.test(err.message || '')) {
+      return 'Network error reaching the server. The lookup may have run too long for the upstream proxy. Wait a few seconds and retry.';
+    }
+    return err && err.message ? err.message : String(err || 'Lookup failed');
+  }
+
+  function coinYearDisplay(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return value == null ? '' : String(value);
+    return n < 0 ? `${Math.abs(Math.trunc(n))} BC` : String(Math.trunc(n));
+  }
+
+  function setCoinFormValue(name, value) {
+    document.getElementsByName(name).forEach(el => {
+      el.value = value == null ? '' : String(value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
     });
   }
 
-  // ── Coin-wide History pill: combined historical context ──
-  // Selector is .coin-history-btn now (not .coin-lookup-btn) so this
-  // handler doesn't double-fire on the Check pill, which shares the
-  // .coin-lookup-btn class for pill styling only.
+  function applyCoinLookupValues(values) {
+    if (!values || typeof values !== 'object') return;
+    if (Object.prototype.hasOwnProperty.call(values, 'date_1')) {
+      values.date_1_text = values.date_1_text || coinYearDisplay(values.date_1);
+    }
+    if (Object.prototype.hasOwnProperty.call(values, 'date_2')) {
+      values.date_2_text = values.date_2_text || coinYearDisplay(values.date_2);
+    }
+    Object.entries(values).forEach(([field, value]) => {
+      setCoinFormValue(field, value);
+      if (field === 'date_1_text') setCoinFormValue('date_1', value);
+      if (field === 'date_2_text') setCoinFormValue('date_2', value);
+    });
+  }
+
+  async function ensureCoinResearchUrls(btn) {
+    if (btn.dataset.url && btn.dataset.specUrl) return;
+    if (typeof ensureRecord !== 'function') {
+      throw new Error('Save the record first.');
+    }
+    await ensureRecord();
+    const detailPath = (document.getElementById('mainForm') || {}).action || '';
+    if (!detailPath) throw new Error('No record URL after save');
+    if (!btn.dataset.url) btn.dataset.url = detailPath + '/context';
+    if (!btn.dataset.specUrl) btn.dataset.specUrl = detailPath + '/lookup-specs';
+  }
+
+  async function runCoinSpecLookup(btn) {
+    const url = btn.dataset.specUrl;
+    if (!url) return;
+    const ctl = new AbortController();
+    const timeoutId = setTimeout(() => ctl.abort(), 280000);
+    let resp;
+    try {
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json' },
+        signal: ctl.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Lookup failed');
+
+    const filled = data.filled || {};
+    const overwritten = data.overwritten || {};
+    if (!Object.keys(filled).length && !Object.keys(overwritten).length) return;
+
+    const applyUrl = url.replace('/lookup-specs', '/apply-lookup-specs');
+    if (!Object.keys(overwritten).length) {
+      const res2 = await fetch(applyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates: filled }),
+      });
+      const d = await res2.json();
+      if (!res2.ok) throw new Error(d.error || 'Apply failed');
+      if (d.updated) applyCoinLookupValues(d.values || filled);
+      return;
+    }
+
+    const result = await showLookupReview(
+      applyUrl,
+      filled,
+      overwritten,
+      data.sources || '',
+      {
+        reloadOnApply: false,
+        silentEmpty: true,
+        emptyMessage: 'Already up to date. Every field the lookup checked matches this coin.'
+          + (data.sources ? '\n\nChecked: ' + data.sources : ''),
+      }
+    );
+    if (result && result.applied) {
+      applyCoinLookupValues((result.data && result.data.values) || result.updates);
+    }
+  }
+
+  // ── Coin-wide Research pill: identify/check the coin, then fetch
+  //     historical context plus pedigree/reference notes.
   document.querySelectorAll('.coin-history-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const url = btn.dataset.url;
-      if (!url) return;
       const originalText = btn.textContent;
       const notes = document.querySelector('[name="condition"]');
       const refNotes = document.querySelector('[name="coin_references_research"]');
@@ -6474,8 +6470,13 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       }
       btn.classList.add('loading'); btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
-      btn.textContent = '🔎 Researching…';
       try {
+        await ensureCoinResearchUrls(btn);
+        btn.textContent = '🔎 Checking…';
+        await runCoinSpecLookup(btn);
+        btn.textContent = '🔎 Researching…';
+        const url = btn.dataset.url;
+        if (!url) throw new Error('No research URL after save');
         const res = await fetch(url, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
@@ -6510,7 +6511,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         // immediately (server has also persisted history_searched_at).
         if (data.searched_at) btn.classList.add('done');
       } catch (err) {
-        alert('Research failed: ' + (err.message || 'unknown'));
+        alert('Research failed: ' + coinLookupFailureMessage(err));
       } finally {
         btn.classList.remove('loading'); btn.disabled = false;
         btn.removeAttribute('aria-busy');

@@ -8511,8 +8511,7 @@ def coin_lookup_specs(record_id):
         elif not _equivalent(f, cur, v):
             overwritten[f] = {'current': cur, 'new': v}
 
-    # Stamp that the lookup ran successfully — used to mark the Check
-    # pill green on subsequent visits to this coin.
+    # Stamp that the identifying-field lookup ran successfully.
     now = datetime.utcnow().isoformat()
     db.execute("UPDATE coins SET specs_searched_at = ? WHERE id = ?",
                (now, record_id))
@@ -8627,7 +8626,11 @@ def coin_apply_lookup_specs(record_id):
                            (new_cat, record_id))
                 updates['cat_id'] = new_cat
     db.commit()
-    return jsonify({'updated': len(updates), 'fields': list(updates.keys())})
+    return jsonify({
+        'updated': len(updates),
+        'fields': list(updates.keys()),
+        'values': updates,
+    })
 
 
 @app.route('/<category>/<record_id>/upload-image', methods=['POST'])

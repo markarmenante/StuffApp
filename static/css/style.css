@@ -750,8 +750,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .watch-lookup-btn:disabled,
 .coin-lookup-btn:disabled { opacity: .6; cursor: progress; }
 /* Green tint once a lookup has been recorded for this record. Shared
-   by every floating-nav lookup pill (watches, coins Check + History,
-   art). */
+   by every floating-nav lookup pill (watches, coin Research, art). */
 .watch-lookup-btn.done,
 .coin-lookup-btn.done {
   background: #e6f6ea;
