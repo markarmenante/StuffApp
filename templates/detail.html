@@ -6465,6 +6465,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     btn.addEventListener('click', async () => {
       const url = btn.dataset.url;
       if (!url) return;
+      const originalText = btn.textContent;
       const notes = document.querySelector('[name="condition"]');
       const refNotes = document.querySelector('[name="coin_references_research"]');
       const scrollTarget = refNotes || notes;
@@ -6472,6 +6473,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
       btn.classList.add('loading'); btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      btn.textContent = '🔎 Researching…';
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -6510,6 +6513,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         alert('Research failed: ' + (err.message || 'unknown'));
       } finally {
         btn.classList.remove('loading'); btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.textContent = originalText;
       }
     });
   });
