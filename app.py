@@ -5136,8 +5136,12 @@ Use up to 6 concise web searches to ground the facts. Cover, in this order:
    Kayhan 880; SNG von Aulock 8046; BMC Caria pg. 183, 1; Babelon, Les
    Perses, pl. X, 8", say what each source is, what region/series it
    supports, and whether the citation confirms the type, rarity, mint
-   attribution, or iconographic reading. Skip padding; only include
-   what actually applies.
+   attribution, or iconographic reading. When evidence supports a
+   rarity estimate, use this scale: C1-C3 = 22+ known, S = 16-21, R1 =
+   11-15, R2 = 7-10, R3 = 4-6, R4 = 2-3, R5 = unique. State the code
+   with a brief basis (hoards, major collections, die studies, auction
+   archives) and name the reference perspective when applicable. Skip
+   padding; only include what actually applies.
 
 4. How this coin reflected the times — propaganda choices, civic pride,
    response to economic or military pressure, religious festival,
