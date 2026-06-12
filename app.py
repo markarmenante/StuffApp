@@ -4355,7 +4355,186 @@ def watch_hertz(beat):
     return None
 
 
-def fetch_watch_valuation(watch):
+PERPLEXITY_CHAT_COMPLETIONS_URL = 'https://api.perplexity.ai/chat/completions'
+
+_JSON_NULLABLE_STRING = {'type': ['string', 'null']}
+_JSON_NULLABLE_NUMBER = {'type': ['number', 'null']}
+_JSON_NULLABLE_INTEGER = {'type': ['integer', 'null']}
+
+WATCH_VALUE_RESPONSE_SCHEMA = {
+    'type': 'object',
+    'additionalProperties': False,
+    'properties': {
+        'consensus_usd': _JSON_NULLABLE_NUMBER,
+        'watchcharts_median_usd': _JSON_NULLABLE_NUMBER,
+        'results_markdown': {'type': 'string'},
+    },
+    'required': [
+        'consensus_usd', 'watchcharts_median_usd', 'results_markdown',
+    ],
+}
+
+WATCH_SPECS_RESPONSE_SCHEMA = {
+    'type': 'object',
+    'additionalProperties': False,
+    'properties': {
+        'metal': _JSON_NULLABLE_STRING,
+        'case_diameter': _JSON_NULLABLE_NUMBER,
+        'dial_color': _JSON_NULLABLE_STRING,
+        'year': _JSON_NULLABLE_INTEGER,
+        'year_basis': _JSON_NULLABLE_STRING,
+        'edition': _JSON_NULLABLE_INTEGER,
+        'calibre': _JSON_NULLABLE_STRING,
+        'movement_type': _JSON_NULLABLE_STRING,
+        'movement_origin': _JSON_NULLABLE_STRING,
+        'movement_jewels': _JSON_NULLABLE_INTEGER,
+        'escapement': _JSON_NULLABLE_STRING,
+        'balance_wheel': _JSON_NULLABLE_STRING,
+        'beat': _JSON_NULLABLE_NUMBER,
+        'reserve': _JSON_NULLABLE_INTEGER,
+        'complications': {
+            'type': ['array', 'null'],
+            'items': {'type': 'string'},
+        },
+        'clasp_type': _JSON_NULLABLE_STRING,
+        'lug_mm': _JSON_NULLABLE_NUMBER,
+        'strap_material': _JSON_NULLABLE_STRING,
+        'notes': _JSON_NULLABLE_STRING,
+        'calibre_notes': _JSON_NULLABLE_STRING,
+        'sources': _JSON_NULLABLE_STRING,
+    },
+    'required': [
+        'metal', 'case_diameter', 'dial_color', 'year', 'year_basis',
+        'edition', 'calibre', 'movement_type', 'movement_origin',
+        'movement_jewels', 'escapement', 'balance_wheel', 'beat',
+        'reserve', 'complications', 'clasp_type', 'lug_mm',
+        'strap_material', 'notes', 'calibre_notes', 'sources',
+    ],
+}
+
+
+def _first_configured_env(names):
+    if not names:
+        return ''
+    if isinstance(names, str):
+        names = (names,)
+    for name in names:
+        configured = (os.environ.get(name) or '').strip()
+        if configured:
+            return configured
+    return ''
+
+
+def perplexity_lookup_model(env_names=None, default='sonar-pro'):
+    return (_first_configured_env(env_names) or
+            (os.environ.get('PERPLEXITY_LOOKUP_MODEL') or '').strip() or
+            default)
+
+
+def perplexity_search_context(env_names=None, default='high'):
+    configured = (_first_configured_env(env_names) or
+                  (os.environ.get('PERPLEXITY_SEARCH_CONTEXT_SIZE') or '').strip() or
+                  default)
+    configured = configured.lower()
+    return configured if configured in {'low', 'medium', 'high'} else default
+
+
+def perplexity_chat_completion(api_key, prompt, *, env_names=None,
+                               default_model='sonar-pro', max_tokens=2048,
+                               response_schema=None, schema_name='lookup',
+                               search_context_env_names=None,
+                               default_search_context='high'):
+    """Call Perplexity's search-grounded chat endpoint with retries."""
+    import urllib.request
+    import urllib.error
+    import time as _time
+
+    body_data = {
+        'model': perplexity_lookup_model(env_names, default_model),
+        'messages': [{'role': 'user', 'content': prompt}],
+        'max_tokens': max_tokens,
+        'temperature': 0.1,
+        'web_search_options': {
+            'search_context_size': perplexity_search_context(
+                search_context_env_names, default_search_context),
+        },
+    }
+    if response_schema is not None:
+        body_data['response_format'] = {
+            'type': 'json_schema',
+            'json_schema': {
+                'name': schema_name,
+                'schema': response_schema,
+            },
+        }
+    body = json.dumps(body_data).encode('utf-8')
+
+    last_err = None
+    for attempt in range(3):
+        req = urllib.request.Request(
+            PERPLEXITY_CHAT_COMPLETIONS_URL,
+            data=body,
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=240) as resp:
+                api_data = json.loads(resp.read().decode('utf-8'))
+            try:
+                text = api_data['choices'][0]['message']['content'] or ''
+            except (KeyError, IndexError, TypeError):
+                raise RuntimeError(
+                    f'Unexpected Perplexity response: {str(api_data)[:200]}')
+            return api_data, text.strip()
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code == 429 or 500 <= e.code < 600:
+                wait = 10 * (attempt + 1)
+                try:
+                    ra = e.headers.get('retry-after') if getattr(e, 'headers', None) else None
+                    if ra:
+                        wait = max(wait, int(float(ra)))
+                except Exception:
+                    pass
+                _time.sleep(wait)
+                continue
+            try:
+                detail = e.read().decode('utf-8', 'ignore')[:200]
+            except Exception:
+                detail = ''
+            raise RuntimeError(f'Perplexity HTTP {e.code}: {detail}')
+        except urllib.error.URLError as e:
+            last_err = e
+            _time.sleep(10 * (attempt + 1))
+    raise RuntimeError(f'Lookup failed after retries: {last_err}')
+
+
+def parse_model_json_object(text):
+    text = (text or '').strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if not m:
+        raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
+    return json.loads(m.group(0))
+
+
+def _coerce_number(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def fetch_watch_valuation_anthropic(watch):
     """Use Claude's web_search tool to estimate current market value.
 
     Returns dict {value: float|None, results: str}. Raises RuntimeError
@@ -4477,6 +4656,101 @@ results_markdown rules:
     if fallback_note:
         results_md = (results_md + '\n\n' + fallback_note).strip()
     return {'value': value, 'results': results_md}
+
+
+def fetch_watch_valuation_perplexity(watch):
+    """Use Perplexity/Sonar Pro to estimate current watch market value."""
+    api_key = os.environ.get('PERPLEXITY_API_KEY')
+    if not api_key:
+        raise RuntimeError('PERPLEXITY_API_KEY not configured')
+
+    brand = (watch['brand'] or '').strip()
+    model = (watch['model'] or '').strip()
+    reference = (watch['reference'] or '').strip()
+    year = watch['year']
+    metal = (watch['metal'] or '').strip()
+    description = (watch['description'] or '').strip()
+
+    if not (brand or model or reference):
+        raise RuntimeError('Need at least brand, model, or reference to fetch value.')
+
+    ident = ' '.join(x for x in [
+        brand, model, f'Ref. {reference}' if reference else '',
+        f'({metal})' if metal else '', str(year) if year else '',
+    ] if x)
+
+    prompt = f"""You are valuing a specific wristwatch from current public web data.
+
+Watch: {ident}
+Description: {(description[:280] + '…') if len(description) > 280 else description or '(none)'}
+
+Use high-quality, current web results. Focus on:
+- Chrono24 active listings for this reference (note median/range when available)
+- WatchCharts market data / price history for this reference
+- Recent auction results (Phillips, Christie's, Sotheby's, Antiquorum, Bonhams)
+- WatchBox / The 1916 Company or A Collected Man if this reference is listed
+
+Compute a consensus USD value (central estimate of the comps found).
+Also capture the WatchCharts market median specifically, if that page publishes one for this reference.
+
+Reply with ONLY a JSON object matching the requested schema:
+{{"consensus_usd": 12345, "watchcharts_median_usd": 12000, "results_markdown": "- Chrono24 (N listings, median): $X,XXX — URL\\n- WatchCharts median: $X,XXX — URL\\n- Phillips, Month YYYY: $X,XXX — URL\\n- ..."}}
+
+results_markdown rules:
+- 3–6 bullet lines for comps that have a URL source (prefix each with '- ').
+- You MAY add 1–2 short plain (non-bullet) lines of context above or below the comps when useful, e.g. rarity, production numbers, condition caveats, or why a comp does not apply.
+- Keep the whole field under ~700 chars.
+- Use null for consensus_usd / watchcharts_median_usd if not available."""
+
+    api_data, text = perplexity_chat_completion(
+        api_key,
+        prompt,
+        env_names=('PERPLEXITY_WATCH_VALUE_MODEL',
+                   'PERPLEXITY_WATCH_LOOKUP_MODEL'),
+        default_model='sonar-pro',
+        max_tokens=1536,
+        response_schema=WATCH_VALUE_RESPONSE_SCHEMA,
+        schema_name='watchValue',
+        search_context_env_names=('PERPLEXITY_WATCH_VALUE_SEARCH_CONTEXT',
+                                  'PERPLEXITY_WATCH_SEARCH_CONTEXT'),
+        default_search_context='high',
+    )
+    data = parse_model_json_object(text)
+
+    consensus = _coerce_number(data.get('consensus_usd'))
+    wc_median = _coerce_number(data.get('watchcharts_median_usd'))
+    orig_price = _coerce_number(watch['price'])
+
+    value = consensus
+    fallback_note = None
+    if value is None:
+        if wc_median is not None:
+            value = wc_median
+            fallback_note = (f"_No consensus computed — defaulted to WatchCharts median "
+                             f"(${wc_median:,.0f})._")
+        elif orig_price is not None:
+            value = orig_price
+            fallback_note = (f"_No consensus or WatchCharts median found — defaulted to "
+                             f"original purchase price (${orig_price:,.0f})._")
+
+    import html as _html
+    results_md = _html.unescape(data.get('results_markdown') or '').strip()
+    citations = api_data.get('citations') or []
+    if citations and 'http' not in results_md.lower():
+        results_md = (results_md + '\n\nCitations: ' +
+                      '; '.join(citations[:6])).strip()
+    if fallback_note:
+        results_md = (results_md + '\n\n' + fallback_note).strip()
+    return {'value': value, 'results': results_md}
+
+
+def fetch_watch_valuation(watch):
+    """Fetch value with Perplexity/Sonar Pro by default, Claude as fallback."""
+    if os.environ.get('PERPLEXITY_API_KEY'):
+        return fetch_watch_valuation_perplexity(watch)
+    if os.environ.get('ANTHROPIC_API_KEY'):
+        return fetch_watch_valuation_anthropic(watch)
+    raise RuntimeError('PERPLEXITY_API_KEY or ANTHROPIC_API_KEY not configured')
 
 
 WATCH_SPEC_SOURCES = [
@@ -4631,72 +4905,19 @@ Reply with ONLY a JSON object, no prose, no code fences:
 }}
 """
 
-    # POST to Perplexity's chat-completions endpoint. urllib avoids
-    # adding a `requests` dependency. Timeout is held below the 300s
-    # gunicorn killer so the worker raises a clean Python exception
-    # (mapped to a JSON 503 by the route) instead of getting SIGKILLed
-    # and returning empty 500s.
-    import urllib.request
-    import urllib.error
-    import time as _time
-
-    body = json.dumps({
-        'model': 'sonar-pro',
-        'messages': [{'role': 'user', 'content': prompt}],
-        'max_tokens': 2048,
-    }).encode('utf-8')
-    req = urllib.request.Request(
-        'https://api.perplexity.ai/chat/completions',
-        data=body,
-        headers={
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-        },
-        method='POST',
+    api_data, text = perplexity_chat_completion(
+        api_key,
+        prompt,
+        env_names='PERPLEXITY_WATCH_LOOKUP_MODEL',
+        default_model='sonar-pro',
+        max_tokens=2048,
+        response_schema=WATCH_SPECS_RESPONSE_SCHEMA,
+        schema_name='watchSpecs',
+        search_context_env_names=('PERPLEXITY_WATCH_LOOKUP_SEARCH_CONTEXT',
+                                  'PERPLEXITY_WATCH_SEARCH_CONTEXT'),
+        default_search_context='high',
     )
-
-    last_err = None
-    api_data = None
-    for attempt in range(3):
-        try:
-            with urllib.request.urlopen(req, timeout=240) as resp:
-                api_data = json.loads(resp.read().decode('utf-8'))
-            break
-        except urllib.error.HTTPError as e:
-            last_err = e
-            # 5xx + 429 are transient; 4xx (except 429) are permanent.
-            if e.code == 429 or 500 <= e.code < 600:
-                wait = 10 * (attempt + 1)
-                try:
-                    ra = e.headers.get('retry-after') if getattr(e, 'headers', None) else None
-                    if ra:
-                        wait = max(wait, int(float(ra)))
-                except Exception:
-                    pass
-                _time.sleep(wait)
-                continue
-            try:
-                detail = e.read().decode('utf-8', 'ignore')[:200]
-            except Exception:
-                detail = ''
-            raise RuntimeError(f'Perplexity HTTP {e.code}: {detail}')
-        except urllib.error.URLError as e:
-            last_err = e
-            _time.sleep(10 * (attempt + 1))
-    else:
-        raise RuntimeError(f'Lookup failed after retries: {last_err}')
-
-    try:
-        text = api_data['choices'][0]['message']['content'] or ''
-    except (KeyError, IndexError, TypeError):
-        raise RuntimeError(f'Unexpected Perplexity response: {str(api_data)[:200]}')
-    text = text.strip()
-
-    m = re.search(r'\{.*\}', text, re.DOTALL)
-    if not m:
-        raise RuntimeError(f'Could not parse JSON from model output: {text[:200]}')
-    parsed = json.loads(m.group(0))
+    parsed = parse_model_json_object(text)
 
     # Surface Perplexity's citation URLs alongside the model's own
     # one-line "sources" note. Helpful when reviewing a lookup result
