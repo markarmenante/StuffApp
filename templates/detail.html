@@ -1031,12 +1031,21 @@ document.addEventListener('DOMContentLoaded', function () {
   <!-- Pedigree, References -->
   <div class="section-bar">Pedigree, References</div>
   <div class="dgrid dg1 coin-reference-source-row">{{ cell('coin_references','',rows=4) }}</div>
+  {% set _refs_research = r['coin_references_research'] if r and 'coin_references_research' in r.keys() and r['coin_references_research'] is not none else '' %}
+  {% if not is_hidden_field(category, 'coin_references_research') %}
   <div class="dgrid dg1 coin-reference-notes-row">
-    <div class="dcell coin-reference-notes-cell">
+    <div class="dcell dcell-markdown-note coin-reference-notes-cell">
+      <div class="markdown-note-preview{% if not _refs_research %} is-empty{% endif %}"
+           data-md-preview-for="coin_references_research"
+           tabindex="0"
+           title="Click to edit"
+           {% if not _refs_research %}style="display:none"{% endif %}>{{ _refs_research|format_results }}</div>
       <textarea name="coin_references_research" rows="1" data-autogrow="1"
-                class="coin-reference-notes">{{ val('coin_references_research') }}</textarea>
+                class="coin-reference-notes markdown-note-editor"
+                {% if _refs_research %}style="display:none"{% endif %}>{{ _refs_research }}</textarea>
     </div>
   </div>
+  {% endif %}
 
   <!-- Grade, Conditions (existing notes data) + Historical Context, Notes (condition column) -->
   {{ notescell('notes','Grade, Conditions') }}
@@ -6551,6 +6560,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         if (refNotes && typeof data.coin_references_research === 'string') {
           refNotes.value = data.coin_references_research;
           refNotes.dispatchEvent(new Event('input', { bubbles: true }));
+          if (window.refreshMarkdownNotePreview) {
+            window.refreshMarkdownNotePreview(refNotes, true);
+          }
           if (window._autosizeTextarea) window._autosizeTextarea(refNotes);
         }
         if (stamp && data.searched_at) {
