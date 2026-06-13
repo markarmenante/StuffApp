@@ -6470,6 +6470,45 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     return !!(result && result.applied);
   }
 
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function readCoinResearchJson(res) {
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      const t = await res.text();
+      throw new Error(coinResearchHttpError(res.status, t));
+    }
+    return res.json();
+  }
+
+  async function pollCoinResearchJob(pollUrl, btn) {
+    if (!pollUrl) throw new Error('No research poll URL returned');
+    const started = Date.now();
+    const maxWaitMs = 10 * 60 * 1000;
+    let interval = 2500;
+    while (Date.now() - started < maxWaitMs) {
+      await delay(interval);
+      const elapsed = Math.round((Date.now() - started) / 1000);
+      if (btn) btn.textContent = `🔎 Researching… ${elapsed}s`;
+      const res = await fetch(pollUrl, {
+        method: 'GET',
+        headers: {'Accept': 'application/json'},
+      });
+      const data = await readCoinResearchJson(res);
+      if (res.status === 202 || data.status === 'running') {
+        interval = Math.min(5000, interval + 500);
+        continue;
+      }
+      if (!res.ok || data.status === 'error') {
+        throw new Error(data.error || 'Research failed');
+      }
+      return data;
+    }
+    throw new Error('Research is still running after 10 minutes. Please try again.');
+  }
+
   // ── Coin-wide Research pill: run field check and historical research
   //     as separate requests behind one visible action.
   document.querySelectorAll('.coin-history-btn').forEach(btn => {
@@ -6495,13 +6534,12 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
           headers: {'Content-Type': 'application/json'},
           body: '{}',
         });
-        const ct = res.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) {
-          const t = await res.text();
-          throw new Error(coinResearchHttpError(res.status, t));
+        let data = await readCoinResearchJson(res);
+        if (res.status === 202 || data.status === 'running') {
+          data = await pollCoinResearchJob(data.poll_url, btn);
+        } else if (!res.ok || data.status === 'error') {
+          throw new Error(data.error || 'Failed');
         }
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed');
         const combinedNotes = data.condition || data.history_context || data.markdown || '';
         if (notes) {
           notes.value = combinedNotes;

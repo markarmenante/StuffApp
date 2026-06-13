@@ -5,6 +5,8 @@ import json
 import re
 import base64
 import unicodedata
+import threading
+import time
 from datetime import datetime, date
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response,
@@ -1014,23 +1016,31 @@ def _nodiacritic_collation(a, b):
     return 0
 
 
+def _configure_db_connection(db):
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys = ON")
+    # Wait up to 5s for a competing writer (gunicorn runs 4 threads)
+    # instead of failing immediately with "database is locked".
+    db.execute("PRAGMA busy_timeout = 5000")
+    # Register the diacritic-folding collation on every fresh
+    # connection — collations are per-connection in sqlite3.
+    db.create_collation('NODIACRITIC', _nodiacritic_collation)
+    # NODIA(text) — function form of the same fold, usable in WHERE
+    # clauses like NODIA(brand) LIKE ?. Lets free-text search match
+    # 'Urban Jürgensen' from the term 'urban jurg', and folds both
+    # pre-composed and decomposed Unicode variants to the same form.
+    db.create_function('NODIA', 1, _strip_diacritics,
+                       deterministic=True)
+    return db
+
+
+def open_db_connection():
+    return _configure_db_connection(sqlite3.connect(DATABASE))
+
+
 def get_db():
     if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
-        # Wait up to 5s for a competing writer (gunicorn runs 4 threads)
-        # instead of failing immediately with "database is locked".
-        g.db.execute("PRAGMA busy_timeout = 5000")
-        # Register the diacritic-folding collation on every fresh
-        # connection — collations are per-connection in sqlite3.
-        g.db.create_collation('NODIACRITIC', _nodiacritic_collation)
-        # NODIA(text) — function form of the same fold, usable in WHERE
-        # clauses like NODIA(brand) LIKE ?. Lets free-text search match
-        # 'Urban Jürgensen' from the term 'urban jurg', and folds both
-        # pre-composed and decomposed Unicode variants to the same form.
-        g.db.create_function('NODIA', 1, _strip_diacritics,
-                             deterministic=True)
+        g.db = open_db_connection()
     return g.db
 
 
@@ -5071,6 +5081,91 @@ def _friendly_lookup_error(label, err):
     return cleaned[:280] if cleaned else f'{label} failed.'
 
 
+COIN_CONTEXT_JOBS = {}
+COIN_CONTEXT_JOBS_LOCK = threading.Lock()
+COIN_CONTEXT_JOB_TTL_SECONDS = 60 * 60
+
+
+def _prune_coin_context_jobs(now_ts=None):
+    now_ts = now_ts or time.time()
+    stale_before = now_ts - COIN_CONTEXT_JOB_TTL_SECONDS
+    for job_id, job in list(COIN_CONTEXT_JOBS.items()):
+        if job.get('updated_ts', job.get('started_ts', now_ts)) < stale_before:
+            COIN_CONTEXT_JOBS.pop(job_id, None)
+
+
+def _set_coin_context_job(job_id, **updates):
+    now_ts = time.time()
+    updates['updated_ts'] = now_ts
+    with COIN_CONTEXT_JOBS_LOCK:
+        job = COIN_CONTEXT_JOBS.setdefault(job_id, {})
+        job.update(updates)
+        _prune_coin_context_jobs(now_ts)
+        return dict(job)
+
+
+def _get_coin_context_job(job_id):
+    with COIN_CONTEXT_JOBS_LOCK:
+        _prune_coin_context_jobs()
+        job = COIN_CONTEXT_JOBS.get(job_id)
+        return dict(job) if job else None
+
+
+def _store_coin_context_result(record_id, coin, markdown):
+    now = datetime.utcnow().isoformat()
+    history_context, reference_notes = _split_coin_context_markdown(markdown)
+    condition = _merge_coin_condition_history(coin.get('condition'), history_context)
+    db = open_db_connection()
+    try:
+        db.execute(
+            "UPDATE coins SET condition = ?, history_context = NULL, "
+            "coin_references_research = ?, history_searched_at = ?, "
+            "updated_at = ? WHERE id = ?",
+            (condition, reference_notes, now, now, record_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return {
+        'status': 'done',
+        'markdown': history_context,
+        'condition': condition,
+        'history_context': history_context,
+        'reference_notes': reference_notes,
+        'coin_references_research': reference_notes,
+        'searched_at': now,
+    }
+
+
+def _run_coin_context_job(job_id, record_id, coin):
+    try:
+        data = fetch_coin_context(coin)
+        result = _store_coin_context_result(record_id, coin, data['markdown'])
+        _set_coin_context_job(
+            job_id,
+            status='done',
+            result=result,
+            completed_at=datetime.utcnow().isoformat(),
+        )
+    except RuntimeError as e:
+        _set_coin_context_job(
+            job_id,
+            status='error',
+            error=_friendly_lookup_error('Coin research lookup', e),
+            completed_at=datetime.utcnow().isoformat(),
+        )
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        detail = str(e) or e.__class__.__name__
+        _set_coin_context_job(
+            job_id,
+            status='error',
+            error=f'Context lookup failed: {detail}',
+            completed_at=datetime.utcnow().isoformat(),
+        )
+
+
 def fetch_coin_context(coin):
     """Claude-driven historical-environment summary for a coin, drawing
     on region, authority, mint, date, and description together.
@@ -8214,32 +8309,54 @@ def coin_fetch_context(record_id):
     coin = db.execute("SELECT * FROM coins WHERE id = ?", (record_id,)).fetchone()
     if not coin:
         return jsonify({'error': 'Coin not found'}), 404
-    try:
-        data = fetch_coin_context(coin)
-    except RuntimeError as e:
-        return jsonify({'error': _friendly_lookup_error('Coin research lookup', e)}), 503
-    except Exception as e:
-        import traceback
-        print(traceback.format_exc(), flush=True)
-        detail = str(e) or e.__class__.__name__
-        return jsonify({'error': f'Context lookup failed: {detail}'}), 500
-    now = datetime.utcnow().isoformat()
-    history_context, reference_notes = _split_coin_context_markdown(data['markdown'])
-    condition = _merge_coin_condition_history(coin['condition'], history_context)
-    db.execute(
-        "UPDATE coins SET condition = ?, history_context = NULL, "
-        "coin_references_research = ?, history_searched_at = ?, updated_at = ? WHERE id = ?",
-        (condition, reference_notes, now, now, record_id),
+
+    job_id = uuid.uuid4().hex
+    _set_coin_context_job(
+        job_id,
+        status='running',
+        record_id=record_id,
+        started_at=datetime.utcnow().isoformat(),
+        started_ts=time.time(),
     )
-    db.commit()
+    threading.Thread(
+        target=_run_coin_context_job,
+        args=(job_id, record_id, dict(coin)),
+        daemon=True,
+    ).start()
     return jsonify({
-        'markdown': history_context,
-        'condition': condition,
-        'history_context': history_context,
-        'reference_notes': reference_notes,
-        'coin_references_research': reference_notes,
-        'searched_at': now,
-    })
+        'status': 'running',
+        'job_id': job_id,
+        'poll_url': url_for(
+            'coin_context_job_status',
+            record_id=record_id,
+            job_id=job_id,
+        ),
+    }), 202
+
+
+@app.route('/coins/<record_id>/context/<job_id>', methods=['GET'])
+def coin_context_job_status(record_id, job_id):
+    job = _get_coin_context_job(job_id)
+    if not job or job.get('record_id') != record_id:
+        return jsonify({
+            'status': 'error',
+            'error': 'Research job expired or was lost. Please try again.',
+        }), 404
+    status = job.get('status') or 'running'
+    if status == 'done':
+        result = dict(job.get('result') or {})
+        result.setdefault('status', 'done')
+        return jsonify(result)
+    if status == 'error':
+        return jsonify({
+            'status': 'error',
+            'error': job.get('error') or 'Research failed.',
+        }), 503
+    return jsonify({
+        'status': 'running',
+        'job_id': job_id,
+        'started_at': job.get('started_at'),
+    }), 202
 
 
 @app.route('/coins/<record_id>/history', methods=['POST'])
