@@ -5161,7 +5161,7 @@ No prose, no code fences, no JSON."""
     lookup_model = anthropic_lookup_model(
         api_key,
         ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
-        default='auto-fable',
+        default='auto-opus',
     )
     web_search = anthropic_web_search_tool(
         6, default_tool='web_search_20260209')
@@ -5322,7 +5322,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
     lookup_model = anthropic_lookup_model(
         api_key,
         ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
-        default='auto-fable',
+        default='auto-opus',
     )
     web_search = anthropic_web_search_tool(
         6, default_tool='web_search_20260209')
@@ -5373,10 +5373,12 @@ Reply with ONLY a JSON object, no prose, no code fences:
 def resolve_anthropic_lookup_model(api_key, configured_model):
     """Resolve auto/latest lookup model settings through Anthropic's Models API."""
     model = (configured_model or '').strip() or 'auto-sonnet'
-    selector = model.lower().replace('_', '-')
+    selector = re.sub(r'[\s_]+', '-', model.lower())
     family = None
-    if selector in {'latest-fable', 'auto-fable'}:
-        family = 'fable'
+    if selector in {'latest-fable', 'auto-fable'} or selector.startswith('claude-fable-'):
+        # Fable can be listed but unavailable to this API account. Anthropic's
+        # current guidance for that case is to use Opus 4.8 instead.
+        family = 'opus'
     elif selector in {'auto', 'latest', 'latest-sonnet', 'auto-sonnet'}:
         family = 'sonnet'
     elif selector in {'latest-opus', 'auto-opus'}:
@@ -5406,7 +5408,6 @@ def resolve_anthropic_lookup_model(api_key, configured_model):
     except Exception:
         pass
     fallbacks = {
-        'fable': 'claude-fable-5',
         'opus': 'claude-opus-4-8',
         'sonnet': 'claude-sonnet-4-6',
         'haiku': 'claude-haiku-4-5-20251001',
