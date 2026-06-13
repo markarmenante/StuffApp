@@ -2943,6 +2943,31 @@ input[type="date"] { -webkit-appearance: none; }
      no value cluttering the phone nav with them. */
   .nav-export, .nav-sweep, .nav-admin { display: none !important; }
 
+  .list-toolbar {
+    flex-wrap: wrap;
+    overflow: hidden;
+  }
+  .list-toolbar .list-cat-title {
+    flex: 1 1 90px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .list-toolbar .search-form {
+    flex: 1 1 145px;
+    min-width: 0;
+    max-width: none;
+  }
+  .list-toolbar .search-wrap {
+    width: 100%;
+  }
+  .list-toolbar .search-wrap input {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
   .sell-panel-grid.dg5 {
     grid-template-columns: 1fr;
   }
@@ -3213,7 +3238,20 @@ input[type="date"] { -webkit-appearance: none; }
   .comp-name { font-size: 16px; }
 
   /* Bottom action row: wrap into 2-up. */
-  .detail-bottom { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .detail-bottom {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .bottom-cell {
+    min-width: 0;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .bottom-cell:nth-child(2n) { border-right: none; }
+  .bottom-cell:nth-last-child(-n+2) { border-bottom: none; }
+  .bottom-cell.btn-cell {
+    flex-basis: auto;
+  }
 
   /* Detail pages share the .watch-body layout (photo left, specs right
      on desktop). On phones a 140px-wide photo on the left squeezed the

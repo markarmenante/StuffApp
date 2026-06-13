@@ -215,6 +215,66 @@
   font-size: 13px;
 }
 .user-add-row input[type=email] { flex: 1; min-width: 200px; }
+
+@media (max-width: 640px) {
+  .admin-page {
+    margin: 16px auto;
+    padding: 0 10px;
+  }
+  .admin-users-table,
+  .admin-users-table thead,
+  .admin-users-table tbody,
+  .admin-users-table tr,
+  .admin-users-table td {
+    display: block;
+    width: 100%;
+  }
+  .admin-users-table thead {
+    display: none;
+  }
+  .admin-users-table tr {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .admin-users-table tr:last-child {
+    border-bottom: none;
+  }
+  .admin-users-table td {
+    padding: 6px 0;
+    border-bottom: none;
+  }
+  .user-name-input,
+  .admin-users-table select {
+    width: 100%;
+    max-width: 100%;
+  }
+  .user-cats-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .user-rf {
+    margin-left: 0;
+  }
+  .user-actions {
+    display: flex;
+    gap: 8px;
+    white-space: normal;
+  }
+  .user-btn {
+    margin-left: 0;
+  }
+  .user-add-row {
+    align-items: stretch;
+  }
+  .user-add-row input[type=email],
+  .user-add-row input[type=text],
+  .user-add-row select,
+  .user-add-row .user-btn {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+}
 </style>
 
 <script>
