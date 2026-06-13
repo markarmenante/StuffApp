@@ -392,7 +392,7 @@
     {% if category == 'coins' and _is_owner %}
     {# Research renders even on the new-coin form. The autosave-on-new
        path creates the record on first interaction, and the Research JS
-       calls ensureRecord() before running spec lookup + research. #}
+       runs spec check + historical research as separate requests. #}
     <button type="button"
             class="coin-lookup-btn coin-history-btn{% if r and r['history_searched_at'] %} done{% endif %}"
             data-url="{% if not is_new %}{{ url_for('coin_fetch_context', record_id=r['id']) }}{% endif %}"
@@ -6393,21 +6393,26 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     });
   }
 
-  async function ensureCoinResearchUrls(btn) {
-    if (btn.dataset.url && btn.dataset.specUrl) return;
+  async function ensureCoinRecordPath() {
     if (typeof ensureRecord !== 'function') {
       throw new Error('Save the record first.');
     }
     await ensureRecord();
     const detailPath = (document.getElementById('mainForm') || {}).action || '';
     if (!detailPath) throw new Error('No record URL after save');
+    return detailPath;
+  }
+
+  async function ensureCoinResearchUrls(btn) {
+    if (btn.dataset.url && btn.dataset.specUrl) return;
+    const detailPath = await ensureCoinRecordPath();
     if (!btn.dataset.url) btn.dataset.url = detailPath + '/context';
     if (!btn.dataset.specUrl) btn.dataset.specUrl = detailPath + '/lookup-specs';
   }
 
-  async function runCoinSpecLookup(btn) {
+  async function runCoinSpecLookup(btn, options = {}) {
     const url = btn.dataset.specUrl;
-    if (!url) return;
+    if (!url) throw new Error('No check URL after save');
     const ctl = new AbortController();
     const timeoutId = setTimeout(() => ctl.abort(), 280000);
     let resp;
@@ -6425,7 +6430,14 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 
     const filled = data.filled || {};
     const overwritten = data.overwritten || {};
-    if (!Object.keys(filled).length && !Object.keys(overwritten).length) return;
+    if (data.specs_searched_at) btn.classList.add('done');
+    if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
+      if (!options.silentEmpty) {
+        alert('No new information found.'
+              + (data.sources ? '\n\nChecked: ' + data.sources : ''));
+      }
+      return false;
+    }
 
     const applyUrl = url.replace('/lookup-specs', '/apply-lookup-specs');
     if (!Object.keys(overwritten).length) {
@@ -6437,7 +6449,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       const d = await res2.json();
       if (!res2.ok) throw new Error(d.error || 'Apply failed');
       if (d.updated) applyCoinLookupValues(d.values || filled);
-      return;
+      return true;
     }
 
     const result = await showLookupReview(
@@ -6455,10 +6467,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     if (result && result.applied) {
       applyCoinLookupValues((result.data && result.data.values) || result.updates);
     }
+    return !!(result && result.applied);
   }
 
-  // ── Coin-wide Research pill: identify/check the coin, then fetch
-  //     historical context plus pedigree/reference notes.
+  // ── Coin-wide Research pill: run field check and historical research
+  //     as separate requests behind one visible action.
   document.querySelectorAll('.coin-history-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const originalText = btn.textContent;
@@ -6473,7 +6486,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       try {
         await ensureCoinResearchUrls(btn);
         btn.textContent = '🔎 Checking…';
-        await runCoinSpecLookup(btn);
+        await runCoinSpecLookup(btn, { silentEmpty: true });
         btn.textContent = '🔎 Researching…';
         const url = btn.dataset.url;
         if (!url) throw new Error('No research URL after save');

@@ -5025,15 +5025,16 @@ Reply with ONLY a JSON object, no prose:
 
 def _coin_research_retry_settings():
     try:
-        timeout = float(os.environ.get('ANTHROPIC_COIN_RESEARCH_TIMEOUT', '110'))
+        timeout = float(os.environ.get('ANTHROPIC_COIN_RESEARCH_TIMEOUT', '75'))
     except (TypeError, ValueError):
-        timeout = 110.0
+        timeout = 75.0
     try:
-        attempts = int(os.environ.get('ANTHROPIC_COIN_RESEARCH_ATTEMPTS', '2'))
+        attempts = int(os.environ.get('ANTHROPIC_COIN_RESEARCH_ATTEMPTS', '1'))
     except (TypeError, ValueError):
-        attempts = 2
-    timeout = max(30.0, min(timeout, 120.0))
-    attempts = max(1, min(attempts, 2))
+        attempts = 1
+    timeout = max(20.0, min(timeout, 75.0))
+    max_attempts = 2 if timeout <= 35.0 else 1
+    attempts = max(1, min(attempts, max_attempts))
     return timeout, attempts
 
 
@@ -5063,6 +5064,8 @@ def _friendly_lookup_error(label, err):
         return f'{label} temporarily unavailable. Please try again.'
     if status in {'429', '500', '502', '503', '504', '529'}:
         return f'{label} temporarily unavailable (HTTP {status}). Please try again.'
+    if re.search(r'\b(?:timeout|timed out|read timed out)\b', raw, re.IGNORECASE):
+        return f'{label} timed out before the public gateway limit. Please try again.'
     cleaned = re.sub(r'<[^>]+>', ' ', raw)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned[:280] if cleaned else f'{label} failed.'
@@ -5114,7 +5117,7 @@ Description: {desc or '(not specified)'}
 Pedigree / References: {refs or '(not specified)'}
 Grade / Conditions:    {grade_notes or '(not specified)'}
 
-Use up to 6 concise web searches to ground the facts. Cover, in this order:
+Use up to 4 concise web searches to ground the facts. Cover, in this order:
 
 1. Historical environment — the political / military situation at this
    mint during the date range; who was in power (dynasty, magistrate,
@@ -5161,10 +5164,11 @@ No prose, no code fences, no JSON."""
     lookup_model = anthropic_lookup_model(
         api_key,
         ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
-        default='auto-opus',
+        default='auto-sonnet',
+        fable_fallback='sonnet',
     )
     web_search = anthropic_web_search_tool(
-        6, default_tool='web_search_20260209')
+        4, default_tool='web_search_20260209')
     import time as _time
     last_err = None
     transient_errs = (
@@ -5177,7 +5181,7 @@ No prose, no code fences, no JSON."""
         try:
             resp = client.messages.create(
                 model=lookup_model,
-                max_tokens=2000,
+                max_tokens=1400,
                 tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
@@ -5301,7 +5305,7 @@ Description: {desc[:500] if desc else '(not specified)'}
 Pedigree / References: {refs[:500] if refs else '(not specified)'}
 Grade / Conditions: {grade_notes[:300] if grade_notes else '(not specified)'}
 
-Use up to 6 concise web searches to ground facts. Stress pedigree and
+Use up to 4 concise web searches to ground facts. Stress pedigree and
 references wherever the record gives you a lead: collection pedigree,
 prior sale, hoard provenance, die-study, catalog numbers, rarity notes,
 or standard references (SNG, HGC, RIC, RPC, Crawford, Ravel, Calciati,
@@ -5322,10 +5326,11 @@ Reply with ONLY a JSON object, no prose, no code fences:
     lookup_model = anthropic_lookup_model(
         api_key,
         ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
-        default='auto-opus',
+        default='auto-sonnet',
+        fable_fallback='sonnet',
     )
     web_search = anthropic_web_search_tool(
-        6, default_tool='web_search_20260209')
+        4, default_tool='web_search_20260209')
 
     import time as _time
     last_err = None
@@ -5339,7 +5344,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
         try:
             resp = client.messages.create(
                 model=lookup_model,
-                max_tokens=1200,
+                max_tokens=900,
                 tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
@@ -5370,15 +5375,17 @@ Reply with ONLY a JSON object, no prose, no code fences:
     return {'markdown': md}
 
 
-def resolve_anthropic_lookup_model(api_key, configured_model):
+def resolve_anthropic_lookup_model(api_key, configured_model, fable_fallback='opus'):
     """Resolve auto/latest lookup model settings through Anthropic's Models API."""
     model = (configured_model or '').strip() or 'auto-sonnet'
     selector = re.sub(r'[\s_]+', '-', model.lower())
     family = None
     if selector in {'latest-fable', 'auto-fable'} or selector.startswith('claude-fable-'):
-        # Fable can be listed but unavailable to this API account. Anthropic's
-        # current guidance for that case is to use Opus 4.8 instead.
-        family = 'opus'
+        # Fable can be listed but unavailable to this API account. Use the
+        # caller's preferred fallback family so public endpoints can choose
+        # speed while deeper offline jobs can choose depth.
+        fallback = (fable_fallback or 'opus').strip().lower()
+        family = fallback if fallback in {'opus', 'sonnet', 'haiku'} else 'opus'
     elif selector in {'auto', 'latest', 'latest-sonnet', 'auto-sonnet'}:
         family = 'sonnet'
     elif selector in {'latest-opus', 'auto-opus'}:
@@ -5415,7 +5422,8 @@ def resolve_anthropic_lookup_model(api_key, configured_model):
     return fallbacks.get(family, model)
 
 
-def anthropic_lookup_model(api_key, env_name=None, default='auto-sonnet'):
+def anthropic_lookup_model(api_key, env_name=None, default='auto-sonnet',
+                           fable_fallback='opus'):
     configured = ''
     env_names = env_name if isinstance(env_name, (tuple, list)) else [env_name]
     for name in env_names:
@@ -5424,7 +5432,8 @@ def anthropic_lookup_model(api_key, env_name=None, default='auto-sonnet'):
             if configured:
                 break
     configured = configured or os.environ.get('ANTHROPIC_LOOKUP_MODEL') or default
-    return resolve_anthropic_lookup_model(api_key, configured)
+    return resolve_anthropic_lookup_model(
+        api_key, configured, fable_fallback=fable_fallback)
 
 
 def anthropic_web_search_tool(max_uses, default_tool='web_search_20250305'):
