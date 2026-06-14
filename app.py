@@ -221,6 +221,121 @@ FIELD_ALIASES = {
 }
 
 
+def coin_grade_value_list_match(value):
+    """Map collector grade variants to the configured coin grade list.
+
+    Returns a canonical VALUE_LISTS['coin_grade'] entry, or None when the
+    source grade cannot be represented by the configured dropdown.
+    """
+    if value is None:
+        return None
+    import unicodedata
+    raw = unicodedata.normalize('NFC', str(value)).strip()
+    if not raw:
+        return None
+
+    allowed = {g.lower(): g for g in VALUE_LISTS['coin_grade']}
+    direct = allowed.get(raw.lower())
+    if direct:
+        return direct
+
+    normalized = raw.lower().replace('&', ' and ')
+    normalized = re.sub(r'[\[\](){},.;:/_–—-]+', ' ', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+
+    aliases = FIELD_ALIASES.get(('coins', 'grade'), {})
+    alias = aliases.get(normalized)
+    if alias:
+        return alias
+
+    compact = re.sub(r'[^a-z0-9+]+', '', normalized)
+    compact_aliases = {
+        'brilliantuncirculated': 'BU',
+        'bu': 'BU',
+        'fleurdecoin': 'FDC',
+        'fdc': 'FDC',
+        'mintstate': 'MS',
+        'uncirculated': 'MS',
+        'ms': 'MS',
+        'proof': 'PF',
+        'prf': 'PF',
+        'pr': 'PF',
+        'pf': 'PF',
+        'choiceau': 'cAU',
+        'chau': 'cAU',
+        'cau': 'cAU',
+        'aboutau': 'aAU',
+        'almostau': 'aAU',
+        'nearlyau': 'aAU',
+        'nearau': 'aAU',
+        'aau': 'aAU',
+        'au': 'AU',
+        'choiceef': 'cEF',
+        'choicexf': 'cEF',
+        'chex': 'cEF',
+        'chef': 'cEF',
+        'chxf': 'cEF',
+        'cef': 'cEF',
+        'cxf': 'cEF',
+        'aboutef': 'aEF',
+        'aboutxf': 'aEF',
+        'almostef': 'aEF',
+        'almostxf': 'aEF',
+        'nearlyef': 'aEF',
+        'nearlyxf': 'aEF',
+        'nearef': 'aEF',
+        'nearxf': 'aEF',
+        'aef': 'aEF',
+        'axf': 'aEF',
+        'ef': 'EF',
+        'xf': 'EF',
+        'choicevf': 'cVF',
+        'chvf': 'cVF',
+        'cvf': 'cVF',
+        'goodvf': 'gVF',
+        'gvf': 'gVF',
+        'aboutvf': 'aVF',
+        'almostvf': 'aVF',
+        'nearlyvf': 'aVF',
+        'nearvf': 'aVF',
+        'avf': 'aVF',
+        'veryfine+': 'VF+',
+        'veryfineplus': 'VF+',
+        'vfplus': 'VF+',
+        'vf+': 'VF+',
+        'vf': 'VF',
+    }
+    if re.fullmatch(r'ms\d{1,2}', compact):
+        return 'MS'
+    if re.fullmatch(r'pf\d{1,2}|pr\d{1,2}', compact):
+        return 'PF'
+    mapped = compact_aliases.get(compact)
+    if mapped:
+        return mapped
+
+    phrase_patterns = [
+        (r'\b(?:brilliant\s+uncirculated|bu)\b', 'BU'),
+        (r'\bfleur\s+de\s+coin\b|\bfdc\b', 'FDC'),
+        (r'\bmint\s+state\b|\buncirculated\b|\bms\s*\d{0,2}\b', 'MS'),
+        (r'\bproof\b|\bpr\s*\d{0,2}\b|\bpf\s*\d{0,2}\b', 'PF'),
+        (r'\b(?:choice|ch)\s+(?:au|about\s+uncirculated|almost\s+uncirculated)\b', 'cAU'),
+        (r'\b(?:about|almost|near|nearly)\s+(?:au|uncirculated)\b', 'aAU'),
+        (r'\bau\b', 'AU'),
+        (r'\b(?:choice|ch)\s+(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'cEF'),
+        (r'\b(?:about|almost|near|nearly)\s+(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'aEF'),
+        (r'\b(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'EF'),
+        (r'\b(?:choice|ch)\s+(?:vf|very\s+fine)\b', 'cVF'),
+        (r'\bgood\s+(?:vf|very\s+fine)\b', 'gVF'),
+        (r'\b(?:about|almost|near|nearly)\s+(?:vf|very\s+fine)\b', 'aVF'),
+        (r'\b(?:vf|very\s+fine)\s*(?:\+|plus\b)', 'VF+'),
+        (r'\b(?:vf|very\s+fine)\b', 'VF'),
+    ]
+    for pattern, canonical in phrase_patterns:
+        if re.search(pattern, normalized):
+            return canonical
+    return None
+
+
 FOUR_DIGIT_YEAR_FIELDS = {'year', 'year_recorded', 'year_built'}
 
 
@@ -255,6 +370,10 @@ def normalize_field_value(table, field_name, value):
         return _normalize_four_digit_year(value)
     if field_name == 'status' and value.strip().lower() == 'owned':
         return 'Own'
+    if table == 'coins' and field_name == 'grade':
+        grade = coin_grade_value_list_match(value)
+        if grade:
+            return grade
     if re.fullmatch(r'med_type_\d+', field_name or ''):
         med_type = value.strip().upper()
         if med_type == 'RX':
@@ -8572,6 +8691,7 @@ def fetch_coin_specs(coin, provider='anthropic'):
             '/ date to look up the rest.')
 
     metals = ', '.join(VALUE_LISTS['metal_coin'])
+    grades = ', '.join(VALUE_LISTS['coin_grade'])
     obv_rev = (coin['obv_rev'] or '').strip()
     description = (coin['description'] or '').strip()
     mint = (coin['mint'] or '').strip()
@@ -8610,7 +8730,7 @@ Target fields:
 - weight: weight in grams (float). If the Description contains an explicit "X.XX g", "X.XX gm", or "X.XX grams" measurement, that value is canonical: return exactly that value and do not use another source for weight. Otherwise look up the canonical published weight for the exact reference.
 - size: diameter in mm (float). If the Description contains an explicit "XX mm" / "XX.X mm" measurement, that value is canonical: return exactly that value and do not use another source for size. Do NOT round diameter measurements: if the Description says "14.5 mm", return 14.5, not 15. Only use a source-derived size when the Description contains no diameter measurement.
 - die_axis: integer 0-12 representing the orientation of the reverse die relative to the obverse, expressed as a clock position. The standard numismatic shorthand is the trailing token of "(diameter mm, weight g, NNh)" — e.g. "(32.5mm, 16.83 g, 12h)" → die_axis 12, "9h" → 9, "6 h" → 6. The user's description usually carries this. Return null only if no clock-position notation is present and no reputable source gives one.
-- grade: short condition grade as written by collectors (e.g. "VF", "gVF", "EF", "MS-65", "Choice EF"). Pull from the description or condition note when present; only return one if the source actually grades the coin (don't invent).
+- grade: map the discovered condition grade to EXACTLY one of [{grades}]. Interpret c = choice, a = about/almost/near, and g = good; map XF / Extremely Fine / Extra Fine to EF; Good VF to gVF; Choice VF to cVF; About VF to aVF; numeric Mint State grades such as MS-65 to MS; PR / Proof to PF. Return null when the source grade is below or outside this list and cannot be represented.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null only when you cannot identify a value:
 {{
@@ -8785,6 +8905,8 @@ def coin_lookup_specs(record_id):
             if n < 0 or n > 12:
                 return None
             return str(n)
+        if field == 'grade':
+            return coin_grade_value_list_match(raw)
         if isinstance(raw, str):
             v = normalize_field_value('coins', field, raw.strip())
             return v or None
@@ -8885,6 +9007,8 @@ def coin_apply_lookup_specs(record_id):
                 return float(raw_v)
             except (TypeError, ValueError):
                 return None
+        if field == 'grade':
+            return coin_grade_value_list_match(raw_v)
         if isinstance(raw_v, str):
             return normalize_field_value('coins', field, raw_v.strip()) or None
         return raw_v
