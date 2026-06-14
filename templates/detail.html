@@ -401,8 +401,18 @@
     <button type="button"
             class="coin-lookup-btn coin-history-btn{% if r and r['history_searched_at'] %} done{% endif %}"
             data-url="{% if not is_new %}{{ url_for('coin_fetch_context', record_id=r['id']) }}{% endif %}"
+            data-context-path="context"
+            data-loading-label="🔎 Researching"
             title="{% if r and r['history_searched_at'] %}Research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Research historical environment plus scholarly pedigree/reference notes{% endif %}">
       🔎 Research
+    </button>
+    <button type="button"
+            class="coin-lookup-btn coin-perplexity-btn{% if r and r['history_searched_at'] %} done{% endif %}"
+            data-url="{% if not is_new %}{{ url_for('coin_fetch_context_perplexity', record_id=r['id']) }}{% endif %}"
+            data-context-path="context-perplexity"
+            data-loading-label="Perplexity"
+            title="{% if r and r['history_searched_at'] %}Perplexity research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Run the same coin research prompt through Perplexity{% endif %}">
+      Perplexity
     </button>
     {% endif %}
     {% if not is_new %}
@@ -6419,7 +6429,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   async function ensureCoinContextUrl(btn) {
     if (btn.dataset.url) return;
     const detailPath = await ensureCoinRecordPath();
-    btn.dataset.url = detailPath + '/context';
+    const contextPath = btn.dataset.contextPath || 'context';
+    btn.dataset.url = detailPath + '/' + contextPath;
   }
 
   async function ensureCoinSpecUrl(btn) {
@@ -6511,7 +6522,10 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     while (Date.now() - started < maxWaitMs) {
       await delay(interval);
       const elapsed = Math.round((Date.now() - started) / 1000);
-      if (btn) btn.textContent = `🔎 Researching… ${elapsed}s`;
+      if (btn) {
+        const loadingLabel = btn.dataset.loadingLabel || '🔎 Researching';
+        btn.textContent = `${loadingLabel}… ${elapsed}s`;
+      }
       const res = await fetch(pollUrl, {
         method: 'GET',
         headers: {'Accept': 'application/json'},
@@ -6551,8 +6565,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     });
   });
 
-  // ── Coin-wide Research pill: historical and reference research only.
-  document.querySelectorAll('.coin-history-btn').forEach(btn => {
+  // ── Coin-wide Research pills: historical and reference research only.
+  document.querySelectorAll('.coin-history-btn, .coin-perplexity-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const originalText = btn.textContent;
       const notes = document.querySelector('[name="condition"]');
@@ -6565,7 +6579,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       btn.setAttribute('aria-busy', 'true');
       try {
         await ensureCoinContextUrl(btn);
-        btn.textContent = '🔎 Researching…';
+        const loadingLabel = btn.dataset.loadingLabel || '🔎 Researching';
+        btn.textContent = `${loadingLabel}…`;
         const url = btn.dataset.url;
         if (!url) throw new Error('No research URL after save');
         const res = await fetch(url, {

@@ -5156,7 +5156,13 @@ def _store_coin_context_result(record_id, coin, markdown):
 
 def _run_coin_context_job(job_id, record_id, coin):
     try:
-        data = fetch_coin_context(coin)
+        provider = coin.pop('_research_provider', 'claude')
+        if provider == 'perplexity':
+            data = fetch_coin_context_perplexity(coin)
+            error_label = 'Perplexity coin research lookup'
+        else:
+            data = fetch_coin_context(coin)
+            error_label = 'Coin research lookup'
         result = _store_coin_context_result(record_id, coin, data['markdown'])
         _set_coin_context_job(
             job_id,
@@ -5168,7 +5174,7 @@ def _run_coin_context_job(job_id, record_id, coin):
         _set_coin_context_job(
             job_id,
             status='error',
-            error=_friendly_lookup_error('Coin research lookup', e),
+            error=_friendly_lookup_error(error_label if 'error_label' in locals() else 'Coin research lookup', e),
             completed_at=datetime.utcnow().isoformat(),
         )
     except Exception as e:
@@ -5183,35 +5189,59 @@ def _run_coin_context_job(job_id, record_id, coin):
         )
 
 
-def fetch_coin_context(coin):
-    """Claude-driven historical-environment summary for a coin, drawing
-    on region, authority, mint, date, and description together.
-    Returns dict {markdown: str}. Raises RuntimeError on missing key
-    / API failure.
-    """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
-    try:
-        import anthropic
-    except ImportError:
-        raise RuntimeError("anthropic package not installed. Run 'pip install anthropic'.")
+def _coin_context_response_markdown(text):
+    text = (text or '').strip()
+    md = ''
+    m = re.search(r'<markdown>(.*?)</markdown>', text, re.DOTALL | re.IGNORECASE)
+    if m:
+        md = m.group(1).strip()
+    else:
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+                md = (data.get('markdown') or '').strip()
+            except ValueError:
+                md = ''
+        if not md:
+            md = text
+    if not md:
+        raise RuntimeError(f'Empty response from model: {text[:200]}')
+    import html as _html
+    md = _html.unescape(md).strip()
+    md = re.sub(r'</?cite\b[^>]*>', '', md, flags=re.IGNORECASE)
+    return md
 
-    region    = (coin['region']    or '').strip()
-    authority = (coin['authority'] or '').strip()
-    mint      = (coin['mint']      or '').strip()
-    desc      = (coin['description'] or '').strip()
-    refs      = (coin['coin_references'] or '').strip()
-    grade_notes = (coin['notes'] or '').strip()
+
+def _coin_context_inputs(coin):
+    region = (_coin_row_value(coin, 'region') or '').strip()
+    authority = (_coin_row_value(coin, 'authority') or '').strip()
+    mint = (_coin_row_value(coin, 'mint') or '').strip()
+    desc = (_coin_row_value(coin, 'description') or '').strip()
+    refs = (_coin_row_value(coin, 'coin_references') or '').strip()
+    grade_notes = (_coin_row_value(coin, 'notes') or '').strip()
+    date_1_text = (_coin_row_value(coin, 'date_1_text') or '').strip()
+    date_2_text = (_coin_row_value(coin, 'date_2_text') or '').strip()
     date_hint = ''
-    if coin['date_1_text'] or coin['date_2_text']:
-        date_hint = (coin['date_1_text'] or '')
-        if coin['date_2_text']:
-            date_hint = f"{date_hint} – {coin['date_2_text']}"
-
+    if date_1_text or date_2_text:
+        date_hint = date_1_text
+        if date_2_text:
+            date_hint = f"{date_hint} – {date_2_text}"
     if not (region or authority or mint or date_hint):
         raise RuntimeError('Fill in at least region, authority, mint, or date first.')
+    return {
+        'region': region,
+        'authority': authority,
+        'mint': mint,
+        'desc': desc,
+        'refs': refs,
+        'grade_notes': grade_notes,
+        'date_hint': date_hint,
+    }
 
+
+def _build_coin_context_prompt(coin):
+    parts = _coin_context_inputs(coin)
     gen_settings = _coin_research_generation_settings()
     search_count = gen_settings['searches']
     max_tokens = gen_settings['max_tokens']
@@ -5228,13 +5258,13 @@ pedigree, Calciati number, SNG / HGC / RIC / RPC / Crawford / Ravel
 references, hoard provenance, strike quality, rarity call-outs); mine
 them for anything useful and cite the reference trail when it matters.
 
-Region:      {region or '(not specified)'}
-Authority:   {authority or '(not specified)'}
-Mint:        {mint or '(not specified)'}
-Date range:  {date_hint or '(not specified)'}
-Description: {desc or '(not specified)'}
-Pedigree / References: {refs or '(not specified)'}
-Grade / Conditions:    {grade_notes or '(not specified)'}
+Region:      {parts['region'] or '(not specified)'}
+Authority:   {parts['authority'] or '(not specified)'}
+Mint:        {parts['mint'] or '(not specified)'}
+Date range:  {parts['date_hint'] or '(not specified)'}
+Description: {parts['desc'] or '(not specified)'}
+Pedigree / References: {parts['refs'] or '(not specified)'}
+Grade / Conditions:    {parts['grade_notes'] or '(not specified)'}
 
 Use up to {search_count} focused web searches to ground the facts. Prefer
 queries that combine the authority/mint/date with the strongest catalog
@@ -5280,6 +5310,26 @@ bare URLs after relevant bullets. Under ~{char_budget} chars total.
 
 Reply with ONLY the markdown, wrapped in a <markdown>…</markdown> tag.
 No prose, no code fences, no JSON."""
+    return prompt, gen_settings
+
+
+def fetch_coin_context(coin):
+    """Claude-driven historical-environment summary for a coin, drawing
+    on region, authority, mint, date, and description together.
+    Returns dict {markdown: str}. Raises RuntimeError on missing key
+    / API failure.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed. Run 'pip install anthropic'.")
+
+    prompt, gen_settings = _build_coin_context_prompt(coin)
+    search_count = gen_settings['searches']
+    max_tokens = gen_settings['max_tokens']
 
     timeout, attempts = _coin_research_retry_settings()
     client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
@@ -5323,28 +5373,32 @@ No prose, no code fences, no JSON."""
             text += block.text
     text = text.strip()
 
-    # Prefer the <markdown>…</markdown> envelope. Fall back to legacy
-    # JSON shape, then finally to the raw text, so a sloppy output
-    # from Claude still lands as usable content.
-    md = ''
-    m = re.search(r'<markdown>(.*?)</markdown>', text, re.DOTALL | re.IGNORECASE)
-    if m:
-        md = m.group(1).strip()
-    else:
-        m = re.search(r'\{.*\}', text, re.DOTALL)
-        if m:
-            try:
-                data = json.loads(m.group(0))
-                md = (data.get('markdown') or '').strip()
-            except ValueError:
-                md = ''
-        if not md:
-            md = text  # last-ditch: show the whole thing
-    if not md:
-        raise RuntimeError(f'Empty response from model: {text[:200]}')
-    import html as _html
-    md = _html.unescape(md).strip()
-    md = re.sub(r'</?cite\b[^>]*>', '', md, flags=re.IGNORECASE)
+    md = _coin_context_response_markdown(text)
+    return {'markdown': md}
+
+
+def fetch_coin_context_perplexity(coin):
+    """Perplexity/Sonar research pass for the coin detail Perplexity button."""
+    api_key = os.environ.get('PERPLEXITY_API_KEY')
+    if not api_key:
+        raise RuntimeError('PERPLEXITY_API_KEY not configured')
+
+    prompt, gen_settings = _build_coin_context_prompt(coin)
+    max_tokens = gen_settings['max_tokens']
+
+    api_data, text = perplexity_chat_completion(
+        api_key,
+        prompt,
+        env_names='PERPLEXITY_COIN_RESEARCH_MODEL',
+        default_model='sonar-pro',
+        max_tokens=max_tokens,
+        search_context_env_names='PERPLEXITY_COIN_RESEARCH_CONTEXT',
+        default_search_context='high',
+    )
+    md = _coin_context_response_markdown(text)
+    citations = api_data.get('citations') or []
+    if citations and not re.search(r'https?://', md, re.IGNORECASE):
+        md = (md + '\n' + '\n'.join(citations[:3])).strip()
     return {'markdown': md}
 
 
@@ -8328,26 +8382,26 @@ def geocode_city():
     return jsonify(data)
 
 
-@app.route('/coins/<record_id>/context', methods=['POST'])
-def coin_fetch_context(record_id):
-    """Combined historical-environment lookup using region + authority +
-    mint + date + description together."""
+def _start_coin_context_job(record_id, provider='claude'):
     db = get_db()
     coin = db.execute("SELECT * FROM coins WHERE id = ?", (record_id,)).fetchone()
     if not coin:
         return jsonify({'error': 'Coin not found'}), 404
 
+    coin_payload = dict(coin)
+    coin_payload['_research_provider'] = provider
     job_id = uuid.uuid4().hex
     _set_coin_context_job(
         job_id,
         status='running',
         record_id=record_id,
+        provider=provider,
         started_at=datetime.utcnow().isoformat(),
         started_ts=time.time(),
     )
     threading.Thread(
         target=_run_coin_context_job,
-        args=(job_id, record_id, dict(coin)),
+        args=(job_id, record_id, coin_payload),
         daemon=True,
     ).start()
     return jsonify({
@@ -8359,6 +8413,19 @@ def coin_fetch_context(record_id):
             job_id=job_id,
         ),
     }), 202
+
+
+@app.route('/coins/<record_id>/context', methods=['POST'])
+def coin_fetch_context(record_id):
+    """Combined historical-environment lookup using region + authority +
+    mint + date + description together."""
+    return _start_coin_context_job(record_id, provider='claude')
+
+
+@app.route('/coins/<record_id>/context-perplexity', methods=['POST'])
+def coin_fetch_context_perplexity(record_id):
+    """Perplexity-backed variant of the coin research lookup."""
+    return _start_coin_context_job(record_id, provider='perplexity')
 
 
 @app.route('/coins/<record_id>/context/<job_id>', methods=['GET'])
