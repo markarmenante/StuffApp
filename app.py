@@ -8438,32 +8438,25 @@ def _coin_row_value(coin, field):
     return None
 
 
-def _coin_explicit_size_mm(coin):
-    pieces = []
-    for field in ('description', 'coin_references', 'condition', 'notes', 'obv_rev'):
-        value = _coin_row_value(coin, field)
-        if value:
-            pieces.append(str(value))
-    text = '\n'.join(pieces)
-    for match in re.finditer(r'(?<![\w.])(\d{1,2}(?:\.\d+)?)\s*mm\b', text, re.IGNORECASE):
+def _coin_first_measurement(text, unit_re, min_value, max_value):
+    text = str(text or '')
+    pattern = rf'(?<![\w.])(\d{{1,3}}(?:\.\d+)?)\s*(?:{unit_re})\b'
+    for match in re.finditer(pattern, text, re.IGNORECASE):
         try:
-            size = float(match.group(1))
+            value = float(match.group(1))
         except ValueError:
             continue
-        if 5 <= size <= 80:
-            return size
+        if min_value <= value <= max_value:
+            return value
     return None
 
 
-def _coin_size_rounding_equivalent(current, suggested):
-    try:
-        current_num = float(current)
-        suggested_num = float(suggested)
-    except (TypeError, ValueError):
-        return False
-    current_is_fractional = abs(current_num - round(current_num)) > 0.001
-    suggested_is_integer = abs(suggested_num - round(suggested_num)) < 0.001
-    return current_is_fractional and suggested_is_integer and abs(current_num - suggested_num) <= 0.51
+def _coin_description_measurements(coin):
+    description = _coin_row_value(coin, 'description') or ''
+    return {
+        'size': _coin_first_measurement(description, 'mm', 5, 80),
+        'weight': _coin_first_measurement(description, 'g|gm|gram|grams', 0.01, 1000),
+    }
 
 
 def fetch_coin_specs(coin):
@@ -8527,8 +8520,8 @@ Target fields:
 - date_1: integer year of issue. NEGATIVE for BC (e.g. -450 for 450 BC), positive for AD/CE.
 - date_2: integer year ending a date range. Same sign convention. Return null if not a range.
 - official: the named individual associated with the coin's striking and their role, formatted as "Name, role" — e.g. "Straton, magistrate", "Marcus Junius Brutus, moneyer", "John Reich, engraver", "Lucius Memmius, mint official". Look in the user-entered description FIRST — it often spells this out as "<Name>, <role>" anywhere in the text, including parenthetical asides and even abbreviated or initialed magistrate signatures (e.g. "Ct..., magistrate", "ΔΗ, magistrate", "CT, magistrate"). Capture those verbatim — partial / two-letter names ARE the actual signature on the die. Then fall back to your web sources for fuller context. If the dies are explicitly "unsigned", "attributed to", or "in the style of" a known artist/official, preserve that nuance in the value — e.g. "Euainetos, engraver (unsigned, attributed)" or "Kimon, engraver (style of)". Do NOT silently promote a stylistic attribution to a confirmed signature. Return null only if the description contains no "<Name>, <role>" construct AND your sources don't surface one.
-- weight: weight in grams (float). Pull from the user's description / pedigree / condition note if it includes an explicit "X.XX g" measurement; otherwise look up the canonical published weight for this exact reference from your sources. Return null if you cannot find a specific figure.
-- size: diameter in mm (float). Take the explicit "XX mm" / "XX.X mm" from the user's notes first, then fall back to the canonical published size for the reference. Do NOT round diameter measurements: if a source says "14.5 mm", return 14.5, not 15. Return an integer only when the source explicitly gives an integer diameter or a standard reference makes that integer diameter numismatically correct.
+- weight: weight in grams (float). If the Description contains an explicit "X.XX g", "X.XX gm", or "X.XX grams" measurement, that value is canonical: return exactly that value and do not use another source for weight. Otherwise look up the canonical published weight for the exact reference.
+- size: diameter in mm (float). If the Description contains an explicit "XX mm" / "XX.X mm" measurement, that value is canonical: return exactly that value and do not use another source for size. Do NOT round diameter measurements: if the Description says "14.5 mm", return 14.5, not 15. Only use a source-derived size when the Description contains no diameter measurement.
 - die_axis: integer 0-12 representing the orientation of the reverse die relative to the obverse, expressed as a clock position. The standard numismatic shorthand is the trailing token of "(diameter mm, weight g, NNh)" — e.g. "(32.5mm, 16.83 g, 12h)" → die_axis 12, "9h" → 9, "6 h" → 6. The user's description usually carries this. Return null only if no clock-position notation is present and no reputable source gives one.
 - grade: short condition grade as written by collectors (e.g. "VF", "gVF", "EF", "MS-65", "Choice EF"). Pull from the description or condition note when present; only return one if the source actually grades the coin (don't invent).
 
@@ -8620,9 +8613,9 @@ def coin_lookup_specs(record_id):
 
     if not isinstance(suggestions, dict):
         suggestions = {}
-    explicit_size = _coin_explicit_size_mm(coin)
-    if explicit_size is not None:
-        suggestions['size'] = explicit_size
+    for field, value in _coin_description_measurements(coin).items():
+        if value is not None:
+            suggestions[field] = value
 
     metal_allowed = {m.lower(): m for m in VALUE_LISTS['metal_coin']}
 
@@ -8683,8 +8676,6 @@ def coin_lookup_specs(record_id):
             # Tolerance: don't propose a "change" for a sub-0.05
             # difference (rounding noise / source-to-source jitter).
             try:
-                if field == 'size' and _coin_size_rounding_equivalent(current, suggested):
-                    return True
                 return abs(float(current) - float(suggested)) < 0.05
             except (TypeError, ValueError):
                 return False
