@@ -249,6 +249,13 @@ def coin_grade_value_list_match(value):
         return alias
 
     compact = re.sub(r'[^a-z0-9+]+', '', normalized)
+    if (
+        'mintstate' in compact
+        or compact in {'unc', 'uncirc'}
+        or 'uncirculated' in compact
+        or re.search(r'\b(?:m\s*s|ms|unc)\s*\d{0,2}\b', normalized)
+    ):
+        return 'MS'
     compact_aliases = {
         'brilliantuncirculated': 'BU',
         'bu': 'BU',
@@ -8730,7 +8737,7 @@ Target fields:
 - weight: weight in grams (float). If the Description contains an explicit "X.XX g", "X.XX gm", or "X.XX grams" measurement, that value is canonical: return exactly that value and do not use another source for weight. Otherwise look up the canonical published weight for the exact reference.
 - size: diameter in mm (float). If the Description contains an explicit "XX mm" / "XX.X mm" measurement, that value is canonical: return exactly that value and do not use another source for size. Do NOT round diameter measurements: if the Description says "14.5 mm", return 14.5, not 15. Only use a source-derived size when the Description contains no diameter measurement.
 - die_axis: integer 0-12 representing the orientation of the reverse die relative to the obverse, expressed as a clock position. The standard numismatic shorthand is the trailing token of "(diameter mm, weight g, NNh)" — e.g. "(32.5mm, 16.83 g, 12h)" → die_axis 12, "9h" → 9, "6 h" → 6. The user's description usually carries this. Return null only if no clock-position notation is present and no reputable source gives one.
-- grade: map the discovered condition grade to EXACTLY one of [{grades}]. Interpret c = choice, a = about/almost/near, and g = good; map XF / Extremely Fine / Extra Fine to EF; Good VF to gVF; Choice VF to cVF; About VF to aVF; numeric Mint State grades such as MS-65 to MS; PR / Proof to PF. Return null when the source grade is below or outside this list and cannot be represented.
+- grade: map the discovered condition grade to EXACTLY one of [{grades}]. Interpret c = choice, a = about/almost/near, and g = good; map Mint State / Uncirculated / UNC / numeric MS grades such as MS-65 to MS; map XF / Extremely Fine / Extra Fine to EF; Good VF to gVF; Choice VF to cVF; About VF to aVF; PR / Proof to PF. Mint State takes priority over EF/XF wording if both appear. Return null when the source grade is below or outside this list and cannot be represented.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null only when you cannot identify a value:
 {{
