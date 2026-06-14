@@ -409,6 +409,8 @@
     <button type="button"
             class="coin-lookup-btn coin-perplexity-btn{% if r and r['history_searched_at'] %} done{% endif %}"
             data-url="{% if not is_new %}{{ url_for('coin_fetch_context_perplexity', record_id=r['id']) }}{% endif %}"
+            data-spec-url="{% if not is_new %}{{ url_for('coin_lookup_specs', record_id=r['id'], provider='perplexity') }}{% endif %}"
+            data-spec-provider="perplexity"
             data-context-path="context-perplexity"
             data-loading-label="Perplexity"
             title="{% if r and r['history_searched_at'] %}Perplexity research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Run the same coin research prompt through Perplexity{% endif %}">
@@ -6436,7 +6438,25 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   async function ensureCoinSpecUrl(btn) {
     if (btn.dataset.specUrl) return;
     const detailPath = await ensureCoinRecordPath();
-    btn.dataset.specUrl = detailPath + '/lookup-specs';
+    const provider = btn.dataset.specProvider;
+    btn.dataset.specUrl = detailPath + '/lookup-specs'
+      + (provider ? `?provider=${encodeURIComponent(provider)}` : '');
+  }
+
+  async function flushCoinResearchInputFields() {
+    if (typeof window.saveField !== 'function') return;
+    const fields = [
+      'region', 'authority', 'denomination', 'metal', 'mint',
+      'date_1', 'date_1_text', 'date_2', 'date_2_text',
+      'description', 'coin_references', 'notes',
+      'official', 'weight', 'size', 'die_axis', 'grade',
+    ];
+    const saves = [];
+    fields.forEach(name => {
+      const el = document.querySelector(`[name="${name}"]`);
+      if (el && el.name) saves.push(window.saveField(el.name, el.value || ''));
+    });
+    await Promise.all(saves);
   }
 
   async function runCoinSpecLookup(btn, options = {}) {
@@ -6578,6 +6598,12 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       btn.classList.add('loading'); btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
       try {
+        if (btn.classList.contains('coin-perplexity-btn')) {
+          await ensureCoinSpecUrl(btn);
+          btn.textContent = '✓ Checking…';
+          await runCoinSpecLookup(btn, { silentEmpty: false });
+          await flushCoinResearchInputFields();
+        }
         await ensureCoinContextUrl(btn);
         const loadingLabel = btn.dataset.loadingLabel || '🔎 Researching';
         btn.textContent = `${loadingLabel}…`;

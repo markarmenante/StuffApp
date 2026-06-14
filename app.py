@@ -8495,6 +8495,30 @@ COIN_SPEC_FILLABLE = ('region', 'authority', 'denomination', 'metal',
                       'date_1', 'date_2', 'official',
                       'weight', 'size', 'die_axis', 'grade')
 
+COIN_SPECS_RESPONSE_SCHEMA = {
+    'type': 'object',
+    'additionalProperties': False,
+    'properties': {
+        'region': _JSON_NULLABLE_STRING,
+        'authority': _JSON_NULLABLE_STRING,
+        'denomination': _JSON_NULLABLE_STRING,
+        'metal': _JSON_NULLABLE_STRING,
+        'date_1': _JSON_NULLABLE_INTEGER,
+        'date_2': _JSON_NULLABLE_INTEGER,
+        'official': _JSON_NULLABLE_STRING,
+        'weight': _JSON_NULLABLE_NUMBER,
+        'size': _JSON_NULLABLE_NUMBER,
+        'die_axis': _JSON_NULLABLE_INTEGER,
+        'grade': _JSON_NULLABLE_STRING,
+        'sources': {'type': 'string'},
+    },
+    'required': [
+        'region', 'authority', 'denomination', 'metal', 'date_1',
+        'date_2', 'official', 'weight', 'size', 'die_axis', 'grade',
+        'sources',
+    ],
+}
+
 
 def _coin_row_value(coin, field):
     try:
@@ -8526,20 +8550,16 @@ def _coin_description_measurements(coin):
     }
 
 
-def fetch_coin_specs(coin):
-    """Use Claude web_search to fill missing identifying fields on a coin.
+def fetch_coin_specs(coin, provider='anthropic'):
+    """Fill missing identifying fields on a coin through the selected provider.
 
     Returns a dict like ``{field: value, ...}`` containing ONLY fields the
     model is confident about. Existing non-empty fields are sent as
     context but never overwritten by the caller.
     """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
-    try:
-        import anthropic
-    except ImportError:
-        raise RuntimeError("anthropic package not installed.")
+    provider = (provider or 'anthropic').strip().lower()
+    if provider not in {'anthropic', 'perplexity'}:
+        raise RuntimeError(f'Unsupported coin spec lookup provider: {provider}')
 
     known = {}
     for f in COIN_SPEC_FILLABLE:
@@ -8609,6 +8629,38 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null only when you 
 }}
 """
 
+    if provider == 'perplexity':
+        api_key = os.environ.get('PERPLEXITY_API_KEY')
+        if not api_key:
+            raise RuntimeError('PERPLEXITY_API_KEY not configured')
+        api_data, text = perplexity_chat_completion(
+            api_key,
+            prompt,
+            env_names='PERPLEXITY_COIN_SPEC_LOOKUP_MODEL',
+            default_model='sonar-pro',
+            max_tokens=1024,
+            response_schema=COIN_SPECS_RESPONSE_SCHEMA,
+            schema_name='coinSpecs',
+            search_context_env_names='PERPLEXITY_COIN_SPEC_LOOKUP_CONTEXT',
+            default_search_context='high',
+        )
+        parsed = parse_model_json_object(text)
+        citations = api_data.get('citations') or []
+        if citations and isinstance(parsed, dict):
+            existing = (parsed.get('sources') or '').strip()
+            cite_list = '; '.join(citations[:6])
+            parsed['sources'] = (f'{existing} | citations: {cite_list}'
+                                 if existing else f'citations: {cite_list}')
+        return parsed
+
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+
     client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(4)
@@ -8670,7 +8722,12 @@ def coin_lookup_specs(record_id):
     if not coin:
         return jsonify({'error': 'Coin not found'}), 404
     try:
-        suggestions = fetch_coin_specs(coin)
+        provider = (
+            'perplexity'
+            if request.args.get('provider') == 'perplexity'
+            else 'anthropic'
+        )
+        suggestions = fetch_coin_specs(coin, provider=provider)
     except RuntimeError as e:
         return jsonify({'error': str(e)}), 503
     except Exception as e:
