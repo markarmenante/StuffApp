@@ -390,14 +390,18 @@
       {% endif %}
     {% endif %}
     {% if category == 'coins' and _is_owner %}
-    {# Research renders even on the new-coin form. The autosave-on-new
-       path creates the record on first interaction, and the Research JS
-       runs spec check + historical research as separate requests. #}
+    {# Check and Research render even on the new-coin form. The autosave-on-new
+       path creates the record on first interaction. #}
+    <button type="button"
+            class="coin-lookup-btn coin-spec-check-btn{% if r and r['specs_searched_at'] %} done{% endif %}"
+            data-spec-url="{% if not is_new %}{{ url_for('coin_lookup_specs', record_id=r['id']) }}{% endif %}"
+            title="{% if r and r['specs_searched_at'] %}Check last run {{ r['specs_searched_at'][:10] }} — click to re-run missing-field lookup{% else %}Check identifying fields and complete missing coin specs{% endif %}">
+      ✓ Check
+    </button>
     <button type="button"
             class="coin-lookup-btn coin-history-btn{% if r and r['history_searched_at'] %} done{% endif %}"
             data-url="{% if not is_new %}{{ url_for('coin_fetch_context', record_id=r['id']) }}{% endif %}"
-            data-spec-url="{% if not is_new %}{{ url_for('coin_lookup_specs', record_id=r['id']) }}{% endif %}"
-            title="{% if r and r['history_searched_at'] %}Research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Check identifying fields, then research the historical environment plus a scholarly discussion of cited pedigree and reference information{% endif %}">
+            title="{% if r and r['history_searched_at'] %}Research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Research historical environment plus scholarly pedigree/reference notes{% endif %}">
       🔎 Research
     </button>
     {% endif %}
@@ -6412,11 +6416,16 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     return detailPath;
   }
 
-  async function ensureCoinResearchUrls(btn) {
-    if (btn.dataset.url && btn.dataset.specUrl) return;
+  async function ensureCoinContextUrl(btn) {
+    if (btn.dataset.url) return;
     const detailPath = await ensureCoinRecordPath();
-    if (!btn.dataset.url) btn.dataset.url = detailPath + '/context';
-    if (!btn.dataset.specUrl) btn.dataset.specUrl = detailPath + '/lookup-specs';
+    btn.dataset.url = detailPath + '/context';
+  }
+
+  async function ensureCoinSpecUrl(btn) {
+    if (btn.dataset.specUrl) return;
+    const detailPath = await ensureCoinRecordPath();
+    btn.dataset.specUrl = detailPath + '/lookup-specs';
   }
 
   async function runCoinSpecLookup(btn, options = {}) {
@@ -6439,7 +6448,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 
     const filled = data.filled || {};
     const overwritten = data.overwritten || {};
-    if (data.specs_searched_at) btn.classList.add('done');
+    if (data.specs_searched_at) {
+      btn.classList.add('done');
+    }
     if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
       if (!options.silentEmpty) {
         alert('No new information found.'
@@ -6518,8 +6529,29 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     throw new Error('Research is still running after 10 minutes. Please try again.');
   }
 
-  // ── Coin-wide Research pill: run field check and historical research
-  //     as separate requests behind one visible action.
+  // ── Coin Check pill: complete missing identifying fields.
+  document.querySelectorAll('.coin-spec-check-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const originalText = btn.textContent;
+      btn.classList.add('loading');
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      try {
+        await ensureCoinSpecUrl(btn);
+        btn.textContent = '✓ Checking…';
+        await runCoinSpecLookup(btn, { silentEmpty: false });
+      } catch (err) {
+        alert('Check failed: ' + coinLookupFailureMessage(err));
+      } finally {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.textContent = originalText;
+      }
+    });
+  });
+
+  // ── Coin-wide Research pill: historical and reference research only.
   document.querySelectorAll('.coin-history-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const originalText = btn.textContent;
@@ -6532,9 +6564,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       btn.classList.add('loading'); btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
       try {
-        await ensureCoinResearchUrls(btn);
-        btn.textContent = '🔎 Checking…';
-        await runCoinSpecLookup(btn, { silentEmpty: true });
+        await ensureCoinContextUrl(btn);
         btn.textContent = '🔎 Researching…';
         const url = btn.dataset.url;
         if (!url) throw new Error('No research URL after save');
