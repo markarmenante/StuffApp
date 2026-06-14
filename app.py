@@ -5048,6 +5048,23 @@ def _coin_research_retry_settings():
     return timeout, attempts
 
 
+def _coin_research_int_setting(name, default, min_value, max_value):
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(min_value, min(value, max_value))
+
+
+def _coin_research_generation_settings():
+    return {
+        'searches': _coin_research_int_setting(
+            'ANTHROPIC_COIN_RESEARCH_SEARCHES', 2, 1, 4),
+        'max_tokens': _coin_research_int_setting(
+            'ANTHROPIC_COIN_RESEARCH_MAX_TOKENS', 950, 700, 1400),
+    }
+
+
 def _bounded_retry_wait(err, fallback, cap=15):
     wait = fallback
     try:
@@ -5195,6 +5212,13 @@ def fetch_coin_context(coin):
     if not (region or authority or mint or date_hint):
         raise RuntimeError('Fill in at least region, authority, mint, or date first.')
 
+    gen_settings = _coin_research_generation_settings()
+    search_count = gen_settings['searches']
+    max_tokens = gen_settings['max_tokens']
+    bullet_count = '1–2' if search_count <= 2 else '1–3'
+    source_count = '1–3' if search_count <= 2 else '2–4'
+    char_budget = 1100 if max_tokens <= 1000 else 1600
+
     prompt = f"""You are an ancient-numismatics historian writing a short,
 rich profile of a specific coin. You have seven inputs; weave them
 together — don't just restate them. Put special weight on pedigree,
@@ -5212,7 +5236,10 @@ Description: {desc or '(not specified)'}
 Pedigree / References: {refs or '(not specified)'}
 Grade / Conditions:    {grade_notes or '(not specified)'}
 
-Use up to 4 concise web searches to ground the facts. Cover, in this order:
+Use up to {search_count} focused web searches to ground the facts. Prefer
+queries that combine the authority/mint/date with the strongest catalog
+reference, so each search can support more than one section. Cover, in
+this order:
 
 1. Historical environment — the political / military situation at this
    mint during the date range; who was in power (dynasty, magistrate,
@@ -5247,9 +5274,9 @@ Use up to 4 concise web searches to ground the facts. Cover, in this order:
 
 Write four short sections using these bold labels on their own lines:
 **Historical environment**, **Style**, **Pedigree and reference notes**,
-**Reflection of the times**. Each label is followed by 1–3 bullets
-starting with '- '. Include 2–4 source URLs as trailing bare URLs
-after relevant bullets. Under ~1600 chars total.
+**Reflection of the times**. Each label is followed by {bullet_count}
+bullets starting with '- '. Include {source_count} source URLs as trailing
+bare URLs after relevant bullets. Under ~{char_budget} chars total.
 
 Reply with ONLY the markdown, wrapped in a <markdown>…</markdown> tag.
 No prose, no code fences, no JSON."""
@@ -5263,7 +5290,7 @@ No prose, no code fences, no JSON."""
         fable_fallback='sonnet',
     )
     web_search = anthropic_web_search_tool(
-        4, default_tool='web_search_20260209')
+        search_count, default_tool='web_search_20260209')
     import time as _time
     last_err = None
     transient_errs = (
@@ -5276,7 +5303,7 @@ No prose, no code fences, no JSON."""
         try:
             resp = client.messages.create(
                 model=lookup_model,
-                max_tokens=1400,
+                max_tokens=max_tokens,
                 tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
