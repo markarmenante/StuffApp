@@ -2966,13 +2966,7 @@ document.querySelectorAll('.watch-lookup-btn:not(.print-pdf-btn):not(.rec-lookup
     // would change).
     if (!Object.keys(overwritten).length) {
       try {
-        const res2 = await fetch(applyUrl, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({updates: filled}),
-        });
-        const d = await res2.json();
-        if (!res2.ok) throw new Error(d.error || 'Apply failed');
+        const d = await applyLookupUpdates(applyUrl, filled);
         if (d.updated) window.location.reload();
       } catch (err) {
         alert('Apply failed: ' + err.message);
@@ -2987,6 +2981,47 @@ document.querySelectorAll('.watch-lookup-btn:not(.print-pdf-btn):not(.rec-lookup
     btn.textContent = original;
   }
 }));
+
+function lookupApplyFailureMessage(status, text) {
+  const plain = String(text || '').replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  return plain
+    ? `Server returned ${status}: ${plain.slice(0, 180)}`
+    : `Server returned ${status}`;
+}
+
+async function applyLookupUpdates(applyUrl, updates, options = {}) {
+  const res = await fetch(applyUrl, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({updates}),
+  });
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    const text = await res.text().catch(() => '');
+    if (options.ignoreApplyFailure) {
+      console.warn('Lookup apply skipped after non-JSON response',
+        {status: res.status, body: text.slice(0, 240)});
+      return {updated: 0, fields: [], values: {}, skipped: true};
+    }
+    throw new Error(lookupApplyFailureMessage(res.status, text));
+  }
+  const data = await res.json().catch(err => {
+    if (options.ignoreApplyFailure) {
+      console.warn('Lookup apply skipped after JSON parse failure', err);
+      return {updated: 0, fields: [], values: {}, skipped: true};
+    }
+    throw err;
+  });
+  if (!res.ok) {
+    if (options.ignoreApplyFailure) {
+      console.warn('Lookup apply skipped after server error', data);
+      return {updated: 0, fields: [], values: {}, skipped: true};
+    }
+    throw new Error(data.error || 'Apply failed');
+  }
+  return data;
+}
 
 function showLookupReview(applyUrl, filled, overwritten, sources, options = {}) {
   // Build the modal.
@@ -3074,13 +3109,7 @@ function showLookupReview(applyUrl, filled, overwritten, sources, options = {}) 
         if (cb.checked) updates[cb.dataset.field] = JSON.parse(cb.dataset.value);
       });
       try {
-        const res = await fetch(applyUrl, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({updates}),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Apply failed');
+        const data = await applyLookupUpdates(applyUrl, updates, options);
         overlay.remove();
         resolve({ applied: Boolean(data.updated), data, updates });
         if (data.updated && options.reloadOnApply !== false) window.location.reload();
@@ -6492,15 +6521,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 
     const applyUrl = url.replace('/lookup-specs', '/apply-lookup-specs');
     if (!Object.keys(overwritten).length) {
-      const res2 = await fetch(applyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updates: filled }),
+      const d = await applyLookupUpdates(applyUrl, filled, {
+        ignoreApplyFailure: options.ignoreApplyFailure,
       });
-      const d = await res2.json();
-      if (!res2.ok) throw new Error(d.error || 'Apply failed');
       if (d.updated) applyCoinLookupValues(d.values || filled);
-      return true;
+      return Boolean(d.updated);
     }
 
     const result = await showLookupReview(
@@ -6511,6 +6536,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       {
         reloadOnApply: false,
         silentEmpty: true,
+        ignoreApplyFailure: options.ignoreApplyFailure,
         emptyMessage: 'Already up to date. Every field the lookup checked matches this coin.'
           + (data.sources ? '\n\nChecked: ' + data.sources : ''),
       }
@@ -6573,7 +6599,10 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       try {
         await ensureCoinSpecUrl(btn);
         btn.textContent = '✓ Checking…';
-        await runCoinSpecLookup(btn, { silentEmpty: true });
+        await runCoinSpecLookup(btn, {
+          silentEmpty: true,
+          ignoreApplyFailure: true,
+        });
       } catch (err) {
         alert('Check failed: ' + coinLookupFailureMessage(err));
       } finally {
@@ -6601,7 +6630,10 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         if (btn.classList.contains('coin-perplexity-btn')) {
           await ensureCoinSpecUrl(btn);
           btn.textContent = '✓ Checking…';
-          await runCoinSpecLookup(btn, { silentEmpty: true });
+          await runCoinSpecLookup(btn, {
+            silentEmpty: true,
+            ignoreApplyFailure: true,
+          });
           await flushCoinResearchInputFields();
         }
         await ensureCoinContextUrl(btn);
