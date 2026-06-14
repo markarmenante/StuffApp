@@ -6573,7 +6573,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       try {
         await ensureCoinSpecUrl(btn);
         btn.textContent = '✓ Checking…';
-        await runCoinSpecLookup(btn, { silentEmpty: false });
+        await runCoinSpecLookup(btn, { silentEmpty: true });
       } catch (err) {
         alert('Check failed: ' + coinLookupFailureMessage(err));
       } finally {
@@ -6601,7 +6601,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         if (btn.classList.contains('coin-perplexity-btn')) {
           await ensureCoinSpecUrl(btn);
           btn.textContent = '✓ Checking…';
-          await runCoinSpecLookup(btn, { silentEmpty: false });
+          await runCoinSpecLookup(btn, { silentEmpty: true });
           await flushCoinResearchInputFields();
         }
         await ensureCoinContextUrl(btn);
