@@ -6355,6 +6355,7 @@ def new_record(category):
         if category == 'watches':
             _apply_watch_order_form_fields(data, request.form)
             _graduate_watch_order_if_owned(data, data.get('status'))
+            _apply_watch_actual_delivery_service_date(data)
 
         if category not in ('watches', 'coins') and 'status' in {
             f['name'] for f in visible_fields(category)
@@ -6627,6 +6628,8 @@ def detail_view(category, record_id):
         if category == 'watches':
             _apply_watch_order_form_fields(updates, request.form)
             _graduate_watch_order_if_owned(updates, updates.get('status'))
+            _apply_watch_actual_delivery_service_date(
+                updates, record['actual_delivery_date'])
 
         # If a coin moved groups, resequence both the old group (to
         # close the gap) and the new group (to place the coin).
@@ -7131,9 +7134,23 @@ def save_field(category, record_id):
     if category == 'watches' and field_name == 'price':
         _refresh_watch_order_balance(db, record_id)
 
+    synced_watch_actual_delivery = None
+    synced_watch_service_date = None
+    if category == 'watches' and field_name == 'actual_delivery_date':
+        actual = _clean_service_date(value)
+        old_actual = _clean_service_date(existing['actual_delivery_date'])
+        if actual and actual != old_actual:
+            db.execute(
+                "UPDATE watches SET service_date = ?, updated_at = ? WHERE id = ?",
+                [actual, now, record_id],
+            )
+            synced_watch_service_date = actual
+
     if category == 'watches' and field_name == 'status' \
             and str(value or '').strip().lower() == 'own':
-        _graduate_watch_order_status(db, record_id)
+        synced_watch_actual_delivery = _graduate_watch_order_status(db, record_id)
+        if synced_watch_actual_delivery:
+            synced_watch_service_date = synced_watch_actual_delivery
 
     # date_1 / date_2 each have a parallel _text column the detail
     # template prefers for display. Without keeping them in sync, the
@@ -7162,7 +7179,12 @@ def save_field(category, record_id):
                 _renumber_coin_groups(db, touched)
 
     db.commit()
-    return jsonify({'ok': True})
+    response = {'ok': True}
+    if synced_watch_actual_delivery:
+        response['actual_delivery_date'] = synced_watch_actual_delivery
+    if synced_watch_service_date:
+        response['service_date'] = synced_watch_service_date
+    return jsonify(response)
 
 
 @app.route('/<category>/<record_id>/delete', methods=['POST'])
@@ -9700,6 +9722,17 @@ def _graduate_watch_order_if_owned(target, status_value):
         target['actual_delivery_date'] = date.today().isoformat()
 
 
+def _apply_watch_actual_delivery_service_date(target, previous_actual=None):
+    actual = _clean_service_date(_row_get(target, 'actual_delivery_date'))
+    if not actual:
+        return None
+    if previous_actual is not None and actual == _clean_service_date(previous_actual):
+        return None
+    target['actual_delivery_date'] = actual
+    target['service_date'] = actual
+    return actual
+
+
 def _update_watch_order_field(db, record_id, field_name, raw_value):
     row = db.execute(
         "SELECT price, order_purchase_price, order_deposit, order_deposit_2, "
@@ -9793,14 +9826,19 @@ def _graduate_watch_order_status(db, record_id):
         return
     updates = []
     params = []
+    stamped_actual = None
     if _has_watch_order_data(row) and not row['actual_delivery_date']:
+        stamped_actual = date.today().isoformat()
         updates.append('actual_delivery_date = ?')
-        params.append(date.today().isoformat())
+        params.append(stamped_actual)
+        updates.append('service_date = ?')
+        params.append(stamped_actual)
     if updates:
         updates.append('updated_at = ?')
         params.append(datetime.utcnow().isoformat())
         params.append(record_id)
         db.execute(f"UPDATE watches SET {', '.join(updates)} WHERE id = ?", params)
+    return stamped_actual
 
 
 @app.template_filter('currency')

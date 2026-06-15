@@ -3701,6 +3701,13 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // Watch order panel: deposit accepts either dollars or a percentage
   // of purchase price. When a watch graduates to Own, stamp actual
   // delivery date if blank; the server applies the same rule.
+  function syncWatchServiceDateFromActualDelivery(actualDate) {
+    const clean = String(actualDate || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return;
+    const serviceInput = form.querySelector('input[name="service_date"]');
+    if (!serviceInput) return;
+    updateServiceSummary(clean);
+  }
   const watchOrderPanel = document.getElementById('watchOrderPanel');
   function orderMoneyNumber(raw) {
     const noPct = stripOrderPercent(raw);
@@ -3879,7 +3886,12 @@ document.querySelectorAll('.comp-item').forEach(item => {
       });
     });
     watchOrderPanel.querySelectorAll('input[type="date"]').forEach(input => {
-      input.addEventListener('change', () => updateWatchOrderMath(false));
+      input.addEventListener('change', () => {
+        if (input.name === 'actual_delivery_date') {
+          syncWatchServiceDateFromActualDelivery(input.value);
+        }
+        updateWatchOrderMath(false);
+      });
     });
     form.querySelector('input[name="price"]')?.addEventListener('input', () => {
       updateWatchOrderMath(true);
@@ -3906,7 +3918,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
         const deposit2Input = watchOrderPanel.querySelector('input[name="order_deposit_2"]');
         const hasOrderData = [depositInput, deposit2Input, expectedInput]
           .some(input => ((input && input.value) || '').trim());
-        if (hasOrderData && actualInput && !actualInput.value) actualInput.value = todayIsoDate();
+        if (hasOrderData && actualInput && !actualInput.value) {
+          actualInput.value = todayIsoDate();
+          syncWatchServiceDateFromActualDelivery(actualInput.value);
+        }
         updateWatchOrderMath(false);
       }
     });
@@ -4048,8 +4063,16 @@ document.querySelectorAll('.comp-item').forEach(item => {
         .then(r => r.json())
         .then(d => {
           if (d.ok) {
+            if (d.actual_delivery_date) {
+              const actualInput = form.querySelector('input[name="actual_delivery_date"]');
+              if (actualInput) actualInput.value = d.actual_delivery_date;
+            }
+            if (d.service_date !== undefined) {
+              updateServiceSummary(d.service_date);
+            }
             showToast();
           }
+          return d;
         });
     }).catch(err => console.warn('Auto-save failed:', err));
   }
