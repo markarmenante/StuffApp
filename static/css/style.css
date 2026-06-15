@@ -300,10 +300,14 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 /* ── ITEM LIST ── */
-.item-list { background: var(--surface); }
+.item-list {
+  --item-list-thumb-size: 128px;
+  background: var(--surface);
+}
 
 .item-row {
   display: flex; align-items: stretch;
+  min-height: var(--item-list-thumb-size);
   border-bottom: 1px solid var(--border-light);
   text-decoration: none; color: inherit;
   cursor: pointer;
@@ -324,7 +328,9 @@ input[type="number"]::-webkit-outer-spin-button {
 .item-row:hover { background: #f0f0ff; text-decoration: none; }
 
 .item-thumb {
-  width: 96px; min-height: 96px; flex-shrink: 0;
+  width: var(--item-list-thumb-size);
+  min-height: var(--item-list-thumb-size);
+  flex-shrink: 0;
   background: var(--cell-bg);
   border-right: 1px solid var(--border-light);
   display: flex; align-items: center; justify-content: center;
@@ -334,7 +340,12 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .item-thumb:hover { background: rgba(0,0,0,.04); }
 .item-thumb.drag-over { background: rgba(0, 122, 255, 0.12); box-shadow: inset 0 0 0 2px var(--blue); }
-.item-thumb img { max-width: 96px; max-height: 96px; object-fit: contain; display: block; }
+.item-thumb img {
+  max-width: var(--item-list-thumb-size);
+  max-height: var(--item-list-thumb-size);
+  object-fit: contain;
+  display: block;
+}
 .item-thumb .no-img { font-size: 36px; color: var(--text-hint); }
 
 /* Coin reverse thumbnail (sits next to the obverse on the list view).
@@ -342,48 +353,7 @@ input[type="number"]::-webkit-outer-spin-button {
    "no reverse uploaded yet" rather than a duplicate of the obverse. */
 .item-thumb-rev .no-img { color: #ddd; }
 
-/* Credit cards: taller rows with larger type for glanceable reading.
-   Number / Exp+CVC / Zip each live on their own line so nothing wraps
-   mid-value at phone widths. The card thumbnail fills its cell height
-   so the art (not whitespace) sits beside the text. */
-.item-list-credit_cards .item-row { align-items: stretch; }
-.item-list-credit_cards .item-thumb {
-  /* Wider cell + tighter padding so the card art fills the frame.
-     150px leaves enough room on a 390px iPhone viewport for the
-     longest data line (19-char card number) to render without
-     wrapping. */
-  width: 150px;
-  min-height: 0;
-  padding: 2px;
-  align-self: stretch;
-}
-.item-list-credit_cards .item-thumb img {
-  max-width: 100%; max-height: 100%;
-  width: 100%; object-fit: contain;
-}
-.item-list-credit_cards .item-thumb .no-img { font-size: 28px; }
-.item-list-credit_cards .item-body { padding: 10px 10px 10px 10px; }
 .item-list-credit_cards .item-line1 { position: relative; padding-right: 36px; }
-/* Cards + Properties share a slightly larger, more glanceable font
-   scale than the smaller-list categories: 22px title and 18px detail
-   text with wider gaps. They're the two lists you scan from across
-   the room. */
-.item-list-credit_cards .item-brand,
-.item-list-properties  .item-brand { font-size: 22px; }
-.item-list-credit_cards .item-detail-rows,
-.item-list-properties  .item-detail-rows { gap: 4px; margin-top: 6px; }
-.item-list-credit_cards .idr,
-.item-list-properties  .idr { gap: 18px; }
-.item-list-credit_cards .idr span,
-.item-list-properties  .idr span { font-size: 18px; }
-.item-list-credit_cards .idr .lbl,
-.item-list-properties  .idr .lbl { font-size: 14px; }
-
-/* Properties list (desktop only): bump the thumbnail 30% wider so the
-   building photos read better at scanning distance. Mobile keeps its
-   own 120px width from the @media (max-width: 640px) block below. */
-.item-list-properties .item-thumb     { width: 125px; }
-.item-list-properties .item-thumb img { max-width: 125px; }
 
 /* Hard divider between the Residential and Commercial blocks on the
    property list. Bold dark line so it reads as a section break. */
@@ -3034,8 +3004,7 @@ input[type="date"] { -webkit-appearance: none; }
   .detail-bottom .bottom-cell:has(select[name="owner"]) { display: none; }
 
   /* Thumbnails: wider on phones so photos read well at a glance. */
-  .item-thumb        { width: 120px; min-height: 120px; }
-  .item-thumb img    { max-width: 120px; max-height: 120px; }
+  .item-list { --item-list-thumb-size: 136px; }
   .item-thumb .no-img { font-size: 40px; }
 
   /* Two coin thumbs would crowd the row on phones; collapse the reverse. */
