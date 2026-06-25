@@ -5333,6 +5333,31 @@ def _run_coin_context_job(job_id, record_id, coin):
         )
 
 
+COIN_CONTEXT_PREAMBLE_RE = re.compile(
+    r'^(?:now i have sufficient information to write (?:the|this) profile\.?|'
+    r'here is the requested profile\.?|here is the coin profile\.?)$',
+    re.IGNORECASE,
+)
+
+
+def _strip_markdown_wrappers(value):
+    """Remove model wrapper tags and setup chatter from coin context notes."""
+    text = (value or '').strip()
+    if not text:
+        return ''
+    text = re.sub(r'&lt;/?\s*markdown\s*&gt;', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'</?\s*markdown\s*>', '', text, flags=re.IGNORECASE)
+    lines = text.splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and COIN_CONTEXT_PREAMBLE_RE.match(lines[0].strip()):
+        lines.pop(0)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+    text = '\n'.join(lines).strip()
+    return re.sub(r'\n{3,}', '\n\n', text)
+
+
 def _coin_context_response_markdown(text):
     text = (text or '').strip()
     md = ''
@@ -5354,7 +5379,7 @@ def _coin_context_response_markdown(text):
     import html as _html
     md = _html.unescape(md).strip()
     md = re.sub(r'</?cite\b[^>]*>', '', md, flags=re.IGNORECASE)
-    return md
+    return _strip_markdown_wrappers(md)
 
 
 def _coin_context_inputs(coin):
@@ -5486,8 +5511,9 @@ Write four short sections using these bold labels on their own lines:
 bullets starting with '- '. Include {source_count} source URLs as trailing
 bare URLs after relevant bullets. Under ~{char_budget} chars total.
 
-Reply with ONLY the markdown, wrapped in a <markdown>…</markdown> tag.
-No prose, no code fences, no JSON."""
+Reply with ONLY one <markdown>…</markdown> block. Do not include any setup
+sentence before it, do not nest another <markdown> tag inside it, and do not
+include code fences or JSON."""
     return prompt, gen_settings
 
 
@@ -5594,7 +5620,7 @@ def _split_coin_context_markdown(markdown):
     pedigree/reference section in its own notes field, while the remaining
     sections stay in the historical-context field.
     """
-    md = (markdown or '').strip()
+    md = _strip_markdown_wrappers(markdown)
     if not md:
         return '', ''
     matches = list(COIN_CONTEXT_SECTION_RE.finditer(md))
@@ -10039,7 +10065,7 @@ def format_results_filter(value):
 
     # Decode any stray HTML entities the AI may have embedded (&#39; etc.)
     # before we re-escape during rendering.
-    raw = _html.unescape(str(value)).strip()
+    raw = _strip_markdown_wrappers(_html.unescape(str(value))).strip()
     # Claude's web_search tool injects <cite index="...">...</cite> markers
     # around quoted text. Strip the tags but keep the inner content.
     raw = re.sub(r'</?cite\b[^>]*>', '', raw, flags=re.IGNORECASE)
