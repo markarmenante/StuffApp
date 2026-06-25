@@ -9,6 +9,7 @@ window.COIN_CITIES = {
   'Amphipolis':[40.82,23.85], 'Olynthus':[40.29,23.37], 'Larissa':[39.64,22.42],
   'Pharsalus':[39.29,22.38], 'Dodona':[39.55,20.79],
   'Troy':[39.96,26.24], 'Byzantium':[41.01,28.97], 'Cyzicus':[40.39,27.89],
+  'Thasos':[40.78,24.71],
   'Pergamon':[39.13,27.18], 'Sardis':[38.49,28.04], 'Smyrna':[38.42,27.14],
   'Phocaea':[38.67,26.75], 'Clazomenae':[38.36,26.78], 'Colophon':[38.10,27.16],
   'Ephesus':[37.94,27.34], 'Miletus':[37.53,27.28], 'Halicarnassus':[37.04,27.43],
@@ -143,6 +144,10 @@ window.COIN_CITY_ALIASES = {
   'mytilini':      'Mytilene',
   'mytilene':      'Mytilene',
   'knidos':        'Knidos',
+  'thasos':        'Thasos',
+  'thassos':       'Thasos',
+  'thasos island': 'Thasos',
+  'island of thasos': 'Thasos',
 };
 
 // Modern/world origin fallback. For modern coins, prefer mint city when

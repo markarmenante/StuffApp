@@ -361,6 +361,22 @@ def _normalize_four_digit_year(value):
     return str(candidate)
 
 
+def _normalize_coin_year_input(value):
+    s = str(value or '').strip()
+    if not s:
+        return ''
+    m = re.match(r'^\s*(-?\d+)\s*(BC|BCE|AD|CE)?\s*$', s, re.IGNORECASE)
+    if not m:
+        return value
+    n = int(m.group(1))
+    era = (m.group(2) or '').upper()
+    if era in ('BC', 'BCE') and n > 0:
+        n = -n
+    elif era in ('AD', 'CE') and n < 0:
+        n = abs(n)
+    return str(n)
+
+
 def normalize_field_value(table, field_name, value):
     """Return the canonical value for a known alias, or the input
     unchanged. Strings are first NFC-normalized so pre-composed and
@@ -375,6 +391,8 @@ def normalize_field_value(table, field_name, value):
         value = unicodedata.normalize('NFC', value)
     if field_name in FOUR_DIGIT_YEAR_FIELDS:
         return _normalize_four_digit_year(value)
+    if table == 'coins' and field_name in ('date_1', 'date_2'):
+        return _normalize_coin_year_input(value)
     if field_name == 'status' and value.strip().lower() == 'owned':
         return 'Own'
     if table == 'coins' and field_name == 'grade':
@@ -5366,6 +5384,37 @@ def _coin_context_inputs(coin):
     }
 
 
+def _coin_scholarly_source_guidance(parts):
+    search_text = ' '.join([
+        parts.get('region') or '',
+        parts.get('authority') or '',
+        parts.get('mint') or '',
+        parts.get('desc') or '',
+        parts.get('refs') or '',
+    ]).lower()
+    sicily_terms = (
+        'sicily', 'sicilian', 'syracuse', 'akragas', 'gela',
+        'katane', 'naxos', 'selinus', 'himera', 'leontini',
+        'messana', 'kamarina', 'camarina',
+    )
+    is_greek_sicilian = any(term in search_text for term in sicily_terms)
+
+    lines = [
+        "Source strategy for scholarly references:",
+        "- Start with Newman Numismatic Portal (NNP) for digitized numismatic literature; prefer books, journals, sale catalogues, and items tied to the S&S Library / S&S digitization project when available.",
+        "- Use Internet Archive collection filters when useful: collection:snslibraryrestricted, collection:s-and-s-library-restricted, and newmannumismaticrestricted.",
+        "- Prefer classic corpora, monographs, sale catalogues with plates, die studies, and standard references over generic dealer summaries. Use auction archives mainly for pedigree, plate matches, and sale history.",
+        "- Use S&S/NNP digitization announcements as a roadmap for scanned rare works, catalog runs, and reference shelves; when relevant, try named reference/category seeds such as Sicilian coinage, Greek coins of Sicily, Syracuse coins, Haeberlin, Mitchiner, Middendorf, Elisabeth Washburn King, Sotheby, Leu, Hess, CNG, and Roma.",
+        "- Search within promising PDFs/catalogues for the exact mint, ruler, polity, magistrate, denomination, and reference numbers entered by the user.",
+    ]
+    if is_greek_sicilian:
+        lines.extend([
+            "- For Greek/Sicilian coins, try focused NNP and Internet Archive searches such as: Sicily tetradrachm; Akragas coinage; Gela coinage; Greek coins Syracuse; Sicily coins collection:snslibraryrestricted; Syracuse collection:s-and-s-library-restricted.",
+            "- For Sicilian material, prioritize references that speak directly to Syracuse, Akragas, Gela, Katane, Naxos, and related poleis, especially plate catalogues and die-study literature.",
+        ])
+    return "\n".join(lines)
+
+
 def _build_coin_context_prompt(coin):
     parts = _coin_context_inputs(coin)
     gen_settings = _coin_research_generation_settings()
@@ -5374,6 +5423,7 @@ def _build_coin_context_prompt(coin):
     bullet_count = '1–2' if search_count <= 2 else '1–3'
     source_count = '1–3' if search_count <= 2 else '2–4'
     char_budget = 1100 if max_tokens <= 1000 else 1600
+    scholarly_source_guidance = _coin_scholarly_source_guidance(parts)
 
     prompt = f"""You are an ancient-numismatics historian writing a short,
 rich profile of a specific coin. You have seven inputs; weave them
@@ -5391,6 +5441,8 @@ Date range:  {parts['date_hint'] or '(not specified)'}
 Description: {parts['desc'] or '(not specified)'}
 Pedigree / References: {parts['refs'] or '(not specified)'}
 Grade / Conditions:    {parts['grade_notes'] or '(not specified)'}
+
+{scholarly_source_guidance}
 
 Use up to {search_count} focused web searches to ground the facts. Prefer
 queries that combine the authority/mint/date with the strongest catalog
@@ -6342,6 +6394,11 @@ def new_record(category):
                     # "A$50,000.00" verbatim; fall back to legacy
                     # strip-and-parse for plain numbers.
                     val = _normalize_price_input(val)
+                elif category == 'coins' and fname in ('date_1', 'date_2'):
+                    # Coin dates can arrive as the display value from the
+                    # add form ("450 BC") before the JS submit normalizer
+                    # runs. Preserve the era before generic unit stripping.
+                    val = _normalize_coin_year_input(val)
                 elif field['type'] == 'number' or fname in ('beat', 'reserve', 'value'):
                     val = val.replace('$', '').replace(',', '').strip()
                     # Strip trailing unit suffix ("8.50 g", "26.5 mm", "28800 hrs")
@@ -7079,24 +7136,16 @@ def save_field(category, record_id):
     # its currency prefix (US$ / A$) verbatim — see _normalize_price_input.
     if field_name == 'price':
         value = _normalize_price_input(str(value))
-    elif field['type'] == 'number' or field_name in ('beat', 'reserve', 'value'):
-        value = str(value).replace('$', '').replace(',', '').strip()
+    elif category == 'coins' and field_name in ('date_1', 'date_2'):
         # Coin date fields render as "625 BC" / "1952" / "1952 AD" but
         # store as a signed integer year. Accept any of those forms.
-        if category == 'coins' and field_name in ('date_1', 'date_2'):
-            s = str(value).strip()
-            m = re.match(r'^\s*(-?\d+)\s*(BC|BCE|AD|CE)?\s*$', s, re.IGNORECASE)
-            if m:
-                n = int(m.group(1))
-                era = (m.group(2) or '').upper()
-                if era in ('BC', 'BCE') and n > 0:
-                    n = -n
-                value = str(n)
-        else:
-            # Generic unit-suffix strip: "8.50 g", "26.5 mm", etc.
-            m = re.match(r'^\s*(-?\d+(?:\.\d+)?)\s*[A-Za-z%°/]*\s*$', str(value))
-            if m:
-                value = m.group(1)
+        value = _normalize_coin_year_input(value)
+    elif field['type'] == 'number' or field_name in ('beat', 'reserve', 'value'):
+        value = str(value).replace('$', '').replace(',', '').strip()
+        # Generic unit-suffix strip: "8.50 g", "26.5 mm", etc.
+        m = re.match(r'^\s*(-?\d+(?:\.\d+)?)\s*[A-Za-z%°/]*\s*$', str(value))
+        if m:
+            value = m.group(1)
 
     value = normalize_field_value(table, field_name, str(value).strip() if value else '')
 

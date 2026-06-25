@@ -376,7 +376,7 @@
     </button>
     {% endif %}
     {# Lookup / Check / History pills are owner-only — they make
-       Anthropic API calls that bill against the owner's account, and
+       AI provider calls that bill against the owner's account, and
        members shouldn't be able to spend on someone else's data. #}
     {%- set _is_owner = g.current_user and g.current_user.role == 'owner' -%}
     {% if not is_new %}
@@ -384,7 +384,9 @@
       <button type="button"
               class="watch-lookup-btn{% if r['specs_searched_at'] %} done{% endif %}"
               data-url="{{ url_for('watch_lookup_specs', record_id=r['id']) }}"
-              title="{% if r['specs_searched_at'] %}Lookup last run {{ r['specs_searched_at'][:10] }} — click to re-run{% else %}Look up missing specs from manufacturer, Chrono24, WatchBox, Caliber Corner, EmmyWatch, Watch Pages, Hodinkee, Monochrome, Watch-Wiki{% endif %}">
+              data-provider="perplexity"
+              data-loading-label="⏳ Perplexity…"
+              title="{% if r['specs_searched_at'] %}Perplexity lookup last run {{ r['specs_searched_at'][:10] }} — click to re-run{% else %}Prompt Perplexity to look up missing specs from manufacturer, Chrono24, WatchBox, Caliber Corner, EmmyWatch, Watch Pages, Hodinkee, Monochrome, Watch-Wiki{% endif %}">
         🔎 Lookup
       </button>
       {% endif %}
@@ -973,8 +975,10 @@ document.addEventListener('DOMContentLoaded', function () {
              data-raw="{{ _d1 }}" value="{{ _d1_disp }}"
              inputmode="numeric"
              {% if is_new and not _d1 %}placeholder="-450 / 1952"{% endif %}
-             style="text-align:center">
+             style="text-align:center" readonly>
       <input type="hidden" name="date_1_text" id="hDate1Text" value="{{ _d1_disp }}">
+      <button type="button" class="coin-date-edit-btn" data-target="dateFrom"
+              title="Edit Date 1" aria-label="Edit Date 1">✎</button>
       <span class="clabel">Date 1</span>
     </div>
     <div class="dcell coin-date-cell" style="text-align:center">
@@ -986,8 +990,10 @@ document.addEventListener('DOMContentLoaded', function () {
              data-raw="{{ _d2 }}" value="{{ _d2_disp }}"
              inputmode="numeric"
              {% if is_new and not _d2 %}placeholder="(opt)"{% endif %}
-             style="text-align:center">
+             style="text-align:center" readonly>
       <input type="hidden" name="date_2_text" id="hDate2Text" value="{{ _d2_disp }}">
+      <button type="button" class="coin-date-edit-btn" data-target="dateTo"
+              title="Edit Date 2" aria-label="Edit Date 2">✎</button>
       <span class="clabel">Date 2</span>
     </div>
     <div class="dcell coin-age-cell" style="text-align:center">
@@ -2929,7 +2935,7 @@ document.querySelectorAll('.watch-lookup-btn:not(.print-pdf-btn):not(.rec-lookup
   if (!url) return;
   const original = btn.textContent;
   btn.disabled = true;
-  btn.textContent = '⏳ Searching…';
+  btn.textContent = btn.dataset.loadingLabel || '⏳ Searching…';
   try {
     const res = await fetch(url, { method: 'POST' });
     const ct = res.headers.get('content-type') || '';
@@ -4159,6 +4165,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
     }
     return el.value;
   }
+  window.formatUsPhoneInput = formatUsPhoneInput;
   function valueFor(el, opts) {
     if (opts && opts.formatPhone && isPropertyPeoplePhoneField(el)) {
       return formatUsPhoneInput(el);
@@ -4661,36 +4668,54 @@ document.querySelectorAll(
   const fromInp = document.getElementById('dateFrom');
   const toInp = document.getElementById('dateTo');
   if (!fromInp && !toInp) return;
-  function fmtDate(raw) {
-    const s = (raw || '').trim();
-    if (s === '' || isNaN(parseInt(s))) return '';
-    const n = parseInt(s);
-    return n < 0 ? Math.abs(n) + ' BC' : String(n);
-  }
   function rawFromDisplay(disp) {
     const s = (disp || '').trim();
     if (!s) return '';
+    const bc = s.match(/(-?\d+)\s*(?:BC|BCE)\b/i);
+    if (bc) return '-' + String(Math.abs(parseInt(bc[1], 10)));
+    const ad = s.match(/(-?\d+)\s*(?:AD|CE)\b/i);
+    if (ad) return String(parseInt(ad[1], 10));
     const m = s.match(/^(-?\d+)/);
     if (m) return m[1];
-    const bc = s.match(/^(\d+)\s*BC$/i);
-    if (bc) return '-' + bc[1];
     return s;
+  }
+  function fmtDate(raw) {
+    const s = rawFromDisplay(raw);
+    if (s === '' || isNaN(parseInt(s, 10))) return '';
+    const n = parseInt(s, 10);
+    return n < 0 ? Math.abs(n) + ' BC' : String(n);
+  }
+  function selectSoon(inp) {
+    setTimeout(() => {
+      try { inp.select(); } catch (_) {}
+    }, 0);
+  }
+  function enterDateEditMode(inp) {
+    if (!inp) return;
+    if (!inp.classList.contains('is-editing')) {
+      const raw = inp.dataset.raw || rawFromDisplay(inp.value);
+      inp.readOnly = false;
+      inp.classList.add('is-editing');
+      inp.value = raw;
+    }
+    if (document.activeElement !== inp) inp.focus();
+    selectSoon(inp);
   }
   function wire(inp, hiddenId) {
     if (!inp) return;
     const hidden = document.getElementById(hiddenId);
     inp.addEventListener('focus', () => {
-      // Show the raw signed number while editing.
-      const raw = inp.dataset.raw || rawFromDisplay(inp.value);
-      inp.value = raw;
-      setTimeout(() => inp.select(), 0);
+      if (inp.readOnly) enterDateEditMode(inp);
+      else selectSoon(inp);
     });
     inp.addEventListener('blur', () => {
-      const raw = inp.value.trim();
+      const raw = rawFromDisplay(inp.value).trim();
       inp.dataset.raw = raw;
       const disp = fmtDate(raw);
       inp.value = disp;
       if (hidden) hidden.value = disp;
+      inp.readOnly = true;
+      inp.classList.remove('is-editing');
       // Submit form expects the numeric value in the visible input's
       // `value` attribute. Set it via DOM so the next form post sees it.
       inp.setAttribute('value', raw);
@@ -4707,6 +4732,13 @@ document.querySelectorAll(
   }
   wire(fromInp, 'hDate1Text');
   wire(toInp, 'hDate2Text');
+  document.querySelectorAll('.coin-date-edit-btn').forEach(btn => {
+    btn.addEventListener('click', event => {
+      event.preventDefault();
+      const target = document.getElementById(btn.dataset.target || '');
+      enterDateEditMode(target);
+    });
+  });
 })();
 
 // Typeahead: visible dropdown of matches + inline grey ghost suffix
@@ -5850,6 +5882,9 @@ document.querySelectorAll('.topic-del-btn').forEach(btn => {
 (function peopleActions() {
   const form = document.getElementById('mainForm');
   if (!form) return;
+  const phoneFormatter = window.formatUsPhoneInput || function(el) {
+    return el ? (el.value || '') : '';
+  };
   function refreshActions() {
     form.querySelectorAll('.ppl-act').forEach(btn => {
       const inp = form.querySelector(`[name="${btn.dataset.target}"]`);
@@ -5857,12 +5892,12 @@ document.querySelectorAll('.topic-del-btn').forEach(btn => {
       btn.classList.toggle('is-disabled', !has);
     });
   }
-  form.querySelectorAll('.people-cell-phone input').forEach(formatUsPhoneInput);
+  form.querySelectorAll('.people-cell-phone input').forEach(phoneFormatter);
   refreshActions();
   form.querySelectorAll('.people-cell-phone input, .people-cell-email input').forEach(inp => {
     inp.addEventListener('input', refreshActions);
     inp.addEventListener('blur', () => {
-      if (inp.closest('.people-cell-phone')) formatUsPhoneInput(inp);
+      if (inp.closest('.people-cell-phone')) phoneFormatter(inp);
       refreshActions();
     });
   });
@@ -6221,6 +6256,13 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const parts = b.split('/').filter(Boolean);
     return parts.length ? parts[parts.length - 1] : '';
   }
+  function fileDropCellFromEvent(ev) {
+    const directCell = ev.target.closest('.dyn-doc-cell');
+    if (directCell && row.contains(directCell)) return directCell;
+    const tile = ev.target.closest('.dyn-doc');
+    if (tile && row.contains(tile)) return tile.querySelector('.dyn-doc-cell');
+    return null;
+  }
 
   row.addEventListener('dragstart', (ev) => {
     const grip = ev.target.closest('.dyn-doc-grip');
@@ -6275,9 +6317,21 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       }
       return;
     }
-    if (ev.target.closest('.dyn-doc-cell')) {
+    const fileCell = fileDropCellFromEvent(ev);
+    if (fileCell) {
       ev.preventDefault();
       ev.dataTransfer.dropEffect = 'copy';
+      document.querySelectorAll('.dyn-doc-cell.drag-over').forEach(cell => {
+        if (cell !== fileCell) cell.classList.remove('drag-over');
+      });
+      fileCell.classList.add('drag-over');
+    }
+  });
+
+  row.addEventListener('dragleave', (ev) => {
+    const fileCell = fileDropCellFromEvent(ev);
+    if (fileCell && !fileCell.contains(ev.relatedTarget)) {
+      fileCell.classList.remove('drag-over');
     }
   });
 
@@ -6326,9 +6380,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       }
       return;
     }
-    const cell = ev.target.closest('.dyn-doc-cell');
+    const cell = fileDropCellFromEvent(ev);
     if (!cell) return;
     ev.preventDefault();
+    ev.stopPropagation();
+    document.querySelectorAll('.dyn-doc-cell.drag-over').forEach(el => el.classList.remove('drag-over'));
     const file = ev.dataTransfer.files && ev.dataTransfer.files[0];
     if (!file) return;
     const tile = cell.closest('.dyn-doc');
@@ -7202,7 +7258,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 // Model, Reference, Metal from the form and opens a Perplexity
 // search in a new tab asking for the technical detail block the
 // user wants to populate movement / pricing / history fields.
-function openPerplexitySearch(btn) {
+window.openPerplexitySearch = function openPerplexitySearch(btn) {
   const form = btn.closest('form');
   if (!form) return;
   const v = name => {
@@ -7228,6 +7284,6 @@ function openPerplexitySearch(btn) {
     `and https://17jewels.info.`;
   const url = 'https://www.perplexity.ai/search?q=' + encodeURIComponent(q);
   window.open(url, '_blank', 'noopener,noreferrer');
-}
+};
 </script>
 {% endblock %}

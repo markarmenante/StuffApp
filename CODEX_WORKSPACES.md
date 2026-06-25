@@ -11,6 +11,7 @@ Use these project folders:
 ```text
 StuffApp: /Users/markarmenante/Developer/stuffapp
 N552YM:   /Users/markarmenante/Developer/n552ym
+Family Office: /Users/markarmenante/Documents/GitHub/Family Office
 ```
 
 The `~/Developer` paths are symlinks to the GitHub checkouts:
@@ -18,6 +19,7 @@ The `~/Developer` paths are symlinks to the GitHub checkouts:
 ```text
 /Users/markarmenante/Documents/GitHub/stuffapp
 /Users/markarmenante/Documents/GitHub/n552ym
+/Users/markarmenante/Documents/GitHub/Family Office
 ```
 
 Production:
@@ -25,6 +27,7 @@ Production:
 ```text
 StuffApp: https://stuff.armenante.com on Railway
 N552YM:   https://n552ym.vercel.app/trips on Vercel
+Family Office: https://ym-familyoffice-production.up.railway.app on Railway
 ```
 
 The stale `stuff-app` Next/Vercel rebuilds (GitHub checkout and old iCloud
