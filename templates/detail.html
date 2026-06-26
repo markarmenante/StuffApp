@@ -1073,13 +1073,14 @@ document.addEventListener('DOMContentLoaded', function () {
      number, and the NGC/PCGS-style strike & surface grades (moved down from the physical-specs row). #}
   {# Strike/Surface are single-digit, so they get narrow columns. The read-only combined grade
      ("Choice AU, brushed") sits inline right after Slab Number rather than on a line below. #}
-  <div class="dgrid coin-grading-row" style="grid-template-columns: 1.3fr 1.3fr 1.3fr 1.2fr 0.5fr 0.5fr 0.9fr;">
+  <div class="dgrid coin-grading-row" style="grid-template-columns: 1.2fr 1.3fr 1.1fr 0.4fr 1.1fr 0.45fr 0.45fr 0.9fr;">
     {{ cell('grading_authority','Grading Authority') }}
     {{ cell('slab_number','Slab Number') }}
     <div class="dcell">
-      <input type="text" value="{{ coin_grade_display(val('grade')) }}" readonly tabindex="-1" class="coin-grade-readout" style="color:#444">
+      <input type="text" value="{{ coin_grade_display(val('grade'), val('grade_modifier')) }}" readonly tabindex="-1" class="coin-grade-readout" style="color:#444">
       <span class="clabel">Grade</span>
     </div>
+    {{ cell('grade_modifier','★ / +') }}
     {{ cell('grade_condition','Condition') }}
     {{ numcell('strike','Strike') }}
     {{ numcell('surface','Surface') }}

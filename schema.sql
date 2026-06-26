@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS coins (
     grading_authority TEXT,
     slab_number TEXT,
     grade_condition TEXT,
+    grade_modifier TEXT,
     weight REAL,
     size REAL,
     bullion TEXT,

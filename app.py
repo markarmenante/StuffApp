@@ -235,13 +235,22 @@ def expand_coin_grade(grade):
 
 
 @app.template_global()
-def coin_grade_display(grade, grade_condition=None):
-    """Combined grade line for display/PDF: cAU + "brushed" -> "Choice AU, brushed"."""
+def coin_grade_display(grade, grade_modifier=None):
+    """Grade with its NGC modifier attached for display/PDF: EF + ★ -> "EF★", cAU + ★ -> "Choice AU★".
+    The modifier (★ Star, + Plus) is part of the grade; surface conditions live in their own field."""
     g = expand_coin_grade(grade)
-    cond = (grade_condition or '').strip()
-    if g and cond:
-        return f'{g}, {cond}'
-    return g or cond
+    mod = (grade_modifier or '').strip()
+    return f'{g}{mod}' if (g and mod) else (g or mod)
+
+
+def normalize_grade_modifier(value):
+    """Reduce a grade designation to the canonical symbol(s): NGC Star -> "★", Plus -> "+", both -> "★+"."""
+    raw = value if isinstance(value, str) else ('' if value is None else str(value))
+    low = raw.lower()
+    star = '★' in raw or '✪' in raw or 'star' in low
+    plus = '+' in raw or 'plus' in low
+    out = ('★' if star else '') + ('+' if plus else '')
+    return out or None
 
 
 _GRADING_AUTHORITY_CANON = {
@@ -733,6 +742,7 @@ FIELDS = {
         {'name': 'grading_authority','label': 'Grading Authority', 'type': 'text'},
         {'name': 'slab_number',     'label': 'Slab Number',       'type': 'text'},
         {'name': 'grade_condition', 'label': 'Condition',         'type': 'text'},
+        {'name': 'grade_modifier',  'label': 'Grade Modifier',    'type': 'text'},
         {'name': 'die_axis',        'label': 'Die Axis',          'type': 'text'},
         {'name': 'strike',          'label': 'Strike',            'type': 'number'},
         {'name': 'surface',         'label': 'Surface',           'type': 'number'},
@@ -1253,6 +1263,7 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN grading_authority TEXT',
         'ALTER TABLE coins ADD COLUMN slab_number TEXT',
         'ALTER TABLE coins ADD COLUMN grade_condition TEXT',
+        'ALTER TABLE coins ADD COLUMN grade_modifier TEXT',
         'ALTER TABLE vehicles ADD COLUMN auto_title TEXT',
         'ALTER TABLE vehicles ADD COLUMN insurance_label TEXT',
         'ALTER TABLE users ADD COLUMN row_filters TEXT',
@@ -8759,7 +8770,7 @@ def coin_fetch_history(record_id):
 
 COIN_SPEC_FILLABLE = ('region', 'mint', 'authority', 'official', 'denomination', 'metal',
                       'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
-                      'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number', 'grade_condition')
+                      'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number', 'grade_condition', 'grade_modifier')
 
 COIN_SPECS_RESPONSE_SCHEMA = {
     'type': 'object',
@@ -8783,13 +8794,14 @@ COIN_SPECS_RESPONSE_SCHEMA = {
         'grading_authority': _JSON_NULLABLE_STRING,
         'slab_number': _JSON_NULLABLE_STRING,
         'grade_condition': _JSON_NULLABLE_STRING,
+        'grade_modifier': _JSON_NULLABLE_STRING,
         'sources': {'type': 'string'},
     },
     'required': [
         'region', 'mint', 'authority', 'official', 'denomination', 'metal',
         'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
         'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number',
-        'grade_condition', 'sources',
+        'grade_condition', 'grade_modifier', 'sources',
     ],
 }
 
@@ -8896,7 +8908,8 @@ Target fields:
 - sheldon: the Sheldon numeric grade as written, usually with a prefix (e.g. "MS-65", "PR-70", "AU-58"), if the text states it; else null.
 - grading_authority: the grading company if the coin is or was ever slabbed/graded and the text names it — e.g. "NGC", "PCGS", "ANACS", "ICG", "PMG", "NGC Ancients". It normally sits right before "slab", "ticket", "cert", "graded", or "holder". The coin is often removed from the holder, so a FORMER grading still counts: "formerly in NGC slab", "ex NGC", "was PCGS graded", "NGC ticket", "out of an NGC slab", "previously NGC Ch AU" all → capture the company. Normalize an obvious typo (e.g. "NCG" -> "NGC"). Else null.
 - slab_number: the grading certification / slab / ticket number if the text states one — capture it verbatim. It usually follows a cue word and is a digit code, often with a hyphen, e.g. "NGC ticket 9829888-003", "NGC cert 9829888-003", "NCG: 9829888-003", "cert #1234567", "PCGS 12345678", "slab 9829888-003" → return "9829888-003" / "1234567" / "12345678". The coin may have been removed from the slab, so it can appear in the description, pedigree, or grade notes. Else null.
-- grade_condition: surface-condition qualifier(s) the dealer or grading service notes alongside the grade — e.g. "brushed", "cleaned", "tooled", "smoothed", "scratched", "porosity", "pitting", "graffiti", "holed", "mounted", "test cut", "edge filing", "deposits", "scratches". Return the qualifier(s) the text states (comma-separated if several, lowercase); else null. Do NOT include the grade itself here.
+- grade_condition: surface-condition qualifier(s) the dealer or grading service notes alongside the grade — e.g. "brushed", "cleaned", "tooled", "smoothed", "scratched", "porosity", "pitting", "graffiti", "holed", "mounted", "test cut", "edge filing", "deposits", "scratches". Return the qualifier(s) the text states (comma-separated if several, lowercase); else null. Do NOT include the grade itself or the ★/+ designation here.
+- grade_modifier: the NGC/PCGS grade-designation symbol(s) attached to the grade, if any. Return "★" when the text shows a star or the word "Star" (e.g. "XF★", "MS 65 Star", "AU★"), "+" when the grade carries a plus (e.g. "MS65+", "AU58+", "EF+"), or "★+" if both. The designation attaches to the grade itself (XF★) and is distinct from the 5/5 strike & surface sub-grades. Else null.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
@@ -8904,7 +8917,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "denomination": null, "metal": null, "date_1": null, "date_2": null,
   "weight": null, "size": null, "die_axis": null, "grade": null,
   "strike": null, "surface": null, "sheldon": null,
-  "grading_authority": null, "slab_number": null, "grade_condition": null,
+  "grading_authority": null, "slab_number": null, "grade_condition": null, "grade_modifier": null,
   "sources": "one-line note of where each value came from (dealer text vs which web source)"
 }}
 """
@@ -9094,6 +9107,8 @@ def coin_lookup_specs(record_id):
                 return None
         if field == 'grading_authority':
             return normalize_grading_authority(raw)
+        if field == 'grade_modifier':
+            return normalize_grade_modifier(raw)
         if field in ('sheldon', 'slab_number', 'mint', 'grade_condition'):
             # Preserve as written (cert numbers, grade strings like MS-65, mint / firm names).
             v = (raw if isinstance(raw, str) else str(raw)).strip()
@@ -9128,7 +9143,7 @@ def coin_lookup_specs(record_id):
     # the lookup from replacing the dealer's attribution with its own period guess (e.g. -356 -> -440),
     # while still catching a transcription error (entered 345, description says 354 -> suggest 354) and
     # filling a value the description states but the field omits.
-    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade', 'slab_number', 'sheldon', 'grade_condition'}
+    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade', 'slab_number', 'sheldon', 'grade_condition', 'grade_modifier'}
     dealer_text = ' '.join(
         str(_coin_row_value(coin, c) or '')
         for c in ('description', 'coin_references', 'condition', 'notes')
@@ -9155,6 +9170,14 @@ def coin_lookup_specs(record_id):
             # Each qualifier word must actually appear in the dealer's text (no invented conditions).
             words = re.findall(r'[a-z]{3,}', str(value).lower())
             return bool(words) and all(w in _dealer_text_key for w in words)
+        if field == 'grade_modifier':
+            # The ★ must be backed by a star in the dealer's text; the + by a plus. No invented bumps.
+            ok = True
+            if '★' in str(value) and not ('★' in dealer_text or 'star' in dealer_text.lower()):
+                ok = False
+            if '+' in str(value) and '+' not in dealer_text:
+                ok = False
+            return ok
         return True
 
     # Build proposals (no longer auto-apply fills — every change now
@@ -9251,7 +9274,11 @@ def coin_apply_lookup_specs(record_id):
                 return float(raw_v)
             except (TypeError, ValueError):
                 return None
-        if field in ('sheldon', 'grading_authority', 'slab_number', 'mint', 'grade_condition'):
+        if field == 'grading_authority':
+            return normalize_grading_authority(raw_v)
+        if field == 'grade_modifier':
+            return normalize_grade_modifier(raw_v)
+        if field in ('sheldon', 'slab_number', 'mint', 'grade_condition'):
             v = (raw_v if isinstance(raw_v, str) else str(raw_v)).strip()
             return v or None
         if isinstance(raw_v, str):
@@ -15090,15 +15117,17 @@ def record_print_pdf(category, record_id):
             name = f['name']
             if f.get('type') == 'file': continue
             if name in ('id', 'created_at', 'updated_at'): continue
+            # The grade modifier (★/+) is folded into the Grade row, not shown on its own.
+            if category == 'coins' and name == 'grade_modifier': continue
             try:
                 v = row[name]
             except (KeyError, IndexError):
                 continue
             if v is None or (isinstance(v, str) and not v.strip()):
                 continue
-            # Coin grade renders expanded ("Choice AU"); Condition stays its own row ("brushed").
+            # Coin grade renders expanded with its modifier ("Choice AU★"); Condition stays its own row.
             if category == 'coins' and name == 'grade':
-                v = coin_grade_display(v) or v
+                v = coin_grade_display(v, _val('grade_modifier')) or v
             label = f.get('label') or name
             if name in LONG_TEXT_FIELDS:
                 long_sections.append((label, str(v)))
