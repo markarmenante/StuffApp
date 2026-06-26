@@ -1076,8 +1076,8 @@ document.addEventListener('DOMContentLoaded', function () {
   <div class="dgrid coin-grading-row" style="grid-template-columns: 1.3fr 1.3fr 1.3fr 1.2fr 0.5fr 0.5fr 0.9fr;">
     {{ cell('grading_authority','Grading Authority') }}
     {{ cell('slab_number','Slab Number') }}
-    <div class="dcell" style="text-align:center">
-      <span class="coin-grade-readout" style="display:inline-block; padding-top:6px; font-size:13px; color:#333;">{{ coin_grade_display(val('grade')) }}</span>
+    <div class="dcell">
+      <input type="text" value="{{ coin_grade_display(val('grade')) }}" readonly tabindex="-1" class="coin-grade-readout" style="color:#444">
       <span class="clabel">Grade</span>
     </div>
     {{ cell('grade_condition','Condition') }}
