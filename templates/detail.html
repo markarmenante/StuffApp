@@ -1003,7 +1003,7 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   <!-- Physical specs -->
-  <div class="dgrid coin-specs" style="grid-template-columns: repeat(6, 1fr);">
+  <div class="dgrid coin-specs" style="grid-template-columns: repeat(4, 1fr);">
     <div class="dcell">
       <input type="text" name="size" value="{{ '%.1f mm'|format(val('size')|float) if val('size') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
              {% if is_new and not val('size') %}placeholder="Diameter"{% endif %}>
@@ -1016,8 +1016,6 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
     <div class="dcell"><select name="die_axis" style="text-align:center"><option value=""></option>{% for o in ['11','12','1','2','3','4','5','6','7','8','9','10'] %}<option value="{{ o }}" {{ 'selected' if val('die_axis')==o }}>{{ o }}h</option>{% endfor %}</select><span class="clabel">axis</span></div>
     <div class="dcell"><select name="grade" style="text-align:center"><option value=""></option>{% for o in vlists.coin_grade %}<option value="{{ o }}" {{ 'selected' if val('grade')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Grade</span></div>
-    {{ numcell('strike','Strike') }}
-    {{ numcell('surface','Surf') }}
   </div>
 
   <!-- Purchase -->
@@ -1071,6 +1069,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- Grade, Conditions (existing notes data) + Historical Context, Notes (condition column) -->
   {{ notescell('notes','Grade, Conditions') }}
+  {# Four grading-company fields in one row under Grade, Conditions: grading authority, former slab
+     number, and the NGC/PCGS-style strike & surface grades (moved down from the physical-specs row). #}
+  <div class="dgrid coin-grading-row" style="grid-template-columns: repeat(4, 1fr);">
+    {{ cell('grading_authority','Grading Authority') }}
+    {{ cell('slab_number','Slab Number') }}
+    {{ numcell('strike','Strike') }}
+    {{ numcell('surface','Surface') }}
+  </div>
   {{ formatted_notescell('condition','Historical Context, Notes') }}
 
   <!-- Extra fields -->

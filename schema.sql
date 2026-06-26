@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS coins (
     die_axis TEXT,
     strike REAL,
     surface REAL,
+    grading_authority TEXT,
+    slab_number TEXT,
     weight REAL,
     size REAL,
     bullion TEXT,
