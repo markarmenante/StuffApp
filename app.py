@@ -9011,6 +9011,18 @@ def coin_lookup_specs(record_id):
             return str(n)
         if field == 'grade':
             return coin_grade_value_list_match(raw)
+        if field == 'denomination':
+            if not isinstance(raw, str):
+                return None
+            cleaned = raw.strip()
+            # Metal codes/names are not denominations — Æ/AE = bronze, AR = silver, AV = gold,
+            # EL = electrum, BI = billon. The lookup sometimes returns the metal here; reject it so it
+            # never overwrites a real denomination (e.g. "Drachm" -> "AE").
+            if re.fullmatch(r'(?:ae|æ|ar|av|el|bi|billon|bronze|copper|silver|gold|electrum|orichalcum)\.?',
+                            cleaned, re.IGNORECASE):
+                return None
+            v = normalize_field_value('coins', field, cleaned)
+            return v or None
         if isinstance(raw, str):
             v = normalize_field_value('coins', field, raw.strip())
             return v or None
@@ -9036,6 +9048,32 @@ def coin_lookup_specs(record_id):
                 return str(current or '').strip() == str(suggested or '').strip()
         return str(current or '').strip().lower() == str(suggested or '').strip().lower()
 
+    # Fields transcribed from the selling numismatist are authoritative. The external lookup may only
+    # change them when the dealer's own description/pedigree/condition text backs the value — this blocks
+    # the lookup from replacing the dealer's attribution with its own period guess (e.g. -356 -> -440),
+    # while still catching a transcription error (entered 345, description says 354 -> suggest 354) and
+    # filling a value the description states but the field omits.
+    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade'}
+    dealer_text = ' '.join(
+        str(_coin_row_value(coin, c) or '')
+        for c in ('description', 'coin_references', 'condition', 'notes')
+    )
+    _dealer_years = set()
+    for _m in re.finditer(r'(\d{1,4})\s*(?:-\s*\d{1,4}\s*)?(?:BCE|BC|B\.C\.|CE|AD|A\.D\.)\b', dealer_text, re.IGNORECASE):
+        for _y in re.findall(r'\d{1,4}', _m.group(0)):
+            _dealer_years.add(int(_y))
+
+    def _grounded_in_description(field, value):
+        if field in ('date_1', 'date_2'):
+            try:
+                return abs(int(value)) in _dealer_years
+            except (TypeError, ValueError):
+                return False
+        if field == 'grade':
+            token = str(value).strip()
+            return bool(token) and re.search(r'\b' + re.escape(token) + r'\b', dealer_text, re.IGNORECASE) is not None
+        return True
+
     # Build proposals (no longer auto-apply fills — every change now
     # flows through the review modal client-side, matching the watch
     # lookup behaviour).
@@ -9044,6 +9082,10 @@ def coin_lookup_specs(record_id):
     for f in COIN_SPEC_FILLABLE:
         v = _coerce(f, suggestions.get(f))
         if v in (None, ''):
+            continue
+        # Numismatist-authoritative fields only change when the dealer's own text backs the value;
+        # otherwise the lookup's external guess is ignored for these fields.
+        if f in NUMISMATIST_FIELDS and not _grounded_in_description(f, v):
             continue
         cur = coin[f]
         if cur in (None, ''):
