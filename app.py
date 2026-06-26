@@ -15074,16 +15074,15 @@ def record_print_pdf(category, record_id):
             name = f['name']
             if f.get('type') == 'file': continue
             if name in ('id', 'created_at', 'updated_at'): continue
-            # For coins the condition qualifier is folded into the Grade row ("Choice AU, brushed").
-            if category == 'coins' and name == 'grade_condition': continue
             try:
                 v = row[name]
             except (KeyError, IndexError):
                 continue
             if v is None or (isinstance(v, str) and not v.strip()):
                 continue
+            # Coin grade renders expanded ("Choice AU"); Condition stays its own row ("brushed").
             if category == 'coins' and name == 'grade':
-                v = coin_grade_display(v, _val('grade_condition')) or v
+                v = coin_grade_display(v) or v
             label = f.get('label') or name
             if name in LONG_TEXT_FIELDS:
                 long_sections.append((label, str(v)))
