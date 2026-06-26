@@ -244,6 +244,20 @@ def coin_grade_display(grade, grade_condition=None):
     return g or cond
 
 
+_GRADING_AUTHORITY_CANON = {
+    'ncg': 'NGC', 'ngc': 'NGC', 'pcgs': 'PCGS', 'anacs': 'ANACS', 'icg': 'ICG',
+    'pmg': 'PMG', 'cac': 'CAC', 'cacg': 'CACG', 'segs': 'SEGS',
+}
+
+
+def normalize_grading_authority(value):
+    """Clean a grading-company name and fix the common 'NCG' typo for 'NGC'."""
+    v = value.strip() if isinstance(value, str) else (str(value).strip() if value is not None else '')
+    if not v:
+        return None
+    return _GRADING_AUTHORITY_CANON.get(v.lower(), v)
+
+
 def coin_grade_value_list_match(value):
     """Map collector grade variants to the configured coin grade list.
 
@@ -9078,7 +9092,9 @@ def coin_lookup_specs(record_id):
                 return float(raw)
             except (TypeError, ValueError):
                 return None
-        if field in ('sheldon', 'grading_authority', 'slab_number', 'mint', 'grade_condition'):
+        if field == 'grading_authority':
+            return normalize_grading_authority(raw)
+        if field in ('sheldon', 'slab_number', 'mint', 'grade_condition'):
             # Preserve as written (cert numbers, grade strings like MS-65, mint / firm names).
             v = (raw if isinstance(raw, str) else str(raw)).strip()
             return v or None
@@ -9112,7 +9128,7 @@ def coin_lookup_specs(record_id):
     # the lookup from replacing the dealer's attribution with its own period guess (e.g. -356 -> -440),
     # while still catching a transcription error (entered 345, description says 354 -> suggest 354) and
     # filling a value the description states but the field omits.
-    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade', 'grading_authority', 'slab_number', 'sheldon', 'grade_condition'}
+    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade', 'slab_number', 'sheldon', 'grade_condition'}
     dealer_text = ' '.join(
         str(_coin_row_value(coin, c) or '')
         for c in ('description', 'coin_references', 'condition', 'notes')
@@ -9132,7 +9148,7 @@ def coin_lookup_specs(record_id):
         if field == 'grade':
             token = str(value).strip()
             return bool(token) and re.search(r'\b' + re.escape(token) + r'\b', dealer_text, re.IGNORECASE) is not None
-        if field in ('grading_authority', 'slab_number', 'sheldon'):
+        if field in ('slab_number', 'sheldon'):
             key = re.sub(r'[^a-z0-9]', '', str(value).lower())
             return len(key) >= 2 and key in _dealer_text_key
         if field == 'grade_condition':
