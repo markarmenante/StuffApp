@@ -695,6 +695,7 @@ FIELDS = {
         {'name': 'grade',           'label': 'Grade',             'type': 'text'},
         {'name': 'grading_authority','label': 'Grading Authority', 'type': 'text'},
         {'name': 'slab_number',     'label': 'Slab Number',       'type': 'text'},
+        {'name': 'grade_condition', 'label': 'Condition',         'type': 'text'},
         {'name': 'die_axis',        'label': 'Die Axis',          'type': 'text'},
         {'name': 'strike',          'label': 'Strike',            'type': 'number'},
         {'name': 'surface',         'label': 'Surface',           'type': 'number'},
@@ -1214,6 +1215,7 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE coins ADD COLUMN grading_authority TEXT',
         'ALTER TABLE coins ADD COLUMN slab_number TEXT',
+        'ALTER TABLE coins ADD COLUMN grade_condition TEXT',
         'ALTER TABLE vehicles ADD COLUMN auto_title TEXT',
         'ALTER TABLE vehicles ADD COLUMN insurance_label TEXT',
         'ALTER TABLE users ADD COLUMN row_filters TEXT',
@@ -8720,7 +8722,7 @@ def coin_fetch_history(record_id):
 
 COIN_SPEC_FILLABLE = ('region', 'mint', 'authority', 'official', 'denomination', 'metal',
                       'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
-                      'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number')
+                      'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number', 'grade_condition')
 
 COIN_SPECS_RESPONSE_SCHEMA = {
     'type': 'object',
@@ -8743,13 +8745,14 @@ COIN_SPECS_RESPONSE_SCHEMA = {
         'sheldon': _JSON_NULLABLE_STRING,
         'grading_authority': _JSON_NULLABLE_STRING,
         'slab_number': _JSON_NULLABLE_STRING,
+        'grade_condition': _JSON_NULLABLE_STRING,
         'sources': {'type': 'string'},
     },
     'required': [
         'region', 'mint', 'authority', 'official', 'denomination', 'metal',
         'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
         'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number',
-        'sources',
+        'grade_condition', 'sources',
     ],
 }
 
@@ -8856,6 +8859,7 @@ Target fields:
 - sheldon: the Sheldon numeric grade as written, usually with a prefix (e.g. "MS-65", "PR-70", "AU-58"), if the text states it; else null.
 - grading_authority: the grading company if the coin was/is slabbed and the text names it — e.g. "NGC", "PCGS", "ANACS", "ICG", "NGC Ancients"; else null.
 - slab_number: the grading certification / slab / ticket number if the text states one — capture it verbatim. It usually follows a cue word and is a digit code, often with a hyphen, e.g. "NGC ticket 9829888-003", "NGC cert 9829888-003", "NCG: 9829888-003", "cert #1234567", "PCGS 12345678", "slab 9829888-003" → return "9829888-003" / "1234567" / "12345678". The coin may have been removed from the slab, so it can appear in the description, pedigree, or grade notes. Else null.
+- grade_condition: surface-condition qualifier(s) the dealer or grading service notes alongside the grade — e.g. "brushed", "cleaned", "tooled", "smoothed", "scratched", "porosity", "pitting", "graffiti", "holed", "mounted", "test cut", "edge filing", "deposits", "scratches". Return the qualifier(s) the text states (comma-separated if several, lowercase); else null. Do NOT include the grade itself here.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
@@ -8863,7 +8867,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "denomination": null, "metal": null, "date_1": null, "date_2": null,
   "weight": null, "size": null, "die_axis": null, "grade": null,
   "strike": null, "surface": null, "sheldon": null,
-  "grading_authority": null, "slab_number": null,
+  "grading_authority": null, "slab_number": null, "grade_condition": null,
   "sources": "one-line note of where each value came from (dealer text vs which web source)"
 }}
 """
@@ -9051,7 +9055,7 @@ def coin_lookup_specs(record_id):
                 return float(raw)
             except (TypeError, ValueError):
                 return None
-        if field in ('sheldon', 'grading_authority', 'slab_number', 'mint'):
+        if field in ('sheldon', 'grading_authority', 'slab_number', 'mint', 'grade_condition'):
             # Preserve as written (cert numbers, grade strings like MS-65, mint / firm names).
             v = (raw if isinstance(raw, str) else str(raw)).strip()
             return v or None
@@ -9085,7 +9089,7 @@ def coin_lookup_specs(record_id):
     # the lookup from replacing the dealer's attribution with its own period guess (e.g. -356 -> -440),
     # while still catching a transcription error (entered 345, description says 354 -> suggest 354) and
     # filling a value the description states but the field omits.
-    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade', 'grading_authority', 'slab_number', 'sheldon'}
+    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade', 'grading_authority', 'slab_number', 'sheldon', 'grade_condition'}
     dealer_text = ' '.join(
         str(_coin_row_value(coin, c) or '')
         for c in ('description', 'coin_references', 'condition', 'notes')
@@ -9108,6 +9112,10 @@ def coin_lookup_specs(record_id):
         if field in ('grading_authority', 'slab_number', 'sheldon'):
             key = re.sub(r'[^a-z0-9]', '', str(value).lower())
             return len(key) >= 2 and key in _dealer_text_key
+        if field == 'grade_condition':
+            # Each qualifier word must actually appear in the dealer's text (no invented conditions).
+            words = re.findall(r'[a-z]{3,}', str(value).lower())
+            return bool(words) and all(w in _dealer_text_key for w in words)
         return True
 
     # Build proposals (no longer auto-apply fills — every change now
@@ -9204,7 +9212,7 @@ def coin_apply_lookup_specs(record_id):
                 return float(raw_v)
             except (TypeError, ValueError):
                 return None
-        if field in ('sheldon', 'grading_authority', 'slab_number', 'mint'):
+        if field in ('sheldon', 'grading_authority', 'slab_number', 'mint', 'grade_condition'):
             v = (raw_v if isinstance(raw_v, str) else str(raw_v)).strip()
             return v or None
         if isinstance(raw_v, str):

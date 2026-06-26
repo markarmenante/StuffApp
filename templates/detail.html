@@ -1071,9 +1071,10 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ notescell('notes','Grade, Conditions') }}
   {# Four grading-company fields in one row under Grade, Conditions: grading authority, former slab
      number, and the NGC/PCGS-style strike & surface grades (moved down from the physical-specs row). #}
-  <div class="dgrid coin-grading-row" style="grid-template-columns: repeat(5, 1fr);">
+  <div class="dgrid coin-grading-row" style="grid-template-columns: repeat(6, 1fr);">
     {{ cell('grading_authority','Grading Authority') }}
     {{ cell('slab_number','Slab Number') }}
+    {{ cell('grade_condition','Condition') }}
     {{ numcell('strike','Strike') }}
     {{ numcell('surface','Surface') }}
     {{ cell('sheldon','Sheldon') }}
