@@ -8811,13 +8811,15 @@ def fetch_coin_specs(coin, provider='anthropic'):
     description = (coin['description'] or '').strip()
     mint = (coin['mint'] or '').strip()
     pedigree = (coin['coin_references'] or '').strip()
+    grade_notes = (coin['notes'] or '').strip()
     condition = (coin['condition'] or '').strip()
 
     known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items()) or '(none entered)'
     dealer_blocks = []
     if description: dealer_blocks.append(f'DESCRIPTION:\n{description[:4000]}')
     if pedigree:    dealer_blocks.append(f'REFERENCES / PEDIGREE:\n{pedigree[:2000]}')
-    if condition:   dealer_blocks.append(f'CONDITION / GRADE NOTES:\n{condition[:2000]}')
+    if grade_notes: dealer_blocks.append(f'GRADE / CONDITIONS NOTES:\n{grade_notes[:2000]}')
+    if condition:   dealer_blocks.append(f'HISTORICAL / OTHER NOTES:\n{condition[:1500]}')
     if obv_rev:     dealer_blocks.append(f'OBVERSE / REVERSE: {obv_rev}')
     if mint:        dealer_blocks.append(f'MINT (as entered): {mint}')
     dealer_text = '\n\n'.join(dealer_blocks) if dealer_blocks else '(no dealer text on file)'
@@ -8853,7 +8855,7 @@ Target fields:
 - surface: the NGC/PCGS surface sub-grade as a number if the text states it (e.g. "4/5" → 4); else null.
 - sheldon: the Sheldon numeric grade as written, usually with a prefix (e.g. "MS-65", "PR-70", "AU-58"), if the text states it; else null.
 - grading_authority: the grading company if the coin was/is slabbed and the text names it — e.g. "NGC", "PCGS", "ANACS", "ICG", "NGC Ancients"; else null.
-- slab_number: the certification / slab number if the text states one; else null.
+- slab_number: the grading certification / slab / ticket number if the text states one — capture it verbatim. It usually follows a cue word and is a digit code, often with a hyphen, e.g. "NGC ticket 9829888-003", "NGC cert 9829888-003", "NCG: 9829888-003", "cert #1234567", "PCGS 12345678", "slab 9829888-003" → return "9829888-003" / "1234567" / "12345678". The coin may have been removed from the slab, so it can appear in the description, pedigree, or grade notes. Else null.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
