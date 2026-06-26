@@ -221,6 +221,29 @@ FIELD_ALIASES = {
 }
 
 
+def expand_coin_grade(grade):
+    """Expand a grade code's prefix for display: cAU -> "Choice AU", gVF -> "Good VF",
+    aEF -> "About EF". Bare grades (VF, EF, MS, "VF+", ...) are returned unchanged."""
+    g = (grade or '').strip()
+    if not g:
+        return ''
+    m = re.match(r'^([cag])([A-Z].*)$', g)
+    prefixes = {'c': 'Choice', 'a': 'About', 'g': 'Good'}
+    if m and m.group(1) in prefixes:
+        return f'{prefixes[m.group(1)]} {m.group(2)}'
+    return g
+
+
+@app.template_global()
+def coin_grade_display(grade, grade_condition=None):
+    """Combined grade line for display/PDF: cAU + "brushed" -> "Choice AU, brushed"."""
+    g = expand_coin_grade(grade)
+    cond = (grade_condition or '').strip()
+    if g and cond:
+        return f'{g}, {cond}'
+    return g or cond
+
+
 def coin_grade_value_list_match(value):
     """Map collector grade variants to the configured coin grade list.
 
@@ -15051,12 +15074,16 @@ def record_print_pdf(category, record_id):
             name = f['name']
             if f.get('type') == 'file': continue
             if name in ('id', 'created_at', 'updated_at'): continue
+            # For coins the condition qualifier is folded into the Grade row ("Choice AU, brushed").
+            if category == 'coins' and name == 'grade_condition': continue
             try:
                 v = row[name]
             except (KeyError, IndexError):
                 continue
             if v is None or (isinstance(v, str) and not v.strip()):
                 continue
+            if category == 'coins' and name == 'grade':
+                v = coin_grade_display(v, _val('grade_condition')) or v
             label = f.get('label') or name
             if name in LONG_TEXT_FIELDS:
                 long_sections.append((label, str(v)))
