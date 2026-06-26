@@ -8718,30 +8718,37 @@ def coin_fetch_history(record_id):
 # from whatever the user has already entered.
 # ---------------------------------------------------------------------------
 
-COIN_SPEC_FILLABLE = ('region', 'authority', 'denomination', 'metal',
-                      'date_1', 'date_2', 'official',
-                      'weight', 'size', 'die_axis', 'grade')
+COIN_SPEC_FILLABLE = ('region', 'mint', 'authority', 'official', 'denomination', 'metal',
+                      'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
+                      'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number')
 
 COIN_SPECS_RESPONSE_SCHEMA = {
     'type': 'object',
     'additionalProperties': False,
     'properties': {
         'region': _JSON_NULLABLE_STRING,
+        'mint': _JSON_NULLABLE_STRING,
         'authority': _JSON_NULLABLE_STRING,
+        'official': _JSON_NULLABLE_STRING,
         'denomination': _JSON_NULLABLE_STRING,
         'metal': _JSON_NULLABLE_STRING,
         'date_1': _JSON_NULLABLE_INTEGER,
         'date_2': _JSON_NULLABLE_INTEGER,
-        'official': _JSON_NULLABLE_STRING,
         'weight': _JSON_NULLABLE_NUMBER,
         'size': _JSON_NULLABLE_NUMBER,
         'die_axis': _JSON_NULLABLE_INTEGER,
         'grade': _JSON_NULLABLE_STRING,
+        'strike': _JSON_NULLABLE_NUMBER,
+        'surface': _JSON_NULLABLE_NUMBER,
+        'sheldon': _JSON_NULLABLE_STRING,
+        'grading_authority': _JSON_NULLABLE_STRING,
+        'slab_number': _JSON_NULLABLE_STRING,
         'sources': {'type': 'string'},
     },
     'required': [
-        'region', 'authority', 'denomination', 'metal', 'date_1',
-        'date_2', 'official', 'weight', 'size', 'die_axis', 'grade',
+        'region', 'mint', 'authority', 'official', 'denomination', 'metal',
+        'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
+        'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number',
         'sources',
     ],
 }
@@ -8806,54 +8813,56 @@ def fetch_coin_specs(coin, provider='anthropic'):
     pedigree = (coin['coin_references'] or '').strip()
     condition = (coin['condition'] or '').strip()
 
-    known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items())
-    extras = []
-    if mint:        extras.append(f'mint: {mint}')
-    if obv_rev:     extras.append(f'obv/rev: {obv_rev}')
-    if description: extras.append(f'description (first 400 chars): {description[:400]}')
-    if pedigree:    extras.append(f'references / pedigree: {pedigree[:300]}')
-    if condition:   extras.append(f'condition note: {condition[:200]}')
-    extras_text = '\n'.join(f'- {e}' for e in extras) if extras else '(none)'
+    known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items()) or '(none entered)'
+    dealer_blocks = []
+    if description: dealer_blocks.append(f'DESCRIPTION:\n{description[:4000]}')
+    if pedigree:    dealer_blocks.append(f'REFERENCES / PEDIGREE:\n{pedigree[:2000]}')
+    if condition:   dealer_blocks.append(f'CONDITION / GRADE NOTES:\n{condition[:2000]}')
+    if obv_rev:     dealer_blocks.append(f'OBVERSE / REVERSE: {obv_rev}')
+    if mint:        dealer_blocks.append(f'MINT (as entered): {mint}')
+    dealer_text = '\n\n'.join(dealer_blocks) if dealer_blocks else '(no dealer text on file)'
 
-    prompt = f"""You are identifying a specific ancient or historical coin.
+    prompt = f"""You are extracting structured catalogue fields for one specific coin.
 
-What the user has entered so far (treat as evidence, but you may correct it if a reputable source clearly shows otherwise):
+PRIMARY SOURCE — the selling numismatist's own text for THIS coin. It is authoritative: extract every field you can DIRECTLY from it.
+{dealer_text}
+
+Structured fields the user has already transcribed from the dealer:
 {known_lines}
 
-Other context for matching:
-{extras_text}
-
-Use up to 4 web searches across reputable numismatic sources (e.g. CoinArchives, ACSearch, Wildwinds, NGC Ancients, British Museum, ANS Mantis, vCoins, CNG, Roma Numismatics, NumisBids).
-
-For every field below, return your best identified value if you can. The user wants both fills (where they left a field blank) and corrections (where what they entered conflicts with what reputable sources clearly indicate). Return null only when you genuinely cannot identify the value.
+Rules:
+1. The dealer's text above is the source of truth. For each target field, FIRST take the value the dealer's text states (description, references/pedigree, condition note).
+2. Only when the dealer's text does NOT mention a field may you use up to 3 web searches (CoinArchives, ACSearch, Wildwinds, NGC, British Museum, ANS, vCoins, CNG, Roma) to fill it. NEVER override a value the dealer's text states with a web/period guess.
+3. The grading-slab fields (grading_authority, slab_number, strike, surface, sheldon), the dates, and the grade must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
+4. The user wants fills (blank fields) and corrections of transcription errors toward the dealer's text. Return null whenever a value is not supported by the text (or, for web-allowed fields, by a reputable source).
 
 Target fields:
-- region: short geographic / cultural region name (e.g. "Ionia", "Roman Republic", "Byzantine Empire", "United States")
-- authority: ruler, polity, or issuing authority (e.g. "Augustus", "Phokaia", "Constantine I", "United States Mint")
-- denomination: coin denomination (e.g. "Drachm", "Tetradrachm", "Aureus", "Antoninianus", "Dollar")
+- region: short geographic / cultural region (e.g. "Thessaly", "Roman Republic", "United States").
+- mint: issuing mint / city as stated (e.g. "Skotussa", "Byzantion").
+- authority: ruler, polity, or issuing authority (e.g. "Augustus", "United States Mint").
+- official: named individual + role as "Name, role" — e.g. "Straton, magistrate", "John Reich, engraver". Look in the description FIRST, including abbreviated/initialed magistrate signatures (e.g. "ΔA, magistrate", "CT, magistrate") — capture verbatim; a partial/two-letter signature IS the die signature. Preserve "unsigned / attributed / style of" nuance; do not promote a stylistic attribution to a confirmed signature. Null if none.
+- denomination: the denomination (e.g. "Drachm", "Tetradrachm", "Dollar"). NOT a metal — "AE", "AR", "AV", "Æ", "bronze", "silver", "gold" are metals, never denominations.
 - metal: EXACTLY one of [{metals}]. Use the two-letter prefix codes shown.
-- date_1: integer year of issue. NEGATIVE for BC (e.g. -450 for 450 BC), positive for AD/CE.
-- date_2: integer year ending a date range. Same sign convention. Return null if not a range.
-- official: the named individual associated with the coin's striking and their role, formatted as "Name, role" — e.g. "Straton, magistrate", "Marcus Junius Brutus, moneyer", "John Reich, engraver", "Lucius Memmius, mint official". Look in the user-entered description FIRST — it often spells this out as "<Name>, <role>" anywhere in the text, including parenthetical asides and even abbreviated or initialed magistrate signatures (e.g. "Ct..., magistrate", "ΔΗ, magistrate", "CT, magistrate"). Capture those verbatim — partial / two-letter names ARE the actual signature on the die. Then fall back to your web sources for fuller context. If the dies are explicitly "unsigned", "attributed to", or "in the style of" a known artist/official, preserve that nuance in the value — e.g. "Euainetos, engraver (unsigned, attributed)" or "Kimon, engraver (style of)". Do NOT silently promote a stylistic attribution to a confirmed signature. Return null only if the description contains no "<Name>, <role>" construct AND your sources don't surface one.
-- weight: weight in grams (float). If the Description contains an explicit "X.XX g", "X.XX gm", or "X.XX grams" measurement, that value is canonical: return exactly that value and do not use another source for weight. Otherwise look up the canonical published weight for the exact reference.
-- size: diameter in mm (float). If the Description contains an explicit "XX mm" / "XX.X mm" measurement, that value is canonical: return exactly that value and do not use another source for size. Do NOT round diameter measurements: if the Description says "14.5 mm", return 14.5, not 15. Only use a source-derived size when the Description contains no diameter measurement.
-- die_axis: integer 0-12 representing the orientation of the reverse die relative to the obverse, expressed as a clock position. The standard numismatic shorthand is the trailing token of "(diameter mm, weight g, NNh)" — e.g. "(32.5mm, 16.83 g, 12h)" → die_axis 12, "9h" → 9, "6 h" → 6. The user's description usually carries this. Return null only if no clock-position notation is present and no reputable source gives one.
-- grade: map the discovered condition grade to EXACTLY one of [{grades}]. Interpret c = choice, a = about/almost/near, and g = good; map Mint State / Uncirculated / UNC / numeric MS grades such as MS-65 to MS; map XF / Extremely Fine / Extra Fine to EF; Good VF to gVF; Choice VF to cVF; About VF to aVF; PR / Proof to PF. Mint State takes priority over EF/XF wording if both appear. Return null when the source grade is below or outside this list and cannot be represented.
+- date_1: integer year, NEGATIVE for BC (e.g. -440 for 440 BC), positive for AD/CE. Use the year the DEALER'S TEXT gives; do not substitute a different period or round it.
+- date_2: integer year ending a range, same sign convention; null if not a range.
+- weight: grams (float). If the text has an explicit "X.XX g / gm / grams", return exactly that.
+- size: diameter mm (float). If the text has "XX mm" / "XX.X mm", return exactly that; do NOT round ("14.5 mm" → 14.5).
+- die_axis: integer 0-12 from the clock-position token in "(mm, g, NNh)" — e.g. "12h" → 12, "6 h" → 6. Null if absent.
+- grade: map the dealer's stated condition grade to EXACTLY one of [{grades}] (c = choice, a = about, g = good; Mint State / Unc / MS-65 → MS; XF / Extremely Fine → EF; Good VF → gVF; Choice VF → cVF; About VF → aVF; PR / Proof → PF). Null if outside the list.
+- strike: the NGC/PCGS strike sub-grade as a number if the text states it (e.g. "5/5" → 5); else null.
+- surface: the NGC/PCGS surface sub-grade as a number if the text states it (e.g. "4/5" → 4); else null.
+- sheldon: the Sheldon numeric grade as written, usually with a prefix (e.g. "MS-65", "PR-70", "AU-58"), if the text states it; else null.
+- grading_authority: the grading company if the coin was/is slabbed and the text names it — e.g. "NGC", "PCGS", "ANACS", "ICG", "NGC Ancients"; else null.
+- slab_number: the certification / slab number if the text states one; else null.
 
-Reply with ONLY a JSON object, no prose, no code fences. Use null only when you cannot identify a value:
+Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
-  "region": null,
-  "authority": null,
-  "denomination": null,
-  "metal": null,
-  "date_1": null,
-  "date_2": null,
-  "official": null,
-  "weight": null,
-  "size": null,
-  "die_axis": null,
-  "grade": null,
-  "sources": "one-line note of which sources hit"
+  "region": null, "mint": null, "authority": null, "official": null,
+  "denomination": null, "metal": null, "date_1": null, "date_2": null,
+  "weight": null, "size": null, "die_axis": null, "grade": null,
+  "strike": null, "surface": null, "sheldon": null,
+  "grading_authority": null, "slab_number": null,
+  "sources": "one-line note of where each value came from (dealer text vs which web source)"
 }}
 """
 
@@ -8866,7 +8875,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null only when you 
             prompt,
             env_names='PERPLEXITY_COIN_SPEC_LOOKUP_MODEL',
             default_model='sonar-pro',
-            max_tokens=1024,
+            max_tokens=2048,
             response_schema=COIN_SPECS_RESPONSE_SCHEMA,
             schema_name='coinSpecs',
             search_context_env_names='PERPLEXITY_COIN_SPEC_LOOKUP_CONTEXT',
@@ -9027,6 +9036,23 @@ def coin_lookup_specs(record_id):
                 return None
             v = normalize_field_value('coins', field, cleaned)
             return v or None
+        if field in ('strike', 'surface'):
+            if isinstance(raw, str):
+                m = re.match(r'^\s*(-?\d+(?:\.\d+)?)', raw)
+                if not m:
+                    return None
+                try:
+                    return float(m.group(1))
+                except ValueError:
+                    return None
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return None
+        if field in ('sheldon', 'grading_authority', 'slab_number', 'mint'):
+            # Preserve as written (cert numbers, grade strings like MS-65, mint / firm names).
+            v = (raw if isinstance(raw, str) else str(raw)).strip()
+            return v or None
         if isinstance(raw, str):
             v = normalize_field_value('coins', field, raw.strip())
             return v or None
@@ -9038,9 +9064,9 @@ def coin_lookup_specs(record_id):
                 return int(current) == int(suggested)
             except (TypeError, ValueError):
                 return False
-        if field in ('weight', 'size'):
+        if field in ('weight', 'size', 'strike', 'surface'):
             # Tolerance: don't propose a "change" for a sub-0.05
-            # difference (rounding noise / source-to-source jitter).
+            # difference (rounding noise / source-to-source jitter, or 5 vs 5.0).
             try:
                 return abs(float(current) - float(suggested)) < 0.05
             except (TypeError, ValueError):
@@ -9057,11 +9083,12 @@ def coin_lookup_specs(record_id):
     # the lookup from replacing the dealer's attribution with its own period guess (e.g. -356 -> -440),
     # while still catching a transcription error (entered 345, description says 354 -> suggest 354) and
     # filling a value the description states but the field omits.
-    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade'}
+    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade', 'grading_authority', 'slab_number', 'sheldon'}
     dealer_text = ' '.join(
         str(_coin_row_value(coin, c) or '')
         for c in ('description', 'coin_references', 'condition', 'notes')
     )
+    _dealer_text_key = re.sub(r'[^a-z0-9]', '', dealer_text.lower())
     _dealer_years = set()
     for _m in re.finditer(r'(\d{1,4})\s*(?:-\s*\d{1,4}\s*)?(?:BCE|BC|B\.C\.|CE|AD|A\.D\.)\b', dealer_text, re.IGNORECASE):
         for _y in re.findall(r'\d{1,4}', _m.group(0)):
@@ -9076,6 +9103,9 @@ def coin_lookup_specs(record_id):
         if field == 'grade':
             token = str(value).strip()
             return bool(token) and re.search(r'\b' + re.escape(token) + r'\b', dealer_text, re.IGNORECASE) is not None
+        if field in ('grading_authority', 'slab_number', 'sheldon'):
+            key = re.sub(r'[^a-z0-9]', '', str(value).lower())
+            return len(key) >= 2 and key in _dealer_text_key
         return True
 
     # Build proposals (no longer auto-apply fills — every change now
@@ -9159,6 +9189,22 @@ def coin_apply_lookup_specs(record_id):
                 return None
         if field == 'grade':
             return coin_grade_value_list_match(raw_v)
+        if field in ('strike', 'surface'):
+            if isinstance(raw_v, str):
+                m = re.match(r'^\s*(-?\d+(?:\.\d+)?)', raw_v)
+                if not m:
+                    return None
+                try:
+                    return float(m.group(1))
+                except ValueError:
+                    return None
+            try:
+                return float(raw_v)
+            except (TypeError, ValueError):
+                return None
+        if field in ('sheldon', 'grading_authority', 'slab_number', 'mint'):
+            v = (raw_v if isinstance(raw_v, str) else str(raw_v)).strip()
+            return v or None
         if isinstance(raw_v, str):
             return normalize_field_value('coins', field, raw_v.strip()) or None
         return raw_v
