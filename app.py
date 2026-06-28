@@ -4651,15 +4651,30 @@ def perplexity_chat_completion(api_key, prompt, *, env_names=None,
                                default_model='sonar-pro', max_tokens=2048,
                                response_schema=None, schema_name='lookup',
                                search_context_env_names=None,
-                               default_search_context='high'):
-    """Call Perplexity's search-grounded chat endpoint with retries."""
+                               default_search_context='high', images=None):
+    """Call Perplexity's search-grounded chat endpoint with retries.
+
+    ``images`` (optional) is a list of ``{label, data, media_type}`` from
+    _load_coin_vision_images; when given they're sent as base64 image_url
+    content blocks ahead of the prompt so Sonar can see the actual item.
+    """
     import urllib.request
     import urllib.error
     import time as _time
 
+    if images:
+        user_content = []
+        for img in images:
+            user_content.append({'type': 'text', 'text': f'{img["label"].capitalize()} of THIS coin:'})
+            user_content.append({'type': 'image_url', 'image_url': {
+                'url': f'data:{img["media_type"]};base64,{img["data"]}'}})
+        user_content.append({'type': 'text', 'text': prompt})
+    else:
+        user_content = prompt
+
     body_data = {
         'model': perplexity_lookup_model(env_names, default_model),
-        'messages': [{'role': 'user', 'content': prompt}],
+        'messages': [{'role': 'user', 'content': user_content}],
         'max_tokens': max_tokens,
         'temperature': 0.1,
         'web_search_options': {
@@ -5139,20 +5154,15 @@ Reply with ONLY a JSON object, no prose, no code fences:
     return parsed
 
 
-def audit_coin_image_vs_description(coin):
-    """Send a coin's obverse + reverse images and its catalog description
-    to Claude vision and ask whether they describe the same coin.
+def _load_coin_vision_images(coin):
+    """Base64-encode a coin's obverse/reverse images for a vision API call.
 
-    Returns {match: True|False|None, confidence: float|None, reason: str}.
-    Returns match=None when there isn't enough material to judge.
+    Returns a list of ``{label, data, media_type}`` (obverse first), skipping
+    any image that's missing on disk or not a supported raster type. Empty when
+    the record has no usable images. Shared by the image audit and the coin
+    Research / Perplexity passes so they all show the model the actual coin.
     """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
-    desc = (coin['description'] or '').strip()
-    if not desc:
-        return {'match': None, 'confidence': None,
-                'reason': 'no description on record'}
+    import base64
     images = []
     for fld, label in (('image_1', 'obverse'), ('image_2', 'reverse')):
         name = coin[fld]
@@ -5169,13 +5179,29 @@ def audit_coin_image_vs_description(coin):
         if not media_type:
             continue
         try:
-            import base64
             with open(path, 'rb') as fh:
                 data = base64.b64encode(fh.read()).decode('ascii')
-            images.append({'label': label, 'data': data,
-                           'media_type': media_type})
         except Exception:
             continue
+        images.append({'label': label, 'data': data, 'media_type': media_type})
+    return images
+
+
+def audit_coin_image_vs_description(coin):
+    """Send a coin's obverse + reverse images and its catalog description
+    to Claude vision and ask whether they describe the same coin.
+
+    Returns {match: True|False|None, confidence: float|None, reason: str}.
+    Returns match=None when there isn't enough material to judge.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    desc = (coin['description'] or '').strip()
+    if not desc:
+        return {'match': None, 'confidence': None,
+                'reason': 'no description on record'}
+    images = _load_coin_vision_images(coin)
     if not images:
         return {'match': None, 'confidence': None,
                 'reason': 'no usable images on record'}
@@ -5505,7 +5531,8 @@ def _build_coin_context_prompt(coin):
     scholarly_source_guidance = _coin_scholarly_source_guidance(parts)
 
     prompt = f"""You are an ancient-numismatics historian writing a short,
-rich profile of a specific coin. You have seven inputs; weave them
+rich profile of a specific coin. You have the inputs below — text fields,
+plus obverse/reverse images of THIS coin when attached; weave them
 together — don't just restate them. Put special weight on pedigree,
 provenance, sale history, hoard context, and catalog references. The
 catalog references and grade notes often carry a lot of signal (BCD
@@ -5520,6 +5547,15 @@ Date range:  {parts['date_hint'] or '(not specified)'}
 Description: {parts['desc'] or '(not specified)'}
 Pedigree / References: {parts['refs'] or '(not specified)'}
 Grade / Conditions:    {parts['grade_notes'] or '(not specified)'}
+
+GROUNDING — write about THIS coin, not the series in the abstract. Do not
+assert a specific design element (a named figure or allegory, portrait
+subject, scene, symbol, signature, or legend reading) unless it is stated in
+the Description / References above, visible in an attached image, or confirmed
+by a source you cite. When the design isn't established by those, keep Style
+general (fabric, module, strike, engraving quality) or attribute the reading
+to the catalog reference — never invent an attributable detail. If you cannot
+verify what is depicted, say so instead of guessing.
 
 {scholarly_source_guidance}
 
@@ -5536,7 +5572,9 @@ this order:
 2. Coin style — the iconography, engraving school, fabric / flan, and
    any artistic signatures (e.g. late-Classical Syracusan masters,
    Hellenistic realism, archaic incuse reverse, Roman provincial
-   portrait conventions). Name the style when it's identifiable.
+   portrait conventions). Name the style when it's identifiable. Read the
+   iconography off the attached images and the description / legend; do not
+   name a figure, portrait, or allegory the images and inputs don't support.
 
 3. Pedigree and reference notes — write a scholarly, catalogue-style
    discussion of the cited pedigree and reference information. Lead
@@ -5589,6 +5627,19 @@ def fetch_coin_context(coin):
     search_count = gen_settings['searches']
     max_tokens = gen_settings['max_tokens']
 
+    # Show the model the actual coin so its Style / iconography section is read
+    # off the images, not invented. Falls back to text-only when none are usable.
+    images = _load_coin_vision_images(coin)
+    if images:
+        message_content = []
+        for img in images:
+            message_content.append({'type': 'text', 'text': f'{img["label"].capitalize()} of THIS coin:'})
+            message_content.append({'type': 'image', 'source': {
+                'type': 'base64', 'media_type': img['media_type'], 'data': img['data']}})
+        message_content.append({'type': 'text', 'text': prompt})
+    else:
+        message_content = prompt
+
     timeout, attempts = _coin_research_retry_settings()
     client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
     lookup_model = anthropic_lookup_model(
@@ -5613,7 +5664,7 @@ def fetch_coin_context(coin):
                 model=lookup_model,
                 max_tokens=max_tokens,
                 tools=[web_search],
-                messages=[{'role': 'user', 'content': prompt}],
+                messages=[{'role': 'user', 'content': message_content}],
             )
             break
         except transient_errs as e:
@@ -5652,6 +5703,7 @@ def fetch_coin_context_perplexity(coin):
         max_tokens=max_tokens,
         search_context_env_names='PERPLEXITY_COIN_RESEARCH_CONTEXT',
         default_search_context='high',
+        images=_load_coin_vision_images(coin),
     )
     md = _coin_context_response_markdown(text)
     citations = api_data.get('citations') or []
