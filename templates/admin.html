@@ -300,7 +300,7 @@ document.querySelectorAll('.admin-action').forEach(li => {
         // Default name (timestamped server-side via Content-Disposition).
         const fullUrl = kind === 'download_no_secret'
           ? url
-          : url + '?secret=' + encodeURIComponent(SECRET);
+          : url + (url.includes('?') ? '&' : '?') + 'secret=' + encodeURIComponent(SECRET);
         const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,15);
         const suggested = `stuffapp-backup-${ts}.zip`;
 
