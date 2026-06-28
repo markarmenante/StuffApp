@@ -5215,23 +5215,24 @@ def _fit_vision_image(raw, media_type):
         return b64, media_type
 
 
-def _load_coin_vision_images(coin):
-    """Base64-encode a coin's obverse/reverse images for a vision API call.
+_VISION_EXT_MEDIA = {
+    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+    'png': 'image/png', 'webp': 'image/webp', 'gif': 'image/gif',
+}
 
-    Returns a list of ``{label, data, media_type}`` (obverse first), skipping
-    any image that's missing on disk or not a supported raster type. Empty when
-    the record has no usable images. Shared by the image audit and the coin
-    Research / Perplexity passes so they all show the model the actual coin.
+
+def _load_vision_images(items):
+    """Base64-encode a record's images for a vision API call, downscaling any
+    that are too large (see ``_fit_vision_image``).
+
+    ``items`` is an iterable of ``(filename, label)``. Returns a list of
+    ``{label, data, media_type}`` in order, skipping anything missing on disk
+    or not a supported raster type. Category-agnostic — coins and any future
+    category that wants to show the model its photos share this one path.
     """
-    import base64
-    ext_media = {
-        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-        'png': 'image/png', 'webp': 'image/webp', 'gif': 'image/gif',
-    }
-    supported = set(ext_media.values())
+    supported = set(_VISION_EXT_MEDIA.values())
     images = []
-    for fld, label in (('image_1', 'obverse'), ('image_2', 'reverse')):
-        name = coin[fld]
+    for name, label in items:
         if not name:
             continue
         path = os.path.join(UPLOAD_FOLDER, name)
@@ -5244,7 +5245,7 @@ def _load_coin_vision_images(coin):
             continue
         # Trust the actual bytes over the extension — a .jpg holding PNG bytes
         # otherwise makes the vision API reject the whole request (HTTP 400).
-        media_type = _sniff_image_media_type(raw) or ext_media.get(
+        media_type = _sniff_image_media_type(raw) or _VISION_EXT_MEDIA.get(
             os.path.splitext(name)[1].lower().lstrip('.'))
         if media_type not in supported:
             continue
@@ -5252,6 +5253,18 @@ def _load_coin_vision_images(coin):
         images.append({'label': label, 'data': data_b64,
                        'media_type': media_type})
     return images
+
+
+def _load_coin_vision_images(coin):
+    """Obverse/reverse images for a coin, ready for a vision API call.
+
+    Thin wrapper over ``_load_vision_images``; shared by the image audit and
+    the coin Research / Perplexity passes so they all show the model the coin.
+    """
+    return _load_vision_images((
+        (coin['image_1'], 'obverse'),
+        (coin['image_2'], 'reverse'),
+    ))
 
 
 def audit_coin_image_vs_description(coin):
