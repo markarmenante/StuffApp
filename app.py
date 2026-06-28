@@ -8954,6 +8954,81 @@ def _coin_description_fields(coin):
     return out
 
 
+# Italian (and Italian-colonial: Eritrea, Somalia, Libya) mint-mark letters.
+# A lone control letter next to the date or called out on the reverse ("R
+# below") is the mint city. Only applied when the coin's own text is clearly
+# Italian, so a stray "R" in some other legend is never misread as Rome.
+_ITALIAN_MINT_MARKS = {
+    'R': 'Rome', 'M': 'Milan', 'B': 'Bologna', 'N': 'Naples',
+    'V': 'Venice', 'T': 'Turin', 'F': 'Florence',
+}
+_ITALIAN_CONTEXT_RE = re.compile(
+    r'\b(ITALIA|ITALICUM|ITALIAN|LIRE|LIRA|TALLERO|ERYTHR|ERITREA|SOMAL|'
+    r'LIBIA|VITTORIO\s+EMANUELE|UMBERTO|REGNO|REGNUM)\b', re.IGNORECASE)
+
+
+def _coin_year_from_prose(text):
+    """First plausible coin date in free text: an 'N BC' token (ancient prose)
+    or a Gregorian year 1500-2099. Skips catalogue refs like 'KM 1916'."""
+    s = str(text or '')
+    # "480-440 BC" → take the earlier year (-480) as date_1.
+    bc_range = re.search(r'\b(\d{1,4})\s*[-–]\s*\d{1,4}\s*B\.?\s*C\.?E?\b', s, re.IGNORECASE)
+    if bc_range:
+        return -int(bc_range.group(1))
+    bc = re.search(r'\b(\d{1,4})\s*B\.?\s*C\.?E?\b', s, re.IGNORECASE)
+    if bc:
+        return -int(bc.group(1))
+    for m in re.finditer(r'(?<![\w#./-])(1[5-9]\d{2}|20\d{2})(?![\w./-])', s):
+        before = s[max(0, m.start() - 6):m.start()].lower()
+        if any(tok in before for tok in ('km', '#', 'no.', 'p.', 'pg', 'lot')):
+            continue
+        return int(m.group(1))
+    return None
+
+
+def _coin_mintmark_city(text):
+    """Expand a lone Italian control-letter mint-mark to its city, but only
+    when the text is unmistakably Italian / Italian-colonial."""
+    s = str(text or '')
+    if not _ITALIAN_CONTEXT_RE.search(s):
+        return None
+    patterns = (
+        r'\b1[5-9]\d{2}\s+([A-Z])\b',          # "1918 R"
+        r'\b20\d{2}\s+([A-Z])\b',
+        r'mint[\s-]*mark[:\s]+([A-Z])\b',
+        r'\b([A-Z])\s+below\b',                # "R below"
+        r'\b([A-Z])\s+on\s+(?:the\s+)?reverse\b',
+    )
+    for pat in patterns:
+        m = re.search(pat, s)
+        if m:
+            city = _ITALIAN_MINT_MARKS.get(m.group(1).upper())
+            if city:
+                return city
+    return None
+
+
+def _coin_text_inferences(coin):
+    """Deterministic reads from the coin's own free-prose text (obv/rev one-
+    liner + description) for fields a labelled block doesn't spell out —
+    chiefly the issue year and an Italian mint-mark. Used only to fill blanks,
+    never to override a labelled value or a confident lookup."""
+    text = '\n'.join(
+        p for p in (
+            str(_coin_row_value(coin, 'obv_rev') or ''),
+            str(_coin_row_value(coin, 'description') or ''),
+        ) if p.strip()
+    )
+    out = {}
+    year = _coin_year_from_prose(text)
+    if year is not None:
+        out['date_1'] = year
+    city = _coin_mintmark_city(text)
+    if city:
+        out['mint'] = city
+    return out
+
+
 def fetch_coin_specs(coin, provider='anthropic'):
     """Fill missing identifying fields on a coin through the selected provider.
 
@@ -9011,12 +9086,12 @@ Rules:
 
 Target fields:
 - region: short geographic / cultural region (e.g. "Thessaly", "Roman Republic", "United States").
-- mint: issuing mint / city as stated (e.g. "Skotussa", "Byzantion").
+- mint: issuing mint / city. Use the city as stated (e.g. "Skotussa", "Byzantion"), but ALSO expand a control-letter mint-mark to its city using standard catalogue conventions — for Italian / Italian-colonial coins R = Rome, M = Milan, B = Bologna, N = Naples, V = Venice, T = Turin, F = Florence. A lone letter right after the date or called out on the reverse is the mint-mark (e.g. "1918 R" or "R below" → Rome).
 - authority: ruler, polity, or issuing authority (e.g. "Augustus", "United States Mint").
 - official: named individual + role as "Name, role" — e.g. "Straton, magistrate", "John Reich, engraver". Look in the description FIRST, including abbreviated/initialed magistrate signatures (e.g. "ΔA, magistrate", "CT, magistrate") — capture verbatim; a partial/two-letter signature IS the die signature. Preserve "unsigned / attributed / style of" nuance; do not promote a stylistic attribution to a confirmed signature. Null if none.
 - denomination: the denomination (e.g. "Drachm", "Tetradrachm", "Dollar"). NOT a metal — "AE", "AR", "AV", "Æ", "bronze", "silver", "gold" are metals, never denominations.
 - metal: EXACTLY one of [{metals}]. Use the two-letter prefix codes shown.
-- date_1: integer year, NEGATIVE for BC (e.g. -440 for 440 BC), positive for AD/CE. Use the year the DEALER'S TEXT gives; do not substitute a different period or round it.
+- date_1: integer year, NEGATIVE for BC (e.g. -440 for 440 BC), positive for AD/CE. Use the year the DEALER'S TEXT gives — including a year stated inline in the description or legend (e.g. "5 Lire 1918 R" → 1918); do not substitute a different period or round it.
 - date_2: integer year ending a range, same sign convention; null if not a range.
 - weight: grams (float). If the text has an explicit "X.XX g / gm / grams", return exactly that.
 - size: diameter mm (float). If the text has "XX mm" / "XX.X mm", return exactly that; do NOT round ("14.5 mm" → 14.5).
@@ -9162,6 +9237,11 @@ def coin_lookup_specs(record_id):
             suggestions[field] = value
     for field, value in _coin_description_fields(coin).items():
         if value not in (None, ''):
+            suggestions[field] = value
+    # Free-prose reads (year, Italian mint-mark) only fill what nothing else
+    # supplied — never override a labelled value or a confident lookup.
+    for field, value in _coin_text_inferences(coin).items():
+        if value not in (None, '') and suggestions.get(field) in (None, ''):
             suggestions[field] = value
 
     # Only surface a lookup failure if the description gave us nothing to
