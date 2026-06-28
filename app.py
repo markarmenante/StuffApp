@@ -5511,6 +5511,7 @@ def _coin_scholarly_source_guidance(parts):
         "- Prefer classic corpora, monographs, sale catalogues with plates, die studies, and standard references over generic dealer summaries. Use auction archives mainly for pedigree, plate matches, and sale history.",
         "- Use S&S/NNP digitization announcements as a roadmap for scanned rare works, catalog runs, and reference shelves; when relevant, try named reference/category seeds such as Sicilian coinage, Greek coins of Sicily, Syracuse coins, Haeberlin, Mitchiner, Middendorf, Elisabeth Washburn King, Sotheby, Leu, Hess, CNG, and Roma.",
         "- Search within promising PDFs/catalogues for the exact mint, ruler, polity, magistrate, denomination, and reference numbers entered by the user.",
+        "- Cite only sources you actually opened and only reference numbers you actually saw there. Do not reconstruct a plausible-looking citation, catalog number, plate, or page from memory — an unverified citation is worse than none.",
     ]
     if is_greek_sicilian:
         lines.extend([
@@ -5531,14 +5532,15 @@ def _build_coin_context_prompt(coin):
     scholarly_source_guidance = _coin_scholarly_source_guidance(parts)
 
     prompt = f"""You are an ancient-numismatics historian writing a short,
-rich profile of a specific coin. You have the inputs below — text fields,
+factual profile of a specific coin. You have the inputs below — text fields,
 plus obverse/reverse images of THIS coin when attached; weave them
 together — don't just restate them. Put special weight on pedigree,
-provenance, sale history, hoard context, and catalog references. The
-catalog references and grade notes often carry a lot of signal (BCD
-pedigree, Calciati number, SNG / HGC / RIC / RPC / Crawford / Ravel
-references, hoard provenance, strike quality, rarity call-outs); mine
-them for anything useful and cite the reference trail when it matters.
+provenance, sale history, hoard context, and catalog references that are
+ACTUALLY PRESENT in the record or that a source confirms. The catalog
+references and grade notes often carry a lot of signal (BCD pedigree,
+Calciati number, SNG / HGC / RIC / RPC / Crawford / Ravel references, hoard
+provenance, strike quality, rarity call-outs); mine what is there and cite
+the reference trail when it matters.
 
 Region:      {parts['region'] or '(not specified)'}
 Authority:   {parts['authority'] or '(not specified)'}
@@ -5548,14 +5550,24 @@ Description: {parts['desc'] or '(not specified)'}
 Pedigree / References: {parts['refs'] or '(not specified)'}
 Grade / Conditions:    {parts['grade_notes'] or '(not specified)'}
 
-GROUNDING — write about THIS coin, not the series in the abstract. Do not
-assert a specific design element (a named figure or allegory, portrait
-subject, scene, symbol, signature, or legend reading) unless it is stated in
-the Description / References above, visible in an attached image, or confirmed
-by a source you cite. When the design isn't established by those, keep Style
-general (fabric, module, strike, engraving quality) or attribute the reading
-to the catalog reference — never invent an attributable detail. If you cannot
-verify what is depicted, say so instead of guessing.
+AUTHORITATIVE, NOT SPECULATIVE — this is the overriding rule. Every statement
+must be backed by one of: the record's text above, an attached image, or a
+source you actually cite with its URL. If you cannot back a claim, leave it
+out. A specific value you can't verify is worse than saying nothing. Do NOT
+invent, estimate, or infer from general knowledge any of:
+- design elements (a named figure/allegory, portrait subject, scene, symbol,
+  signature, or legend reading) — read these only off the images or the
+  description/legend;
+- catalog or reference numbers (KM, Davenport, Pagani, Montenegro, SNG, RIC,
+  HGC, Crawford, Calciati…) — give a number only if a source confirms it,
+  otherwise name the reference work without a number or omit it;
+- mintage figures, rarity codes, or example counts (and never a fabricated
+  "N examples per auction cycle");
+- pedigree, prior sales, hoard provenance, or die studies.
+Write about THIS coin, not the series in the abstract: do not attribute a
+general fact about the type to this specimen as if it were specific to it.
+Prefer omission over padding — "not established" / "no pedigree on record"
+is a valid and preferred answer when the evidence isn't there.
 
 {scholarly_source_guidance}
 
@@ -5577,25 +5589,27 @@ this order:
    name a figure, portrait, or allegory the images and inputs don't support.
 
 3. Pedigree and reference notes — write a scholarly, catalogue-style
-   discussion of the cited pedigree and reference information. Lead
-   with collection pedigree, prior sale, hoard, die-study, rarity,
-   catalog placement, or significance within the series (first portrait
-   of a ruler, earliest use of a legend, benchmark type in a standard
-   catalog). Explain terse catalog citations in collector-friendly
-   language when possible. For example, if references include "SNG
-   Kayhan 880; SNG von Aulock 8046; BMC Caria pg. 183, 1; Babelon, Les
-   Perses, pl. X, 8", say what each source is, what region/series it
-   supports, and whether the citation confirms the type, rarity, mint
-   attribution, or iconographic reading. When evidence supports a
-   rarity estimate, use this scale: C1-C3 = 22+ known, S = 16-21, R1 =
-   11-15, R2 = 7-10, R3 = 4-6, R4 = 2-3, R5 = unique. State the code
-   with a brief basis (hoards, major collections, die studies, auction
-   archives) and name the reference perspective when applicable. Skip
-   padding; only include what actually applies.
+   discussion of the pedigree and reference information THAT IS ACTUALLY
+   in the record or that a source confirms. Lead with whichever of these
+   the record/sources actually support: collection pedigree, prior sale,
+   hoard, die-study, catalog placement, or significance within the series
+   (first portrait of a ruler, earliest use of a legend, benchmark type).
+   Explain terse catalog citations the record already lists in collector-
+   friendly language — e.g. for "SNG Kayhan 880; BMC Caria pg. 183, 1",
+   say what each source is and what it confirms. Do not add catalog numbers
+   the record doesn't have unless a cited source gives them.
+   Rarity: state it ONLY when a cited source or an actual mintage figure
+   supports it, and cite that basis; then you may name the standard code
+   (C, S, R1–R5). A large mintage means the coin is common overall even if
+   scarce in high grade — say which, and never invent an example count or a
+   "per auction cycle" figure. If rarity isn't sourced, omit it.
+   Skip padding; only include what actually applies.
 
 4. How this coin reflected the times — propaganda choices, civic pride,
    response to economic or military pressure, religious festival,
-   trade denomination. Tie the imagery or metal directly to the moment.
+   trade denomination. Tie the imagery or metal to the moment only where the
+   record, the images, or a cited source supports it; do not manufacture a
+   motive. If there's nothing solid to say here, keep it to one line or omit.
 
 Write four short sections using these bold labels on their own lines:
 **Historical environment**, **Style**, **Pedigree and reference notes**,
@@ -5782,7 +5796,7 @@ def fetch_coin_history(field_name, topic, coin):
     refs = (coin['coin_references'] or '').strip()
     grade_notes = (coin['notes'] or '').strip()
 
-    prompt = f"""You are an ancient-numismatics historian summarizing the {kind} of a specific coin.
+    prompt = f"""You are an ancient-numismatics historian summarizing the {kind} of a specific coin. Obverse/reverse images of the coin are attached when available.
 
 {kind.capitalize()}: {topic}
 Date range: {date_hint or '(not specified)'}
@@ -5791,11 +5805,19 @@ Description: {desc[:500] if desc else '(not specified)'}
 Pedigree / References: {refs[:500] if refs else '(not specified)'}
 Grade / Conditions: {grade_notes[:300] if grade_notes else '(not specified)'}
 
-Use up to 4 concise web searches to ground facts. Stress pedigree and
-references wherever the record gives you a lead: collection pedigree,
-prior sale, hoard provenance, die-study, catalog numbers, rarity notes,
-or standard references (SNG, HGC, RIC, RPC, Crawford, Ravel, Calciati,
-BCD, etc.). Do not bury this evidence behind generic political history.
+AUTHORITATIVE, NOT SPECULATIVE — every claim must be backed by the record
+above, an attached image, or a source you actually cite with its URL. If you
+can't back it, leave it out. Do not invent or estimate catalog/reference
+numbers, mintage figures, rarity codes or example counts, pedigree, sales, or
+die studies; an unverified specific is worse than none. Read any design detail
+off the images or the description/legend, not from general knowledge.
+
+Use up to 4 concise web searches to ground facts. Stress the pedigree and
+references the record actually gives you: collection pedigree, prior sale,
+hoard provenance, die-study, catalog numbers, rarity notes, or standard
+references (SNG, HGC, RIC, RPC, Crawford, Ravel, Calciati, BCD, etc.). Do not
+bury real evidence behind generic political history, and do not pad with
+unsourced narrative.
 
 Focus on:
 - What this {kind} was (city-state, kingdom, satrapy, Roman province, etc.)
@@ -5818,6 +5840,18 @@ Reply with ONLY a JSON object, no prose, no code fences:
     web_search = anthropic_web_search_tool(
         4, default_tool='web_search_20260209')
 
+    # Show the model the actual coin so any design/iconography read is grounded.
+    images = _load_coin_vision_images(coin)
+    if images:
+        message_content = []
+        for img in images:
+            message_content.append({'type': 'text', 'text': f'{img["label"].capitalize()} of THIS coin:'})
+            message_content.append({'type': 'image', 'source': {
+                'type': 'base64', 'media_type': img['media_type'], 'data': img['data']}})
+        message_content.append({'type': 'text', 'text': prompt})
+    else:
+        message_content = prompt
+
     import time as _time
     last_err = None
     transient_errs = (
@@ -5832,7 +5866,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
                 model=lookup_model,
                 max_tokens=900,
                 tools=[web_search],
-                messages=[{'role': 'user', 'content': prompt}],
+                messages=[{'role': 'user', 'content': message_content}],
             )
             break
         except transient_errs as e:
