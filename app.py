@@ -4253,7 +4253,7 @@ def _join_property_filter(status, ptype):
 
 
 SEARCHABLE_NUMERIC = {
-    'coins': ['weight'],
+    'coins': ['weight', 'price'],
 }
 
 COIN_PURCHASE_DATE_SEARCH_RE = re.compile(
@@ -4262,11 +4262,13 @@ COIN_PURCHASE_DATE_SEARCH_RE = re.compile(
 
 
 def _normalize_numeric_term(term):
-    """Strip trailing zeros after the decimal point so a user search for
-    '10.20' still matches a column stored as REAL 10.2 (which SQLite's
-    LIKE coerces to the string '10.2', not '10.20')."""
+    """Normalize a numeric search term so it matches a REAL column SQLite's
+    LIKE coerces to a plain string. Strips thousands-separator commas so
+    '5,750' matches a price stored as 5750 (-> '5750.0'), and strips trailing
+    decimal zeros so '10.20' matches 10.2."""
+    cleaned = (term or '').replace(',', '')
     try:
-        f = float(term)
+        f = float(cleaned)
     except (TypeError, ValueError):
         return term
     s = ('%f' % f).rstrip('0').rstrip('.')
@@ -4350,7 +4352,10 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
                     conds.append(f"NODIA({col}) LIKE ?")
                 params.append(f'%{folded_term}%')
             for col in numeric_fields:
-                conds.append(f"{col} LIKE ?")
+                # Strip commas from the stored value too: price is sometimes a
+                # formatted string ("$5,750") rather than a REAL, so both the
+                # term and the column are matched comma-free.
+                conds.append(f"REPLACE({col}, ',', '') LIKE ?")
                 params.append(f'%{num_term}%')
             wheres.append('(' + ' OR '.join(conds) + ')')
 
