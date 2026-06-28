@@ -13651,6 +13651,14 @@ def admin_index():
             'kind':  'download',
         },
         {
+            'label': "Download database only (no images)",
+            'desc':  "Just stuffapp.db (a consistent snapshot) — small and "
+                     "fast. Use when the full backup is too large to download "
+                     "in one shot, or when you only need the data.",
+            'url':   url_for('admin_backup', db_only=1),
+            'kind':  'download',
+        },
+        {
             'label': "Export StuffFiles (per-user, organized)",
             'desc':  "Streams a zip with every file you can see, organized "
                      "as StuffFiles/<Category>/<Group>/<Item> — <Label>.<ext>. "
@@ -13786,8 +13794,16 @@ def admin_index():
 
 @app.route('/admin/backup', methods=['GET'])
 def admin_backup():
-    """Stream a zip containing a consistent snapshot of the SQLite DB
-    plus the entire uploads/ directory. Browser triggers a download.
+    """Stream a zip of the SQLite DB plus the uploads/ directory — or just the
+    database when ?db_only=1. Browser triggers a download.
+
+    The zip is built on a DISK temp file, not an in-memory BytesIO: a full
+    backup with every uploaded image can run to hundreds of MB, which an
+    in-memory build either OOMs the Railway container or holds the request long
+    enough to hit Cloudflare's ~100s edge timeout — the download then arrives
+    empty (0 bytes). This mirrors the /export-files approach. db_only returns
+    just the (small) database, which always succeeds even when the full backup
+    is too large to ship in one shot.
 
     Authentication: in production Cloudflare Access gates the URL; the
     IMPORT_MISSING_SECRET is also required as a query string so the link
@@ -13796,41 +13812,58 @@ def admin_backup():
     if request.args.get('secret') != IMPORT_MISSING_SECRET:
         abort(403)
 
-    import io
     import zipfile
     import tempfile
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Use SQLite's online backup API for a consistent snapshot —
-        # safer than copying stuffapp.db while writes may be in flight.
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            tmp_path = tmp.name
-        try:
-            src = sqlite3.connect(DATABASE)
-            dst = sqlite3.connect(tmp_path)
-            src.backup(dst)
-            dst.close()
-            src.close()
-            zf.write(tmp_path, arcname='stuffapp.db')
-        finally:
-            try: os.unlink(tmp_path)
+    db_only = request.args.get('db_only') in ('1', 'true', 'yes', 'on')
+
+    # Consistent DB snapshot via SQLite's online backup API — safer than copying
+    # stuffapp.db while writes may be in flight.
+    db_fd, db_path = tempfile.mkstemp(suffix='.db')
+    os.close(db_fd)
+    src = sqlite3.connect(DATABASE)
+    dst = sqlite3.connect(db_path)
+    src.backup(dst)
+    dst.close()
+    src.close()
+
+    if db_only:
+        @after_this_request
+        def _cleanup_db(response):
+            try: os.unlink(db_path)
             except OSError: pass
+            return response
+        return send_file(db_path, as_attachment=True,
+                         download_name='stuffapp.db',
+                         mimetype='application/octet-stream')
 
-        # Walk uploads/ but skip the .thumbs cache (regenerable).
-        if os.path.isdir(UPLOAD_FOLDER):
-            for dirpath, dirnames, filenames in os.walk(UPLOAD_FOLDER):
-                dirnames[:] = [d for d in dirnames if d != '.thumbs']
-                for name in filenames:
-                    if name == '.DS_Store':
-                        continue
-                    full = os.path.join(dirpath, name)
-                    rel = os.path.relpath(full, UPLOAD_FOLDER)
-                    zf.write(full, arcname=os.path.join('uploads', rel))
+    zip_fd, zip_path = tempfile.mkstemp(suffix='.zip')
+    os.close(zip_fd)
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.write(db_path, arcname='stuffapp.db')
+            # Walk uploads/ but skip the .thumbs cache (regenerable).
+            if os.path.isdir(UPLOAD_FOLDER):
+                for dirpath, dirnames, filenames in os.walk(UPLOAD_FOLDER):
+                    dirnames[:] = [d for d in dirnames if d != '.thumbs']
+                    for name in filenames:
+                        if name == '.DS_Store':
+                            continue
+                        full = os.path.join(dirpath, name)
+                        rel = os.path.relpath(full, UPLOAD_FOLDER)
+                        zf.write(full, arcname=os.path.join('uploads', rel))
+    finally:
+        try: os.unlink(db_path)
+        except OSError: pass
 
-    buf.seek(0)
+    @after_this_request
+    def _cleanup_zip(response):
+        try: os.unlink(zip_path)
+        except OSError: pass
+        return response
+
     fname = f"stuffapp-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
-    return send_file(buf, as_attachment=True, download_name=fname,
+    return send_file(zip_path, as_attachment=True, download_name=fname,
                      mimetype='application/zip')
 
 
