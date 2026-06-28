@@ -5172,6 +5172,49 @@ def _sniff_image_media_type(raw):
     return None
 
 
+# Anthropic rejects any image whose base64 payload exceeds 10 MB and
+# recommends <=1568 px on the long edge. Keep a safety margin under the hard
+# limit so a large catalog scan never trips a 400 on the whole request.
+_VISION_IMAGE_B64_CAP = 4_500_000   # ~4.5 MB base64 (~3.4 MB of image bytes)
+_VISION_IMAGE_MAX_EDGE = 1568
+
+
+def _fit_vision_image(raw, media_type):
+    """Return ``(base64_data, media_type)`` for a vision API call, shrinking the
+    image when its base64 would exceed the size cap. Small images pass through
+    untouched; oversized ones are downscaled to <=1568 px and re-encoded as
+    progressively-more-compressed JPEG until they fit."""
+    import base64
+    b64 = base64.b64encode(raw).decode('ascii')
+    if len(b64) <= _VISION_IMAGE_B64_CAP:
+        return b64, media_type
+    try:
+        import io
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(raw)) as im:
+            im = ImageOps.exif_transpose(im)
+            if im.mode not in ('RGB', 'L'):
+                im = im.convert('RGB')
+            longest = max(im.size)
+            if longest > _VISION_IMAGE_MAX_EDGE:
+                scale = _VISION_IMAGE_MAX_EDGE / float(longest)
+                im = im.resize((max(1, round(im.width * scale)),
+                                max(1, round(im.height * scale))),
+                               Image.LANCZOS)
+            last = b64
+            for quality in (85, 75, 65, 55, 45):
+                buf = io.BytesIO()
+                im.save(buf, format='JPEG', quality=quality, optimize=True)
+                last = base64.b64encode(buf.getvalue()).decode('ascii')
+                if len(last) <= _VISION_IMAGE_B64_CAP:
+                    return last, 'image/jpeg'
+            return last, 'image/jpeg'
+    except Exception:
+        # If PIL can't process it, hand back the original encoding — no worse
+        # than before, and the other image (if any) may still go through.
+        return b64, media_type
+
+
 def _load_coin_vision_images(coin):
     """Base64-encode a coin's obverse/reverse images for a vision API call.
 
@@ -5205,7 +5248,8 @@ def _load_coin_vision_images(coin):
             os.path.splitext(name)[1].lower().lstrip('.'))
         if media_type not in supported:
             continue
-        images.append({'label': label, 'data': base64.b64encode(raw).decode('ascii'),
+        data_b64, media_type = _fit_vision_image(raw, media_type)
+        images.append({'label': label, 'data': data_b64,
                        'media_type': media_type})
     return images
 
