@@ -9370,6 +9370,15 @@ def coin_lookup_specs(record_id):
     for _m in re.finditer(r'(\d{1,4})\s*(?:-\s*\d{1,4}\s*)?(?:BCE|BC|B\.C\.|CE|AD|A\.D\.)\b', dealer_text, re.IGNORECASE):
         for _y in re.findall(r'\d{1,4}', _m.group(0)):
             _dealer_years.add(int(_y))
+    # Modern issue years are usually stated plainly with no era marker ("YEAR 1891",
+    # "5 Lire 1918 R"), so the BC/AD pass above never sees them — leaving a description-
+    # sourced date ungrounded and wrongly dropped. Add bare Gregorian years (1500-2099)
+    # too, skipping catalogue refs (KM 1916, #, lot) the same way _coin_year_from_prose does.
+    for _m in re.finditer(r'(?<![\w#./-])(1[5-9]\d{2}|20\d{2})(?![\w./-])', dealer_text):
+        _before = dealer_text[max(0, _m.start() - 6):_m.start()].lower()
+        if any(_tok in _before for _tok in ('km', '#', 'no.', 'p.', 'pg', 'lot')):
+            continue
+        _dealer_years.add(int(_m.group(1)))
 
     def _grounded_in_description(field, value):
         if field in ('date_1', 'date_2'):
