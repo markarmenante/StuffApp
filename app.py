@@ -8770,7 +8770,8 @@ def coin_fetch_history(record_id):
 
 COIN_SPEC_FILLABLE = ('region', 'mint', 'authority', 'official', 'denomination', 'metal',
                       'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
-                      'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number', 'grade_condition', 'grade_modifier')
+                      'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number',
+                      'grade_condition', 'grade_modifier', 'coin_references')
 
 COIN_SPECS_RESPONSE_SCHEMA = {
     'type': 'object',
@@ -8836,6 +8837,123 @@ def _coin_description_measurements(coin):
     }
 
 
+# OpenNumismat / Krause-catalogue style descriptions store one labelled
+# field per line ("COUNTRY  Eritrea", "RULER NAME  Umberto I", "YEAR 1891",
+# "COMPOSITION  Silver", ...). Each label maps to a coin column. These come
+# from the collector's own record, so they are canonical — they fill blanks
+# and override a web/LLM guess, exactly like an explicit "16.85 g" does for
+# weight. Labels are kept specific to avoid matching free-prose descriptions
+# of ancient coins (which carry no leading label and fall through untouched).
+_COIN_DESC_LABEL_FIELDS = {
+    'country': 'region',
+    'region': 'region',
+    'ruler name': 'authority',
+    'ruler': 'authority',
+    'issuer': 'authority',
+    'emperor': 'authority',
+    'denomination': 'denomination',
+    'mint name': 'mint',
+    'composition': 'metal',
+    'material': 'metal',
+    'diameter': 'size',
+    'weight (g)': 'weight',
+    'weight': 'weight',
+    'year': 'date_1',
+    'km': 'coin_references',
+    'km#': 'coin_references',
+    'km number': 'coin_references',
+    'krause': 'coin_references',
+}
+
+# composition word -> metal value-list code (see VALUE_LISTS['metal_coin']).
+_COIN_METAL_WORDS = (
+    ('aluminum', 'AL Aluminium'), ('aluminium', 'AL Aluminium'),
+    ('billon', 'BL Billon'), ('electrum', 'EL Electrum'),
+    ('silver', 'AR Silver'), ('gold', 'AV Gold'),
+    ('bronze', 'AE Bronze'), ('copper', 'AE Copper'),
+    ('nickel', 'NI Nickel'),
+)
+
+
+def _coin_metal_from_word(text):
+    low = str(text or '').strip().lower()
+    for word, code in _COIN_METAL_WORDS:
+        if word in low:
+            return code
+    return None
+
+
+def _coin_year_from_label(text):
+    """Pull signed issue years out of a YEAR label value.
+
+    '1891' -> (1891, None); '1890-1891' -> (1890, 1891); '450 BC' -> (-450,
+    None). date_2 is returned only for an explicit range.
+    """
+    s = str(text or '')
+    is_bc = bool(re.search(r'\bB\.?\s*C\.?E?\b', s, re.IGNORECASE))
+    years = re.findall(r'\d{1,4}', s)
+    if not years:
+        return None, None
+    nums = [(-int(y) if is_bc else int(y)) for y in years[:2]]
+    return nums[0], (nums[1] if len(nums) > 1 else None)
+
+
+# Match "<label><separator><value>" where the label is one we recognise.
+# Longest labels first so "weight (g)" wins over "weight"; the separator is a
+# colon, tab, or run of spaces (these blocks are column-aligned).
+_COIN_DESC_LINE_RE = re.compile(
+    r'^\s*(' + '|'.join(
+        re.escape(lbl) for lbl in sorted(
+            _COIN_DESC_LABEL_FIELDS, key=len, reverse=True)
+    ) + r')\s*(?::|\t| +)\s*(.+?)\s*$',
+    re.IGNORECASE,
+)
+
+
+def _coin_description_fields(coin):
+    """Read identifying fields out of a structured catalogue-style description.
+
+    Returns a dict of coin columns the block spells out, coerced to the form
+    the lookup route expects (metal as a value-list code, date as an int,
+    size/weight as numeric strings). Free-prose descriptions yield {}.
+    """
+    description = str(_coin_row_value(coin, 'description') or '')
+    if not description.strip():
+        return {}
+
+    pairs = {}
+    for line in description.splitlines():
+        m = _COIN_DESC_LINE_RE.match(line)
+        if not m:
+            continue
+        field = _COIN_DESC_LABEL_FIELDS[re.sub(r'\s+', ' ', m.group(1).strip().lower())]
+        value = m.group(2).strip()
+        if value and field not in pairs:
+            pairs[field] = value
+
+    out = {}
+    for field, value in pairs.items():
+        if field == 'metal':
+            code = _coin_metal_from_word(value)
+            if code:
+                out['metal'] = code
+        elif field == 'date_1':
+            d1, d2 = _coin_year_from_label(value)
+            if d1 is not None:
+                out['date_1'] = d1
+            if d2 is not None:
+                out['date_2'] = d2
+        elif field in ('size', 'weight'):
+            num = re.search(r'-?\d+(?:\.\d+)?', value)
+            if num:
+                out[field] = num.group(0)
+        elif field == 'coin_references':
+            out['coin_references'] = value if value.lower().startswith('km') else f'KM# {value}'
+        else:
+            out[field] = value
+    return out
+
+
 def fetch_coin_specs(coin, provider='anthropic'):
     """Fill missing identifying fields on a coin through the selected provider.
 
@@ -8889,6 +9007,7 @@ Rules:
 2. Only when the dealer's text does NOT mention a field may you use up to 3 web searches (CoinArchives, ACSearch, Wildwinds, NGC, British Museum, ANS, vCoins, CNG, Roma) to fill it. NEVER override a value the dealer's text states with a web/period guess.
 3. The grading-slab fields (grading_authority, slab_number, strike, surface, sheldon), the dates, and the grade must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
 4. The user wants fills (blank fields) and corrections of transcription errors toward the dealer's text. Return null whenever a value is not supported by the text (or, for web-allowed fields, by a reputable source).
+5. If the dealer's text or description quotes the coin's actual inscription / legend (Latin, Greek, Cyrillic, Arabic, etc.), transliterate and translate it — the ruler, titles, mint, denomination and frequently the year are spelled out on the coin (e.g. "VMBERTO I RE D'ITALIA · 1891" → authority "Umberto I", date_1 1891; "ΒΑΣΙΛΕΩΣ ΛΥΣΙΜΑΧΟΥ" → authority "Lysimachos"). Numerals in the legend or exergue (Western, Roman, regnal, or era dates) are direct evidence for date_1. A translated legend counts as the dealer's text, not a web guess.
 
 Target fields:
 - region: short geographic / cultural region (e.g. "Thessaly", "Roman Republic", "United States").
@@ -9014,25 +9133,43 @@ def coin_lookup_specs(record_id):
     coin = db.execute("SELECT * FROM coins WHERE id = ?", (record_id,)).fetchone()
     if not coin:
         return jsonify({'error': 'Coin not found'}), 404
+    provider = (
+        'perplexity'
+        if request.args.get('provider') == 'perplexity'
+        else 'anthropic'
+    )
+    # The coin's own description — a structured catalogue block and/or
+    # explicit measurements — is canonical and needs no network. Read it
+    # first so a missing API key or a flaky web lookup can never stop the
+    # Check from filling fields the record already spells out.
+    suggestions = {}
+    lookup_error = None
+    lookup_status = 503
     try:
-        provider = (
-            'perplexity'
-            if request.args.get('provider') == 'perplexity'
-            else 'anthropic'
-        )
         suggestions = fetch_coin_specs(coin, provider=provider)
     except RuntimeError as e:
-        return jsonify({'error': str(e)}), 503
+        lookup_error = str(e)
     except Exception as e:
         import traceback
         print(traceback.format_exc(), flush=True)
-        return jsonify({'error': f'Lookup failed: {e or e.__class__.__name__}'}), 500
+        lookup_error = f'Lookup failed: {e or e.__class__.__name__}'
+        lookup_status = 500
 
     if not isinstance(suggestions, dict):
         suggestions = {}
     for field, value in _coin_description_measurements(coin).items():
         if value is not None:
             suggestions[field] = value
+    for field, value in _coin_description_fields(coin).items():
+        if value not in (None, ''):
+            suggestions[field] = value
+
+    # Only surface a lookup failure if the description gave us nothing to
+    # offer either — otherwise apply the canonical fields silently.
+    if lookup_error and not any(
+        suggestions.get(f) not in (None, '') for f in COIN_SPEC_FILLABLE
+    ):
+        return jsonify({'error': lookup_error}), lookup_status
 
     metal_allowed = {m.lower(): m for m in VALUE_LISTS['metal_coin']}
 
