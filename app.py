@@ -5154,6 +5154,24 @@ Reply with ONLY a JSON object, no prose, no code fences:
     return parsed
 
 
+def _sniff_image_media_type(raw):
+    """Detect a raster image's media type from its magic bytes, or None.
+
+    The catalog images are often mislabeled (a .jpg that is really PNG bytes),
+    and the vision APIs reject a media_type that doesn't match the actual bytes,
+    so trust the content over the file extension.
+    """
+    if raw[:8] == b'\x89PNG\r\n\x1a\n':
+        return 'image/png'
+    if raw[:3] == b'\xff\xd8\xff':
+        return 'image/jpeg'
+    if raw[:6] in (b'GIF87a', b'GIF89a'):
+        return 'image/gif'
+    if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+        return 'image/webp'
+    return None
+
+
 def _load_coin_vision_images(coin):
     """Base64-encode a coin's obverse/reverse images for a vision API call.
 
@@ -5163,6 +5181,11 @@ def _load_coin_vision_images(coin):
     Research / Perplexity passes so they all show the model the actual coin.
     """
     import base64
+    ext_media = {
+        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+        'png': 'image/png', 'webp': 'image/webp', 'gif': 'image/gif',
+    }
+    supported = set(ext_media.values())
     images = []
     for fld, label in (('image_1', 'obverse'), ('image_2', 'reverse')):
         name = coin[fld]
@@ -5171,19 +5194,19 @@ def _load_coin_vision_images(coin):
         path = os.path.join(UPLOAD_FOLDER, name)
         if not os.path.exists(path):
             continue
-        ext = os.path.splitext(name)[1].lower().lstrip('.')
-        media_type = {
-            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-            'png': 'image/png', 'webp': 'image/webp', 'gif': 'image/gif',
-        }.get(ext)
-        if not media_type:
-            continue
         try:
             with open(path, 'rb') as fh:
-                data = base64.b64encode(fh.read()).decode('ascii')
+                raw = fh.read()
         except Exception:
             continue
-        images.append({'label': label, 'data': data, 'media_type': media_type})
+        # Trust the actual bytes over the extension — a .jpg holding PNG bytes
+        # otherwise makes the vision API reject the whole request (HTTP 400).
+        media_type = _sniff_image_media_type(raw) or ext_media.get(
+            os.path.splitext(name)[1].lower().lstrip('.'))
+        if media_type not in supported:
+            continue
+        images.append({'label': label, 'data': base64.b64encode(raw).decode('ascii'),
+                       'media_type': media_type})
     return images
 
 
