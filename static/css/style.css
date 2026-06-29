@@ -3043,19 +3043,28 @@ input[type="date"] { -webkit-appearance: none; }
       "ingredients ingredients"
       "directions directions";
     column-gap: 6px;
+    row-gap: 0;
     min-width: 0;
-    padding-bottom: 6px;
+    padding: 1px 4px 3px;
   }
   .med-table .med-row:not(.med-head) .med-name-wrap {
     grid-area: name;
     position: static;
     border-right: none;
   }
+  .med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"] {
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
   .med-table .med-row:not(.med-head) > textarea[name^="med_active_ingredients"] { grid-area: ingredients; }
   .med-table .med-row:not(.med-head) > textarea[name^="med_directions"] { grid-area: directions; }
   .med-table .med-row:not(.med-head) > textarea {
     width: 100%;
     border-right: none;
+    min-height: 18px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    line-height: 1.2;
   }
   .med-table .med-row:not(.med-head) .med-del-btn {
     grid-area: del;
