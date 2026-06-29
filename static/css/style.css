@@ -3037,15 +3037,13 @@ input[type="date"] { -webkit-appearance: none; }
   .med-table .med-row.med-head > span:not(.med-name-head):not(.med-actions) { display: none; }
   .med-table .med-row.med-head > span.med-actions { grid-column: 2; }
   .med-table .med-row:not(.med-head) {
-    grid-template-columns: 1fr auto;
-    grid-template-areas:
-      "name del"
-      "ingredients ingredients"
-      "directions directions";
-    column-gap: 6px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 46vw) auto;
+    grid-template-areas: "name directions del";
+    align-items: start;
+    column-gap: 8px;
     row-gap: 0;
     min-width: 0;
-    padding: 1px 4px 3px;
+    padding: 2px 4px;
   }
   .med-table .med-row:not(.med-head) .med-name-wrap {
     grid-area: name;
@@ -3053,17 +3051,22 @@ input[type="date"] { -webkit-appearance: none; }
     border-right: none;
   }
   .med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"] {
-    padding-top: 1px;
-    padding-bottom: 1px;
+    padding-top: 2px;
+    padding-bottom: 2px;
   }
-  .med-table .med-row:not(.med-head) > textarea[name^="med_active_ingredients"] { grid-area: ingredients; }
-  .med-table .med-row:not(.med-head) > textarea[name^="med_directions"] { grid-area: directions; }
+  /* Hide Active Ingredients on phones — keep each med to one line:
+     Brand on the left, dosage instructions on the right. */
+  .med-table .med-row:not(.med-head) > textarea[name^="med_active_ingredients"] { display: none; }
+  .med-table .med-row:not(.med-head) > textarea[name^="med_directions"] {
+    grid-area: directions;
+    text-align: right;
+  }
   .med-table .med-row:not(.med-head) > textarea {
     width: 100%;
     border-right: none;
-    min-height: 18px;
-    padding-top: 1px;
-    padding-bottom: 1px;
+    min-height: 20px;
+    padding-top: 2px;
+    padding-bottom: 2px;
     line-height: 1.2;
   }
   .med-table .med-row:not(.med-head) .med-del-btn {
