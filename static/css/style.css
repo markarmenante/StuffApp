@@ -3024,6 +3024,44 @@ input[type="date"] { -webkit-appearance: none; }
     box-shadow: -6px 0 6px -4px rgba(255, 255, 255, 0.9);
   }
 
+  /* Medications on phones: stack each row vertically — Type+Brand, then
+     Active Ingredients, then Directions — instead of the desktop 3-column
+     grid. The grid was wider than the viewport, so it forced a horizontal
+     scroll where the sticky name column bled over the ingredient text. */
+  .med-table { overflow-x: visible !important; scrollbar-gutter: auto; }
+  .med-table .med-row.med-head {
+    grid-template-columns: 1fr auto;
+    min-width: 0;
+  }
+  .med-table .med-row.med-head .med-name-head { position: static; }
+  .med-table .med-row.med-head > span:not(.med-name-head):not(.med-actions) { display: none; }
+  .med-table .med-row.med-head > span.med-actions { grid-column: 2; }
+  .med-table .med-row:not(.med-head) {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "name del"
+      "ingredients ingredients"
+      "directions directions";
+    column-gap: 6px;
+    min-width: 0;
+    padding-bottom: 6px;
+  }
+  .med-table .med-row:not(.med-head) .med-name-wrap {
+    grid-area: name;
+    position: static;
+    border-right: none;
+  }
+  .med-table .med-row:not(.med-head) > textarea[name^="med_active_ingredients"] { grid-area: ingredients; }
+  .med-table .med-row:not(.med-head) > textarea[name^="med_directions"] { grid-area: directions; }
+  .med-table .med-row:not(.med-head) > textarea {
+    width: 100%;
+    border-right: none;
+  }
+  .med-table .med-row:not(.med-head) .med-del-btn {
+    grid-area: del;
+    align-self: center;
+  }
+
   /* Topics on iPhone: surface the "click row for more" hint in the
      section-bar header (one place, doesn't inflate row height) via
      the .topics-hint span the template renders. */
