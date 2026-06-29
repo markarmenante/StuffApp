@@ -2009,7 +2009,10 @@ input[type="date"] { -webkit-appearance: none; }
   position: sticky;
   left: 0;
   z-index: 3;
-  background: inherit;
+  /* Opaque (not `inherit`, which is transparent on the un-striped rows) so the
+     sticky Brand/Product column hides the Active-Ingredients text scrolling
+     underneath it instead of letting it bleed through (mobile collision). */
+  background: var(--surface);
 }
 .med-type-toggle {
   min-width: 38px;
@@ -2101,6 +2104,8 @@ input[type="date"] { -webkit-appearance: none; }
   text-align: center;
 }
 .med-table .med-row:not(.med-head):nth-child(odd) { background: var(--cell-bg); }
+/* Keep the sticky name column's opaque background in step with the row stripe. */
+.med-table .med-row:not(.med-head):nth-child(odd) .med-name-wrap { background: var(--cell-bg); }
 .med-table .med-row:not(.med-head) > input,
 .med-table .med-row:not(.med-head) > textarea,
 .med-table .med-row:not(.med-head) .med-name-wrap > input[type="text"] {
