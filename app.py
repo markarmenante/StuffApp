@@ -8989,10 +8989,11 @@ def _coin_row_value(coin, field):
 
 def _coin_first_measurement(text, unit_re, min_value, max_value):
     text = str(text or '')
-    pattern = rf'(?<![\w.])(\d{{1,3}}(?:\.\d+)?)\s*(?:{unit_re})\b'
+    # Accept a comma decimal too — European dealers write "16,8 g" / "32,5 mm".
+    pattern = rf'(?<![\w.,])(\d{{1,3}}(?:[.,]\d+)?)\s*(?:{unit_re})\b'
     for match in re.finditer(pattern, text, re.IGNORECASE):
         try:
-            value = float(match.group(1))
+            value = float(match.group(1).replace(',', '.'))
         except ValueError:
             continue
         if min_value <= value <= max_value:
@@ -9437,13 +9438,14 @@ def coin_lookup_specs(record_id):
             except (TypeError, ValueError):
                 return None
         if field in ('weight', 'size'):
-            # Accept "16.85", "16.85 g", "30 mm" — strip the unit.
+            # Accept "16.85", "16.85 g", "30 mm", and a comma decimal
+            # ("16,8 g" / "32,5 mm") from European dealers — strip the unit.
             if isinstance(raw, str):
-                m = re.match(r'^\s*(-?\d+(?:\.\d+)?)', raw)
+                m = re.match(r'^\s*(-?\d+(?:[.,]\d+)?)', raw)
                 if not m:
                     return None
                 try:
-                    return float(m.group(1))
+                    return float(m.group(1).replace(',', '.'))
                 except ValueError:
                     return None
             try:
@@ -9645,11 +9647,12 @@ def coin_apply_lookup_specs(record_id):
                 return None
         if field in ('weight', 'size'):
             if isinstance(raw_v, str):
-                m = re.match(r'^\s*(-?\d+(?:\.\d+)?)', raw_v)
+                # Accept a comma decimal ("16,8" / "32,5") from European dealers.
+                m = re.match(r'^\s*(-?\d+(?:[.,]\d+)?)', raw_v)
                 if not m:
                     return None
                 try:
-                    return float(m.group(1))
+                    return float(m.group(1).replace(',', '.'))
                 except ValueError:
                     return None
             try:
