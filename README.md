@@ -43,7 +43,18 @@ gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300
 Related app:
 
 ```text
-N552YM: /Users/markarmenante/Developer/n552ym
+Museum of Time: /Users/markarmenante/Documents/GitHub/museum-of-time
+N552YM:         /Users/markarmenante/Documents/GitHub/n552ym
+Family Office: /Users/markarmenante/Documents/GitHub/Family Office
+```
+
+Production switcher:
+
+```text
+Museum of Time: https://museum-of-time-peach.vercel.app
+StuffApp:      https://stuff.armenante.com
+N552YM:         https://n552ym.vercel.app/trips
+Family Office: https://ym-familyoffice-production.up.railway.app
 ```
 
 The old `stuff-app` (dashed) Next/Vercel rebuild was retired and deleted in
