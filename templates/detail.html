@@ -419,6 +419,16 @@
       Perplexity
     </button>
     {% endif %}
+    {% if category == 'banknotes' and _is_owner %}
+    {# Same Check flow as coins — the shared coin-spec JS builds the
+       lookup URL from the record path, so the banknote routes plug in. #}
+    <button type="button"
+            class="coin-lookup-btn coin-spec-check-btn{% if r and r['specs_searched_at'] %} done{% endif %}"
+            data-spec-url="{% if not is_new %}{{ url_for('banknote_lookup_specs', record_id=r['id']) }}{% endif %}"
+            title="{% if r and r['specs_searched_at'] %}Check last run {{ r['specs_searched_at'][:10] }} — click to re-run missing-field lookup{% else %}Check identifying fields and complete missing banknote specs{% endif %}">
+      ✓ Check
+    </button>
+    {% endif %}
     {% if not is_new %}
       {% if category == 'art' and _is_owner %}
       <button type="button"
@@ -1161,6 +1171,248 @@ document.addEventListener('DOMContentLoaded', function () {
              data-generated-field="cat_id"
              readonly
              title="Auto-assigned stable ID. Click to copy '(C###)' — paste into any local filename and sweep routes it here."
+             onclick="if(this.value){navigator.clipboard?.writeText('(' + this.value + ')')}; this.select();"
+             style="text-align:center;cursor:pointer;color:#666;font-family:var(--font-mono,monospace)">
+      <span class="blabel">Cat ID (auto)</span>
+    </div>
+    <div class="bottom-cell">
+      {% set _pn = val('property_name') %}
+      <select name="property_name">
+        <option value=""></option>
+        {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if _pn==o }}>{{ o }}</option>{% endfor %}
+      </select>
+      <span class="blabel">Location</span>
+    </div>
+    {% if current_user and current_user.role == 'owner' %}
+    <div class="bottom-cell">
+      {% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}
+      <select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select>
+      <span class="blabel">Owner</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       BANKNOTES
+  ══════════════════════════════════════════════════════════ -->
+  {% elif category == 'banknotes' %}
+
+  <!-- Row 1: Country | Issuing bank -->
+  <div class="dgrid dg2 coin-top-row">
+    <div class="dcell ta-wrap coin-region-cell">
+      <input type="text" name="country" value="{{ val('country') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('country', [])|join('||') }}" style="font-weight:700"
+             {% if is_new and not val('country') %}placeholder="Country"{% endif %}>
+      <span class="clabel">Country</span>
+    </div>
+    <div class="dcell ta-wrap">
+      <input type="text" name="issuer" value="{{ val('issuer') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('issuer', [])|join('||') }}"
+             {% if is_new and not val('issuer') %}placeholder="Issuing bank / authority"{% endif %}>
+      <span class="clabel">Issuer</span>
+    </div>
+  </div>
+
+  <!-- Row 2: Portrait/Ruler | Series -->
+  <div class="dgrid dg2 coin-top-row">
+    <div class="dcell">
+      <input type="text" name="official" value="{{ val('official') }}"
+             {% if is_new and not val('official') %}placeholder="Portrait / ruler"{% endif %}>
+      <span class="clabel">Portrait</span>
+    </div>
+    {{ cell('series','Series / Issue') }}
+  </div>
+
+  <!-- Banknote images (front + back) — pinned near the top like coins. -->
+  <div class="coin-imgs coin-imgs-large banknote-imgs">
+    <div class="coin-img-panel drop-zone" data-field="image_1"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image_1'] and r['image_1']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="">
+      {% else %}<span style="font-size:28px;color:#ccc">💵</span>{% endif %}
+      <label class="file-upload-lbl">
+        <input type="file" name="image_1" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_1')">
+      </label>
+    </div>
+    <div class="coin-img-panel drop-zone" data-field="image_2"
+         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+      {% if r and r['image_2'] and r['image_2']|is_image %}
+        <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="">
+      {% else %}<span style="font-size:28px;color:#ccc">💵</span>{% endif %}
+      <label class="file-upload-lbl">
+        <input type="file" name="image_2" accept="image/*" style="display:none"
+               onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_2')">
+      </label>
+    </div>
+  </div>
+
+  <!-- Denomination / Material / Date 1 / Date 2 / Age -->
+  <div class="dgrid" style="grid-template-columns: repeat(5, 1fr);">
+    <div class="dcell">
+      <input type="text" name="denomination" value="{{ val('denomination') }}"
+             {% if is_new and not val('denomination') %}placeholder="Denomination"{% endif %}>
+      <span class="clabel">Denomination</span>
+    </div>
+    <div class="dcell">
+      <select name="material"><option value=""></option>{% for o in vlists.banknote_material %}<option value="{{ o }}" {{ 'selected' if val('material')==o }}>{{ o }}</option>{% endfor %}</select>
+      <span class="clabel">Material</span>
+    </div>
+    <div class="dcell coin-date-cell" style="text-align:center">
+      {% set _d1 = val('date_1') %}
+      {%- if val('date_1_text') %}{% set _d1_disp = val('date_1_text') %}
+      {%- elif _d1 %}{% set _d1_disp = (_d1|int|abs|string) ~ (' BC' if _d1|int < 0 else '') %}
+      {%- else %}{% set _d1_disp = '' %}{% endif %}
+      <input type="text" name="date_1" id="dateFrom" class="coin-date-input"
+             data-raw="{{ _d1 }}" value="{{ _d1_disp }}"
+             inputmode="numeric"
+             {% if is_new and not _d1 %}placeholder="1954"{% endif %}
+             style="text-align:center" readonly>
+      <input type="hidden" name="date_1_text" id="hDate1Text" value="{{ _d1_disp }}">
+      <button type="button" class="coin-date-edit-btn" data-target="dateFrom"
+              title="Edit Date 1" aria-label="Edit Date 1">✎</button>
+      <span class="clabel">Date 1</span>
+    </div>
+    <div class="dcell coin-date-cell" style="text-align:center">
+      {% set _d2 = val('date_2') %}
+      {%- if val('date_2_text') %}{% set _d2_disp = val('date_2_text') %}
+      {%- elif _d2 %}{% set _d2_disp = (_d2|int|abs|string) ~ (' BC' if _d2|int < 0 else '') %}
+      {%- else %}{% set _d2_disp = '' %}{% endif %}
+      <input type="text" name="date_2" id="dateTo" class="coin-date-input"
+             data-raw="{{ _d2 }}" value="{{ _d2_disp }}"
+             inputmode="numeric"
+             {% if is_new and not _d2 %}placeholder="(opt)"{% endif %}
+             style="text-align:center" readonly>
+      <input type="hidden" name="date_2_text" id="hDate2Text" value="{{ _d2_disp }}">
+      <button type="button" class="coin-date-edit-btn" data-target="dateTo"
+              title="Edit Date 2" aria-label="Edit Date 2">✎</button>
+      <span class="clabel">Date 2</span>
+    </div>
+    <div class="dcell coin-age-cell" style="text-align:center">
+      {% if coin_age_val %}{{ '{:,}'.format(coin_age_val) }} yrs{% endif %}
+      <span class="clabel">Age</span>
+    </div>
+  </div>
+
+  <!-- Catalogue / production -->
+  <div class="dgrid dg3">
+    {{ cell('pick_number','Pick #') }}
+    <div class="dcell ta-wrap">
+      <input type="text" name="printer" value="{{ val('printer') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('printer', [])|join('||') }}"
+             {% if is_new and not val('printer') %}placeholder="Printer"{% endif %}>
+      <span class="clabel">Printer</span>
+    </div>
+    {{ cell('signatures','Signatures') }}
+  </div>
+
+  <!-- Serial / watermark / physical size / grade -->
+  <div class="dgrid" style="grid-template-columns: 1.2fr 1.2fr 0.7fr 0.7fr 0.9fr;">
+    {{ cell('serial_number','Serial #') }}
+    {{ cell('watermark','Watermark') }}
+    <div class="dcell">
+      <input type="text" name="size_width" value="{{ '%.0f mm'|format(val('size_width')|float) if val('size_width') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
+             {% if is_new and not val('size_width') %}placeholder="W"{% endif %}>
+      <span class="clabel">W mm</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="size_height" value="{{ '%.0f mm'|format(val('size_height')|float) if val('size_height') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
+             {% if is_new and not val('size_height') %}placeholder="H"{% endif %}>
+      <span class="clabel">H mm</span>
+    </div>
+    <div class="dcell"><select name="grade" style="text-align:center"><option value=""></option>{% for o in vlists.banknote_grade %}<option value="{{ o }}" {{ 'selected' if val('grade')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Grade</span></div>
+  </div>
+
+  <!-- Purchase -->
+  <div class="dgrid dg3 coin-purchase">
+    <div class="dcell ta-wrap">
+      <input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center"
+             {% if is_new and not val('vendor') %}placeholder="Vendor"{% endif %}>
+      <span class="clabel">Vendor</span>
+    </div>
+    <div class="dcell date-overlay-cell">
+      {% set _pd = val('purchase_date') %}
+      {% set _pd_eff = _pd if _pd else (today_iso if is_new else '') %}
+      <input type="date" name="purchase_date" value="{{ _pd_eff }}" class="date-overlay-input" style="text-align:center">
+      <span class="date-overlay-display">{% if _pd_eff and _pd_eff|length >= 10 %}{{ _pd_eff[5:7] }}/{{ _pd_eff[8:10] }}/{{ _pd_eff[0:4] }}{% endif %}</span>
+      <span class="clabel">Date</span>
+    </div>
+    <div class="dcell">
+      <input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric" style="text-align:center"
+             {% if is_new and not val('price') %}placeholder="Price"{% endif %}>
+      <span class="clabel">Price</span>
+    </div>
+  </div>
+
+  <!-- Description -->
+  <div class="section-bar">Description</div>
+  {% set _desc = val('description') %}
+  <div class="dgrid dg1">
+    <div class="dcell">
+      <textarea name="description" rows="8" {% if is_new and not _desc %}placeholder="Description"{% endif %}>{{ _desc }}</textarea>
+    </div>
+  </div>
+
+  <!-- Pedigree, References -->
+  <div class="section-bar">Pedigree, References</div>
+  <div class="dgrid dg1 coin-reference-source-row">{{ cell('note_references','',rows=4) }}</div>
+  {% set _refs_research = r['note_references_research'] if r and 'note_references_research' in r.keys() and r['note_references_research'] is not none else '' %}
+  {% if not is_hidden_field(category, 'note_references_research') %}
+  <div class="dgrid dg1 coin-reference-notes-row">
+    <div class="dcell dcell-markdown-note coin-reference-notes-cell">
+      <div class="markdown-note-preview{% if not _refs_research %} is-empty{% endif %}"
+           data-md-preview-for="note_references_research"
+           tabindex="0"
+           title="Click to edit"
+           {% if not _refs_research %}style="display:none"{% endif %}>{{ _refs_research|format_results }}</div>
+      <textarea name="note_references_research" rows="1" data-autogrow="1"
+                class="coin-reference-notes markdown-note-editor"
+                {% if _refs_research %}style="display:none"{% endif %}>{{ _refs_research }}</textarea>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Grade, Conditions -->
+  {{ notescell('notes','Grade, Conditions') }}
+  {# Grading-service row: authority, cert number, combined grade readout,
+     numeric grade, EPQ/★ designation, condition qualifier. #}
+  <div class="dgrid coin-grading-row" style="grid-template-columns: 1.2fr 1.3fr 1.1fr 0.6fr 0.6fr 1.1fr;">
+    {{ cell('grading_authority','Grading Authority') }}
+    {{ cell('slab_number','Cert Number') }}
+    <div class="dcell">
+      <input type="text" value="{{ coin_grade_display(val('grade'), val('grade_modifier')) }}" readonly tabindex="-1" class="coin-grade-readout" style="color:#444">
+      <span class="clabel">Grade</span>
+    </div>
+    {{ numcell('grade_numeric','Numeric') }}
+    {{ cell('grade_modifier','EPQ / ★') }}
+    {{ cell('grade_condition','Condition') }}
+  </div>
+  {{ formatted_notescell('condition','Historical Context, Notes') }}
+
+  <!-- Extra fields -->
+  <div class="dgrid dg1">
+    {{ cell('storage_location','Storage') }}
+  </div>
+
+  {# Unbounded table-backed docs row, same shape as coins. #}
+  {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
+  {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
+
+  <!-- Bottom -->
+  <div class="detail-bottom">
+    <div class="bottom-cell">
+      {% set _s = val('status') if val('status') else ('Ordered' if is_new else '') %}
+      <select name="status" class="status-select {{ 'status-ordered' if _s=='Ordered' }}"
+              onchange="this.classList.toggle('status-ordered', this.value==='Ordered')">
+        <option value=""></option>
+        {% for s in vlists.coin_status %}<option value="{{ s }}" {{ 'selected' if _s==s }}>{{ s }}</option>{% endfor %}
+      </select>
+      <span class="blabel">Status</span>
+    </div>
+    <div class="bottom-cell">
+      {# cat_id is the stable collection ID (B###) — matches (B###) in
+         local filenames for the Files sweep, like coins' C###. #}
+      <input type="text" name="cat_id" value="{{ val('cat_id') }}"
+             data-generated-field="cat_id"
+             readonly
+             title="Auto-assigned stable ID. Click to copy '(B###)' — paste into any local filename and sweep routes it here."
              onclick="if(this.value){navigator.clipboard?.writeText('(' + this.value + ')')}; this.select();"
              style="text-align:center;cursor:pointer;color:#666;font-family:var(--font-mono,monospace)">
       <span class="blabel">Cat ID (auto)</span>
@@ -3378,7 +3630,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
     window.__stuffAllowUnload = true;
   });
 
-  if (isNewRecord && !['watches', 'coins'].includes(formCategory)) {
+  if (isNewRecord && !['watches', 'coins', 'banknotes'].includes(formCategory)) {
     const defaultStatus = form.querySelector('select[name="status"]');
     if (defaultStatus && !defaultStatus.value) defaultStatus.value = 'Own';
   }
@@ -6419,9 +6671,13 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 });
 </script>
 
+{% if category in ('coins', 'banknotes') %}
+{# Banknotes reuse the coin Check/lookup JS below; the Leaflet map and
+   geo layer stay coins-only (the map init guards on the elements). #}
 {% if category == 'coins' %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="{{ url_for('static', filename='js/coin-geo.js') }}?v={{ asset_v('js/coin-geo.js') }}"></script>
+{% endif %}
 <script>
 (function coinHistoryAndMap() {
   // ── History: magnifier buttons on Region / Authority ──

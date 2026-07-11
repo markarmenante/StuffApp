@@ -162,10 +162,10 @@
     </div>
     {% endif %}
 
-    {# Reverse thumbnail — only coins. Hidden on mobile to keep the row tight.
-       Has its own upload-url + data-field so dropping on it goes to image_2,
-       not image_1. #}
-    {% if category == 'coins' %}
+    {# Reverse thumbnail — coins and banknotes. Hidden on mobile to keep the
+       row tight. Has its own upload-url + data-field so dropping on it goes
+       to image_2, not image_1. #}
+    {% if category in ('coins', 'banknotes') %}
     <div class="item-thumb item-thumb-rev"
          data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
          data-field="image_2"
@@ -256,6 +256,29 @@
               {% if row['coin_id'] %}<span class="item-cat-id">{{ row['coin_id'] }}</span>{% endif %}
             </span>
             {% endif %}
+          </div>
+        </div>
+
+      {# ── BANKNOTES ── #}
+      {% elif category == 'banknotes' %}
+        <div class="item-line1">
+          <span class="item-brand">{{ row['country'] or row['issuer'] or '—' }}</span>
+          {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
+        </div>
+        <div class="item-detail-rows">
+          <div class="idr">
+            {% if row['issuer'] %}<span>{{ row['issuer'] }}</span>{% endif %}
+            {% if row['pick_number'] %}<span><span class="lbl">Pick</span> {{ row['pick_number'] }}</span>{% endif %}
+          </div>
+          <div class="idr">
+            {% if row['date_1_text'] %}<span>{{ row['date_1_text'] }}{% if row['date_2_text'] %} – {{ row['date_2_text'] }}{% endif %}</span>{% endif %}
+            {% if row['grade'] %}<span>{{ coin_grade_display(row['grade'], row['grade_modifier']) }}{% if row['grade_numeric'] %} {{ row['grade_numeric']|int }}{% endif %}</span>{% endif %}
+          </div>
+          <div class="idr" style="display:flex;align-items:center;width:100%;gap:14px;">
+            <div style="display:inline-flex;align-items:baseline;flex:1 1 auto;min-width:0;gap:14px;flex-wrap:wrap;">
+              {% if row['printer'] %}<span class="li-hide-mobile">{{ row['printer'] }}</span>{% endif %}
+            </div>
+            {% if row['cat_id'] %}<span class="item-cat-id" style="margin-left:auto;flex-shrink:0;">{{ row['cat_id'] }}</span>{% endif %}
           </div>
         </div>
 

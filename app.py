@@ -54,6 +54,10 @@ CATEGORIES = {
         'name': 'Coins', 'singular': 'Coin', 'icon': '🪙', 'table': 'coins',
         'label_field': 'authority', 'sublabel_field': 'denomination', 'image_field': 'image_1',
     },
+    'banknotes': {
+        'name': 'Banknotes', 'singular': 'Banknote', 'icon': '💵', 'table': 'banknotes',
+        'label_field': 'country', 'sublabel_field': 'denomination', 'image_field': 'image_1',
+    },
     'cameras': {
         'name': 'Cameras', 'singular': 'Camera', 'icon': '📷', 'table': 'cameras',
         'label_field': 'make', 'sublabel_field': 'model', 'image_field': 'image',
@@ -107,6 +111,7 @@ CATEGORIES = {
 ITEM_IMAGE_FIELDS_BY_CATEGORY = {
     'watches':      {'image_obv'},
     'coins':        {'image_1', 'image_2'},
+    'banknotes':    {'image_1', 'image_2'},
     'cameras':      {'image'},
     'lenses':       {'image'},
     'pens':         {'image'},
@@ -154,6 +159,10 @@ VALUE_LISTS = {
     'recording_status': ['Own','Ordered'],
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
     'coin_grade': ['BU','FDC','MS','PF','cAU','AU','aAU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
+    # Paper-money adjectival grades, PMG/PCGS-Banknote style, best first.
+    'banknote_grade': ['Superb Gem UNC','Gem UNC','Choice UNC','UNC','cAU','AU','aAU',
+                       'cEF','EF','aEF','cVF','VF','aVF','F','VG','G','Fair','Poor'],
+    'banknote_material': ['Paper','Cotton','Polymer','Hybrid'],
     'clasp_type': ['Tang','Fold Over','Butterfly','Velcro'],
     'pen_type':      ['Fountain Pen', 'Ball Point', 'Roller Ball', 'Mechanical Pencil'],
     'pen_action':    ['Cap', 'Click', 'Twist'],
@@ -217,6 +226,42 @@ FIELD_ALIASES = {
         'almost vf':  'aVF',
         'good vf':    'gVF',
         'xf':         'EF',
+    },
+    # Banknote grades: fold PMG/PCGS-Banknote adjectival variants onto
+    # the banknote_grade value list so dealer text like "Super Gem UNC"
+    # or "Gem Uncirculated" snaps to a canonical entry on save.
+    ('banknotes', 'grade'): {
+        'super gem unc':             'Superb Gem UNC',
+        'super gem uncirculated':    'Superb Gem UNC',
+        'superb gem unc':            'Superb Gem UNC',
+        'superb gem uncirculated':   'Superb Gem UNC',
+        'gem unc':                   'Gem UNC',
+        'gem uncirculated':          'Gem UNC',
+        'gem crisp uncirculated':    'Gem UNC',
+        'choice unc':                'Choice UNC',
+        'choice uncirculated':       'Choice UNC',
+        'choice crisp uncirculated': 'Choice UNC',
+        'crisp uncirculated':        'UNC',
+        'uncirculated':              'UNC',
+        'cu':                        'UNC',
+        'about unc':                 'aAU',
+        'almost unc':                'aAU',
+        'about au':                  'aAU',
+        'choice au':                 'cAU',
+        'choice ef':                 'cEF',
+        'choice xf':                 'cEF',
+        'about ef':                  'aEF',
+        'almost ef':                 'aEF',
+        'about xf':                  'aEF',
+        'xf':                        'EF',
+        'extremely fine':            'EF',
+        'choice vf':                 'cVF',
+        'about vf':                  'aVF',
+        'almost vf':                 'aVF',
+        'very fine':                 'VF',
+        'fine':                      'F',
+        'very good':                 'VG',
+        'good':                      'G',
     },
 }
 
@@ -389,6 +434,62 @@ def coin_grade_value_list_match(value):
     return None
 
 
+def banknote_grade_value_list_match(value):
+    """Map paper-money grade variants to VALUE_LISTS['banknote_grade'].
+
+    PMG/PCGS-Banknote wording ("Superb Gem Uncirculated 67 EPQ",
+    "Gem UNC", "Choice About Unc 58") folds to the canonical adjectival
+    entry. Returns None when nothing in the list fits.
+    """
+    if value is None:
+        return None
+    import unicodedata
+    raw = unicodedata.normalize('NFC', str(value)).strip()
+    if not raw:
+        return None
+
+    allowed = {g.lower(): g for g in VALUE_LISTS['banknote_grade']}
+    direct = allowed.get(raw.lower())
+    if direct:
+        return direct
+
+    normalized = raw.lower()
+    normalized = re.sub(r'[\[\](){},.;:/_–—-]+', ' ', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+
+    alias = FIELD_ALIASES.get(('banknotes', 'grade'), {}).get(normalized)
+    if alias:
+        return alias
+
+    # Ordered: most specific phrasing first. Numeric suffixes ("65 EPQ")
+    # and the EPQ/★ designation are ignored here — they live in
+    # grade_numeric / grade_modifier.
+    phrase_patterns = [
+        (r'\bsuperb?\s+gem\s+(?:unc|uncirculated|cu)\b', 'Superb Gem UNC'),
+        (r'\bgem\s+(?:crisp\s+)?(?:unc|uncirculated|cu)\b', 'Gem UNC'),
+        (r'\b(?:choice|ch)\s+(?:crisp\s+)?(?:unc|uncirculated|cu)\b', 'Choice UNC'),
+        (r'\b(?:crisp\s+)?(?:unc|uncirculated)\b|\bcu\s*\d{0,2}\b', 'UNC'),
+        (r'\b(?:choice|ch)\s+(?:au|about\s+unc(?:irculated)?)\b', 'cAU'),
+        (r'\b(?:about|almost|near|nearly)\s+(?:au|unc(?:irculated)?)\b', 'aAU'),
+        (r'\bau\s*\d{0,2}\b', 'AU'),
+        (r'\b(?:choice|ch)\s+(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'cEF'),
+        (r'\b(?:about|almost|near|nearly)\s+(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'aEF'),
+        (r'\b(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'EF'),
+        (r'\b(?:choice|ch)\s+(?:vf|very\s+fine)\b', 'cVF'),
+        (r'\b(?:about|almost|near|nearly)\s+(?:vf|very\s+fine)\b', 'aVF'),
+        (r'\b(?:vf|very\s+fine)\b', 'VF'),
+        (r'\bvery\s+good\b|\bvg\b', 'VG'),
+        (r'\b(?:fine|f)\s*\d{0,2}\b', 'F'),
+        (r'\bgood\b|\bg\s*\d{1,2}\b', 'G'),
+        (r'\bfair\b', 'Fair'),
+        (r'\bpoor\b', 'Poor'),
+    ]
+    for pattern, canonical in phrase_patterns:
+        if re.search(pattern, normalized):
+            return canonical
+    return None
+
+
 FOUR_DIGIT_YEAR_FIELDS = {'year', 'year_recorded', 'year_built'}
 
 
@@ -437,12 +538,16 @@ def normalize_field_value(table, field_name, value):
         value = unicodedata.normalize('NFC', value)
     if field_name in FOUR_DIGIT_YEAR_FIELDS:
         return _normalize_four_digit_year(value)
-    if table == 'coins' and field_name in ('date_1', 'date_2'):
+    if table in ('coins', 'banknotes') and field_name in ('date_1', 'date_2'):
         return _normalize_coin_year_input(value)
     if field_name == 'status' and value.strip().lower() == 'owned':
         return 'Own'
     if table == 'coins' and field_name == 'grade':
         grade = coin_grade_value_list_match(value)
+        if grade:
+            return grade
+    if table == 'banknotes' and field_name == 'grade':
+        grade = banknote_grade_value_list_match(value)
         if grade:
             return grade
     if re.fullmatch(r'med_type_\d+', field_name or ''):
@@ -594,6 +699,7 @@ def _cleanup_coin_research_headings(db):
 DEFAULT_OWNER_BY_CATEGORY = {
     'watches':      'Mark',
     'coins':        'Mark',
+    'banknotes':    'Mark',
     'properties':   'YM',
     'credit_cards': 'YM',
     'persons':      'YM',
@@ -765,6 +871,49 @@ FIELDS = {
          'options': ['', 'Own', 'Sold', 'Loaned']},
         {'name': 'image_1',         'label': 'Image (Obverse)',   'type': 'file'},
         {'name': 'image_2',         'label': 'Image (Reverse)',   'type': 'file'},
+    ],
+    'banknotes': [
+        {'name': 'cat_id',          'label': 'Cat ID',            'type': 'text', 'readonly': True},
+        {'name': 'country',         'label': 'Country',           'type': 'text'},
+        {'name': 'issuer',          'label': 'Issuing Bank / Authority', 'type': 'text'},
+        {'name': 'official',        'label': 'Portrait / Ruler',  'type': 'text'},
+        {'name': 'denomination',    'label': 'Denomination',      'type': 'text'},
+        {'name': 'series',          'label': 'Series / Issue',    'type': 'text'},
+        {'name': 'pick_number',     'label': 'Pick #',            'type': 'text'},
+        {'name': 'printer',         'label': 'Printer',           'type': 'text'},
+        {'name': 'signatures',      'label': 'Signatures',        'type': 'text'},
+        {'name': 'serial_number',   'label': 'Serial Number',     'type': 'text'},
+        {'name': 'watermark',       'label': 'Watermark',         'type': 'text'},
+        {'name': 'material',        'label': 'Material',          'type': 'select',
+         'options': [''] + VALUE_LISTS['banknote_material']},
+        {'name': 'date_1',          'label': 'Date From (year)',  'type': 'number'},
+        {'name': 'date_1_text',     'label': 'Date From (text)',  'type': 'text'},
+        {'name': 'date_2',          'label': 'Date To (year)',    'type': 'number'},
+        {'name': 'date_2_text',     'label': 'Date To (text)',    'type': 'text'},
+        {'name': 'description',     'label': 'Description',       'type': 'textarea'},
+        {'name': 'note_references', 'label': 'References / Pedigree', 'type': 'textarea'},
+        {'name': 'note_references_research', 'label': 'Reference Notes', 'type': 'textarea'},
+        {'name': 'notes',           'label': 'Notes / Grade',     'type': 'textarea'},
+        {'name': 'history_context', 'label': 'Historical Context','type': 'textarea'},
+        {'name': 'grade',           'label': 'Grade',             'type': 'text'},
+        {'name': 'grade_numeric',   'label': 'Grade (numeric)',   'type': 'number'},
+        {'name': 'grading_authority','label': 'Grading Authority', 'type': 'text'},
+        {'name': 'slab_number',     'label': 'Cert Number',       'type': 'text'},
+        {'name': 'grade_condition', 'label': 'Condition',         'type': 'text'},
+        {'name': 'grade_modifier',  'label': 'EPQ / ★',           'type': 'text'},
+        {'name': 'size_width',      'label': 'Width (mm)',        'type': 'number'},
+        {'name': 'size_height',     'label': 'Height (mm)',       'type': 'number'},
+        {'name': 'storage_location','label': 'Storage Location',  'type': 'text'},
+        {'name': 'condition',       'label': 'Historical Context, Notes', 'type': 'textarea'},
+        {'name': 'price',           'label': 'Price',             'type': 'number'},
+        {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
+        {'name': 'purchase_date',   'label': 'Purchase Date',     'type': 'date'},
+        {'name': 'owner',           'label': 'Owner',             'type': 'text'},
+        {'name': 'property_name',   'label': 'Property',          'type': 'text'},
+        {'name': 'status',          'label': 'Status',            'type': 'select',
+         'options': ['', 'Own', 'Sold', 'Loaned']},
+        {'name': 'image_1',         'label': 'Image (Front)',     'type': 'file'},
+        {'name': 'image_2',         'label': 'Image (Back)',      'type': 'file'},
     ],
     'cameras': [
         {'name': 'make',            'label': 'Brand',             'type': 'text'},
@@ -1115,7 +1264,7 @@ SELL_PANEL_FIELDS = [
     {'name': 'sold_to', 'label': 'Sold To', 'type': 'text'},
 ]
 SELL_PANEL_CATEGORIES = (
-    'watches', 'coins', 'cameras', 'lenses', 'pens', 'art', 'items',
+    'watches', 'coins', 'banknotes', 'cameras', 'lenses', 'pens', 'art', 'items',
     'vehicles', 'recordings', 'audio', 'rifles', 'properties',
 )
 
@@ -1169,6 +1318,7 @@ def create_location_field(category):
 LIST_EXTRA_FIELDS = {
     'watches':      ['metal', 'reference', 'vendor', 'property'],
     'coins':        ['metal', 'denomination', 'date_1_text', 'grade'],
+    'banknotes':    ['denomination', 'pick_number', 'date_1_text', 'grade'],
     'cameras':      ['digital_film', 'film_size', 'lens_mount', 'megapixels', 'serial_number', 'vendor', 'price', 'property'],
     'lenses':       ['mount', 'aperture', 'filter_size', 'length', 'serial_number', 'vendor', 'price', 'property'],
     'pens':         ['type', 'action', 'nib', 'cartridge', 'vendor', 'price', 'property'],
@@ -1812,6 +1962,97 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     db.commit()
+
+    # One-shot: the Iran 100 Rials PMG-64 note (cat_id C658, coin_id
+    # CM28) was entered under Coins before Banknotes existed. Move it
+    # into the banknotes table — same row id, so its uploaded images
+    # travel with it — populate the paper-money fields the dealer's
+    # description states, and delete the coins row (with a mobile
+    # tombstone so offline clients drop it from Coins). Ledger-gated;
+    # a deployment without this record (e.g. the gerri instance)
+    # no-ops and marks applied.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('banknote_c658_move_v1',),
+    ).fetchone():
+        _bn_now = datetime.utcnow().isoformat()
+        _c658 = None
+        try:
+            _c658 = db.execute(
+                "SELECT * FROM coins WHERE id = ? OR TRIM(COALESCE(cat_id,'')) = 'C658'",
+                ('30cd6d98-3ae3-4a71-bf07-6d609e7ca58f',),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            pass
+        if _c658 is not None and not db.execute(
+            "SELECT 1 FROM banknotes WHERE id = ?", (_c658['id'],)
+        ).fetchone():
+            db.execute(
+                "INSERT INTO banknotes ("
+                "  id, cat_id, country, issuer, official, denomination,"
+                "  pick_number, printer, signatures,"
+                "  date_1, date_1_text, description,"
+                "  grade, grade_numeric, grading_authority,"
+                "  price, vendor, purchase_date, owner, property_name,"
+                "  status, image_1, image_2, documents,"
+                "  created_at, updated_at"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    _c658['id'],
+                    next_serial_cat_id(db, 'banknotes', 'B'),
+                    'Iran',
+                    'Bank Melli Iran (National Bank)',
+                    'Muhammad Reza Shah Pahlavi',
+                    _c658['denomination'] or '100 Rials',
+                    'P-67',
+                    'Harrison & Sons',
+                    'Nasser-Emami',
+                    _c658['date_1'],
+                    _c658['date_1_text'] or 'SH 1333 (1954)',
+                    _c658['description'],
+                    'Superb Gem UNC',
+                    64,
+                    'PMG',
+                    _c658['price'],
+                    _c658['vendor'],
+                    _c658['purchase_date'],
+                    _c658['owner'],
+                    _c658['property_name'],
+                    _c658['status'],
+                    _c658['image_1'],
+                    _c658['image_2'],
+                    _c658['documents'],
+                    _c658['created_at'],
+                    _bn_now,
+                ),
+            )
+            # Any doc tiles keyed to the coins record follow it over.
+            try:
+                db.execute(
+                    "UPDATE record_documents SET category = 'banknotes' "
+                    "WHERE category = 'coins' AND record_id = ?",
+                    (_c658['id'],),
+                )
+            except sqlite3.OperationalError:
+                pass
+            # Mobile tombstone so offline clients drop the Coins copy.
+            try:
+                db.execute(
+                    "INSERT INTO mobile_record_tombstones "
+                    "(id, category, record_id, deleted_at) VALUES (?, ?, ?, ?)",
+                    (str(uuid.uuid4()), 'coins', _c658['id'], _bn_now),
+                )
+            except sqlite3.OperationalError:
+                pass
+            _gap_group = _coin_group_for(_c658['property_name'], _c658['date_1'])
+            db.execute("DELETE FROM coins WHERE id = ?", (_c658['id'],))
+            if _gap_group:
+                _renumber_coin_groups(db, [_gap_group])
+        db.execute(
+            "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+            ('banknote_c658_move_v1', _bn_now),
+        )
+        db.commit()
 
 
 def _parse_prescription_lines(text):
@@ -3792,6 +4033,7 @@ def property_choices_for_category(category=None):
     choices = get_property_choices()
     restricted = {
         'coins': ['Carpinteria', 'NYC'],
+        'banknotes': ['Carpinteria', 'NYC'],
         'recordings': ['Carpinteria', 'Martis'],
         'audio': ['Carpinteria', 'Martis'],
     }.get(category)
@@ -3901,6 +4143,7 @@ def get_global_vendor_typeahead():
 TYPEAHEAD_FIELDS = {
     'watches':      ('brand', 'dial_color', 'strap_color', 'vendor'),
     'coins':        ('region', 'mint', 'denomination', 'vendor'),
+    'banknotes':    ('country', 'issuer', 'printer', 'vendor'),
     'art':          ('artist', 'medium', 'vendor', 'property', 'location'),
     # Items typeahead: only the fields still present in the form
     # (type/subtype/make/model were removed). `type` is the key one —
@@ -4426,6 +4669,9 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
+    'banknotes': ("COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
+                  "COALESCE(NULLIF(issuer, ''), 'zzz') COLLATE NODIACRITIC, "
+                  "COALESCE(date_1, 99999) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
                 "COALESCE(NULLIF(description, ''), 'zzz') COLLATE NODIACRITIC"),
     'vehicles':   _MAKE_MODEL_ORDER,
@@ -6645,7 +6891,7 @@ def new_record(category):
                     # "A$50,000.00" verbatim; fall back to legacy
                     # strip-and-parse for plain numbers.
                     val = _normalize_price_input(val)
-                elif category == 'coins' and fname in ('date_1', 'date_2'):
+                elif category in ('coins', 'banknotes') and fname in ('date_1', 'date_2'):
                     # Coin dates can arrive as the display value from the
                     # add form ("450 BC") before the JS submit normalizer
                     # runs. Preserve the era before generic unit stripping.
@@ -6665,7 +6911,7 @@ def new_record(category):
             _graduate_watch_order_if_owned(data, data.get('status'))
             _apply_watch_actual_delivery_service_date(data)
 
-        if category not in ('watches', 'coins') and 'status' in {
+        if category not in ('watches', 'coins', 'banknotes') and 'status' in {
             f['name'] for f in visible_fields(category)
         } and not (data.get('status') or '').strip():
             data['status'] = 'Own'
@@ -6692,7 +6938,7 @@ def new_record(category):
         # standard 'YM' default. All other categories: members get
         # 'YM', owners get DEFAULT_OWNER_BY_CATEGORY.
         if not (data.get('owner') or '').strip():
-            if category == 'coins':
+            if category in ('coins', 'banknotes'):
                 data['owner'] = 'Mark'
             else:
                 user = g.get('current_user') or {}
@@ -6730,6 +6976,8 @@ def new_record(category):
         if category == 'coins':
             data['coin_id'] = next_coin_id(db)
             data['cat_id'] = next_cat_id(db, data.get('property_name'), data.get('date_1'))
+        elif category == 'banknotes':
+            data['cat_id'] = next_serial_cat_id(db, 'banknotes', 'B')
         elif category == 'watches':
             data['cat_id'] = next_serial_cat_id(db, 'watches', 'W')
         elif category == 'art':
@@ -6993,7 +7241,7 @@ def detail_view(category, record_id):
         hertz = watch_hertz(record['beat'])
 
     coin_age_val = None
-    if category == 'coins' and record['date_1'] is not None:
+    if category in ('coins', 'banknotes') and record['date_1'] is not None:
         coin_age_val = coin_age(record['date_1'])
 
     property_topics = None
@@ -7387,7 +7635,7 @@ def save_field(category, record_id):
     # its currency prefix (US$ / A$) verbatim — see _normalize_price_input.
     if field_name == 'price':
         value = _normalize_price_input(str(value))
-    elif category == 'coins' and field_name in ('date_1', 'date_2'):
+    elif category in ('coins', 'banknotes') and field_name in ('date_1', 'date_2'):
         # Coin date fields render as "625 BC" / "1952" / "1952 AD" but
         # store as a signed integer year. Accept any of those forms.
         value = _normalize_coin_year_input(value)
@@ -7456,7 +7704,7 @@ def save_field(category, record_id):
     # template prefers for display. Without keeping them in sync, the
     # old text shadows the new integer on reload (the field appears
     # to "revert" even though the integer was saved correctly).
-    if category == 'coins' and field_name in ('date_1', 'date_2'):
+    if category in ('coins', 'banknotes') and field_name in ('date_1', 'date_2'):
         try:
             n = int(value) if value not in ('', None) else None
         except (TypeError, ValueError):
@@ -9743,6 +9991,511 @@ def coin_apply_lookup_specs(record_id):
     })
 
 
+# ---------------------------------------------------------------------------
+# Banknote spec lookup: same Check contract as coins (lookup-specs +
+# apply-lookup-specs feeding the shared review modal), with paper-money
+# fields. The dealer's description stays authoritative — grading and
+# date fields only change when the dealer's own text backs the value.
+# ---------------------------------------------------------------------------
+
+BANKNOTE_SPEC_FILLABLE = (
+    'country', 'issuer', 'official', 'denomination', 'series',
+    'pick_number', 'printer', 'signatures', 'serial_number', 'watermark',
+    'material', 'date_1', 'date_2', 'size_width', 'size_height',
+    'grade', 'grade_numeric', 'grading_authority', 'slab_number',
+    'grade_condition', 'grade_modifier',
+)
+
+BANKNOTE_SPECS_RESPONSE_SCHEMA = {
+    'type': 'object',
+    'additionalProperties': False,
+    'properties': {
+        **{f: _JSON_NULLABLE_STRING for f in (
+            'country', 'issuer', 'official', 'denomination', 'series',
+            'pick_number', 'printer', 'signatures', 'serial_number',
+            'watermark', 'material', 'grade', 'grading_authority',
+            'slab_number', 'grade_condition', 'grade_modifier',
+        )},
+        'date_1': _JSON_NULLABLE_INTEGER,
+        'date_2': _JSON_NULLABLE_INTEGER,
+        'grade_numeric': _JSON_NULLABLE_NUMBER,
+        'size_width': _JSON_NULLABLE_NUMBER,
+        'size_height': _JSON_NULLABLE_NUMBER,
+        'sources': {'type': 'string'},
+    },
+    'required': list(BANKNOTE_SPEC_FILLABLE) + ['sources'],
+}
+
+
+def _banknote_description_fields(note):
+    """Read paper-money fields the dealer's own description states.
+
+    Pure text parsing, no network — mirrors _coin_description_fields so
+    a missing API key can never stop Check from filling what the record
+    already spells out."""
+    description = str(_coin_row_value(note, 'description') or '')
+    out = {}
+    if not description.strip():
+        return out
+
+    # Pick catalogue number: "Pick-67", "P-67b", "Pick 102a", "P#67".
+    m = re.search(r'\b(?:pick|p)\s*[-#]?\s*(\d{1,4}[a-z]?)\b',
+                  description, re.IGNORECASE)
+    if m:
+        out['pick_number'] = f'P-{m.group(1)}'
+
+    # Grading service + numeric grade: "PMG-64", "PMG 66 EPQ",
+    # "PCGS Banknote 58".
+    m = re.search(r'\b(PMG|PCGS(?:\s+Banknote)?|CGA|Legacy)\s*[-#]?\s*(\d{1,2})\b',
+                  description, re.IGNORECASE)
+    if m:
+        out['grading_authority'] = normalize_grading_authority(m.group(1).split()[0])
+        try:
+            n = float(m.group(2))
+            if 1 <= n <= 70:
+                out['grade_numeric'] = n
+        except ValueError:
+            pass
+
+    # EPQ / Star designation rides with the grade.
+    if re.search(r'\bEPQ\b', description):
+        out['grade_modifier'] = 'EPQ'
+    if '★' in description or re.search(r'\bstar\b', description, re.IGNORECASE):
+        star = '★'
+        out['grade_modifier'] = (out.get('grade_modifier') or '') + star
+
+    # Adjectival grade phrases ("Super Gem UNC", "Crisp Uncirculated",
+    # "Extremely Fine") — only match explicit grade wording, then fold
+    # through the canonical value-list matcher.
+    m = re.search(
+        r'\b((?:superb?\s+)?gem\s+(?:crisp\s+)?unc\w*'
+        r'|choice\s+(?:crisp\s+)?unc\w*'
+        r'|crisp\s+uncirculated|uncirculated'
+        r'|(?:about|almost)\s+unc\w*'
+        r'|extremely\s+fine|very\s+fine|very\s+good)\b',
+        description, re.IGNORECASE)
+    if m:
+        grade = banknote_grade_value_list_match(m.group(1))
+        if grade:
+            out['grade'] = grade
+
+    # Printer: "Printed by British Company Harrison", "printer: TDLR".
+    # Captures stop at the next comma/period — dealer descriptions are
+    # comma-chained clauses, so running past the comma grabs the next
+    # unrelated clause (multi-name combos lose their tail; acceptable).
+    m = re.search(r'\bprint(?:ed)?\s+by[:\s]+([^.;,\n]{3,80})', description,
+                  re.IGNORECASE)
+    if m:
+        out['printer'] = m.group(1).strip()
+
+    # Signatures: "Signature Nasser-Emami", "signatures: X / Y".
+    m = re.search(r'\bsignatures?\b[:\s]+([^.;,\n]{3,80})', description,
+                  re.IGNORECASE)
+    if m:
+        out['signatures'] = m.group(1).strip()
+
+    # Watermark: "Watermark: Shah portrait".
+    m = re.search(r'\bwatermarks?\b[:\s]+([^.;,\n]{3,80})', description,
+                  re.IGNORECASE)
+    if m:
+        out['watermark'] = m.group(1).strip()
+
+    # Serial number when explicitly labelled.
+    m = re.search(r'\bserial\s*(?:no\.?|number|#)[:\s]*([A-Z0-9][A-Z0-9/\-]{2,24})',
+                  description, re.IGNORECASE)
+    if m:
+        out['serial_number'] = m.group(1).strip()
+
+    # Size: "130 x 67 mm" / "130×67mm".
+    m = re.search(r'\b(\d{2,3}(?:[.,]\d+)?)\s*[x×]\s*(\d{2,3}(?:[.,]\d+)?)\s*mm\b',
+                  description, re.IGNORECASE)
+    if m:
+        try:
+            out['size_width'] = float(m.group(1).replace(',', '.'))
+            out['size_height'] = float(m.group(2).replace(',', '.'))
+        except ValueError:
+            pass
+
+    # Issue year: a bare Gregorian year, preferring one in parentheses
+    # after a local-era date ("SH 1333 (1954)"). Skip catalogue-ref
+    # neighbourhoods the same way the coin prose reader does.
+    year = None
+    m = re.search(r'\(\s*(1[6-9]\d{2}|20\d{2})\s*\)', description)
+    if m:
+        year = int(m.group(1))
+    else:
+        for m in re.finditer(r'(?<![\w#./-])(1[6-9]\d{2}|20\d{2})(?![\w./-])',
+                             description):
+            before = description[max(0, m.start() - 6):m.start()].lower()
+            if any(tok in before for tok in ('pick', 'p-', '#', 'no.', 'lot')):
+                continue
+            year = int(m.group(1))
+            break
+    if year:
+        out['date_1'] = year
+    return out
+
+
+def fetch_banknote_specs(note):
+    """Fill missing identifying fields on a banknote via Claude + web
+    search. Same contract as fetch_coin_specs: returns {field: value}
+    with ONLY confident values; the dealer's text is authoritative."""
+    known = {}
+    for f in BANKNOTE_SPEC_FILLABLE:
+        v = _coin_row_value(note, f)
+        if v not in (None, ''):
+            known[f] = v
+    if not known:
+        raise RuntimeError(
+            'Need at least one of country / issuer / denomination / '
+            'Pick # / date to look up the rest.')
+
+    grades = ', '.join(VALUE_LISTS['banknote_grade'])
+    materials = ', '.join(VALUE_LISTS['banknote_material'])
+    description = (_coin_row_value(note, 'description') or '').strip()
+    pedigree = (_coin_row_value(note, 'note_references') or '').strip()
+    grade_notes = (_coin_row_value(note, 'notes') or '').strip()
+    condition = (_coin_row_value(note, 'condition') or '').strip()
+
+    known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items()) or '(none entered)'
+    dealer_blocks = []
+    if description: dealer_blocks.append(f'DESCRIPTION:\n{description[:4000]}')
+    if pedigree:    dealer_blocks.append(f'REFERENCES / PEDIGREE:\n{pedigree[:2000]}')
+    if grade_notes: dealer_blocks.append(f'GRADE / CONDITIONS NOTES:\n{grade_notes[:2000]}')
+    if condition:   dealer_blocks.append(f'HISTORICAL / OTHER NOTES:\n{condition[:1500]}')
+    dealer_text = '\n\n'.join(dealer_blocks) if dealer_blocks else '(no dealer text on file)'
+
+    prompt = f"""You are extracting structured catalogue fields for one specific banknote (paper money).
+
+PRIMARY SOURCE — the selling dealer's own text for THIS note. It is authoritative: extract every field you can DIRECTLY from it.
+{dealer_text}
+
+Structured fields the user has already transcribed from the dealer:
+{known_lines}
+
+Rules:
+1. The dealer's text above is the source of truth. For each target field, FIRST take the value the dealer's text states.
+2. Only when the dealer's text does NOT mention a field may you use up to 3 web searches (Banknote catalogs: Standard Catalog of World Paper Money / Pick numbers, PMG population reports, Banknote World, Numista, Heritage Auctions, Stack's Bowers) to fill it. NEVER override a value the dealer's text states with a web guess.
+3. The grading fields (grading_authority, grade_numeric, slab_number, grade_modifier), the dates, and the grade must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
+4. Return null whenever a value is not supported by the text (or, for web-allowed fields, by a reputable source).
+
+Target fields:
+- country: issuing country as commonly catalogued (e.g. "Iran", "United States").
+- issuer: the issuing bank or authority (e.g. "Bank Melli Iran (National Bank)", "Federal Reserve").
+- official: the person portrayed or the ruler under whom the note was issued, as "Name" or "Name, role" (e.g. "Muhammad Reza Shah Pahlavi"). Null if none.
+- denomination: face value with currency (e.g. "100 Rials", "5 Pounds").
+- series: the series / issue name or year designation if catalogued (e.g. "Series 1928", "Third Issue"). Null if not stated.
+- pick_number: the Pick catalogue number formatted "P-<number><letter>" (e.g. "P-67", "P-102a").
+- printer: the printing firm (e.g. "Harrison & Sons", "Thomas De La Rue", "Bureau of Engraving and Printing").
+- signatures: signature combination as stated (e.g. "Nasser-Emami").
+- serial_number: THIS note's serial number if the text states it; else null.
+- watermark: watermark description if stated or catalogued (e.g. "Young Shah portrait").
+- material: EXACTLY one of [{materials}]; null if unknown.
+- date_1: integer Gregorian year of issue (e.g. 1954). If the note is dated in a local era (SH/AH/BE), convert to the Gregorian year the dealer gives; do not compute your own conversion unless the dealer states it.
+- date_2: integer year ending a range; null if not a range.
+- size_width: printed note width in mm (float); size_height: height in mm (float).
+- grade: map the dealer's stated grade to EXACTLY one of [{grades}] (c = choice, a = about; "Super Gem UNC" → "Superb Gem UNC"; XF → EF). Null if outside the list.
+- grade_numeric: the numeric grade 1-70 if a grading service number is stated (e.g. "PMG-64" → 64); else null.
+- grading_authority: the grading company if the note is or was slabbed and the text names it — "PMG", "PCGS Banknote", "CGA", "Legacy". Else null.
+- slab_number: the certification number if stated, verbatim; else null.
+- grade_condition: condition qualifier(s) noted alongside the grade — e.g. "minor rust", "pinholes", "annotation", "small tear". Comma-separated, lowercase; else null.
+- grade_modifier: "EPQ" when the text shows EPQ (Exceptional Paper Quality), "★" for a star designation, "EPQ★" for both, "+" for a plus grade. Else null.
+
+Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
+{{
+  "country": null, "issuer": null, "official": null, "denomination": null,
+  "series": null, "pick_number": null, "printer": null, "signatures": null,
+  "serial_number": null, "watermark": null, "material": null,
+  "date_1": null, "date_2": null, "size_width": null, "size_height": null,
+  "grade": null, "grade_numeric": null, "grading_authority": null,
+  "slab_number": null, "grade_condition": null, "grade_modifier": null,
+  "sources": "one-line note of where each value came from (dealer text vs which web source)"
+}}
+"""
+
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+
+    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
+    web_search = anthropic_web_search_tool(4)
+    import time as _time
+    transient_errs = (
+        anthropic.RateLimitError,
+        anthropic.APIConnectionError,
+        anthropic.APITimeoutError,
+        anthropic.InternalServerError,
+    )
+    resp = None
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = client.messages.create(
+                model=lookup_model,
+                max_tokens=1024,
+                tools=[web_search],
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            break
+        except transient_errs as e:
+            last_err = e
+            if attempt == 2:
+                raise RuntimeError(f'Banknote spec lookup failed: {last_err}')
+            _time.sleep(10 * (attempt + 1))
+    if resp is None:
+        raise RuntimeError('Banknote spec lookup returned no response')
+
+    text = ''
+    for block in resp.content:
+        if getattr(block, 'type', None) == 'text':
+            text += block.text
+    text = re.sub(r'^```(?:json)?\s*', '', text.strip())
+    text = re.sub(r'\s*```$', '', text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]*\}', text)
+        if m:
+            return json.loads(m.group(0))
+        raise RuntimeError('Could not parse Claude response as JSON')
+
+
+def _coerce_banknote_spec(field, raw):
+    """Coerce one suggested banknote field to its storable form (or None)."""
+    if raw is None:
+        return None
+    if field == 'material':
+        if not isinstance(raw, str):
+            return None
+        allowed = {m.lower(): m for m in VALUE_LISTS['banknote_material']}
+        return allowed.get(raw.strip().lower())
+    if field in ('date_1', 'date_2'):
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+    if field in ('size_width', 'size_height', 'grade_numeric'):
+        if isinstance(raw, str):
+            m = re.match(r'^\s*(-?\d+(?:[.,]\d+)?)', raw)
+            if not m:
+                return None
+            try:
+                raw = float(m.group(1).replace(',', '.'))
+            except ValueError:
+                return None
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if field == 'grade_numeric' and not (1 <= v <= 70):
+            return None
+        return v
+    if field == 'grade':
+        return banknote_grade_value_list_match(raw)
+    if field == 'grading_authority':
+        return normalize_grading_authority(raw)
+    if field == 'grade_modifier':
+        # Keep EPQ verbatim; fold star/plus like coins.
+        v = (raw if isinstance(raw, str) else str(raw)).strip()
+        if not v:
+            return None
+        if 'epq' in v.lower():
+            return 'EPQ★' if ('★' in v or 'star' in v.lower()) else 'EPQ'
+        return normalize_grade_modifier(v)
+    if field in ('pick_number', 'slab_number', 'serial_number',
+                 'grade_condition', 'printer', 'signatures', 'watermark',
+                 'series'):
+        v = (raw if isinstance(raw, str) else str(raw)).strip()
+        return v or None
+    if isinstance(raw, str):
+        return normalize_field_value('banknotes', field, raw.strip()) or None
+    return raw
+
+
+@app.route('/banknotes/<record_id>/lookup-specs', methods=['POST'])
+def banknote_lookup_specs(record_id):
+    """Fill blank banknote fields — description first, then web lookup."""
+    db = get_db()
+    note = db.execute("SELECT * FROM banknotes WHERE id = ?",
+                      (record_id,)).fetchone()
+    if not note:
+        return jsonify({'error': 'Banknote not found'}), 404
+
+    suggestions = {}
+    lookup_error = None
+    lookup_status = 503
+    try:
+        suggestions = fetch_banknote_specs(note)
+    except RuntimeError as e:
+        lookup_error = str(e)
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        lookup_error = f'Lookup failed: {e or e.__class__.__name__}'
+        lookup_status = 500
+
+    if not isinstance(suggestions, dict):
+        suggestions = {}
+    # The dealer's own description is canonical and needs no network —
+    # overlay it last so it always wins.
+    for field, value in _banknote_description_fields(note).items():
+        if value not in (None, ''):
+            suggestions[field] = value
+
+    if lookup_error and not any(
+        suggestions.get(f) not in (None, '') for f in BANKNOTE_SPEC_FILLABLE
+    ):
+        return jsonify({'error': lookup_error}), lookup_status
+
+    # Grading + date fields are dealer-authoritative: only propose a
+    # value the dealer's own text backs (same principle as coins).
+    DEALER_FIELDS = {'date_1', 'date_2', 'grade', 'grade_numeric',
+                     'grading_authority', 'slab_number', 'grade_condition',
+                     'grade_modifier', 'pick_number', 'serial_number'}
+    dealer_text = ' '.join(
+        str(_coin_row_value(note, c) or '')
+        for c in ('description', 'note_references', 'condition', 'notes')
+    )
+    _dealer_text_key = re.sub(r'[^a-z0-9]', '', dealer_text.lower())
+    _dealer_years = {
+        int(m.group(1))
+        for m in re.finditer(r'(?<![\w#./-])(1[6-9]\d{2}|20\d{2})(?![\w./-])',
+                             dealer_text)
+    }
+
+    def _grounded(field, value):
+        if field in ('date_1', 'date_2'):
+            try:
+                return int(value) in _dealer_years
+            except (TypeError, ValueError):
+                return False
+        if field in ('slab_number', 'serial_number', 'pick_number'):
+            key = re.sub(r'[^a-z0-9]', '', str(value).lower()).lstrip('p')
+            return len(key) >= 1 and key in _dealer_text_key
+        if field == 'grade_numeric':
+            return re.sub(r'\.0$', '', str(value)) in dealer_text
+        if field == 'grade':
+            return banknote_grade_value_list_match(dealer_text) == value or \
+                str(value).lower() in dealer_text.lower()
+        if field == 'grade_condition':
+            words = re.findall(r'[a-z]{3,}', str(value).lower())
+            return bool(words) and all(w in _dealer_text_key for w in words)
+        if field == 'grade_modifier':
+            v = str(value)
+            if 'EPQ' in v and 'epq' not in dealer_text.lower():
+                return False
+            if '★' in v and not ('★' in dealer_text or 'star' in dealer_text.lower()):
+                return False
+            if '+' in v and '+' not in dealer_text:
+                return False
+            return True
+        return True
+
+    filled = {}
+    overwritten = {}
+    for f in BANKNOTE_SPEC_FILLABLE:
+        v = _coerce_banknote_spec(f, suggestions.get(f))
+        if v in (None, ''):
+            continue
+        if f in DEALER_FIELDS and not _grounded(f, v):
+            continue
+        cur = note[f]
+        if cur in (None, ''):
+            filled[f] = v
+        elif f in ('date_1', 'date_2'):
+            try:
+                same = int(cur) == int(v)
+            except (TypeError, ValueError):
+                same = False
+            if not same:
+                overwritten[f] = {'current': cur, 'new': v}
+        elif f in ('size_width', 'size_height', 'grade_numeric'):
+            try:
+                same = abs(float(cur) - float(v)) < 0.05
+            except (TypeError, ValueError):
+                same = False
+            if not same:
+                overwritten[f] = {'current': cur, 'new': v}
+        elif str(cur or '').strip().lower() != str(v or '').strip().lower():
+            overwritten[f] = {'current': cur, 'new': v}
+
+    now = datetime.utcnow().isoformat()
+    db.execute("UPDATE banknotes SET specs_searched_at = ? WHERE id = ?",
+               (now, record_id))
+    db.commit()
+
+    return jsonify({
+        'filled': filled,
+        'overwritten': overwritten,
+        'sources': suggestions.get('sources', ''),
+        'specs_searched_at': now,
+    })
+
+
+@app.route('/banknotes/<record_id>/apply-lookup-specs', methods=['POST'])
+def banknote_apply_lookup_specs(record_id):
+    """Apply a user-selected subset of banknote lookup suggestions.
+
+    Body: ``{"updates": {"<field>": <value>, ...}}`` — only fields in
+    BANKNOTE_SPEC_FILLABLE are accepted."""
+    db = get_db()
+    note = db.execute("SELECT * FROM banknotes WHERE id = ?",
+                      (record_id,)).fetchone()
+    if not note:
+        return jsonify({'error': 'Banknote not found'}), 404
+    data = request.get_json(force=True) or {}
+    raw = data.get('updates') or {}
+    if not isinstance(raw, dict):
+        return jsonify({'error': 'updates must be an object'}), 400
+
+    updates = {}
+    for k, v in raw.items():
+        if k not in BANKNOTE_SPEC_FILLABLE:
+            continue
+        coerced = _coerce_banknote_spec(k, v)
+        if coerced in (None, ''):
+            continue
+        updates[k] = coerced
+    if not updates:
+        return jsonify({'updated': 0, 'fields': []})
+
+    # Keep the display text columns in sync with the integer dates —
+    # same shadowing rule as coins.
+    def _date_text(n):
+        try:
+            return str(int(n))
+        except (TypeError, ValueError):
+            return ''
+
+    if 'date_1' in updates and not (note['date_1_text'] or '').strip():
+        updates['date_1_text'] = _date_text(updates['date_1'])
+    if 'date_2' in updates and not (note['date_2_text'] or '').strip():
+        updates['date_2_text'] = _date_text(updates['date_2'])
+
+    set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        f"UPDATE banknotes SET {set_clause}, updated_at = ? WHERE id = ?",
+        list(updates.values()) + [now, record_id],
+    )
+    if not note['cat_id']:
+        new_cat = next_serial_cat_id(db, 'banknotes', 'B')
+        db.execute("UPDATE banknotes SET cat_id = ? WHERE id = ?",
+                   (new_cat, record_id))
+        updates['cat_id'] = new_cat
+    db.commit()
+    return jsonify({
+        'updated': len(updates),
+        'fields': list(updates.keys()),
+        'values': updates,
+    })
+
+
 @app.route('/<category>/<record_id>/upload-image', methods=['POST'])
 def upload_image(category, record_id):
     """AJAX endpoint: drop an image on a list row to set its primary image."""
@@ -10758,6 +11511,7 @@ DOC_SETS_BY_CATEGORY = {
     'properties': {'main': 'documents'},
     'watches':    {'main': 'documents'},
     'coins':      {'main': 'documents'},
+    'banknotes':  {'main': 'documents'},
     'art':        {'main': 'documents'},
     'items':      {'main': 'documents'},
     'vehicles':   {'main': 'documents'},
@@ -14297,6 +15051,18 @@ EXPORT_LAYOUT = {
             ('image_2', 'Reverse', None),
         ],
     },
+    'banknotes': {
+        'group': lambda r: _g(r, 'country') or 'Unknown',
+        'ident': lambda r: ' '.join(filter(None, [
+            _g(r, 'cat_id') or '',
+            _g(r, 'country') or '',
+            _g(r, 'denomination') or '',
+        ])).strip() or _g(r, 'id')[:8],
+        'files': [
+            ('image_1', 'Front', None),
+            ('image_2', 'Back', None),
+        ],
+    },
     'properties': {
         'group': lambda r: _g(r, 'name') or 'Unknown',
         'ident': lambda r: _g(r, 'name') or _g(r, 'id')[:8],
@@ -14418,6 +15184,7 @@ EXPORT_LAYOUT = {
 IDENTITY_SLOTS_BY_CATEGORY = {
     'watches':      {'image_obv'},
     'coins':        {'image_1', 'image_2'},
+    'banknotes':    {'image_1', 'image_2'},
     'persons':      {'head_shot', 'license_obverse', 'license_reverse',
                      'health_card_obv', 'health_card_rev'},
     'credit_cards': {'image_front', 'image_back'},
@@ -14430,7 +15197,8 @@ def _identity_slots(category):
 
 # Pretty labels for the top-level category folders inside the zip.
 EXPORT_CATEGORY_LABELS = {
-    'watches': 'Watches', 'coins': 'Coins', 'properties': 'Properties',
+    'watches': 'Watches', 'coins': 'Coins', 'banknotes': 'Banknotes',
+    'properties': 'Properties',
     'credit_cards': 'Cards', 'persons': 'People', 'cameras': 'Cameras',
     'lenses': 'Lenses', 'pens': 'Pens', 'art': 'Art', 'vehicles': 'Vehicles',
     'recordings': 'Music', 'audio': 'Audio', 'rifles': 'Rifles',
@@ -15086,7 +15854,7 @@ def _parse_sweep_path(rel_path):
 # Accepts a 2+-digit serial (the live scheme is 3 digits, but old data
 # or hand-typed names with fewer digits still match) and tolerates any
 # of em-dash / en-dash / ASCII hyphen as the label separator.
-_CAT_ID_SWEEP_PREFIXES = {'C': 'coins', 'W': 'watches', 'A': 'art'}
+_CAT_ID_SWEEP_PREFIXES = {'C': 'coins', 'W': 'watches', 'A': 'art', 'B': 'banknotes'}
 _CAT_ID_SWEEP_RE = re.compile(
     r'^\s*([CWA]\d{2,})\b\s*(?:[—–-]\s*(.+?))?\s*$',
     re.IGNORECASE,
