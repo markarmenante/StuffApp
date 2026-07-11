@@ -162,7 +162,11 @@ VALUE_LISTS = {
     # Paper-money adjectival grades, PMG/PCGS-Banknote style, best first.
     'banknote_grade': ['Superb Gem UNC','Gem UNC','Choice UNC','UNC','cAU','AU','aAU',
                        'cEF','EF','aEF','cVF','VF','aVF','F','VG','G','Fair','Poor'],
-    'banknote_material': ['Paper','Cotton','Polymer','Hybrid'],
+    'banknote_material': ['Paper','Cotton','Polymer','Cardboard','Silk','Leather','Hybrid'],
+    # Notgeld is cataloged by locality, not national authority — the
+    # issue-type axis separates national issues from emergency money
+    # (and drives the list filter pill, like coins' Ancient/Modern).
+    'banknote_issue_type': ['National','Notgeld','Military / Occupation','Colonial','Private / Scrip','Specimen'],
     'clasp_type': ['Tang','Fold Over','Butterfly','Velcro'],
     'pen_type':      ['Fountain Pen', 'Ball Point', 'Roller Ball', 'Mechanical Pencil'],
     'pen_action':    ['Cap', 'Click', 'Twist'],
@@ -875,11 +879,18 @@ FIELDS = {
     'banknotes': [
         {'name': 'cat_id',          'label': 'Cat ID',            'type': 'text', 'readonly': True},
         {'name': 'country',         'label': 'Country',           'type': 'text'},
+        # Notgeld layer: emergency money is cataloged by the issuing
+        # town, in themed sets, with its own catalog numbering.
+        {'name': 'municipality',    'label': 'Municipality / Locality', 'type': 'text'},
+        {'name': 'issue_type',      'label': 'Issue Type',        'type': 'select',
+         'options': [''] + VALUE_LISTS['banknote_issue_type']},
         {'name': 'issuer',          'label': 'Issuing Bank / Authority', 'type': 'text'},
         {'name': 'official',        'label': 'Portrait / Ruler',  'type': 'text'},
         {'name': 'denomination',    'label': 'Denomination',      'type': 'text'},
-        {'name': 'series',          'label': 'Series / Issue',    'type': 'text'},
+        {'name': 'series',          'label': 'Series / Set',      'type': 'text'},
+        {'name': 'obv_rev',         'label': 'Obv/Rev',           'type': 'text'},
         {'name': 'pick_number',     'label': 'Pick #',            'type': 'text'},
+        {'name': 'other_catalog',   'label': 'Other Catalog #',   'type': 'text'},
         {'name': 'printer',         'label': 'Printer',           'type': 'text'},
         {'name': 'signatures',      'label': 'Signatures',        'type': 'text'},
         {'name': 'serial_number',   'label': 'Serial Number',     'type': 'text'},
@@ -891,6 +902,8 @@ FIELDS = {
         {'name': 'date_1',          'label': 'Date (year)',       'type': 'number'},
         {'name': 'date_1_text',     'label': 'Date (text)',       'type': 'text'},
         {'name': 'description',     'label': 'Description',       'type': 'textarea'},
+        {'name': 'lettering',       'label': 'Lettering / Inscriptions', 'type': 'textarea'},
+        {'name': 'lettering_translation', 'label': 'Translation', 'type': 'textarea'},
         {'name': 'note_references', 'label': 'References / Pedigree', 'type': 'textarea'},
         {'name': 'note_references_research', 'label': 'Reference Notes', 'type': 'textarea'},
         {'name': 'notes',           'label': 'Notes / Grade',     'type': 'textarea'},
@@ -1318,7 +1331,7 @@ def create_location_field(category):
 LIST_EXTRA_FIELDS = {
     'watches':      ['metal', 'reference', 'vendor', 'property'],
     'coins':        ['metal', 'denomination', 'date_1_text', 'grade'],
-    'banknotes':    ['denomination', 'pick_number', 'date_1_text', 'grade'],
+    'banknotes':    ['municipality', 'denomination', 'pick_number', 'date_1_text', 'grade'],
     'cameras':      ['digital_film', 'film_size', 'lens_mount', 'megapixels', 'serial_number', 'vendor', 'price', 'property'],
     'lenses':       ['mount', 'aperture', 'filter_size', 'length', 'serial_number', 'vendor', 'price', 'property'],
     'pens':         ['type', 'action', 'nib', 'cartridge', 'vendor', 'price', 'property'],
@@ -1408,6 +1421,13 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE art ADD COLUMN object_notes TEXT',
         'ALTER TABLE art ADD COLUMN art_searched_at TEXT',
+        # Notgeld layer on banknotes (table shipped before these).
+        'ALTER TABLE banknotes ADD COLUMN municipality TEXT',
+        'ALTER TABLE banknotes ADD COLUMN issue_type TEXT',
+        'ALTER TABLE banknotes ADD COLUMN other_catalog TEXT',
+        'ALTER TABLE banknotes ADD COLUMN obv_rev TEXT',
+        'ALTER TABLE banknotes ADD COLUMN lettering TEXT',
+        'ALTER TABLE banknotes ADD COLUMN lettering_translation TEXT',
         'ALTER TABLE coins ADD COLUMN official TEXT',
         'ALTER TABLE coins ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE coins ADD COLUMN grading_authority TEXT',
@@ -1888,6 +1908,17 @@ def init_db():
             ('drop_legacy_doc_columns_v1', datetime.utcnow().isoformat()),
         )
         db.commit()
+
+    # The Iran 100 Rials (B001) predates the issue_type axis — it's a
+    # national issue. Idempotent: only fills while issue_type is blank.
+    try:
+        db.execute(
+            "UPDATE banknotes SET issue_type = 'National' "
+            "WHERE id = '30cd6d98-3ae3-4a71-bf07-6d609e7ca58f' "
+            "AND (issue_type IS NULL OR TRIM(issue_type) = '')"
+        )
+    except sqlite3.OperationalError:
+        pass
 
     # Pen cartridges: fold the "Pilot-Namiki" variant into the canonical
     # "Pilot/Namiki" so the strict select doesn't reject existing rows.
@@ -4143,7 +4174,7 @@ def get_global_vendor_typeahead():
 TYPEAHEAD_FIELDS = {
     'watches':      ('brand', 'dial_color', 'strap_color', 'vendor'),
     'coins':        ('region', 'mint', 'denomination', 'vendor'),
-    'banknotes':    ('country', 'issuer', 'printer', 'vendor'),
+    'banknotes':    ('country', 'municipality', 'issuer', 'printer', 'vendor'),
     'art':          ('artist', 'medium', 'vendor', 'property', 'location'),
     # Items typeahead: only the fields still present in the form
     # (type/subtype/make/model were removed). `type` is the key one —
@@ -4399,6 +4430,11 @@ CATEGORY_FILTERS = {
         # actually left the collection (sold / gifted / lost). The
         # default list (no filter) hides these — see build_search_query.
         'no_longer_owned': ("LOWER(TRIM(COALESCE(status,''))) IN ('sold','gifted','lost')", []),
+    },
+    'banknotes': {
+        'notgeld':  ("LOWER(TRIM(COALESCE(issue_type,''))) = 'notgeld'", []),
+        'national': ("LOWER(TRIM(COALESCE(issue_type,''))) = 'national'", []),
+        'ordered':  ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
     },
     'coins': {
         'ancient':    ("date_1 <  500", []),
@@ -4670,6 +4706,7 @@ CATEGORY_ORDER_BY = {
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
     'banknotes': ("COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
+                  "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(NULLIF(issuer, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(date_1, 99999) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
@@ -6788,7 +6825,7 @@ def list_view(category):
     # row (or the user is already viewing filter=ordered and wants a
     # way to toggle back off).
     has_ordered = False
-    if category in ('coins', 'watches'):
+    if category in ('coins', 'watches', 'banknotes'):
         table = CATEGORIES[category]['table']
         has_ordered = db.execute(
             f"SELECT EXISTS(SELECT 1 FROM {table} "
@@ -9999,11 +10036,14 @@ def coin_apply_lookup_specs(record_id):
 # ---------------------------------------------------------------------------
 
 BANKNOTE_SPEC_FILLABLE = (
-    'country', 'issuer', 'official', 'denomination', 'series',
-    'pick_number', 'printer', 'signatures', 'serial_number', 'watermark',
+    'country', 'municipality', 'issue_type', 'issuer', 'official',
+    'denomination', 'series',
+    'pick_number', 'other_catalog', 'printer', 'signatures',
+    'serial_number', 'watermark',
     'material', 'date_1', 'size_width', 'size_height',
     'grade', 'grade_numeric', 'grading_authority', 'slab_number',
     'grade_condition', 'grade_modifier',
+    'lettering', 'lettering_translation',
 )
 
 BANKNOTE_SPECS_RESPONSE_SCHEMA = {
@@ -10011,10 +10051,13 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
     'additionalProperties': False,
     'properties': {
         **{f: _JSON_NULLABLE_STRING for f in (
-            'country', 'issuer', 'official', 'denomination', 'series',
-            'pick_number', 'printer', 'signatures', 'serial_number',
+            'country', 'municipality', 'issue_type', 'issuer', 'official',
+            'denomination', 'series',
+            'pick_number', 'other_catalog', 'printer', 'signatures',
+            'serial_number',
             'watermark', 'material', 'grade', 'grading_authority',
             'slab_number', 'grade_condition', 'grade_modifier',
+            'lettering', 'lettering_translation',
         )},
         'date_1': _JSON_NULLABLE_INTEGER,
         'grade_numeric': _JSON_NULLABLE_NUMBER,
@@ -10136,9 +10179,13 @@ def _banknote_description_fields(note):
 
 
 def fetch_banknote_specs(note):
-    """Fill missing identifying fields on a banknote via Claude + web
-    search. Same contract as fetch_coin_specs: returns {field: value}
-    with ONLY confident values; the dealer's text is authoritative."""
+    """Fill missing identifying fields on a banknote via Claude vision +
+    web search. Same contract as fetch_coin_specs: returns {field: value}
+    with ONLY confident values; the dealer's text is authoritative.
+
+    The note's own front/back images are attached, so the model can scan
+    the note directly — read and translate the lettering, and use text
+    printed on the note (town, dates, denomination, serial) as evidence."""
     known = {}
     for f in BANKNOTE_SPEC_FILLABLE:
         v = _coin_row_value(note, f)
@@ -10151,6 +10198,7 @@ def fetch_banknote_specs(note):
 
     grades = ', '.join(VALUE_LISTS['banknote_grade'])
     materials = ', '.join(VALUE_LISTS['banknote_material'])
+    issue_types = ', '.join(VALUE_LISTS['banknote_issue_type'])
     description = (_coin_row_value(note, 'description') or '').strip()
     pedigree = (_coin_row_value(note, 'note_references') or '').strip()
     grade_notes = (_coin_row_value(note, 'notes') or '').strip()
@@ -10166,31 +10214,36 @@ def fetch_banknote_specs(note):
 
     prompt = f"""You are extracting structured catalogue fields for one specific banknote (paper money).
 
-PRIMARY SOURCE — the selling dealer's own text for THIS note. It is authoritative: extract every field you can DIRECTLY from it.
+PRIMARY SOURCES for THIS note, in order of authority:
+1. The note's own images above (front/back, when attached) — direct evidence for everything printed ON the note: lettering, issuing town, dates, denomination, serial number, signatures.
+2. The selling dealer's own text below — authoritative for grading, attribution, and anything the images don't show.
 {dealer_text}
 
 Structured fields the user has already transcribed from the dealer:
 {known_lines}
 
 Rules:
-1. The dealer's text above is the source of truth. For each target field, FIRST take the value the dealer's text states.
-2. Only when the dealer's text does NOT mention a field may you use up to 3 web searches (Banknote catalogs: Standard Catalog of World Paper Money / Pick numbers, PMG population reports, Banknote World, Numista, Heritage Auctions, Stack's Bowers) to fill it. NEVER override a value the dealer's text states with a web guess.
-3. The grading fields (grading_authority, grade_numeric, slab_number, grade_modifier), the dates, and the grade must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
-4. Return null whenever a value is not supported by the text (or, for web-allowed fields, by a reputable source).
+1. For each target field, FIRST take what the note's images and the dealer's text state.
+2. Only when neither states a field may you use up to 3 web searches (Standard Catalog of World Paper Money / Pick numbers, Grabowski-Mehl and other notgeld catalogs, PMG population reports, Numista, Banknote World, Heritage Auctions, Stack's Bowers) to fill it. NEVER override a value the images or dealer's text state with a web guess.
+3. The grading fields (grading_authority, grade_numeric, slab_number, grade_modifier) and the grade must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
+4. Return null whenever a value is not supported by the images, the text, or (for web-allowed fields) a reputable source.
 
 Target fields:
-- country: issuing country as commonly catalogued (e.g. "Iran", "United States").
-- issuer: the issuing bank or authority (e.g. "Bank Melli Iran (National Bank)", "Federal Reserve").
+- country: issuing country as commonly catalogued (e.g. "Iran", "Germany").
+- municipality: the issuing town / locality for notgeld, emergency, or municipal issues (e.g. "Bielefeld") — usually printed prominently on the note itself. Null for national issues.
+- issue_type: EXACTLY one of [{issue_types}]. German/Austrian emergency money is "Notgeld"; state or central-bank issues are "National". Null if unclear.
+- issuer: the issuing bank or authority (e.g. "Bank Melli Iran (National Bank)", "Stadt Bielefeld").
 - official: the person portrayed or the ruler under whom the note was issued, as "Name" or "Name, role" (e.g. "Muhammad Reza Shah Pahlavi"). Null if none.
-- denomination: face value with currency (e.g. "100 Rials", "5 Pounds").
-- series: the series / issue name or year designation if catalogued (e.g. "Series 1928", "Third Issue"). Null if not stated.
-- pick_number: the Pick catalogue number formatted "P-<number><letter>" (e.g. "P-67", "P-102a").
-- printer: the printing firm (e.g. "Harrison & Sons", "Thomas De La Rue", "Bureau of Engraving and Printing").
-- signatures: signature combination as stated (e.g. "Nasser-Emami").
-- serial_number: THIS note's serial number if the text states it; else null.
+- denomination: face value with currency (e.g. "100 Rials", "50 Pfennig").
+- series: the series / set name or year designation if catalogued — notgeld was often issued in themed sets (e.g. "Series 1928", "Leinen-Ausgabe"). Null if not stated.
+- pick_number: the Pick catalogue number formatted "P-<number><letter>" (e.g. "P-67", "P-102a"). Null if the issue isn't Pick-catalogued (most notgeld).
+- other_catalog: specialized catalogue reference(s) beyond Pick, verbatim as cited — Grabowski/Mehl, Rosenberg, Lamb, Funck, Menzel, Tieste (e.g. "Grabowski Bi.7.5", "Rosenberg 74b"). Comma-separated if several; else null.
+- printer: the printing firm (e.g. "Harrison & Sons", "Thomas De La Rue"; notgeld was often locally printed).
+- signatures: signature combination as stated or visible (e.g. "Nasser-Emami").
+- serial_number: THIS note's serial number, from the images or the text; else null.
 - watermark: watermark description if stated or catalogued (e.g. "Young Shah portrait").
 - material: EXACTLY one of [{materials}]; null if unknown.
-- date_1: integer Gregorian year of issue (e.g. 1954). If the note is dated in a local era (SH/AH/BE), convert to the Gregorian year the dealer gives; do not compute your own conversion unless the dealer states it.
+- date_1: integer Gregorian year of issue (e.g. 1954, 1921). A date printed on the note counts as direct evidence. If the note is dated in a local era (SH/AH/BE), convert to the Gregorian year the dealer gives; do not compute your own conversion unless the dealer states it.
 - size_width: printed note width in mm (float); size_height: height in mm (float).
 - grade: map the dealer's stated grade to EXACTLY one of [{grades}] (c = choice, a = about; "Super Gem UNC" → "Superb Gem UNC"; XF → EF). Null if outside the list.
 - grade_numeric: the numeric grade 1-70 if a grading service number is stated (e.g. "PMG-64" → 64); else null.
@@ -10198,16 +10251,21 @@ Target fields:
 - slab_number: the certification number if stated, verbatim; else null.
 - grade_condition: condition qualifier(s) noted alongside the grade — e.g. "minor rust", "pinholes", "annotation", "small tear". Comma-separated, lowercase; else null.
 - grade_modifier: "EPQ" when the text shows EPQ (Exceptional Paper Quality), "★" for a star designation, "EPQ★" for both, "+" for a plus grade. Else null.
+- lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text.
+- lettering_translation: English translation of each lettering line, same order and same Front:/Back: prefixes. Transliterate non-Latin scripts in parentheses where helpful. Null if lettering is null or already English.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
-  "country": null, "issuer": null, "official": null, "denomination": null,
-  "series": null, "pick_number": null, "printer": null, "signatures": null,
+  "country": null, "municipality": null, "issue_type": null,
+  "issuer": null, "official": null, "denomination": null,
+  "series": null, "pick_number": null, "other_catalog": null,
+  "printer": null, "signatures": null,
   "serial_number": null, "watermark": null, "material": null,
   "date_1": null, "size_width": null, "size_height": null,
   "grade": null, "grade_numeric": null, "grading_authority": null,
   "slab_number": null, "grade_condition": null, "grade_modifier": null,
-  "sources": "one-line note of where each value came from (dealer text vs which web source)"
+  "lettering": null, "lettering_translation": null,
+  "sources": "one-line note of where each value came from (note images vs dealer text vs which web source)"
 }}
 """
 
@@ -10222,6 +10280,24 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(4)
+
+    # Scan the note itself: attach front/back images ahead of the prompt
+    # so the model reads the lettering and printed details directly.
+    # Missing/unreadable files degrade to a text-only lookup.
+    images = _load_vision_images((
+        (_coin_row_value(note, 'image_1'), 'front'),
+        (_coin_row_value(note, 'image_2'), 'back'),
+    ))
+    content = []
+    for img in images:
+        content.append({'type': 'text', 'text': f'{img["label"].capitalize()} of the note:'})
+        content.append({'type': 'image', 'source': {
+            'type': 'base64',
+            'media_type': img['media_type'],
+            'data': img['data'],
+        }})
+    content.append({'type': 'text', 'text': prompt})
+
     import time as _time
     transient_errs = (
         anthropic.RateLimitError,
@@ -10235,9 +10311,9 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
         try:
             resp = client.messages.create(
                 model=lookup_model,
-                max_tokens=1024,
+                max_tokens=2048,
                 tools=[web_search],
-                messages=[{'role': 'user', 'content': prompt}],
+                messages=[{'role': 'user', 'content': content}],
             )
             break
         except transient_errs as e:
@@ -10272,6 +10348,16 @@ def _coerce_banknote_spec(field, raw):
             return None
         allowed = {m.lower(): m for m in VALUE_LISTS['banknote_material']}
         return allowed.get(raw.strip().lower())
+    if field == 'issue_type':
+        if not isinstance(raw, str):
+            return None
+        allowed = {t.lower(): t for t in VALUE_LISTS['banknote_issue_type']}
+        v = raw.strip().lower()
+        # Common shorthand → canonical axis values.
+        v = {'emergency': 'notgeld', 'military': 'military / occupation',
+             'occupation': 'military / occupation', 'scrip': 'private / scrip',
+             'private': 'private / scrip'}.get(v, v)
+        return allowed.get(v)
     if field in ('date_1', 'date_2'):
         try:
             return int(raw)

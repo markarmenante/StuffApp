@@ -1211,14 +1211,32 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <!-- Row 2: Portrait/Ruler | Series -->
+  <!-- Row 2: Municipality (notgeld) | Issue Type -->
+  <div class="dgrid dg2 coin-top-row">
+    <div class="dcell ta-wrap">
+      <input type="text" name="municipality" value="{{ val('municipality') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('municipality', [])|join('||') }}"
+             {% if is_new and not val('municipality') %}placeholder="Municipality (notgeld)"{% endif %}>
+      <span class="clabel">Municipality</span>
+    </div>
+    <div class="dcell">
+      <select name="issue_type"><option value=""></option>{% for o in vlists.banknote_issue_type %}<option value="{{ o }}" {{ 'selected' if val('issue_type')==o }}>{{ o }}</option>{% endfor %}</select>
+      <span class="clabel">Issue Type</span>
+    </div>
+  </div>
+
+  <!-- Row 3: Portrait/Ruler | Series/Set -->
   <div class="dgrid dg2 coin-top-row">
     <div class="dcell">
       <input type="text" name="official" value="{{ val('official') }}"
              {% if is_new and not val('official') %}placeholder="Portrait / ruler"{% endif %}>
       <span class="clabel">Portrait</span>
     </div>
-    {{ cell('series','Series / Issue') }}
+    {{ cell('series','Series / Set') }}
+  </div>
+
+  <!-- Row 4: Obv/Rev one-liner — full width, like coins -->
+  <div class="dgrid dg1 coin-top-row">
+    {{ cell('obv_rev','Obv/Rev one-liner') }}
   </div>
 
   <!-- Banknote images (front + back) — pinned near the top like coins. -->
@@ -1278,8 +1296,9 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   <!-- Catalogue / production -->
-  <div class="dgrid dg3">
+  <div class="dgrid" style="grid-template-columns: 0.8fr 1.2fr 1fr 1fr;">
     {{ cell('pick_number','Pick #') }}
+    {{ cell('other_catalog','Other Catalog # (Grabowski…)') }}
     <div class="dcell ta-wrap">
       <input type="text" name="printer" value="{{ val('printer') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('printer', [])|join('||') }}"
              {% if is_new and not val('printer') %}placeholder="Printer"{% endif %}>
@@ -1332,6 +1351,21 @@ document.addEventListener('DOMContentLoaded', function () {
   <div class="dgrid dg1">
     <div class="dcell">
       <textarea name="description" rows="8" {% if is_new and not _desc %}placeholder="Description"{% endif %}>{{ _desc }}</textarea>
+    </div>
+  </div>
+
+  <!-- Lettering / Translation — filled by Check scanning the note images -->
+  <div class="section-bar">Lettering &amp; Translation</div>
+  <div class="dgrid dg2 banknote-lettering-row">
+    <div class="dcell">
+      <textarea name="lettering" rows="5" data-autogrow="1"
+                {% if is_new and not val('lettering') %}placeholder="Inscriptions on the note (original script)"{% endif %}>{{ val('lettering') }}</textarea>
+      <span class="clabel">Lettering</span>
+    </div>
+    <div class="dcell">
+      <textarea name="lettering_translation" rows="5" data-autogrow="1"
+                {% if is_new and not val('lettering_translation') %}placeholder="English translation"{% endif %}>{{ val('lettering_translation') }}</textarea>
+      <span class="clabel">Translation</span>
     </div>
   </div>
 

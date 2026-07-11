@@ -59,6 +59,19 @@
   <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
      title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
   {% endif %}
+  {% if category == 'banknotes' and not at_property %}
+  {# One pill cycling the issue-type axis: Notgeld → National → All. #}
+  {%- set _bn_next = 'national' if coin_filter == 'notgeld' else (None if coin_filter == 'national' else 'notgeld') -%}
+  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=_bn_next) }}"
+     class="toolbar-btn pill {% if coin_filter in ('notgeld', 'national') %}active{% endif %}"
+     title="Cycle issue type: Notgeld → National → All">{{ 'Notgeld' if coin_filter == 'notgeld' else ('National' if coin_filter == 'national' else 'Type: All') }}</a>
+  {% if has_ordered or coin_filter == 'ordered' %}
+  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
+     class="toolbar-btn pill ordered-filter-pill {% if coin_filter == 'ordered' %}active{% endif %}"
+     title="Banknotes with status Ordered"
+     aria-label="Banknotes with status Ordered"><span class="ordered-filter-dot"></span></a>
+  {% endif %}
+  {% endif %}
   {% if category == 'watches' and not at_property %}
   {% if has_ordered or coin_filter == 'ordered' %}
   <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
@@ -261,14 +274,18 @@
 
       {# ── BANKNOTES ── #}
       {% elif category == 'banknotes' %}
+        {# Notgeld reads by town first: a page of German notes would all
+           say "Germany", so the municipality leads when present. #}
         <div class="item-line1">
-          <span class="item-brand">{{ row['country'] or row['issuer'] or '—' }}</span>
+          <span class="item-brand">{{ row['municipality'] or row['country'] or row['issuer'] or '—' }}</span>
           {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
         </div>
         <div class="item-detail-rows">
           <div class="idr">
+            {% if row['municipality'] and row['country'] %}<span>{{ row['country'] }}</span>{% endif %}
             {% if row['issuer'] %}<span>{{ row['issuer'] }}</span>{% endif %}
             {% if row['pick_number'] %}<span><span class="lbl">Pick</span> {{ row['pick_number'] }}</span>{% endif %}
+            {% if row['other_catalog'] %}<span>{{ row['other_catalog'] }}</span>{% endif %}
           </div>
           <div class="idr">
             {% if row['date_1_text'] %}<span>{{ row['date_1_text'] }}</span>{% endif %}
