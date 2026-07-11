@@ -10057,7 +10057,7 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
             'serial_number',
             'watermark', 'material', 'grade', 'grading_authority',
             'slab_number', 'grade_condition', 'grade_modifier',
-            'lettering', 'lettering_translation',
+            'lettering', 'lettering_translation', 'history_context',
         )},
         'date_1': _JSON_NULLABLE_INTEGER,
         'grade_numeric': _JSON_NULLABLE_NUMBER,
@@ -10253,6 +10253,7 @@ Target fields:
 - grade_modifier: "EPQ" when the text shows EPQ (Exceptional Paper Quality), "★" for a star designation, "EPQ★" for both, "+" for a plus grade. Else null.
 - lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text.
 - lettering_translation: English translation of each lettering line, same order and same Front:/Back: prefixes. Transliterate non-Latin scripts in parentheses where helpful. Null if lettering is null or already English.
+- history_context: a VERY SHORT historical-context narrative — 2-3 sentences, under 70 words. Why this note existed: who issued it, what was happening then and there (hyperinflation, war, occupation, nationalization, currency reform), and anything notable about this type. Plain prose, no headings, no citations inline. Web searches allowed. Null if you cannot say anything reliable.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
@@ -10264,7 +10265,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "date_1": null, "size_width": null, "size_height": null,
   "grade": null, "grade_numeric": null, "grading_authority": null,
   "slab_number": null, "grade_condition": null, "grade_modifier": null,
-  "lettering": null, "lettering_translation": null,
+  "lettering": null, "lettering_translation": null, "history_context": null,
   "sources": "one-line note of where each value came from (note images vs dealer text vs which web source)"
 }}
 """
@@ -10482,6 +10483,14 @@ def banknote_lookup_specs(record_id):
 
     filled = {}
     overwritten = {}
+    # Short historical narrative → the "Historical Context, Notes" field
+    # (the `condition` column, coins convention). Fill-only: an existing
+    # note is the user's own and is never proposed for overwrite.
+    hc = suggestions.get('history_context')
+    if isinstance(hc, str) and hc.strip() and not (
+        _coin_row_value(note, 'condition') or ''
+    ).strip():
+        filled['condition'] = hc.strip()
     for f in BANKNOTE_SPEC_FILLABLE:
         v = _coerce_banknote_spec(f, suggestions.get(f))
         if v in (None, ''):
@@ -10539,7 +10548,10 @@ def banknote_apply_lookup_specs(record_id):
 
     updates = {}
     for k, v in raw.items():
-        if k not in BANKNOTE_SPEC_FILLABLE:
+        # `condition` carries the Check-generated historical narrative
+        # (fill-only, proposed by the lookup route) alongside the spec
+        # fields.
+        if k not in BANKNOTE_SPEC_FILLABLE and k != 'condition':
             continue
         coerced = _coerce_banknote_spec(k, v)
         if coerced in (None, ''):
