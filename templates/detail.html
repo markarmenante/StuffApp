@@ -1245,8 +1245,8 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <!-- Denomination / Material / Date 1 / Date 2 / Age -->
-  <div class="dgrid" style="grid-template-columns: repeat(5, 1fr);">
+  <!-- Denomination / Material / Date / Age -->
+  <div class="dgrid" style="grid-template-columns: repeat(4, 1fr);">
     <div class="dcell">
       <input type="text" name="denomination" value="{{ val('denomination') }}"
              {% if is_new and not val('denomination') %}placeholder="Denomination"{% endif %}>
@@ -1268,23 +1268,8 @@ document.addEventListener('DOMContentLoaded', function () {
              style="text-align:center" readonly>
       <input type="hidden" name="date_1_text" id="hDate1Text" value="{{ _d1_disp }}">
       <button type="button" class="coin-date-edit-btn" data-target="dateFrom"
-              title="Edit Date 1" aria-label="Edit Date 1">✎</button>
-      <span class="clabel">Date 1</span>
-    </div>
-    <div class="dcell coin-date-cell" style="text-align:center">
-      {% set _d2 = val('date_2') %}
-      {%- if val('date_2_text') %}{% set _d2_disp = val('date_2_text') %}
-      {%- elif _d2 %}{% set _d2_disp = (_d2|int|abs|string) ~ (' BC' if _d2|int < 0 else '') %}
-      {%- else %}{% set _d2_disp = '' %}{% endif %}
-      <input type="text" name="date_2" id="dateTo" class="coin-date-input"
-             data-raw="{{ _d2 }}" value="{{ _d2_disp }}"
-             inputmode="numeric"
-             {% if is_new and not _d2 %}placeholder="(opt)"{% endif %}
-             style="text-align:center" readonly>
-      <input type="hidden" name="date_2_text" id="hDate2Text" value="{{ _d2_disp }}">
-      <button type="button" class="coin-date-edit-btn" data-target="dateTo"
-              title="Edit Date 2" aria-label="Edit Date 2">✎</button>
-      <span class="clabel">Date 2</span>
+              title="Edit Date" aria-label="Edit Date">✎</button>
+      <span class="clabel">Date</span>
     </div>
     <div class="dcell coin-age-cell" style="text-align:center">
       {% if coin_age_val %}{{ '{:,}'.format(coin_age_val) }} yrs{% endif %}

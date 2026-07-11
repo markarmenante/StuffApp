@@ -271,7 +271,7 @@
             {% if row['pick_number'] %}<span><span class="lbl">Pick</span> {{ row['pick_number'] }}</span>{% endif %}
           </div>
           <div class="idr">
-            {% if row['date_1_text'] %}<span>{{ row['date_1_text'] }}{% if row['date_2_text'] %} – {{ row['date_2_text'] }}{% endif %}</span>{% endif %}
+            {% if row['date_1_text'] %}<span>{{ row['date_1_text'] }}</span>{% endif %}
             {% if row['grade'] %}<span>{{ coin_grade_display(row['grade'], row['grade_modifier']) }}{% if row['grade_numeric'] %} {{ row['grade_numeric']|int }}{% endif %}</span>{% endif %}
           </div>
           <div class="idr" style="display:flex;align-items:center;width:100%;gap:14px;">

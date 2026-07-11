@@ -886,10 +886,10 @@ FIELDS = {
         {'name': 'watermark',       'label': 'Watermark',         'type': 'text'},
         {'name': 'material',        'label': 'Material',          'type': 'select',
          'options': [''] + VALUE_LISTS['banknote_material']},
-        {'name': 'date_1',          'label': 'Date From (year)',  'type': 'number'},
-        {'name': 'date_1_text',     'label': 'Date From (text)',  'type': 'text'},
-        {'name': 'date_2',          'label': 'Date To (year)',    'type': 'number'},
-        {'name': 'date_2_text',     'label': 'Date To (text)',    'type': 'text'},
+        # date_2 / date_2_text columns exist in the table but are not
+        # surfaced — banknotes carry a single issue year.
+        {'name': 'date_1',          'label': 'Date (year)',       'type': 'number'},
+        {'name': 'date_1_text',     'label': 'Date (text)',       'type': 'text'},
         {'name': 'description',     'label': 'Description',       'type': 'textarea'},
         {'name': 'note_references', 'label': 'References / Pedigree', 'type': 'textarea'},
         {'name': 'note_references_research', 'label': 'Reference Notes', 'type': 'textarea'},
@@ -10001,7 +10001,7 @@ def coin_apply_lookup_specs(record_id):
 BANKNOTE_SPEC_FILLABLE = (
     'country', 'issuer', 'official', 'denomination', 'series',
     'pick_number', 'printer', 'signatures', 'serial_number', 'watermark',
-    'material', 'date_1', 'date_2', 'size_width', 'size_height',
+    'material', 'date_1', 'size_width', 'size_height',
     'grade', 'grade_numeric', 'grading_authority', 'slab_number',
     'grade_condition', 'grade_modifier',
 )
@@ -10017,7 +10017,6 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
             'slab_number', 'grade_condition', 'grade_modifier',
         )},
         'date_1': _JSON_NULLABLE_INTEGER,
-        'date_2': _JSON_NULLABLE_INTEGER,
         'grade_numeric': _JSON_NULLABLE_NUMBER,
         'size_width': _JSON_NULLABLE_NUMBER,
         'size_height': _JSON_NULLABLE_NUMBER,
@@ -10192,7 +10191,6 @@ Target fields:
 - watermark: watermark description if stated or catalogued (e.g. "Young Shah portrait").
 - material: EXACTLY one of [{materials}]; null if unknown.
 - date_1: integer Gregorian year of issue (e.g. 1954). If the note is dated in a local era (SH/AH/BE), convert to the Gregorian year the dealer gives; do not compute your own conversion unless the dealer states it.
-- date_2: integer year ending a range; null if not a range.
 - size_width: printed note width in mm (float); size_height: height in mm (float).
 - grade: map the dealer's stated grade to EXACTLY one of [{grades}] (c = choice, a = about; "Super Gem UNC" → "Superb Gem UNC"; XF → EF). Null if outside the list.
 - grade_numeric: the numeric grade 1-70 if a grading service number is stated (e.g. "PMG-64" → 64); else null.
@@ -10206,7 +10204,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "country": null, "issuer": null, "official": null, "denomination": null,
   "series": null, "pick_number": null, "printer": null, "signatures": null,
   "serial_number": null, "watermark": null, "material": null,
-  "date_1": null, "date_2": null, "size_width": null, "size_height": null,
+  "date_1": null, "size_width": null, "size_height": null,
   "grade": null, "grade_numeric": null, "grading_authority": null,
   "slab_number": null, "grade_condition": null, "grade_modifier": null,
   "sources": "one-line note of where each value came from (dealer text vs which web source)"
@@ -10354,7 +10352,7 @@ def banknote_lookup_specs(record_id):
 
     # Grading + date fields are dealer-authoritative: only propose a
     # value the dealer's own text backs (same principle as coins).
-    DEALER_FIELDS = {'date_1', 'date_2', 'grade', 'grade_numeric',
+    DEALER_FIELDS = {'date_1', 'grade', 'grade_numeric',
                      'grading_authority', 'slab_number', 'grade_condition',
                      'grade_modifier', 'pick_number', 'serial_number'}
     dealer_text = ' '.join(
@@ -10474,8 +10472,6 @@ def banknote_apply_lookup_specs(record_id):
 
     if 'date_1' in updates and not (note['date_1_text'] or '').strip():
         updates['date_1_text'] = _date_text(updates['date_1'])
-    if 'date_2' in updates and not (note['date_2_text'] or '').strip():
-        updates['date_2_text'] = _date_text(updates['date_2'])
 
     set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
     now = datetime.utcnow().isoformat()
