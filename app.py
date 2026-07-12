@@ -10044,6 +10044,7 @@ BANKNOTE_SPEC_FILLABLE = (
     'grade', 'grade_numeric', 'grading_authority', 'slab_number',
     'grade_condition', 'grade_modifier',
     'lettering', 'lettering_translation',
+    'vendor', 'price', 'purchase_date',
 )
 
 BANKNOTE_SPECS_RESPONSE_SCHEMA = {
@@ -10058,6 +10059,7 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
             'watermark', 'material', 'grade', 'grading_authority',
             'slab_number', 'grade_condition', 'grade_modifier',
             'lettering', 'lettering_translation', 'history_context',
+            'vendor', 'price', 'purchase_date',
         )},
         'date_1': _JSON_NULLABLE_INTEGER,
         'grade_numeric': _JSON_NULLABLE_NUMBER,
@@ -10069,6 +10071,39 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
 }
 
 
+def _format_purchase_price(raw):
+    """Normalize a matched dollar amount to the app's manual-entry style
+    ("$2,000", "$175", "$449.50"). Returns None when unparseable."""
+    digits = re.sub(r'[^\d.]', '', str(raw or ''))
+    if not digits or digits == '.':
+        return None
+    try:
+        n = float(digits)
+    except ValueError:
+        return None
+    if n <= 0 or n >= 10_000_000:
+        return None
+    if n == int(n):
+        return f'${int(n):,}'
+    return f'${n:,.2f}'
+
+
+def _parse_purchase_date(raw):
+    """Parse a dealer-text purchase date ("July 11th, 2026", "2026-07-11",
+    "7/11/2026") to ISO YYYY-MM-DD. Returns None when unparseable."""
+    text = re.sub(r'(\d{1,2})(?:st|nd|rd|th)\b', r'\1', str(raw or '').strip())
+    text = re.sub(r'\s+', ' ', text).strip(' ,')
+    for fmt in ('%Y-%m-%d', '%B %d, %Y', '%B %d %Y', '%b %d, %Y', '%b %d %Y',
+                '%m/%d/%Y', '%m/%d/%y'):
+        try:
+            d = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if 1900 <= d.year <= 2100:
+            return d.strftime('%Y-%m-%d')
+    return None
+
+
 def _banknote_description_fields(note):
     """Read paper-money fields the dealer's own description states.
 
@@ -10076,7 +10111,66 @@ def _banknote_description_fields(note):
     a missing API key can never stop Check from filling what the record
     already spells out."""
     description = str(_coin_row_value(note, 'description') or '')
+    # Purchase facts may sit in the pedigree/notes fields rather than the
+    # description proper — parse those from the combined dealer text.
+    purchase_text = '\n'.join(
+        t for t in (
+            description,
+            str(_coin_row_value(note, 'note_references') or ''),
+            str(_coin_row_value(note, 'notes') or ''),
+        ) if t.strip()
+    )
     out = {}
+
+    # Purchase facts the pasted listing/invoice states. Dealer-inventory
+    # dumps label the paid price "My Cost" (Stack's Bowers collector
+    # pages), invoices say "purchase price" / "paid"; prose says
+    # "purchased ... for $450". Only labelled or purchase-verb-tied
+    # amounts count — a bare $ figure could be a catalog value.
+    m = re.search(
+        r'\b(?:my\s+cost|purchase\s+price|price\s+paid|total\s+paid|paid)\b'
+        r'[:\s]*\$?\s*([\d][\d,]*(?:\.\d{1,2})?)',
+        purchase_text, re.IGNORECASE)
+    if not m:
+        m = re.search(
+            r'\b(?:purchased|bought|acquired)\b[^.;\n]{0,60}?'
+            r'\bfor\s+\$\s*([\d][\d,]*(?:\.\d{1,2})?)',
+            purchase_text, re.IGNORECASE)
+    if m:
+        price = _format_purchase_price(m.group(1))
+        if price:
+            out['price'] = price
+
+    # Vendor: only an explicit label or purchase verb — dealer branding
+    # ("Stack's Bowers Galleries" letterhead) is left to the model, which
+    # can judge whether a name is the seller or just a mention.
+    m = re.search(
+        r'\b(?:purchased|bought|acquired)\s+from\s+([^.;,\n\t(]{3,60})',
+        purchase_text, re.IGNORECASE)
+    if not m:
+        m = re.search(r'\b(?:vendor|dealer|seller|sold\s+by)\b[:\s]+([^.;,\n\t(]{3,60})',
+                      purchase_text, re.IGNORECASE)
+    if m:
+        vendor = re.sub(r'\s+(?:on|in|at|for)\s+.*$', '', m.group(1)).strip(' -')
+        if len(vendor) >= 3:
+            out['vendor'] = vendor
+
+    # Purchase date: "PURCHASE DATE  July 11th, 2026", "purchased on
+    # 7/11/2026", "bought from X on March 3, 2024".
+    _date_alts = (r'([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}'
+                  r'|\d{4}-\d{2}-\d{2}'
+                  r'|\d{1,2}/\d{1,2}/\d{2,4})')
+    m = re.search(r'\bpurchase[d]?\s*(?:date|on)?\b[:\s]*' + _date_alts,
+                  purchase_text, re.IGNORECASE)
+    if not m:
+        m = re.search(
+            r'\b(?:purchased|bought|acquired)\b[^.;\n]{0,60}?\bon\s+' + _date_alts,
+            purchase_text, re.IGNORECASE)
+    if m:
+        parsed = _parse_purchase_date(m.group(1))
+        if parsed:
+            out['purchase_date'] = parsed
+
     if not description.strip():
         return out
 
@@ -10226,7 +10320,8 @@ Rules:
 1. For each target field, FIRST take what the note's images and the dealer's text state.
 2. Only when neither states a field may you use up to 3 web searches (Standard Catalog of World Paper Money / Pick numbers, Grabowski-Mehl and other notgeld catalogs, PMG population reports, Numista, Banknote World, Heritage Auctions, Stack's Bowers) to fill it. NEVER override a value the images or dealer's text state with a web guess.
 3. The grading fields (grading_authority, grade_numeric, slab_number, grade_modifier) and the grade must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
-4. Return null whenever a value is not supported by the images, the text, or (for web-allowed fields) a reputable source.
+4. The purchase fields (vendor, price, purchase_date) must come ONLY from the text and images on file — an invoice line, "My Cost", "purchased from", or the listing's own branding. NEVER web-search them, and NEVER report a catalog value, price guide figure, auction estimate, or another sale's realized price as the price paid. Return null if the material on file does not state them.
+5. Return null whenever a value is not supported by the images, the text, or (for web-allowed fields) a reputable source.
 
 Target fields:
 - country: issuing country as commonly catalogued (e.g. "Iran", "Germany").
@@ -10254,6 +10349,9 @@ Target fields:
 - lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text.
 - lettering_translation: English translation of each lettering line, same order and same Front:/Back: prefixes. Transliterate non-Latin scripts in parentheses where helpful. Null if lettering is null or already English.
 - history_context: a VERY SHORT historical-context narrative — 2-3 sentences, under 70 words. Why this note existed: who issued it, what was happening then and there (hyperinflation, war, occupation, nationalization, currency reform), and anything notable about this type. Plain prose, no headings, no citations inline. Web searches allowed. Null if you cannot say anything reliable.
+- vendor: the dealer or auction house THIS note was purchased from, only when the material on file identifies it — an explicit "purchased from X" / vendor / seller line, an invoice, or the pasted listing's own branding or letterhead (a Stack's Bowers inventory page means vendor "Stack's Bowers"; a Heritage lot page means "Heritage Auctions"). A firm merely mentioned in the pedigree ("ex Spink sale") is prior provenance, not the vendor — when in doubt, null.
+- price: the price PAID for this note, only when the material on file states it ("My Cost", "purchase price", "paid", an invoice total, "purchased for $X"). Format "$1,234" or "$1,234.56". This is never a catalog value, estimate, or price guide figure.
+- purchase_date: the date THIS note was purchased, as "YYYY-MM-DD", only when the material on file states it ("Purchase Date July 11th, 2026" → "2026-07-11"). Null otherwise.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
@@ -10266,6 +10364,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "grade": null, "grade_numeric": null, "grading_authority": null,
   "slab_number": null, "grade_condition": null, "grade_modifier": null,
   "lettering": null, "lettering_translation": null, "history_context": null,
+  "vendor": null, "price": null, "purchase_date": null,
   "sources": "one-line note of where each value came from (note images vs dealer text vs which web source)"
 }}
 """
@@ -10392,9 +10491,13 @@ def _coerce_banknote_spec(field, raw):
         if 'epq' in v.lower():
             return 'EPQ★' if ('★' in v or 'star' in v.lower()) else 'EPQ'
         return normalize_grade_modifier(v)
+    if field == 'price':
+        return _format_purchase_price(raw)
+    if field == 'purchase_date':
+        return _parse_purchase_date(raw)
     if field in ('pick_number', 'slab_number', 'serial_number',
                  'grade_condition', 'printer', 'signatures', 'watermark',
-                 'series'):
+                 'series', 'vendor'):
         v = (raw if isinstance(raw, str) else str(raw)).strip()
         return v or None
     if isinstance(raw, str):
@@ -10437,11 +10540,13 @@ def banknote_lookup_specs(record_id):
     ):
         return jsonify({'error': lookup_error}), lookup_status
 
-    # Grading + date fields are dealer-authoritative: only propose a
-    # value the dealer's own text backs (same principle as coins).
+    # Grading + date + purchase fields are dealer-authoritative: only
+    # propose a value the dealer's own text backs (same principle as
+    # coins). Purchase facts especially must never be model guesses.
     DEALER_FIELDS = {'date_1', 'grade', 'grade_numeric',
                      'grading_authority', 'slab_number', 'grade_condition',
-                     'grade_modifier', 'pick_number', 'serial_number'}
+                     'grade_modifier', 'pick_number', 'serial_number',
+                     'vendor', 'price', 'purchase_date'}
     dealer_text = ' '.join(
         str(_coin_row_value(note, c) or '')
         for c in ('description', 'note_references', 'condition', 'notes')
@@ -10479,6 +10584,38 @@ def banknote_lookup_specs(record_id):
             if '+' in v and '+' not in dealer_text:
                 return False
             return True
+        if field == 'price':
+            # The paid amount must appear in the dealer text ("$2,000",
+            # "2000", "2,000.00") — a plausible-looking price the model
+            # produced from a catalog value is rejected here.
+            digits = re.sub(r'[^\d.]', '', str(value))
+            try:
+                n = float(digits) if digits else None
+            except ValueError:
+                n = None
+            if n is None:
+                return False
+            forms = {f'{int(n):,}', str(int(n))}
+            if n != int(n):
+                forms |= {f'{n:,.2f}', f'{n:.2f}'}
+            return any(f in dealer_text for f in forms)
+        if field == 'vendor':
+            # The named firm must actually appear in the dealer text:
+            # first token always, and at least half the tokens overall.
+            tokens = re.findall(r'[a-z0-9]{3,}', str(value).lower())
+            if not tokens:
+                return False
+            hits = sum(1 for t in tokens if t in _dealer_text_key)
+            return tokens[0] in _dealer_text_key and hits * 2 >= len(tokens)
+        if field == 'purchase_date':
+            try:
+                year = int(str(value)[:4])
+            except (TypeError, ValueError):
+                return False
+            lowered = dealer_text.lower()
+            return year in _dealer_years and any(
+                k in lowered for k in ('purchas', 'bought', 'acquired', 'invoice')
+            )
         return True
 
     filled = {}
