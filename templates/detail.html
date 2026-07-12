@@ -4286,15 +4286,19 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (recordExists) return Promise.resolve();
     if (creatingPromise) return creatingPromise;
     const fd = new FormData(form);
-    // keepalive so a Back-button before the response lands still
-    // creates the row server-side. The form's pre-filled defaults
-    // (status, date, owner) are in the FormData, so even a single
-    // typed character produces a complete row.
+    // keepalive lets a Back-click race still land the create, BUT
+    // keepalive bodies are hard-capped at 64KiB and the fetch REJECTS
+    // outright beyond that. Images added on the add form ride in this
+    // FormData, so the images-first flow was killing every create (and
+    // with it all autosave + Check). Only keep keepalive for small,
+    // file-less bodies; the pagehide beacon covers leave-page creates.
+    const hasFiles = Array.from(form.querySelectorAll('input[type=file]'))
+      .some(inp => inp.files && inp.files.length > 0);
     creatingPromise = fetch(form.action, {
       method: 'POST',
       headers: { 'Accept': 'application/json' },
       body: fd,
-      keepalive: true,
+      keepalive: !hasFiles,
     })
       .then(r => r.json())
       .then(d => {
@@ -4419,6 +4423,25 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // reliably (incl. Safari); saveField's keepalive fetch survives the
   // navigation. Non-empty values only — this can add, never erase.
   window.addEventListener('pagehide', function () {
+    // Record not created yet (images-first add, then straight to Back):
+    // beacon a text-only copy of the form so the row still lands.
+    // Files are stripped — beacons share the same 64KiB cap that broke
+    // the keepalive create — so images are the one thing a hard exit
+    // can lose. Only fires when the user actually typed something.
+    if (!recordExists && !creatingPromise) {
+      const typed = Array.from(form.querySelectorAll(
+        'input[type=text], textarea'
+      )).some(inp => (inp.value || '').trim() !== '');
+      if (typed && navigator.sendBeacon) {
+        const fd = new FormData(form);
+        for (const key of Array.from(fd.keys())) {
+          const v = fd.get(key);
+          if (v instanceof File) fd.delete(key);
+        }
+        try { navigator.sendBeacon(form.action, fd); } catch (e) { /* best effort */ }
+      }
+      return;
+    }
     const el = document.activeElement;
     if (!el || !el.name || !form.contains(el)) return;
     if (!/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
