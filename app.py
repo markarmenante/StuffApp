@@ -10071,6 +10071,12 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
 }
 
 
+# Gregorian-year token for banknote dealer text. Trailing period allowed
+# (sentence-final "... 1961. P-38a") unless it starts a decimal; still
+# rejects catalogue-ish neighbours like "1961-62", "1961a", "#1961".
+_BANKNOTE_YEAR_RE = r'(?<![\w#./-])(1[6-9]\d{2}|20\d{2})(?![\w/-])(?!\.\d)'
+
+
 def _format_purchase_price(raw):
     """Normalize a matched dollar amount to the app's manual-entry style
     ("$2,000", "$175", "$449.50"). Returns None when unparseable."""
@@ -10261,16 +10267,21 @@ def _banknote_description_fields(note):
 
     # Issue year: a bare Gregorian year, preferring one in parentheses
     # after a local-era date ("SH 1333 (1954)"). Skip catalogue-ref
-    # neighbourhoods the same way the coin prose reader does.
+    # neighbourhoods the same way the coin prose reader does, and skip
+    # calendar dates ("July 10th, 2026" is a purchase date, not the
+    # issue year). Sentence-final years ("... 1961. P-38a") must match,
+    # so a trailing period is allowed unless it starts a decimal.
     year = None
     m = re.search(r'\(\s*(1[6-9]\d{2}|20\d{2})\s*\)', description)
     if m:
         year = int(m.group(1))
     else:
-        for m in re.finditer(r'(?<![\w#./-])(1[6-9]\d{2}|20\d{2})(?![\w./-])',
-                             description):
-            before = description[max(0, m.start() - 6):m.start()].lower()
+        for m in re.finditer(_BANKNOTE_YEAR_RE, description):
+            before = description[max(0, m.start() - 14):m.start()].lower()
             if any(tok in before for tok in ('pick', 'p-', '#', 'no.', 'lot')):
+                continue
+            if re.search(r'[a-z]{2,9}\.?\s+\d{1,2}(?:st|nd|rd|th)?\s*,?\s*$',
+                         before):
                 continue
             year = int(m.group(1))
             break
@@ -10292,10 +10303,6 @@ def fetch_banknote_specs(note):
         v = _coin_row_value(note, f)
         if v not in (None, ''):
             known[f] = v
-    if not known:
-        raise RuntimeError(
-            'Need at least one of country / issuer / denomination / '
-            'Pick # / date to look up the rest.')
 
     grades = ', '.join(VALUE_LISTS['banknote_grade'])
     materials = ', '.join(VALUE_LISTS['banknote_material'])
@@ -10304,6 +10311,23 @@ def fetch_banknote_specs(note):
     pedigree = (_coin_row_value(note, 'note_references') or '').strip()
     grade_notes = (_coin_row_value(note, 'notes') or '').strip()
     condition = (_coin_row_value(note, 'condition') or '').strip()
+
+    # Scan the note itself: front/back images are attached ahead of the
+    # prompt so the model reads the lettering and printed details
+    # directly. Missing/unreadable files degrade to a text-only lookup.
+    images = _load_vision_images((
+        (_coin_row_value(note, 'image_1'), 'front'),
+        (_coin_row_value(note, 'image_2'), 'back'),
+    ))
+
+    # Images or a pasted dealer description are enough to identify a
+    # note — the images-first flow (drop photos, hit Check) must work
+    # on a brand-new record with no structured fields typed yet.
+    if not known and not description and not pedigree and not images:
+        raise RuntimeError(
+            'Add the note images, the dealer description, or at least '
+            'one identifying field (country / denomination / Pick #) '
+            'before running Check.')
 
     known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items()) or '(none entered)'
     dealer_blocks = []
@@ -10388,13 +10412,6 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(4)
 
-    # Scan the note itself: attach front/back images ahead of the prompt
-    # so the model reads the lettering and printed details directly.
-    # Missing/unreadable files degrade to a text-only lookup.
-    images = _load_vision_images((
-        (_coin_row_value(note, 'image_1'), 'front'),
-        (_coin_row_value(note, 'image_2'), 'back'),
-    ))
     content = []
     for img in images:
         content.append({'type': 'text', 'text': f'{img["label"].capitalize()} of the note:'})
@@ -10561,8 +10578,7 @@ def banknote_lookup_specs(record_id):
     _dealer_text_key = re.sub(r'[^a-z0-9]', '', dealer_text.lower())
     _dealer_years = {
         int(m.group(1))
-        for m in re.finditer(r'(?<![\w#./-])(1[6-9]\d{2}|20\d{2})(?![\w./-])',
-                             dealer_text)
+        for m in re.finditer(_BANKNOTE_YEAR_RE, dealer_text)
     }
 
     def _grounded(field, value):
@@ -21678,4 +21694,4 @@ with app.app_context():
     init_db()
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=int(os.environ.get('PORT', 5001)))

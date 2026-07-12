@@ -4414,6 +4414,18 @@ document.querySelectorAll('.comp-item').forEach(item => {
     event.returnValue = '';
   });
 
+  // Safety net: leaving the page (Back tap) while a field still holds
+  // focus can outrun its blur-save on some browsers. pagehide fires
+  // reliably (incl. Safari); saveField's keepalive fetch survives the
+  // navigation. Non-empty values only — this can add, never erase.
+  window.addEventListener('pagehide', function () {
+    const el = document.activeElement;
+    if (!el || !el.name || !form.contains(el)) return;
+    if (!/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+    if (el.type === 'file' || (el.value || '').trim() === '') return;
+    try { saveField(el.name, el.value); } catch (e) { /* best effort */ }
+  });
+
   // Text / textarea — save on blur. We used to prefer el.dataset.raw
   // when present (coin date inputs render "175 BC" but stash "-175"
   // there), but the autosave blur handler runs *before* the
@@ -6856,6 +6868,39 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     await Promise.all(saves);
   }
 
+  // Push the form's current non-empty values to the server before a
+  // Check runs. Check reads the SERVER row, so a just-pasted
+  // description whose blur-save is still in flight (or never fired --
+  // paste then click Check directly) would otherwise be invisible to
+  // the lookup. Non-empty only: this can add, never erase.
+  async function flushCheckInputFields() {
+    if (typeof window.saveField !== 'function') return;
+    const fieldsByCategory = {
+      coins: [
+        'region', 'authority', 'denomination', 'metal', 'mint',
+        'date_1', 'date_2', 'description', 'coin_references', 'notes',
+        'official', 'weight', 'size', 'die_axis', 'grade',
+      ],
+      banknotes: [
+        'country', 'municipality', 'issuer', 'official', 'denomination',
+        'series', 'pick_number', 'other_catalog', 'printer', 'signatures',
+        'serial_number', 'watermark', 'date_1', 'description',
+        'note_references', 'notes', 'vendor', 'price', 'purchase_date',
+        'grade', 'obv_rev',
+      ],
+    };
+    const formEl = document.getElementById('mainForm');
+    const fields = fieldsByCategory[(formEl && formEl.dataset.category) || ''] || [];
+    const saves = [];
+    fields.forEach(name => {
+      const el = document.querySelector(`[name="${name}"]`);
+      if (el && el.name && (el.value || '').trim() !== '') {
+        saves.push(window.saveField(el.name, el.value));
+      }
+    });
+    await Promise.all(saves);
+  }
+
   async function runCoinSpecLookup(btn, options = {}) {
     const url = btn.dataset.specUrl;
     if (!url) throw new Error('No check URL after save');
@@ -6966,6 +7011,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       btn.setAttribute('aria-busy', 'true');
       try {
         await ensureCoinSpecUrl(btn);
+        // Land any typed-but-unsaved values first: Check reads the
+        // server row, not the DOM.
+        await flushCheckInputFields();
         btn.textContent = '✓ Checking…';
         await runCoinSpecLookup(btn, {
           silentEmpty: true,
