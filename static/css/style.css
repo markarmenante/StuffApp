@@ -811,6 +811,13 @@ input[type="number"]::-webkit-outer-spin-button {
      select carries an inline style="text-align:center". */
   text-align-last: center;
 }
+/* Banknotes: Issue Type reads like the text fields around it —
+   left-justified, not a centered pill. */
+.detail-page-banknotes .dcell select[name="issue_type"] {
+  text-align: left;
+  text-align-last: left;
+}
+
 .dcell textarea {
   resize: vertical;
   min-height: 40px;

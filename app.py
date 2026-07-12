@@ -10044,7 +10044,7 @@ BANKNOTE_SPEC_FILLABLE = (
     'grade', 'grade_numeric', 'grading_authority', 'slab_number',
     'grade_condition', 'grade_modifier',
     'lettering', 'lettering_translation',
-    'vendor', 'price', 'purchase_date',
+    'vendor', 'price', 'purchase_date', 'obv_rev',
 )
 
 BANKNOTE_SPECS_RESPONSE_SCHEMA = {
@@ -10059,7 +10059,7 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
             'watermark', 'material', 'grade', 'grading_authority',
             'slab_number', 'grade_condition', 'grade_modifier',
             'lettering', 'lettering_translation', 'history_context',
-            'vendor', 'price', 'purchase_date',
+            'vendor', 'price', 'purchase_date', 'obv_rev',
         )},
         'date_1': _JSON_NULLABLE_INTEGER,
         'grade_numeric': _JSON_NULLABLE_NUMBER,
@@ -10075,6 +10075,52 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
 # (sentence-final "... 1961. P-38a") unless it starts a decimal; still
 # rejects catalogue-ish neighbours like "1961-62", "1961a", "#1961".
 _BANKNOTE_YEAR_RE = r'(?<![\w#./-])(1[6-9]\d{2}|20\d{2})(?![\w/-])(?!\.\d)'
+
+
+# Bare lines in a pasted dealer table that carry no data (section
+# headers, empty collector fields) -- dropped during compaction.
+_DESC_NOISE_LINES = {
+    'item details', "collector's info", 'collectors info', 'comment',
+    'tags', 'inventory key', 'expected listing price', 'headquarters',
+    'provenance', 'notes',
+}
+
+
+def compact_banknote_description(text):
+    """Compact a pasted label/value dealer listing (one pair per line,
+    tab- or wide-space-separated -- the Stack's Bowers / PMG inventory
+    dump shape) into one linear 'Label: value; ...' paragraph. Prose
+    descriptions are left untouched: returns None when the text does
+    not look like a table or is already compact."""
+    if not text or not text.strip() or '\n' not in text.strip():
+        return None
+    pairs = []
+    bare = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r'^([^\t]{1,40}?)(?:\t+|\s{3,})(.+)$', line)
+        if m:
+            label, value = m.group(1).strip(), m.group(2).strip()
+            if label.isupper():
+                label = ' '.join(
+                    w.capitalize() if w.isalpha() and len(w) > 1 else w
+                    for w in label.split()
+                )
+            pairs.append(f'{label}: {value}')
+        else:
+            if line.lower().strip(': ') in _DESC_NOISE_LINES:
+                continue
+            # Label-only rows ("Inventory Key") vs real content
+            # ("Stack's Bowers logo", a stray prose sentence).
+            if len(line.split()) <= 2 and not any(ch.isdigit() for ch in line):
+                continue
+            bare.append(line)
+    if len(pairs) < 3:
+        return None
+    compacted = '; '.join(pairs + bare)
+    return compacted if compacted != text.strip() else None
 
 
 def _format_purchase_price(raw):
@@ -10383,6 +10429,7 @@ Target fields:
 - vendor: the dealer or auction house THIS note was purchased from, only when the material on file identifies it — an explicit "purchased from X" / vendor / seller line, an invoice, or the pasted listing's own branding or letterhead (a Stack's Bowers inventory page means vendor "Stack's Bowers"; a Heritage lot page means "Heritage Auctions"). A firm merely mentioned in the pedigree ("ex Spink sale") is prior provenance, not the vendor — when in doubt, null.
 - price: the price PAID for this note, only when the material on file states it ("My Cost", "purchase price", "paid", an invoice total, "purchased for $X"). Format "$1,234" or "$1,234.56". This is never a catalog value, estimate, or price guide figure.
 - purchase_date: the date THIS note was purchased, as "YYYY-MM-DD", only when the material on file states it ("Purchase Date July 11th, 2026" → "2026-07-11"). Null otherwise.
+- obv_rev: one very short line naming the main obverse and reverse designs, format "Obv: ... / Rev: ..." (e.g. "Obv: young Shah portrait / Rev: Abadan Refinery"), under 90 characters, from the note images or the dealer text. Null if you cannot tell.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
@@ -10395,7 +10442,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "grade": null, "grade_numeric": null, "grading_authority": null,
   "slab_number": null, "grade_condition": null, "grade_modifier": null,
   "lettering": null, "lettering_translation": null, "history_context": null,
-  "vendor": null, "price": null, "purchase_date": null,
+  "vendor": null, "price": null, "purchase_date": null, "obv_rev": null,
   "sources": "one-line note of where each value came from (note images vs dealer text vs which web source)"
 }}
 """
@@ -10677,6 +10724,14 @@ def banknote_lookup_specs(record_id):
         elif str(cur or '').strip().lower() != str(v or '').strip().lower():
             overwritten[f] = {'current': cur, 'new': v}
 
+    # Pasted dealer tables hog vertical space: propose the linear
+    # 'Label: value; ...' rewrite of the description for approval.
+    current_description = str(_coin_row_value(note, 'description') or '')
+    compacted = compact_banknote_description(current_description)
+    if compacted:
+        overwritten['description'] = {'current': current_description,
+                                      'new': compacted}
+
     now = datetime.utcnow().isoformat()
     db.execute("UPDATE banknotes SET specs_searched_at = ? WHERE id = ?",
                (now, record_id))
@@ -10708,10 +10763,9 @@ def banknote_apply_lookup_specs(record_id):
 
     updates = {}
     for k, v in raw.items():
-        # `condition` carries the Check-generated historical narrative
-        # (fill-only, proposed by the lookup route) alongside the spec
-        # fields.
-        if k not in BANKNOTE_SPEC_FILLABLE and k != 'condition':
+        # `condition` carries the Check-generated historical narrative;
+        # `description` carries the compacted-listing rewrite.
+        if k not in BANKNOTE_SPEC_FILLABLE and k not in ('condition', 'description'):
             continue
         coerced = _coerce_banknote_spec(k, v)
         if coerced in (None, ''):

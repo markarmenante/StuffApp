@@ -1234,9 +1234,10 @@ document.addEventListener('DOMContentLoaded', function () {
     {{ cell('series','Series / Set') }}
   </div>
 
-  <!-- Row 4: Obv/Rev one-liner — full width, like coins -->
+  <!-- Row 4: Short Desc (obv_rev) — full width, like coins. Check
+       fills it with a one-line obverse/reverse description. -->
   <div class="dgrid dg1 coin-top-row">
-    {{ cell('obv_rev','Obv/Rev one-liner') }}
+    {{ cell('obv_rev','Short Desc') }}
   </div>
 
   <!-- Banknote images (front + back) — pinned near the top like coins. -->
@@ -4448,6 +4449,52 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (el.type === 'file' || (el.value || '').trim() === '') return;
     try { saveField(el.name, el.value); } catch (e) { /* best effort */ }
   });
+
+  // Banknotes: a pasted dealer listing arrives as a label/value table
+  // (one pair per line) that hogs vertical space. Compact it into one
+  // linear 'Label: value; ...' paragraph on paste — the same rewrite
+  // the server's compact_banknote_description proposes from Check.
+  if (formCategory === 'banknotes') {
+    const desc = form.querySelector('textarea[name="description"]');
+    if (desc) {
+      const NOISE = new Set([
+        'item details', "collector's info", 'collectors info', 'comment',
+        'tags', 'inventory key', 'expected listing price', 'headquarters',
+        'provenance', 'notes',
+      ]);
+      desc.addEventListener('paste', () => {
+        setTimeout(() => {
+          const text = desc.value;
+          if (!text.trim() || !text.trim().includes('\n')) return;
+          const pairs = [], bare = [];
+          for (let line of text.split('\n')) {
+            line = line.trim();
+            if (!line) continue;
+            const m = line.match(/^([^\t]{1,40}?)(?:\t+|\s{3,})(.+)$/);
+            if (m) {
+              let label = m[1].trim();
+              if (label === label.toUpperCase()) {
+                label = label.split(/\s+/).map(w =>
+                  /^[A-Za-z]{2,}$/.test(w) ? w[0] + w.slice(1).toLowerCase() : w
+                ).join(' ');
+              }
+              pairs.push(label + ': ' + m[2].trim());
+            } else {
+              if (NOISE.has(line.toLowerCase().replace(/^[:\s]+|[:\s]+$/g, ''))) continue;
+              if (line.split(/\s+/).length <= 2 && !/\d/.test(line)) continue;
+              bare.push(line);
+            }
+          }
+          if (pairs.length < 3) return;
+          const compacted = pairs.concat(bare).join('; ');
+          if (compacted === text.trim()) return;
+          desc.value = compacted;
+          desc.dispatchEvent(new Event('input', { bubbles: true }));
+          if (window._autosizeTextarea) window._autosizeTextarea(desc);
+        }, 0);
+      });
+    }
+  }
 
   // Text / textarea — save on blur. We used to prefer el.dataset.raw
   // when present (coin date inputs render "175 BC" but stash "-175"
