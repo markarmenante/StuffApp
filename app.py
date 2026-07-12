@@ -10236,11 +10236,18 @@ def _banknote_description_fields(note):
     if m:
         out['watermark'] = m.group(1).strip()
 
-    # Serial number when explicitly labelled.
-    m = re.search(r'\bserial\s*(?:no\.?|number|#)[:\s]*([A-Z0-9][A-Z0-9/\-]{2,24})',
-                  description, re.IGNORECASE)
+    # Serial number when explicitly labelled. World-note serials are often
+    # a prefix block plus a number separated by spaces ("A/1 129677",
+    # "X92 911221") — continue across spaces, but only into chunks that
+    # contain a digit so trailing prose is never swallowed.
+    m = re.search(
+        r'\bserial\s*(?:no\.?|number|#)[:\s]*'
+        r'([A-Z0-9][A-Z0-9/\-]*(?:[ ](?=[A-Z0-9/\-]*\d)[A-Z0-9/\-]+){0,3})',
+        description, re.IGNORECASE)
     if m:
-        out['serial_number'] = m.group(1).strip()
+        serial = m.group(1).strip()
+        if 3 <= len(serial) <= 30:
+            out['serial_number'] = serial
 
     # Size: "130 x 67 mm" / "130×67mm".
     m = re.search(r'\b(\d{2,3}(?:[.,]\d+)?)\s*[x×]\s*(\d{2,3}(?:[.,]\d+)?)\s*mm\b',
