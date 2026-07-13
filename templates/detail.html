@@ -1346,6 +1346,23 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
+  <!-- Grade, Conditions -->
+  {{ notescell('notes','Grade, Conditions') }}
+  {# Grading-service row: authority, cert number, combined grade readout,
+     numeric grade, EPQ/★ designation, condition qualifier. #}
+  <div class="dgrid coin-grading-row" style="grid-template-columns: 1.2fr 1.3fr 1.1fr 0.6fr 0.6fr 1.1fr;">
+    {{ cell('grading_authority','Grading Authority') }}
+    {{ cell('slab_number','Cert Number') }}
+    <div class="dcell">
+      <input type="text" value="{{ coin_grade_display(val('grade'), val('grade_modifier')) }}" readonly tabindex="-1" class="coin-grade-readout" style="color:#444">
+      <span class="clabel">Grade</span>
+    </div>
+    {{ numcell('grade_numeric','Numeric') }}
+    {{ cell('grade_modifier','EPQ / ★') }}
+    {{ cell('grade_condition','Condition') }}
+  </div>
+  {{ formatted_notescell('condition','Historical Context, Notes') }}
+
   <!-- Description -->
   <div class="section-bar">Description</div>
   {% set _desc = val('description') %}
@@ -1388,23 +1405,6 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
   {% endif %}
-
-  <!-- Grade, Conditions -->
-  {{ notescell('notes','Grade, Conditions') }}
-  {# Grading-service row: authority, cert number, combined grade readout,
-     numeric grade, EPQ/★ designation, condition qualifier. #}
-  <div class="dgrid coin-grading-row" style="grid-template-columns: 1.2fr 1.3fr 1.1fr 0.6fr 0.6fr 1.1fr;">
-    {{ cell('grading_authority','Grading Authority') }}
-    {{ cell('slab_number','Cert Number') }}
-    <div class="dcell">
-      <input type="text" value="{{ coin_grade_display(val('grade'), val('grade_modifier')) }}" readonly tabindex="-1" class="coin-grade-readout" style="color:#444">
-      <span class="clabel">Grade</span>
-    </div>
-    {{ numcell('grade_numeric','Numeric') }}
-    {{ cell('grade_modifier','EPQ / ★') }}
-    {{ cell('grade_condition','Condition') }}
-  </div>
-  {{ formatted_notescell('condition','Historical Context, Notes') }}
 
   <!-- Extra fields -->
   <div class="dgrid dg1">
