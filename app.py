@@ -10646,6 +10646,13 @@ def banknote_lookup_specs(record_id):
                 return int(value) in _dealer_years
             except (TypeError, ValueError):
                 return False
+        if field == 'serial_number' and (
+            _coin_row_value(note, 'image_1') or _coin_row_value(note, 'image_2')
+        ):
+            # The serial is printed ON the note: with images attached the
+            # model reads it directly, so dealer-text grounding would
+            # reject exactly the image-read serials Check exists to find.
+            return True
         if field in ('slab_number', 'serial_number', 'pick_number'):
             key = re.sub(r'[^a-z0-9]', '', str(value).lower()).lstrip('p')
             return len(key) >= 1 and key in _dealer_text_key
