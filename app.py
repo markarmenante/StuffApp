@@ -9884,16 +9884,21 @@ def coin_lookup_specs(record_id):
             overwritten[f] = {'current': cur, 'new': v}
 
     # Stamp that the identifying-field lookup ran successfully.
-    now = datetime.utcnow().isoformat()
-    db.execute("UPDATE coins SET specs_searched_at = ? WHERE id = ?",
-               (now, record_id))
-    db.commit()
+    # Only stamp a fully successful run: a partial (description-only)
+    # result keeps the Check button un-done so a retry isn't skipped.
+    now = None
+    if not lookup_error:
+        now = datetime.utcnow().isoformat()
+        db.execute("UPDATE coins SET specs_searched_at = ? WHERE id = ?",
+                   (now, record_id))
+        db.commit()
 
     return jsonify({
         'filled': filled,
         'overwritten': overwritten,
         'sources': suggestions.get('sources', ''),
         'specs_searched_at': now,
+        'lookup_error': lookup_error,
     })
 
 
@@ -10478,11 +10483,16 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     )
     resp = None
     last_err = None
+    # 2048 tokens was silently truncating full banknote responses
+    # (lettering + translation + history + short desc easily pass it),
+    # which surfaced as a JSON parse failure and a description-only
+    # fallback. 8192 leaves ample headroom; the stop_reason check below
+    # catches any remaining truncation instead of failing cryptically.
     for attempt in range(3):
         try:
             resp = client.messages.create(
                 model=lookup_model,
-                max_tokens=2048,
+                max_tokens=8192,
                 tools=[web_search],
                 messages=[{'role': 'user', 'content': content}],
             )
@@ -10494,6 +10504,8 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
             _time.sleep(10 * (attempt + 1))
     if resp is None:
         raise RuntimeError('Banknote spec lookup returned no response')
+    if getattr(resp, 'stop_reason', None) == 'max_tokens':
+        raise RuntimeError('Banknote spec lookup response hit the length limit — try again.')
 
     text = ''
     for block in resp.content:
@@ -10732,16 +10744,24 @@ def banknote_lookup_specs(record_id):
         overwritten['description'] = {'current': current_description,
                                       'new': compacted}
 
-    now = datetime.utcnow().isoformat()
-    db.execute("UPDATE banknotes SET specs_searched_at = ? WHERE id = ?",
-               (now, record_id))
-    db.commit()
+    # Only stamp a fully successful run: a partial (description-only)
+    # result keeps the Check button un-done so a retry isn't skipped.
+    now = None
+    if not lookup_error:
+        now = datetime.utcnow().isoformat()
+        db.execute("UPDATE banknotes SET specs_searched_at = ? WHERE id = ?",
+                   (now, record_id))
+        db.commit()
 
     return jsonify({
         'filled': filled,
         'overwritten': overwritten,
         'sources': suggestions.get('sources', ''),
         'specs_searched_at': now,
+        # The image/web lookup failed but the dealer-description parser
+        # still produced fields — tell the user the scan was partial so
+        # a rerun isn't skipped ("it already ran") by mistake.
+        'lookup_error': lookup_error,
     })
 
 

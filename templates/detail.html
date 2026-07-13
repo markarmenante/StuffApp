@@ -6994,6 +6994,14 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     if (data.specs_searched_at) {
       btn.classList.add('done');
     }
+    if (data.lookup_error) {
+      // The image/web scan failed; anything shown came from the dealer
+      // description alone. Say so — a silent partial result reads as
+      // "Check already ran" and never gets retried.
+      alert('Partial Check: the image/web scan failed ('
+            + data.lookup_error
+            + ').\n\nOnly description-derived fields were found — run Check again for the full scan (images, lettering, historical context).');
+    }
     if (!Object.keys(filled).length && !Object.keys(overwritten).length) {
       if (!options.silentEmpty) {
         alert('No new information found.'
