@@ -1,6 +1,6 @@
 # StuffApp
 
-> **New computer?** Start with [NEW_MACHINE_SETUP.md](NEW_MACHINE_SETUP.md) — accounts, CLIs, local dev, and deploy for all five repos.
+> **New computer?** Start with [NEW_MACHINE_SETUP.md](NEW_MACHINE_SETUP.md) — accounts, CLIs, local dev, and deploy for all four repos.
 
 Production StuffApp runs on Railway behind Cloudflare:
 

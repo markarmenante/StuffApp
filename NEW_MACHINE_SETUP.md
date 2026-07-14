@@ -1,14 +1,16 @@
 # New-machine setup — develop, test, deploy
 
-One-stop note for getting productive on a fresh computer. The same note lives in every active repo. Last verified 2026-07-14.
+One-stop note for getting productive on a fresh computer. The same note lives in all four active repos. Last verified 2026-07-14.
+
+The four active repos: **family-office**, **boardroom**, **StuffApp**, **n552ym**. (Archived, do not clone: `museum-of-time` and `oryn-boardroom` were folded into the boardroom monorepo's `/museum` and `/oryn`; `ym-parties` was folded into n552ym's party features.)
 
 ## Accounts & dashboards
 
 | Service | Where | Used for |
 | --- | --- | --- |
-| GitHub | https://github.com/markarmenante | All source. Repos: `family-office`, `boardroom`, `StuffApp`, `n552ym`, `ym-parties` |
+| GitHub | https://github.com/markarmenante | All source |
 | Railway | https://railway.app/dashboard (account markarmenante@gmail.com) | Hosts **family-office** (project `ym-familyoffice`: Next.js service + Postgres, uploads volume at `/app/uploads`) and **StuffApp** (`web` service) |
-| Vercel | https://vercel.com/dashboard (account `markarmenante`) | Hosts **boardroom** (project `board`, root `apps/board` → board-delta-silk.vercel.app), **n552ym**, and **ym-parties** |
+| Vercel | https://vercel.com/dashboard (account `markarmenante`) | Hosts **boardroom** (project `board`, root `apps/board` → board-delta-silk.vercel.app) and **n552ym** |
 | Cloudflare | https://dash.cloudflare.com | DNS for `stuff.armenante.com` (fronts StuffApp on Railway) |
 | Anthropic Console | https://console.anthropic.com | API keys: family-office document intake, StuffApp vision |
 | Perplexity | https://www.perplexity.ai/settings/api | Optional family-office quick-file scan provider |
@@ -37,12 +39,12 @@ gh auth login          # GitHub
 railway login          # Railway — CLI auth is per-machine; the Railway MCP can hold
                        # stale auth even after CLI relogin, prefer the CLI when they disagree
 vercel login           # Vercel
-git clone https://github.com/markarmenante/{family-office,boardroom,StuffApp,n552ym,ym-parties}.git
+git clone https://github.com/markarmenante/{family-office,boardroom,StuffApp,n552ym}.git
 ```
 
 ## Deploy flow — all repos
 
-**Push to `main` auto-deploys everywhere.** family-office runs `prisma migrate deploy` on start (Railway `start:railway`); Vercel builds boardroom/n552ym/ym-parties per push; StuffApp redeploys on Railway.
+**Push to `main` auto-deploys everywhere.** family-office runs `prisma migrate deploy` on start (Railway `start:railway`); Vercel builds boardroom and n552ym per push; StuffApp redeploys on Railway.
 
 ## Per-repo local dev
 
@@ -66,11 +68,8 @@ Read `HANDOFF.md` + `PICKUP.md` first. Monorepo; the app is `apps/board`. **All 
 Python/Flask (gunicorn). `pip install -r requirements.txt`, needs `ANTHROPIC_API_KEY`. Deployed on Railway behind Cloudflare.
 
 ### n552ym
-Plain Next.js on Vercel (`npm install && npm run dev`).
-
-### ym-parties
-Uses pnpm 11 (`corepack enable`; a vendored pnpm also lives in `.tools/`). Next.js + Prisma; `.env` ships with placeholder Postgres URLs — replace `DATABASE_URL` before storing real data. See its README for the N552YM contact-sync setup.
+Plain Next.js on Vercel (`npm install && npm run dev`). Covers aviation, trips, parties, lodging, residency, and the Rivet email workflow.
 
 ## Secrets
 
-Never committed. They live in the Railway service variables (family-office, StuffApp) and Vercel project envs (boardroom, n552ym, ym-parties). If a value is unreadable there (Vercel sensitive), it can only be replaced, not recovered — keep that in mind before rotating.
+Never committed. They live in the Railway service variables (family-office, StuffApp) and Vercel project envs (boardroom, n552ym). If a value is unreadable there (Vercel sensitive), it can only be replaced, not recovered — keep that in mind before rotating.
