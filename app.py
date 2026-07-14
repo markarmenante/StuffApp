@@ -5668,6 +5668,27 @@ def _bounded_retry_wait(err, fallback, cap=15):
     return max(1, min(wait, cap))
 
 
+def _anthropic_transient_errs(anthropic):
+    """Anthropic exception classes worth an automatic retry.
+
+    529 Overloaded maps to its own OverloadedError class — NOT
+    InternalServerError — so it must be listed explicitly or a transient
+    capacity blip becomes a hard failure with a raw error blob in the
+    user's face. The class isn't exported at the package top level in
+    every SDK version, so resolve it defensively."""
+    overloaded = getattr(anthropic, 'OverloadedError', None)
+    if overloaded is None:
+        try:
+            from anthropic._exceptions import OverloadedError as overloaded
+        except ImportError:
+            overloaded = None
+    errs = [anthropic.RateLimitError, anthropic.APIConnectionError,
+            anthropic.APITimeoutError, anthropic.InternalServerError]
+    if overloaded is not None:
+        errs.append(overloaded)
+    return tuple(errs)
+
+
 def _friendly_lookup_error(label, err):
     raw = str(err or '').strip()
     if not raw:
@@ -6034,12 +6055,7 @@ def fetch_coin_context(coin):
         search_count, default_tool='web_search_20260209')
     import time as _time
     last_err = None
-    transient_errs = (
-        anthropic.RateLimitError,
-        anthropic.APIConnectionError,
-        anthropic.APITimeoutError,
-        anthropic.InternalServerError,
-    )
+    transient_errs = _anthropic_transient_errs(anthropic)
     for attempt in range(attempts):
         try:
             resp = client.messages.create(
@@ -6222,12 +6238,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
 
     import time as _time
     last_err = None
-    transient_errs = (
-        anthropic.RateLimitError,
-        anthropic.APIConnectionError,
-        anthropic.APITimeoutError,
-        anthropic.InternalServerError,
-    )
+    transient_errs = _anthropic_transient_errs(anthropic)
     for attempt in range(attempts):
         try:
             resp = client.messages.create(
@@ -8530,12 +8541,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
     web_search = anthropic_web_search_tool(3)
     import time as _time
     last_err = None
-    transient_errs = (
-        anthropic.RateLimitError,
-        anthropic.APIConnectionError,
-        anthropic.APITimeoutError,
-        anthropic.InternalServerError,
-    )
+    transient_errs = _anthropic_transient_errs(anthropic)
     for attempt in range(3):
         try:
             resp = client.messages.create(
@@ -9610,12 +9616,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     web_search = anthropic_web_search_tool(4)
     import time as _time
     last_err = None
-    transient_errs = (
-        anthropic.RateLimitError,
-        anthropic.APIConnectionError,
-        anthropic.APITimeoutError,
-        anthropic.InternalServerError,
-    )
+    transient_errs = _anthropic_transient_errs(anthropic)
     resp = None
     for attempt in range(3):
         try:
@@ -9636,7 +9637,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
             except Exception:
                 pass
             if attempt == 2:
-                raise RuntimeError(f'Coin spec lookup failed: {last_err}')
+                raise RuntimeError(_friendly_lookup_error('Coin spec lookup', last_err))
             _time.sleep(wait)
     if resp is None:
         raise RuntimeError('Coin spec lookup returned no response')
@@ -10475,12 +10476,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     content.append({'type': 'text', 'text': prompt})
 
     import time as _time
-    transient_errs = (
-        anthropic.RateLimitError,
-        anthropic.APIConnectionError,
-        anthropic.APITimeoutError,
-        anthropic.InternalServerError,
-    )
+    transient_errs = _anthropic_transient_errs(anthropic)
     resp = None
     last_err = None
     # 2048 tokens was silently truncating full banknote responses
@@ -10500,7 +10496,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
         except transient_errs as e:
             last_err = e
             if attempt == 2:
-                raise RuntimeError(f'Banknote spec lookup failed: {last_err}')
+                raise RuntimeError(_friendly_lookup_error('Banknote spec lookup', last_err))
             _time.sleep(10 * (attempt + 1))
     if resp is None:
         raise RuntimeError('Banknote spec lookup returned no response')
