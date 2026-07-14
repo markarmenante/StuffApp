@@ -10967,9 +10967,11 @@ def delete_file_field(category, record_id):
 
 # Currency prefixes the JS formatter writes on blur. Anything starting
 # with one of these is treated as already-formatted and round-trips
-# verbatim through save / display.
+# verbatim through save / display. Besides the symbol majors, the JS
+# writes any Frankfurter-supported ISO code as "CAD 140 / $102" — so a
+# generic 3-letter-code prefix counts as pre-formatted too.
 _CURRENCY_PREFIX_RE = re.compile(
-    r'^\s*(A\$|US\$|\$|€|£|¥|CHF\s|EUR\s|USD\s|AUD\s|AUS\s|GBP\s|JPY\s|YEN\s|CHF$|EUR$|USD$|AUD$|AUS$|GBP$|JPY$|YEN$)',
+    r'^\s*(A\$|US\$|\$|€|£|¥|[A-Za-z]{3}(?=[\s\d]|$))',
     re.IGNORECASE)
 
 
@@ -11055,8 +11057,8 @@ def fx_rate_save():
 
 def _normalize_price_input(val):
     """Price-input normaliser. Pre-formatted strings with a currency
-    prefix ($/A$/€/£/¥/CHF/USD/AUD/EUR/CHF/GBP/JPY/YEN) round-trip
-    verbatim — the JS blur formatter is the source of truth for those.
+    prefix ($/A$/€/£/¥ or any 3-letter ISO code) round-trip verbatim
+    — the JS blur formatter is the source of truth for those.
     Anything else falls back to the legacy strip-symbols-and-parse
     behaviour so existing plain-number entries keep working."""
     s = (val or '').strip()
