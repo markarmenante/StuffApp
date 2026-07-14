@@ -136,7 +136,9 @@
       "Bash(git commit *)",
       "Bash(git merge *)",
       "Bash(git stash *)",
-      "Bash(grep -n \"buf.seek\\(0\\)\\\\s*$\" /Users/markarmenante/Desktop/StuffApp/app.py)"
+      "Bash(grep -n \"buf.seek\\(0\\)\\\\s*$\" /Users/markarmenante/Desktop/StuffApp/app.py)",
+      "Bash(ps -p 44273 -o command=)",
+      "Bash(git -C /Users/markarmenante/Documents/GitHub/stuffapp log --oneline -3)"
     ]
   }
 }

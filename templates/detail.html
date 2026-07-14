@@ -3685,12 +3685,17 @@ document.querySelectorAll('.comp-item').forEach(item => {
   function todayIsoDate() {
     return new Date().toISOString().slice(0, 10);
   }
+  // The row's transaction-date input. Watches call it "date"; coins and
+  // banknotes call it "purchase_date". One resolver so every category's
+  // price fields convert to USD as of the purchase date.
+  const transactionDateInput =
+    form.querySelector('input[name="date"], input[name="purchase_date"]');
   function transactionDate() {
     // Use the row's transaction date if set, else today. Lets a user
     // type a price + currency before filling in the date and still
     // get a USD conversion.
-    const dateInput = form.querySelector('input[name="date"]');
-    return (dateInput && dateInput.value) ? dateInput.value : todayIsoDate();
+    return (transactionDateInput && transactionDateInput.value)
+      ? transactionDateInput.value : todayIsoDate();
   }
   function detectCurrency(raw) {
     for (const p of PRICE_PREFIXES) {
@@ -3795,10 +3800,9 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
   // When the row's transaction date changes, recompute every non-USD
   // price field's " / $..." conversion against the new rate.
-  const _dateInput = form.querySelector('input[name="date"]');
-  if (_dateInput) {
-    _dateInput.addEventListener('change', () => {
-      form.querySelectorAll('input.price-input').forEach(applyUsdConversion);
+  if (transactionDateInput) {
+    transactionDateInput.addEventListener('change', () => {
+      form.querySelectorAll('input.price-input').forEach(el => applyUsdConversion(el));
     });
   }
 
