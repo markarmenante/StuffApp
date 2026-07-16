@@ -1427,6 +1427,16 @@ document.addEventListener('DOMContentLoaded', function () {
       <span class="blabel">Status</span>
     </div>
     <div class="bottom-cell">
+      {# Position in the country/town/year order. Resequenced whenever a
+         note is added, removed, or re-sorted — so it is read-only here. #}
+      <input type="text" name="banknote_id" value="{{ val('banknote_id') }}"
+             data-generated-field="banknote_id"
+             readonly
+             title="Auto-assigned from sort position (country, town, year). Renumbers when notes are added or removed."
+             style="text-align:center;color:#666;font-family:var(--font-mono,monospace)">
+      <span class="blabel">Display Number (auto)</span>
+    </div>
+    <div class="bottom-cell">
       {# cat_id is the stable collection ID (B###) — matches (B###) in
          local filenames for the Files sweep, like coins' C###. #}
       <input type="text" name="cat_id" value="{{ val('cat_id') }}"

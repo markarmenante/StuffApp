@@ -877,6 +877,7 @@ FIELDS = {
         {'name': 'image_2',         'label': 'Image (Reverse)',   'type': 'file'},
     ],
     'banknotes': [
+        {'name': 'banknote_id',     'label': 'Display Number',    'type': 'text', 'readonly': True},
         {'name': 'cat_id',          'label': 'Cat ID',            'type': 'text', 'readonly': True},
         {'name': 'country',         'label': 'Country',           'type': 'text'},
         # Notgeld layer: emergency money is cataloged by the issuing
@@ -1594,6 +1595,7 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN image_audit_reason TEXT',
         'ALTER TABLE coins ADD COLUMN image_audit_at TEXT',
         'ALTER TABLE coins ADD COLUMN cat_id TEXT',
+        'ALTER TABLE banknotes ADD COLUMN banknote_id TEXT',
         'ALTER TABLE watches ADD COLUMN cat_id TEXT',
         'ALTER TABLE watches ADD COLUMN escapement TEXT',
         'ALTER TABLE watches ADD COLUMN escape_wheel TEXT',
@@ -2082,6 +2084,23 @@ def init_db():
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
             ('banknote_c658_move_v1', _bn_now),
+        )
+        db.commit()
+
+    # One-shot: seed banknote_id (Display Number) for notes that predate
+    # the column. From here on the write paths keep it current, so this
+    # only ever needs to run once per deployment.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('banknote_display_number_v1',),
+    ).fetchone():
+        try:
+            _renumber_banknotes(db)
+        except sqlite3.OperationalError:
+            pass
+        db.execute(
+            "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+            ('banknote_display_number_v1', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -7089,6 +7108,13 @@ def new_record(category):
                 data.get('property_name'), data.get('date_1'))
             if new_group:
                 _renumber_coin_groups(db, [new_group])
+        elif category == 'banknotes':
+            # The new note slots into the country/year order, pushing
+            # every later note's Display Number up by one.
+            _renumber_banknotes(db)
+            data['banknote_id'] = db.execute(
+                "SELECT banknote_id FROM banknotes WHERE id = ?",
+                [record_id]).fetchone()['banknote_id']
 
         db.commit()
         detail_url = url_for('detail_view', category=category, record_id=record_id)
@@ -7098,7 +7124,7 @@ def new_record(category):
         if request.headers.get('Accept', '').startswith('application/json') \
                 or request.headers.get('X-Requested-With') == 'fetch':
             generated = {
-                k: data.get(k) for k in ('coin_id', 'cat_id')
+                k: data.get(k) for k in ('coin_id', 'banknote_id', 'cat_id')
                 if data.get(k) not in (None, '')
             }
             return jsonify({'ok': True, 'id': record_id,
@@ -7235,6 +7261,14 @@ def detail_view(category, record_id):
             _apply_watch_actual_delivery_service_date(
                 updates, record['actual_delivery_date'])
 
+        # A note that changed country/town/issuer/year moves in the
+        # order, so every Display Number after it shifts.
+        resequence_banknotes = (
+            category == 'banknotes'
+            and any(f in updates and updates[f] != record[f]
+                    for f in BANKNOTE_SORT_FIELDS)
+        )
+
         # If a coin moved groups, resequence both the old group (to
         # close the gap) and the new group (to place the coin).
         groups_to_resequence = []
@@ -7279,6 +7313,8 @@ def detail_view(category, record_id):
                 )
         if groups_to_resequence:
             _renumber_coin_groups(db, groups_to_resequence)
+        if resequence_banknotes:
+            _renumber_banknotes(db)
         db.commit()
         flash("Record saved.", 'success')
         return redirect(url_for('detail_view', category=category, record_id=record_id))
@@ -7732,6 +7768,7 @@ def save_field(category, record_id):
 
     synced_watch_actual_delivery = None
     synced_watch_service_date = None
+    response_banknote_id = None
     if category == 'watches' and field_name == 'actual_delivery_date':
         actual = _clean_service_date(value)
         old_actual = _clean_service_date(existing['actual_delivery_date'])
@@ -7774,12 +7811,20 @@ def save_field(category, record_id):
             if touched:
                 _renumber_coin_groups(db, touched)
 
+    if category == 'banknotes' and field_name in BANKNOTE_SORT_FIELDS:
+        _renumber_banknotes(db)
+        response_banknote_id = db.execute(
+            "SELECT banknote_id FROM banknotes WHERE id = ?",
+            [record_id]).fetchone()['banknote_id']
+
     db.commit()
     response = {'ok': True}
     if synced_watch_actual_delivery:
         response['actual_delivery_date'] = synced_watch_actual_delivery
     if synced_watch_service_date:
         response['service_date'] = synced_watch_service_date
+    if response_banknote_id:
+        response['banknote_id'] = response_banknote_id
     return jsonify(response)
 
 
@@ -7859,6 +7904,8 @@ def delete_record(category, record_id):
     db.execute(f"DELETE FROM {table} WHERE id = ?", [record_id])
     if gap_group:
         _renumber_coin_groups(db, [gap_group])
+    if category == 'banknotes':
+        _renumber_banknotes(db)
     db.commit()
     flash("Record deleted.", 'info')
     return redirect(url_for('list_view', category=category))
@@ -20786,6 +20833,31 @@ def _renumber_coin_groups(db, groups=None):
         for i, row in enumerate(rows, start=1):
             db.execute("UPDATE coins SET coin_id = ? WHERE id = ?",
                        (f'{prefix}{i}', row['id']))
+
+
+# Changing any of these reorders the note list, so the Display Number
+# has to be resequenced when one is edited.
+BANKNOTE_SORT_FIELDS = ('country', 'municipality', 'issuer', 'date_1')
+
+
+def _renumber_banknotes(db):
+    """Resequence banknote_id (Display Number) across every note.
+
+    One flat B series — notes have no property/era partition the way
+    coins do, so there's a single sequence rather than a group each.
+    Ordering is CATEGORY_ORDER_BY['banknotes'] (country, municipality,
+    issuer, date_1), the same ORDER BY the list view uses, so the
+    Display Number always runs in the order the list shows. cat_id is
+    untouched: that one is assigned once and stays with the note.
+    Caller is responsible for commit — we stay inside the surrounding
+    transaction."""
+    rows = db.execute(
+        "SELECT id FROM banknotes "
+        f"ORDER BY {CATEGORY_ORDER_BY['banknotes']}"
+    ).fetchall()
+    for i, row in enumerate(rows, start=1):
+        db.execute("UPDATE banknotes SET banknote_id = ? WHERE id = ?",
+                   (f'B{i}', row['id']))
 
 
 def _coin_group_for(property_name, date_1):

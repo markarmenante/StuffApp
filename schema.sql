@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS coins (
 , official TEXT, specs_searched_at TEXT, documents TEXT, history_region TEXT, history_authority TEXT, history_searched_at TEXT, history_context TEXT, coin_references_research TEXT, image_audit_match TEXT, image_audit_confidence REAL, image_audit_reason TEXT, image_audit_at TEXT, cat_id TEXT, sell_keep TEXT, sell_purchase_price TEXT, sell_estimated_sales_price TEXT, sell_commission_percent TEXT, sell_net_sales_price TEXT, sell_tax_state TEXT, sell_federal_tax_rate TEXT, sell_ny_tax_rate TEXT, sell_ca_tax_rate TEXT, sell_tax_rates_checked_at TEXT, sell_federal_tax TEXT, sell_state_tax TEXT, sell_gross_gain_loss TEXT, sell_net_gain_loss TEXT, sold_to TEXT);
 CREATE TABLE IF NOT EXISTS banknotes (
     id TEXT PRIMARY KEY,
+    banknote_id TEXT,
     cat_id TEXT,
     country TEXT,
     municipality TEXT,

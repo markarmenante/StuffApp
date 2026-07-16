@@ -295,7 +295,15 @@
             <div style="display:inline-flex;align-items:baseline;flex:1 1 auto;min-width:0;gap:14px;flex-wrap:wrap;">
               {% if row['printer'] %}<span class="li-hide-mobile">{{ row['printer'] }}</span>{% endif %}
             </div>
-            {% if row['cat_id'] %}<span class="item-cat-id" style="margin-left:auto;flex-shrink:0;">{{ row['cat_id'] }}</span>{% endif %}
+            {# Display Number / Cat ID: the B# tracks sort position and
+               is resequenced on every add; the B### stays put. #}
+            {% if row['banknote_id'] or row['cat_id'] %}
+            <span class="item-cat-id" style="margin-left:auto;flex-shrink:0;">
+              {%- if row['banknote_id'] %}{{ row['banknote_id'] }}{% endif -%}
+              {%- if row['banknote_id'] and row['cat_id'] %} / {% endif -%}
+              {%- if row['cat_id'] %}{{ row['cat_id'] }}{% endif -%}
+            </span>
+            {% endif %}
           </div>
         </div>
 
