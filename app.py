@@ -1374,6 +1374,123 @@ def _nodiacritic_collation(a, b):
     return 0
 
 
+# Denominations are free text ('50 Pfennig', '1 Million Mark'), so a
+# plain text sort would read 1, 10, 100, 2 and would file Mark ahead of
+# Pfennig. These helpers split a denomination into the three parts the
+# note list sorts on: the currency family ('mark'), the worth of its
+# unit within that family (Pfennig 0.01 sorts ahead of Mark 1.0), and
+# the number itself (1 Million -> 1000000).
+#
+# Subunit -> main unit, so the small change leads: cent before dollar,
+# pfennig before mark. Unlisted currencies fall back to their own name
+# as the family at unit 1.0, which keeps them grouped and alphabetical
+# rather than silently mis-sorted.
+_CURRENCY_UNITS = {
+    # German mark (the bulk of the Notgeld)
+    'pfennig': ('mark', 0.01), 'pfennige': ('mark', 0.01),
+    'reichspfennig': ('mark', 0.01),
+    'mark': ('mark', 1.0), 'reichsmark': ('mark', 1.0),
+    'goldmark': ('mark', 1.0), 'rentenmark': ('mark', 1.0),
+    # Austrian / Hungarian
+    'heller': ('krone', 0.01), 'filler': ('krone', 0.01),
+    'krone': ('krone', 1.0), 'kronen': ('krone', 1.0),
+    'korona': ('krone', 1.0),
+    'groschen': ('schilling', 0.01),
+    'schilling': ('schilling', 1.0), 'schillinge': ('schilling', 1.0),
+    # US / dollar
+    'cent': ('dollar', 0.01), 'cents': ('dollar', 0.01),
+    'dollar': ('dollar', 1.0), 'dollars': ('dollar', 1.0),
+    # Franc (French and Swiss)
+    'centime': ('franc', 0.01), 'centimes': ('franc', 0.01),
+    'rappen': ('franc', 0.01),
+    'franc': ('franc', 1.0), 'francs': ('franc', 1.0),
+    'franken': ('franc', 1.0),
+    # Pre-decimal sterling: 12 pence to a shilling, 20 to a pound.
+    'penny': ('pound', 1 / 240), 'pence': ('pound', 1 / 240),
+    'shilling': ('pound', 1 / 20), 'shillings': ('pound', 1 / 20),
+    'pound': ('pound', 1.0), 'pounds': ('pound', 1.0),
+    # Others that turn up in the collection
+    'kopek': ('ruble', 0.01), 'kopeks': ('ruble', 0.01),
+    'ruble': ('ruble', 1.0), 'rubles': ('ruble', 1.0),
+    'rouble': ('ruble', 1.0), 'roubles': ('ruble', 1.0),
+    'centavo': ('peso', 0.01), 'centavos': ('peso', 0.01),
+    'peso': ('peso', 1.0), 'pesos': ('peso', 1.0),
+    'ore': ('krona', 0.01),
+    'krona': ('krona', 1.0), 'kronor': ('krona', 1.0),
+    'stotinka': ('lev', 0.01), 'stotinki': ('lev', 0.01),
+    'lev': ('lev', 1.0), 'leva': ('lev', 1.0),
+    'para': ('dinar', 0.01),
+    'dinar': ('dinar', 1.0), 'dinara': ('dinar', 1.0),
+    'dinars': ('dinar', 1.0),
+}
+_DENOM_SCALES = {
+    'tausend': 1e3,
+    'million': 1e6, 'millionen': 1e6,
+    'milliarde': 1e9, 'milliarden': 1e9,
+    # German 'Billion' is 1e12, not the English 1e9.
+    'billion': 1e12, 'billionen': 1e12,
+}
+# 1.000 / 1,000 are thousands separators; 1.5 / 1,5 are decimals. Three
+# trailing digits is the only reliable tell between them.
+_DENOM_THOUSANDS_RE = re.compile(r'(?<=\d)[.,](?=\d{3}(?:\D|$))')
+_DENOM_FRACTION_RE = re.compile(r'(\d+)\s*/\s*(\d+)')
+_DENOM_NUMBER_RE = re.compile(r'\d+(?:[.,]\d+)?')
+# Sorts blank/unparseable denominations last, matching the 'zzz' and
+# 99999 blanks-last convention the rest of CATEGORY_ORDER_BY uses.
+_DENOM_VALUE_LAST = 1e18
+
+
+def _denom_value(text):
+    """Numeric value of a denomination: '50 Pfennig' -> 50.0,
+    '1 Million Mark' -> 1e6, '1/2 Mark' -> 0.5. Blank or numberless
+    text sorts last."""
+    s = _strip_diacritics(text).strip()
+    if not s:
+        return _DENOM_VALUE_LAST
+    frac = _DENOM_FRACTION_RE.search(s)
+    if frac:
+        num, den = float(frac.group(1)), float(frac.group(2))
+        base = num / den if den else num
+    else:
+        m = _DENOM_NUMBER_RE.search(_DENOM_THOUSANDS_RE.sub('', s))
+        if not m:
+            return _DENOM_VALUE_LAST
+        base = float(m.group(0).replace(',', '.'))
+    scale = 1.0
+    for word in s.split():
+        if word in _DENOM_SCALES:
+            scale = _DENOM_SCALES[word]
+            break
+    return base * scale
+
+
+def _denom_lookup(text):
+    """(family, unit worth) for a denomination's currency. Unknown
+    currencies become their own family at unit 1.0; blank sorts last."""
+    s = _strip_diacritics(text)
+    s = _DENOM_FRACTION_RE.sub(' ', s)
+    s = _DENOM_NUMBER_RE.sub(' ', s)
+    words = [w.strip('.,-/') for w in s.split()]
+    words = [w for w in words if w and w not in _DENOM_SCALES]
+    for w in words:
+        if w in _CURRENCY_UNITS:
+            return _CURRENCY_UNITS[w]
+    return (' '.join(words), 1.0) if words else ('zzz', 1.0)
+
+
+def _denom_currency(text):
+    """Currency family of a denomination: '1 Million Mark' and
+    '50 Pfennig' both -> 'mark', so a town's German notes group
+    together before splitting by unit."""
+    return _denom_lookup(text)[0]
+
+
+def _denom_unit(text):
+    """Worth of the denomination's unit within its family: Pfennig
+    0.01, Mark 1.0. Sorting on this puts the change before the note."""
+    return _denom_lookup(text)[1]
+
+
 def _configure_db_connection(db):
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
@@ -1388,6 +1505,15 @@ def _configure_db_connection(db):
     # 'Urban Jürgensen' from the term 'urban jurg', and folds both
     # pre-composed and decomposed Unicode variants to the same form.
     db.create_function('NODIA', 1, _strip_diacritics,
+                       deterministic=True)
+    # DENOM_* — split a banknote denomination into currency family,
+    # unit worth, and number for the note list's ORDER BY (see
+    # CATEGORY_ORDER_BY['banknotes']).
+    db.create_function('DENOM_CURRENCY', 1, _denom_currency,
+                       deterministic=True)
+    db.create_function('DENOM_UNIT', 1, _denom_unit,
+                       deterministic=True)
+    db.create_function('DENOM_VALUE', 1, _denom_value,
                        deterministic=True)
     return db
 
@@ -2089,10 +2215,13 @@ def init_db():
 
     # One-shot: seed banknote_id (Display Number) for notes that predate
     # the column. From here on the write paths keep it current, so this
-    # only ever needs to run once per deployment.
+    # only ever needs to run once per ordering. Bump the key whenever
+    # CATEGORY_ORDER_BY['banknotes'] changes — v1 numbered notes by
+    # country/town/issuer/year, which v2's country/town/series/
+    # denomination ordering invalidates.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v1',),
+        ('banknote_display_number_v2',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -2100,7 +2229,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v1', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v2', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -4724,9 +4853,18 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
+    # Country, town, series, then denomination. Denomination is three
+    # keys: currency family, then unit worth (Pfennig before Mark, cent
+    # before dollar), then the number — so a town reads 50 Pfennig,
+    # 1 Mark, 10 Mark rather than 1, 10, 50 by text. date_1 is only a
+    # tiebreak: it keeps the order (and so the Display Number) stable
+    # for notes that match on everything above.
     'banknotes': ("COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
-                  "COALESCE(NULLIF(issuer, ''), 'zzz') COLLATE NODIACRITIC, "
+                  "COALESCE(NULLIF(series, ''), 'zzz') COLLATE NODIACRITIC, "
+                  "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
+                  "DENOM_UNIT(denomination) ASC, "
+                  "DENOM_VALUE(denomination) ASC, "
                   "COALESCE(date_1, 99999) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
                 "COALESCE(NULLIF(description, ''), 'zzz') COLLATE NODIACRITIC"),
@@ -20836,8 +20974,10 @@ def _renumber_coin_groups(db, groups=None):
 
 
 # Changing any of these reorders the note list, so the Display Number
-# has to be resequenced when one is edited.
-BANKNOTE_SORT_FIELDS = ('country', 'municipality', 'issuer', 'date_1')
+# has to be resequenced when one is edited. Mirrors the fields in
+# CATEGORY_ORDER_BY['banknotes'] — keep the two in step.
+BANKNOTE_SORT_FIELDS = ('country', 'municipality', 'series',
+                        'denomination', 'date_1')
 
 
 def _renumber_banknotes(db):
