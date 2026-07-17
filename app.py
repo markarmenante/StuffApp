@@ -4880,7 +4880,16 @@ def _expand_note_box_to_paper(img, box):
         return x0, y0, x1, y1
     max_lum = max(c[0] for c in candidates)
     bright = [c for c in candidates if c[0] >= max_lum - 25]
-    ref = max(bright, key=lambda c: c[1])
+    # Median of the warm-bright cluster, not the single warmest sample:
+    # one sample catching warm ornament remnants would drag the anchor
+    # past the real margin tone and the tolerance band would then
+    # exclude the margin itself.
+    warm_cluster = [c for c in bright if c[1] >= 15]
+    if len(warm_cluster) >= 3:
+        ref = (_median([c[0] for c in warm_cluster]),
+               _median([c[1] for c in warm_cluster]))
+    else:
+        ref = max(bright, key=lambda c: c[1])
 
     def is_paper(st):
         return abs(st[0] - ref[0]) <= 18 and abs(st[1] - ref[1]) <= 7
