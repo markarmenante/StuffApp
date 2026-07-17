@@ -4510,15 +4510,28 @@ def _trim_slabbed_note_image(data):
     in black plastic) and the light holder (note on a white/grey clear
     holder, found by its engraving texture). Both cut away the label
     band and holder frame and level a slight skew so the note's bottom
-    edge runs horizontal. Returns JPEG bytes, or None when the image
-    doesn't look like a slab shot — already-trimmed notes pass through
+    edge runs horizontal. A final pass re-centres an already-trimmed
+    note whose margins came out lopsided. Returns JPEG bytes, or None
+    when there is nothing to do — well-trimmed notes pass through
     untouched.
     """
     img = _flatten_image_for_jpeg(_open_upload_image(data))
     w, h = img.size
     if w < 200 or h < 100:
         return None
-    return _trim_dark_slab_note(img) or _trim_light_slab_note(img)
+    # Iterate to a fixed point (a fuzzy paper edge can leave a sliver
+    # that only the next pass sees) so the stored image is final and a
+    # later Check finds nothing left to shave. Each pass only ever
+    # shrinks the image; 3 passes covers the worst real case.
+    out = None
+    for _ in range(3):
+        step = (_trim_dark_slab_note(img) or _trim_light_slab_note(img)
+                or _recenter_trimmed_note(img))
+        if step is None:
+            break
+        out = step
+        img = _flatten_image_for_jpeg(_open_upload_image(step))
+    return out
 
 
 def _encode_trimmed_note(crop):
@@ -4743,11 +4756,11 @@ def _note_edge_blob(gray):
     return e.filter(ImageFilter.MaxFilter(7))
 
 
-def _largest_note_component(blob, step=2):
+def _largest_note_component(blob, step=2, max_area=0.92):
     """Pixel bbox of the biggest banknote-shaped edge component: solid
     (fill > 0.45 — a textured photo background forms a hollow ring and
-    fails this), banknote-proportioned, and neither tiny nor the whole
-    frame. None when nothing qualifies."""
+    fails this), banknote-proportioned, and neither tiny nor more than
+    max_area of the frame. None when nothing qualifies."""
     from collections import deque
 
     w, h = blob.size
@@ -4782,7 +4795,8 @@ def _largest_note_component(blob, step=2):
             fill = n / float(bw * bh)
             area = bw * bh / float(gw * gh)
             aspect = bw / float(bh)
-            if 0.08 <= area <= 0.92 and 1.15 <= aspect <= 3.8 and fill > 0.45:
+            if 0.08 <= area <= max_area and 1.15 <= aspect <= 3.8 \
+                    and fill > 0.45:
                 if best is None or n > best[0]:
                     best = (n, minx * step, miny * step,
                             (maxx + 1) * step, (maxy + 1) * step)
@@ -4813,53 +4827,69 @@ def _median(vals):
 
 
 def _expand_note_box_to_paper(img, box):
-    """Walk each ink-box side outward across the note's plain paper
-    margin, stopping at the colour step onto the holder. The reference
-    colour per side is the paper just INSIDE the ink box edge (the
-    median across the line rides over sparse ink tips), so when a note
-    has no margin the walk stops immediately instead of wandering onto
-    a similar-toned holder."""
+    """Locate the note's physical paper edges around the ink box.
+
+    Per side, scan a window across the box edge and find the strongest
+    step in median luminance + warmth (R-B): aged note paper is warm,
+    holder plastic of any brightness is neutral, so the paper->holder
+    boundary is the dominant transition even when their plain RGB
+    distance is a handful of units. The window reaches slightly INSIDE
+    the box because the box edge itself can sit past the paper edge
+    (the note's edge shadow dilates into the ink component). Falls back
+    to the box edge when no confident step exists."""
     w, h = img.size
     px = img.load()
     x0, y0, x1, y1 = box
     nw, nh = x1 - x0, y1 - y0
 
-    def line_med(side, pos):
-        rs, gs, bs = [], [], []
+    def line_stats(side, pos):
+        lum, warm = [], []
         if side in ('top', 'bottom'):
             for x in range(x0 + nw // 4, x1 - nw // 4, 2):
                 p = px[x, pos]
-                rs.append(p[0]); gs.append(p[1]); bs.append(p[2])
+                lum.append((p[0] + p[1] + p[2]) // 3)
+                warm.append(p[0] - p[2])
         else:
             for y in range(y0 + nh // 4, y1 - nh // 4, 2):
                 p = px[pos, y]
-                rs.append(p[0]); gs.append(p[1]); bs.append(p[2])
-        return _median(rs), _median(gs), _median(bs)
+                lum.append((p[0] + p[1] + p[2]) // 3)
+                warm.append(p[0] - p[2])
+        return _median(lum), _median(warm)
 
-    def walk(side, start, step, limit, cap):
-        inset = max(3, int(0.01 * (nh if side in ('top', 'bottom') else nw)))
-        ref_pos = start - step * inset
-        if not (0 <= ref_pos < limit):
+    def paper_edge(side, start, step, limit):
+        nd = nh if side in ('top', 'bottom') else nw
+        span_in = max(4, int(0.02 * nd))
+        span_out = max(8, int(0.10 * nd))
+        positions = []
+        p = start - step * span_in
+        for _ in range(span_in + span_out):
+            if not (0 <= p < limit):
+                break
+            positions.append(p)
+            p += step
+        K = 3
+        if len(positions) < 2 * K + 1:
             return start
-        ref = line_med(side, ref_pos)
-        pos = start
-        moved = 0
-        while moved < cap:
-            nxt = pos + step
-            if nxt < 0 or nxt >= limit:
-                break
-            m = line_med(side, nxt)
-            if max(abs(m[i] - ref[i]) for i in range(3)) > 12:
-                break
-            pos = nxt
-            moved += 1
-        return pos
+        stats = [line_stats(side, q) for q in positions]
+        # The paper edge is the FIRST sustained step walking outward —
+        # never the strongest in the window, because a holder seam
+        # further out is a far bigger luminance step than paper->holder
+        # and would win an argmax.
+        for i in range(K, len(stats) - K + 1):
+            inner = stats[i - K:i]
+            outer = stats[i:i + K]
+            dl = abs(sum(s[0] for s in inner) - sum(s[0] for s in outer)) / K
+            dw = abs(sum(s[1] for s in inner) - sum(s[1] for s in outer)) / K
+            if dl + 1.5 * dw >= 8.0:
+                # positions[i] is the first line past the step — the
+                # last paper line is one before it.
+                return positions[i - 1]
+        return start
 
-    capy, capx = max(4, int(0.06 * nh)), max(4, int(0.06 * nw))
-    ny0 = walk('top', y0, -1, h, capy)
-    ny1 = walk('bottom', y1, 1, h, capy)
-    nx0 = walk('left', x0, -1, w, capx)
-    nx1 = walk('right', x1, 1, w, capx)
+    ny0 = paper_edge('top', y0, -1, h)
+    ny1 = paper_edge('bottom', y1, 1, h)
+    nx0 = paper_edge('left', x0, -1, w)
+    nx1 = paper_edge('right', x1, 1, w)
     return nx0, ny0, nx1, ny1
 
 
@@ -4947,13 +4977,67 @@ def _trim_light_slab_note(img):
         if fx1 - fx0 < 20 or fy1 - fy0 < 20:
             return None
 
+    # The detected paper edges ARE the note rectangle — the printed
+    # design sits centred inside it, so cropping to them yields the
+    # equal margins a real note carries. An edge found INSIDE the ink
+    # box (the box overran the paper there, e.g. an edge shadow pulled
+    # into the component) shrinks the crop accordingly.
     px0, py0, px1, py1 = _expand_note_box_to_paper(
         img, (fx0, fy0, fx1, fy1))
+    if px1 - px0 < 0.6 * (fx1 - fx0) or py1 - py0 < 0.6 * (fy1 - fy0):
+        return None
     final = img.crop((px0, py0, px1 + 1, py1 + 1))
     fw, fh = final.size
     if not (1.15 <= fw / float(max(1, fh)) <= 3.8):
         return None
     return _encode_trimmed_note(final)
+
+
+def _recenter_trimmed_note(img):
+    """Fix an already-trimmed note whose margins came out lopsided.
+
+    The printed design is centred on a real note, so when a full-frame
+    note image carries grossly unequal margins on an axis, crop the
+    larger margin down to match the smaller. Runs only when the design
+    fills most of the frame (a slab photo never reaches here with its
+    holder still on) and the asymmetry is unmistakable — a well-trimmed
+    image passes through untouched, keeping Check idempotent."""
+    w, h = img.size
+    scale = min(1.0, 900.0 / max(w, h))
+    aw, ah = max(1, int(w * scale)), max(1, int(h * scale))
+    small = img.resize((aw, ah))
+    blob = _note_edge_blob(small.convert('L'))
+    box = _largest_note_component(blob, max_area=1.0)
+    if not box:
+        return None
+    x0, y0, x1, y1 = box
+    if (x1 - x0) < 0.75 * aw or (y1 - y0) < 0.75 * ah:
+        return None
+
+    fx0, fy0 = int(x0 / scale), int(y0 / scale)
+    fx1, fy1 = int(x1 / scale), int(y1 / scale)
+    # Act only on unmistakable lopsidedness (a fat holder band left on
+    # one side) — a fresh trim's few-pixel wobble must pass untouched
+    # or Check would re-shave the images on every run.
+    changed = False
+    m_l, m_r = fx0, (w - 1) - fx1
+    m_t, m_b = fy0, (h - 1) - fy1
+    nx0, nx1, ny0, ny1 = 0, w - 1, 0, h - 1
+    if max(m_l, m_r) >= 3 * max(1, min(m_l, m_r)) and \
+            max(m_l, m_r) >= 0.06 * w and \
+            max(m_l, m_r) - min(m_l, m_r) >= 0.04 * w:
+        m = min(m_l, m_r)
+        nx0, nx1 = fx0 - m, fx1 + m
+        changed = True
+    if max(m_t, m_b) >= 3 * max(1, min(m_t, m_b)) and \
+            max(m_t, m_b) >= 0.06 * h and \
+            max(m_t, m_b) - min(m_t, m_b) >= 0.04 * h:
+        m = min(m_t, m_b)
+        ny0, ny1 = fy0 - m, fy1 + m
+        changed = True
+    if not changed:
+        return None
+    return _encode_trimmed_note(img.crop((nx0, ny0, nx1 + 1, ny1 + 1)))
 
 
 def get_file_fields(category):
