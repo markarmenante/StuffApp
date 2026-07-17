@@ -4506,20 +4506,81 @@ def save_upload(file_obj, *, optimize_image=False):
 def _trim_slabbed_note_image(data):
     """Crop a graded-holder photo (PMG/PCGS slab) down to just the note.
 
-    Detects a bright note sitting in a dark holder: the label band and
-    the black frame are cut away, and a slight skew is levelled so the
-    note's bottom edge runs horizontal. Returns JPEG bytes, or None when
-    the image doesn't look like a slab shot — already-trimmed notes and
-    white-background scans pass through untouched.
+    Two detectors run in sequence: the classic dark holder (bright note
+    in black plastic) and the light holder (note on a white/grey clear
+    holder, found by its engraving texture). Both cut away the label
+    band and holder frame and level a slight skew so the note's bottom
+    edge runs horizontal. Returns JPEG bytes, or None when the image
+    doesn't look like a slab shot — already-trimmed notes pass through
+    untouched.
     """
-    import math
-    from io import BytesIO
-    from PIL import Image
-
     img = _flatten_image_for_jpeg(_open_upload_image(data))
     w, h = img.size
     if w < 200 or h < 100:
         return None
+    return _trim_dark_slab_note(img) or _trim_light_slab_note(img)
+
+
+def _encode_trimmed_note(crop):
+    from io import BytesIO
+
+    if max(crop.size) > OPTIMIZED_IMAGE_MAX_EDGE:
+        crop.thumbnail((OPTIMIZED_IMAGE_MAX_EDGE, OPTIMIZED_IMAGE_MAX_EDGE))
+    out = BytesIO()
+    crop.save(out, format='JPEG', quality=OPTIMIZED_IMAGE_JPEG_QUALITY,
+              optimize=True, progressive=True)
+    return out.getvalue()
+
+
+def _fit_note_bottom_angle(mask_px, cw, ch, hit):
+    """Skew of the note's bottom edge: least-squares line through the
+    lowest matching pixel per sampled column, with an outlier-rejecting
+    refit. Positive slope (right side lower) needs a counter-clockwise
+    = positive PIL rotate. Returns 0.0 when the evidence is bad (too few
+    points, or a fit steeper than any real slab shot)."""
+    import math
+
+    pts = []
+    for x in range(int(cw * 0.15), int(cw * 0.85), max(1, cw // 80)):
+        for y in range(ch - 1, ch // 2, -1):
+            if hit(mask_px, x, y):
+                pts.append((x, y))
+                break
+    if len(pts) < 20:
+        return 0.0
+
+    def _fit(points):
+        n = len(points)
+        sx = sum(p[0] for p in points)
+        sy = sum(p[1] for p in points)
+        sxx = sum(p[0] * p[0] for p in points)
+        sxy = sum(p[0] * p[1] for p in points)
+        d = n * sxx - sx * sx
+        if not d:
+            return None
+        slope = (n * sxy - sx * sy) / d
+        return slope, (sy - slope * sx) / n
+
+    fit = _fit(pts)
+    if not fit:
+        return 0.0
+    slope, intercept = fit
+    tol = max(3.0, 0.004 * ch)
+    good = [p for p in pts if abs(p[1] - (slope * p[0] + intercept)) < tol]
+    if len(good) >= 10:
+        refit = _fit(good)
+        if refit:
+            slope = refit[0]
+    angle = math.degrees(math.atan(slope))
+    return 0.0 if abs(angle) > 4.0 else angle
+
+
+def _trim_dark_slab_note(img):
+    """Dark-holder detector: the note is the big bright block framed by
+    black holder plastic."""
+    from PIL import Image
+
+    w, h = img.size
 
     # All detection runs on a bounded greyscale copy; sampled pure-python
     # profiles keep this ~100ms without numpy.
@@ -4613,48 +4674,14 @@ def _trim_slabbed_note_image(data):
     crop = img.crop((max(0, fx0 - mx), max(0, fy0 - my),
                      min(w, fx1 + mx), min(h, fy1 + my)))
 
-    # Deskew: least-squares fit of the bottom edge (lowest bright pixel
-    # per sampled column, with an outlier-rejecting refit), then rotate
-    # so that edge runs horizontal. Positive slope (right side lower)
-    # needs a counter-clockwise = positive PIL rotate.
+    # Deskew on the note's bottom edge (lowest sustained-bright pixel
+    # per column).
     cg = crop.convert('L')
     cw, ch = cg.size
-    cpx = cg.load()
-    pts = []
-    for x in range(int(cw * 0.08), int(cw * 0.92), max(1, cw // 80)):
-        for y in range(ch - 1, ch // 2, -1):
-            if (cpx[x, y] > BRIGHT and cpx[x, max(0, y - 3)] > BRIGHT
-                    and cpx[x, max(0, y - 6)] > BRIGHT):
-                pts.append((x, y))
-                break
-    angle = 0.0
-    if len(pts) >= 20:
-        def _fit(points):
-            n = len(points)
-            sx = sum(p[0] for p in points)
-            sy = sum(p[1] for p in points)
-            sxx = sum(p[0] * p[0] for p in points)
-            sxy = sum(p[0] * p[1] for p in points)
-            d = n * sxx - sx * sx
-            if not d:
-                return None
-            slope = (n * sxy - sx * sy) / d
-            return slope, (sy - slope * sx) / n
-        fit = _fit(pts)
-        if fit:
-            slope, intercept = fit
-            tol = max(3.0, 0.004 * ch)
-            good = [p for p in pts
-                    if abs(p[1] - (slope * p[0] + intercept)) < tol]
-            if len(good) >= 10:
-                refit = _fit(good)
-                if refit:
-                    slope = refit[0]
-            angle = math.degrees(math.atan(slope))
-    if abs(angle) > 4.0:
-        # A steep "edge" is the fit latching onto something that isn't
-        # the note's bottom — don't rotate on bad evidence.
-        angle = 0.0
+    angle = _fit_note_bottom_angle(
+        cg.load(), cw, ch,
+        lambda p, x, y: (p[x, y] > BRIGHT and p[x, max(0, y - 3)] > BRIGHT
+                         and p[x, max(0, y - 6)] > BRIGHT))
     if abs(angle) >= 0.05:
         crop = crop.rotate(angle, resample=Image.BICUBIC, expand=True,
                            fillcolor=(0, 0, 0))
@@ -4699,13 +4726,210 @@ def _trim_slabbed_note_image(data):
     inset = max(2, int(0.004 * min(tx1 - tx0, ty1 - ty0)))
     crop = crop.crop((tx0 + inset, ty0 + inset,
                       tx1 + 1 - inset, ty1 + 1 - inset))
+    return _encode_trimmed_note(crop)
 
-    if max(crop.size) > OPTIMIZED_IMAGE_MAX_EDGE:
-        crop.thumbnail((OPTIMIZED_IMAGE_MAX_EDGE, OPTIMIZED_IMAGE_MAX_EDGE))
-    out = BytesIO()
-    crop.save(out, format='JPEG', quality=OPTIMIZED_IMAGE_JPEG_QUALITY,
-              optimize=True, progressive=True)
-    return out.getvalue()
+
+def _note_edge_blob(gray):
+    """Binary mask of engraving texture, dilated into solid blobs. The
+    note's design becomes one big component; flat holder plastic, page
+    background and blank paper stay empty."""
+    from PIL import ImageDraw, ImageFilter
+
+    g = gray.filter(ImageFilter.GaussianBlur(1.0))
+    e = g.filter(ImageFilter.FIND_EDGES).point(lambda v: 255 if v > 26 else 0)
+    w, h = e.size
+    # FIND_EDGES is unreliable on the outermost pixel ring — zero it.
+    ImageDraw.Draw(e).rectangle([0, 0, w - 1, h - 1], outline=0, width=2)
+    return e.filter(ImageFilter.MaxFilter(7))
+
+
+def _largest_note_component(blob, step=2):
+    """Pixel bbox of the biggest banknote-shaped edge component: solid
+    (fill > 0.45 — a textured photo background forms a hollow ring and
+    fails this), banknote-proportioned, and neither tiny nor the whole
+    frame. None when nothing qualifies."""
+    from collections import deque
+
+    w, h = blob.size
+    px = blob.load()
+    gw, gh = w // step, h // step
+    seen = [[False] * gw for _ in range(gh)]
+    best = None
+    for gy in range(gh):
+        for gx in range(gw):
+            if seen[gy][gx] or px[gx * step, gy * step] == 0:
+                seen[gy][gx] = True
+                continue
+            q = deque([(gx, gy)])
+            seen[gy][gx] = True
+            n = 0
+            minx = maxx = gx
+            miny = maxy = gy
+            while q:
+                cx, cy = q.popleft()
+                n += 1
+                if cx < minx: minx = cx
+                if cx > maxx: maxx = cx
+                if cy < miny: miny = cy
+                if cy > maxy: maxy = cy
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx, ny = cx + dx, cy + dy
+                    if 0 <= nx < gw and 0 <= ny < gh and not seen[ny][nx] \
+                            and px[nx * step, ny * step] > 0:
+                        seen[ny][nx] = True
+                        q.append((nx, ny))
+            bw, bh = maxx - minx + 1, maxy - miny + 1
+            fill = n / float(bw * bh)
+            area = bw * bh / float(gw * gh)
+            aspect = bw / float(bh)
+            if 0.08 <= area <= 0.92 and 1.15 <= aspect <= 3.8 and fill > 0.45:
+                if best is None or n > best[0]:
+                    best = (n, minx * step, miny * step,
+                            (maxx + 1) * step, (maxy + 1) * step)
+    return best[1:] if best else None
+
+
+def _ring_mostly_uniform(blob, box):
+    """True when the band immediately around the box is texture-free —
+    holder plastic of any colour. Rejects busy dealer-page surroundings
+    that happen to contain a banknote-shaped blob."""
+    x0, y0, x1, y1 = box
+    w, h = blob.size
+    ring = max(3, int(0.04 * min(x1 - x0, y1 - y0)))
+    rx0, ry0 = max(0, x0 - ring), max(0, y0 - ring)
+    rx1, ry1 = min(w - 1, x1 + ring), min(h - 1, y1 + ring)
+    px = blob.load()
+    vals = [px[x, y]
+            for y in range(ry0, ry1 + 1)
+            for x in range(rx0, rx1 + 1)
+            if not (x0 <= x <= x1 and y0 <= y <= y1)]
+    return bool(vals) and \
+        sum(1 for v in vals if v > 0) / len(vals) <= 0.20
+
+
+def _median(vals):
+    s = sorted(vals)
+    return s[len(s) // 2]
+
+
+def _expand_note_box_to_paper(img, box):
+    """Walk each ink-box side outward across the note's plain paper
+    margin, stopping at the colour step onto the holder. The reference
+    colour per side is the paper just INSIDE the ink box edge (the
+    median across the line rides over sparse ink tips), so when a note
+    has no margin the walk stops immediately instead of wandering onto
+    a similar-toned holder."""
+    w, h = img.size
+    px = img.load()
+    x0, y0, x1, y1 = box
+    nw, nh = x1 - x0, y1 - y0
+
+    def line_med(side, pos):
+        rs, gs, bs = [], [], []
+        if side in ('top', 'bottom'):
+            for x in range(x0 + nw // 4, x1 - nw // 4, 2):
+                p = px[x, pos]
+                rs.append(p[0]); gs.append(p[1]); bs.append(p[2])
+        else:
+            for y in range(y0 + nh // 4, y1 - nh // 4, 2):
+                p = px[pos, y]
+                rs.append(p[0]); gs.append(p[1]); bs.append(p[2])
+        return _median(rs), _median(gs), _median(bs)
+
+    def walk(side, start, step, limit, cap):
+        inset = max(3, int(0.01 * (nh if side in ('top', 'bottom') else nw)))
+        ref_pos = start - step * inset
+        if not (0 <= ref_pos < limit):
+            return start
+        ref = line_med(side, ref_pos)
+        pos = start
+        moved = 0
+        while moved < cap:
+            nxt = pos + step
+            if nxt < 0 or nxt >= limit:
+                break
+            m = line_med(side, nxt)
+            if max(abs(m[i] - ref[i]) for i in range(3)) > 12:
+                break
+            pos = nxt
+            moved += 1
+        return pos
+
+    capy, capx = max(4, int(0.06 * nh)), max(4, int(0.06 * nw))
+    ny0 = walk('top', y0, -1, h, capy)
+    ny1 = walk('bottom', y1, 1, h, capy)
+    nx0 = walk('left', x0, -1, w, capx)
+    nx1 = walk('right', x1, 1, w, capx)
+    return nx0, ny0, nx1, ny1
+
+
+def _detect_light_note_box(img, require_ring=True):
+    """Full-res ink box of the note on a light holder, or None.
+
+    Detection always runs on the full frame — the whole-frame gates
+    (size, ring uniformity) are what keep it honest. Detecting on a
+    tight crop loses that context: the dilated edges bridge the note to
+    its own edge shadow and the holder seam, and the "component" grows
+    to the whole crop.
+    """
+    w, h = img.size
+    scale = min(1.0, 900.0 / max(w, h))
+    aw, ah = max(1, int(w * scale)), max(1, int(h * scale))
+    small = img.resize((aw, ah))
+    blob = _note_edge_blob(small.convert('L'))
+    box = _largest_note_component(blob)
+    if not box:
+        return None
+    x0, y0, x1, y1 = box
+    # A design spanning nearly the whole frame IS the already-trimmed
+    # note — re-trimming would shave its margins on every Check run.
+    if (x1 - x0) > 0.90 * aw or (y1 - y0) > 0.90 * ah:
+        return None
+    # After a deskew rotation the ring test is skipped: the scene
+    # already qualified pre-rotation, and bicubic resampling can push a
+    # borderline ring just past the threshold.
+    if require_ring and not _ring_mostly_uniform(blob, box):
+        return None
+    return (int(x0 / scale), int(y0 / scale),
+            int(x1 / scale), int(y1 / scale))
+
+
+def _trim_light_slab_note(img):
+    """Light-holder detector: the note is found by its engraving
+    texture, then each side walks out to the true paper edge."""
+    from PIL import Image
+
+    box = _detect_light_note_box(img)
+    if not box:
+        return None
+    w, h = img.size
+    fx0, fy0, fx1, fy1 = box
+
+    # The crop is used ONLY to measure the skew of the design's bottom
+    # line at full resolution.
+    mx = max(8, int(0.10 * (fx1 - fx0)))
+    my = max(8, int(0.10 * (fy1 - fy0)))
+    crop = img.crop((max(0, fx0 - mx), max(0, fy0 - my),
+                     min(w, fx1 + mx), min(h, fy1 + my)))
+    ce = _note_edge_blob(crop.convert('L'))
+    angle = _fit_note_bottom_angle(ce.load(), ce.width, ce.height,
+                                   lambda p, x, y: p[x, y] > 0)
+    if abs(angle) >= 0.05:
+        fill = img.load()[2, 2]
+        img = img.rotate(angle, resample=Image.BICUBIC, expand=True,
+                         fillcolor=fill)
+        box = _detect_light_note_box(img, require_ring=False)
+        if not box:
+            return None
+        fx0, fy0, fx1, fy1 = box
+
+    px0, py0, px1, py1 = _expand_note_box_to_paper(
+        img, (fx0, fy0, fx1, fy1))
+    final = img.crop((px0, py0, px1 + 1, py1 + 1))
+    fw, fh = final.size
+    if not (1.15 <= fw / float(max(1, fh)) <= 3.8):
+        return None
+    return _encode_trimmed_note(final)
 
 
 def get_file_fields(category):
