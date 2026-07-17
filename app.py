@@ -4510,10 +4510,10 @@ def _trim_slabbed_note_image(data):
     in black plastic) and the light holder (note on a white/grey clear
     holder, found by its engraving texture). Both cut away the label
     band and holder frame and level a slight skew so the note's bottom
-    edge runs horizontal. A final pass re-centres an already-trimmed
-    note whose margins came out lopsided. Returns JPEG bytes, or None
-    when there is nothing to do — well-trimmed notes pass through
-    untouched.
+    edge runs horizontal. Returns JPEG bytes, or None when there is
+    nothing to do — well-trimmed notes pass through untouched (an
+    already-trimmed image that needs redoing is re-processed from its
+    original photo, never by shaving the stored copy).
     """
     img = _flatten_image_for_jpeg(_open_upload_image(data))
     w, h = img.size
@@ -4525,8 +4525,7 @@ def _trim_slabbed_note_image(data):
     # shrinks the image; 3 passes covers the worst real case.
     out = None
     for _ in range(3):
-        step = (_trim_dark_slab_note(img) or _trim_light_slab_note(img)
-                or _recenter_trimmed_note(img))
+        step = _trim_dark_slab_note(img) or _trim_light_slab_note(img)
         if step is None:
             break
         out = step
@@ -4884,7 +4883,11 @@ def _expand_note_box_to_paper(img, box):
                 # positions[i] is the first line past the step — the
                 # last paper line is one before it.
                 return positions[i - 1]
-        return start
+        # No boundary anywhere in the window: everything scanned reads
+        # as uniform paper, so keep it ALL. Falling back to the ink box
+        # edge here would eat the margins of an already-trimmed image
+        # (whose paper simply runs to the frame with no holder step).
+        return positions[-1]
 
     ny0 = paper_edge('top', y0, -1, h)
     ny1 = paper_edge('bottom', y1, 1, h)
@@ -4988,56 +4991,13 @@ def _trim_light_slab_note(img):
         return None
     final = img.crop((px0, py0, px1 + 1, py1 + 1))
     fw, fh = final.size
+    # Cropping next to nothing means this IS the trimmed note already —
+    # report nothing-to-do instead of re-encoding a near-identical copy.
+    if fw >= 0.985 * w and fh >= 0.985 * h:
+        return None
     if not (1.15 <= fw / float(max(1, fh)) <= 3.8):
         return None
     return _encode_trimmed_note(final)
-
-
-def _recenter_trimmed_note(img):
-    """Fix an already-trimmed note whose margins came out lopsided.
-
-    The printed design is centred on a real note, so when a full-frame
-    note image carries grossly unequal margins on an axis, crop the
-    larger margin down to match the smaller. Runs only when the design
-    fills most of the frame (a slab photo never reaches here with its
-    holder still on) and the asymmetry is unmistakable — a well-trimmed
-    image passes through untouched, keeping Check idempotent."""
-    w, h = img.size
-    scale = min(1.0, 900.0 / max(w, h))
-    aw, ah = max(1, int(w * scale)), max(1, int(h * scale))
-    small = img.resize((aw, ah))
-    blob = _note_edge_blob(small.convert('L'))
-    box = _largest_note_component(blob, max_area=1.0)
-    if not box:
-        return None
-    x0, y0, x1, y1 = box
-    if (x1 - x0) < 0.75 * aw or (y1 - y0) < 0.75 * ah:
-        return None
-
-    fx0, fy0 = int(x0 / scale), int(y0 / scale)
-    fx1, fy1 = int(x1 / scale), int(y1 / scale)
-    # Act only on unmistakable lopsidedness (a fat holder band left on
-    # one side) — a fresh trim's few-pixel wobble must pass untouched
-    # or Check would re-shave the images on every run.
-    changed = False
-    m_l, m_r = fx0, (w - 1) - fx1
-    m_t, m_b = fy0, (h - 1) - fy1
-    nx0, nx1, ny0, ny1 = 0, w - 1, 0, h - 1
-    if max(m_l, m_r) >= 2 * max(1, min(m_l, m_r)) and \
-            max(m_l, m_r) >= 0.06 * w and \
-            max(m_l, m_r) - min(m_l, m_r) >= 0.04 * w:
-        m = min(m_l, m_r)
-        nx0, nx1 = fx0 - m, fx1 + m
-        changed = True
-    if max(m_t, m_b) >= 2 * max(1, min(m_t, m_b)) and \
-            max(m_t, m_b) >= 0.06 * h and \
-            max(m_t, m_b) - min(m_t, m_b) >= 0.04 * h:
-        m = min(m_t, m_b)
-        ny0, ny1 = fy0 - m, fy1 + m
-        changed = True
-    if not changed:
-        return None
-    return _encode_trimmed_note(img.crop((nx0, ny0, nx1 + 1, ny1 + 1)))
 
 
 def get_file_fields(category):
