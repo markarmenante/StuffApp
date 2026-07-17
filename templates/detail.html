@@ -7022,6 +7022,23 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.error || 'Lookup failed');
 
+    // Banknote Check trims slab photos down to just the note once the
+    // label has been read — swap the refreshed images in regardless of
+    // how the field pass went below.
+    Object.entries(data.images || {}).forEach(([field, url]) => {
+      const zone = document.querySelector(`.drop-zone[data-field="${field}"]`);
+      if (!zone) return;
+      let img = zone.querySelector('img');
+      if (!img) {
+        const placeholder = zone.querySelector('span:not(.panel-lbl)');
+        if (placeholder) placeholder.remove();
+        img = document.createElement('img');
+        img.alt = '';
+        zone.insertBefore(img, zone.firstChild);
+      }
+      img.src = url;
+    });
+
     const filled = data.filled || {};
     const overwritten = data.overwritten || {};
     if (data.specs_searched_at) {

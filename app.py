@@ -4503,6 +4503,192 @@ def save_upload(file_obj, *, optimize_image=False):
     return stored_name
 
 
+def _trim_slabbed_note_image(data):
+    """Crop a graded-holder photo (PMG/PCGS slab) down to just the note.
+
+    Detects a bright note sitting in a dark holder: the label band and
+    the black frame are cut away, and a slight skew is levelled so the
+    note's bottom edge runs horizontal. Returns JPEG bytes, or None when
+    the image doesn't look like a slab shot — already-trimmed notes and
+    white-background scans pass through untouched.
+    """
+    import math
+    from io import BytesIO
+    from PIL import Image
+
+    img = _flatten_image_for_jpeg(_open_upload_image(data))
+    w, h = img.size
+    if w < 200 or h < 100:
+        return None
+
+    # All detection runs on a bounded greyscale copy; sampled pure-python
+    # profiles keep this ~100ms without numpy.
+    scale = min(1.0, 900.0 / max(w, h))
+    aw, ah = max(1, int(w * scale)), max(1, int(h * scale))
+    g = img.convert('L').resize((aw, ah))
+    px = g.load()
+    BRIGHT = 96
+    FRAC = 0.45
+
+    def _bands(length, frac_at):
+        bands, start = [], None
+        for i in range(length + 1):
+            f = frac_at(i) if i < length else 0.0
+            if f > FRAC and start is None:
+                start = i
+            elif f <= FRAC and start is not None:
+                bands.append((start, i - 1))
+                start = None
+        return bands
+
+    def _row_frac(y):
+        hit = n = 0
+        for x in range(0, aw, 2):
+            n += 1
+            if px[x, y] > BRIGHT:
+                hit += 1
+        return hit / n
+
+    # The label band and the note are both bright but separated by dark
+    # holder — contiguous mostly-bright row bands, tallest one is the note.
+    row_bands = _bands(ah, _row_frac)
+    if not row_bands:
+        return None
+    y0, y1 = max(row_bands, key=lambda b: b[1] - b[0])
+    if (y1 - y0) < 0.25 * ah:
+        return None
+
+    def _col_frac(x):
+        hit = n = 0
+        for y in range(y0, y1 + 1, 2):
+            n += 1
+            if px[x, y] > BRIGHT:
+                hit += 1
+        return hit / n
+
+    col_bands = _bands(aw, _col_frac)
+    if not col_bands:
+        return None
+    x0, x1 = max(col_bands, key=lambda b: b[1] - b[0])
+    if (x1 - x0) < 0.3 * aw:
+        return None
+
+    # Slab-shot signature: the note must not already fill the frame, and
+    # what surrounds it must be mostly dark holder (a white scan margin
+    # means "not a slab" — leave those alone).
+    area = (x1 - x0) * (y1 - y0) / float(aw * ah)
+    if not (0.10 <= area <= 0.90):
+        return None
+    outside = [px[x, y]
+               for y in range(0, ah, 3) for x in range(0, aw, 3)
+               if not (x0 <= x <= x1 and y0 <= y <= y1)]
+    if not outside:
+        return None
+    if sum(1 for v in outside if v < 60) / len(outside) < 0.5:
+        return None
+
+    fx0, fy0 = int(x0 / scale), int(y0 / scale)
+    fx1, fy1 = int((x1 + 1) / scale), int((y1 + 1) / scale)
+    mx = max(4, int(0.02 * (fx1 - fx0)))
+    my = max(4, int(0.02 * (fy1 - fy0)))
+    crop = img.crop((max(0, fx0 - mx), max(0, fy0 - my),
+                     min(w, fx1 + mx), min(h, fy1 + my)))
+
+    # Deskew: least-squares fit of the bottom edge (lowest bright pixel
+    # per sampled column, with an outlier-rejecting refit), then rotate
+    # so that edge runs horizontal. Positive slope (right side lower)
+    # needs a counter-clockwise = positive PIL rotate.
+    cg = crop.convert('L')
+    cw, ch = cg.size
+    cpx = cg.load()
+    pts = []
+    for x in range(int(cw * 0.08), int(cw * 0.92), max(1, cw // 80)):
+        for y in range(ch - 1, ch // 2, -1):
+            if (cpx[x, y] > BRIGHT and cpx[x, max(0, y - 3)] > BRIGHT
+                    and cpx[x, max(0, y - 6)] > BRIGHT):
+                pts.append((x, y))
+                break
+    angle = 0.0
+    if len(pts) >= 20:
+        def _fit(points):
+            n = len(points)
+            sx = sum(p[0] for p in points)
+            sy = sum(p[1] for p in points)
+            sxx = sum(p[0] * p[0] for p in points)
+            sxy = sum(p[0] * p[1] for p in points)
+            d = n * sxx - sx * sx
+            if not d:
+                return None
+            slope = (n * sxy - sx * sy) / d
+            return slope, (sy - slope * sx) / n
+        fit = _fit(pts)
+        if fit:
+            slope, intercept = fit
+            tol = max(3.0, 0.004 * ch)
+            good = [p for p in pts
+                    if abs(p[1] - (slope * p[0] + intercept)) < tol]
+            if len(good) >= 10:
+                refit = _fit(good)
+                if refit:
+                    slope = refit[0]
+            angle = math.degrees(math.atan(slope))
+    if abs(angle) > 4.0:
+        # A steep "edge" is the fit latching onto something that isn't
+        # the note's bottom — don't rotate on bad evidence.
+        angle = 0.0
+    if abs(angle) >= 0.05:
+        crop = crop.rotate(angle, resample=Image.BICUBIC, expand=True,
+                           fillcolor=(0, 0, 0))
+
+    # Tighten to the levelled note and shave a sliver so no dark edge
+    # survives the crop.
+    cg = crop.convert('L')
+    cw, ch = cg.size
+    cpx = cg.load()
+
+    def _tight_row(y):
+        hit = n = 0
+        for x in range(0, cw, 2):
+            n += 1
+            if cpx[x, y] > BRIGHT:
+                hit += 1
+        return hit / n
+
+    def _tight_col(x):
+        hit = n = 0
+        for y in range(0, ch, 2):
+            n += 1
+            if cpx[x, y] > BRIGHT:
+                hit += 1
+        return hit / n
+
+    TIGHT = 0.60
+    ty0 = 0
+    while ty0 < ch - 1 and _tight_row(ty0) < TIGHT:
+        ty0 += 1
+    ty1 = ch - 1
+    while ty1 > ty0 and _tight_row(ty1) < TIGHT:
+        ty1 -= 1
+    tx0 = 0
+    while tx0 < cw - 1 and _tight_col(tx0) < TIGHT:
+        tx0 += 1
+    tx1 = cw - 1
+    while tx1 > tx0 and _tight_col(tx1) < TIGHT:
+        tx1 -= 1
+    if tx1 - tx0 < 0.5 * cw or ty1 - ty0 < 0.5 * ch:
+        return None
+    inset = max(2, int(0.004 * min(tx1 - tx0, ty1 - ty0)))
+    crop = crop.crop((tx0 + inset, ty0 + inset,
+                      tx1 + 1 - inset, ty1 + 1 - inset))
+
+    if max(crop.size) > OPTIMIZED_IMAGE_MAX_EDGE:
+        crop.thumbnail((OPTIMIZED_IMAGE_MAX_EDGE, OPTIMIZED_IMAGE_MAX_EDGE))
+    out = BytesIO()
+    crop.save(out, format='JPEG', quality=OPTIMIZED_IMAGE_JPEG_QUALITY,
+              optimize=True, progressive=True)
+    return out.getvalue()
+
+
 def get_file_fields(category):
     return [f['name'] for f in visible_fields(category) if f['type'] == 'file']
 
@@ -10577,7 +10763,7 @@ def fetch_banknote_specs(note):
     prompt = f"""You are extracting structured catalogue fields for one specific banknote (paper money).
 
 PRIMARY SOURCES for THIS note, in order of authority:
-1. The note's own images above (front/back, when attached) — direct evidence for everything printed ON the note: lettering, issuing town, dates, denomination, serial number, signatures.
+1. The note's own images above (front/back, when attached) — direct evidence for everything printed ON the note: lettering, issuing town, dates, denomination, serial number, signatures. When the note sits in a grading-service holder (PMG / PCGS Banknote), the holder's printed label is equally direct evidence: read the denomination, series year, catalog attribution (Fr# / Pick#), signature combination, serial number, grade line, and certification number straight off it.
 2. The selling dealer's own text below — authoritative for grading, attribution, and anything the images don't show.
 {dealer_text}
 
@@ -10587,7 +10773,7 @@ Structured fields the user has already transcribed from the dealer:
 Rules:
 1. For each target field, FIRST take what the note's images and the dealer's text state.
 2. Only when neither states a field may you use up to 3 web searches (Standard Catalog of World Paper Money / Pick numbers, Grabowski-Mehl and other notgeld catalogs, PMG population reports, Numista, Banknote World, Heritage Auctions, Stack's Bowers) to fill it. NEVER override a value the images or dealer's text state with a web guess.
-3. The grading fields (grading_authority, grade_numeric, slab_number, grade_modifier) and the grade must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
+3. The grading fields (grading_authority, grade_numeric, slab_number, grade_modifier) and the grade must come ONLY from the dealer's text or from a grading-service label readable in the attached images — do not web-search or estimate them. Return null if neither states them.
 4. The purchase fields (vendor, price, purchase_date) must come ONLY from the text and images on file — an invoice line, "My Cost", "purchased from", or the listing's own branding. NEVER web-search them, and NEVER report a catalog value, price guide figure, auction estimate, or another sale's realized price as the price paid. Return null if the material on file does not state them.
 5. Return null whenever a value is not supported by the images, the text, or (for web-allowed fields) a reputable source.
 
@@ -10599,7 +10785,7 @@ Target fields:
 - official: the person portrayed or the ruler under whom the note was issued, as "Name" or "Name, role" (e.g. "Muhammad Reza Shah Pahlavi"). Null if none.
 - denomination: face value with currency (e.g. "100 Rials", "50 Pfennig").
 - series: the series / set name or year designation if catalogued — notgeld was often issued in themed sets (e.g. "Series 1928", "Leinen-Ausgabe"). Null if not stated.
-- pick_number: the Pick catalogue number formatted "P-<number><letter>" (e.g. "P-67", "P-102a"). Null if the issue isn't Pick-catalogued (most notgeld).
+- pick_number: the Pick catalogue number formatted "P-<number><letter>" (e.g. "P-67", "P-102a"). United States federal issues are Friedberg-catalogued instead — use the Friedberg number formatted "Fr#<number>" (a grading label's "Fr#248" goes here verbatim). Null if the issue has neither (most notgeld).
 - other_catalog: specialized catalogue reference(s) beyond Pick, verbatim as cited — Grabowski/Mehl, Rosenberg, Lamb, Funck, Menzel, Tieste (e.g. "Grabowski Bi.7.5", "Rosenberg 74b"). Comma-separated if several; else null.
 - printer: the printing firm (e.g. "Harrison & Sons", "Thomas De La Rue"; notgeld was often locally printed).
 - signatures: signature combination as stated or visible (e.g. "Nasser-Emami").
@@ -10821,18 +11007,36 @@ def banknote_lookup_specs(record_id):
         for m in re.finditer(_BANKNOTE_YEAR_RE, dealer_text)
     }
 
+    _has_images = bool(
+        _coin_row_value(note, 'image_1') or _coin_row_value(note, 'image_2')
+    )
+    # Fields a grading-service holder label states outright. With images
+    # attached AND the model naming a grading authority (i.e. it saw a
+    # slab label), these are image-read facts — dealer-text grounding
+    # would reject exactly what the label shows.
+    _SLAB_LABEL_FIELDS = {'grade', 'grade_numeric', 'grading_authority',
+                          'slab_number', 'grade_condition', 'grade_modifier',
+                          'pick_number'}
+
     def _grounded(field, value):
         if field in ('date_1', 'date_2'):
             try:
-                return int(value) in _dealer_years
+                year = int(value)
             except (TypeError, ValueError):
                 return False
-        if field == 'serial_number' and (
-            _coin_row_value(note, 'image_1') or _coin_row_value(note, 'image_2')
-        ):
+            if year in _dealer_years:
+                return True
+            # No dealer text to ground against: the series year is
+            # printed on the note (and its slab label) — trust the
+            # image read, same rationale as the serial below.
+            return _has_images and not _dealer_years
+        if field == 'serial_number' and _has_images:
             # The serial is printed ON the note: with images attached the
             # model reads it directly, so dealer-text grounding would
             # reject exactly the image-read serials Check exists to find.
+            return True
+        if field in _SLAB_LABEL_FIELDS and _has_images and \
+                suggestions.get('grading_authority'):
             return True
         if field in ('slab_number', 'serial_number', 'pick_number'):
             key = re.sub(r'[^a-z0-9]', '', str(value).lower()).lstrip('p')
@@ -10941,9 +11145,41 @@ def banknote_lookup_specs(record_id):
                    (now, record_id))
         db.commit()
 
+    # Slab photos have now served their purpose (the lookup above read
+    # the holder label off them) — trim each stored image down to just
+    # the note, levelled. Only after a full run: a failed scan keeps the
+    # labels intact so a retry can still read them. The untrimmed
+    # original stays on disk (orphan-uploads can sweep it later).
+    images_updated = {}
+    if not lookup_error:
+        for field in ('image_1', 'image_2'):
+            fname = _coin_row_value(note, field)
+            if not fname or not is_image_filter(fname):
+                continue
+            try:
+                with open(os.path.join(UPLOAD_FOLDER, fname), 'rb') as fh:
+                    raw = fh.read()
+                trimmed = _trim_slabbed_note_image(raw)
+            except Exception as e:
+                app.logger.warning('banknote %s: trim of %s (%s) failed: %s',
+                                   record_id, field, fname, e)
+                continue
+            if not trimmed:
+                continue
+            new_name = f"{uuid.uuid4().hex}.jpg"
+            with open(os.path.join(UPLOAD_FOLDER, new_name), 'wb') as fh:
+                fh.write(trimmed)
+            db.execute(
+                f"UPDATE banknotes SET {field} = ?, updated_at = ? WHERE id = ?",
+                (new_name, datetime.utcnow().isoformat(), record_id))
+            images_updated[field] = url_for('uploaded_file', filename=new_name)
+        if images_updated:
+            db.commit()
+
     return jsonify({
         'filled': filled,
         'overwritten': overwritten,
+        'images': images_updated,
         'sources': suggestions.get('sources', ''),
         'specs_searched_at': now,
         # The image/web lookup failed but the dealer-description parser
