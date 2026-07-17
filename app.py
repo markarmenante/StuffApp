@@ -4531,6 +4531,11 @@ def _trim_slabbed_note_image(data):
     FRAC = 0.45
 
     def _bands(length, frac_at):
+        """Contiguous mostly-bright bands, merged across tiny dark gaps —
+        a dense engraving line ("THIS CERTIFIES THAT…") dips a few rows
+        below the threshold and must not split the note in two. The gap
+        between the holder label and the note is far wider than the
+        merge tolerance, so the label stays a separate band."""
         bands, start = [], None
         for i in range(length + 1):
             f = frac_at(i) if i < length else 0.0
@@ -4539,7 +4544,14 @@ def _trim_slabbed_note_image(data):
             elif f <= FRAC and start is not None:
                 bands.append((start, i - 1))
                 start = None
-        return bands
+        tol = max(2, int(0.008 * length))
+        merged = []
+        for b in bands:
+            if merged and b[0] - merged[-1][1] <= tol:
+                merged[-1] = (merged[-1][0], b[1])
+            else:
+                merged.append(b)
+        return merged
 
     def _row_frac(y):
         hit = n = 0
@@ -4574,17 +4586,24 @@ def _trim_slabbed_note_image(data):
         return None
 
     # Slab-shot signature: the note must not already fill the frame, and
-    # what surrounds it must be mostly dark holder (a white scan margin
-    # means "not a slab" — leave those alone).
+    # the band IMMEDIATELY around it must be dark holder plastic. Only
+    # the immediate ring counts — a dealer-page screenshot surrounds the
+    # slab with bright page background and the label band is bright too,
+    # so judging the whole outside rejects real slab shots. A white scan
+    # margin (raw note, no slab) still fails here — those pass through.
     area = (x1 - x0) * (y1 - y0) / float(aw * ah)
     if not (0.10 <= area <= 0.90):
         return None
-    outside = [px[x, y]
-               for y in range(0, ah, 3) for x in range(0, aw, 3)
+    ring = max(3, int(0.04 * min(x1 - x0, y1 - y0)))
+    rx0, ry0 = max(0, x0 - ring), max(0, y0 - ring)
+    rx1, ry1 = min(aw - 1, x1 + ring), min(ah - 1, y1 + ring)
+    ring_px = [px[x, y]
+               for y in range(ry0, ry1 + 1)
+               for x in range(rx0, rx1 + 1)
                if not (x0 <= x <= x1 and y0 <= y <= y1)]
-    if not outside:
+    if not ring_px:
         return None
-    if sum(1 for v in outside if v < 60) / len(outside) < 0.5:
+    if sum(1 for v in ring_px if v < 60) / len(ring_px) < 0.7:
         return None
 
     fx0, fy0 = int(x0 / scale), int(y0 / scale)
