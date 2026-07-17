@@ -4828,14 +4828,17 @@ def _median(vals):
 def _expand_note_box_to_paper(img, box):
     """Locate the note's physical paper edges around the ink box.
 
-    Per side, scan a window across the box edge and find the strongest
-    step in median luminance + warmth (R-B): aged note paper is warm,
-    holder plastic of any brightness is neutral, so the paper->holder
-    boundary is the dominant transition even when their plain RGB
-    distance is a handful of units. The window reaches slightly INSIDE
-    the box because the box edge itself can sit past the paper edge
-    (the note's edge shadow dilates into the ink component). Falls back
-    to the box edge when no confident step exists."""
+    Anchor on the note's own margin: sample the lines just outside the
+    box on every side and take the WARMEST sample as the paper
+    reference (aged paper is warm, holder plastic of any brightness is
+    neutral — at least one side always shows real margin). Each side's
+    paper edge is then the outer end of the run of paper-like lines
+    across its window: thin printed border lines are bridged, holder
+    ends the run, and on an already-trimmed image the run simply
+    reaches the frame so nothing is cut. Line classification against a
+    measured anchor sidesteps the step-detection ambiguities entirely
+    (an ink->margin step, a border line, and a paper->holder step can
+    all look alike as gradients)."""
     w, h = img.size
     px = img.load()
     x0, y0, x1, y1 = box
@@ -4855,46 +4858,73 @@ def _expand_note_box_to_paper(img, box):
                 warm.append(p[0] - p[2])
         return _median(lum), _median(warm)
 
-    def paper_edge(side, start, step, limit):
-        nd = nh if side in ('top', 'bottom') else nw
-        span_in = max(4, int(0.02 * nd))
-        span_out = max(8, int(0.10 * nd))
-        positions = []
-        p = start - step * span_in
-        for _ in range(span_in + span_out):
-            if not (0 <= p < limit):
+    sides = (('top', y0, -1, h, nh), ('bottom', y1, 1, h, nh),
+             ('left', x0, -1, w, nw), ('right', x1, 1, w, nw))
+
+    # Margin reference = bright AND warm. Candidates at several offsets
+    # per side; ink is warm but dark, holder bright but neutral, page
+    # background very bright but neutral — only true margin is both.
+    candidates = []
+    for side, start, step, limit, nd in sides:
+        for frac in (0.01, 0.03, 0.05, 0.08):
+            off = max(1, int(frac * nd))
+            vals = []
+            for k in (off, off + 1, off + 2):
+                pos = start + step * k
+                if 0 <= pos < limit:
+                    vals.append(line_stats(side, pos))
+            if vals:
+                candidates.append((_median([v[0] for v in vals]),
+                                   _median([v[1] for v in vals])))
+    if not candidates:
+        return x0, y0, x1, y1
+    max_lum = max(c[0] for c in candidates)
+    bright = [c for c in candidates if c[0] >= max_lum - 25]
+    ref = max(bright, key=lambda c: c[1])
+
+    def is_paper(st):
+        return abs(st[0] - ref[0]) <= 18 and abs(st[1] - ref[1]) <= 7
+
+    def paper_edge(side, start, step, limit, nd):
+        span_in = max(4, int(0.03 * nd))
+        span_out = max(8, int(0.12 * nd))
+        bridge = max(2, int(0.008 * nd))
+        # Innermost paper-like line first — scanning from slightly
+        # inside the box recovers a box that overran the paper (edge
+        # shadow dilated into the ink component).
+        edge = None
+        k = -span_in
+        while k < span_out:
+            pos = start + step * k
+            if not (0 <= pos < limit):
                 break
-            positions.append(p)
-            p += step
-        K = 3
-        if len(positions) < 2 * K + 1:
+            if is_paper(line_stats(side, pos)):
+                edge = pos
+                break
+            k += 1
+        if edge is None:
             return start
-        stats = [line_stats(side, q) for q in positions]
-        # The paper edge is the FIRST sustained step walking outward —
-        # never the strongest in the window, because a holder seam
-        # further out is a far bigger luminance step than paper->holder
-        # and would win an argmax.
-        for i in range(K, len(stats) - K + 1):
-            inner = stats[i - K:i]
-            outer = stats[i:i + K]
-            dl = abs(sum(s[0] for s in inner) - sum(s[0] for s in outer)) / K
-            dw = abs(sum(s[1] for s in inner) - sum(s[1] for s in outer)) / K
-            if dl + 1.5 * dw >= 8.0:
-                # positions[i] is the first line past the step — the
-                # last paper line is one before it.
-                return positions[i - 1]
-        # No boundary anywhere in the window: everything scanned reads
-        # as uniform paper, so keep it ALL. Falling back to the ink box
-        # edge here would eat the margins of an already-trimmed image
-        # (whose paper simply runs to the frame with no holder step).
-        return positions[-1]
+        # Extend the run outward, bridging thin printed border lines;
+        # holder (non-paper with no paper resuming) ends it.
+        gap = 0
+        k += 1
+        while gap <= bridge:
+            pos = start + step * k
+            if not (0 <= pos < limit):
+                break
+            if is_paper(line_stats(side, pos)):
+                edge = pos
+                gap = 0
+            else:
+                gap += 1
+            k += 1
+        return edge
 
-    ny0 = paper_edge('top', y0, -1, h)
-    ny1 = paper_edge('bottom', y1, 1, h)
-    nx0 = paper_edge('left', x0, -1, w)
-    nx1 = paper_edge('right', x1, 1, w)
+    ny0 = paper_edge('top', y0, -1, h, nh)
+    ny1 = paper_edge('bottom', y1, 1, h, nh)
+    nx0 = paper_edge('left', x0, -1, w, nw)
+    nx1 = paper_edge('right', x1, 1, w, nw)
     return nx0, ny0, nx1, ny1
-
 
 def _detect_light_note_box(img):
     """Full-res ink box of the note on a light holder, or None.
