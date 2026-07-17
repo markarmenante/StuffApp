@@ -5023,13 +5023,13 @@ def _recenter_trimmed_note(img):
     m_l, m_r = fx0, (w - 1) - fx1
     m_t, m_b = fy0, (h - 1) - fy1
     nx0, nx1, ny0, ny1 = 0, w - 1, 0, h - 1
-    if max(m_l, m_r) >= 3 * max(1, min(m_l, m_r)) and \
+    if max(m_l, m_r) >= 2 * max(1, min(m_l, m_r)) and \
             max(m_l, m_r) >= 0.06 * w and \
             max(m_l, m_r) - min(m_l, m_r) >= 0.04 * w:
         m = min(m_l, m_r)
         nx0, nx1 = fx0 - m, fx1 + m
         changed = True
-    if max(m_t, m_b) >= 3 * max(1, min(m_t, m_b)) and \
+    if max(m_t, m_b) >= 2 * max(1, min(m_t, m_b)) and \
             max(m_t, m_b) >= 0.06 * h and \
             max(m_t, m_b) - min(m_t, m_b) >= 0.04 * h:
         m = min(m_t, m_b)
