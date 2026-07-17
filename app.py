@@ -4863,7 +4863,7 @@ def _expand_note_box_to_paper(img, box):
     return nx0, ny0, nx1, ny1
 
 
-def _detect_light_note_box(img, require_ring=True):
+def _detect_light_note_box(img):
     """Full-res ink box of the note on a light holder, or None.
 
     Detection always runs on the full frame — the whole-frame gates
@@ -4885,10 +4885,7 @@ def _detect_light_note_box(img, require_ring=True):
     # note — re-trimming would shave its margins on every Check run.
     if (x1 - x0) > 0.90 * aw or (y1 - y0) > 0.90 * ah:
         return None
-    # After a deskew rotation the ring test is skipped: the scene
-    # already qualified pre-rotation, and bicubic resampling can push a
-    # borderline ring just past the threshold.
-    if require_ring and not _ring_mostly_uniform(blob, box):
+    if not _ring_mostly_uniform(blob, box):
         return None
     return (int(x0 / scale), int(y0 / scale),
             int(x1 / scale), int(y1 / scale))
@@ -4915,13 +4912,40 @@ def _trim_light_slab_note(img):
     angle = _fit_note_bottom_angle(ce.load(), ce.width, ce.height,
                                    lambda p, x, y: p[x, y] > 0)
     if abs(angle) >= 0.05:
+        import math
+
         fill = img.load()[2, 2]
-        img = img.rotate(angle, resample=Image.BICUBIC, expand=True,
-                         fillcolor=fill)
-        box = _detect_light_note_box(img, require_ring=False)
-        if not box:
+        rotated = img.rotate(angle, resample=Image.BICUBIC, expand=True,
+                             fillcolor=fill)
+        # Map the ink box through the rotation analytically. Re-running
+        # detection on the rotated frame is fragile: resampling smears
+        # faint texture over the flat holder (worst on re-encoded JPEG
+        # uploads) and the component bleeds far beyond the note.
+        th = math.radians(angle)
+        cos, sin = math.cos(th), math.sin(th)
+        cx, cy = w / 2.0, h / 2.0
+        cx2, cy2 = rotated.width / 2.0, rotated.height / 2.0
+
+        def _map(x, y):
+            dx, dy = x - cx, y - cy
+            return (cos * dx + sin * dy + cx2, -sin * dx + cos * dy + cy2)
+
+        corners = [_map(fx0, fy0), _map(fx1, fy0),
+                   _map(fx0, fy1), _map(fx1, fy1)]
+        xs = [c[0] for c in corners]
+        ys = [c[1] for c in corners]
+        # Inscribe: shave the tilt sliver so the box stays on the note;
+        # the paper walk below re-expands to the true edges.
+        shave_x = abs((fy1 - fy0) * sin)
+        shave_y = abs((fx1 - fx0) * sin)
+        img = rotated
+        w, h = img.size
+        fx0 = max(0, int(min(xs) + shave_x))
+        fx1 = min(w - 1, int(max(xs) - shave_x))
+        fy0 = max(0, int(min(ys) + shave_y))
+        fy1 = min(h - 1, int(max(ys) - shave_y))
+        if fx1 - fx0 < 20 or fy1 - fy0 < 20:
             return None
-        fx0, fy0, fx1, fy1 = box
 
     px0, py0, px1, py1 = _expand_note_box_to_paper(
         img, (fx0, fy0, fx1, fy1))
