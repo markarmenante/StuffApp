@@ -4544,7 +4544,7 @@ def _encode_trimmed_note(crop):
     return out.getvalue()
 
 
-def _fit_note_bottom_angle(mask_px, cw, ch, hit):
+def _fit_note_bottom_angle(mask_px, cw, ch, hit, y_start=None, y_stop=None):
     """Skew of the note's bottom edge: least-squares line through the
     lowest matching pixel per sampled column, with an outlier-rejecting
     refit. Positive slope (right side lower) needs a counter-clockwise
@@ -4552,9 +4552,13 @@ def _fit_note_bottom_angle(mask_px, cw, ch, hit):
     points, or a fit steeper than any real slab shot)."""
     import math
 
+    if y_start is None:
+        y_start = ch - 1
+    if y_stop is None:
+        y_stop = ch // 2
     pts = []
     for x in range(int(cw * 0.15), int(cw * 0.85), max(1, cw // 80)):
-        for y in range(ch - 1, ch // 2, -1):
+        for y in range(min(ch - 1, y_start), max(0, y_stop), -1):
             if hit(mask_px, x, y):
                 pts.append((x, y))
                 break
@@ -4579,10 +4583,14 @@ def _fit_note_bottom_angle(mask_px, cw, ch, hit):
     slope, intercept = fit
     tol = max(3.0, 0.004 * ch)
     good = [p for p in pts if abs(p[1] - (slope * p[0] + intercept)) < tol]
-    if len(good) >= 10:
-        refit = _fit(good)
-        if refit:
-            slope = refit[0]
+    # A zigzag border or noisy edge scatters the points off any line —
+    # rotating on that evidence tilts a level scan. Only rotate when a
+    # solid majority of points actually lie on the fitted line.
+    if len(good) < max(10, int(0.6 * len(pts))):
+        return 0.0
+    refit = _fit(good)
+    if refit:
+        slope = refit[0]
     angle = math.degrees(math.atan(slope))
     return 0.0 if abs(angle) > 4.0 else angle
 
@@ -4696,10 +4704,11 @@ def _trim_dark_slab_note(img):
     return _encode_trimmed_note(crop)
 
 
-def _note_edge_blob(gray):
-    """Binary mask of engraving texture, dilated into solid blobs. The
-    note's design becomes one big component; flat holder plastic, page
-    background and blank paper stay empty."""
+def _note_edge_masks(gray):
+    """(raw, dilated) binary masks of engraving texture. The dilated
+    mask turns the note's design into one solid component; the raw mask
+    keeps sparse scan noise sparse, which is what ring-uniformity must
+    judge (dilation inflates faint sheet noise into blanket texture)."""
     from PIL import ImageDraw, ImageFilter
 
     g = gray.filter(ImageFilter.GaussianBlur(1.0))
@@ -4707,13 +4716,18 @@ def _note_edge_blob(gray):
     w, h = e.size
     # FIND_EDGES is unreliable on the outermost pixel ring — zero it.
     ImageDraw.Draw(e).rectangle([0, 0, w - 1, h - 1], outline=0, width=2)
-    return e.filter(ImageFilter.MaxFilter(7))
+    return e, e.filter(ImageFilter.MaxFilter(7))
+
+
+def _note_edge_blob(gray):
+    return _note_edge_masks(gray)[1]
 
 
 def _largest_note_component(blob, step=2, max_area=0.92, min_area=0.08):
     """Pixel bbox of the biggest banknote-shaped mask component: solid
-    (fill > 0.45 — a textured photo background forms a hollow ring and
-    fails this), banknote-proportioned, and between min_area and
+    (fill > 0.38 — a textured photo background forms a hollow ring and
+    fails this; an open design with a big watermark window still clears
+    it), banknote-proportioned, and between min_area and
     max_area of the frame. Works on any binary mask — edge blobs for
     light holders, brightness masks for dark ones. None when nothing
     qualifies."""
@@ -4752,7 +4766,7 @@ def _largest_note_component(blob, step=2, max_area=0.92, min_area=0.08):
             area = bw * bh / float(gw * gh)
             aspect = bw / float(bh)
             if min_area <= area <= max_area and 1.15 <= aspect <= 3.8 \
-                    and fill > 0.45:
+                    and fill > 0.38:
                 if best is None or n > best[0]:
                     best = (n, minx * step, miny * step,
                             (maxx + 1) * step, (maxy + 1) * step)
@@ -4760,21 +4774,26 @@ def _largest_note_component(blob, step=2, max_area=0.92, min_area=0.08):
 
 
 def _ring_mostly_uniform(blob, box):
-    """True when the band immediately around the box is texture-free —
-    holder plastic of any colour. Rejects busy dealer-page surroundings
-    that happen to contain a banknote-shaped blob."""
+    """True when the band around the box is texture-free — holder
+    plastic or backing sheet of any colour. Rejects busy dealer-page
+    surroundings that happen to contain a banknote-shaped blob. A small
+    guard band is skipped first: the note's own edge shadow lines the
+    box and is expected content, not surroundings."""
     x0, y0, x1, y1 = box
     w, h = blob.size
+    guard = max(2, int(0.02 * min(x1 - x0, y1 - y0)))
     ring = max(3, int(0.04 * min(x1 - x0, y1 - y0)))
-    rx0, ry0 = max(0, x0 - ring), max(0, y0 - ring)
-    rx1, ry1 = min(w - 1, x1 + ring), min(h - 1, y1 + ring)
+    gx0, gy0 = x0 - guard, y0 - guard
+    gx1, gy1 = x1 + guard, y1 + guard
+    rx0, ry0 = max(0, gx0 - ring), max(0, gy0 - ring)
+    rx1, ry1 = min(w - 1, gx1 + ring), min(h - 1, gy1 + ring)
     px = blob.load()
     vals = [px[x, y]
             for y in range(ry0, ry1 + 1)
             for x in range(rx0, rx1 + 1)
-            if not (x0 <= x <= x1 and y0 <= y <= y1)]
+            if not (gx0 <= x <= gx1 and gy0 <= y <= gy1)]
     return bool(vals) and \
-        sum(1 for v in vals if v > 0) / len(vals) <= 0.20
+        sum(1 for v in vals if v > 0) / len(vals) <= 0.15
 
 
 def _median(vals):
@@ -4853,7 +4872,7 @@ def _expand_note_box_to_paper(img, box):
 
     def paper_edge(side, start, step, limit, nd):
         span_in = max(4, int(0.03 * nd))
-        span_out = max(8, int(0.12 * nd))
+        span_out = max(8, int(0.25 * nd))
         bridge = max(2, int(0.008 * nd))
         # Innermost paper-like line first — scanning from slightly
         # inside the box recovers a box that overran the paper (edge
@@ -4875,6 +4894,14 @@ def _expand_note_box_to_paper(img, box):
         gap = 0
         k += 1
         while gap <= bridge:
+            if k >= span_in + span_out:
+                # Still on paper with the whole scan exhausted: no
+                # boundary exists on this side (an under-registered
+                # design on an already-trimmed note, or a giant backing
+                # sheet). Keep EVERYTHING — the full-frame no-op guard
+                # decides whether anything is left to do. Cropping at
+                # the scan cap here shaved stored trims.
+                return 0 if step < 0 else limit - 1
             pos = start + step * k
             if not (0 <= pos < limit):
                 break
@@ -4905,7 +4932,7 @@ def _detect_light_note_box(img):
     scale = min(1.0, 900.0 / max(w, h))
     aw, ah = max(1, int(w * scale)), max(1, int(h * scale))
     small = img.resize((aw, ah))
-    blob = _note_edge_blob(small.convert('L'))
+    raw_edges, blob = _note_edge_masks(small.convert('L'))
     box = _largest_note_component(blob)
     if not box:
         return None
@@ -4914,19 +4941,7 @@ def _detect_light_note_box(img):
     # note — re-trimming would shave its margins on every Check run.
     if (x1 - x0) > 0.90 * aw or (y1 - y0) > 0.90 * ah:
         return None
-    if not _ring_mostly_uniform(blob, box):
-        return None
-    # A BLACK surround is the dark detector's scene, not this one's:
-    # with no bright margin anywhere the paper-colour anchor below
-    # would lock onto holder plastic and the "paper run" would sprawl
-    # across the void.
-    gpx = small.convert('L').load()
-    ring = max(3, int(0.04 * min(x1 - x0, y1 - y0)))
-    ring_lum = [gpx[x, y]
-                for y in range(max(0, y0 - ring), min(ah, y1 + ring + 1))
-                for x in range(max(0, x0 - ring), min(aw, x1 + ring + 1))
-                if not (x0 <= x <= x1 and y0 <= y <= y1)]
-    if ring_lum and _median(ring_lum) < 100:
+    if not _ring_mostly_uniform(raw_edges, box):
         return None
     return (int(x0 / scale), int(y0 / scale),
             int(x1 / scale), int(y1 / scale))
@@ -4950,8 +4965,15 @@ def _trim_light_slab_note(img):
     crop = img.crop((max(0, fx0 - mx), max(0, fy0 - my),
                      min(w, fx1 + mx), min(h, fy1 + my)))
     ce = _note_edge_blob(crop.convert('L'))
+    # Fit the skew on the design's bottom line only: scanning from the
+    # crop bottom would seed the fit with backing-sheet noise below the
+    # note and rotate a level scan.
+    box_bot = (fy1 - fy0) + my
+    box_h = fy1 - fy0
     angle = _fit_note_bottom_angle(ce.load(), ce.width, ce.height,
-                                   lambda p, x, y: p[x, y] > 0)
+                                   lambda p, x, y: p[x, y] > 0,
+                                   y_start=box_bot + int(0.06 * box_h),
+                                   y_stop=box_bot - int(0.25 * box_h))
     if abs(angle) >= 0.05:
         import math
 
@@ -5001,7 +5023,10 @@ def _trim_light_slab_note(img):
     fw, fh = final.size
     # Cropping next to nothing means this IS the trimmed note already —
     # report nothing-to-do instead of re-encoding a near-identical copy.
-    if fw >= 0.985 * w and fh >= 0.985 * h:
+    # 95%, not tighter: on a stored trim whose margins exceed the
+    # expansion cap, the crop comes out a few percent under the frame
+    # and must still count as nothing-to-do.
+    if fw >= 0.95 * w and fh >= 0.95 * h:
         return None
     if not (1.15 <= fw / float(max(1, fh)) <= 3.8):
         return None
