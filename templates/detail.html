@@ -1296,8 +1296,10 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <!-- Catalogue / production -->
-  <div class="dgrid" style="grid-template-columns: 0.8fr 1.2fr 1fr 1fr;">
+  <!-- Catalogue / production. Narrow catalogue numbers ("P-11a",
+       "TBB B301"), wide signatures ("Il Controllore / Il Presidente
+       (unnamed signatories)"). -->
+  <div class="dgrid" style="grid-template-columns: 0.55fr 0.85fr 1.1fr 1.5fr;">
     {{ cell('pick_number','Pick #') }}
     {{ cell('other_catalog','Other Catalog # (Grabowski…)') }}
     <div class="dcell ta-wrap">
