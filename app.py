@@ -4888,7 +4888,9 @@ def _expand_note_box_to_paper(img, box):
                 break
             k += 1
         if edge is None:
-            return start
+            # No paper anywhere near the box edge: we are already at
+            # the boundary (box overran clean through the margin).
+            return start, True
         # Extend the run outward, bridging thin printed border lines;
         # holder (non-paper with no paper resuming) ends it.
         gap = 0
@@ -4896,28 +4898,77 @@ def _expand_note_box_to_paper(img, box):
         while gap <= bridge:
             if k >= span_in + span_out:
                 # Still on paper with the whole scan exhausted: no
-                # boundary exists on this side (an under-registered
-                # design on an already-trimmed note, or a giant backing
-                # sheet). Keep EVERYTHING — the full-frame no-op guard
-                # decides whether anything is left to do. Cropping at
-                # the scan cap here shaved stored trims.
-                return 0 if step < 0 else limit - 1
+                # colour boundary exists on this side (paper-toned
+                # holder, or an already-trimmed note). NOT confident —
+                # the caller layers fainter evidence on top.
+                return (0 if step < 0 else limit - 1), False
             pos = start + step * k
             if not (0 <= pos < limit):
-                break
+                # Ran to the frame while still on paper — same story.
+                return edge, False
             if is_paper(line_stats(side, pos)):
                 edge = pos
                 gap = 0
             else:
                 gap += 1
             k += 1
-        return edge
+        return edge, True
 
-    ny0 = paper_edge('top', y0, -1, h, nh)
-    ny1 = paper_edge('bottom', y1, 1, h, nh)
-    nx0 = paper_edge('left', x0, -1, w, nw)
-    nx1 = paper_edge('right', x1, 1, w, nw)
-    return nx0, ny0, nx1, ny1
+    ny0, ct = paper_edge('top', y0, -1, h, nh)
+    ny1, cb = paper_edge('bottom', y1, 1, h, nh)
+    nx0, cl = paper_edge('left', x0, -1, w, nw)
+    nx1, cr = paper_edge('right', x1, 1, w, nw)
+    return (nx0, ny0, nx1, ny1), (cl, ct, cr, cb)
+
+def _faint_note_edge_line(img, box, side):
+    """The note's physical edge as a faint straight dip line.
+
+    When paper and holder are colourimetrically identical (white note
+    in a white holder on a white page), the only cue left is the
+    hairline shadow where the note meets the holder: a 1-3px dip of a
+    few luminance units that runs the FULL length of the side. Per
+    candidate position the score is the fraction of samples along the
+    line that dip below both perpendicular neighbours; a real edge
+    scores ~0.3-0.9 across two consecutive positions, noise doesn't.
+    Returns the innermost qualifying position beyond the ink box, or
+    None."""
+    px = img.load()
+    w, h = img.size
+    x0, y0, x1, y1 = box
+    nw, nh = x1 - x0, y1 - y0
+    if side in ('top', 'bottom'):
+        nd, a0, a1, limit = nh, x0 + nw // 8, x1 - nw // 8, h
+        start, step = (y0, -1) if side == 'top' else (y1, 1)
+    else:
+        nd, a0, a1, limit = nw, y0 + nh // 8, y1 - nh // 8, w
+        start, step = (x0, -1) if side == 'left' else (x1, 1)
+
+    def score(pos):
+        hits = n = 0
+        for a in range(a0, a1, 5):
+            if side in ('top', 'bottom'):
+                c, m, p = px[a, pos - 4], px[a, pos], px[a, pos + 4]
+            else:
+                c, m, p = px[pos - 4, a], px[pos, a], px[pos + 4, a]
+            lc = (c[0] + c[1] + c[2]) // 3
+            lm = (m[0] + m[1] + m[2]) // 3
+            lp = (p[0] + p[1] + p[2]) // 3
+            n += 1
+            if lc - lm >= 5 and lp - lm >= 5:
+                hits += 1
+        return hits / max(1, n)
+
+    prev = 0.0
+    for k in range(max(1, int(0.012 * nd)), int(0.12 * nd)):
+        pos = start + step * k
+        if not (5 <= pos < limit - 5):
+            break
+        s = score(pos)
+        if s >= 0.30 and prev >= 0.30:
+            return pos - step
+        prev = s
+    return None
+
 
 def _detect_light_note_box(img):
     """Full-res ink box of the note on a light holder, or None.
@@ -5012,11 +5063,58 @@ def _trim_light_slab_note(img):
 
     # The detected paper edges ARE the note rectangle — the printed
     # design sits centred inside it, so cropping to them yields the
-    # equal margins a real note carries. An edge found INSIDE the ink
-    # box (the box overran the paper there, e.g. an edge shadow pulled
-    # into the component) shrinks the crop accordingly.
-    px0, py0, px1, py1 = _expand_note_box_to_paper(
+    # equal margins a real note carries. Evidence layers per side, best
+    # first: a colour boundary from the paper run; the faint straight
+    # edge line (white-on-white holders); the opposite side's margin
+    # mirrored (design centred => equal margins per axis); the other
+    # axis's margin; else keep everything and let the no-op guard rule.
+    (px0, py0, px1, py1), (cl, ct, cr, cb) = _expand_note_box_to_paper(
         img, (fx0, fy0, fx1, fy1))
+    color = {'left': (px0, cl), 'top': (py0, ct),
+             'right': (px1, cr), 'bottom': (py1, cb)}
+    boxpos = {'left': fx0, 'top': fy0, 'right': fx1, 'bottom': fy1}
+    outward = {'left': -1, 'top': -1, 'right': 1, 'bottom': 1}
+    ndim = {'left': fx1 - fx0, 'right': fx1 - fx0,
+            'top': fy1 - fy0, 'bottom': fy1 - fy0}
+    res = {}
+    for side in ('left', 'top', 'right', 'bottom'):
+        cands = []
+        pos, ok = color[side]
+        m = (pos - boxpos[side]) * outward[side]
+        # A "boundary" implying a margin beyond 12% of the note is not
+        # the note's edge — the run sailed over a paper-toned holder
+        # and stopped at some remote page feature.
+        if ok and -0.05 * ndim[side] <= m <= 0.12 * ndim[side]:
+            cands.append(pos)
+        d = _faint_note_edge_line(img, (fx0, fy0, fx1, fy1), side)
+        if d is not None:
+            cands.append(d)
+        if cands:
+            # Inward-most evidence wins: a colour stop at a holder band
+            # loses to the actual edge line inside it.
+            res[side] = max(cands) if outward[side] < 0 else min(cands)
+        else:
+            res[side] = None
+
+    def _margin(side):
+        return max(0, (res[side] - boxpos[side]) * outward[side])
+
+    for a, b in (('left', 'right'), ('right', 'left'),
+                 ('top', 'bottom'), ('bottom', 'top')):
+        if res[a] is None and res[b] is not None:
+            res[a] = boxpos[a] + outward[a] * _margin(b)
+    if res['left'] is None and res['top'] is not None:
+        m = (_margin('top') + _margin('bottom')) // 2
+        res['left'] = boxpos['left'] - m
+        res['right'] = boxpos['right'] + m
+    if res['top'] is None and res['left'] is not None:
+        m = (_margin('left') + _margin('right')) // 2
+        res['top'] = boxpos['top'] - m
+        res['bottom'] = boxpos['bottom'] + m
+    px0 = max(0, res['left']) if res['left'] is not None else 0
+    py0 = max(0, res['top']) if res['top'] is not None else 0
+    px1 = min(w - 1, res['right']) if res['right'] is not None else w - 1
+    py1 = min(h - 1, res['bottom']) if res['bottom'] is not None else h - 1
     if px1 - px0 < 0.6 * (fx1 - fx0) or py1 - py0 < 0.6 * (fy1 - fy0):
         return None
     final = img.crop((px0, py0, px1 + 1, py1 + 1))
