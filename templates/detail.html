@@ -1296,12 +1296,11 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <!-- Catalogue / production. Narrow catalogue numbers ("P-11a",
-       "TBB B301"), wide signatures ("Il Controllore / Il Presidente
-       (unnamed signatories)"). -->
-  <div class="dgrid" style="grid-template-columns: 0.55fr 0.85fr 1.1fr 1.5fr;">
-    {{ cell('pick_number','Pick #') }}
-    {{ cell('other_catalog','Other Catalog # (Grabowski…)') }}
+  <!-- Catalogue / production. One field holds every catalogue
+       reference ("P-11a, TBB B301"); signatures stay widest for lines
+       like "Il Controllore / Il Presidente (unnamed signatories)". -->
+  <div class="dgrid" style="grid-template-columns: 1fr 1.1fr 1.4fr;">
+    {{ cell('pick_number','Catalog #s (Pick, Friedberg, TBB…)') }}
     <div class="dcell ta-wrap">
       <input type="text" name="printer" value="{{ val('printer') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('printer', [])|join('||') }}"
              {% if is_new and not val('printer') %}placeholder="Printer"{% endif %}>
@@ -6988,7 +6987,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       ],
       banknotes: [
         'country', 'municipality', 'issuer', 'official', 'denomination',
-        'series', 'pick_number', 'other_catalog', 'printer', 'signatures',
+        'series', 'pick_number', 'printer', 'signatures',
         'serial_number', 'watermark', 'date_1', 'description',
         'note_references', 'notes', 'vendor', 'price', 'purchase_date',
         'grade', 'obv_rev',

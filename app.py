@@ -890,8 +890,10 @@ FIELDS = {
         {'name': 'denomination',    'label': 'Denomination',      'type': 'text'},
         {'name': 'series',          'label': 'Series / Set',      'type': 'text'},
         {'name': 'obv_rev',         'label': 'Obv/Rev',           'type': 'text'},
-        {'name': 'pick_number',     'label': 'Pick #',            'type': 'text'},
-        {'name': 'other_catalog',   'label': 'Other Catalog #',   'type': 'text'},
+        # One field for every catalogue reference — Pick, Friedberg,
+        # TBB, Grabowski/Mehl etc. The legacy other_catalog column is
+        # folded in at boot by _merge_banknote_catalog_numbers.
+        {'name': 'pick_number',     'label': 'Catalog #s',        'type': 'text'},
         {'name': 'printer',         'label': 'Printer',           'type': 'text'},
         {'name': 'signatures',      'label': 'Signatures',        'type': 'text'},
         {'name': 'serial_number',   'label': 'Serial Number',     'type': 'text'},
@@ -1768,6 +1770,7 @@ def init_db():
     _backfill_blank_status_own(db)
     _migrate_coin_history_context_into_condition(db)
     _cleanup_coin_research_headings(db)
+    _merge_banknote_catalog_numbers(db)
     db.commit()
 
     # Migration-state ledger: one row per applied one-shot data
@@ -10884,7 +10887,7 @@ def coin_apply_lookup_specs(record_id):
 BANKNOTE_SPEC_FILLABLE = (
     'country', 'municipality', 'issue_type', 'issuer', 'official',
     'denomination', 'series',
-    'pick_number', 'other_catalog', 'printer', 'signatures',
+    'pick_number', 'printer', 'signatures',
     'serial_number', 'watermark',
     'material', 'date_1', 'size_width', 'size_height',
     'grade', 'grade_numeric', 'grading_authority', 'slab_number',
@@ -10900,7 +10903,7 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
         **{f: _JSON_NULLABLE_STRING for f in (
             'country', 'municipality', 'issue_type', 'issuer', 'official',
             'denomination', 'series',
-            'pick_number', 'other_catalog', 'printer', 'signatures',
+            'pick_number', 'printer', 'signatures',
             'serial_number',
             'watermark', 'material', 'grade', 'grading_authority',
             'slab_number', 'grade_condition', 'grade_modifier',
@@ -11254,8 +11257,7 @@ Target fields:
 - official: the person portrayed or the ruler under whom the note was issued, as "Name" or "Name, role" (e.g. "Muhammad Reza Shah Pahlavi"). Null if none.
 - denomination: face value with currency (e.g. "100 Rials", "50 Pfennig").
 - series: the series / set name or year designation if catalogued — notgeld was often issued in themed sets (e.g. "Series 1928", "Leinen-Ausgabe"). Null if not stated.
-- pick_number: the Pick catalogue number formatted "P-<number><letter>" (e.g. "P-67", "P-102a"). United States federal issues are Friedberg-catalogued instead — use the Friedberg number formatted "Fr#<number>" (a grading label's "Fr#248" goes here verbatim). Null if the issue has neither (most notgeld).
-- other_catalog: specialized catalogue reference(s) beyond Pick, verbatim as cited — Grabowski/Mehl, Rosenberg, Lamb, Funck, Menzel, Tieste (e.g. "Grabowski Bi.7.5", "Rosenberg 74b"). Comma-separated if several; else null.
+- pick_number: ALL catalogue references for this note in one comma-separated list, verbatim as cited — the Pick number formatted "P-<number><letter>" (e.g. "P-67", "P-102a"); for United States federal issues the Friedberg number ("Fr#248" — a grading label's attribution goes here verbatim); plus TBB and specialist catalogues (Grabowski/Mehl, Rosenberg, Lamb, Funck, Menzel, Tieste — e.g. "Grabowski Bi.7.5"). Null if none.
 - printer: the printing firm (e.g. "Harrison & Sons", "Thomas De La Rue"; notgeld was often locally printed).
 - signatures: signature combination as stated or visible (e.g. "Nasser-Emami").
 - serial_number: THIS note's serial number, from the images or the text; else null.
@@ -11281,7 +11283,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
 {{
   "country": null, "municipality": null, "issue_type": null,
   "issuer": null, "official": null, "denomination": null,
-  "series": null, "pick_number": null, "other_catalog": null,
+  "series": null, "pick_number": null,
   "printer": null, "signatures": null,
   "serial_number": null, "watermark": null, "material": null,
   "date_1": null, "size_width": null, "size_height": null,
@@ -13284,6 +13286,34 @@ TENANT_CATEGORIES = (
     None if OWNER_CATEGORIES.strip() in ('*', '')
     else {c.strip() for c in OWNER_CATEGORIES.split(',') if c.strip()}
 )
+
+
+def _merge_banknote_catalog_numbers(db):
+    """All catalogue references live in one field: fold the legacy
+    other_catalog column into pick_number ("P-11a, TBB B301") and blank
+    the source. Idempotent — a merged row has an empty other_catalog.
+    Skips the append when the pick field already contains the other
+    text (Check historically wrote overlapping values)."""
+    try:
+        rows = db.execute(
+            "SELECT id, pick_number, other_catalog FROM banknotes "
+            "WHERE other_catalog IS NOT NULL AND TRIM(other_catalog) != ''"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return
+    now = datetime.utcnow().isoformat()
+    for row in rows:
+        pick = (row['pick_number'] or '').strip()
+        other = (row['other_catalog'] or '').strip()
+        if not pick:
+            merged = other
+        elif other.lower() in pick.lower():
+            merged = pick
+        else:
+            merged = f'{pick}, {other}'
+        db.execute(
+            "UPDATE banknotes SET pick_number = ?, other_catalog = '', "
+            "updated_at = ? WHERE id = ?", (merged, now, row['id']))
 
 
 def _ensure_owner_user(db):
