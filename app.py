@@ -2232,12 +2232,12 @@ def init_db():
     # One-shot: seed banknote_id (Display Number) for notes that predate
     # the column. From here on the write paths keep it current, so this
     # only ever needs to run once per ordering. Bump the key whenever
-    # CATEGORY_ORDER_BY['banknotes'] changes — v1 numbered notes by
-    # country/town/issuer/year, which v2's country/town/series/
-    # denomination ordering invalidates.
+    # CATEGORY_ORDER_BY['banknotes'] changes so the seeded numbers match
+    # the live order — v3 is country/town/series/date/denomination,
+    # which supersedes v2's denomination-before-series/date ordering.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v2',),
+        ('banknote_display_number_v3',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -2245,7 +2245,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v2', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v3', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -5524,19 +5524,19 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
-    # Country, town, then denomination, with series and date as
-    # tiebreaks. Denomination is three keys: currency family, then unit
+    # Country, town (Notgeld), series, date, then denomination. A
+    # country reads chronologically, and within one date the notes run
+    # by value. Denomination is three keys: currency family, then unit
     # worth (Pfennig before Mark, cent before dollar), then the number —
-    # so a country reads 1, 2, 10 Rupees rather than 1, 10, 2 by text.
-    # Series comes AFTER denomination: sorting it first scattered a
-    # country's denominations by issue-series text.
+    # so a same-date group reads 1, 2, 10 Rupees rather than 1, 10, 2 by
+    # text. Blank series/date sort last within their level.
     'banknotes': ("COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
+                  "COALESCE(NULLIF(series, ''), 'zzz') COLLATE NODIACRITIC, "
+                  "COALESCE(date_1, 99999) ASC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
                   "DENOM_UNIT(denomination) ASC, "
-                  "DENOM_VALUE(denomination) ASC, "
-                  "COALESCE(NULLIF(series, ''), 'zzz') COLLATE NODIACRITIC, "
-                  "COALESCE(date_1, 99999) ASC"),
+                  "DENOM_VALUE(denomination) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
                 "COALESCE(NULLIF(description, ''), 'zzz') COLLATE NODIACRITIC"),
     'vehicles':   _MAKE_MODEL_ORDER,
