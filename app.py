@@ -1424,6 +1424,15 @@ _CURRENCY_UNITS = {
     'para': ('dinar', 0.01),
     'dinar': ('dinar', 1.0), 'dinara': ('dinar', 1.0),
     'dinars': ('dinar', 1.0),
+    # Indian subcontinent: 16 annas to the rupee.
+    'anna': ('rupee', 1 / 16), 'annas': ('rupee', 1 / 16),
+    'rupee': ('rupee', 1.0), 'rupees': ('rupee', 1.0),
+    'rupia': ('rupee', 1.0), 'rupien': ('rupee', 1.0),
+    'rial': ('rial', 1.0), 'rials': ('rial', 1.0),
+    'riyal': ('rial', 1.0), 'riyals': ('rial', 1.0),
+    # Israel: 1000 pruta to the (Israel) pound — country sorts first,
+    # so the sterling collision never surfaces.
+    'pruta': ('pound', 0.001), 'prutot': ('pound', 0.001),
 }
 _DENOM_SCALES = {
     'tausend': 1e3,
@@ -1477,7 +1486,11 @@ def _denom_lookup(text):
     for w in words:
         if w in _CURRENCY_UNITS:
             return _CURRENCY_UNITS[w]
-    return (' '.join(words), 1.0) if words else ('zzz', 1.0)
+    # Unknown currency: fold a trailing plural 's' so '2 Rupees' and
+    # '1 Rupee' land in ONE family instead of two adjacent ones.
+    folded = [w[:-1] if len(w) > 3 and w.endswith('s') else w
+              for w in words]
+    return (' '.join(folded), 1.0) if folded else ('zzz', 1.0)
 
 
 def _denom_currency(text):
@@ -5511,18 +5524,18 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
-    # Country, town, series, then denomination. Denomination is three
-    # keys: currency family, then unit worth (Pfennig before Mark, cent
-    # before dollar), then the number — so a town reads 50 Pfennig,
-    # 1 Mark, 10 Mark rather than 1, 10, 50 by text. date_1 is only a
-    # tiebreak: it keeps the order (and so the Display Number) stable
-    # for notes that match on everything above.
+    # Country, town, then denomination, with series and date as
+    # tiebreaks. Denomination is three keys: currency family, then unit
+    # worth (Pfennig before Mark, cent before dollar), then the number —
+    # so a country reads 1, 2, 10 Rupees rather than 1, 10, 2 by text.
+    # Series comes AFTER denomination: sorting it first scattered a
+    # country's denominations by issue-series text.
     'banknotes': ("COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
-                  "COALESCE(NULLIF(series, ''), 'zzz') COLLATE NODIACRITIC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
                   "DENOM_UNIT(denomination) ASC, "
                   "DENOM_VALUE(denomination) ASC, "
+                  "COALESCE(NULLIF(series, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(date_1, 99999) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
                 "COALESCE(NULLIF(description, ''), 'zzz') COLLATE NODIACRITIC"),
