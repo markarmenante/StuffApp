@@ -4970,6 +4970,29 @@ def _faint_note_edge_line(img, box, side):
     return None
 
 
+def _label_band_above(blob, note_box, aw, ah):
+    """True when a grading-label band sits above the note: a contiguous
+    run of rows whose edge coverage spans a wide slice of the frame,
+    clearly separated from the note box. Distinguishes a slab photo of
+    a frame-filling large note from an already-trimmed image."""
+    from PIL import Image
+
+    x0, y0, x1, y1 = note_box
+    top = y0 - max(3, int(0.01 * ah))
+    if top < int(0.04 * ah):
+        return False
+    band = blob.crop((0, 0, aw, top))
+    prof = [v / 255.0 for v in band.resize((1, top), Image.BOX).getdata()]
+    run = best = 0
+    for f in prof:
+        if f > 0.25:
+            run += 1
+            best = max(best, run)
+        else:
+            run = 0
+    return best >= 0.03 * ah
+
+
 def _detect_light_note_box(img):
     """Full-res ink box of the note on a light holder, or None.
 
@@ -4988,10 +5011,14 @@ def _detect_light_note_box(img):
     if not box:
         return None
     x0, y0, x1, y1 = box
-    # A design spanning nearly the whole frame IS the already-trimmed
-    # note — re-trimming would shave its margins on every Check run.
+    # A design spanning nearly the whole frame is USUALLY the
+    # already-trimmed note — re-trimming would shave its margins on
+    # every Check run. The exception is a large note photographed
+    # close: then the grading label still shows as a wide flat band
+    # above the note, which a stored trim never has.
     if (x1 - x0) > 0.90 * aw or (y1 - y0) > 0.90 * ah:
-        return None
+        if not _label_band_above(blob, box, aw, ah):
+            return None
     if not _ring_mostly_uniform(raw_edges, box):
         return None
     return (int(x0 / scale), int(y0 / scale),
