@@ -1506,6 +1506,24 @@ def _denom_unit(text):
     return _denom_lookup(text)[1]
 
 
+# A note's series is a free-text label ('Series of 1896 (Educational
+# Series)', 'Series of 1880', or just '1896'); its embedded year is the
+# meaningful sort key, so the same issue-year groups regardless of how
+# the label was typed. Matches a 4-digit 1600s-2099 year.
+_SERIES_YEAR_RE = re.compile(r'\b(1[6-9]\d\d|20\d\d)\b')
+
+
+def _series_year(text):
+    """Year embedded in a series label, for sorting: 'Series of 1896
+    (Educational Series)' and '1896' both -> 1896. Returns None when the
+    series carries no year, so the caller falls back to the note's own
+    date."""
+    if not text:
+        return None
+    m = _SERIES_YEAR_RE.search(str(text))
+    return int(m.group(1)) if m else None
+
+
 def _configure_db_connection(db):
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
@@ -1529,6 +1547,10 @@ def _configure_db_connection(db):
     db.create_function('DENOM_UNIT', 1, _denom_unit,
                        deterministic=True)
     db.create_function('DENOM_VALUE', 1, _denom_value,
+                       deterministic=True)
+    # SERIES_YEAR(series) — the issue-year pulled from a series label, so
+    # the note list groups by year regardless of label wording.
+    db.create_function('SERIES_YEAR', 1, _series_year,
                        deterministic=True)
     return db
 
@@ -2233,11 +2255,11 @@ def init_db():
     # the column. From here on the write paths keep it current, so this
     # only ever needs to run once per ordering. Bump the key whenever
     # CATEGORY_ORDER_BY['banknotes'] changes so the seeded numbers match
-    # the live order — v4 is country/town/series/denomination/date,
-    # moving date after denomination so face value orders within a series.
+    # the live order — v5 sorts by the issue-year pulled from the series
+    # label (falling back to date_1) instead of the raw series text.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v4',),
+        ('banknote_display_number_v5',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -2245,7 +2267,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v4', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v5', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -5524,16 +5546,18 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
-    # Country, town (Notgeld), series, denomination, then date. Within a
-    # series the notes run by face value, with date only breaking exact
-    # ties — so denomination stays ordered even when notes of the same
-    # apparent year carry slightly different date_1 values. Denomination
-    # is three keys: currency family, then unit worth (Pfennig before
-    # Mark, cent before dollar), then the number — so a group reads 1, 2,
-    # 10 Rupees rather than 1, 10, 2 by text. Blanks sort last per level.
+    # Country, town (Notgeld), issue-year, denomination, then date. The
+    # year comes from the series label when it has one ('Series of 1896
+    # (Educational Series)' -> 1896) and falls back to the note's own
+    # date_1 otherwise — so notes of the same year group together no
+    # matter how the series was worded, and within a year they run by
+    # face value. Denomination is three keys: currency family, then unit
+    # worth (Pfennig before Mark, cent before dollar), then the number —
+    # so a group reads 1, 2, 10 Rupees rather than 1, 10, 2 by text.
+    # date_1 is a final tiebreak. Blanks sort last per level.
     'banknotes': ("COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
-                  "COALESCE(NULLIF(series, ''), 'zzz') COLLATE NODIACRITIC, "
+                  "COALESCE(SERIES_YEAR(series), date_1, 99999) ASC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
                   "DENOM_UNIT(denomination) ASC, "
                   "DENOM_VALUE(denomination) ASC, "
