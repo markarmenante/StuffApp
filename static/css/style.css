@@ -353,6 +353,21 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .item-thumb .no-img { font-size: 36px; color: var(--text-hint); }
 
+/* Banknotes are landscape, so a row as tall as the thumbnail is wide
+   wastes vertical space. Keep the full thumb width (images stay large)
+   but shorten the row toward the note's own proportions, and cap the
+   image height to match so a taller note can't push the row back out.
+   calc off --item-list-thumb-size, so this tracks the desktop (154) and
+   mobile (163) sizes without a separate breakpoint rule. */
+.item-list-banknotes .item-row,
+.item-list-banknotes .item-thumb {
+  min-height: calc(var(--item-list-thumb-size) * 0.65);
+}
+.item-list-banknotes .item-thumb img {
+  max-height: calc(var(--item-list-thumb-size) * 0.65);
+}
+.item-list-banknotes .item-body { padding-top: 4px; padding-bottom: 4px; }
+
 /* Coin reverse thumbnail (sits next to the obverse on the list view).
    Slightly muted "no-img" placeholder so the empty side reads as
    "no reverse uploaded yet" rather than a duplicate of the obverse. */
