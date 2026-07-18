@@ -4598,75 +4598,30 @@ def _trim_dark_slab_note(img):
     # profiles keep this ~100ms without numpy.
     scale = min(1.0, 900.0 / max(w, h))
     aw, ah = max(1, int(w * scale)), max(1, int(h * scale))
+    from PIL import ImageFilter
+
     g = img.convert('L').resize((aw, ah))
     px = g.load()
     BRIGHT = 96
-    FRAC = 0.45
 
-    def _bands(length, frac_at):
-        """Contiguous mostly-bright bands, merged across tiny dark gaps —
-        a dense engraving line ("THIS CERTIFIES THAT…") dips a few rows
-        below the threshold and must not split the note in two. The gap
-        between the holder label and the note is far wider than the
-        merge tolerance, so the label stays a separate band."""
-        bands, start = [], None
-        for i in range(length + 1):
-            f = frac_at(i) if i < length else 0.0
-            if f > FRAC and start is None:
-                start = i
-            elif f <= FRAC and start is not None:
-                bands.append((start, i - 1))
-                start = None
-        tol = max(2, int(0.008 * length))
-        merged = []
-        for b in bands:
-            if merged and b[0] - merged[-1][1] <= tol:
-                merged[-1] = (merged[-1][0], b[1])
-            else:
-                merged.append(b)
-        return merged
-
-    def _row_frac(y):
-        hit = n = 0
-        for x in range(0, aw, 2):
-            n += 1
-            if px[x, y] > BRIGHT:
-                hit += 1
-        return hit / n
-
-    # The label band and the note are both bright but separated by dark
-    # holder — contiguous mostly-bright row bands, tallest one is the note.
-    row_bands = _bands(ah, _row_frac)
-    if not row_bands:
+    # The note is the biggest bright banknote-shaped block. Component
+    # analysis (not row/column profiles) so a SMALL note in a big
+    # holder is still found — a fractional note can cover under a third
+    # of the frame, where profile fractions never cross any threshold —
+    # and the label, though bright and solid, fails the aspect gate.
+    bright_mask = g.point(lambda v: 255 if v > BRIGHT else 0)
+    bright_mask = bright_mask.filter(ImageFilter.MaxFilter(5))
+    box = _largest_note_component(bright_mask, max_area=0.90, min_area=0.05)
+    if not box:
         return None
-    y0, y1 = max(row_bands, key=lambda b: b[1] - b[0])
-    if (y1 - y0) < 0.25 * ah:
-        return None
+    x0, y0, x1, y1 = box
 
-    def _col_frac(x):
-        hit = n = 0
-        for y in range(y0, y1 + 1, 2):
-            n += 1
-            if px[x, y] > BRIGHT:
-                hit += 1
-        return hit / n
-
-    col_bands = _bands(aw, _col_frac)
-    if not col_bands:
-        return None
-    x0, x1 = max(col_bands, key=lambda b: b[1] - b[0])
-    if (x1 - x0) < 0.3 * aw:
-        return None
-
-    # Slab-shot signature: the note must not already fill the frame, and
-    # the band IMMEDIATELY around it must be dark holder plastic. Only
-    # the immediate ring counts — a dealer-page screenshot surrounds the
-    # slab with bright page background and the label band is bright too,
-    # so judging the whole outside rejects real slab shots. A white scan
-    # margin (raw note, no slab) still fails here — those pass through.
-    area = (x1 - x0) * (y1 - y0) / float(aw * ah)
-    if not (0.10 <= area <= 0.90):
-        return None
+    # Slab-shot signature: the band IMMEDIATELY around the note must be
+    # dark holder plastic. Only the immediate ring counts — a
+    # dealer-page screenshot surrounds the slab with bright page
+    # background and the label band is bright too, so judging the whole
+    # outside rejects real slab shots. A white scan margin (raw note,
+    # no slab) still fails here — those pass through.
     ring = max(3, int(0.04 * min(x1 - x0, y1 - y0)))
     rx0, ry0 = max(0, x0 - ring), max(0, y0 - ring)
     rx1, ry1 = min(aw - 1, x1 + ring), min(ah - 1, y1 + ring)
@@ -4755,11 +4710,13 @@ def _note_edge_blob(gray):
     return e.filter(ImageFilter.MaxFilter(7))
 
 
-def _largest_note_component(blob, step=2, max_area=0.92):
-    """Pixel bbox of the biggest banknote-shaped edge component: solid
+def _largest_note_component(blob, step=2, max_area=0.92, min_area=0.08):
+    """Pixel bbox of the biggest banknote-shaped mask component: solid
     (fill > 0.45 — a textured photo background forms a hollow ring and
-    fails this), banknote-proportioned, and neither tiny nor more than
-    max_area of the frame. None when nothing qualifies."""
+    fails this), banknote-proportioned, and between min_area and
+    max_area of the frame. Works on any binary mask — edge blobs for
+    light holders, brightness masks for dark ones. None when nothing
+    qualifies."""
     from collections import deque
 
     w, h = blob.size
@@ -4794,7 +4751,7 @@ def _largest_note_component(blob, step=2, max_area=0.92):
             fill = n / float(bw * bh)
             area = bw * bh / float(gw * gh)
             aspect = bw / float(bh)
-            if 0.08 <= area <= max_area and 1.15 <= aspect <= 3.8 \
+            if min_area <= area <= max_area and 1.15 <= aspect <= 3.8 \
                     and fill > 0.45:
                 if best is None or n > best[0]:
                     best = (n, minx * step, miny * step,
@@ -4958,6 +4915,18 @@ def _detect_light_note_box(img):
     if (x1 - x0) > 0.90 * aw or (y1 - y0) > 0.90 * ah:
         return None
     if not _ring_mostly_uniform(blob, box):
+        return None
+    # A BLACK surround is the dark detector's scene, not this one's:
+    # with no bright margin anywhere the paper-colour anchor below
+    # would lock onto holder plastic and the "paper run" would sprawl
+    # across the void.
+    gpx = small.convert('L').load()
+    ring = max(3, int(0.04 * min(x1 - x0, y1 - y0)))
+    ring_lum = [gpx[x, y]
+                for y in range(max(0, y0 - ring), min(ah, y1 + ring + 1))
+                for x in range(max(0, x0 - ring), min(aw, x1 + ring + 1))
+                if not (x0 <= x <= x1 and y0 <= y <= y1)]
+    if ring_lum and _median(ring_lum) < 100:
         return None
     return (int(x0 / scale), int(y0 / scale),
             int(x1 / scale), int(y1 / scale))
