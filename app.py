@@ -2255,11 +2255,12 @@ def init_db():
     # the column. From here on the write paths keep it current, so this
     # only ever needs to run once per ordering. Bump the key whenever
     # CATEGORY_ORDER_BY['banknotes'] changes so the seeded numbers match
-    # the live order — v5 sorts by the issue-year pulled from the series
-    # label (falling back to date_1) instead of the raw series text.
+    # the live order — v6 moves municipality below the issue-year, so
+    # Notgeld files chronologically inside its country rather than in
+    # per-town blocks ahead of the national notes.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v5',),
+        ('banknote_display_number_v6',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -2267,7 +2268,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v5', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v6', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -5546,18 +5547,20 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
-    # Country, town (Notgeld), issue-year, denomination, then date. The
-    # year comes from the series label when it has one ('Series of 1896
-    # (Educational Series)' -> 1896) and falls back to the note's own
-    # date_1 otherwise — so notes of the same year group together no
-    # matter how the series was worded, and within a year they run by
-    # face value. Denomination is three keys: currency family, then unit
-    # worth (Pfennig before Mark, cent before dollar), then the number —
-    # so a group reads 1, 2, 10 Rupees rather than 1, 10, 2 by text.
-    # date_1 is a final tiebreak. Blanks sort last per level.
+    # Country, issue-year, town, denomination, then date. Notgeld files
+    # inside its country's chronological run like any national note —
+    # municipality is only a tiebreak within a year, keeping a town's
+    # same-year set together without splitting Germany or Austria into
+    # per-town blocks. The year comes from the series label when it has
+    # one ('Series of 1896 (Educational Series)' -> 1896) and falls back
+    # to the note's own date_1 otherwise. Denomination is three keys:
+    # currency family, then unit worth (Pfennig before Mark, cent before
+    # dollar), then the number — so a group reads 1, 2, 10 Rupees rather
+    # than 1, 10, 2 by text. date_1 is a final tiebreak. Blanks sort
+    # last per level.
     'banknotes': ("COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
-                  "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(SERIES_YEAR(series), date_1, 99999) ASC, "
+                  "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
                   "DENOM_UNIT(denomination) ASC, "
                   "DENOM_VALUE(denomination) ASC, "
