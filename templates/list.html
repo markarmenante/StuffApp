@@ -274,15 +274,17 @@
 
       {# ── BANKNOTES ── #}
       {% elif category == 'banknotes' %}
-        {# Notgeld reads by town first: a page of German notes would all
-           say "Germany", so the municipality leads when present. #}
+        {# Country leads, matching the sort — a row labelled by its town
+           (e.g. "Burlington" for a New Jersey note) looked misfiled in
+           the country-alphabetical list. Municipality follows on the
+           detail line. #}
         <div class="item-line1">
-          <span class="item-brand">{{ row['municipality'] or row['country'] or row['issuer'] or '—' }}</span>
+          <span class="item-brand">{{ row['country'] or row['municipality'] or row['issuer'] or '—' }}</span>
           {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
         </div>
         <div class="item-detail-rows">
           <div class="idr">
-            {% if row['municipality'] and row['country'] %}<span>{{ row['country'] }}</span>{% endif %}
+            {% if row['municipality'] and row['country'] %}<span>{{ row['municipality'] }}</span>{% endif %}
             {% if row['issuer'] %}<span>{{ row['issuer'] }}</span>{% endif %}
             {% if row['pick_number'] %}<span><span class="lbl">Pick</span> {{ row['pick_number'] }}</span>{% endif %}
             {% if row['other_catalog'] %}<span>{{ row['other_catalog'] }}</span>{% endif %}
