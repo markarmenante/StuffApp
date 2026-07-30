@@ -10948,6 +10948,7 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
             'serial_number',
             'watermark', 'material', 'grade', 'grading_authority',
             'slab_number', 'grade_condition', 'grade_modifier',
+            'sheet_position',
             'lettering', 'lettering_translation', 'history_context',
             'vendor', 'price', 'purchase_date', 'obv_rev',
         )},
@@ -11312,6 +11313,7 @@ Target fields:
 - slab_number: the certification number if stated, verbatim; else null.
 - grade_condition: condition qualifier(s) noted alongside the grade — e.g. "minor rust", "pinholes", "annotation", "small tear". Comma-separated, lowercase; else null.
 - grade_modifier: "EPQ" when the text shows EPQ (Exceptional Paper Quality), "★" for a star designation, "EPQ★" for both, "+" for a plus grade. Else null.
+- sheet_position: THIS note's position on the printing sheet, when identifiable from the images or the dealer's text — an uncut/partial-sheet position stated like "2 of 4", or the plate-position letter/number printed in the note's margin or corner (e.g. "A", "D12", "Position 7"). Direct evidence only — never inferred from a catalogue. Null when not shown or stated.
 - lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text.
 - lettering_translation: English translation of each lettering line, same order and same Front:/Back: prefixes. Transliterate non-Latin scripts in parentheses where helpful. Null if lettering is null or already English.
 - history_context: a VERY SHORT historical-context narrative — 2-3 sentences, under 70 words. Why this note existed: who issued it, what was happening then and there (hyperinflation, war, occupation, nationalization, currency reform), and anything notable about this type. Plain prose, no headings, no citations inline. Web searches allowed. Null if you cannot say anything reliable.
@@ -11330,6 +11332,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "date_1": null, "size_width": null, "size_height": null,
   "grade": null, "grade_numeric": null, "grading_authority": null,
   "slab_number": null, "grade_condition": null, "grade_modifier": null,
+  "sheet_position": null,
   "lettering": null, "lettering_translation": null, "history_context": null,
   "vendor": null, "price": null, "purchase_date": null, "obv_rev": null,
   "sources": "one-line note of where each value came from (note images vs dealer text vs which web source)"
@@ -11640,6 +11643,25 @@ def banknote_lookup_specs(record_id):
         elif str(cur or '').strip().lower() != str(v or '').strip().lower():
             overwritten[f] = {'current': cur, 'new': v}
 
+    # Sheet / plate position ("2 of 4", "A") → appended to the
+    # "Grade, Conditions" notes field, no column of its own. Image reads
+    # count as direct evidence (the position is printed on the note);
+    # otherwise it must appear in the dealer's text.
+    sp = suggestions.get('sheet_position')
+    if isinstance(sp, str) and sp.strip():
+        sp = sp.strip()
+        sp_grounded = _has_images or \
+            re.sub(r'[^a-z0-9]', '', sp.lower()) in _dealer_text_key
+        cur_notes = (_coin_row_value(note, 'notes') or '').strip()
+        sp_line = sp if re.search(r'(?i)sheet|plate|position', sp) \
+            else f'Sheet position {sp}'
+        if sp_grounded and sp.lower() not in cur_notes.lower():
+            if cur_notes:
+                overwritten['notes'] = {'current': cur_notes,
+                                        'new': f'{cur_notes}\n{sp_line}'}
+            else:
+                filled['notes'] = sp_line
+
     # Pasted dealer tables hog vertical space: propose the linear
     # 'Label: value; ...' rewrite of the description for approval.
     current_description = str(_coin_row_value(note, 'description') or '')
@@ -11720,8 +11742,9 @@ def banknote_apply_lookup_specs(record_id):
     updates = {}
     for k, v in raw.items():
         # `condition` carries the Check-generated historical narrative;
-        # `description` carries the compacted-listing rewrite.
-        if k not in BANKNOTE_SPEC_FILLABLE and k not in ('condition', 'description'):
+        # `description` carries the compacted-listing rewrite; `notes`
+        # carries the sheet-position append to Grade, Conditions.
+        if k not in BANKNOTE_SPEC_FILLABLE and k not in ('condition', 'description', 'notes'):
             continue
         coerced = _coerce_banknote_spec(k, v)
         if coerced in (None, ''):
