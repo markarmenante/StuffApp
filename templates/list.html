@@ -65,6 +65,10 @@
   <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=_bn_next) }}"
      class="toolbar-btn pill {% if coin_filter in ('notgeld', 'national') %}active{% endif %}"
      title="Cycle issue type: Notgeld → National → All">{{ 'Notgeld' if coin_filter == 'notgeld' else ('National' if coin_filter == 'national' else 'Type: All') }}</a>
+  {# Country axis — toggles the list to US issues only. #}
+  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=None if coin_filter == 'us' else 'us') }}"
+     class="toolbar-btn pill {% if coin_filter == 'us' %}active{% endif %}"
+     title="United States banknotes">US</a>
   {% if has_ordered or coin_filter == 'ordered' %}
   <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
      class="toolbar-btn pill ordered-filter-pill {% if coin_filter == 'ordered' %}active{% endif %}"

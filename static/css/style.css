@@ -236,12 +236,19 @@ input[type="number"]::-webkit-outer-spin-button {
   text-decoration: none;
 }
 .toolbar-btn:hover { background: rgba(0,0,0,.08); text-decoration: none; }
-.toolbar-btn.add { background: var(--blue); border-color: var(--blue); color: #fff; font-size: 20px; font-weight: 300; line-height: 1; }
+/* Double-size "+" — the primary action on every list, so it reads as
+   the one control that isn't a filter. */
+.toolbar-btn.add {
+  width: 52px; height: 52px; border-radius: 10px;
+  background: var(--blue); border-color: var(--blue); color: #fff;
+  font-size: 40px; font-weight: 300; line-height: 1;
+}
 .toolbar-btn.add:hover { background: #0050c0; }
 /* Text-labeled add pill — shown to non-owners (e.g. "Add Watch")
-   in place of the bare "+" so the affordance reads on first sight. */
+   in place of the bare "+" so the affordance reads on first sight.
+   Stays pill-sized; only the bare "+" is doubled. */
 .toolbar-btn.add.add-labeled {
-  width: auto; padding: 0 12px; border-radius: 13px;
+  width: auto; height: 26px; padding: 0 12px; border-radius: 13px;
   font-size: 12px; font-weight: 500; white-space: nowrap;
 }
 .toolbar-btn.pill {
