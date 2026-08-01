@@ -243,6 +243,10 @@ input[type="number"]::-webkit-outer-spin-button {
   width: 52px; height: 26px; border-radius: 13px;
   background: var(--blue); border-color: var(--blue); color: #fff;
   font-size: 22px; font-weight: 300; line-height: 1;
+  /* Flex centering centers the line box, but the "+" glyph's ink sits
+     ~1.75px below it — trim the content box to put the glyph itself
+     on the button's center. */
+  padding-bottom: 3.5px;
 }
 .toolbar-btn.add:hover { background: #0050c0; }
 /* Text-labeled add pill — shown to non-owners (e.g. "Add Watch")
