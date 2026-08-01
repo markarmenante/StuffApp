@@ -1373,18 +1373,22 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  <!-- Lettering / Translation — filled by Check scanning the note images -->
-  <div class="section-bar">Lettering &amp; Translation</div>
+  <!-- Lettering / Translation — filled by Check scanning the note images.
+       English notes need no translation, so the two panels hold the two
+       sides instead: front text left, back text right — matching the
+       image order above. -->
+  {% set english_sides = val('lettering_translation').lower().startswith('back:') %}
+  <div class="section-bar">{% if english_sides %}Lettering — Front &amp; Back{% else %}Lettering &amp; Translation{% endif %}</div>
   <div class="dgrid dg2 banknote-lettering-row">
     <div class="dcell">
       <textarea name="lettering" rows="5" data-autogrow="1"
                 {% if is_new and not val('lettering') %}placeholder="Inscriptions on the note (original script)"{% endif %}>{{ val('lettering') }}</textarea>
-      <span class="clabel">Lettering</span>
+      <span class="clabel">{% if english_sides %}Front Lettering{% else %}Lettering{% endif %}</span>
     </div>
     <div class="dcell">
       <textarea name="lettering_translation" rows="5" data-autogrow="1"
                 {% if is_new and not val('lettering_translation') %}placeholder="English translation"{% endif %}>{{ val('lettering_translation') }}</textarea>
-      <span class="clabel">Translation</span>
+      <span class="clabel">{% if english_sides %}Back Lettering{% else %}Translation{% endif %}</span>
     </div>
   </div>
 

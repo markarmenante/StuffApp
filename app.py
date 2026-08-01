@@ -617,6 +617,80 @@ def _merge_coin_condition_history(existing_notes, history_context):
     return f"{notes}\n\n{body}"
 
 
+
+def _backfill_english_banknote_lettering(db):
+    """One-time split for English-text banknotes: Check historically put
+    all inscriptions (Front: + Back:) in `lettering` and left the
+    translation empty for English notes. The convention is now
+    side-per-panel for English notes — front text in `lettering` (left
+    panel, under the front image), back text in `lettering_translation`
+    (right panel, under the back image). Idempotent: transformed rows
+    have a Back:-leading translation and are skipped on later boots;
+    non-English notes (real translations) are untouched."""
+    english_markers = {
+        'the', 'of', 'and', 'will', 'pay', 'bearer', 'on', 'demand',
+        'dollar', 'dollars', 'pound', 'pounds', 'bank', 'states',
+        'america', 'this', 'note', 'legal', 'tender', 'promise',
+        'treasury', 'reserve', 'one', 'two', 'five', 'ten', 'twenty',
+        'fifty', 'hundred',
+    }
+
+    def looks_english(text):
+        try:
+            text.encode('ascii')
+        except UnicodeEncodeError:
+            return False
+        words = set(re.findall(r"[a-z']+", text.lower()))
+        return len(words & english_markers) >= 2
+
+    def split_sides(text):
+        front, back, side = [], [], None
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            lowered = stripped.lower()
+            if lowered.startswith('front:') or lowered.startswith('obverse:'):
+                side = 'front'
+            elif lowered.startswith('back:') or lowered.startswith('reverse:'):
+                side = 'back'
+            elif side is None:
+                # Unstructured leading line — leave the row alone.
+                return None
+            (front if side == 'front' else back).append(stripped)
+        if not back:
+            return None  # nothing to move right; leave as-is
+        return '\n'.join(front) or None, '\n'.join(back)
+
+    rows = db.execute(
+        "SELECT id, lettering, lettering_translation FROM banknotes "
+        "WHERE lettering IS NOT NULL AND TRIM(lettering) != ''"
+    ).fetchall()
+    changed = 0
+    for row in rows:
+        lettering = (row['lettering'] or '').strip()
+        translation = (row['lettering_translation'] or '').strip()
+        if translation and translation.lower() != lettering.lower():
+            # A real translation (or already-transformed row) — skip.
+            continue
+        if translation.lower().startswith('back:'):
+            continue
+        if not looks_english(lettering):
+            continue
+        split = split_sides(lettering)
+        if not split:
+            continue
+        front_text, back_text = split
+        db.execute(
+            "UPDATE banknotes SET lettering = ?, lettering_translation = ? WHERE id = ?",
+            (front_text, back_text, row['id']),
+        )
+        changed += 1
+    if changed:
+        db.commit()
+        print(f"[migrate] split English lettering into front/back panels on {changed} banknotes", flush=True)
+
+
 def _migrate_coin_history_context_into_condition(db):
     """Move legacy generated coin history into the editable notes field."""
     cols = {r['name'] for r in db.execute("PRAGMA table_info(coins)").fetchall()}
@@ -1803,6 +1877,7 @@ def init_db():
     _ensure_owner_user(db)
     _normalize_owned_status_values(db)
     _backfill_blank_status_own(db)
+    _backfill_english_banknote_lettering(db)
     _migrate_coin_history_context_into_condition(db)
     _cleanup_coin_research_headings(db)
     _merge_banknote_catalog_numbers(db)
@@ -11314,8 +11389,8 @@ Target fields:
 - grade_condition: condition qualifier(s) noted alongside the grade — e.g. "minor rust", "pinholes", "annotation", "small tear". Comma-separated, lowercase; else null.
 - grade_modifier: "EPQ" when the text shows EPQ (Exceptional Paper Quality), "★" for a star designation, "EPQ★" for both, "+" for a plus grade. Else null.
 - sheet_position: THIS note's position on the printing sheet, when identifiable from the images or the dealer's text — an uncut/partial-sheet position stated like "2 of 4", or the plate-position letter/number printed in the note's margin or corner (e.g. "A", "D12", "Position 7"). Direct evidence only — never inferred from a catalogue. Null when not shown or stated.
-- lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text.
-- lettering_translation: English translation of each lettering line, same order and same Front:/Back: prefixes. Transliterate non-Latin scripts in parentheses where helpful. Null if lettering is null or already English.
+- lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text. EXCEPTION — when the note's text is already ENGLISH: no translation is needed, so the two fields become the two sides instead: put ONLY the FRONT inscriptions here (lines prefixed "Front:"), matching the front image on the left.
+- lettering_translation: English translation of each lettering line, same order and same Front:/Back: prefixes. Transliterate non-Latin scripts in parentheses where helpful. EXCEPTION — when the note's text is already ENGLISH: put ONLY the BACK inscriptions here (lines prefixed "Back:"), matching the back image on the right, with the front inscriptions in lettering. Null only when there is nothing to report.
 - history_context: a VERY SHORT historical-context narrative — 2-3 sentences, under 70 words. Why this note existed: who issued it, what was happening then and there (hyperinflation, war, occupation, nationalization, currency reform), and anything notable about this type. Plain prose, no headings, no citations inline. Web searches allowed. Null if you cannot say anything reliable.
 - vendor: the dealer or auction house THIS note was purchased from, only when the material on file identifies it — an explicit "purchased from X" / vendor / seller line, an invoice, or the pasted listing's own branding or letterhead (a Stack's Bowers inventory page means vendor "Stack's Bowers"; a Heritage lot page means "Heritage Auctions"). A firm merely mentioned in the pedigree ("ex Spink sale") is prior provenance, not the vendor — when in doubt, null.
 - price: the price PAID for this note, only when the material on file states it ("My Cost", "purchase price", "paid", an invoice total, "purchased for $X"). Format "$1,234" or "$1,234.56". This is never a catalog value, estimate, or price guide figure.
