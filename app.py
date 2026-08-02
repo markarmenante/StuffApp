@@ -2015,6 +2015,54 @@ COUNTRY_KEYS = {
     'new-zealand': ('new zealand',),
     'cuba': ('cuba',),
     'argentina': ('argentina',),
+    'macau': ('macau', 'macao'),
+    'laos': ('laos', 'lao'),
+    'malawi': ('malawi', 'nyasaland'),
+    'nigeria': ('nigeria',),
+    'ghana': ('ghana', 'gold coast'),
+    'zambia': ('zambia', 'northern rhodesia'),
+    'uganda': ('uganda',),
+    'tanzania': ('tanzania', 'tanganyika', 'zanzibar'),
+    'ethiopia': ('ethiopia', 'abyssinia'),
+    'mozambique': ('mozambique', 'portuguese east africa'),
+    'angola': ('angola', 'portuguese west africa'),
+    'indonesia': ('indonesia',),
+    'cambodia': ('cambodia', 'kampuchea', 'khmer republic'),
+    'south-korea': ('south korea', 'korea', 'republic of korea'),
+    'taiwan': ('taiwan', 'formosa', 'bank of taiwan'),
+    'hong-kong': ('hong kong', 'hongkong'),
+    'lebanon': ('lebanon',),
+    'syria': ('syria',),
+    'jordan': ('jordan', 'transjordan'),
+    'saudi-arabia': ('saudi arabia', 'saudi'),
+    'kuwait': ('kuwait',),
+    'libya': ('libya',),
+    'sudan': ('sudan',),
+    'nepal': ('nepal',),
+    'bangladesh': ('bangladesh',),
+    'mongolia': ('mongolia',),
+    'colombia': ('colombia',),
+    'peru': ('peru',),
+    'chile': ('chile',),
+    'uruguay': ('uruguay',),
+    'bolivia': ('bolivia',),
+    'paraguay': ('paraguay',),
+    'ecuador': ('ecuador',),
+    'guatemala': ('guatemala',),
+    'nicaragua': ('nicaragua',),
+    'el-salvador': ('el salvador',),
+    'panama': ('panama',),
+    'croatia': ('croatia',),
+    'slovenia': ('slovenia',),
+    'ukraine': ('ukraine',),
+    'estonia': ('estonia',),
+    'latvia': ('latvia',),
+    'lithuania': ('lithuania',),
+    'iceland': ('iceland',),
+    'malta': ('malta',),
+    'cyprus': ('cyprus',),
+    'luxembourg': ('luxembourg',),
+    'colonial-america': ('new jersey', 'colony of new jersey', 'new jersey colony', 'pennsylvania', 'pennsylvania colony', 'colony of pennsylvania', 'province of pennsylvania', 'rhode island', 'rhode island and providence plantations', 'massachusetts', 'massachusetts bay', 'province of massachusetts', 'connecticut', 'new york', 'colony of new york', 'province of new york', 'virginia', 'colony of virginia', 'maryland', 'delaware', 'north carolina', 'south carolina', 'georgia', 'new hampshire', 'continental congress', 'united colonies', 'continental currency'),
 }
 
 COUNTRY_ERAS = {
@@ -2660,9 +2708,13 @@ COUNTRY_ERAS = {
          'currency were renamed Sri Lanka in 1972.'),
     )),
     'malaya': ('Malaya', (
-        (1899, 1941, 'Straits and Malayan dollars',
-         'The Straits Settlements dollar (1899) and the Malayan dollar '
-         '(1939) were issued by currency boards at 2s 4d sterling.'),
+        (1826, 1941, 'Straits Settlements and the currency board',
+         'Penang, Malacca, and Singapore were grouped as the Straits '
+         'Settlements, governed under British India until 1867 and then as '
+         'a Crown Colony. The Board of Commissioners of Currency issued the '
+         'Straits dollar from 1899 and the Malayan dollar from 1939, each '
+         'held at 2 shillings 4 pence sterling by a currency board with '
+         'full reserves in London.'),
         (1942, 1945, 'Occupation "banana money"',
          'Japanese military dollars were issued without serial-number '
          'control and became nearly worthless by 1945; the board’s '
@@ -2843,6 +2895,312 @@ COUNTRY_ERAS = {
          'high inflation returned in the 2010s and exceeded 200% in '
          '2023.'),
     )),
+    'macau': ('Macau', (
+        (1905, 1999, 'Portuguese administration',
+         'The Banco Nacional Ultramarino issued the pataca from 1906 under Portuguese administration, pegged to the Hong Kong dollar. Notes were printed in Portugal and Britain (Bradbury Wilkinson, De La Rue).'),
+        (1999, 2100, 'After the handover',
+         'Administration transferred to China in December 1999. The pataca continues, now co-issued by the Banco Nacional Ultramarino and the Bank of China, and remains pegged to the Hong Kong dollar.'),
+    )),
+    'laos': ('Laos', (
+        (1953, 1975, 'The Kingdom',
+         'The Banque Nationale du Laos issued the kip from 1955, replacing the French Indochinese piastre. Notes were printed in France.'),
+        (1976, 2100, 'The Lao PDR',
+         'The Pathet Lao "liberation kip" of 1976 was replaced later that year by the kip of the new republic at 20 to one.'),
+    )),
+    'malawi': ('Malawi', (
+        (1953, 1964, 'Rhodesia and Nyasaland',
+         'Nyasaland used the pound of the Rhodesia and Nyasaland Federation.'),
+        (1964, 2100, 'Reserve Bank of Malawi',
+         'The Reserve Bank of Malawi issued the Malawian pound from 1964; the decimal kwacha replaced it in 1971 at 2 kwacha per pound.'),
+    )),
+    'nigeria': ('Nigeria', (
+        (1912, 1958, 'West African Currency Board',
+         'Nigeria used the West African pound issued by the currency board from 1912.'),
+        (1959, 2100, 'Central Bank of Nigeria',
+         'The Central Bank of Nigeria issued from 1959; the naira replaced the pound in 1973 at 2 naira per pound.'),
+    )),
+    'ghana': ('Ghana', (
+        (1913, 1957, 'Gold Coast',
+         'The Gold Coast used the West African Currency Board pound.'),
+        (1958, 2100, 'Bank of Ghana',
+         'The Bank of Ghana issued from 1958; the cedi replaced the pound in 1965. Inflation brought a redenomination in 2007 removing four zeros.'),
+    )),
+    'zambia': ('Zambia', (
+        (1953, 1964, 'Northern Rhodesia',
+         'Northern Rhodesia used the Rhodesia and Nyasaland pound.'),
+        (1964, 2100, 'Bank of Zambia',
+         'The Bank of Zambia issued the Zambian pound from 1964; the kwacha replaced it in 1968. A redenomination in 2013 removed three zeros.'),
+    )),
+    'uganda': ('Uganda', (
+        (1919, 1966, 'East African shilling',
+         'Uganda used the East African Currency Board shilling.'),
+        (1966, 1986, 'Bank of Uganda and inflation',
+         'The Bank of Uganda issued the Ugandan shilling from 1966. Under and after Amin, inflation was severe.'),
+        (1987, 2100, 'Reform',
+         'The 1987 reform introduced a new shilling at 100 old to one, with a conversion tax.'),
+    )),
+    'tanzania': ('Tanzania', (
+        (1919, 1966, 'East African shilling',
+         'Tanganyika and Zanzibar used the East African Currency Board shilling.'),
+        (1966, 2100, 'Bank of Tanzania',
+         'The Bank of Tanzania issued the Tanzanian shilling from 1966, after the 1964 union.'),
+    )),
+    'ethiopia': ('Ethiopia', (
+        (1893, 1935, 'Thaler and the first birr',
+         'The Maria Theresa thaler circulated for centuries; the Bank of Abyssinia issued the first notes in 1915.'),
+        (1936, 1941, 'Italian occupation',
+         'Italian East Africa used the lira during the 1936–41 occupation.'),
+        (1945, 2100, 'The Ethiopian dollar and birr',
+         'The Ethiopian dollar was issued from 1945, renamed the birr; the National Bank of Ethiopia has issued since 1964.'),
+    )),
+    'mozambique': ('Mozambique', (
+        (1877, 1975, 'Portuguese East Africa',
+         'The Banco Nacional Ultramarino issued the escudo (earlier real and milréis) under Portuguese administration.'),
+        (1975, 2100, 'Independence and the metical',
+         'The metical replaced the escudo at par in 1980. A redenomination in 2006 removed three zeros.'),
+    )),
+    'angola': ('Angola', (
+        (1865, 1975, 'Portuguese West Africa',
+         'The Banco Nacional Ultramarino and later the Banco de Angola issued the escudo (earlier real and milréis).'),
+        (1977, 2100, 'Independence and inflation',
+         'The kwanza replaced the escudo in 1977. Civil-war inflation brought redenominations in 1995 (novo kwanza, 1,000:1) and 1999 (kwanza reajustado), removing nine zeros in total.'),
+    )),
+    'indonesia': ('Indonesia', (
+        (1900, 1942, 'Netherlands Indies',
+         'The Javasche Bank issued the Netherlands Indies gulden.'),
+        (1942, 1949, 'Occupation and revolution',
+         'Japanese occupation gulden gave way to the Republic’s ORI rupiah from 1945, issued amid the independence war alongside Dutch-sponsored notes.'),
+        (1950, 1965, 'Early republic',
+         'The rupiah was cut sharply in 1959 and again in the 1965 redenomination (1,000 old to one new).'),
+        (1966, 2100, 'New Order and after',
+         'Inflation was brought down after 1966; the rupiah floated in the 1997 Asian crisis.'),
+    )),
+    'cambodia': ('Cambodia', (
+        (1953, 1975, 'The riel',
+         'The riel replaced the French Indochinese piastre in 1955, issued by the National Bank of Cambodia.'),
+        (1975, 1980, 'Money abolished',
+         'The Khmer Rouge abolished money in 1975 and emptied the cities; a 1975 note series was printed but never issued.'),
+        (1980, 2100, 'Reintroduction',
+         'The riel was reintroduced in 1980. The US dollar circulates widely alongside it.'),
+    )),
+    'south-korea': ('South Korea', (
+        (1945, 1953, 'Won and the Korean War',
+         'The Bank of Korea won succeeded the Japanese-era yen. War inflation led to the hwan in 1953 at 100 won to one.'),
+        (1953, 1962, 'The hwan',
+         'The hwan circulated until the 1962 reform.'),
+        (1962, 2100, 'The modern won',
+         'The won returned in 1962 at 10 hwan to one and has been issued by the Bank of Korea since.'),
+    )),
+    'taiwan': ('Taiwan', (
+        (1946, 1949, 'The old Taiwan dollar',
+         'The Bank of Taiwan issued the old Taiwan dollar from 1946. Mainland gold-yuan inflation spread to the island, destroying its value.'),
+        (1949, 2100, 'The new Taiwan dollar',
+         'The new Taiwan dollar replaced it in June 1949 at 40,000 to one, weeks before the Nationalist government withdrew to Taiwan.'),
+    )),
+    'hong-kong': ('Hong Kong', (
+        (1845, 1934, 'The silver dollar',
+         'Note-issuing commercial banks — chiefly the Hongkong and Shanghai Bank and the Chartered Bank — issued a dollar on silver.'),
+        (1935, 1982, 'Off silver, into sterling',
+         'Hong Kong left silver in 1935 and pegged to sterling. Government small-denomination notes were issued from 1935.'),
+        (1983, 2100, 'The US dollar peg',
+         'The Hong Kong dollar was pegged to the US dollar at 7.80 in 1983 under a currency board; the note-issuing banks continue.'),
+    )),
+    'lebanon': ('Lebanon', (
+        (1920, 1963, 'Banque de Syrie et du Liban',
+         'The Banque de Syrie et du Liban issued the Lebanese pound under and after the French mandate.'),
+        (1964, 2018, 'Banque du Liban',
+         'The central bank issued from 1964; the pound was stable until the civil war, then settled near 1,500 per dollar from the 1990s.'),
+        (2019, 2100, 'Collapse',
+         'From 2019 the currency lost most of its value, trading well above 100,000 per dollar as the banking system failed.'),
+    )),
+    'syria': ('Syria', (
+        (1919, 1963, 'Mandate and independence',
+         'The Banque de Syrie et du Liban issued the Syrian pound under the French mandate and after 1946.'),
+        (1963, 2100, 'Central Bank of Syria',
+         'The Central Bank of Syria has issued since 1956. The pound lost most of its value during the war after 2011.'),
+    )),
+    'jordan': ('Jordan', (
+        (1927, 1949, 'The Palestine pound',
+         'Transjordan used the Palestine pound.'),
+        (1949, 2100, 'The dinar',
+         'The Jordanian dinar replaced the Palestine pound in 1949; the Central Bank of Jordan has issued since 1959.'),
+    )),
+    'saudi-arabia': ('Saudi Arabia', (
+        (1953, 1961, 'Pilgrim receipts',
+         'The Saudi Arabian Monetary Agency first issued "Hajj pilgrim receipts" in 1953 as de facto paper money for pilgrims, the coin economy having no notes.'),
+        (1961, 2100, 'The riyal note',
+         'Regular riyal banknotes were issued from 1961, pegged to the US dollar.'),
+    )),
+    'kuwait': ('Kuwait', (
+        (1941, 1960, 'The Gulf rupee',
+         'Kuwait used the Indian, then Gulf, rupee.'),
+        (1961, 2100, 'The dinar',
+         'The Kuwaiti dinar replaced the Gulf rupee in 1961. Notes looted during the 1990 Iraqi invasion were demonetized after liberation.'),
+    )),
+    'libya': ('Libya', (
+        (1911, 1951, 'Italian colony and occupation',
+         'Italian Libya used the lira; British and French military currencies circulated after 1943.'),
+        (1951, 2100, 'Pound then dinar',
+         'The Libyan pound was issued at independence in 1951; the dinar replaced it in 1971 after the discovery of oil.'),
+    )),
+    'sudan': ('Sudan', (
+        (1899, 1956, 'Anglo-Egyptian condominium',
+         'Egyptian currency circulated under the condominium.'),
+        (1956, 2100, 'The Sudanese pound',
+         'The Sudanese pound was issued at independence in 1956. The dinar replaced it in 1992, the pound returned in 2007, and South Sudan introduced its own pound in 2011.'),
+    )),
+    'nepal': ('Nepal', (
+        (1945, 2100, 'The rupee',
+         'Government "mohru" notes were first issued in 1945; the Nepal Rastra Bank, the central bank, has issued the rupee since 1956.'),
+    )),
+    'bangladesh': ('Bangladesh', (
+        (1971, 1972, 'Overstamped Pakistani notes',
+         'Pakistani rupees overstamped "Bangladesh" served briefly after independence in 1971.'),
+        (1972, 2100, 'The taka',
+         'The taka replaced the rupee at par in 1972, issued by Bangladesh Bank.'),
+    )),
+    'mongolia': ('Mongolia', (
+        (1925, 2100, 'The tögrög',
+         'The tögrög was introduced in 1925, replacing a mix of Chinese, Russian, and other currencies, and issued under Soviet-aligned central planning until the 1990s transition.'),
+    )),
+    'colombia': ('Colombia', (
+        (1880, 1923, 'Early peso',
+         'Government and bank issues followed a nineteenth-century paper inflation and an 1899–1902 civil-war hyperinflation.'),
+        (1923, 2100, 'Banco de la República',
+         'The central bank, founded on Kemmerer’s advice in 1923, has issued the peso since. Inflation was persistent but never hyperinflationary.'),
+    )),
+    'peru': ('Peru', (
+        (1863, 1984, 'The sol',
+         'The sol served, with interruptions, from 1863; the sol de oro dates from 1931.'),
+        (1985, 1990, 'The inti',
+         'The inti replaced the sol in 1985 at 1,000 to one, on the eve of the late-1980s hyperinflation.'),
+        (1991, 2100, 'The nuevo sol',
+         'The nuevo sol replaced the inti in 1991 at one million to one — nine zeros removed from the sol in total — as Fujimori’s stabilization ended the inflation.'),
+    )),
+    'chile': ('Chile', (
+        (1925, 1959, 'The peso',
+         'The Banco Central de Chile issued the peso from 1925 through a long inflation.'),
+        (1960, 1975, 'The escudo',
+         'The escudo replaced the peso in 1960 at 1,000 to one; inflation accelerated sharply in the early 1970s.'),
+        (1975, 2100, 'The new peso',
+         'The peso returned in 1975 at 1,000 escudos to one.'),
+    )),
+    'uruguay': ('Uruguay', (
+        (1896, 1975, 'The peso',
+         'The Banco de la República issued the peso through a long twentieth-century inflation.'),
+        (1975, 1993, 'The new peso',
+         'The nuevo peso replaced the peso in 1975 at 1,000 to one.'),
+        (1993, 2100, 'The peso uruguayo',
+         'The peso uruguayo replaced the nuevo peso in 1993 at 1,000 to one.'),
+    )),
+    'bolivia': ('Bolivia', (
+        (1864, 1962, 'The boliviano',
+         'The boliviano served from 1864 through repeated devaluations.'),
+        (1963, 1986, 'Peso boliviano and hyperinflation',
+         'The peso boliviano replaced the boliviano in 1963 at 1,000 to one. Bolivia then suffered the hyperinflation of 1984–85, among the sharpest recorded outside wartime.'),
+        (1987, 2100, 'The boliviano restored',
+         'The boliviano returned in 1987 at one million pesos to one, ending the inflation.'),
+    )),
+    'paraguay': ('Paraguay', (
+        (1943, 2100, 'The guaraní',
+         'The guaraní replaced the peso in 1943 and has been issued by the Banco Central since 1952 — one of the more durable South American currencies.'),
+    )),
+    'ecuador': ('Ecuador', (
+        (1884, 1999, 'The sucre',
+         'The Banco Central del Ecuador issued the sucre from 1927; a banking crisis late in the decade collapsed it.'),
+        (2000, 2100, 'Dollarization',
+         'Ecuador adopted the US dollar in 2000 at 25,000 sucres to one, ending its own currency.'),
+    )),
+    'guatemala': ('Guatemala', (
+        (1925, 2100, 'The quetzal',
+         'The quetzal replaced the peso in 1925 at par with the US dollar, issued later by the Banco de Guatemala.'),
+    )),
+    'nicaragua': ('Nicaragua', (
+        (1912, 1987, 'The córdoba',
+         'The córdoba was introduced in 1912 at par with the US dollar.'),
+        (1988, 1991, 'Hyperinflation',
+         'War and deficits produced hyperinflation in the late 1980s; the córdoba was replaced in 1988 and by the córdoba oro in 1991, removing many zeros.'),
+        (1991, 2100, 'The córdoba oro',
+         'The gold córdoba stabilized the currency and remains in use.'),
+    )),
+    'el-salvador': ('El Salvador', (
+        (1919, 2000, 'The colón',
+         'The colón was issued by private banks, then the Banco Central from 1934.'),
+        (2001, 2100, 'Dollarization',
+         'El Salvador adopted the US dollar in 2001 at 8.75 colones to one.'),
+    )),
+    'panama': ('Panama', (
+        (1904, 2100, 'The dollar economy',
+         'Panama has used the US dollar since 1904; the balboa exists mainly as coin. Its only banknotes were the 1941 "Arias" issue, withdrawn within days when the government fell.'),
+    )),
+    'croatia': ('Croatia', (
+        (1991, 1994, 'Dinar and inflation',
+         'The Croatian dinar of 1991 circulated through the wartime inflation of the early 1990s.'),
+        (1994, 2022, 'The kuna',
+         'The kuna replaced the dinar in 1994 at 1,000 to one. It was replaced by the euro in 2023.'),
+    )),
+    'slovenia': ('Slovenia', (
+        (1991, 2006, 'The tolar',
+         'The tolar replaced the Yugoslav dinar in 1991, first as bons then as notes. It was replaced by the euro in 2007.'),
+    )),
+    'ukraine': ('Ukraine', (
+        (1917, 1920, 'The first hryvnia and karbovanets',
+         'The short-lived Ukrainian People’s Republic issued karbovanets and hryvnia during the revolution.'),
+        (1992, 1996, 'Coupon-karbovanets hyperinflation',
+         'The interim karbovanets coupon suffered severe hyperinflation, with prices rising into the millions.'),
+        (1996, 2100, 'The hryvnia',
+         'The hryvnia replaced the karbovanets in 1996 at 100,000 to one.'),
+    )),
+    'estonia': ('Estonia', (
+        (1918, 1940, 'First independence',
+         'The Estonian mark, then the kroon from 1928, served the first republic until Soviet annexation in 1940.'),
+        (1992, 2010, 'The kroon restored',
+         'The kroon returned in 1992, pegged to the Deutsche Mark under a currency board. Estonia adopted the euro in 2011.'),
+    )),
+    'latvia': ('Latvia', (
+        (1918, 1940, 'First independence',
+         'The Latvian rublis, then the lats from 1922, served until Soviet annexation.'),
+        (1993, 2013, 'The lats restored',
+         'The lats returned in 1993 after a transitional rublis. Latvia adopted the euro in 2014.'),
+    )),
+    'lithuania': ('Lithuania', (
+        (1922, 1940, 'First independence',
+         'The litas of 1922 was among the more stable interwar currencies until Soviet annexation.'),
+        (1993, 2014, 'The litas restored',
+         'The litas returned in 1993 after a transitional talonas, later pegged to the dollar then the euro. Lithuania adopted the euro in 2015.'),
+    )),
+    'iceland': ('Iceland', (
+        (1885, 1980, 'The króna',
+         'Iceland issued its own króna, separating from the Danish krone over the early twentieth century.'),
+        (1981, 2100, 'Redenomination',
+         'A long postwar inflation led to the 1981 redenomination at 100 old krónur to one.'),
+    )),
+    'malta': ('Malta', (
+        (1800, 1913, 'British colony',
+         'Britain took Malta from the French in 1800 and held it as a Crown Colony, confirmed by the Treaty of Paris in 1814. Sterling currency replaced the Maltese scudo in 1825, and British coin circulated.'),
+        (1914, 1967, 'The currency board pound',
+         'The Government of Malta issued its own pound from 1914 through a currency board, which held sterling reserves in London against every note at par — the standard colonial arrangement, giving a territory its own paper without an independent monetary policy. Malta became independent in 1964.'),
+        (1968, 2007, 'Central Bank and lira',
+         'The Central Bank of Malta issued from 1968 and the pound was renamed the lira. Malta adopted the euro in 2008.'),
+    )),
+    'cyprus': ('Cyprus', (
+        (1878, 1959, 'British administration',
+         'Britain administered Cyprus from 1878 under nominal Ottoman suzerainty, annexed it in 1914, and made it a Crown Colony in 1925. A currency board issued the Cyprus pound at par with sterling, held first at 20 shillings and later divided into 1,000 mils.'),
+        (1960, 2007, 'Republic',
+         'The Central Bank of Cyprus issued from 1963 after independence in 1960. Cyprus adopted the euro in 2008.'),
+    )),
+    'colonial-america': ('Colonial America', (
+        (1690, 1774, 'Bills of credit: pounds on paper, dollars in coin',
+         'Massachusetts issued the first government paper money in the English-speaking world in 1690, to pay soldiers returned from an expedition against Quebec, and the other colonies followed with "bills of credit." Accounts were kept in pounds, shillings, and pence, but little British coin reached the colonies — export of sterling coin was restricted — so the everyday coin was the Spanish silver dollar, the eight-reales "piece of eight." Each colony rated that dollar in its own shillings, and the ratings differed: roughly 8 shillings in New York, 6 in New England and Virginia, 7 shillings 6 pence in Pennsylvania. Parliament restricted colonial paper with the Currency Acts of 1751 and 1764.'),
+        (1775, 1783, 'The Revolution and the turn to the dollar',
+         'The Continental Congress issued dollar-denominated Continental Currency from 1775 to finance the war; over-issue and British counterfeiting destroyed its value, the source of "not worth a Continental." The states issued their own bills alongside it, increasingly denominated in dollars rather than shillings — Rhode Island’s 1780 notes are in Spanish milled dollars — as the coin already in circulation became the unit of account. This is why notes of the same years appear in both units: Pennsylvania (1773) and New Jersey (1776) still in shillings, Rhode Island (1780) in dollars.'),
+        (1784, 1792, 'Adopting the dollar',
+         'The Congress of the Confederation adopted the dollar as the money of account in 1785, and the Coinage Act of 1792 established the decimal dollar on the Spanish model. The shilling passed out of official American use.'),
+    )),
+    'luxembourg': ('Luxembourg', (
+        (1856, 2001, 'The franc',
+         'The Luxembourg franc circulated at par with the Belgian franc under monetary union. It was replaced by the euro in 2002.'),
+    )),
 }
 
 
@@ -2964,6 +3322,7 @@ def _series_panel_for_row(row):
         if note_class:
             clause, previous_clause = _clause_for_year(note_class, year)
         return {
+            'country_key': 'us',
             'title': note_class['name'] if note_class else 'United States',
             'title_span': note_class['years'] if note_class else '',
             'series': (_row_get(row, 'series') or '').strip(),
@@ -2978,6 +3337,7 @@ def _series_panel_for_row(row):
     if era is None:
         return None
     return {
+        'country_key': country_key,
         'title': COUNTRY_ERAS[country_key][0],
         'title_span': '',
         'series': (_row_get(row, 'series') or '').strip(),
@@ -3019,6 +3379,7 @@ def series_panels(rows):
     group_panel = None
     group_series_seen = None
     prev_row_id = None  # last row of the currently open group
+    prev_group_country = None  # country of the previous group, for rule weight
 
     def mark(row_id, key, value):
         placements.setdefault(row_id, {})[key] = value
@@ -3033,6 +3394,7 @@ def series_panels(rows):
                 mark(prev_row_id, 'group_end', True)
             group_signature = group_panel = group_series_seen = None
             prev_row_id = None
+            prev_group_country = None
             continue
 
         series_label = panel['series'] or (str(panel['year']) if panel['year'] else '')
@@ -3050,6 +3412,10 @@ def series_panels(rows):
             group_series_seen = set()
             panel['series_list'] = []
             panel['series_more'] = 0
+            # Another era of the SAME country gets a light rule; the heavy
+            # rule marks a change of country.
+            panel['continues_country'] = panel['country_key'] == prev_group_country
+            prev_group_country = panel['country_key']
             mark(_row_get(row, 'id'), 'panel', panel)
 
         if series_label and series_label not in group_series_seen:

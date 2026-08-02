@@ -3757,6 +3757,10 @@ input[type="date"] { -webkit-appearance: none; }
 }
 .us-series-panel:first-child { margin-top: 4px; }
 
+/* A later era of the same country: light rule. The heavy 3px rule above
+   is reserved for a change of country. */
+.us-series-panel.usp-cont { border-top: 1px solid var(--border); }
+
 .usp-head {
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px;
   margin-bottom: 10px;
