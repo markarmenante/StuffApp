@@ -1866,6 +1866,16 @@ US_NOTE_CLASSES = (
 # "The history of the times" — the monetary period around the series year.
 # Factual register throughout: names, dates, numbers, consequences.
 US_MONETARY_ERAS = (
+    (1791, 1860, 'State banks and free banking',
+     'Before the national system there was no federal paper money in '
+     'peacetime. The First and Second Banks of the United States issued '
+     'notes until their charters lapsed (1811, 1836); otherwise currency '
+     'was issued by hundreds of state-chartered and private banks of '
+     'varying soundness. Under the "free banking" laws from 1837, notes '
+     'were backed by bonds deposited with state authorities, but many '
+     'banks failed and their notes — including "wildcat" issues redeemable '
+     'only in remote places — circulated at a discount set by distance and '
+     'reputation.'),
     (1861, 1865, 'Civil War finance',
      'Specie payment was suspended in December 1861 and the war was '
      'financed with bonds, the first federal income tax, and paper issued '
@@ -2063,6 +2073,19 @@ COUNTRY_KEYS = {
     'cyprus': ('cyprus',),
     'luxembourg': ('luxembourg',),
     'colonial-america': ('new jersey', 'colony of new jersey', 'new jersey colony', 'pennsylvania', 'pennsylvania colony', 'colony of pennsylvania', 'province of pennsylvania', 'rhode island', 'rhode island and providence plantations', 'massachusetts', 'massachusetts bay', 'province of massachusetts', 'connecticut', 'new york', 'colony of new york', 'province of new york', 'virginia', 'colony of virginia', 'maryland', 'delaware', 'north carolina', 'south carolina', 'georgia', 'new hampshire', 'continental congress', 'united colonies', 'continental currency'),
+    'belize': ('belize', 'british honduras'),
+    'cameroon': ('cameroon', 'kamerun', 'cameroons'),
+    'faroe-islands': ('faroe islands', 'faroes', 'faeroe islands'),
+    'french-west-africa': ('french west africa', 'afrique occidentale francaise'),
+    'west-african-states': ('west african states', 'west african monetary union', 'bceao', "banque centrale des etats de l'afrique de l'ouest"),
+    'gibraltar': ('gibraltar',),
+    'guernsey': ('guernsey', 'bailiwick of guernsey'),
+    'saint-helena': ('saint helena', 'st helena', 'st. helena', 'saint helena and ascension'),
+    'sao-tome': ('sao tome and principe', 'são tomé and príncipe', 'sao tome', 'st thomas and prince'),
+    'sarawak': ('sarawak',),
+    'togo': ('togo', 'togoland', 'french togo', 'togolese republic'),
+    'uzbekistan': ('uzbekistan',),
+    'yemen': ('yemen', 'south arabia', 'aden', 'north yemen', 'south yemen', 'yemen arab republic'),
 }
 
 COUNTRY_ERAS = {
@@ -3201,6 +3224,80 @@ COUNTRY_ERAS = {
         (1856, 2001, 'The franc',
          'The Luxembourg franc circulated at par with the Belgian franc under monetary union. It was replaced by the euro in 2002.'),
     )),
+    'belize': ('Belize', (
+        (1894, 1973, 'British Honduras',
+         'The colony of British Honduras issued its own dollar, put on a gold/US-dollar basis in 1894 rather than sterling. A Board of Commissioners of Currency issued government notes.'),
+        (1973, 2100, 'Belize',
+         'British Honduras was renamed Belize in 1973 and became independent in 1981. The Belize dollar has been fixed at 2 per US dollar since 1978; the Central Bank of Belize issued from 1982.'),
+    )),
+    'cameroon': ('Cameroon', (
+        (1884, 1960, 'German, then French and British mandate',
+         'German Kamerun was divided after the First World War into French and British League of Nations mandates. French Cameroun used the currency of French Equatorial Africa.'),
+        (1960, 2100, 'Independence and the Central African CFA franc',
+         'Cameroon became independent in 1960 and federated with the former British Southern Cameroons in 1961. It uses the Central African CFA franc, issued by the Bank of Central African States (BEAC) and guaranteed by the French Treasury at a fixed parity — pegged to the French franc, and to the euro since 1999.'),
+    )),
+    'faroe-islands': ('Faroe Islands', (
+        (1940, 2100, 'A wartime currency that stayed',
+         'The Faroe Islands, a self-governing part of Denmark, issued their own króna from 1940, when the British occupation of the islands cut them off from German-occupied Denmark. It continues at par with the Danish krone, which remains legal tender alongside it.'),
+    )),
+    'french-west-africa': ('French West Africa', (
+        (1901, 1945, "Banque de l'Afrique Occidentale",
+         "French West Africa (AOF) — Senegal, Soudan, Guinea, Ivory Coast, Dahomey, Upper Volta, Niger, Mauritania — used the franc issued by the private Banque de l'Afrique Occidentale from 1901."),
+        (1945, 1960, 'The CFA franc',
+         'The CFA franc was created in December 1945, at the same time France ratified the Bretton Woods agreement, deliberately set at a stronger rate than the metropolitan franc. Issue passed to a public institute in the 1950s, the predecessor of the BCEAO.'),
+    )),
+    'west-african-states': ('West African States', (
+        (1959, 2100, 'The shared CFA franc',
+         'The Central Bank of West African States (BCEAO) issues one CFA franc for eight countries — Benin, Burkina Faso, Ivory Coast, Guinea-Bissau, Mali, Niger, Senegal, Togo. The currency is guaranteed by the French Treasury at a fixed parity, in return for which the members long held part of their reserves in Paris. It was pegged to the French franc, devalued by half in January 1994, and pegged to the euro since 1999. Notes carry a letter code for the issuing country.'),
+    )),
+    'gibraltar': ('Gibraltar', (
+        (1704, 1913, 'British territory',
+         'Britain captured Gibraltar in 1704 and holds it as an Overseas Territory. Sterling and Spanish coin circulated.'),
+        (1914, 2100, 'The Gibraltar pound',
+         'The Government of Gibraltar issued its own pound notes from 1914 under a 1934 currency ordinance, at par with sterling and backed by sterling reserves — the standard currency-board arrangement.'),
+    )),
+    'guernsey': ('Guernsey', (
+        (1827, 2100, 'States of Guernsey notes',
+         'The Bailiwick of Guernsey, a Crown Dependency, has issued its own pound notes since 1827 — famously to finance public works, including a new market, without borrowing at interest. The Guernsey pound circulates at par with sterling.'),
+    )),
+    'saint-helena': ('Saint Helena', (
+        (1502, 1975, 'A mid-ocean colony',
+         'The remote South Atlantic island, a British possession from the seventeenth century and long an East India Company station, used sterling and a variety of imported coin.'),
+        (1976, 2100, 'The Saint Helena pound',
+         'The government issued its own pound notes from 1976, at par with sterling and backed by it — shared with Ascension, and among the lowest-circulation currencies in the world.'),
+    )),
+    'sao-tome': ('São Tomé and Príncipe', (
+        (1897, 1975, 'Portuguese colony',
+         'The islands were a Portuguese cocoa colony; the Banco Nacional Ultramarino issued the escudo.'),
+        (1977, 2100, 'The dobra',
+         'The dobra replaced the escudo at par in 1977 after independence. Heavy inflation followed; the dobra was redenominated in 2018 at 1,000 to one and pegged to the euro.'),
+    )),
+    'sarawak': ('Sarawak', (
+        (1841, 1946, 'The Brooke Raj',
+         'Sarawak was ruled by the Brooke family — the "White Rajahs" — as a personal state from 1841, under British protection from 1888. The government issued its own Sarawak dollar. Emergency issues included notes redeemable in dry rubber during the 1941 supply controls, on the eve of the Japanese invasion.'),
+        (1946, 2100, 'Crown Colony to Malaysia',
+         'Sarawak was ceded to Britain as a Crown Colony in 1946 and joined Malaysia in 1963, adopting the Malaysian dollar.'),
+    )),
+    'togo': ('Togo', (
+        (1884, 1960, 'German Togoland to French mandate',
+         'German Togoland was partitioned after the First World War into British and French League of Nations mandates; French Togo used the currency of French West Africa.'),
+        (1960, 2100, 'The West African CFA franc',
+         'Togo became independent in 1960 and uses the West African CFA franc issued by the BCEAO, guaranteed by the French Treasury and pegged to the French franc, then the euro.'),
+    )),
+    'uzbekistan': ('Uzbekistan', (
+        (1991, 1993, 'The ruble zone',
+         'Uzbekistan continued to use the Soviet, then Russian, ruble after independence in 1991.'),
+        (1994, 2100, 'The som',
+         'A transitional sum-coupon was issued in 1993 on leaving the ruble zone, replaced by the som in 1994. The currency was heavily controlled and lost most of its value; the exchange rate was liberalized in 2017, roughly halving it overnight.'),
+    )),
+    'yemen': ('Yemen', (
+        (1918, 1962, 'Two Yemens',
+         'The Zaidi imamate in the north used the Maria Theresa thaler and later the rial; the British colony and protectorate of Aden in the south used Indian and then East African currency.'),
+        (1965, 1990, 'The rial and the South Arabian dinar',
+         'North Yemen (the Yemen Arab Republic) issued the rial from 1964. The south issued the South Arabian dinar, set at one pound sterling, then the People’s Democratic Republic’s dinar.'),
+        (1990, 2100, 'Unification',
+         'The two states united in 1990; the rial absorbed the dinar at 26 rials to one by 1996. War after 2014 split the note issue between rival central banks and drove sharp depreciation.'),
+    )),
 }
 
 
@@ -3274,17 +3371,39 @@ def _country_key(country):
     value = (country or '').strip().lower().rstrip('.')
     if not value:
         return None
-    if value in US_COUNTRY_NAMES or value.startswith('united states'):
-        return 'us'
-    for key, spellings in COUNTRY_KEYS.items():
-        if value in spellings:
-            return key
+    # Drop a trailing parenthetical qualifier ("Sarawak (Malaysia)" ->
+    # "sarawak") so those forms match by their base name.
+    base = re.sub(r'\s*\([^)]*\)\s*$', '', value).strip()
+    for candidate in (value, base):
+        if candidate in US_COUNTRY_NAMES or candidate.startswith('united states'):
+            return 'us'
+        for key, spellings in COUNTRY_KEYS.items():
+            if candidate in spellings:
+                return key
     # Forgiving prefix match for qualified forms the extractor emits, e.g.
     # "Germany — Weimar Republic" or "Austria (First Republic)".
     for key, spellings in COUNTRY_KEYS.items():
         for spelling in spellings:
-            if value.startswith(spelling + ' ') or value.startswith(spelling + ','):
+            if base.startswith(spelling + ' ') or base.startswith(spelling + ','):
                 return key
+    return None
+
+
+# A decade written as "1850s" (in a series label or date text) resolves to
+# the decade's first year, so undated obsolete notes still land in an era.
+_DECADE_RE = re.compile(r'\b((?:1[6-9]|20)\d)0s\b')
+
+
+def _note_year(row):
+    """Best year for era placement: a 4-digit year in the series label, then
+    date_1, then a decade like '1850s' in the series or date text."""
+    year = _series_year(_row_get(row, 'series')) or _row_get(row, 'date_1')
+    if year:
+        return year
+    for field in ('series', 'date_1_text'):
+        m = _DECADE_RE.search(str(_row_get(row, field) or ''))
+        if m:
+            return int(m.group(1) + '0')
     return None
 
 
@@ -3311,7 +3430,7 @@ def _series_panel_for_row(row):
     if country_key is None:
         return None
 
-    year = _series_year(_row_get(row, 'series')) or _row_get(row, 'date_1')
+    year = _note_year(row)
 
     if country_key == 'us':
         note_class = _us_note_class(row)
