@@ -1667,7 +1667,7 @@ US_NOTE_CLASSES = (
         'obligor': 'An obligation of the United States, issued through the '
                    'twelve Federal Reserve Banks. The government is liable; '
                    'the Reserve Bank is the channel.',
-        'why': 'The answer to the Panic of 1907. The Federal Reserve Act of '
+        'why': 'A response to the Panic of 1907. The Federal Reserve Act of '
                '1913 was built to give the country an elastic currency — one '
                'that could expand when commerce demanded it and contract '
                'when it did not, instead of the fixed bond-secured supply '
@@ -1681,22 +1681,19 @@ US_NOTE_CLASSES = (
             (1928, 1933,
              'REDEEMABLE IN GOLD ON DEMAND AT THE UNITED STATES TREASURY, '
              'OR IN GOLD OR LAWFUL MONEY AT ANY FEDERAL RESERVE BANK',
-             'The wording survives the 1928 change to small-size notes '
-             'intact — the design changed, the monetary commitment did not.'),
+             'The wording was unchanged through the 1928 small-size redesign.'),
             (1934, 1962,
              'THIS NOTE IS LEGAL TENDER FOR ALL DEBTS, PUBLIC AND PRIVATE, '
              'AND IS REDEEMABLE IN LAWFUL MONEY AT THE UNITED STATES '
              'TREASURY, OR AT ANY FEDERAL RESERVE BANK',
-             'The pivot. After Executive Order 6102 and the Gold Reserve '
-             'Act of 1934 the gold clause is gone, and legal tender status '
-             'is promoted to the front of the sentence — the note is now '
-             'good because the law says so, not because metal backs it.'),
+             'After Executive Order 6102 and the Gold Reserve Act of 1934 '
+             'the gold clause is removed and legal tender status moves to '
+             'the front of the sentence.'),
             (1963, 2100,
              'THIS NOTE IS LEGAL TENDER FOR ALL DEBTS, PUBLIC AND PRIVATE',
-             'The last of the promise is dropped. "Redeemable in lawful '
-             'money" had become circular once the note itself was lawful '
-             'money, and "will pay to the bearer on demand" went with it. '
-             'What remains is the whole of the modern claim.'),
+             'The redemption sentence was dropped with the 1963 series; '
+             '"redeemable in lawful money" had become circular once the '
+             'note itself was lawful money.'),
         ),
     },
     {
@@ -1706,7 +1703,7 @@ US_NOTE_CLASSES = (
         'obligor': 'A federally chartered private bank, named with its '
                    'charter number on the face — but collateralised by the '
                    'federal government.',
-        'why': 'Two problems solved with one instrument. The National '
+        'why': 'The National '
                'Banking Acts of 1863 and 1864 replaced thousands of '
                'inconsistent state bank issues with a uniform currency, and '
                'in requiring bond collateral they created a captive market '
@@ -1735,7 +1732,7 @@ US_NOTE_CLASSES = (
         'pattern': r'gold certificate',
         'obligor': 'The United States Treasury as custodian. A warehouse '
                    'receipt, not a credit instrument.',
-        'why': 'Settlement convenience. Gold coin was heavy and awkward for '
+        'why': 'Gold coin was impractical for '
                'large transactions, so banks and the Treasury moved claims '
                'on gold rather than gold itself.',
         'clauses': (
@@ -1743,17 +1740,16 @@ US_NOTE_CLASSES = (
              'THIS CERTIFIES THAT THERE HAVE BEEN DEPOSITED IN THE TREASURY '
              'OF THE UNITED STATES [X] DOLLARS IN GOLD COIN PAYABLE TO THE '
              'BEARER ON DEMAND',
-             'The strongest wording any US note ever carried. Not a promise '
-             'to pay but a statement that the gold already exists and is '
+             'Not a promise to pay but a statement that the gold already exists and is '
              'set aside — a full reserve, deposited, and claimable.'),
             (1928, 1933,
              'THIS CERTIFIES THAT THERE HAVE BEEN DEPOSITED IN THE TREASURY '
              'OF THE UNITED STATES [X] DOLLARS IN GOLD COIN PAYABLE TO THE '
              'BEARER ON DEMAND',
-             'Unchanged wording, withdrawn instrument. Executive Order 6102 '
+             'The wording was unchanged, but the instrument was withdrawn: '
+             'Executive Order 6102 '
              'in 1933 made private holding illegal and the Gold Reserve Act '
-             'of 1934 abrogated the gold clause: the sentence stayed true '
-             'on paper while ceasing to be enforceable.'),
+             'of 1934 abrogated the gold clause.'),
         ),
     },
     {
@@ -1762,7 +1758,7 @@ US_NOTE_CLASSES = (
         'pattern': r'silver certificate',
         'obligor': 'The United States Treasury, custodian of a silver '
                    'reserve held dollar for dollar against the issue.',
-        'why': 'Politics as much as finance. The Bland–Allison Act of 1878 '
+        'why': 'The Bland–Allison Act of 1878 '
                'and the Sherman Silver Purchase Act of 1890 forced the '
                'Treasury to buy silver it did not need, to satisfy Western '
                'mining states and the free-silver movement; certificates '
@@ -1778,10 +1774,10 @@ US_NOTE_CLASSES = (
              'THIS CERTIFIES THAT THERE IS ON DEPOSIT IN THE TREASURY OF '
              'THE UNITED STATES [X] DOLLAR IN SILVER PAYABLE TO THE BEARER '
              'ON DEMAND',
-             'One word doing a great deal of work: "silver dollars" becomes '
-             '"dollar in silver". After the Silver Purchase Act of 1934 the '
+             'The wording changes from "silver dollars" to "dollar in '
+             'silver". After the Silver Purchase Act of 1934 the '
              'Treasury could satisfy the claim with bullion instead of '
-             'struck coin — a quiet loosening of exactly what was owed.'),
+             'struck coin.'),
             (1964, 1968,
              'Redemption withdrawn',
              'Rising silver prices made the coins worth more melted than '
@@ -1801,10 +1797,8 @@ US_NOTE_CLASSES = (
             (1890, 1891,
              'THE UNITED STATES OF AMERICA WILL PAY TO THE BEARER [X] '
              'DOLLARS IN COIN',
-             'The most consequential ambiguity in US currency wording. '
-             '"In coin" deliberately declined to say gold or silver, '
-             'reserving the choice for the Treasury. Holders read it '
-             'correctly, redeemed in gold, and drained the gold reserve — '
+             '"In coin" deliberately did not specify gold or silver, '
+             'reserving the choice for the Treasury. Holders redeemed in gold, and drained the gold reserve — '
              'a direct contributor to the Panic of 1893. The Act was '
              'repealed that year and the notes retired.'),
         ),
@@ -1825,7 +1819,7 @@ US_NOTE_CLASSES = (
              'THE UNITED STATES WILL PAY THE BEARER [X] DOLLARS … THIS NOTE '
              'IS A LEGAL TENDER FOR ALL DEBTS PUBLIC AND PRIVATE EXCEPT '
              'DUTIES ON IMPORTS AND INTEREST ON THE PUBLIC DEBT',
-             'Note what is carved out. Customs duties and interest on the '
+             'Customs duties and interest on the '
              'debt still had to be paid in coin — the government would not '
              'accept its own paper for the two obligations that mattered '
              'most to its creditors.'),
@@ -1839,14 +1833,13 @@ US_NOTE_CLASSES = (
              'WILL PAY TO THE BEARER ON DEMAND [X] DOLLARS … THIS NOTE IS A '
              'LEGAL TENDER AT ITS FACE VALUE FOR ALL DEBTS PUBLIC AND '
              'PRIVATE',
-             'Distinguished from a Federal Reserve Note only by the red '
-             'seal and this wording — by now the practical difference '
-             'between the two had almost entirely disappeared.'),
+             'Distinguished from a Federal Reserve Note by the red seal and '
+             'this wording; the practical difference between the two '
+             'classes had largely disappeared.'),
             (1963, 1971,
              'THIS NOTE IS LEGAL TENDER FOR ALL DEBTS, PUBLIC AND PRIVATE',
-             'Converges on the identical sentence carried by the Federal '
-             'Reserve Note. A century after 1862 the fiat greenback and the '
-             'central bank note make the same promise, in the same words.'),
+             'Identical wording to the Federal Reserve Note; United States '
+             'Note issue ended in 1971.'),
         ),
     },
     {
@@ -1862,136 +1855,86 @@ US_NOTE_CLASSES = (
              'THE UNITED STATES PROMISE TO PAY THE BEARER [X] DOLLARS ON '
              'DEMAND … PAYABLE BY THE ASSISTANT TREASURER OF THE UNITED '
              'STATES AT [CITY]',
-             'A promise with an address on it — redeemable in coin at one '
-             'named office. It held for about six months: specie payment '
-             'was suspended in December 1861, the notes stopped being '
-             'convertible, and that failure produced the Legal Tender Act '
+             'Redeemable in coin at the named sub-treasury office. Specie payment '
+             'was suspended in December 1861 and the notes stopped being '
+             'convertible; that failure produced the Legal Tender Act '
              'and the greenbacks that followed.'),
         ),
     },
 )
 
-# "The history of the times" — the surrounding monetary moment for the
-# series year. Ranges are inclusive and ordered; the first match wins.
+# "The history of the times" — the monetary period around the series year.
+# Factual register throughout: names, dates, numbers, consequences.
 US_MONETARY_ERAS = (
     (1861, 1865, 'Civil War finance',
-     'The Union is spending faster than it can borrow. Specie payment is '
-     'suspended in December 1861, gold goes to a premium against paper, and '
-     'the government starts issuing currency on its own authority — the '
-     'decision that creates federal paper money as a permanent institution. '
-     'Congress also invents the machinery to make it stick: the first income '
-     'tax, the national banking system, and half a billion dollars of war '
-     'bonds sold to the public by Jay Cooke’s traveling agents. By the '
-     'war’s end a gold dollar buys nearly two paper ones, and unwinding '
-     'that gap will dominate finance for a generation.'),
-    (1866, 1877, 'Contraction and the road to resumption',
-     'The post-war fight is over whether to shrink the greenback supply back '
-     'to a gold standard. Deflation is severe, the Panic of 1873 wrecks the '
-     'railroads and the banks behind them, and the Resumption Act of 1875 '
-     'sets January 1879 as the date paper becomes convertible again. '
-     'Contraction is brutal politics: farmers and debtors, whose loans grow '
-     'harder to repay as prices fall, organize into the Greenback movement '
-     'to demand more paper, not less. And the Coinage Act of 1873 quietly '
-     'drops the silver dollar from the mint list — the “Crime of '
-     '’73” that the silver movement spends the next twenty-five '
-     'years trying to reverse.'),
-    (1878, 1899, 'Bimetallism and the free-silver fight',
-     'The central monetary argument of the era is whether silver should be '
-     'money alongside gold. The Bland–Allison and Sherman Acts force the '
-     'Treasury to buy silver, the gold reserve is drained by holders '
-     'redeeming ambiguous obligations, and the Panic of 1893 follows. Behind '
-     'the statutes sits a real deflation: prices fall for most of three '
-     'decades, and indebted farmers see free coinage of silver as the way to '
-     'reflate their way out. The fight peaks with Bryan’s “Cross of '
-     'Gold” speech in 1896; his defeat, plus new gold from the Klondike '
-     'and South Africa, takes the pressure off, and the question is settled '
-     'for gold in 1900.'),
-    (1900, 1912, 'A gold standard without a central bank',
-     'The Gold Standard Act of 1900 fixes the dollar to gold, but there is '
-     'still no institution able to supply currency in a crisis. The Panic '
-     'of 1907 is stopped by J. P. Morgan personally organising the rescue, '
-     'which makes the case for a central bank impossible to argue with. The '
-     'underlying defect is an “inelastic” money supply — currency '
-     'is tied to bank holdings of government bonds, so it cannot expand for '
-     'the harvest season or a panic, and every autumn credit tightens on '
-     'schedule. The Aldrich–Vreeland Act of 1908 papers over the gap '
-     'with emergency currency and creates the National Monetary Commission, '
-     'whose studies become the blueprint for the Federal Reserve.'),
-    (1913, 1922, 'The Federal Reserve arrives, and a war to pay for',
-     'The Federal Reserve Act of 1913 creates twelve Reserve Banks and an '
-     'elastic currency. Almost immediately the system is financing the First '
-     'World War, and the note-issuing structure the country had used since '
-     'the Civil War begins to be dismantled. Liberty Loan drives raise some '
-     'twenty-one billion dollars from the public with the Fed underwriting '
-     'the market, and wartime inflation roughly doubles prices between 1916 '
-     'and 1920. The correction is the sharp deflation of 1920–21 — '
-     'severe, short, and the young Fed’s first hard lesson in what its '
-     'rate policy actually does.'),
-    (1923, 1928, 'Boom, and the last of the large-size notes',
-     'A decade of expansion, and the end of an era in the paper itself: in '
-     '1928 the government shrinks the note to the small size still used '
-     'today, cutting printing costs by around a third and retiring the '
-     'large-size designs that had run since 1861. Under Benjamin Strong the '
-     'New York Fed discovers open-market operations — buying and selling '
-     'government securities to steer credit — which becomes the modern '
-     'instrument of monetary policy almost by accident. Cheap money helps '
-     'Britain back onto gold in 1925 and, critics will later say, helps '
-     'inflate the stock bubble that breaks in 1929.'),
-    (1929, 1933, 'Depression, the bank holiday, and the end of gold',
-     'Nine thousand banks fail. In March 1933 every bank in the country is '
-     'closed by proclamation, and the Emergency Banking Act reopens them '
-     'against emergency currency. Executive Order 6102 requires private gold '
-     'to be surrendered, and the promises printed on gold-backed notes stop '
-     'being promises. The failures feed on themselves: each closed bank '
-     'destroys deposits, shrinks the money supply, and starts the run on the '
-     'next — roughly a third of the nation’s money vanishes between '
-     '1929 and 1933, and scrip circulates in hundreds of towns in place of '
-     'the currency being hoarded. Federal deposit insurance arrives in 1934 '
-     'to make the runs stop.'),
-    (1934, 1963, 'Managed money under Bretton Woods',
-     'The Gold Reserve Act of 1934 devalues the dollar and moves the gold to '
-     'the Treasury. Bretton Woods makes the dollar the anchor of the world '
-     'system — convertible to gold at $35, but only for foreign central '
-     'banks. Domestic paper is no longer redeemable in metal by anyone. The '
-     'revaluation books a two-billion-dollar paper profit that seeds the '
-     'Exchange Stabilization Fund, and Fort Knox is built in 1936 to hold '
-     'the surrendered metal. Through the Second World War the Fed serves '
-     'again as the Treasury’s financing arm, pegging interest rates '
-     'until the Treasury–Fed Accord of 1951 finally separates monetary '
-     'policy from debt management.'),
-    (1964, 1970, 'Silver leaves the currency',
-     'Rising silver prices make coins worth more melted than spent. The '
-     'Coinage Act of 1965 strips silver from the dime and quarter, silver '
-     'certificates stop being redeemable in 1968, and the last metallic '
-     'claim on US paper money disappears. The same squeeze is playing out in '
-     'gold internationally: dollars held abroad exceed the Treasury’s '
-     'gold by the mid-1960s, the London Gold Pool defending the $35 price '
-     'collapses in 1968, and Vietnam-era deficits push the system toward '
-     'the break that comes in 1971.'),
-    (1971, 2100, 'Pure fiat',
-     'The closing of the gold window in August 1971 ends convertibility for '
-     'good. Every note issued since is backed by legal tender status and '
-     'the credit of the United States, which is what the greenbacks of 1862 '
-     'were backed by at the start. The float is ratified in 1976 when the '
-     'IMF formally demonetizes gold, and fiat’s first decade brings the '
-     'great inflation of the 1970s — ended only by the Volcker Fed pushing '
-     'rates past twenty percent in 1981. What anchors the currency now is '
-     'not metal but an institution: a central bank that markets believe '
-     'will defend the dollar’s purchasing power.'),
+     'Specie payment was suspended in December 1861 and the war was '
+     'financed with bonds, the first federal income tax, and paper issued '
+     'on government authority. The National Banking Acts of 1863–64 '
+     'created a uniform bank currency secured by war bonds. By 1865 a '
+     'gold dollar cost nearly two paper dollars.'),
+    (1866, 1877, 'Contraction and resumption',
+     'Postwar policy shrank the greenback supply toward a return to gold. '
+     'Prices fell steadily; the Panic of 1873 brought a five-year '
+     'depression; the Coinage Act of 1873 ended silver-dollar coinage. '
+     'The Resumption Act of 1875 set gold convertibility for January '
+     '1879.'),
+    (1878, 1899, 'The silver question',
+     'The Bland–Allison Act (1878) and Sherman Silver Purchase Act (1890) '
+     'required the Treasury to buy silver, put into circulation through '
+     'silver certificates and Treasury Notes. Redemptions drained the '
+     'gold reserve and contributed to the Panic of 1893; the Sherman Act '
+     'was repealed that year. Bryan lost the 1896 election on free '
+     'silver, and new gold supplies eased the deflation.'),
+    (1900, 1912, 'Gold standard, no central bank',
+     'The Gold Standard Act of 1900 fixed the dollar to gold. Currency '
+     'remained tied to bank bond holdings and could not expand in a '
+     'crisis; the Panic of 1907 was contained by private coordination '
+     'among New York banks. The Aldrich–Vreeland Act of 1908 authorized '
+     'emergency currency and created the National Monetary Commission, '
+     'whose reports led to the Federal Reserve Act.'),
+    (1913, 1922, 'The Federal Reserve and the First World War',
+     'The Federal Reserve Act of 1913 created twelve Reserve Banks '
+     'issuing an elastic currency. War finance ran through Liberty Loans '
+     '— about $21 billion — with prices roughly doubling from 1916 to '
+     '1920, followed by the sharp deflation of 1920–21.'),
+    (1923, 1928, 'The small-size change',
+     'In 1928 the note was reduced to the size still used today, cutting '
+     'printing costs about a third and ending the large-size designs in '
+     'use since 1861. In the same decade the New York Fed developed '
+     'open-market operations — buying and selling government securities '
+     '— as the main instrument of monetary policy.'),
+    (1929, 1933, 'Depression and the end of domestic gold',
+     'About 9,000 banks failed between 1930 and 1933, and roughly a '
+     'third of the money supply disappeared. In March 1933 all banks '
+     'were closed by proclamation and reopened under the Emergency '
+     'Banking Act. Executive Order 6102 required private gold to be '
+     'surrendered.'),
+    (1934, 1963, 'The Gold Reserve Act and Bretton Woods',
+     'The Gold Reserve Act of 1934 devalued the dollar to $35 an ounce '
+     'and transferred monetary gold to the Treasury; Fort Knox was built '
+     'for it in 1936. Under Bretton Woods (1944) the dollar was '
+     'convertible to gold only for foreign central banks. The '
+     'Treasury–Fed Accord of 1951 ended wartime interest-rate pegging.'),
+    (1964, 1970, 'Silver removed',
+     'The Coinage Act of 1965 removed silver from the dime and quarter. '
+     'Silver certificate redemption ended in June 1968. Dollars held '
+     'abroad exceeded the Treasury’s gold, and the London Gold Pool '
+     'defending the $35 price collapsed in 1968.'),
+    (1971, 2100, 'Fiat',
+     'Gold convertibility ended in August 1971; the IMF formally '
+     'demonetized gold in 1976. The inflation of the 1970s peaked above '
+     '13% and was ended by Federal Reserve policy under Volcker, with '
+     'short-term rates above 19% in 1981. Notes since are backed by '
+     'legal tender status and the credit of the United States.'),
 )
 
 
 # ── Country histories ───────────────────────────────────────────────────
 #
-# The same era-band treatment the US notes get, for everyone else — but
-# deliberately lighter on monetary policy. A German or Austrian note is
-# explained by the history of its times (war, empire, occupation,
-# partition); the monetary machinery only takes the foreground where it
-# WAS the history — Weimar 1923, the pengő, the 1944 drachma, Zimbabwe.
-#
-# Keys are matched against the note's country field via COUNTRY_KEYS
-# (spellings observed in dealer text and the AI extractor differ). A
-# country with no table here simply gets no panel.
+# Era bands per country, matched on the note's country field. Factual
+# register: issuers, reforms, dates, magnitudes. Monetary events carry the
+# detail; ordinary periods are brief. A country with no table gets no
+# panel.
 
 COUNTRY_KEYS = {
     'germany': (
@@ -2002,12 +1945,12 @@ COUNTRY_KEYS = {
     ),
     'austria': (
         'austria', 'austria-hungary', 'austro-hungarian empire',
-        'austrian empire', 'austro-hungary',
+        'austrian empire', 'austro-hungary', 'austro hungary',
     ),
     'hungary': ('hungary', 'kingdom of hungary'),
     'great-britain': (
         'great britain', 'england', 'united kingdom', 'uk', 'britain',
-        'scotland', 'gb', 'u.k.',
+        'scotland', 'gb', 'u.k.', 'northern ireland',
     ),
     'france': ('france', 'french republic'),
     'italy': ('italy', 'kingdom of italy'),
@@ -2022,397 +1965,883 @@ COUNTRY_KEYS = {
     'japan': ('japan', 'empire of japan'),
     'india': ('india', 'british india'),
     'turkey': ('turkey', 'ottoman empire', 'türkiye', 'turkiye'),
-    'zimbabwe': ('zimbabwe', 'rhodesia'),
+    'zimbabwe': ('zimbabwe', 'rhodesia', 'southern rhodesia'),
     'venezuela': ('venezuela',),
+    'afghanistan': ('afghanistan',),
+    'algeria': ('algeria', 'french algeria'),
+    'andorra': ('andorra',),
+    'israel': ('israel', 'palestine', 'british palestine', 'palestine mandate'),
+    'belgian-congo': ('belgian congo', 'congo', 'congo free state',
+                      'democratic republic of the congo', 'zaire', 'zaïre'),
+    'jamaica': ('jamaica',),
+    'kenya': ('kenya', 'east africa', 'british east africa'),
+    'somalia': ('italian somaliland', 'somalia', 'somaliland',
+                'british somaliland'),
+    'egypt': ('egypt', 'united arab republic'),
+    'south-africa': ('south africa', 'union of south africa'),
+    'canada': ('canada', 'dominion of canada'),
+    'mexico': ('mexico',),
+    'brazil': ('brazil',),
+    'spain': ('spain', 'kingdom of spain'),
+    'portugal': ('portugal',),
+    'netherlands': ('netherlands', 'holland', 'kingdom of the netherlands',
+                    'netherlands indies', 'dutch east indies'),
+    'belgium': ('belgium', 'kingdom of belgium'),
+    'czechoslovakia': ('czechoslovakia', 'czech republic', 'slovakia',
+                       'bohemia and moravia'),
+    'romania': ('romania', 'rumania', 'kingdom of romania'),
+    'bulgaria': ('bulgaria', 'kingdom of bulgaria'),
+    'philippines': ('philippines', 'philippine islands'),
+    'indochina': ('french indochina', 'indochina', 'indo-china',
+                  'french indo-china'),
+    'vietnam': ('vietnam', 'south vietnam', 'north vietnam', 'viet nam'),
+    'ceylon': ('ceylon', 'sri lanka'),
+    'malaya': ('malaya', 'malaysia', 'straits settlements',
+               'malaya and british borneo', 'singapore'),
+    'morocco': ('morocco', 'french morocco'),
+    'tunisia': ('tunisia', 'french tunisia'),
+    'iran': ('iran', 'persia'),
+    'iraq': ('iraq', 'kingdom of iraq'),
+    'thailand': ('thailand', 'siam'),
+    'burma': ('burma', 'myanmar'),
+    'pakistan': ('pakistan',),
+    'ireland': ('ireland', 'irish free state', 'eire', 'éire'),
+    'switzerland': ('switzerland',),
+    'sweden': ('sweden',),
+    'denmark': ('denmark',),
+    'norway': ('norway',),
+    'finland': ('finland',),
+    'australia': ('australia', 'commonwealth of australia'),
+    'new-zealand': ('new zealand',),
+    'cuba': ('cuba',),
+    'argentina': ('argentina',),
 }
 
 COUNTRY_ERAS = {
     'germany': ('Germany', (
-        (1871, 1913, 'The imperial goldmark',
-         'Unification in 1871 folds twenty-odd currencies into one mark on '
-         'gold, issued by the new Reichsbank alongside a handful of older '
-         'state banks. It is the money of Germany’s industrial surge — '
-         'steel, chemicals, railways — and it holds its value for forty '
-         'years, which is why the generation that lived through what came '
-         'next never stopped measuring loss against it.'),
-        (1914, 1918, 'War money and the first Notgeld',
-         'Gold convertibility is suspended in the first week of the war and '
-         'the fighting is financed by loans and the printing press on the '
-         'assumption the enemy would pay for it all. Small change vanishes '
-         'as coins are hoarded for their metal, and towns, firms, and '
-         'prison camps step in with their own emergency paper — the first '
-         'Notgeld, born as a practical fix, not yet a collectible.'),
-        (1919, 1923, 'Weimar and the great inflation',
-         'The defining monetary catastrophe of the modern age. Reparations, '
-         'deficits, and the 1923 Ruhr occupation — met by paying striking '
-         'workers with printed money — take the mark from 4.2 to the '
-         'dollar in 1914 to 4.2 trillion by November 1923. Wages are paid '
-         'twice a day and spent within the hour; savings, pensions, and '
-         'mortgages are annihilated, a trauma that shapes German economics '
-         'to this day. The era’s Notgeld splits in two: real emergency '
-         'issues in ever-larger denominations, and the artist-designed '
-         'Serienscheine printed for collectors — town histories, legends, '
-         'and biting political satire on money that barely pretended to '
-         'circulate. Stabilization comes overnight in November 1923 with '
-         'the Rentenmark, nominally backed by a mortgage on all German '
-         'land — twelve zeros struck off, and it held.'),
-        (1924, 1932, 'The Rentenmark years',
-         'The Reichsmark succeeds the Rentenmark in 1924 and Germany '
-         'borrows its way to a short golden age on American credit. The '
-         '1929 crash calls those loans home; Brüning answers depression '
-         'with deflation, unemployment passes six million, and the '
-         'political center gives way.'),
-        (1933, 1945, 'The Third Reich and the war',
-         'Currency stays deceptively stable while rearmament is hidden '
-         'off-books in MEFO bills and price controls suppress the '
-         'inflation. Occupation issues follow the armies across Europe; '
-         'concentration and prison camps have their own scrip; and by the '
-         'end cigarettes are sounder money than the Reichsmark.'),
-        (1945, 1948, 'Occupation and the cigarette economy',
-         'Four occupation zones share a broken currency nobody trusts — '
-         'the real economy runs on barter, ration coupons, and American '
-         'cigarettes. The 1948 currency reform that creates the Deutsche '
-         'Mark in the western zones restocks shop windows almost '
-         'overnight, and the Soviet response — a separate eastern mark and '
-         'the Berlin blockade — hardens the division of Germany.'),
-        (1949, 2001, 'Two marks, then one, then the euro',
-         'The Deutsche Mark becomes the anchor of European money and the '
-         'symbol of the Wirtschaftswunder; the East German mark, '
-         'unconvertible, becomes a symbol of the other kind. Reunification '
-         'in 1990 swaps eastern savings into DM at generous rates, and the '
-         'mark itself retires into the euro in 2002.'),
+        (1871, 1913, 'The goldmark',
+         'Unification in 1871 replaced the state currencies with a mark on '
+         'the gold standard, issued mainly by the new Reichsbank. It held '
+         'its value until 1914.'),
+        (1914, 1918, 'War finance and the first Notgeld',
+         'Gold convertibility was suspended in August 1914 and the war was '
+         'financed by loans and note issue. Coins disappeared into '
+         'hoarding, and towns, firms, and prison camps issued small-value '
+         'emergency paper — the first Notgeld.'),
+        (1919, 1923, 'The hyperinflation',
+         'Deficits, reparations, and the 1923 Ruhr occupation — met by '
+         'paying striking workers with printed money — took the mark from '
+         '4.2 per dollar in 1914 to about 4.2 trillion per dollar in '
+         'November 1923. Savings, pensions, and mortgages denominated in '
+         'marks were destroyed. Notgeld of the period divides into actual '
+         'emergency issues in rising denominations and the Serienscheine '
+         'of 1920–22, printed for collectors. The Rentenmark of November '
+         '1923, exchanged at one trillion paper marks to one, ended the '
+         'inflation.'),
+        (1924, 1932, 'Reichsmark and depression',
+         'The Reichsmark replaced the Rentenmark in 1924 on a gold-exchange '
+         'basis, supported by American lending. After 1929 those loans '
+         'were withdrawn; deflationary policy under Brüning accompanied '
+         'unemployment above six million by 1932.'),
+        (1933, 1945, 'The Third Reich',
+         'Rearmament was financed off-budget through MEFO bills while '
+         'price and wage controls suppressed open inflation. Occupation '
+         'currencies followed the army across Europe, and camps and '
+         'ghettos were issued separate scrip.'),
+        (1945, 1948, 'Occupation',
+         'The Reichsmark continued under the four occupation zones with '
+         'prices controlled and goods scarce; cigarettes and barter '
+         'carried much of the real economy. The June 1948 currency reform '
+         'introduced the Deutsche Mark in the western zones; the Soviet '
+         'zone issued its own mark and the Berlin blockade followed.'),
+        (1949, 2001, 'Two marks to the euro',
+         'The Deutsche Mark became the anchor currency of Europe; the East '
+         'German mark was never convertible. Monetary union in July 1990 '
+         'converted eastern balances at 1:1 and 2:1. The DM was replaced '
+         'by the euro in 2002.'),
     )),
     'austria': ('Austria', (
-        (1867, 1913, 'The Dual Monarchy',
-         'The Austro-Hungarian krone serves a single market of fifty '
-         'million people and a dozen nationalities from Vienna to Lemberg. '
-         'The notes themselves say it: denominations repeated in eight or '
-         'more languages, the empire’s diversity printed on its money.'),
+        (1867, 1913, 'The Austro-Hungarian krone',
+         'The dual monarchy shared one currency, issued by the '
+         'Austro-Hungarian Bank from 1878, with denominations printed in '
+         'the languages of the empire. The krone replaced the gulden in '
+         '1892 on a gold basis.'),
         (1914, 1918, 'War and dissolution',
-         'The war the empire started consumes it. Financed by the press '
-         'once loan appetite fades, the krone loses most of its value '
-         'before the state that issued it ceases to exist in November '
-         '1918, leaving successor states to overstamp its banknotes while '
-         'they organized currencies of their own.'),
-        (1919, 1924, 'The little brother of the German inflation',
-         'Rump Austria — a capital of two million attached to a country of '
-         'six — slides into its own hyperinflation, prices rising some '
-         'fourteen-thousandfold. Towns issue Notgeld in the German manner, '
-         'much of it for collectors. A League of Nations loan in 1922 '
-         'stabilizes the krone at the price of foreign control of the '
-         'budget, and the schilling replaces it in 1925 at 10,000 to one.'),
-        (1925, 1937, 'The schilling between the wars',
-         'The "Alpine dollar" is hard money over a fragile polity: '
-         'the Creditanstalt collapse of 1931 opens the European banking '
-         'crisis, and civil war in 1934 precedes the authoritarian '
-         'corporate state.'),
+         'War finance ran on note issue after loan capacity faded; the '
+         'krone lost most of its purchasing power by 1918. The empire '
+         'dissolved in November 1918 and successor states overstamped its '
+         'notes while establishing their own currencies.'),
+        (1919, 1924, 'Hyperinflation and stabilization',
+         'The republic covered deficits by printing; prices rose roughly '
+         '14,000-fold from 1914 levels by 1922. Towns issued Notgeld, '
+         'much of it sold to collectors. A League of Nations loan in '
+         'October 1922 stabilized the krone under foreign budget '
+         'supervision, and the schilling replaced it in 1925 at 10,000 '
+         'kronen to one.'),
+        (1925, 1937, 'The schilling',
+         'The schilling held its value through the period. The collapse '
+         'of Creditanstalt in May 1931 opened the central European '
+         'banking crisis; civil conflict in 1934 preceded the '
+         'authoritarian state.'),
         (1938, 1945, 'Anschluss',
-         'Annexation replaces the schilling with the Reichsmark at a '
-         'confiscatory rate; Austria’s war is Germany’s, through to the '
-         'ruins of 1945.'),
+         'Annexation in March 1938 replaced the schilling with the '
+         'Reichsmark at 1.50 schilling per mark, below its market value. '
+         'Austrian issues resumed only after the war.'),
         (1945, 2001, 'Second Republic',
-         'The restored schilling, after an early inflationary scare, '
-         'becomes one of Europe’s hardest currencies, shadowing the '
-         'Deutsche Mark until both retire into the euro.'),
+         'The schilling was restored in 1945 and, after an initial '
+         'inflationary period, was pegged to the Deutsche Mark from the '
+         '1970s. It was replaced by the euro in 2002.'),
     )),
     'hungary': ('Hungary', (
-        (1867, 1918, 'The Hungarian half of the Dual Monarchy',
-         'Budapest mints and prints alongside Vienna — same krone, '
-         'proudly separate note designs. The arrangement dies with the '
-         'empire in 1918, and Trianon strips two-thirds of the kingdom’s '
-         'territory.'),
-        (1919, 1926, 'Revolution and the korona inflation',
-         'A communist republic, its overthrow, and a punishing peace are '
-         'financed on paper; the korona follows the Austrian krone into '
-         'collapse and is replaced by the pengő in 1927 at 12,500 to one.'),
+        (1867, 1918, 'The dual monarchy',
+         'Hungary shared the krone with Austria, printed in Budapest with '
+         'distinct designs. The Treaty of Trianon (1920) removed about '
+         'two-thirds of the kingdom’s prewar territory.'),
+        (1919, 1926, 'Korona inflation',
+         'Postwar deficits were financed by note issue; the korona '
+         'followed the Austrian krone into severe inflation. The pengő '
+         'replaced it in 1927 at 12,500 korona to one.'),
         (1927, 1944, 'The pengő',
-         'Solid through depression and revision politics, then broken by '
-         'war on the Axis side and German occupation in 1944.'),
-        (1945, 1946, 'The worst inflation ever recorded',
-         'The pengő’s end is the most extreme hyperinflation in monetary '
-         'history: prices doubling roughly every fifteen hours at the '
-         'peak, notes denominated in hundreds of quintillions, the '
-         'unissued milliard b.-pengő printed and abandoned. The forint of '
-         'August 1946 replaces it at 4×10^29 to one — every pengő ever '
-         'printed worth, together, a fraction of one US cent.'),
-        (1947, 1989, 'Forint under socialism',
-         '"Goulash communism" keeps shops fuller than the bloc norm; the '
-         'forint is soft but stable, and survives the transition of 1989 '
-         'to remain Hungary’s money today.'),
+         'The pengő was stable until the Second World War. German '
+         'occupation in March 1944 and the war’s costs broke it.'),
+        (1945, 1946, 'The pengő hyperinflation',
+         'The largest hyperinflation on record: at its peak in July 1946 '
+         'prices doubled roughly every 15 hours, and monthly inflation '
+         'reached about 4.19 × 10^16 percent. Notes reached 100 million '
+         'b.-pengő (10^20 pengő); the 10^21 note was printed but not '
+         'issued. The forint replaced the pengő on 1 August 1946 at '
+         '4 × 10^29 to one.'),
+        (1947, 1989, 'The forint',
+         'The forint remained Hungary’s currency through the '
+         'socialist period, with controlled prices and periodic '
+         'devaluations, and survived the 1989–90 transition.'),
     )),
     'great-britain': ('Great Britain', (
-        (1694, 1913, 'The pound at the center of the world',
-         'From the Bank of England’s founding, sterling grows into the '
-         'currency of global trade; the nineteenth-century gold sovereign '
-         'and the white fiver are as close to universal money as the '
-         'world has had. Scottish and provincial banks issue their own '
-         'notes under the Bank’s shadow.'),
-        (1914, 1925, 'War and the Bradbury pound',
-         'Gold coin is withdrawn in 1914 and the Treasury itself prints '
-         'the first £1 and 10-shilling notes — "Bradburys" — to replace '
-         'sovereigns in pockets. Churchill’s 1925 return to gold at the '
-         'old prewar parity overvalues the pound and squeezes industry '
-         'for the rest of the decade.'),
-        (1931, 1945, 'Off gold, and a war economy',
-         'Britain leaves gold for good in September 1931 — the moment the '
-         'international gold standard effectively dies. The Second World '
-         'War brings exchange control, rationing, and a note issue '
-         'redesigned mid-war after the Nazis’ Operation Bernhard '
-         'counterfeited the white fiver well enough to force its '
-         'retirement.'),
-        (1946, 1979, 'Austerity to devaluation',
-         'A nationalized Bank of England manages a currency in managed '
-         'decline: devaluation in 1949, again in 1967 ("the pound in your '
-         'pocket"), decimalization in 1971 ending twelve pence to the '
-         'shilling after eight centuries, and the IMF at the door in '
-         '1976.'),
+        (1694, 1913, 'Sterling and the gold standard',
+         'The Bank of England was founded in 1694; sterling was the '
+         'leading reserve and trade currency of the nineteenth century. '
+         'Scottish and Irish banks issued their own notes under their own '
+         'statutes.'),
+        (1914, 1925, 'War and the Treasury note',
+         'Gold sovereigns were withdrawn in 1914 and the Treasury issued '
+         '£1 and 10-shilling currency notes ("Bradburys"). Britain '
+         'returned to gold in 1925 at the prewar parity of $4.86, a rate '
+         'generally judged to have overvalued the pound.'),
+        (1931, 1945, 'Off gold; the Bernhard forgeries',
+         'Britain left the gold standard in September 1931. During the '
+         'Second World War, German Operation Bernhard counterfeited '
+         'high-denomination Bank of England notes on a large scale; the '
+         'denominations above £5 were withdrawn and the white fiver was '
+         'redesigned and later retired.'),
+        (1946, 1979, 'Devaluation and decimalization',
+         'The Bank of England was nationalized in 1946. Sterling was '
+         'devalued in 1949 (from $4.03 to $2.80) and 1967 (to $2.40). '
+         'Decimal currency replaced pounds-shillings-pence in February '
+         '1971. An IMF loan was required in 1976.'),
         (1980, 2100, 'The modern pound',
-         'Inflation tamed in the 1980s, ejection from the European '
-         'exchange mechanism in 1992, Bank independence in 1997 — and '
-         'sterling, alone among the old great-power currencies, never '
-         'joined the euro.'),
+         'Inflation fell through the 1980s; sterling left the European '
+         'Exchange Rate Mechanism in September 1992; the Bank of England '
+         'received operational independence in 1997. The UK did not '
+         'adopt the euro.'),
     )),
     'france': ('France', (
         (1800, 1913, 'The germinal franc',
-         'Napoleon’s franc holds its metal content for over a century — '
-         'the bourgeois virtue of French finance — and anchors the Latin '
-         'Monetary Union across southern Europe.'),
-        (1914, 1928, 'The franc after the trenches',
-         'The war is financed on the slogan "Germany will pay"; Germany '
-         'largely does not. The franc loses four-fifths of its value '
-         'before Poincaré stabilizes it in 1926–28 at a fifth of the old '
-         'parity — a managed partial default that spares France a Weimar '
-         'but ruins the rentier class.'),
-        (1929, 1945, 'Depression, defeat, occupation',
-         'Clinging to gold longest of the great powers deepens France’s '
-         'depression; defeat in 1940 splits the country, and occupation '
-         'costs are levied in francs at an extortionate imposed rate.'),
-        (1945, 1960, 'Reconstruction and the nouveau franc',
-         'Repeated postwar devaluations end with de Gaulle’s 1960 '
-         'nouveau franc — two zeros struck off, a hard-money signal for '
-         'the Fifth Republic.'),
-        (1960, 2001, 'From franc fort to the euro',
-         'The franc shadows the Deutsche Mark through the European '
-         'Monetary System and dissolves into the euro it did much to '
-         'create.'),
+         'The franc kept the metal content set in 1803 for over a '
+         'century and anchored the Latin Monetary Union from 1865.'),
+        (1914, 1928, 'War inflation and the Poincaré franc',
+         'War finance and reconstruction costs took the franc to about a '
+         'fifth of its prewar value. Poincaré stabilized it in 1926 and '
+         'the 1928 law fixed the new gold parity at that reduced level.'),
+        (1929, 1945, 'Depression and occupation',
+         'France stayed on gold until 1936, prolonging its depression. '
+         'Under the 1940 armistice, occupation costs were charged at 20 '
+         'francs per Reichsmark, well above the market rate.'),
+        (1945, 1959, 'Postwar devaluations',
+         'The franc was devalued repeatedly after the war. The nouveau '
+         'franc of 1960 replaced 100 old francs with one.'),
+        (1960, 2001, 'New franc to euro',
+         'The franc tracked the Deutsche Mark within the European '
+         'Monetary System from 1979 and was replaced by the euro in '
+         '2002.'),
     )),
     'italy': ('Italy', (
-        (1861, 1913, 'The lira of united Italy',
-         'A new kingdom’s currency struggling to be believed: bouts of '
-         'inconvertibility (the corso forzoso), bank scandals, and a '
-         'banking collapse in 1893 that produces the Bank of Italy.'),
-        (1914, 1943, 'War, fascism, and Quota 90',
-         'The First World War quadruples prices; Mussolini stakes his '
-         'prestige on revaluing the lira to 90 per pound in 1927 — hard '
-         'money as propaganda, paid for in recession. The next war breaks '
-         'the currency entirely.'),
-        (1943, 1949, 'Two Italys, one inflation',
-         'Allied military lire in the liberated south, the Social '
-         'Republic’s issues in the German-held north, and by 1945 prices '
-         'twenty times prewar. The republic stabilizes in 1947 but the '
-         'zeros never come off — Italians will price cars in millions for '
-         'half a century.'),
-        (1950, 2001, 'The long lira',
-         'Miracle-years growth, chronic devaluation, and a 1970s of '
-         'strikes and inflation; the lira leaves the European exchange '
-         'mechanism in 1992 and retires into the euro at 1,936 to one.'),
+        (1861, 1913, 'The lira of unification',
+         'The unified kingdom’s lira joined the Latin Monetary Union '
+         'in 1865. Convertibility was suspended twice (corso forzoso); '
+         'the 1893 banking crisis led to the founding of the Bank of '
+         'Italy.'),
+        (1914, 1943, 'War inflation and Quota 90',
+         'First World War finance roughly quadrupled prices. In 1926–27 '
+         'the lira was revalued to 92.46 per pound ("Quota 90"), a '
+         'deflationary rate held until the next war.'),
+        (1943, 1949, 'Occupation and postwar inflation',
+         'From 1943 Allied military lire circulated in the south and '
+         'Social Republic issues in the German-held north. By 1945 '
+         'prices were roughly twenty times the prewar level; '
+         'stabilization came in 1947 without a currency reform, so '
+         'denominations stayed high permanently.'),
+        (1950, 2001, 'The postwar lira',
+         'The lira was repeatedly devalued against the Deutsche Mark, '
+         'left the European Exchange Rate Mechanism in 1992, and was '
+         'replaced by the euro at 1,936.27 lire in 2002.'),
     )),
     'russia': ('Russia', (
-        (1769, 1913, 'Assignats to the gold standard',
-         'Catherine’s assignat rouble begins a long Russian pattern — '
-         'paper issued for war, then painfully consolidated. Witte puts '
-         'the rouble on gold in 1897, money of the empire’s last '
-         'industrial spurt.'),
+        (1769, 1913, 'Assignats to the gold rouble',
+         'Paper roubles date from Catherine II’s assignats of 1769. '
+         'Witte’s reform of 1897 put the rouble on gold.'),
         (1914, 1923, 'War, revolution, and the sovznak',
-         'War suspends gold; revolution destroys the rest. Provisional '
-         'Government kerenki, White and regional issues by the hundreds, '
-         'and Soviet sovznaki printed until prices ran in millions — for '
-         'a moment Bolshevik doctrine welcomed the death of money itself. '
-         'The 1922–24 reforms and the gold-backed chervonets end it.'),
-        (1924, 1990, 'The administrative rouble',
-         'Under planning, the rouble is an accounting token — prices set '
-         'by decree, exchange criminalized, confiscatory reforms in 1947 '
-         'and 1961 shearing wartime and hoarded cash.'),
-        (1991, 1998, 'Collapse and the new rouble',
-         'Price liberalization meets monetary overhang: inflation over '
-         '2,500% in 1992, savings wiped out again, and the 1998 default '
-         'and redenomination (three zeros off) close the decade.'),
+         'Gold convertibility ended in 1914. After 1917, Provisional '
+         'Government kerenki, hundreds of White and regional issues, and '
+         'Soviet sovznaki circulated concurrently; by 1922 prices were '
+         'measured in millions of roubles. The 1922–24 reforms and the '
+         'gold-backed chervonets ended the inflation.'),
+        (1924, 1990, 'The Soviet rouble',
+         'Under central planning the rouble served as an accounting unit '
+         'with controlled prices and no convertibility. The 1947 and '
+         '1961 reforms exchanged old notes on confiscatory terms for '
+         'large cash holdings.'),
+        (1991, 1998, 'Post-Soviet inflation',
+         'Price liberalization in January 1992 was followed by inflation '
+         'above 2,500% that year. The 1998 redenomination removed three '
+         'zeros; the August 1998 default and devaluation followed.'),
     )),
     'poland': ('Poland', (
-        (1918, 1923, 'The marka and the borders wars',
-         'A state reassembled from three empires fights six border '
-         'conflicts on a printed marka; by 1923 it is hyperinflation, '
-         'prices millions of times prewar.'),
-        (1924, 1939, 'Grabski’s złoty',
-         'Stabilization without foreign control — a point of national '
-         'pride — gives Poland the złoty; depression hits its peasant '
-         'majority brutally hard.'),
+        (1918, 1923, 'The marka inflation',
+         'The restored state financed consolidation and the 1919–21 '
+         'Soviet war with marka issue; by late 1923 inflation was '
+         'running at hyperinflationary rates, with prices roughly '
+         '2.5 million times prewar.'),
+        (1924, 1939, 'The złoty',
+         'Grabski’s 1924 reform introduced the złoty at 1.8 million '
+         'marek to one without a foreign stabilization loan.'),
         (1939, 1944, 'Occupation',
-         'The General Government circulates occupation złoty ("młynarki") '
-         'while the ghettos are issued their own scrip — Litzmannstadt’s '
-         'quittungen among the darkest paper in any collection.'),
+         'The General Government circulated occupation złoty issued by '
+         'the Bank Emisyjny in Krakow. The Łódź ghetto had its own '
+         'scrip.'),
         (1945, 1989, 'The people’s złoty',
-         'Confiscatory reform in 1950, chronic shortage economics, and by '
-         'the 1980s inflation that martial law cannot decree away.'),
-        (1990, 1995, 'Shock therapy',
-         'The Balcerowicz plan trades a brutal year for a working '
-         'currency; 1995 strikes four zeros and the złoty becomes one of '
-         'the transition’s successes.'),
+         'The 1950 reform exchanged cash at confiscatory rates. Chronic '
+         'shortages persisted; inflation reached about 250% in 1989.'),
+        (1990, 1995, 'Stabilization',
+         'The Balcerowicz program of January 1990 ended near- '
+         'hyperinflation; the 1995 redenomination removed four zeros.'),
     )),
     'greece': ('Greece', (
-        (1841, 1940, 'The drachma of the new state',
-         'Chronic deficits, a spectacular 1893 default ("Regretfully, we '
-         'are bankrupt"), international financial control, and the '
-         'population exchange of 1923 — the drachma’s first century is '
-         'turbulent even before the catastrophe.'),
+        (1841, 1940, 'The drachma',
+         'The National Bank of Greece issued notes from 1841, the Bank '
+         'of Greece from 1928. The state defaulted in 1893 and accepted '
+         'international financial control in 1898.'),
         (1941, 1944, 'Occupation hyperinflation',
-         'Axis occupation levies crushing costs and famine kills tens of '
-         'thousands in Athens; by November 1944 prices double roughly '
-         'every four days and the largest note is 100 billion drachmai. '
-         'The liberation drachma swaps at 50 billion to one — the '
-         'third-worst inflation ever recorded.'),
-        (1945, 1953, 'Civil war and the sovereign standard',
-         'Through civil war Greeks price everything in gold sovereigns; '
-         'the 1953 devaluation and reform finally give the paper drachma '
-         'a quarter-century of credibility.'),
-        (1954, 2001, 'The long climb to the euro',
-         'Growth, junta, restoration, and the drachma — Europe’s oldest '
-         'currency name — retires into the euro in 2002.'),
+         'Axis occupation costs and famine collapsed the currency: by '
+         'November 1944 prices doubled roughly every 4.3 days, the '
+         'third-most-severe inflation recorded. The largest note was 100 '
+         'billion drachmai. The November 1944 reform exchanged 50 '
+         'billion old drachmai for one new.'),
+        (1945, 1953, 'Civil war and reform',
+         'Inflation continued through the civil war, with gold '
+         'sovereigns widely used as a store of value. The 1953 '
+         'devaluation and reforms stabilized the currency; the 1954 '
+         'redenomination removed three zeros.'),
+        (1954, 2001, 'To the euro',
+         'The drachma remained broadly stable thereafter and was '
+         'replaced by the euro in 2002.'),
     )),
     'yugoslavia': ('Yugoslavia', (
         (1918, 1941, 'The first Yugoslavia',
-         'A kingdom assembled from Habsburg and Ottoman fragments '
-         'overstamps krone and issues dinars; the tensions on the map '
-         'never leave the money.'),
-        (1941, 1945, 'Dismemberment',
-         'Occupation currencies multiply — the Independent State of '
-         'Croatia’s kuna, Serbian dinars under German control, Italian '
-         'lire on the coast.'),
-        (1945, 1991, 'Tito’s dinar',
-         'Self-management socialism runs on a soft dinar, repeatedly '
-         'devalued, redenominated in 1966; after Tito the debts and the '
-         'inflation compound through the 1980s.'),
-        (1992, 1994, 'The Milošević hyperinflation',
-         'Rump Yugoslavia under sanctions prints for war: at the January '
-         '1994 peak prices double roughly every day and a half, and the '
-         '500-billion-dinar note becomes the emblem of the second-worst '
-         'inflation ever measured. The "super dinar" of 1994 briefly '
-         'holds at one to the Deutsche Mark.'),
+         'The kingdom overstamped Austro-Hungarian krone and introduced '
+         'the dinar. '),
+        (1941, 1945, 'Partition currencies',
+         'Occupation divided the currency: the Independent State of '
+         'Croatia issued kuna, Serbia dinars under German control, with '
+         'Italian and Bulgarian currencies in annexed areas.'),
+        (1945, 1991, 'The socialist dinar',
+         'The dinar was redenominated in 1966 (100:1) and devalued '
+         'repeatedly; inflation accelerated through the 1980s to over '
+         '1,000% by 1989.'),
+        (1992, 1994, 'Hyperinflation',
+         'In the rump federation under sanctions, inflation peaked in '
+         'January 1994 at about 313 million percent for the month, '
+         'prices doubling roughly every 34 hours — the second-most- '
+         'severe episode recorded. The largest note was 500 billion '
+         'dinars. The January 1994 "super dinar" was set at par with '
+         'the Deutsche Mark.'),
     )),
     'china': ('China', (
-        (1023, 1911, 'The oldest paper money on earth',
-         'China invented circulating paper in the Song dynasty and also '
-         'invented its abuse — Yuan-era inflations that led the Ming to '
-         'abandon paper for silver. The late empire runs on silver taels, '
-         'copper cash, and a chaos of provincial and foreign bank '
-         'issues.'),
-        (1912, 1937, 'Republic and warlords',
-         'Every warlord, province, and bank prints; the 1935 fabi reform '
-         'nationalizes the note issue and takes China off silver — sound '
-         'in design, fatal in the hands of a state about to fight a '
-         'fifteen-year war.'),
-        (1937, 1949, 'War and the fabi/gold-yuan collapse',
-         'Japan’s invasion, then civil war, are financed on the press. '
-         'The 1948 gold yuan reform confiscates private metal and then '
-         'inflates worse than the fabi it replaced — prices in Shanghai '
-         'doubling in days. The collapse of the money did as much as any '
-         'army to deliver the mainland to the Communists.'),
+        (1023, 1911, 'Early paper to the late empire',
+         'Song-dynasty jiaozi (11th century) were the first circulating '
+         'paper money; Yuan and Ming over-issue led to paper’s '
+         'abandonment for silver by the 15th century. The late empire '
+         'used silver taels, copper cash, and provincial and foreign '
+         'bank notes.'),
+        (1912, 1936, 'Republic and the fabi reform',
+         'Provincial, warlord, and private bank issues multiplied. The '
+         '1935 reform made the notes of four government banks (fabi) '
+         'sole legal tender and took China off silver.'),
+        (1937, 1949, 'War inflation and the gold yuan',
+         'War with Japan and then civil war were financed by note issue. '
+         'The August 1948 gold yuan replaced the fabi at 3 million to '
+         'one and required surrender of private gold and silver; it '
+         'collapsed within a year, with Shanghai prices at one point '
+         'doubling in days.'),
         (1949, 2100, 'The renminbi',
-         'The people’s currency, twice redenominated, non-convertible '
-         'through the planned decades, and since the 1990s the money of '
-         'the largest industrial expansion in history.'),
+         'The People’s Bank renminbi (1948) was redenominated in '
+         '1955 at 10,000 to one and has remained the currency since.'),
     )),
     'japan': ('Japan', (
-        (1868, 1930, 'Meiji to the gold standard',
-         'The yen of 1871 replaces feudal clan notes; indemnity gold from '
-         'China puts it on the standard in 1897. The 1927 banking panic '
-         'previews the fragility beneath.'),
-        (1931, 1945, 'Takahashi and the war machine',
-         'Leaving gold early and spending its way out, Japan has one of '
-         'the mildest depressions — then the militarists murder finance '
-         'minister Takahashi for trying to rein spending in, and the '
-         'press finances empire: military yen across occupied Asia, '
-         'puppet-bank issues in China, invasion money from Burma to the '
-         'Philippines.'),
-        (1945, 1949, 'Defeat and the new yen',
-         'Prices rise some hundredfold in four years; deposits are '
-         'frozen, the currency is stamped and swapped, and the Dodge '
-         'Line of 1949 fixes 360 to the dollar — a rate that holds for '
-         'twenty-two years.'),
-        (1950, 2100, 'The strong yen',
-         'Export-led growth turns the yen into a hard currency; the 1985 '
-         'Plaza Accord doubles its value, the bubble bursts in 1990, and '
-         'Japan pioneers the zero-rate world everyone else later '
-         'joined.'),
+        (1868, 1930, 'The yen',
+         'The yen was adopted in 1871; the Bank of Japan issued from '
+         '1885, and the 1897 gold standard was funded largely by the '
+         'Chinese indemnity.'),
+        (1931, 1945, 'War finance',
+         'Japan left gold in December 1931. Finance minister Takahashi’s '
+         'reflation ended the depression early; he was assassinated in '
+         '1936 after moving to restrain military spending. Occupation '
+         'and military yen circulated across wartime Asia.'),
+        (1945, 1949, 'Postwar inflation',
+         'Prices rose roughly a hundredfold between 1945 and 1949. The '
+         '1946 measures froze deposits and exchanged notes; the 1949 '
+         'Dodge Line balanced the budget and fixed the yen at 360 per '
+         'dollar, a rate held until 1971.'),
+        (1950, 2100, 'The postwar yen',
+         'The Plaza Accord of 1985 roughly doubled the yen’s dollar '
+         'value; the asset bubble burst in 1990, and near-zero interest '
+         'rates followed from the late 1990s.'),
     )),
     'india': ('India', (
-        (1861, 1946, 'The rupee of the Raj',
-         'Government of India notes replace the Presidency banks’ issues '
-         'in 1861; the silver rupee’s long fall against gold is a chronic '
-         'headache of imperial finance. The Reserve Bank arrives in 1935, '
-         'and wartime inflation plus the 1943 Bengal famine mark the '
-         'Raj’s last notes.'),
-        (1947, 1990, 'Independence and the licence raj',
-         'Partition splits the currency zone — Pakistan overstamps Indian '
-         'notes — and planned-economy India runs a controlled, '
-         'devaluation-punctuated rupee (1966, 1991), with high-value '
-         'notes demonetized in 1946 and again in 1978 against black '
-         'money.'),
+        (1861, 1946, 'Government and RBI issues',
+         'The Paper Currency Act of 1861 gave the Government of India a '
+         'note monopoly. The Reserve Bank of India issued from 1938. '
+         'High-denomination notes were demonetized in 1946.'),
+        (1947, 1990, 'Independence',
+         'Pakistan initially used overstamped Indian notes after '
+         'partition. The rupee was devalued in 1966 and high '
+         'denominations demonetized again in 1978.'),
         (1991, 2100, 'Liberalization',
-         'The 1991 crisis — gold airlifted to London as collateral — '
-         'forces the opening; the 2016 demonetization of 86% of cash in '
-         'circulation repeats the old instinct at modern scale.'),
+         'The 1991 balance-of-payments crisis, in which gold reserves '
+         'were pledged abroad, preceded liberalization. In November 2016 '
+         'the ₹500 and ₹1000 notes — about 86% of currency by value — '
+         'were demonetized.'),
     )),
     'turkey': ('Turkey', (
         (1840, 1922, 'Ottoman paper',
-         'The kaime starts as interest-bearing treasury paper and decays '
-         'into inflationary issue; default in 1875 brings European '
-         'control of Ottoman revenues. War finance after 1914 leaves the '
-         'empire’s last notes nearly worthless outside the capital.'),
+         'The kaime of 1840 began as treasury paper and was repeatedly '
+         'over-issued. The empire defaulted in 1875, and the Ottoman '
+         'Public Debt Administration controlled major revenues from '
+         '1881. Wartime issues after 1915 lost most of their value.'),
         (1923, 1969, 'The republican lira',
-         'Atatürk’s republic prints its own lira — Latin script from '
-         '1928, the alphabet reform visible on the money itself — and '
-         'keeps it broadly stable through étatist decades.'),
-        (1970, 2004, 'The chronic inflation',
-         'Three decades of 30–100% annual inflation without ever quite '
-         'tipping into hyperinflation: prices in millions, the '
-         '20-million-lira note, and a national habit of thinking in '
-         'dollars.'),
-        (2005, 2100, 'Six zeros off',
-         'The 2005 new lira strikes six zeros — a fresh start whose '
-         'credibility the 2018–2023 depreciation spends back down.'),
+         'The republic issued its own lira from 1927, printed in Latin '
+         'script after the 1928 alphabet reform.'),
+        (1970, 2004, 'Chronic inflation',
+         'Annual inflation ran between roughly 30% and 100% for three '
+         'decades without becoming hyperinflation. Denominations reached '
+         '20 million lira.'),
+        (2005, 2100, 'Redenomination',
+         'The 2005 new lira removed six zeros. The lira lost about 80% '
+         'of its dollar value between 2018 and 2023.'),
     )),
     'zimbabwe': ('Zimbabwe', (
-        (1980, 1997, 'The Zimbabwe dollar at par',
-         'At independence the new dollar is worth more than the US '
-         'dollar, backing one of Africa’s more diversified economies.'),
-        (1998, 2009, 'The second-worst hyperinflation ever',
-         'Land seizures, war spending, and the printing press compound '
-         'into the canonical modern hyperinflation: three '
-         'redenominations, the hundred-trillion-dollar note, and a '
-         'November 2008 peak with prices doubling roughly every day. The '
-         'currency is abandoned in 2009 for the US dollar and rand — '
-         'money dying not by decree but by refusal.'),
-        (2010, 2100, 'After the dollar',
-         'Bond notes, RTGS dollars, the ZiG — successive attempts to '
-         'reintroduce a national currency against a population that '
-         'remembers.'),
+        (1965, 1979, 'Rhodesian dollar',
+         'Rhodesia issued its own pound, then dollar (1970), under '
+         'sanctions following UDI in 1965.'),
+        (1980, 1997, 'Zimbabwe dollar',
+         'At independence in 1980 the Zimbabwe dollar was worth more '
+         'than the US dollar.'),
+        (1998, 2009, 'Hyperinflation',
+         'Fiscal deficits and money creation produced the second-most- '
+         'severe hyperinflation recorded: in November 2008 monthly '
+         'inflation reached about 7.96 × 10^10 percent, prices doubling '
+         'roughly every 25 hours. Three redenominations removed 25 zeros '
+         'in total; the Z$100 trillion note of 2009 was the largest '
+         'issued. The currency was abandoned in 2009 for the US dollar '
+         'and rand.'),
+        (2010, 2100, 'Successor currencies',
+         'Bond notes (2016), the RTGS dollar (2019), and the ZiG (2024) '
+         'have each attempted to restore a national currency.'),
     )),
     'venezuela': ('Venezuela', (
-        (1879, 1982, 'The petro-bolívar',
-         'The bolívar rides a century of oil into being one of Latin '
-         'America’s hardest currencies — 4.30 to the dollar for a '
-         'generation.'),
-        (1983, 2012, 'Black Friday to controls',
-         'The 1983 devaluation ends the illusion; exchange controls from '
-         '2003 breed the parallel market that later swallows the '
-         'official rate.'),
-        (2013, 2100, 'The bolívar hyperinflation',
-         'The first hyperinflation of the smartphone era: peak annual '
-         'inflation estimated in the millions of percent, fourteen zeros '
-         'removed across two redenominations (2018, 2021), notes '
-         'abandoned for informal dollarization while they were still '
-         'being printed.'),
+        (1879, 1982, 'The bolívar',
+         'The bolívar of 1879 was among the more stable Latin American '
+         'currencies, fixed at 4.30 per dollar from 1964 to 1983.'),
+        (1983, 2012, 'Devaluation and controls',
+         'The February 1983 devaluation ("Black Friday") ended the fixed '
+         'rate; exchange controls from 2003 created a widening parallel '
+         'market.'),
+        (2013, 2100, 'Hyperinflation',
+         'Inflation exceeded 1,000,000% annually at its 2018 peak. '
+         'Redenominations in 2018 (five zeros) and 2021 (six zeros) '
+         'removed eleven zeros; transactions informally dollarized.'),
+    )),
+    'afghanistan': ('Afghanistan', (
+        (1919, 1935, 'Rupee to afghani',
+         'The afghani replaced the Kabuli rupee in 1925 under '
+         'Amanullah’s reforms. Treasury notes preceded bank issue.'),
+        (1936, 1978, 'Bank issue',
+         'Bank-i-Millie issued from 1936; Da Afghanistan Bank, the '
+         'central bank, from 1939. Notes of the monarchy were printed '
+         'abroad, including by De La Rue.'),
+        (1979, 2001, 'War',
+         'Soviet occupation and civil war brought heavy note issue and '
+         'depreciation; by the 1990s rival authorities circulated '
+         'competing print runs of the same designs.'),
+        (2002, 2100, 'New afghani',
+         'The 2002 reform exchanged the new afghani at 1,000 old to one, '
+         'consolidating the wartime issues.'),
+    )),
+    'algeria': ('Algeria', (
+        (1851, 1942, 'Banque de l’Algérie',
+         'The Banque de l’Algérie issued franc notes from 1851, at '
+         'par with the French franc.'),
+        (1942, 1945, 'Allied landings',
+         'After the November 1942 landings, Algeria was an early '
+         'printing ground for Free French and Allied-backed issues while '
+         'metropolitan France was occupied.'),
+        (1946, 1962, 'New franc era',
+         'Algerian notes followed the French new franc reform of 1960.'),
+        (1962, 2100, 'The dinar',
+         'The independent state replaced the franc with the dinar in '
+         '1964 at par.'),
+    )),
+    'andorra': ('Andorra', (
+        (1936, 1939, 'The only Andorran notes',
+         'The Consell General issued Andorra’s only banknotes in '
+         'December 1936, in pesseta denominations, to relieve the coin '
+         'shortage caused by the Spanish Civil War. They circulated '
+         'briefly and were withdrawn.'),
+        (1940, 2100, 'Foreign currency use',
+         'Andorra used the Spanish peseta and French franc without a '
+         'currency of its own, and uses the euro today.'),
+    )),
+    'israel': ('Israel', (
+        (1927, 1948, 'The Palestine pound',
+         'The Palestine Currency Board issued the Palestine pound from '
+         '1927 at par with sterling, printed in English, Arabic, and '
+         'Hebrew.'),
+        (1948, 1954, 'Anglo-Palestine Bank',
+         'The new state’s first notes were issued by the '
+         'Anglo-Palestine Bank (1948), then Bank Leumi; the Israel '
+         'pound (lira) replaced the Palestine pound.'),
+        (1954, 1985, 'Bank of Israel and inflation',
+         'The Bank of Israel issued from 1955. The shekel replaced the '
+         'lira in 1980 at 10:1. Inflation reached about 445% in 1984.'),
+        (1985, 2100, 'New shekel',
+         'The 1985 stabilization program and the new shekel (1,000 old '
+         'shekels to one, 1986) ended the high inflation.'),
+    )),
+    'belgian-congo': ('Belgian Congo', (
+        (1909, 1960, 'Banque du Congo Belge',
+         'The Banque du Congo Belge issued Congo francs from 1909, '
+         'linked to the Belgian franc.'),
+        (1960, 1967, 'Independence',
+         'The Conseil Monétaire and then the Banque Nationale du Congo '
+         'issued after 1960 amid civil conflict and inflation.'),
+        (1967, 1997, 'The zaïre',
+         'The zaïre of 1967 (1,000 francs to 1) was followed by chronic '
+         'and then extreme inflation: the nouveau zaïre of 1993 removed '
+         'three zeros, and monthly inflation in late 1993 exceeded '
+         '200%.'),
+        (1997, 2100, 'Congolese franc',
+         'The franc congolais of 1998 replaced the nouveau zaïre at '
+         '100,000 to one.'),
+    )),
+    'jamaica': ('Jamaica', (
+        (1904, 1960, 'Government issues',
+         'Government of Jamaica notes in pounds circulated alongside '
+         'sterling; commercial banks also issued until 1940. Printing '
+         'was largely by De La Rue.'),
+        (1961, 2100, 'Bank of Jamaica',
+         'The Bank of Jamaica issued from 1961; the decimal Jamaican '
+         'dollar (10 shillings = J$1) replaced the pound in 1969.'),
+    )),
+    'kenya': ('Kenya', (
+        (1919, 1966, 'The East African shilling',
+         'The East African Currency Board issued a common shilling for '
+         'Kenya, Uganda, and Tanganyika from 1921 (after a brief rupee '
+         'and florin period), at 20 to the pound sterling.'),
+        (1966, 2100, 'Central Bank of Kenya',
+         'The Central Bank of Kenya replaced the board’s notes with '
+         'the Kenyan shilling in 1966 at par.'),
+    )),
+    'somalia': ('Somalia', (
+        (1893, 1949, 'Rupia and lira',
+         'Italian Somaliland used the rupia from 1910, then the Italian '
+         'lira from 1925. British military administration issued East '
+         'African shillings after 1941.'),
+        (1950, 1962, 'The somalo',
+         'Under UN trusteeship, the Cassa per la Circolazione Monetaria '
+         'della Somalia issued the somalo from 1950, at par with the '
+         'East African shilling.'),
+        (1962, 2100, 'Somali shilling',
+         'The Somali shilling replaced the somalo and the East African '
+         'shilling at par in 1962. After the state collapsed in 1991, '
+         'unofficial print runs continued to circulate.'),
+    )),
+    'egypt': ('Egypt', (
+        (1834, 1913, 'The Egyptian pound',
+         'The Egyptian pound dates from 1834; the National Bank of '
+         'Egypt, privately owned, issued notes from 1899.'),
+        (1914, 1946, 'Sterling link',
+         'The pound was pegged to sterling from 1885 (gold) and 1916 '
+         '(sterling exchange), with notes made legal tender in 1914.'),
+        (1947, 2100, 'Independence of issue',
+         'Egypt left the sterling area in 1947; the National Bank was '
+         'nationalized in 1960 and the Central Bank of Egypt created in '
+         '1961. The pound has since been devalued in stages, including '
+         'floats in 2016 and 2022–24.'),
+    )),
+    'south-africa': ('South Africa', (
+        (1921, 1960, 'Reserve Bank pounds',
+         'The South African Reserve Bank, established 1921, took over '
+         'issue from commercial banks.'),
+        (1961, 2100, 'The rand',
+         'The decimal rand replaced the pound at 2 rand per pound in '
+         '1961.'),
+    )),
+    'canada': ('Canada', (
+        (1870, 1934, 'Dominion and chartered bank notes',
+         'Dominion of Canada notes circulated alongside chartered bank '
+         'issues.'),
+        (1935, 2100, 'Bank of Canada',
+         'The Bank of Canada issued from 1935, bilingual from 1937; '
+         'chartered bank issue ended by 1944.'),
+    )),
+    'mexico': ('Mexico', (
+        (1823, 1910, 'The silver peso',
+         'The silver peso was a world trade coin; bank notes were issued '
+         'by state and private banks under the 1897 law.'),
+        (1910, 1920, 'Revolutionary issues',
+         'The revolution produced hundreds of issues — Constitutionalist, '
+         'Villista, and local "bilimbiques" — most of which became '
+         'worthless. The 1916 "infalsificables" failed within months.'),
+        (1920, 1982, 'Banco de México',
+         'The Banco de México received the issue monopoly in 1925. The '
+         'peso was stable at 12.50 per dollar from 1954 to 1976.'),
+        (1982, 2100, 'Crisis and new peso',
+         'The 1982 debt crisis and the inflation of the 1980s (peaking '
+         'near 160% in 1987) led to the 1993 nuevo peso at 1,000 old '
+         'pesos to one.'),
+    )),
+    'brazil': ('Brazil', (
+        (1822, 1941, 'Milréis',
+         'The milréis served the empire and early republic, with '
+         'Treasury and bank issues.'),
+        (1942, 1993, 'Eight currencies',
+         'Chronic inflation produced successive currencies: cruzeiro '
+         '(1942), cruzeiro novo (1967), cruzado (1986), cruzado novo '
+         '(1989), cruzeiro (1990), cruzeiro real (1993). Monthly '
+         'inflation approached 80% in early 1990. Together the reforms '
+         'removed eighteen zeros.'),
+        (1994, 2100, 'The real',
+         'The Plano Real introduced the real in July 1994 and ended the '
+         'high inflation without a price freeze.'),
+    )),
+    'spain': ('Spain', (
+        (1868, 1935, 'The peseta',
+         'The peseta of 1868 was issued by the Banco de España, which '
+         'held the note monopoly from 1874.'),
+        (1936, 1939, 'Civil war currencies',
+         'Republican and Nationalist zones issued separate notes, and '
+         'hundreds of towns and councils issued local paper; Republican '
+         'notes were demonetized after the Nationalist victory.'),
+        (1940, 2001, 'Franco era to euro',
+         'The peseta was devalued in 1959 under the Stabilization Plan '
+         'and replaced by the euro in 2002.'),
+    )),
+    'portugal': ('Portugal', (
+        (1846, 1910, 'Réis',
+         'The Banco de Portugal issued réis notes from 1847.'),
+        (1911, 1930, 'Escudo and the 1925 fraud',
+         'The escudo replaced the réis in 1911 at 1,000 réis. In 1925 '
+         'Alves dos Reis obtained genuine 500-escudo notes from Waterlow '
+         '& Sons on forged authority — roughly 1% of GDP — a scandal '
+         'that contributed to the 1926 coup and to a landmark lawsuit '
+         'against the printer.'),
+        (1931, 2001, 'Estado Novo to euro',
+         'The escudo was stable under Salazar’s balanced budgets, '
+         'devalued after 1974, and replaced by the euro in 2002.'),
+    )),
+    'netherlands': ('Netherlands', (
+        (1814, 1939, 'The guilder',
+         'De Nederlandsche Bank issued from 1814. The Netherlands stayed '
+         'on gold until 1936, among the last countries to leave.'),
+        (1940, 1945, 'Occupation',
+         'Occupation issues circulated; in the East Indies, Japanese '
+         'invasion money replaced the Javasche Bank guilder.'),
+        (1945, 2001, 'Money purge to euro',
+         'The 1945 Lieftinck reform briefly withdrew all cash to tax '
+         'wartime gains. The guilder was replaced by the euro in 2002.'),
+    )),
+    'belgium': ('Belgium', (
+        (1832, 1913, 'The Belgian franc',
+         'The National Bank of Belgium issued from 1851; Belgium was a '
+         'founding member of the Latin Monetary Union.'),
+        (1914, 1944, 'Two occupations',
+         'German occupation marks circulated in 1914–18 and occupation '
+         'francs in 1940–44.'),
+        (1944, 2001, 'The Gutt operation to euro',
+         'The October 1944 Gutt reform blocked most bank deposits and '
+         'exchanged notes to cut the money supply roughly two-thirds. '
+         'The franc was replaced by the euro in 2002.'),
+    )),
+    'czechoslovakia': ('Czechoslovakia', (
+        (1919, 1938, 'The koruna',
+         'Rašín’s 1919 reform stamped Austro-Hungarian notes within '
+         'the new borders and converted them to Czechoslovak koruna, '
+         'avoiding the neighbors’ inflations.'),
+        (1939, 1945, 'Occupation',
+         'The Protectorate of Bohemia and Moravia and the Slovak state '
+         'issued separate currencies; Theresienstadt used camp scrip.'),
+        (1945, 1992, 'Socialist koruna',
+         'The 1953 reform exchanged cash at 5:1 to 50:1, wiping out '
+         'savings. The federation and its currency split in 1993.'),
+    )),
+    'romania': ('Romania', (
+        (1867, 1944, 'The leu',
+         'The National Bank of Romania issued lei from 1881.'),
+        (1944, 1952, 'Postwar inflation',
+         'Occupation costs and deficits brought severe inflation; the '
+         'August 1947 stabilization exchanged 20,000 old lei for one and '
+         'capped the amounts convertible. A further confiscatory reform '
+         'followed in 1952.'),
+        (1953, 2004, 'Socialist and transition leu',
+         'Inflation returned after 1989, peaking above 250% in 1993.'),
+        (2005, 2100, 'New leu',
+         'The 2005 redenomination removed four zeros.'),
+    )),
+    'bulgaria': ('Bulgaria', (
+        (1881, 1944, 'The lev',
+         'The Bulgarian National Bank issued leva from 1885, pegged '
+         'variously to gold, the franc, and the Reichsmark.'),
+        (1944, 1962, 'Postwar reforms',
+         'Confiscatory exchanges in 1947 and 1952 and a 1962 '
+         'redenomination followed the war.'),
+        (1990, 1997, 'Hyperinflation',
+         'Banking collapse brought hyperinflation peaking in February '
+         '1997 at about 242% for the month. A currency board pegged the '
+         'lev to the Deutsche Mark in July 1997; the 1999 redenomination '
+         'removed three zeros.'),
+    )),
+    'philippines': ('Philippines', (
+        (1903, 1941, 'US administration',
+         'The peso was held at two per US dollar under a gold-exchange '
+         'standard; Treasury certificates and bank notes circulated.'),
+        (1942, 1945, 'Japanese occupation',
+         'Japanese military pesos ("Mickey Mouse money") depreciated to '
+         'worthlessness by 1944–45, with prices doubling in weeks; '
+         'guerrilla and emergency notes were issued in the provinces.'),
+        (1949, 2100, 'Central Bank',
+         'The Central Bank of the Philippines issued from 1949.'),
+    )),
+    'indochina': ('French Indochina', (
+        (1875, 1954, 'The piastre',
+         'The Banque de l’Indochine issued the piastre from 1875, '
+         'on silver into the 1930s. The fixed 17-franc rate after 1945 '
+         'fed the "piastre affair" arbitrage scandal exposed in 1953.'),
+        (1954, 2100, 'Succession',
+         'The piastre was replaced by the Vietnamese đồng, Lao kip, and '
+         'Cambodian riel after 1954.'),
+    )),
+    'vietnam': ('Vietnam', (
+        (1945, 1975, 'War currencies',
+         'The DRV issued đồng from 1946; the South issued its own from '
+         '1955. Both saw wartime inflation.'),
+        (1975, 1990, 'Unification and reform',
+         'The 1975 and 1978 exchanges converted southern currency on '
+         'limited terms. The 1985 price-wage-money reform triggered '
+         'inflation that approached 700% in 1986.'),
+        (1990, 2100, 'Đổi mới era',
+         'Inflation was brought down in the 1990s; the đồng remains '
+         'among the lowest-valued major currency units.'),
+    )),
+    'ceylon': ('Ceylon', (
+        (1884, 1949, 'Currency board rupee',
+         'Government of Ceylon notes circulated from 1885 under a '
+         'currency board tied to the Indian rupee.'),
+        (1950, 2100, 'Central Bank',
+         'The Central Bank of Ceylon issued from 1951; the country and '
+         'currency were renamed Sri Lanka in 1972.'),
+    )),
+    'malaya': ('Malaya', (
+        (1899, 1941, 'Straits and Malayan dollars',
+         'The Straits Settlements dollar (1899) and the Malayan dollar '
+         '(1939) were issued by currency boards at 2s 4d sterling.'),
+        (1942, 1945, 'Occupation "banana money"',
+         'Japanese military dollars were issued without serial-number '
+         'control and became nearly worthless by 1945; the board’s '
+         'prewar notes resumed after liberation.'),
+        (1946, 2100, 'Succession',
+         'The Malaya and British Borneo dollar (1953) preceded the '
+         'separate Malaysian ringgit, Singapore dollar, and Brunei '
+         'dollar of 1967.'),
+    )),
+    'morocco': ('Morocco', (
+        (1907, 1958, 'Protectorate franc',
+         'The Banque d’État du Maroc issued francs from 1910 under '
+         'the international statute of 1906.'),
+        (1959, 2100, 'The dirham',
+         'The dirham replaced the franc in 1959 at 100 francs to one, '
+         'issued by the new Banque du Maroc.'),
+    )),
+    'tunisia': ('Tunisia', (
+        (1904, 1958, 'Protectorate franc',
+         'The Banque de l’Algérie issued for Tunisia from 1904, '
+         'with Tunisian overprints and designs.'),
+        (1958, 2100, 'The dinar',
+         'The Central Bank of Tunisia replaced the franc with the dinar '
+         'in 1958 at 1,000 francs to one.'),
+    )),
+    'iran': ('Iran', (
+        (1889, 1931, 'Imperial Bank of Persia',
+         'The British-chartered Imperial Bank of Persia issued the '
+         'country’s first banknotes from 1890.'),
+        (1932, 1978, 'Bank Melli and Bank Markazi',
+         'Bank Melli Iran took over issue in 1932; the rial replaced the '
+         'kran. Bank Markazi, the central bank, issued from 1961.'),
+        (1979, 2100, 'Islamic Republic',
+         'Post-revolution notes replaced the Pahlavi designs. Sanctions '
+         'and inflation have reduced the rial’s value by several '
+         'orders of magnitude; a redenomination removing four zeros was '
+         'approved in 2020.'),
+    )),
+    'iraq': ('Iraq', (
+        (1932, 1949, 'Currency board dinar',
+         'The Iraqi dinar replaced the Indian rupee in 1932 at par with '
+         'sterling, under a London currency board.'),
+        (1949, 1990, 'National Bank and Central Bank',
+         'The Central Bank of Iraq issued from 1949.'),
+        (1990, 2003, 'Sanctions-era notes',
+         'After 1990, locally printed "Saddam" dinars depreciated '
+         'sharply — from about $3 per dinar to roughly 2,000 dinars per '
+         'dollar — while the pre-1990 "Swiss" dinars kept separate, '
+         'higher value in the Kurdish north.'),
+        (2003, 2100, 'New dinar',
+         'The 2003–04 exchange unified the two circulations into a new '
+         'dinar.'),
+    )),
+    'thailand': ('Thailand', (
+        (1902, 1941, 'Siamese baht',
+         'Government notes date from 1902; the baht was pegged to '
+         'sterling between the wars.'),
+        (1942, 1945, 'War inflation',
+         'Occupation finance roughly quadrupled prices; notes were '
+         'printed locally when supply from England was cut off.'),
+        (1946, 2100, 'The modern baht',
+         'The Bank of Thailand (1942) has issued since; the baht’s '
+         '1997 float began the Asian financial crisis.'),
+    )),
+    'burma': ('Burma', (
+        (1937, 1948, 'Separation and occupation',
+         'Burma’s rupee notes followed separation from India in '
+         '1937; Japanese occupation rupees became worthless by 1945.'),
+        (1948, 1987, 'The kyat',
+         'The kyat was decimalized in 1952. Demonetizations in 1964, '
+         '1985, and 1987 cancelled high denominations without full '
+         'compensation; the 1987 round voided about three-quarters of '
+         'the currency and preceded the 1988 uprising. The 45- and '
+         '90-kyat notes of 1987 reflected numerological preference.'),
+        (1988, 2100, 'Later kyat',
+         'New series followed 1988; inflation and multiple exchange '
+         'rates persisted until partial reforms in 2012.'),
+    )),
+    'pakistan': ('Pakistan', (
+        (1947, 1948, 'Overprinted Indian notes',
+         'Reserve Bank of India notes overprinted "Government of '
+         'Pakistan" served until Pakistani printing began.'),
+        (1948, 2100, 'State Bank of Pakistan',
+         'The State Bank issued from 1948; Bangladesh’s taka '
+         'replaced the rupee in the former East Pakistan after 1971.'),
+    )),
+    'ireland': ('Ireland', (
+        (1928, 1978, 'The Saorstát pound',
+         'The Currency Commission issued the Irish pound from 1928 at '
+         'parity with sterling, maintained for fifty years; consolidated '
+         'bank notes were phased out by 1953.'),
+        (1979, 2001, 'EMS to euro',
+         'The sterling link ended in 1979 when Ireland joined the '
+         'European Monetary System; the euro replaced the pound in '
+         '2002.'),
+    )),
+    'switzerland': ('Switzerland', (
+        (1850, 1906, 'Cantonal and private issue',
+         'The 1850 federal franc was coined nationally but notes were '
+         'issued by cantonal and private banks.'),
+        (1907, 2100, 'Swiss National Bank',
+         'The SNB has issued since 1907. The franc stayed on gold '
+         'longest of the European currencies, formally until 1999.'),
+    )),
+    'sweden': ('Sweden', (
+        (1661, 1913, 'Earliest European banknotes',
+         'Stockholms Banco issued Europe’s first banknotes in 1661; '
+         'the Riksbank, founded 1668, is the oldest central bank. '
+         'Sweden led the Scandinavian Monetary Union from 1873.'),
+        (1914, 2100, 'The modern krona',
+         'The union dissolved in the First World War; the krona has '
+         'floated since 1992.'),
+    )),
+    'denmark': ('Denmark', (
+        (1818, 1913, 'Nationalbank krone',
+         'Danmarks Nationalbank was founded in 1818 after the 1813 '
+         'state bankruptcy; the krone dates from the Scandinavian '
+         'Monetary Union of 1873.'),
+        (1914, 2100, 'The modern krone',
+         'The krone has been pegged to the Deutsche Mark and then the '
+         'euro since 1982.'),
+    )),
+    'norway': ('Norway', (
+        (1816, 1913, 'Norges Bank',
+         'Norges Bank was founded in 1816; the krone joined the '
+         'Scandinavian Monetary Union in 1875.'),
+        (1914, 2100, 'The modern krone',
+         'Norway left gold in 1931 with sterling; the krone floats '
+         'today.'),
+    )),
+    'finland': ('Finland', (
+        (1860, 1917, 'Markka under Russia',
+         'The markka of 1860 gave the Grand Duchy its own currency, on '
+         'gold from 1878.'),
+        (1918, 2001, 'Independent markka',
+         'The markka was devalued repeatedly in the twentieth century '
+         'and replaced by the euro in 2002.'),
+    )),
+    'australia': ('Australia', (
+        (1910, 1959, 'Commonwealth notes',
+         'The Commonwealth took over note issue in 1910; the '
+         'Commonwealth Bank and then the note board issued the pound.'),
+        (1960, 2100, 'Reserve Bank and dollar',
+         'The Reserve Bank of Australia issued from 1960; the decimal '
+         'dollar replaced the pound in 1966. Australia introduced the '
+         'first polymer banknote in 1988.'),
+    )),
+    'new-zealand': ('New Zealand', (
+        (1934, 1966, 'Reserve Bank pounds',
+         'The Reserve Bank of New Zealand unified issue in 1934, ending '
+         'trading bank notes.'),
+        (1967, 2100, 'The dollar',
+         'The decimal dollar replaced the pound in 1967. The Reserve '
+         'Bank pioneered inflation targeting in 1990.'),
+    )),
+    'cuba': ('Cuba', (
+        (1857, 1958, 'Colonial and republican peso',
+         'Spanish colonial banks, US-era certificates, and the Banco '
+         'Nacional de Cuba (1950) issued the peso at par with the US '
+         'dollar.'),
+        (1959, 1993, 'Revolutionary peso',
+         'The 1961 exchange demonetized old notes on short notice; 1961 '
+         'issues carry Che Guevara’s signature as bank president.'),
+        (1994, 2100, 'Dual currency',
+         'The convertible peso circulated alongside the national peso '
+         'from 1994 until unification in 2021.'),
+    )),
+    'argentina': ('Argentina', (
+        (1881, 1969, 'Peso moneda nacional',
+         'The 1881 peso held through the export boom; persistent '
+         'inflation began mid-century.'),
+        (1970, 1991, 'Five currencies',
+         'Successive pesos (1970, 1983), the austral (1985), and the '
+         'convertible peso (1992) removed thirteen zeros in total. '
+         'Inflation peaked near 3,000% in 1989–90.'),
+        (1992, 2100, 'Convertibility and after',
+         'The 1:1 dollar peg held from 1991 until the 2001–02 collapse; '
+         'high inflation returned in the 2010s and exceeded 200% in '
+         '2023.'),
     )),
 }
 
