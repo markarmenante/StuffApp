@@ -6144,18 +6144,6 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
 
     where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
-    # US pill reads newest series first — the story runs from the modern
-    # fiat note back toward the Civil War. Scoped to the filter so the
-    # global banknote order (and the B-number sequence derived from it)
-    # keeps its country/year-ascending shape. COALESCE falls to 0 so
-    # undated notes still sort last under DESC, mirroring the 99999
-    # blanks-last convention the ascending order uses.
-    if category == 'banknotes' and coin_filter == 'us':
-        order_by = ("COALESCE(SERIES_YEAR(series), date_1, 0) DESC, "
-                    "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
-                    "DENOM_UNIT(denomination) ASC, "
-                    "DENOM_VALUE(denomination) ASC, "
-                    "COALESCE(date_1, 0) DESC")
     if purchase_date_op and purchase_date_iso:
         order_by = (
             "COALESCE(NULLIF(purchase_date, ''), '0000-00-00') DESC, "
