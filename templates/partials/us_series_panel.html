@@ -1,0 +1,53 @@
+{# US series explainer. Expects _panel from us_series_panel(row).
+   Order is deliberate: what the note is, then what it promised, then what
+   that promise replaced, then the world that changed it. #}
+<div class="us-series-panel">
+
+  <div class="usp-head">
+    {% if _panel.note_class %}
+    <span class="usp-class">{{ _panel.note_class.name }}</span>
+    <span class="usp-span">{{ _panel.note_class.years }}</span>
+    {% endif %}
+    {% if _panel.series %}
+    <span class="usp-series">{{ _panel.series }}</span>
+    {% elif _panel.year %}
+    <span class="usp-series">{{ _panel.year }}</span>
+    {% endif %}
+  </div>
+
+  {% if _panel.note_class %}
+  <p class="usp-obligor"><span class="usp-lbl">Liable</span>{{ _panel.note_class.obligor }}</p>
+  {% endif %}
+
+  {% if _panel.clause %}
+  <div class="usp-clause">
+    <div class="usp-clause-head">
+      <span class="usp-lbl">Printed promise</span>
+      <span class="usp-clause-span">{{ _panel.clause.span }}</span>
+    </div>
+    <blockquote class="usp-clause-text">{{ _panel.clause.text }}</blockquote>
+    <p class="usp-clause-policy">{{ _panel.clause.policy }}</p>
+  </div>
+
+  {% if _panel.previous_clause %}
+  <div class="usp-clause usp-clause-prev">
+    <div class="usp-clause-head">
+      <span class="usp-lbl">Replacing</span>
+      <span class="usp-clause-span">{{ _panel.previous_clause.span }}</span>
+    </div>
+    <blockquote class="usp-clause-text">{{ _panel.previous_clause.text }}</blockquote>
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {% if _panel.note_class %}
+  <p class="usp-why"><span class="usp-lbl">Why it existed</span>{{ _panel.note_class.why }}</p>
+  {% endif %}
+
+  {% if _panel.era %}
+  <p class="usp-era">
+    <span class="usp-lbl">{{ _panel.era.span }} · {{ _panel.era.label }}</span>{{ _panel.era.body }}
+  </p>
+  {% endif %}
+
+</div>

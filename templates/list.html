@@ -158,10 +158,24 @@
   {# Properties: bold divider where the Residential block ends and the
      Commercial block begins. ns.prev tracks the prior row's type so we
      can detect the boundary mid-loop. #}
-  {% set ns = namespace(prev=None) %}
+  {% set ns = namespace(prev=None, series=None) %}
   {% for row in rows %}
   {% if category == 'properties' and ns.prev == 'Residential' and (row['type'] or '') == 'Commercial' %}
   <div class="property-type-divider" aria-hidden="true"></div>
+  {% endif %}
+  {# US banknotes: a panel heads each series, explaining what class of note
+     it is, who was liable for it, and how the redemption clause printed on
+     the face moved with monetary policy. Keyed on the series label, so it
+     fires once per group in the country/year sort — not once per note. #}
+  {% if category == 'banknotes' %}
+    {% set _series_key = (row['series'] or '')|trim %}
+    {% if _series_key != ns.series %}
+      {% set ns.series = _series_key %}
+      {% set _panel = us_series_panel(row) %}
+      {% if _panel %}
+      {% include 'partials/us_series_panel.html' %}
+      {% endif %}
+    {% endif %}
   {% endif %}
   <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None, dot='1' if dot else None) }}">
 

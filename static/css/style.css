@@ -3744,3 +3744,72 @@ input[type="date"] { -webkit-appearance: none; }
     border-top: 2px solid var(--border);
   }
 }
+
+/* ── US series panel ────────────────────────────────────────────────────
+   Heads each series in the US banknote list. Reads as a reference block,
+   not a list row: flat surface, rule above, and the redemption clause set
+   apart so the wording is the thing the eye lands on. */
+.us-series-panel {
+  border-top: 3px solid var(--text);
+  background: var(--cell-bg);
+  padding: 14px 16px 16px;
+  margin: 18px 0 8px;
+}
+.us-series-panel:first-child { margin-top: 4px; }
+
+.usp-head {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px;
+  margin-bottom: 10px;
+}
+.usp-class {
+  font-size: 15px; font-weight: 700; letter-spacing: -0.01em; color: var(--text);
+}
+.usp-span, .usp-clause-span {
+  font-size: 12px; color: var(--text-label); font-variant-numeric: tabular-nums;
+}
+.usp-series {
+  margin-left: auto; font-size: 12px; color: var(--text-secondary);
+}
+
+/* Labels lead their paragraph inline — keeps the block compact instead of
+   turning six facts into six headed sections. */
+.usp-lbl {
+  display: inline-block; margin-right: 8px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-label);
+}
+.us-series-panel p {
+  margin: 0 0 10px; font-size: 13px; line-height: 1.5; color: var(--text-secondary);
+}
+.us-series-panel p:last-child { margin-bottom: 0; }
+
+.usp-clause { margin: 0 0 12px; }
+.usp-clause-head {
+  display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px;
+}
+.usp-clause-text {
+  margin: 0 0 6px; padding: 8px 12px;
+  border-left: 3px solid var(--text);
+  background: var(--surface);
+  font-size: 13px; line-height: 1.45; color: var(--text);
+  font-variant: small-caps;
+}
+.usp-clause-policy {
+  margin: 0 !important; padding-left: 15px;
+  font-size: 12.5px; line-height: 1.5; color: var(--text-secondary);
+}
+
+/* The superseded clause sits back a step — present for comparison, not
+   competing with the wording actually in force for this series. */
+.usp-clause-prev .usp-clause-text {
+  border-left-color: var(--border);
+  background: transparent;
+  color: var(--text-label);
+}
+
+.usp-era { border-top: 1px solid var(--border-light); padding-top: 10px; }
+
+@media (max-width: 640px) {
+  .us-series-panel { padding: 12px 12px 14px; margin: 14px 0 6px; }
+  .usp-series { margin-left: 0; width: 100%; }
+}

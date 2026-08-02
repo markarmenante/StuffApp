@@ -7,6 +7,13 @@
       "runtimeArgs": ["/Users/markarmenante/GitHub/StuffApp/app.py"],
       "port": 5001,
       "autoPort": true
+    },
+    {
+      "name": "Boardroom (Next.js)",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "cd /Users/markarmenante/GitHub/boardroom/apps/board && npm run dev"],
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }

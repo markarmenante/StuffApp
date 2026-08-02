@@ -1598,6 +1598,435 @@ def _series_year(text):
     return int(m.group(1)) if m else None
 
 
+# ── US series panels ────────────────────────────────────────────────────
+#
+# A header block that precedes each series in the US banknote list: what
+# class of note it is, who stood behind it, what the note actually promised
+# to pay, and what was happening at the time that produced it.
+#
+# The class is not a structured field — issue_type only carries the
+# National / Notgeld / Colonial axis — so it is read out of the text the
+# note itself carries (series label, issuer, and the transcribed lettering,
+# which is where "GOLD CERTIFICATE" or "NATIONAL CURRENCY" actually
+# appears). Patterns are ordered most-specific first: a Federal Reserve
+# Bank Note is not a Federal Reserve Note, and the two differ on exactly
+# the point this panel exists to explain — who is liable.
+
+US_COUNTRY_NAMES = {
+    'united states', 'united states of america', 'usa', 'us', 'u.s.',
+    'u.s.a.', 'united states of america (usa)',
+}
+
+
+def _is_us_note(row):
+    country = (_row_get(row, 'country') or '').strip().lower().rstrip('.')
+    if country in US_COUNTRY_NAMES or country.rstrip('.') in US_COUNTRY_NAMES:
+        return True
+    return country.startswith('united states')
+
+
+# name, span, regex, obligor, why it existed, and the redemption clause as
+# it was actually printed — rewritten each time monetary policy moved. The
+# clause list is the point of the panel: the promise on the face of the
+# note is the most direct record there is of what the government was
+# willing to commit to in a given year.
+US_NOTE_CLASSES = (
+    {
+        'name': 'Federal Reserve Bank Note',
+        'years': '1915–1934',
+        'pattern': r'federal reserve bank note|f\.?r\.?b\.?n\.?\b',
+        'obligor': 'The individual issuing Federal Reserve Bank — not the '
+                   'United States. Liability sat with New York, Chicago, '
+                   'Dallas, whichever one printed it.',
+        'why': 'Emergency paper, twice: in 1918 to replace the National '
+               'Bank Notes then being retired, and again in 1933, when the '
+               'Emergency Banking Act let the Reserve Banks issue against '
+               'any sound collateral to put currency back into a country '
+               'that had just closed every bank in it.',
+        'clauses': (
+            (1915, 1928,
+             'SECURED BY UNITED STATES CERTIFICATES OF INDEBTEDNESS OR '
+             'UNITED STATES ONE-YEAR GOLD NOTES … REDEEMABLE IN LAWFUL '
+             'MONEY OF THE UNITED STATES AT THE FEDERAL RESERVE BANK',
+             'The National Bank Note formula with a Reserve Bank in place '
+             'of a chartered private bank: collateral named on the face, '
+             'and redemption in "lawful money" rather than in metal.'),
+            (1929, 1934,
+             'SECURED BY UNITED STATES BONDS OR OTHER SECURITIES … '
+             'REDEEMABLE IN LAWFUL MONEY OF THE UNITED STATES AT UNITED '
+             'STATES TREASURY OR AT THE BANK OF ISSUE',
+             'The 1933 emergency issue widens the collateral from specific '
+             'government paper to "other securities" — the Reserve Banks '
+             'needed to be able to issue against whatever they held.'),
+        ),
+    },
+    {
+        'name': 'Federal Reserve Note',
+        'years': '1914–present',
+        'pattern': r'federal reserve note|\bf\.?r\.?n\.?\b',
+        'obligor': 'An obligation of the United States, issued through the '
+                   'twelve Federal Reserve Banks. The government is liable; '
+                   'the Reserve Bank is the channel.',
+        'why': 'The answer to the Panic of 1907. The Federal Reserve Act of '
+               '1913 was built to give the country an elastic currency — one '
+               'that could expand when commerce demanded it and contract '
+               'when it did not, instead of the fixed bond-secured supply '
+               'that had left banks unable to meet a run.',
+        'clauses': (
+            (1914, 1927,
+             'REDEEMABLE IN GOLD ON DEMAND AT THE UNITED STATES TREASURY, '
+             'OR IN GOLD OR LAWFUL MONEY AT ANY FEDERAL RESERVE BANK',
+             'Two redemption points and a real gold promise. The note is '
+             'convertible by anyone who presents it.'),
+            (1928, 1933,
+             'REDEEMABLE IN GOLD ON DEMAND AT THE UNITED STATES TREASURY, '
+             'OR IN GOLD OR LAWFUL MONEY AT ANY FEDERAL RESERVE BANK',
+             'The wording survives the 1928 change to small-size notes '
+             'intact — the design changed, the monetary commitment did not.'),
+            (1934, 1962,
+             'THIS NOTE IS LEGAL TENDER FOR ALL DEBTS, PUBLIC AND PRIVATE, '
+             'AND IS REDEEMABLE IN LAWFUL MONEY AT THE UNITED STATES '
+             'TREASURY, OR AT ANY FEDERAL RESERVE BANK',
+             'The pivot. After Executive Order 6102 and the Gold Reserve '
+             'Act of 1934 the gold clause is gone, and legal tender status '
+             'is promoted to the front of the sentence — the note is now '
+             'good because the law says so, not because metal backs it.'),
+            (1963, 2100,
+             'THIS NOTE IS LEGAL TENDER FOR ALL DEBTS, PUBLIC AND PRIVATE',
+             'The last of the promise is dropped. "Redeemable in lawful '
+             'money" had become circular once the note itself was lawful '
+             'money, and "will pay to the bearer on demand" went with it. '
+             'What remains is the whole of the modern claim.'),
+        ),
+    },
+    {
+        'name': 'National Bank Note',
+        'years': '1863–1935',
+        'pattern': r'national bank note|national currency|\bnational bank\b',
+        'obligor': 'A federally chartered private bank, named with its '
+                   'charter number on the face — but collateralised by the '
+                   'federal government.',
+        'why': 'Two problems solved with one instrument. The National '
+               'Banking Acts of 1863 and 1864 replaced thousands of '
+               'inconsistent state bank issues with a uniform currency, and '
+               'in requiring bond collateral they created a captive market '
+               'for the debt paying for the Civil War.',
+        'clauses': (
+            (1863, 1928,
+             'THIS NOTE IS SECURED BY BONDS OF THE UNITED STATES DEPOSITED '
+             'WITH THE TREASURER OF THE UNITED STATES',
+             'The guarantee is structural rather than a promise to pay: if '
+             'the bank failed, the Treasury sold the bonds and paid the '
+             'noteholders. Depositors could lose everything; noteholders '
+             'did not.'),
+            (1929, 1935,
+             'SECURED BY UNITED STATES BONDS OR OTHER SECURITIES … '
+             'REDEEMABLE IN LAWFUL MONEY OF THE UNITED STATES AT UNITED '
+             'STATES TREASURY OR AT THE BANK OF ISSUE',
+             'The small-size series adds an explicit redemption route at '
+             'the Treasury — by then the Federal Reserve was the real '
+             'issuer and the note-issuing privilege was being wound down. '
+             'It ended in 1935.'),
+        ),
+    },
+    {
+        'name': 'Gold Certificate',
+        'years': '1863–1933',
+        'pattern': r'gold certificate',
+        'obligor': 'The United States Treasury as custodian. A warehouse '
+                   'receipt, not a credit instrument.',
+        'why': 'Settlement convenience. Gold coin was heavy and awkward for '
+               'large transactions, so banks and the Treasury moved claims '
+               'on gold rather than gold itself.',
+        'clauses': (
+            (1863, 1927,
+             'THIS CERTIFIES THAT THERE HAVE BEEN DEPOSITED IN THE TREASURY '
+             'OF THE UNITED STATES [X] DOLLARS IN GOLD COIN PAYABLE TO THE '
+             'BEARER ON DEMAND',
+             'The strongest wording any US note ever carried. Not a promise '
+             'to pay but a statement that the gold already exists and is '
+             'set aside — a full reserve, deposited, and claimable.'),
+            (1928, 1933,
+             'THIS CERTIFIES THAT THERE HAVE BEEN DEPOSITED IN THE TREASURY '
+             'OF THE UNITED STATES [X] DOLLARS IN GOLD COIN PAYABLE TO THE '
+             'BEARER ON DEMAND',
+             'Unchanged wording, withdrawn instrument. Executive Order 6102 '
+             'in 1933 made private holding illegal and the Gold Reserve Act '
+             'of 1934 abrogated the gold clause: the sentence stayed true '
+             'on paper while ceasing to be enforceable.'),
+        ),
+    },
+    {
+        'name': 'Silver Certificate',
+        'years': '1878–1964',
+        'pattern': r'silver certificate',
+        'obligor': 'The United States Treasury, custodian of a silver '
+                   'reserve held dollar for dollar against the issue.',
+        'why': 'Politics as much as finance. The Bland–Allison Act of 1878 '
+               'and the Sherman Silver Purchase Act of 1890 forced the '
+               'Treasury to buy silver it did not need, to satisfy Western '
+               'mining states and the free-silver movement; certificates '
+               'were how that silver reached circulation.',
+        'clauses': (
+            (1878, 1933,
+             'THIS CERTIFIES THAT THERE HAVE BEEN DEPOSITED IN THE TREASURY '
+             'OF THE UNITED STATES [X] SILVER DOLLARS PAYABLE TO THE BEARER '
+             'ON DEMAND',
+             'Payable in a specific coin. The holder was entitled to actual '
+             'silver dollars, counted out.'),
+            (1934, 1963,
+             'THIS CERTIFIES THAT THERE IS ON DEPOSIT IN THE TREASURY OF '
+             'THE UNITED STATES [X] DOLLAR IN SILVER PAYABLE TO THE BEARER '
+             'ON DEMAND',
+             'One word doing a great deal of work: "silver dollars" becomes '
+             '"dollar in silver". After the Silver Purchase Act of 1934 the '
+             'Treasury could satisfy the claim with bullion instead of '
+             'struck coin — a quiet loosening of exactly what was owed.'),
+            (1964, 1968,
+             'Redemption withdrawn',
+             'Rising silver prices made the coins worth more melted than '
+             'spent. Redemption in silver dollars stopped in 1964 and in '
+             'bullion in June 1968, ending the last metallic claim on US '
+             'paper money.'),
+        ),
+    },
+    {
+        'name': 'Treasury (Coin) Note',
+        'years': '1890–1891',
+        'pattern': r'treasury note|coin note',
+        'obligor': 'The United States Treasury.',
+        'why': 'Issued under the Sherman Silver Purchase Act of 1890 to pay '
+               'for bullion the government was compelled to buy.',
+        'clauses': (
+            (1890, 1891,
+             'THE UNITED STATES OF AMERICA WILL PAY TO THE BEARER [X] '
+             'DOLLARS IN COIN',
+             'The most consequential ambiguity in US currency wording. '
+             '"In coin" deliberately declined to say gold or silver, '
+             'reserving the choice for the Treasury. Holders read it '
+             'correctly, redeemed in gold, and drained the gold reserve — '
+             'a direct contributor to the Panic of 1893. The Act was '
+             'repealed that year and the notes retired.'),
+        ),
+    },
+    {
+        'name': 'United States Note (Legal Tender Note)',
+        'years': '1862–1971',
+        'pattern': r'united states note|legal tender note|legal tender|greenback',
+        'obligor': 'The United States alone. No metal reserve, no bond '
+                   'collateral, no bank — the credit of the government and '
+                   'nothing else.',
+        'why': 'The Legal Tender Act of 1862, because the Union was losing '
+               'the race between war spending and the bond market. The '
+               'original greenbacks, and the first US paper to circulate on '
+               'declaration rather than on deposit.',
+        'clauses': (
+            (1862, 1877,
+             'THE UNITED STATES WILL PAY THE BEARER [X] DOLLARS … THIS NOTE '
+             'IS A LEGAL TENDER FOR ALL DEBTS PUBLIC AND PRIVATE EXCEPT '
+             'DUTIES ON IMPORTS AND INTEREST ON THE PUBLIC DEBT',
+             'Note what is carved out. Customs duties and interest on the '
+             'debt still had to be paid in coin — the government would not '
+             'accept its own paper for the two obligations that mattered '
+             'most to its creditors.'),
+            (1878, 1927,
+             'THE UNITED STATES WILL PAY THE BEARER [X] DOLLARS … LEGAL '
+             'TENDER FOR ALL DEBTS PUBLIC AND PRIVATE',
+             'The carve-outs go after resumption in 1879 makes the note '
+             'convertible again. The outstanding amount is frozen by law in '
+             '1878 at $346,681,016 and stays there for most of a century.'),
+            (1928, 1962,
+             'WILL PAY TO THE BEARER ON DEMAND [X] DOLLARS … THIS NOTE IS A '
+             'LEGAL TENDER AT ITS FACE VALUE FOR ALL DEBTS PUBLIC AND '
+             'PRIVATE',
+             'Distinguished from a Federal Reserve Note only by the red '
+             'seal and this wording — by now the practical difference '
+             'between the two had almost entirely disappeared.'),
+            (1963, 1971,
+             'THIS NOTE IS LEGAL TENDER FOR ALL DEBTS, PUBLIC AND PRIVATE',
+             'Converges on the identical sentence carried by the Federal '
+             'Reserve Note. A century after 1862 the fiat greenback and the '
+             'central bank note make the same promise, in the same words.'),
+        ),
+    },
+    {
+        'name': 'Demand Note',
+        'years': '1861–1862',
+        'pattern': r'demand note',
+        'obligor': 'The United States Treasury, payable at a named '
+                   'sub-office.',
+        'why': 'The first federal paper currency since the Continental, '
+               'issued to pay Union soldiers and suppliers in 1861.',
+        'clauses': (
+            (1861, 1862,
+             'THE UNITED STATES PROMISE TO PAY THE BEARER [X] DOLLARS ON '
+             'DEMAND … PAYABLE BY THE ASSISTANT TREASURER OF THE UNITED '
+             'STATES AT [CITY]',
+             'A promise with an address on it — redeemable in coin at one '
+             'named office. It held for about six months: specie payment '
+             'was suspended in December 1861, the notes stopped being '
+             'convertible, and that failure produced the Legal Tender Act '
+             'and the greenbacks that followed.'),
+        ),
+    },
+)
+
+# "The history of the times" — the surrounding monetary moment for the
+# series year. Ranges are inclusive and ordered; the first match wins.
+US_MONETARY_ERAS = (
+    (1861, 1865, 'Civil War finance',
+     'The Union is spending faster than it can borrow. Specie payment is '
+     'suspended in December 1861, gold goes to a premium against paper, and '
+     'the government starts issuing currency on its own authority — the '
+     'decision that creates federal paper money as a permanent institution.'),
+    (1866, 1877, 'Contraction and the road to resumption',
+     'The post-war fight is over whether to shrink the greenback supply back '
+     'to a gold standard. Deflation is severe, the Panic of 1873 wrecks the '
+     'railroads and the banks behind them, and the Resumption Act of 1875 '
+     'sets January 1879 as the date paper becomes convertible again.'),
+    (1878, 1899, 'Bimetallism and the free-silver fight',
+     'The central monetary argument of the era is whether silver should be '
+     'money alongside gold. The Bland–Allison and Sherman Acts force the '
+     'Treasury to buy silver, the gold reserve is drained by holders '
+     'redeeming ambiguous obligations, and the Panic of 1893 follows. '
+     'The question is settled for gold in 1900.'),
+    (1900, 1912, 'A gold standard without a central bank',
+     'The Gold Standard Act of 1900 fixes the dollar to gold, but there is '
+     'still no institution able to supply currency in a crisis. The Panic '
+     'of 1907 is stopped by J. P. Morgan personally organising the rescue, '
+     'which makes the case for a central bank impossible to argue with.'),
+    (1913, 1922, 'The Federal Reserve arrives, and a war to pay for',
+     'The Federal Reserve Act of 1913 creates twelve Reserve Banks and an '
+     'elastic currency. Almost immediately the system is financing the First '
+     'World War, and the note-issuing structure the country had used since '
+     'the Civil War begins to be dismantled.'),
+    (1923, 1928, 'Boom, and the last of the large-size notes',
+     'A decade of expansion, and the end of an era in the paper itself: in '
+     '1928 the government shrinks the note to the small size still used '
+     'today, cutting printing costs by around a third and retiring the '
+     'large-size designs that had run since 1861.'),
+    (1929, 1933, 'Depression, the bank holiday, and the end of gold',
+     'Nine thousand banks fail. In March 1933 every bank in the country is '
+     'closed by proclamation, and the Emergency Banking Act reopens them '
+     'against emergency currency. Executive Order 6102 requires private gold '
+     'to be surrendered, and the promises printed on gold-backed notes stop '
+     'being promises.'),
+    (1934, 1963, 'Managed money under Bretton Woods',
+     'The Gold Reserve Act of 1934 devalues the dollar and moves the gold to '
+     'the Treasury. Bretton Woods makes the dollar the anchor of the world '
+     'system — convertible to gold at $35, but only for foreign central '
+     'banks. Domestic paper is no longer redeemable in metal by anyone.'),
+    (1964, 1970, 'Silver leaves the currency',
+     'Rising silver prices make coins worth more melted than spent. The '
+     'Coinage Act of 1965 strips silver from the dime and quarter, silver '
+     'certificates stop being redeemable in 1968, and the last metallic '
+     'claim on US paper money disappears.'),
+    (1971, 2100, 'Pure fiat',
+     'The closing of the gold window in August 1971 ends convertibility for '
+     'good. Every note issued since is backed by legal tender status and '
+     'the credit of the United States, which is what the greenbacks of 1862 '
+     'were backed by at the start.'),
+)
+
+
+def _us_note_class(row):
+    """Match a note to its class from the text it carries. Series and
+    lettering are the reliable sources — the class is printed on the note,
+    so the transcribed lettering usually names it outright."""
+    haystack = ' '.join(
+        str(_row_get(row, f) or '')
+        for f in ('series', 'issuer', 'official', 'lettering',
+                  'lettering_translation', 'other_catalog', 'description')
+    ).lower()
+    if not haystack.strip():
+        return None
+    for note_class in US_NOTE_CLASSES:
+        if re.search(note_class['pattern'], haystack):
+            return note_class
+    return None
+
+
+def _us_monetary_era(year):
+    if not year:
+        return None
+    for start, end, label, body in US_MONETARY_ERAS:
+        if start <= year <= end:
+            return {'label': label, 'body': body, 'span': f'{start}–{end}'}
+    return None
+
+
+def _clause_for_year(note_class, year):
+    """The redemption clause in force for a series year, plus the one it
+    replaced. Showing the pair is the whole point: the policy change is
+    legible in the difference between two sentences, not in either alone."""
+    clauses = note_class.get('clauses') or ()
+    if not clauses:
+        return None, None
+
+    current = None
+    index = None
+    for i, clause in enumerate(clauses):
+        start, end = clause[0], clause[1]
+        if year and start <= year <= end:
+            current, index = clause, i
+            break
+
+    # No usable year, or a year outside the class's run: show the earliest
+    # clause rather than nothing, and don't imply a transition.
+    if current is None:
+        return _clause_dict(clauses[0]), None
+
+    previous = _clause_dict(clauses[index - 1]) if index and index > 0 else None
+    # Only show the predecessor when the wording actually moved — the Gold
+    # Certificate's 1928 change was the paper size, not the sentence, and
+    # quoting an identical clause twice reads as an error.
+    if previous and previous['text'] == _clause_dict(current)['text']:
+        previous = None
+    return _clause_dict(current), previous
+
+
+def _clause_dict(clause):
+    start, end, text, policy = clause
+    return {
+        'span': f'{start}–{end}' if start != end else str(start),
+        'text': text,
+        'policy': policy,
+    }
+
+
+@app.template_global()
+def us_series_panel(row):
+    """The explainer block that precedes a US series in the list: what
+    class of note this is, who was liable, the redemption clause as
+    printed in that year, what it replaced, and the monetary moment that
+    produced the change.
+
+    Returns None when the note is not American or when nothing useful can
+    be said, so the template can skip it rather than render an empty box."""
+    if not _is_us_note(row):
+        return None
+
+    note_class = _us_note_class(row)
+    year = _series_year(_row_get(row, 'series')) or _row_get(row, 'date_1')
+    era = _us_monetary_era(year)
+
+    if not note_class and not era:
+        return None
+
+    clause = previous_clause = None
+    if note_class:
+        clause, previous_clause = _clause_for_year(note_class, year)
+
+    return {
+        'series': (_row_get(row, 'series') or '').strip(),
+        'year': year,
+        'note_class': note_class,
+        'clause': clause,
+        'previous_clause': previous_clause,
+        'era': era,
+    }
+
+
 def _configure_db_connection(db):
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
