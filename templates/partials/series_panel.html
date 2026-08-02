@@ -1,27 +1,36 @@
 {# Banknote series explainer. Expects _panel from series_panels(rows).
-   US notes carry the full apparatus (liability, printed promise, what it
-   replaced); other countries get the era narrative alone. Order is
-   deliberate: what the note is, what it promised, what that replaced,
-   then the world that produced it. #}
+   US notes are organized by series: the header is 'Series of XXXX' and
+   the note type (Silver Certificate, Federal Reserve Note…) is named
+   within the panel, followed by liability, the printed promise, what it
+   replaced, and the era. Other countries: country header + era band. #}
 <div class="us-series-panel{% if _panel.continues_country %} usp-cont{% endif %}">
 
   <div class="usp-head">
     <span class="usp-class">{{ _panel.title }}</span>
     {% if _panel.title_span %}
     <span class="usp-span">{{ _panel.title_span }}</span>
-    {% elif _panel.era %}
+    {% elif _panel.era and _panel.country_key != 'us' %}
     <span class="usp-span">{{ _panel.era.span }}</span>
     {% endif %}
-    {# Every series this panel covers — a group can span several
-       (Series of 1934, 1934 A…) when they tell the same story. #}
-    {% if _panel.series_list %}
-    <span class="usp-series">{{ _panel.series_list|join(' · ') }}{% if _panel.series_more %} · +{{ _panel.series_more }} more{% endif %}</span>
-    {% elif _panel.series %}
-    <span class="usp-series">{{ _panel.series }}</span>
-    {% elif _panel.year %}
-    <span class="usp-series">{{ _panel.year }}</span>
+    {# Series covered — right-aligned. US panels are headed BY the series,
+       so the list is only shown for other countries, where one era panel
+       can span several series. #}
+    {% if _panel.country_key != 'us' %}
+      {% if _panel.series_list %}
+      <span class="usp-series">{{ _panel.series_list|join(' · ') }}{% if _panel.series_more %} · +{{ _panel.series_more }} more{% endif %}</span>
+      {% elif _panel.series %}
+      <span class="usp-series">{{ _panel.series }}</span>
+      {% elif _panel.year %}
+      <span class="usp-series">{{ _panel.year }}</span>
+      {% endif %}
     {% endif %}
   </div>
+
+  {% if _panel.note_type %}
+  <p class="usp-note-type">
+    <span class="usp-lbl">Note type</span>{{ _panel.note_type }}{% if _panel.note_class and _panel.note_class.years %} · {{ _panel.note_class.years }}{% endif %}
+  </p>
+  {% endif %}
 
   {% if _panel.note_class %}
   <p class="usp-obligor"><span class="usp-lbl">Liable</span>{{ _panel.note_class.obligor }}</p>

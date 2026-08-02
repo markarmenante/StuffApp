@@ -3480,15 +3480,38 @@ def _country_era(country_key, year):
     return None
 
 
+def _display_series(series, year):
+    """Standardize a US series label to 'Series of XXXX'. 'Series of 1896
+    (Educational Series)' is kept, '1891' / '1935A' / '1850s' get the
+    prefix, and 'Series 1935A' (missing 'of') is corrected. Falls back to
+    the note's year when no series label is stored."""
+    s = (series or '').strip()
+    if not s:
+        return f'Series of {year}' if year else ''
+    low = s.lower()
+    if low.startswith('series of '):
+        return 'Series of ' + s[len('series of '):]
+    if low.startswith('series '):
+        return 'Series of ' + s[len('series '):]
+    # Only prefix labels that carry a real series year — including the
+    # suffixed small-size form ('1935A', '1928B'). '1850s' (an obsolete
+    # bank note) stays as written: the lowercase decade 's' is not a
+    # series suffix.
+    if re.search(r'\b(1[6-9]\d\d|20\d\d)[A-Z]?\b', s):
+        return f'Series of {s}'
+    return s
+
+
 def _series_panel_for_row(row):
     """Panel content for one banknote, any country.
 
-    US notes get the full treatment — note class, liability, and the
-    redemption clause over time — because there the promise printed on the
-    face IS the history. Everyone else gets the era band alone: the
-    history of the note's times, with monetary policy in the foreground
-    only where it was the event (Weimar, the pengő, the 1944 drachma,
-    Zimbabwe). Returns None when there is nothing useful to say."""
+    US notes are organized by SERIES: the panel is headed by the series
+    ('Series of 1896'), names the note type within (Silver Certificate),
+    and carries the liability and the redemption clause printed on that
+    series. Everyone else gets the era band alone: the history of the
+    note's times, with monetary policy in the foreground only where it was
+    the event (Weimar, the pengő, the 1944 drachma, Zimbabwe). Returns None
+    when there is nothing useful to say."""
     country_key = _country_key(_row_get(row, 'country'))
     if country_key is None:
         return None
@@ -3503,11 +3526,14 @@ def _series_panel_for_row(row):
         clause = previous_clause = None
         if note_class:
             clause, previous_clause = _clause_for_year(note_class, year)
+        series_raw = (_row_get(row, 'series') or '').strip()
         return {
             'country_key': 'us',
-            'title': note_class['name'] if note_class else 'United States',
-            'title_span': note_class['years'] if note_class else '',
-            'series': (_row_get(row, 'series') or '').strip(),
+            # Header is the series; the note type moves into the panel.
+            'title': _display_series(series_raw, year) or 'United States',
+            'title_span': '',
+            'note_type': note_class['name'] if note_class else None,
+            'series': series_raw,
             'year': year,
             'note_class': note_class,
             'clause': clause,
@@ -3522,6 +3548,7 @@ def _series_panel_for_row(row):
         'country_key': country_key,
         'title': COUNTRY_ERAS[country_key][0],
         'title_span': '',
+        'note_type': None,
         'series': (_row_get(row, 'series') or '').strip(),
         'year': year,
         'note_class': None,
@@ -3582,6 +3609,7 @@ def series_panels(rows):
         series_label = panel['series'] or (str(panel['year']) if panel['year'] else '')
         signature = (
             panel['title'],
+            panel.get('note_type') or '',
             panel['clause']['span'] if panel['clause'] else '',
             panel['era']['label'] if panel['era'] else '',
         )

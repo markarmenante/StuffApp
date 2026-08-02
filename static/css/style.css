@@ -3830,3 +3830,9 @@ input[type="date"] { -webkit-appearance: none; }
 /* Era-only panels (non-US countries): the era paragraph is the whole body,
    so it drops the divider rule that separates it from the US-only rows. */
 .usp-era-solo { border-top: none; padding-top: 0; }
+
+/* US panels: the series is the header, so the note type gets its own
+   emphasized line right under it. */
+.us-series-panel p.usp-note-type {
+  font-weight: 600; color: var(--text); font-size: 13.5px;
+}
