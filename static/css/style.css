@@ -3821,3 +3821,7 @@ input[type="date"] { -webkit-appearance: none; }
   border-top: 3px solid var(--text);
   margin: 4px 0;
 }
+
+/* Era-only panels (non-US countries): the era paragraph is the whole body,
+   so it drops the divider rule that separates it from the US-only rows. */
+.usp-era-solo { border-top: none; padding-top: 0; }

@@ -1,17 +1,21 @@
-{# US series explainer. Expects _panel from us_series_panel(row).
-   Order is deliberate: what the note is, then what it promised, then what
-   that promise replaced, then the world that changed it. #}
+{# Banknote series explainer. Expects _panel from series_panels(rows).
+   US notes carry the full apparatus (liability, printed promise, what it
+   replaced); other countries get the era narrative alone. Order is
+   deliberate: what the note is, what it promised, what that replaced,
+   then the world that produced it. #}
 <div class="us-series-panel">
 
   <div class="usp-head">
-    {% if _panel.note_class %}
-    <span class="usp-class">{{ _panel.note_class.name }}</span>
-    <span class="usp-span">{{ _panel.note_class.years }}</span>
+    <span class="usp-class">{{ _panel.title }}</span>
+    {% if _panel.title_span %}
+    <span class="usp-span">{{ _panel.title_span }}</span>
+    {% elif _panel.era %}
+    <span class="usp-span">{{ _panel.era.span }}</span>
     {% endif %}
-    {# Every series this panel covers — the group can span several
-       (Series of 1934, 1934 A…) when they tell the same monetary story. #}
+    {# Every series this panel covers — a group can span several
+       (Series of 1934, 1934 A…) when they tell the same story. #}
     {% if _panel.series_list %}
-    <span class="usp-series">{{ _panel.series_list|join(' · ') }}</span>
+    <span class="usp-series">{{ _panel.series_list|join(' · ') }}{% if _panel.series_more %} · +{{ _panel.series_more }} more{% endif %}</span>
     {% elif _panel.series %}
     <span class="usp-series">{{ _panel.series }}</span>
     {% elif _panel.year %}
@@ -49,7 +53,7 @@
   {% endif %}
 
   {% if _panel.era %}
-  <p class="usp-era">
+  <p class="usp-era {% if not _panel.note_class %}usp-era-solo{% endif %}">
     <span class="usp-lbl">{{ _panel.era.span }} · {{ _panel.era.label }}</span>{{ _panel.era.body }}
   </p>
   {% endif %}

@@ -1981,6 +1981,442 @@ US_MONETARY_ERAS = (
 )
 
 
+# ── Country histories ───────────────────────────────────────────────────
+#
+# The same era-band treatment the US notes get, for everyone else — but
+# deliberately lighter on monetary policy. A German or Austrian note is
+# explained by the history of its times (war, empire, occupation,
+# partition); the monetary machinery only takes the foreground where it
+# WAS the history — Weimar 1923, the pengő, the 1944 drachma, Zimbabwe.
+#
+# Keys are matched against the note's country field via COUNTRY_KEYS
+# (spellings observed in dealer text and the AI extractor differ). A
+# country with no table here simply gets no panel.
+
+COUNTRY_KEYS = {
+    'germany': (
+        'germany', 'deutschland', 'german empire', 'german reich',
+        'weimar republic', 'weimar germany', 'west germany', 'east germany',
+        'german democratic republic', 'federal republic of germany',
+        'germany (weimar republic)', 'germany (empire)', 'danzig',
+    ),
+    'austria': (
+        'austria', 'austria-hungary', 'austro-hungarian empire',
+        'austrian empire', 'austro-hungary',
+    ),
+    'hungary': ('hungary', 'kingdom of hungary'),
+    'great-britain': (
+        'great britain', 'england', 'united kingdom', 'uk', 'britain',
+        'scotland', 'gb', 'u.k.',
+    ),
+    'france': ('france', 'french republic'),
+    'italy': ('italy', 'kingdom of italy'),
+    'russia': (
+        'russia', 'russian empire', 'soviet union', 'ussr', 'rsfsr',
+        'soviet russia', 'russian federation',
+    ),
+    'poland': ('poland', 'polish republic'),
+    'greece': ('greece', 'kingdom of greece'),
+    'yugoslavia': ('yugoslavia', 'kingdom of yugoslavia', 'sfr yugoslavia'),
+    'china': ('china', 'republic of china', "people's republic of china"),
+    'japan': ('japan', 'empire of japan'),
+    'india': ('india', 'british india'),
+    'turkey': ('turkey', 'ottoman empire', 'türkiye', 'turkiye'),
+    'zimbabwe': ('zimbabwe', 'rhodesia'),
+    'venezuela': ('venezuela',),
+}
+
+COUNTRY_ERAS = {
+    'germany': ('Germany', (
+        (1871, 1913, 'The imperial goldmark',
+         'Unification in 1871 folds twenty-odd currencies into one mark on '
+         'gold, issued by the new Reichsbank alongside a handful of older '
+         'state banks. It is the money of Germany’s industrial surge — '
+         'steel, chemicals, railways — and it holds its value for forty '
+         'years, which is why the generation that lived through what came '
+         'next never stopped measuring loss against it.'),
+        (1914, 1918, 'War money and the first Notgeld',
+         'Gold convertibility is suspended in the first week of the war and '
+         'the fighting is financed by loans and the printing press on the '
+         'assumption the enemy would pay for it all. Small change vanishes '
+         'as coins are hoarded for their metal, and towns, firms, and '
+         'prison camps step in with their own emergency paper — the first '
+         'Notgeld, born as a practical fix, not yet a collectible.'),
+        (1919, 1923, 'Weimar and the great inflation',
+         'The defining monetary catastrophe of the modern age. Reparations, '
+         'deficits, and the 1923 Ruhr occupation — met by paying striking '
+         'workers with printed money — take the mark from 4.2 to the '
+         'dollar in 1914 to 4.2 trillion by November 1923. Wages are paid '
+         'twice a day and spent within the hour; savings, pensions, and '
+         'mortgages are annihilated, a trauma that shapes German economics '
+         'to this day. The era’s Notgeld splits in two: real emergency '
+         'issues in ever-larger denominations, and the artist-designed '
+         'Serienscheine printed for collectors — town histories, legends, '
+         'and biting political satire on money that barely pretended to '
+         'circulate. Stabilization comes overnight in November 1923 with '
+         'the Rentenmark, nominally backed by a mortgage on all German '
+         'land — twelve zeros struck off, and it held.'),
+        (1924, 1932, 'The Rentenmark years',
+         'The Reichsmark succeeds the Rentenmark in 1924 and Germany '
+         'borrows its way to a short golden age on American credit. The '
+         '1929 crash calls those loans home; Brüning answers depression '
+         'with deflation, unemployment passes six million, and the '
+         'political center gives way.'),
+        (1933, 1945, 'The Third Reich and the war',
+         'Currency stays deceptively stable while rearmament is hidden '
+         'off-books in MEFO bills and price controls suppress the '
+         'inflation. Occupation issues follow the armies across Europe; '
+         'concentration and prison camps have their own scrip; and by the '
+         'end cigarettes are sounder money than the Reichsmark.'),
+        (1945, 1948, 'Occupation and the cigarette economy',
+         'Four occupation zones share a broken currency nobody trusts — '
+         'the real economy runs on barter, ration coupons, and American '
+         'cigarettes. The 1948 currency reform that creates the Deutsche '
+         'Mark in the western zones restocks shop windows almost '
+         'overnight, and the Soviet response — a separate eastern mark and '
+         'the Berlin blockade — hardens the division of Germany.'),
+        (1949, 2001, 'Two marks, then one, then the euro',
+         'The Deutsche Mark becomes the anchor of European money and the '
+         'symbol of the Wirtschaftswunder; the East German mark, '
+         'unconvertible, becomes a symbol of the other kind. Reunification '
+         'in 1990 swaps eastern savings into DM at generous rates, and the '
+         'mark itself retires into the euro in 2002.'),
+    )),
+    'austria': ('Austria', (
+        (1867, 1913, 'The Dual Monarchy',
+         'The Austro-Hungarian krone serves a single market of fifty '
+         'million people and a dozen nationalities from Vienna to Lemberg. '
+         'The notes themselves say it: denominations repeated in eight or '
+         'more languages, the empire’s diversity printed on its money.'),
+        (1914, 1918, 'War and dissolution',
+         'The war the empire started consumes it. Financed by the press '
+         'once loan appetite fades, the krone loses most of its value '
+         'before the state that issued it ceases to exist in November '
+         '1918, leaving successor states to overstamp its banknotes while '
+         'they organized currencies of their own.'),
+        (1919, 1924, 'The little brother of the German inflation',
+         'Rump Austria — a capital of two million attached to a country of '
+         'six — slides into its own hyperinflation, prices rising some '
+         'fourteen-thousandfold. Towns issue Notgeld in the German manner, '
+         'much of it for collectors. A League of Nations loan in 1922 '
+         'stabilizes the krone at the price of foreign control of the '
+         'budget, and the schilling replaces it in 1925 at 10,000 to one.'),
+        (1925, 1937, 'The schilling between the wars',
+         'The "Alpine dollar" is hard money over a fragile polity: '
+         'the Creditanstalt collapse of 1931 opens the European banking '
+         'crisis, and civil war in 1934 precedes the authoritarian '
+         'corporate state.'),
+        (1938, 1945, 'Anschluss',
+         'Annexation replaces the schilling with the Reichsmark at a '
+         'confiscatory rate; Austria’s war is Germany’s, through to the '
+         'ruins of 1945.'),
+        (1945, 2001, 'Second Republic',
+         'The restored schilling, after an early inflationary scare, '
+         'becomes one of Europe’s hardest currencies, shadowing the '
+         'Deutsche Mark until both retire into the euro.'),
+    )),
+    'hungary': ('Hungary', (
+        (1867, 1918, 'The Hungarian half of the Dual Monarchy',
+         'Budapest mints and prints alongside Vienna — same krone, '
+         'proudly separate note designs. The arrangement dies with the '
+         'empire in 1918, and Trianon strips two-thirds of the kingdom’s '
+         'territory.'),
+        (1919, 1926, 'Revolution and the korona inflation',
+         'A communist republic, its overthrow, and a punishing peace are '
+         'financed on paper; the korona follows the Austrian krone into '
+         'collapse and is replaced by the pengő in 1927 at 12,500 to one.'),
+        (1927, 1944, 'The pengő',
+         'Solid through depression and revision politics, then broken by '
+         'war on the Axis side and German occupation in 1944.'),
+        (1945, 1946, 'The worst inflation ever recorded',
+         'The pengő’s end is the most extreme hyperinflation in monetary '
+         'history: prices doubling roughly every fifteen hours at the '
+         'peak, notes denominated in hundreds of quintillions, the '
+         'unissued milliard b.-pengő printed and abandoned. The forint of '
+         'August 1946 replaces it at 4×10^29 to one — every pengő ever '
+         'printed worth, together, a fraction of one US cent.'),
+        (1947, 1989, 'Forint under socialism',
+         '"Goulash communism" keeps shops fuller than the bloc norm; the '
+         'forint is soft but stable, and survives the transition of 1989 '
+         'to remain Hungary’s money today.'),
+    )),
+    'great-britain': ('Great Britain', (
+        (1694, 1913, 'The pound at the center of the world',
+         'From the Bank of England’s founding, sterling grows into the '
+         'currency of global trade; the nineteenth-century gold sovereign '
+         'and the white fiver are as close to universal money as the '
+         'world has had. Scottish and provincial banks issue their own '
+         'notes under the Bank’s shadow.'),
+        (1914, 1925, 'War and the Bradbury pound',
+         'Gold coin is withdrawn in 1914 and the Treasury itself prints '
+         'the first £1 and 10-shilling notes — "Bradburys" — to replace '
+         'sovereigns in pockets. Churchill’s 1925 return to gold at the '
+         'old prewar parity overvalues the pound and squeezes industry '
+         'for the rest of the decade.'),
+        (1931, 1945, 'Off gold, and a war economy',
+         'Britain leaves gold for good in September 1931 — the moment the '
+         'international gold standard effectively dies. The Second World '
+         'War brings exchange control, rationing, and a note issue '
+         'redesigned mid-war after the Nazis’ Operation Bernhard '
+         'counterfeited the white fiver well enough to force its '
+         'retirement.'),
+        (1946, 1979, 'Austerity to devaluation',
+         'A nationalized Bank of England manages a currency in managed '
+         'decline: devaluation in 1949, again in 1967 ("the pound in your '
+         'pocket"), decimalization in 1971 ending twelve pence to the '
+         'shilling after eight centuries, and the IMF at the door in '
+         '1976.'),
+        (1980, 2100, 'The modern pound',
+         'Inflation tamed in the 1980s, ejection from the European '
+         'exchange mechanism in 1992, Bank independence in 1997 — and '
+         'sterling, alone among the old great-power currencies, never '
+         'joined the euro.'),
+    )),
+    'france': ('France', (
+        (1800, 1913, 'The germinal franc',
+         'Napoleon’s franc holds its metal content for over a century — '
+         'the bourgeois virtue of French finance — and anchors the Latin '
+         'Monetary Union across southern Europe.'),
+        (1914, 1928, 'The franc after the trenches',
+         'The war is financed on the slogan "Germany will pay"; Germany '
+         'largely does not. The franc loses four-fifths of its value '
+         'before Poincaré stabilizes it in 1926–28 at a fifth of the old '
+         'parity — a managed partial default that spares France a Weimar '
+         'but ruins the rentier class.'),
+        (1929, 1945, 'Depression, defeat, occupation',
+         'Clinging to gold longest of the great powers deepens France’s '
+         'depression; defeat in 1940 splits the country, and occupation '
+         'costs are levied in francs at an extortionate imposed rate.'),
+        (1945, 1960, 'Reconstruction and the nouveau franc',
+         'Repeated postwar devaluations end with de Gaulle’s 1960 '
+         'nouveau franc — two zeros struck off, a hard-money signal for '
+         'the Fifth Republic.'),
+        (1960, 2001, 'From franc fort to the euro',
+         'The franc shadows the Deutsche Mark through the European '
+         'Monetary System and dissolves into the euro it did much to '
+         'create.'),
+    )),
+    'italy': ('Italy', (
+        (1861, 1913, 'The lira of united Italy',
+         'A new kingdom’s currency struggling to be believed: bouts of '
+         'inconvertibility (the corso forzoso), bank scandals, and a '
+         'banking collapse in 1893 that produces the Bank of Italy.'),
+        (1914, 1943, 'War, fascism, and Quota 90',
+         'The First World War quadruples prices; Mussolini stakes his '
+         'prestige on revaluing the lira to 90 per pound in 1927 — hard '
+         'money as propaganda, paid for in recession. The next war breaks '
+         'the currency entirely.'),
+        (1943, 1949, 'Two Italys, one inflation',
+         'Allied military lire in the liberated south, the Social '
+         'Republic’s issues in the German-held north, and by 1945 prices '
+         'twenty times prewar. The republic stabilizes in 1947 but the '
+         'zeros never come off — Italians will price cars in millions for '
+         'half a century.'),
+        (1950, 2001, 'The long lira',
+         'Miracle-years growth, chronic devaluation, and a 1970s of '
+         'strikes and inflation; the lira leaves the European exchange '
+         'mechanism in 1992 and retires into the euro at 1,936 to one.'),
+    )),
+    'russia': ('Russia', (
+        (1769, 1913, 'Assignats to the gold standard',
+         'Catherine’s assignat rouble begins a long Russian pattern — '
+         'paper issued for war, then painfully consolidated. Witte puts '
+         'the rouble on gold in 1897, money of the empire’s last '
+         'industrial spurt.'),
+        (1914, 1923, 'War, revolution, and the sovznak',
+         'War suspends gold; revolution destroys the rest. Provisional '
+         'Government kerenki, White and regional issues by the hundreds, '
+         'and Soviet sovznaki printed until prices ran in millions — for '
+         'a moment Bolshevik doctrine welcomed the death of money itself. '
+         'The 1922–24 reforms and the gold-backed chervonets end it.'),
+        (1924, 1990, 'The administrative rouble',
+         'Under planning, the rouble is an accounting token — prices set '
+         'by decree, exchange criminalized, confiscatory reforms in 1947 '
+         'and 1961 shearing wartime and hoarded cash.'),
+        (1991, 1998, 'Collapse and the new rouble',
+         'Price liberalization meets monetary overhang: inflation over '
+         '2,500% in 1992, savings wiped out again, and the 1998 default '
+         'and redenomination (three zeros off) close the decade.'),
+    )),
+    'poland': ('Poland', (
+        (1918, 1923, 'The marka and the borders wars',
+         'A state reassembled from three empires fights six border '
+         'conflicts on a printed marka; by 1923 it is hyperinflation, '
+         'prices millions of times prewar.'),
+        (1924, 1939, 'Grabski’s złoty',
+         'Stabilization without foreign control — a point of national '
+         'pride — gives Poland the złoty; depression hits its peasant '
+         'majority brutally hard.'),
+        (1939, 1944, 'Occupation',
+         'The General Government circulates occupation złoty ("młynarki") '
+         'while the ghettos are issued their own scrip — Litzmannstadt’s '
+         'quittungen among the darkest paper in any collection.'),
+        (1945, 1989, 'The people’s złoty',
+         'Confiscatory reform in 1950, chronic shortage economics, and by '
+         'the 1980s inflation that martial law cannot decree away.'),
+        (1990, 1995, 'Shock therapy',
+         'The Balcerowicz plan trades a brutal year for a working '
+         'currency; 1995 strikes four zeros and the złoty becomes one of '
+         'the transition’s successes.'),
+    )),
+    'greece': ('Greece', (
+        (1841, 1940, 'The drachma of the new state',
+         'Chronic deficits, a spectacular 1893 default ("Regretfully, we '
+         'are bankrupt"), international financial control, and the '
+         'population exchange of 1923 — the drachma’s first century is '
+         'turbulent even before the catastrophe.'),
+        (1941, 1944, 'Occupation hyperinflation',
+         'Axis occupation levies crushing costs and famine kills tens of '
+         'thousands in Athens; by November 1944 prices double roughly '
+         'every four days and the largest note is 100 billion drachmai. '
+         'The liberation drachma swaps at 50 billion to one — the '
+         'third-worst inflation ever recorded.'),
+        (1945, 1953, 'Civil war and the sovereign standard',
+         'Through civil war Greeks price everything in gold sovereigns; '
+         'the 1953 devaluation and reform finally give the paper drachma '
+         'a quarter-century of credibility.'),
+        (1954, 2001, 'The long climb to the euro',
+         'Growth, junta, restoration, and the drachma — Europe’s oldest '
+         'currency name — retires into the euro in 2002.'),
+    )),
+    'yugoslavia': ('Yugoslavia', (
+        (1918, 1941, 'The first Yugoslavia',
+         'A kingdom assembled from Habsburg and Ottoman fragments '
+         'overstamps krone and issues dinars; the tensions on the map '
+         'never leave the money.'),
+        (1941, 1945, 'Dismemberment',
+         'Occupation currencies multiply — the Independent State of '
+         'Croatia’s kuna, Serbian dinars under German control, Italian '
+         'lire on the coast.'),
+        (1945, 1991, 'Tito’s dinar',
+         'Self-management socialism runs on a soft dinar, repeatedly '
+         'devalued, redenominated in 1966; after Tito the debts and the '
+         'inflation compound through the 1980s.'),
+        (1992, 1994, 'The Milošević hyperinflation',
+         'Rump Yugoslavia under sanctions prints for war: at the January '
+         '1994 peak prices double roughly every day and a half, and the '
+         '500-billion-dinar note becomes the emblem of the second-worst '
+         'inflation ever measured. The "super dinar" of 1994 briefly '
+         'holds at one to the Deutsche Mark.'),
+    )),
+    'china': ('China', (
+        (1023, 1911, 'The oldest paper money on earth',
+         'China invented circulating paper in the Song dynasty and also '
+         'invented its abuse — Yuan-era inflations that led the Ming to '
+         'abandon paper for silver. The late empire runs on silver taels, '
+         'copper cash, and a chaos of provincial and foreign bank '
+         'issues.'),
+        (1912, 1937, 'Republic and warlords',
+         'Every warlord, province, and bank prints; the 1935 fabi reform '
+         'nationalizes the note issue and takes China off silver — sound '
+         'in design, fatal in the hands of a state about to fight a '
+         'fifteen-year war.'),
+        (1937, 1949, 'War and the fabi/gold-yuan collapse',
+         'Japan’s invasion, then civil war, are financed on the press. '
+         'The 1948 gold yuan reform confiscates private metal and then '
+         'inflates worse than the fabi it replaced — prices in Shanghai '
+         'doubling in days. The collapse of the money did as much as any '
+         'army to deliver the mainland to the Communists.'),
+        (1949, 2100, 'The renminbi',
+         'The people’s currency, twice redenominated, non-convertible '
+         'through the planned decades, and since the 1990s the money of '
+         'the largest industrial expansion in history.'),
+    )),
+    'japan': ('Japan', (
+        (1868, 1930, 'Meiji to the gold standard',
+         'The yen of 1871 replaces feudal clan notes; indemnity gold from '
+         'China puts it on the standard in 1897. The 1927 banking panic '
+         'previews the fragility beneath.'),
+        (1931, 1945, 'Takahashi and the war machine',
+         'Leaving gold early and spending its way out, Japan has one of '
+         'the mildest depressions — then the militarists murder finance '
+         'minister Takahashi for trying to rein spending in, and the '
+         'press finances empire: military yen across occupied Asia, '
+         'puppet-bank issues in China, invasion money from Burma to the '
+         'Philippines.'),
+        (1945, 1949, 'Defeat and the new yen',
+         'Prices rise some hundredfold in four years; deposits are '
+         'frozen, the currency is stamped and swapped, and the Dodge '
+         'Line of 1949 fixes 360 to the dollar — a rate that holds for '
+         'twenty-two years.'),
+        (1950, 2100, 'The strong yen',
+         'Export-led growth turns the yen into a hard currency; the 1985 '
+         'Plaza Accord doubles its value, the bubble bursts in 1990, and '
+         'Japan pioneers the zero-rate world everyone else later '
+         'joined.'),
+    )),
+    'india': ('India', (
+        (1861, 1946, 'The rupee of the Raj',
+         'Government of India notes replace the Presidency banks’ issues '
+         'in 1861; the silver rupee’s long fall against gold is a chronic '
+         'headache of imperial finance. The Reserve Bank arrives in 1935, '
+         'and wartime inflation plus the 1943 Bengal famine mark the '
+         'Raj’s last notes.'),
+        (1947, 1990, 'Independence and the licence raj',
+         'Partition splits the currency zone — Pakistan overstamps Indian '
+         'notes — and planned-economy India runs a controlled, '
+         'devaluation-punctuated rupee (1966, 1991), with high-value '
+         'notes demonetized in 1946 and again in 1978 against black '
+         'money.'),
+        (1991, 2100, 'Liberalization',
+         'The 1991 crisis — gold airlifted to London as collateral — '
+         'forces the opening; the 2016 demonetization of 86% of cash in '
+         'circulation repeats the old instinct at modern scale.'),
+    )),
+    'turkey': ('Turkey', (
+        (1840, 1922, 'Ottoman paper',
+         'The kaime starts as interest-bearing treasury paper and decays '
+         'into inflationary issue; default in 1875 brings European '
+         'control of Ottoman revenues. War finance after 1914 leaves the '
+         'empire’s last notes nearly worthless outside the capital.'),
+        (1923, 1969, 'The republican lira',
+         'Atatürk’s republic prints its own lira — Latin script from '
+         '1928, the alphabet reform visible on the money itself — and '
+         'keeps it broadly stable through étatist decades.'),
+        (1970, 2004, 'The chronic inflation',
+         'Three decades of 30–100% annual inflation without ever quite '
+         'tipping into hyperinflation: prices in millions, the '
+         '20-million-lira note, and a national habit of thinking in '
+         'dollars.'),
+        (2005, 2100, 'Six zeros off',
+         'The 2005 new lira strikes six zeros — a fresh start whose '
+         'credibility the 2018–2023 depreciation spends back down.'),
+    )),
+    'zimbabwe': ('Zimbabwe', (
+        (1980, 1997, 'The Zimbabwe dollar at par',
+         'At independence the new dollar is worth more than the US '
+         'dollar, backing one of Africa’s more diversified economies.'),
+        (1998, 2009, 'The second-worst hyperinflation ever',
+         'Land seizures, war spending, and the printing press compound '
+         'into the canonical modern hyperinflation: three '
+         'redenominations, the hundred-trillion-dollar note, and a '
+         'November 2008 peak with prices doubling roughly every day. The '
+         'currency is abandoned in 2009 for the US dollar and rand — '
+         'money dying not by decree but by refusal.'),
+        (2010, 2100, 'After the dollar',
+         'Bond notes, RTGS dollars, the ZiG — successive attempts to '
+         'reintroduce a national currency against a population that '
+         'remembers.'),
+    )),
+    'venezuela': ('Venezuela', (
+        (1879, 1982, 'The petro-bolívar',
+         'The bolívar rides a century of oil into being one of Latin '
+         'America’s hardest currencies — 4.30 to the dollar for a '
+         'generation.'),
+        (1983, 2012, 'Black Friday to controls',
+         'The 1983 devaluation ends the illusion; exchange controls from '
+         '2003 breed the parallel market that later swallows the '
+         'official rate.'),
+        (2013, 2100, 'The bolívar hyperinflation',
+         'The first hyperinflation of the smartphone era: peak annual '
+         'inflation estimated in the millions of percent, fourteen zeros '
+         'removed across two redenominations (2018, 2021), notes '
+         'abandoned for informal dollarization while they were still '
+         'being printed.'),
+    )),
+}
+
+
 def _us_note_class(row):
     """Match a note to its class from the text it carries. Series and
     lettering are the reliable sources — the class is printed on the note,
@@ -2046,47 +2482,100 @@ def _clause_dict(clause):
     }
 
 
-def _us_series_panel(row):
-    """The explainer content for one US note: what class of note this is,
-    who was liable, the redemption clause as printed in that year, what it
-    replaced, and the monetary moment that produced the change.
+def _country_key(country):
+    """Normalize a country field to a COUNTRY_ERAS key, or None."""
+    value = (country or '').strip().lower().rstrip('.')
+    if not value:
+        return None
+    if value in US_COUNTRY_NAMES or value.startswith('united states'):
+        return 'us'
+    for key, spellings in COUNTRY_KEYS.items():
+        if value in spellings:
+            return key
+    # Forgiving prefix match for qualified forms the extractor emits, e.g.
+    # "Germany — Weimar Republic" or "Austria (First Republic)".
+    for key, spellings in COUNTRY_KEYS.items():
+        for spelling in spellings:
+            if value.startswith(spelling + ' ') or value.startswith(spelling + ','):
+                return key
+    return None
 
-    Returns None when the note is not American or when nothing useful can
-    be said."""
-    if not _is_us_note(row):
+
+def _country_era(country_key, year):
+    if not year or country_key not in COUNTRY_ERAS:
+        return None
+    title, eras = COUNTRY_ERAS[country_key]
+    for start, end, label, body in eras:
+        if start <= year <= end:
+            return {'label': label, 'body': body, 'span': f'{start}–{end}'}
+    return None
+
+
+def _series_panel_for_row(row):
+    """Panel content for one banknote, any country.
+
+    US notes get the full treatment — note class, liability, and the
+    redemption clause over time — because there the promise printed on the
+    face IS the history. Everyone else gets the era band alone: the
+    history of the note's times, with monetary policy in the foreground
+    only where it was the event (Weimar, the pengő, the 1944 drachma,
+    Zimbabwe). Returns None when there is nothing useful to say."""
+    country_key = _country_key(_row_get(row, 'country'))
+    if country_key is None:
         return None
 
-    note_class = _us_note_class(row)
     year = _series_year(_row_get(row, 'series')) or _row_get(row, 'date_1')
-    era = _us_monetary_era(year)
 
-    if not note_class and not era:
+    if country_key == 'us':
+        note_class = _us_note_class(row)
+        era = _us_monetary_era(year)
+        if not note_class and not era:
+            return None
+        clause = previous_clause = None
+        if note_class:
+            clause, previous_clause = _clause_for_year(note_class, year)
+        return {
+            'title': note_class['name'] if note_class else 'United States',
+            'title_span': note_class['years'] if note_class else '',
+            'series': (_row_get(row, 'series') or '').strip(),
+            'year': year,
+            'note_class': note_class,
+            'clause': clause,
+            'previous_clause': previous_clause,
+            'era': era,
+        }
+
+    era = _country_era(country_key, year)
+    if era is None:
         return None
-
-    clause = previous_clause = None
-    if note_class:
-        clause, previous_clause = _clause_for_year(note_class, year)
-
     return {
+        'title': COUNTRY_ERAS[country_key][0],
+        'title_span': '',
         'series': (_row_get(row, 'series') or '').strip(),
         'year': year,
-        'note_class': note_class,
-        'clause': clause,
-        'previous_clause': previous_clause,
+        'note_class': None,
+        'clause': None,
+        'previous_clause': None,
         'era': era,
     }
 
 
+# Longest series list a panel head will spell out; beyond it the tail is
+# summarized ("+N more") — a German inflation-year group can span dozens
+# of Notgeld series.
+_PANEL_SERIES_DISPLAY_CAP = 6
+
+
 @app.template_global()
-def us_series_panels(rows):
+def series_panels(rows):
     """Panel placement for the whole banknote list, precomputed so the
     template stays a dumb loop.
 
-    Consecutive US notes whose class, clause span, and era all match share
-    ONE panel — 'Series of 1934' and 'Series of 1934 A' Federal Reserve
-    Notes say the same monetary thing, and repeating the block per series
-    read as a bug. The panel instead names every series it covers, and the
-    series boundaries inside a group get a divider entry so the blocks
+    Consecutive notes whose panel tells the same story (same country,
+    class, clause, era) share ONE panel — 'Series of 1934' and 'Series of
+    1934 A' Federal Reserve Notes, or fifty Notgeld towns in 1921 Germany,
+    say the same historical thing. The panel names the series it covers,
+    and series boundaries inside a group get a divider entry so the blocks
     stay visually separate.
 
     Returns {row_id: {'panel': {...}} | {'divider': True}}; rows absent
@@ -2098,16 +2587,16 @@ def us_series_panels(rows):
     prev_series = None
 
     for row in rows:
-        panel = _us_series_panel(row)
+        panel = _series_panel_for_row(row)
         if panel is None:
-            # Non-US note (or nothing to say): closes any open group.
+            # Unknown country (or nothing to say): closes any open group.
             group_signature = group_panel = group_series_seen = None
             prev_series = None
             continue
 
         series_label = panel['series'] or (str(panel['year']) if panel['year'] else '')
         signature = (
-            panel['note_class']['name'] if panel['note_class'] else '',
+            panel['title'],
             panel['clause']['span'] if panel['clause'] else '',
             panel['era']['label'] if panel['era'] else '',
         )
@@ -2117,6 +2606,7 @@ def us_series_panels(rows):
             group_panel = panel
             group_series_seen = set()
             panel['series_list'] = []
+            panel['series_more'] = 0
             placements[_row_get(row, 'id')] = {'panel': panel}
         elif series_label and series_label != prev_series:
             # Same story, new series: rule a line between the blocks.
@@ -2124,7 +2614,10 @@ def us_series_panels(rows):
 
         if series_label and series_label not in group_series_seen:
             group_series_seen.add(series_label)
-            group_panel['series_list'].append(series_label)
+            if len(group_panel['series_list']) < _PANEL_SERIES_DISPLAY_CAP:
+                group_panel['series_list'].append(series_label)
+            else:
+                group_panel['series_more'] += 1
         prev_series = series_label
 
     return placements
@@ -8265,6 +8758,9 @@ def list_view(category):
     dot = request.args.get('dot', '') == '1'
     raw_filter = request.args.get('filter')
     coin_filter = (raw_filter or '').strip() or None
+    # Banknotes: the History pill switches the era/monetary-policy panels
+    # on and off. On by default; ?history=0 hides them.
+    show_history = request.args.get('history') != '0'
     # ?at=<property name> — drill in from a Property's pill row.
     at_property = (request.args.get('at') or '').strip() or None
     # Default filters apply on a fresh visit (no explicit ?filter= and no
@@ -8355,6 +8851,7 @@ def list_view(category):
                            q=q,
                            dot=dot,
                            coin_filter=coin_filter,
+                           show_history=show_history,
                            at_property=at_property,
                            at_property_url=at_property_url,
                            prop_status=prop_status,

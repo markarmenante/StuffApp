@@ -60,17 +60,25 @@
      title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
   {% endif %}
   {% if category == 'banknotes' and not at_property %}
+  {# History state rides along on every banknote pill so toggling a filter
+     doesn't silently switch the panels back on. Default (on) keeps URLs
+     clean by passing None. #}
+  {%- set _hist = None if show_history else '0' -%}
   {# One pill cycling the issue-type axis: Notgeld → National → All. #}
   {%- set _bn_next = 'national' if coin_filter == 'notgeld' else (None if coin_filter == 'national' else 'notgeld') -%}
-  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=_bn_next) }}"
+  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=_bn_next, history=_hist) }}"
      class="toolbar-btn pill {% if coin_filter in ('notgeld', 'national') %}active{% endif %}"
      title="Cycle issue type: Notgeld → National → All">{{ 'Notgeld' if coin_filter == 'notgeld' else ('National' if coin_filter == 'national' else 'Type: All') }}</a>
   {# Country axis — toggles the list to US issues only. #}
-  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=None if coin_filter == 'us' else 'us') }}"
+  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=None if coin_filter == 'us' else 'us', history=_hist) }}"
      class="toolbar-btn pill {% if coin_filter == 'us' %}active{% endif %}"
      title="United States banknotes">US</a>
+  {# Switches the historical/monetary-context panels on and off. #}
+  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=coin_filter or None, history='0' if show_history else None) }}"
+     class="toolbar-btn pill {% if show_history %}active{% endif %}"
+     title="Show or hide the historical context panels">History</a>
   {% if has_ordered or coin_filter == 'ordered' %}
-  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
+  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered', history=_hist) }}"
      class="toolbar-btn pill ordered-filter-pill {% if coin_filter == 'ordered' %}active{% endif %}"
      title="Banknotes with status Ordered"
      aria-label="Banknotes with status Ordered"><span class="ordered-filter-dot"></span></a>
@@ -159,11 +167,12 @@
      Commercial block begins. ns.prev tracks the prior row's type so we
      can detect the boundary mid-loop. #}
   {% set ns = namespace(prev=None) %}
-  {# US banknotes: panels head each run of series that tell the same
-     monetary story (class + clause + era), naming the series they cover;
-     series boundaries inside a run get a dark divider. Placement is
-     precomputed in us_series_panels() so this loop stays dumb. #}
-  {% set _us_panels = us_series_panels(rows) if category == 'banknotes' else {} %}
+  {# Banknotes: panels head each run of series that tell the same
+     historical story (country/class + clause + era), naming the series
+     they cover; series boundaries inside a run get a dark divider. The
+     History pill switches all of it off. Placement is precomputed in
+     series_panels() so this loop stays dumb. #}
+  {% set _us_panels = series_panels(rows) if category == 'banknotes' and show_history else {} %}
   {% for row in rows %}
   {% if category == 'properties' and ns.prev == 'Residential' and (row['type'] or '') == 'Commercial' %}
   <div class="property-type-divider" aria-hidden="true"></div>
@@ -172,7 +181,7 @@
   {% if _placement %}
     {% if _placement.panel %}
       {% set _panel = _placement.panel %}
-      {% include 'partials/us_series_panel.html' %}
+      {% include 'partials/series_panel.html' %}
     {% elif _placement.divider %}
       <div class="us-series-divider" aria-hidden="true"></div>
     {% endif %}
