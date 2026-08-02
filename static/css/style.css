@@ -182,6 +182,7 @@ input[type="number"]::-webkit-outer-spin-button {
    "← back to Property" pill and search bar stay reachable on long lists. */
 .list-toolbar-watches,
 .list-toolbar-coins,
+.list-toolbar-banknotes,
 .list-toolbar-recordings,
 .list-toolbar-at-prop {
   position: sticky;
