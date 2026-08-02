@@ -567,6 +567,69 @@ def normalize_field_value(table, field_name, value):
     return aliases.get(value.strip().lower(), value)
 
 
+# US notes must be catalogued under one country spelling or they split
+# into separate blocks in the country-sorted list; grading services and
+# Friedberg treat them as one. We store the fullest form.
+_US_DENOM_RE = re.compile(r'^\s*(\d+)\s+dollars?\s*$', re.I)
+
+
+def _canonical_banknote_country(value):
+    if not isinstance(value, str):
+        return value
+    key = re.sub(r'[.\s]', '', value).lower()
+    if key in ('unitedstates', 'unitedstatesofamerica', 'usa', 'us'):
+        return 'United States of America'
+    return value
+
+
+def _canonical_us_denomination(value):
+    """US denominations follow the numismatic '$1' convention (Friedberg /
+    PMG / PCGS), not '1 Dollar'. World notes keep the spelled unit
+    ('5 Francs', 'EIGHT DOLLARS') and are left untouched — this only ever
+    runs for US-country notes."""
+    if not isinstance(value, str):
+        return value
+    m = _US_DENOM_RE.match(value)
+    return f'${m.group(1)}' if m else value
+
+
+def canonicalize_banknote_fields(fields, existing=None):
+    """Row-aware canonicalization applied on every banknote save: fold US
+    country spellings to one, and — only for US notes — put dollar
+    denominations in '$N' form so they sort as a single block. Mutates and
+    returns `fields`. `existing` supplies the country on a partial update
+    that didn't touch it."""
+    if 'country' in fields:
+        fields['country'] = _canonical_banknote_country(fields['country'])
+    country = fields.get('country')
+    if country is None and existing is not None:
+        country = existing['country']
+    if _country_key(country) == 'us' and 'denomination' in fields:
+        fields['denomination'] = _canonical_us_denomination(fields['denomination'])
+    return fields
+
+
+def _migrate_canonicalize_us_banknotes(db):
+    """One-shot + idempotent backfill: apply canonicalize_banknote_fields to
+    every existing note and resequence Display Numbers if anything changed.
+    Fixes notes added under 'United States' / '1 Dollar' before the save
+    hook existed."""
+    cols = {r['name'] for r in db.execute("PRAGMA table_info(banknotes)").fetchall()}
+    if not {'country', 'denomination'}.issubset(cols):
+        return
+    changed = False
+    for r in db.execute("SELECT id, country, denomination FROM banknotes").fetchall():
+        fields = {'country': r['country'], 'denomination': r['denomination']}
+        canonicalize_banknote_fields(fields, existing=r)
+        if fields['country'] != r['country'] or fields['denomination'] != r['denomination']:
+            db.execute(
+                "UPDATE banknotes SET country = ?, denomination = ? WHERE id = ?",
+                (fields['country'], fields['denomination'], r['id']))
+            changed = True
+    if changed:
+        _renumber_banknotes(db)
+
+
 def _normalize_owned_status_values(db):
     """Fold legacy status='Owned' rows to the canonical status='Own'."""
     tables = [
@@ -3835,6 +3898,7 @@ def init_db():
     _migrate_coin_history_context_into_condition(db)
     _cleanup_coin_research_headings(db)
     _merge_banknote_catalog_numbers(db)
+    _migrate_canonicalize_us_banknotes(db)
     db.commit()
 
     # Migration-state ledger: one row per applied one-shot data
@@ -9947,6 +10011,9 @@ def new_record(category):
                 flash(err, 'error')
                 return _render_new_form(category, data=data, focus_field=fld)
 
+        if category == 'banknotes':
+            canonicalize_banknote_fields(data)
+
         # Only write columns that physically exist — keeps the INSERT
         # resilient to dropped legacy columns that may still linger in
         # FIELDS for a category.
@@ -10139,6 +10206,9 @@ def detail_view(category, record_id):
             _graduate_watch_order_if_owned(updates, updates.get('status'))
             _apply_watch_actual_delivery_service_date(
                 updates, record['actual_delivery_date'])
+
+        if category == 'banknotes':
+            canonicalize_banknote_fields(updates, existing=record)
 
         # A note that changed country/town/issuer/year moves in the
         # order, so every Display Number after it shifts.
