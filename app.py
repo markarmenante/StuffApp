@@ -2578,20 +2578,32 @@ def series_panels(rows):
     and series boundaries inside a group get a divider entry so the blocks
     stay visually separate.
 
-    Returns {row_id: {'panel': {...}} | {'divider': True}}; rows absent
-    from the map render nothing."""
+    The dark rules BRACKET a group rather than subdividing it: the panel's
+    own top border opens the block, and a closing rule lands after the
+    group's last note. No line is drawn when the next row opens another
+    panel — that panel's top border already separates them.
+
+    Returns {row_id: {'panel': {...}, 'group_end': True}}, either key
+    optional; rows absent from the map render nothing."""
     placements = {}
     group_signature = None
     group_panel = None
     group_series_seen = None
-    prev_series = None
+    prev_row_id = None  # last row of the currently open group
+
+    def mark(row_id, key, value):
+        placements.setdefault(row_id, {})[key] = value
 
     for row in rows:
         panel = _series_panel_for_row(row)
         if panel is None:
-            # Unknown country (or nothing to say): closes any open group.
+            # Unknown country (or nothing to say): the open group ends
+            # here, and this panel-less row needs the closing rule above
+            # it — on the group's last note.
+            if group_signature is not None and prev_row_id is not None:
+                mark(prev_row_id, 'group_end', True)
             group_signature = group_panel = group_series_seen = None
-            prev_series = None
+            prev_row_id = None
             continue
 
         series_label = panel['series'] or (str(panel['year']) if panel['year'] else '')
@@ -2602,15 +2614,14 @@ def series_panels(rows):
         )
 
         if signature != group_signature:
+            # New group. The previous one closes silently — the incoming
+            # panel's own top border draws the separation.
             group_signature = signature
             group_panel = panel
             group_series_seen = set()
             panel['series_list'] = []
             panel['series_more'] = 0
-            placements[_row_get(row, 'id')] = {'panel': panel}
-        elif series_label and series_label != prev_series:
-            # Same story, new series: rule a line between the blocks.
-            placements[_row_get(row, 'id')] = {'divider': True}
+            mark(_row_get(row, 'id'), 'panel', panel)
 
         if series_label and series_label not in group_series_seen:
             group_series_seen.add(series_label)
@@ -2618,7 +2629,11 @@ def series_panels(rows):
                 group_panel['series_list'].append(series_label)
             else:
                 group_panel['series_more'] += 1
-        prev_series = series_label
+        prev_row_id = _row_get(row, 'id')
+
+    # A group still open at the end of the list closes under its last row.
+    if group_signature is not None and prev_row_id is not None:
+        mark(prev_row_id, 'group_end', True)
 
     return placements
 

@@ -3814,8 +3814,9 @@ input[type="date"] { -webkit-appearance: none; }
   .usp-series { margin-left: 0; width: 100%; }
 }
 
-/* Dark rule between series blocks that share one US panel — the panel names
-   all of them; this keeps each series' notes visually distinct within it. */
+/* Closing rule under the last note of a history-panel group — the bottom
+   edge of the bracket the panel's own top border opens. Only drawn when the
+   next row doesn't open another panel (whose border would draw it anyway). */
 .us-series-divider {
   height: 0;
   border-top: 3px solid var(--text);

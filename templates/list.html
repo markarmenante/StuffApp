@@ -178,13 +178,9 @@
   <div class="property-type-divider" aria-hidden="true"></div>
   {% endif %}
   {% set _placement = _us_panels.get(row['id']) %}
-  {% if _placement %}
-    {% if _placement.panel %}
-      {% set _panel = _placement.panel %}
-      {% include 'partials/series_panel.html' %}
-    {% elif _placement.divider %}
-      <div class="us-series-divider" aria-hidden="true"></div>
-    {% endif %}
+  {% if _placement and _placement.panel %}
+    {% set _panel = _placement.panel %}
+    {% include 'partials/series_panel.html' %}
   {% endif %}
   <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None, dot='1' if dot else None) }}">
 
@@ -607,6 +603,11 @@
 
     </div><!-- /item-body -->
   </div>
+  {# Closing rule under the last note of a history-panel group — the
+     bracket's bottom edge, matching the panel's own top border above. #}
+  {% if _placement and _placement.group_end %}
+  <div class="us-series-divider" aria-hidden="true"></div>
+  {% endif %}
   {% if category == 'properties' %}{% set ns.prev = row['type'] %}{% endif %}
   {% endfor %}
 </div>
