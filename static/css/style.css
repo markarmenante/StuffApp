@@ -3813,3 +3813,11 @@ input[type="date"] { -webkit-appearance: none; }
   .us-series-panel { padding: 12px 12px 14px; margin: 14px 0 6px; }
   .usp-series { margin-left: 0; width: 100%; }
 }
+
+/* Dark rule between series blocks that share one US panel — the panel names
+   all of them; this keeps each series' notes visually distinct within it. */
+.us-series-divider {
+  height: 0;
+  border-top: 3px solid var(--text);
+  margin: 4px 0;
+}

@@ -1878,54 +1878,106 @@ US_MONETARY_ERAS = (
      'The Union is spending faster than it can borrow. Specie payment is '
      'suspended in December 1861, gold goes to a premium against paper, and '
      'the government starts issuing currency on its own authority — the '
-     'decision that creates federal paper money as a permanent institution.'),
+     'decision that creates federal paper money as a permanent institution. '
+     'Congress also invents the machinery to make it stick: the first income '
+     'tax, the national banking system, and half a billion dollars of war '
+     'bonds sold to the public by Jay Cooke’s traveling agents. By the '
+     'war’s end a gold dollar buys nearly two paper ones, and unwinding '
+     'that gap will dominate finance for a generation.'),
     (1866, 1877, 'Contraction and the road to resumption',
      'The post-war fight is over whether to shrink the greenback supply back '
      'to a gold standard. Deflation is severe, the Panic of 1873 wrecks the '
      'railroads and the banks behind them, and the Resumption Act of 1875 '
-     'sets January 1879 as the date paper becomes convertible again.'),
+     'sets January 1879 as the date paper becomes convertible again. '
+     'Contraction is brutal politics: farmers and debtors, whose loans grow '
+     'harder to repay as prices fall, organize into the Greenback movement '
+     'to demand more paper, not less. And the Coinage Act of 1873 quietly '
+     'drops the silver dollar from the mint list — the “Crime of '
+     '’73” that the silver movement spends the next twenty-five '
+     'years trying to reverse.'),
     (1878, 1899, 'Bimetallism and the free-silver fight',
      'The central monetary argument of the era is whether silver should be '
      'money alongside gold. The Bland–Allison and Sherman Acts force the '
      'Treasury to buy silver, the gold reserve is drained by holders '
-     'redeeming ambiguous obligations, and the Panic of 1893 follows. '
-     'The question is settled for gold in 1900.'),
+     'redeeming ambiguous obligations, and the Panic of 1893 follows. Behind '
+     'the statutes sits a real deflation: prices fall for most of three '
+     'decades, and indebted farmers see free coinage of silver as the way to '
+     'reflate their way out. The fight peaks with Bryan’s “Cross of '
+     'Gold” speech in 1896; his defeat, plus new gold from the Klondike '
+     'and South Africa, takes the pressure off, and the question is settled '
+     'for gold in 1900.'),
     (1900, 1912, 'A gold standard without a central bank',
      'The Gold Standard Act of 1900 fixes the dollar to gold, but there is '
      'still no institution able to supply currency in a crisis. The Panic '
      'of 1907 is stopped by J. P. Morgan personally organising the rescue, '
-     'which makes the case for a central bank impossible to argue with.'),
+     'which makes the case for a central bank impossible to argue with. The '
+     'underlying defect is an “inelastic” money supply — currency '
+     'is tied to bank holdings of government bonds, so it cannot expand for '
+     'the harvest season or a panic, and every autumn credit tightens on '
+     'schedule. The Aldrich–Vreeland Act of 1908 papers over the gap '
+     'with emergency currency and creates the National Monetary Commission, '
+     'whose studies become the blueprint for the Federal Reserve.'),
     (1913, 1922, 'The Federal Reserve arrives, and a war to pay for',
      'The Federal Reserve Act of 1913 creates twelve Reserve Banks and an '
      'elastic currency. Almost immediately the system is financing the First '
      'World War, and the note-issuing structure the country had used since '
-     'the Civil War begins to be dismantled.'),
+     'the Civil War begins to be dismantled. Liberty Loan drives raise some '
+     'twenty-one billion dollars from the public with the Fed underwriting '
+     'the market, and wartime inflation roughly doubles prices between 1916 '
+     'and 1920. The correction is the sharp deflation of 1920–21 — '
+     'severe, short, and the young Fed’s first hard lesson in what its '
+     'rate policy actually does.'),
     (1923, 1928, 'Boom, and the last of the large-size notes',
      'A decade of expansion, and the end of an era in the paper itself: in '
      '1928 the government shrinks the note to the small size still used '
      'today, cutting printing costs by around a third and retiring the '
-     'large-size designs that had run since 1861.'),
+     'large-size designs that had run since 1861. Under Benjamin Strong the '
+     'New York Fed discovers open-market operations — buying and selling '
+     'government securities to steer credit — which becomes the modern '
+     'instrument of monetary policy almost by accident. Cheap money helps '
+     'Britain back onto gold in 1925 and, critics will later say, helps '
+     'inflate the stock bubble that breaks in 1929.'),
     (1929, 1933, 'Depression, the bank holiday, and the end of gold',
      'Nine thousand banks fail. In March 1933 every bank in the country is '
      'closed by proclamation, and the Emergency Banking Act reopens them '
      'against emergency currency. Executive Order 6102 requires private gold '
      'to be surrendered, and the promises printed on gold-backed notes stop '
-     'being promises.'),
+     'being promises. The failures feed on themselves: each closed bank '
+     'destroys deposits, shrinks the money supply, and starts the run on the '
+     'next — roughly a third of the nation’s money vanishes between '
+     '1929 and 1933, and scrip circulates in hundreds of towns in place of '
+     'the currency being hoarded. Federal deposit insurance arrives in 1934 '
+     'to make the runs stop.'),
     (1934, 1963, 'Managed money under Bretton Woods',
      'The Gold Reserve Act of 1934 devalues the dollar and moves the gold to '
      'the Treasury. Bretton Woods makes the dollar the anchor of the world '
      'system — convertible to gold at $35, but only for foreign central '
-     'banks. Domestic paper is no longer redeemable in metal by anyone.'),
+     'banks. Domestic paper is no longer redeemable in metal by anyone. The '
+     'revaluation books a two-billion-dollar paper profit that seeds the '
+     'Exchange Stabilization Fund, and Fort Knox is built in 1936 to hold '
+     'the surrendered metal. Through the Second World War the Fed serves '
+     'again as the Treasury’s financing arm, pegging interest rates '
+     'until the Treasury–Fed Accord of 1951 finally separates monetary '
+     'policy from debt management.'),
     (1964, 1970, 'Silver leaves the currency',
      'Rising silver prices make coins worth more melted than spent. The '
      'Coinage Act of 1965 strips silver from the dime and quarter, silver '
      'certificates stop being redeemable in 1968, and the last metallic '
-     'claim on US paper money disappears.'),
+     'claim on US paper money disappears. The same squeeze is playing out in '
+     'gold internationally: dollars held abroad exceed the Treasury’s '
+     'gold by the mid-1960s, the London Gold Pool defending the $35 price '
+     'collapses in 1968, and Vietnam-era deficits push the system toward '
+     'the break that comes in 1971.'),
     (1971, 2100, 'Pure fiat',
      'The closing of the gold window in August 1971 ends convertibility for '
      'good. Every note issued since is backed by legal tender status and '
      'the credit of the United States, which is what the greenbacks of 1862 '
-     'were backed by at the start.'),
+     'were backed by at the start. The float is ratified in 1976 when the '
+     'IMF formally demonetizes gold, and fiat’s first decade brings the '
+     'great inflation of the 1970s — ended only by the Volcker Fed pushing '
+     'rates past twenty percent in 1981. What anchors the currency now is '
+     'not metal but an institution: a central bank that markets believe '
+     'will defend the dollar’s purchasing power.'),
 )
 
 
@@ -1994,15 +2046,13 @@ def _clause_dict(clause):
     }
 
 
-@app.template_global()
-def us_series_panel(row):
-    """The explainer block that precedes a US series in the list: what
-    class of note this is, who was liable, the redemption clause as
-    printed in that year, what it replaced, and the monetary moment that
-    produced the change.
+def _us_series_panel(row):
+    """The explainer content for one US note: what class of note this is,
+    who was liable, the redemption clause as printed in that year, what it
+    replaced, and the monetary moment that produced the change.
 
     Returns None when the note is not American or when nothing useful can
-    be said, so the template can skip it rather than render an empty box."""
+    be said."""
     if not _is_us_note(row):
         return None
 
@@ -2025,6 +2075,59 @@ def us_series_panel(row):
         'previous_clause': previous_clause,
         'era': era,
     }
+
+
+@app.template_global()
+def us_series_panels(rows):
+    """Panel placement for the whole banknote list, precomputed so the
+    template stays a dumb loop.
+
+    Consecutive US notes whose class, clause span, and era all match share
+    ONE panel — 'Series of 1934' and 'Series of 1934 A' Federal Reserve
+    Notes say the same monetary thing, and repeating the block per series
+    read as a bug. The panel instead names every series it covers, and the
+    series boundaries inside a group get a divider entry so the blocks
+    stay visually separate.
+
+    Returns {row_id: {'panel': {...}} | {'divider': True}}; rows absent
+    from the map render nothing."""
+    placements = {}
+    group_signature = None
+    group_panel = None
+    group_series_seen = None
+    prev_series = None
+
+    for row in rows:
+        panel = _us_series_panel(row)
+        if panel is None:
+            # Non-US note (or nothing to say): closes any open group.
+            group_signature = group_panel = group_series_seen = None
+            prev_series = None
+            continue
+
+        series_label = panel['series'] or (str(panel['year']) if panel['year'] else '')
+        signature = (
+            panel['note_class']['name'] if panel['note_class'] else '',
+            panel['clause']['span'] if panel['clause'] else '',
+            panel['era']['label'] if panel['era'] else '',
+        )
+
+        if signature != group_signature:
+            group_signature = signature
+            group_panel = panel
+            group_series_seen = set()
+            panel['series_list'] = []
+            placements[_row_get(row, 'id')] = {'panel': panel}
+        elif series_label and series_label != prev_series:
+            # Same story, new series: rule a line between the blocks.
+            placements[_row_get(row, 'id')] = {'divider': True}
+
+        if series_label and series_label not in group_series_seen:
+            group_series_seen.add(series_label)
+            group_panel['series_list'].append(series_label)
+        prev_series = series_label
+
+    return placements
 
 
 def _configure_db_connection(db):
@@ -6041,6 +6144,18 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
 
     where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
+    # US pill reads newest series first — the story runs from the modern
+    # fiat note back toward the Civil War. Scoped to the filter so the
+    # global banknote order (and the B-number sequence derived from it)
+    # keeps its country/year-ascending shape. COALESCE falls to 0 so
+    # undated notes still sort last under DESC, mirroring the 99999
+    # blanks-last convention the ascending order uses.
+    if category == 'banknotes' and coin_filter == 'us':
+        order_by = ("COALESCE(SERIES_YEAR(series), date_1, 0) DESC, "
+                    "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
+                    "DENOM_UNIT(denomination) ASC, "
+                    "DENOM_VALUE(denomination) ASC, "
+                    "COALESCE(date_1, 0) DESC")
     if purchase_date_op and purchase_date_iso:
         order_by = (
             "COALESCE(NULLIF(purchase_date, ''), '0000-00-00') DESC, "

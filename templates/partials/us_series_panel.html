@@ -8,7 +8,11 @@
     <span class="usp-class">{{ _panel.note_class.name }}</span>
     <span class="usp-span">{{ _panel.note_class.years }}</span>
     {% endif %}
-    {% if _panel.series %}
+    {# Every series this panel covers — the group can span several
+       (Series of 1934, 1934 A…) when they tell the same monetary story. #}
+    {% if _panel.series_list %}
+    <span class="usp-series">{{ _panel.series_list|join(' · ') }}</span>
+    {% elif _panel.series %}
     <span class="usp-series">{{ _panel.series }}</span>
     {% elif _panel.year %}
     <span class="usp-series">{{ _panel.year }}</span>
