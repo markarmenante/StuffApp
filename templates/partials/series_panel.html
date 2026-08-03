@@ -7,6 +7,11 @@
 
   <div class="usp-head">
     <span class="usp-class">{{ _panel.title }}</span>
+    {# US panels: every denomination the series was issued in, right after
+       the series name. #}
+    {% if _panel.denoms %}
+    <span class="usp-denoms">{{ _panel.denoms }}</span>
+    {% endif %}
     {% if _panel.title_span %}
     <span class="usp-span">{{ _panel.title_span }}</span>
     {% elif _panel.era and _panel.country_key != 'us' %}

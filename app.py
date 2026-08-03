@@ -1926,6 +1926,112 @@ US_NOTE_CLASSES = (
     },
 )
 
+# Denominations actually issued in each series, keyed by (class name, base
+# series year) — suffix letters ('1934 A') share the base year's set, the
+# union across the letter runs. Sourced from the Friedberg listings; a
+# series absent here simply shows no denomination line.
+US_SERIES_DENOMS = {
+    ('Demand Note', 1861): (5, 10, 20),
+
+    ('United States Note (Legal Tender Note)', 1862):
+        (1, 2, 5, 10, 20, 50, 100, 500, 1000),
+    ('United States Note (Legal Tender Note)', 1863):
+        (1, 2, 5, 10, 20, 50, 100, 500, 1000),
+    ('United States Note (Legal Tender Note)', 1869):
+        (1, 2, 5, 10, 20, 50, 100, 500, 1000),
+    ('United States Note (Legal Tender Note)', 1874): (1, 2, 50, 500),
+    ('United States Note (Legal Tender Note)', 1875):
+        (1, 2, 5, 10, 20, 50, 100, 500),
+    ('United States Note (Legal Tender Note)', 1878):
+        (1, 2, 5, 10, 20, 50, 100, 500, 1000, 5000, 10000),
+    ('United States Note (Legal Tender Note)', 1880):
+        (1, 2, 5, 10, 20, 50, 100, 500, 1000),
+    ('United States Note (Legal Tender Note)', 1901): (10,),
+    ('United States Note (Legal Tender Note)', 1907): (5,),
+    ('United States Note (Legal Tender Note)', 1917): (1, 2),
+    ('United States Note (Legal Tender Note)', 1923): (1, 10),
+    ('United States Note (Legal Tender Note)', 1928): (1, 2, 5),
+    ('United States Note (Legal Tender Note)', 1953): (2, 5),
+    ('United States Note (Legal Tender Note)', 1963): (2, 5),
+    ('United States Note (Legal Tender Note)', 1966): (100,),
+
+    ('Silver Certificate', 1878): (10, 20, 50, 100, 500, 1000),
+    ('Silver Certificate', 1880): (10, 20, 50, 100, 500, 1000),
+    ('Silver Certificate', 1886): (1, 2, 5, 10, 20),
+    ('Silver Certificate', 1891): (1, 2, 5, 10, 20, 50, 100, 1000),
+    ('Silver Certificate', 1896): (1, 2, 5),
+    ('Silver Certificate', 1899): (1, 2, 5),
+    ('Silver Certificate', 1908): (10,),
+    ('Silver Certificate', 1923): (1, 5),
+    ('Silver Certificate', 1928): (1,),
+    ('Silver Certificate', 1933): (10,),
+    ('Silver Certificate', 1934): (1, 5, 10),
+    ('Silver Certificate', 1935): (1,),
+    ('Silver Certificate', 1953): (5, 10),
+    ('Silver Certificate', 1957): (1,),
+
+    ('Gold Certificate', 1882): (20, 50, 100, 500, 1000, 5000, 10000),
+    ('Gold Certificate', 1905): (20,),
+    ('Gold Certificate', 1906): (20,),
+    ('Gold Certificate', 1907): (10, 1000),
+    ('Gold Certificate', 1913): (50,),
+    ('Gold Certificate', 1922): (10, 20, 50, 100, 500, 1000),
+    ('Gold Certificate', 1928):
+        (10, 20, 50, 100, 500, 1000, 5000, 10000),
+
+    ('Treasury (Coin) Note', 1890): (1, 2, 5, 10, 20, 100, 1000),
+    ('Treasury (Coin) Note', 1891): (1, 2, 5, 10, 20, 50, 100, 1000),
+
+    ('National Bank Note', 1875): (1, 2, 5, 10, 20, 50, 100, 500, 1000),
+    ('National Bank Note', 1882): (5, 10, 20, 50, 100),
+    ('National Bank Note', 1902): (5, 10, 20, 50, 100),
+    ('National Bank Note', 1929): (5, 10, 20, 50, 100),
+
+    ('Federal Reserve Bank Note', 1915): (5, 10, 20),
+    ('Federal Reserve Bank Note', 1918): (1, 2, 5, 10, 20, 50),
+    ('Federal Reserve Bank Note', 1929): (5, 10, 20, 50, 100),
+
+    ('Federal Reserve Note', 1914): (5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1918): (500, 1000, 5000, 10000),
+    ('Federal Reserve Note', 1928):
+        (5, 10, 20, 50, 100, 500, 1000, 5000, 10000),
+    ('Federal Reserve Note', 1934):
+        (5, 10, 20, 50, 100, 500, 1000, 5000, 10000),
+    ('Federal Reserve Note', 1950): (5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1963): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1969): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1974): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1976): (2,),
+    ('Federal Reserve Note', 1977): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1981): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1985): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1988): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1990): (10, 20, 50, 100),
+    ('Federal Reserve Note', 1993): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 1995): (1, 2, 5, 10, 20),
+    ('Federal Reserve Note', 1996): (20, 50, 100),
+    ('Federal Reserve Note', 1999): (1, 5, 10, 20, 100),
+    ('Federal Reserve Note', 2001): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 2003): (1, 2, 5, 10, 100),
+    ('Federal Reserve Note', 2004): (10, 20, 50),
+    ('Federal Reserve Note', 2006): (1, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 2009): (1, 2, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 2013): (1, 2, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 2017): (1, 2, 5, 10, 20, 50, 100),
+    ('Federal Reserve Note', 2021): (1, 5, 10, 20, 50, 100),
+}
+
+
+def _series_denoms(note_class, series, year):
+    """'$1, $2, $5' — every denomination issued in this series, or None."""
+    if not note_class:
+        return None
+    base_year = _series_year(series) or year
+    denoms = US_SERIES_DENOMS.get((note_class['name'], base_year))
+    if not denoms:
+        return None
+    return ', '.join(f'${d:,}' for d in denoms)
+
 # "The history of the times" — the monetary period around the series year.
 # Factual register throughout: names, dates, numbers, consequences.
 US_MONETARY_ERAS = (
@@ -3532,6 +3638,7 @@ def _series_panel_for_row(row):
             # Header is the series; the note type moves into the panel.
             'title': _display_series(series_raw, year) or 'United States',
             'title_span': '',
+            'denoms': _series_denoms(note_class, series_raw, year),
             'note_type': note_class['name'] if note_class else None,
             'series': series_raw,
             'year': year,

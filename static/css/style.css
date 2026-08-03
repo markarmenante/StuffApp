@@ -3775,6 +3775,11 @@ input[type="date"] { -webkit-appearance: none; }
 .usp-series {
   margin-left: auto; font-size: 12px; color: var(--text-secondary);
 }
+/* Denominations the series was issued in, trailing the series name. */
+.usp-denoms {
+  font-size: 12px; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Labels lead their paragraph inline — keeps the block compact instead of
    turning six facts into six headed sections. */
