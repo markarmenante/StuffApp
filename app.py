@@ -1760,9 +1760,45 @@ US_NOTE_CLASSES = (
         ),
     },
     {
+        'name': 'Fractional Currency',
+        'years': '1862–1876',
+        'pattern': r'fractional currency|postage currency'
+                   r'|\b(?:first|second|third|fourth|fifth) issue\b',
+        'obligor': 'The United States Treasury — federal small change in '
+                   'paper, not a bank issue.',
+        'why': 'Specie hoarding after 1861 stripped every coin out of '
+               'circulation, down to the cent. Postage stamps passed as '
+               'change until the Treasury formalised the practice: Postage '
+               'Currency in 1862, then four further issues of fractional '
+               'notes from 3¢ to 50¢. They circulated until the Specie '
+               'Resumption Act of 1875 provided silver coin to redeem '
+               'them, and were withdrawn from 1876.',
+        'clauses': (
+            (1862, 1863,
+             'RECEIVABLE FOR POSTAGE STAMPS AT ANY POST OFFICE … '
+             'EXCHANGEABLE FOR UNITED STATES NOTES BY ANY ASSISTANT '
+             'TREASURER … IN SUMS NOT LESS THAN FIVE DOLLARS',
+             'Stamps-as-money made official: the note is denominated in '
+             'postage and convertible into greenbacks only in bulk.'),
+            (1863, 1876,
+             'EXCHANGEABLE FOR UNITED STATES NOTES BY THE ASSISTANT '
+             'TREASURERS AND DESIGNATED DEPOSITARIES OF THE UNITED STATES '
+             '… RECEIVABLE FOR ALL DUES TO THE UNITED STATES LESS THAN '
+             'FIVE DOLLARS',
+             'From the Second Issue the postage framing is dropped: this '
+             'is Treasury small change, convertible into United States '
+             'Notes and good for taxes under five dollars.'),
+        ),
+    },
+    {
         'name': 'National Bank Note',
         'years': '1863–1935',
-        'pattern': r'national bank note|national currency|\bnational bank\b',
+        # The lookaheads keep the PRINTER credit "National Bank Note
+        # Company" (which engraved many unrelated notes, incl. Fractional
+        # Currency) from reading as this class.
+        'pattern': r'national bank note(?!\s+(?:company|co\.?\b))'
+                   r'|national currency'
+                   r'|\bnational bank\b(?!\s+note\s+(?:company|co\.?\b))',
         'obligor': 'A federally chartered private bank, named with its '
                    'charter number on the face — but collateralised by the '
                    'federal government.',
@@ -2022,10 +2058,31 @@ US_SERIES_DENOMS = {
 }
 
 
+# Fractional Currency issues: start of the actual issue run (the dates the
+# notes carry are usually the authorizing Act — a Fourth Issue note reads
+# 1863 but was issued from 1869), and the cent denominations issued.
+US_FRACTIONAL_ISSUES = {
+    'first':  (1862, (5, 10, 25, 50)),
+    'second': (1863, (5, 10, 25, 50)),
+    'third':  (1864, (3, 5, 10, 15, 25, 50)),
+    'fourth': (1869, (10, 15, 25, 50)),
+    'fifth':  (1874, (10, 25, 50)),
+}
+
+
+def _fractional_issue(series):
+    m = re.search(r'\b(first|second|third|fourth|fifth)\s+issue\b',
+                  str(series or ''), re.IGNORECASE)
+    return US_FRACTIONAL_ISSUES.get(m.group(1).lower()) if m else None
+
+
 def _series_denoms(note_class, series, year):
     """'$1, $2, $5' — every denomination issued in this series, or None."""
     if not note_class:
         return None
+    if note_class['name'] == 'Fractional Currency':
+        issue = _fractional_issue(series)
+        return ', '.join(f'{d}¢' for d in issue[1]) if issue else None
     base_year = _series_year(series) or year
     denoms = US_SERIES_DENOMS.get((note_class['name'], base_year))
     if not denoms:
@@ -3626,13 +3683,22 @@ def _series_panel_for_row(row):
 
     if country_key == 'us':
         note_class = _us_note_class(row)
+        series_raw = (_row_get(row, 'series') or '').strip()
+        # Fractional notes carry the authorizing Act's date (1863 on a
+        # Fourth Issue note), which lands different notes of one issue in
+        # different era bands and splits their shared panel. Era placement
+        # uses the issue's actual start instead.
+        if note_class and note_class['name'] == 'Fractional Currency' \
+                and not _series_year(series_raw):
+            issue = _fractional_issue(series_raw)
+            if issue:
+                year = issue[0]
         era = _us_monetary_era(year)
         if not note_class and not era:
             return None
         clause = previous_clause = None
         if note_class:
             clause, previous_clause = _clause_for_year(note_class, year)
-        series_raw = (_row_get(row, 'series') or '').strip()
         return {
             'country_key': 'us',
             # Header is the series; the note type moves into the panel.
