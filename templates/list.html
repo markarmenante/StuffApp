@@ -64,15 +64,11 @@
      doesn't silently switch the panels back on. Default (on) keeps URLs
      clean by passing None. #}
   {%- set _hist = None if show_history else '0' -%}
-  {# One pill cycling the issue-type axis: Notgeld → National → All. #}
-  {%- set _bn_next = 'national' if coin_filter == 'notgeld' else (None if coin_filter == 'national' else 'notgeld') -%}
+  {# One pill cycling the type axis: All → US → Military → Notgeld. #}
+  {%- set _bn_next = 'military' if coin_filter == 'us' else ('notgeld' if coin_filter == 'military' else (None if coin_filter == 'notgeld' else 'us')) -%}
   <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=_bn_next, history=_hist) }}"
-     class="toolbar-btn pill {% if coin_filter in ('notgeld', 'national') %}active{% endif %}"
-     title="Cycle issue type: Notgeld → National → All">{{ 'Notgeld' if coin_filter == 'notgeld' else ('National' if coin_filter == 'national' else 'Type: All') }}</a>
-  {# Country axis — toggles the list to US issues only. #}
-  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=None if coin_filter == 'us' else 'us', history=_hist) }}"
-     class="toolbar-btn pill {% if coin_filter == 'us' %}active{% endif %}"
-     title="United States banknotes">US</a>
+     class="toolbar-btn pill {% if coin_filter in ('us', 'military', 'notgeld') %}active{% endif %}"
+     title="Cycle type: All → US → Military → Notgeld">{{ 'US' if coin_filter == 'us' else ('Military' if coin_filter == 'military' else ('Notgeld' if coin_filter == 'notgeld' else 'Type: All')) }}</a>
   {# Switches the historical/monetary-context panels on and off. #}
   <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=coin_filter or None, history='0' if show_history else None) }}"
      class="toolbar-btn pill {% if show_history %}active{% endif %}"

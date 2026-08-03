@@ -7397,6 +7397,7 @@ CATEGORY_FILTERS = {
     'banknotes': {
         'notgeld':  ("LOWER(TRIM(COALESCE(issue_type,''))) = 'notgeld'", []),
         'national': ("LOWER(TRIM(COALESCE(issue_type,''))) = 'national'", []),
+        'military': ("LOWER(TRIM(COALESCE(issue_type,''))) = 'military / occupation'", []),
         # Country axis. Matches every spelling of the US that has landed
         # in the data (catalogues, dealer text and the AI extractor all
         # differ), so the pill can't silently miss notes.
