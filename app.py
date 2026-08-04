@@ -3969,12 +3969,24 @@ def _series_panel_for_row(row):
         clause = previous_clause = None
         if note_class:
             clause, previous_clause = _clause_for_year(note_class, year)
+        if note_class:
+            title = (fractional_title or _display_series(series_raw, year)
+                     or 'United States')
+            title_span = ''
+        else:
+            # No federal class matched: a state or obsolete issue (the
+            # 1872 South Carolina Revenue Bond Scrip, an 1850s bank
+            # note). 'Series of XXXX' is federal framing and would
+            # misrepresent it — head the panel with the issuing
+            # authority, the date as the span.
+            issuer = (_row_get(row, 'issuer') or '').strip()
+            title = issuer or series_raw or 'United States'
+            title_span = str(year) if year else ''
         return {
             'country_key': 'us',
             # Header is the series; the note type moves into the panel.
-            'title': fractional_title or _display_series(series_raw, year)
-                     or 'United States',
-            'title_span': '',
+            'title': title,
+            'title_span': title_span,
             'denoms': _series_denoms(note_class, series_raw, year),
             'note_type': note_class['name'] if note_class else None,
             'series': series_raw,
