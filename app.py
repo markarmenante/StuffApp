@@ -1652,13 +1652,18 @@ _SERIES_YEAR_RE = re.compile(r'\b(1[6-9]\d\d|20\d\d)\b')
 
 def _series_year(text):
     """Year embedded in a series label, for sorting: 'Series of 1896
-    (Educational Series)' and '1896' both -> 1896. Returns None when the
-    series carries no year, so the caller falls back to the note's own
-    date."""
+    (Educational Series)' and '1896' both -> 1896. Fractional Currency
+    issue labels ('Fourth Issue') map to the issue's actual start year
+    (1869) — such notes carry the authorizing Act's date (1863), which
+    would file them out of order. Returns None when the series carries
+    no year, so the caller falls back to the note's own date."""
     if not text:
         return None
     m = _SERIES_YEAR_RE.search(str(text))
-    return int(m.group(1)) if m else None
+    if m:
+        return int(m.group(1))
+    issue = _fractional_issue(text)
+    return issue[0] if issue else None
 
 
 # ── US series panels ────────────────────────────────────────────────────
@@ -3696,17 +3701,12 @@ def _series_panel_for_row(row):
     if country_key == 'us':
         note_class = _us_note_class(row)
         series_raw = (_row_get(row, 'series') or '').strip()
-        # Fractional notes carry the authorizing Act's date (1863 on a
-        # Fourth Issue note), which lands different notes of one issue in
-        # different era bands and splits their shared panel. Era placement
-        # uses the issue's actual start instead.
+        # Era placement lands on the issue's actual start year —
+        # _series_year maps 'Fourth Issue' to 1869, not the Act date the
+        # note carries.
         fractional_title = None
         if note_class and note_class['name'] == 'Fractional Currency':
             fractional_title = _fractional_issue_title(series_raw)
-            if not _series_year(series_raw):
-                issue = _fractional_issue(series_raw)
-                if issue:
-                    year = issue[0]
         era = _us_monetary_era(year)
         if not note_class and not era:
             return None
@@ -4566,10 +4566,12 @@ def init_db():
     # CATEGORY_ORDER_BY['banknotes'] changes so the seeded numbers match
     # the live order — v6 moves municipality below the issue-year, so
     # Notgeld files chronologically inside its country rather than in
-    # per-town blocks ahead of the national notes.
+    # per-town blocks ahead of the national notes. v7: SERIES_YEAR maps
+    # Fractional Currency issue labels to the issue's actual start year,
+    # so Third Issue files before Fourth despite both carrying 1863.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v6',),
+        ('banknote_display_number_v7',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -4577,7 +4579,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v6', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v7', datetime.utcnow().isoformat()),
         )
         db.commit()
 
