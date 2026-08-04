@@ -576,7 +576,9 @@ _US_DENOM_RE = re.compile(r'^\s*(\d+)\s+dollars?\s*$', re.I)
 def _canonical_banknote_country(value):
     if not isinstance(value, str):
         return value
-    key = re.sub(r'[.\s]', '', value).lower()
+    # Strip everything but letters/digits so punctuation and invisible
+    # characters (NBSP, zero-width space) can't defeat the fold.
+    key = re.sub(r'[^a-z0-9]', '', value.lower())
     if key in ('unitedstates', 'unitedstatesofamerica', 'usa', 'us'):
         return 'United States of America'
     return value
@@ -11213,6 +11215,14 @@ def save_field(category, record_id):
 
     value = normalize_field_value(table, field_name, str(value).strip() if value else '')
 
+    # Same intake canonicalization the create/edit forms apply — a
+    # country autosaved as 'United States' must fold to the canonical
+    # spelling or the note splits out of the US sort block.
+    if category == 'banknotes':
+        _canon = canonicalize_banknote_fields({field_name: value},
+                                              existing=existing)
+        value = _canon[field_name]
+
     if category == 'persons' and _parse_person_medication_field(field_name):
         if _update_person_medication_field(db, record_id, field_name, value):
             db.commit()
@@ -14412,6 +14422,11 @@ def banknote_apply_lookup_specs(record_id):
 
     if 'date_1' in updates and not (note['date_1_text'] or '').strip():
         updates['date_1_text'] = _date_text(updates['date_1'])
+
+    # Lookup-extracted fields get the same intake canonicalization as
+    # the forms — the model returns 'United States', the collection
+    # spells it 'United States of America'.
+    canonicalize_banknote_fields(updates, existing=note)
 
     set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
     now = datetime.utcnow().isoformat()
