@@ -2070,10 +2070,22 @@ US_FRACTIONAL_ISSUES = {
 }
 
 
+_FRACTIONAL_ISSUE_RE = re.compile(r'\b(first|second|third|fourth|fifth)\s+issue\b',
+                                  re.IGNORECASE)
+
+
 def _fractional_issue(series):
-    m = re.search(r'\b(first|second|third|fourth|fifth)\s+issue\b',
-                  str(series or ''), re.IGNORECASE)
+    m = _FRACTIONAL_ISSUE_RE.search(str(series or ''))
     return US_FRACTIONAL_ISSUES.get(m.group(1).lower()) if m else None
+
+
+def _fractional_issue_title(series):
+    """Canonical fractional issue title: 'First Issue', 'Third Issue'…
+    Raw labels vary — 'First Issue (Postage Currency)' and 'First Issue'
+    name the same issue (all fractional currency was postage-denominated)
+    and must share one panel."""
+    m = _FRACTIONAL_ISSUE_RE.search(str(series or ''))
+    return f'{m.group(1).capitalize()} Issue' if m else None
 
 
 def _series_denoms(note_class, series, year):
@@ -3688,11 +3700,13 @@ def _series_panel_for_row(row):
         # Fourth Issue note), which lands different notes of one issue in
         # different era bands and splits their shared panel. Era placement
         # uses the issue's actual start instead.
-        if note_class and note_class['name'] == 'Fractional Currency' \
-                and not _series_year(series_raw):
-            issue = _fractional_issue(series_raw)
-            if issue:
-                year = issue[0]
+        fractional_title = None
+        if note_class and note_class['name'] == 'Fractional Currency':
+            fractional_title = _fractional_issue_title(series_raw)
+            if not _series_year(series_raw):
+                issue = _fractional_issue(series_raw)
+                if issue:
+                    year = issue[0]
         era = _us_monetary_era(year)
         if not note_class and not era:
             return None
@@ -3702,7 +3716,8 @@ def _series_panel_for_row(row):
         return {
             'country_key': 'us',
             # Header is the series; the note type moves into the panel.
-            'title': _display_series(series_raw, year) or 'United States',
+            'title': fractional_title or _display_series(series_raw, year)
+                     or 'United States',
             'title_span': '',
             'denoms': _series_denoms(note_class, series_raw, year),
             'note_type': note_class['name'] if note_class else None,
