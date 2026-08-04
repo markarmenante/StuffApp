@@ -2084,13 +2084,28 @@ def _fractional_issue(series):
     return US_FRACTIONAL_ISSUES.get(m.group(1).lower()) if m else None
 
 
-def _fractional_issue_title(series):
-    """Canonical fractional issue title: 'First Issue', 'Third Issue'…
-    Raw labels vary — 'First Issue (Postage Currency)' and 'First Issue'
+def _fractional_issue_for_note(series, year):
+    """(title, (start, denoms)) for a Fractional Currency note — the
+    canonical issue title ('Fifth Issue') plus the issue data.
+
+    Raw labels vary: 'First Issue (Postage Currency)' and 'First Issue'
     name the same issue (all fractional currency was postage-denominated)
-    and must share one panel."""
+    and must share one panel. Notes whose series is stored as a bare year
+    ('1874', '1875') carry no ordinal at all — those resolve by date to
+    the latest issue already underway. Returns (None, None) when neither
+    the label nor the year identifies an issue."""
     m = _FRACTIONAL_ISSUE_RE.search(str(series or ''))
-    return f'{m.group(1).capitalize()} Issue' if m else None
+    if m:
+        return (f'{m.group(1).capitalize()} Issue',
+                US_FRACTIONAL_ISSUES[m.group(1).lower()])
+    if year and 1862 <= year <= 1876:
+        best = None
+        for name, issue in US_FRACTIONAL_ISSUES.items():
+            if issue[0] <= year and (best is None or issue[0] > best[1][0]):
+                best = (name, issue)
+        if best:
+            return (f'{best[0].capitalize()} Issue', best[1])
+    return (None, None)
 
 
 def _series_denoms(note_class, series, year):
@@ -2098,7 +2113,7 @@ def _series_denoms(note_class, series, year):
     if not note_class:
         return None
     if note_class['name'] == 'Fractional Currency':
-        issue = _fractional_issue(series)
+        issue = _fractional_issue_for_note(series, year)[1]
         return ', '.join(f'{d}¢' for d in issue[1]) if issue else None
     base_year = _series_year(series) or year
     denoms = US_SERIES_DENOMS.get((note_class['name'], base_year))
@@ -3629,7 +3644,246 @@ def _country_key(country):
         for spelling in spellings:
             if base.startswith(spelling + ' ') or base.startswith(spelling + ','):
                 return key
-    return None
+    # Generated histories: countries outside the built-in tables match by
+    # their stored spellings (colonial and former names included) or by
+    # the slug of the name itself.
+    gen = _generated_country_eras()
+    for candidate in (value, base):
+        if candidate in gen['spellings']:
+            return gen['spellings'][candidate]
+    slug = _country_slug(base)
+    return slug if slug in gen['entries'] else None
+
+
+def _country_slug(name):
+    """Stable key for a generated-history country: 'São Tomé' -> 'sao-tome'."""
+    folded = _strip_diacritics((name or '').strip().lower())
+    return re.sub(r'[^a-z0-9]+', '-', folded).strip('-')
+
+
+# Generated country histories, cached in-process. The table only ever
+# grows (one row per new country), so a short TTL plus explicit reload
+# after an insert keeps every worker thread current without a query per
+# row on list render.
+_COUNTRY_ERAS_CACHE = {'loaded_at': 0.0, 'entries': {}, 'spellings': {}}
+_COUNTRY_ERAS_CACHE_LOCK = threading.Lock()
+_COUNTRY_ERAS_CACHE_TTL = 60.0
+
+
+def _generated_country_eras(force=False):
+    """{'entries': {key: (title, eras)}, 'spellings': {spelling: key}}
+    from the country_eras table. eras rows mirror the COUNTRY_ERAS shape:
+    (start, end, label, body) tuples."""
+    now = time.time()
+    with _COUNTRY_ERAS_CACHE_LOCK:
+        if not force and now - _COUNTRY_ERAS_CACHE['loaded_at'] < _COUNTRY_ERAS_CACHE_TTL:
+            return _COUNTRY_ERAS_CACHE
+        entries, spellings = {}, {}
+        try:
+            db = open_db_connection()
+            try:
+                rows = db.execute(
+                    "SELECT country_key, title, eras, spellings FROM country_eras"
+                ).fetchall()
+            finally:
+                db.close()
+            for row in rows:
+                try:
+                    eras = tuple(
+                        (int(e[0]), int(e[1]), str(e[2]), str(e[3]))
+                        for e in json.loads(row['eras'])
+                    )
+                    spells = json.loads(row['spellings'] or '[]')
+                except (ValueError, TypeError, IndexError):
+                    continue
+                if not eras:
+                    continue
+                entries[row['country_key']] = (row['title'], eras)
+                for s in spells:
+                    s = str(s).strip().lower()
+                    if s:
+                        spellings.setdefault(s, row['country_key'])
+        except sqlite3.Error:
+            # Table missing (first boot before init_db) or locked —
+            # serve what we have; TTL retries shortly.
+            pass
+        _COUNTRY_ERAS_CACHE['entries'] = entries
+        _COUNTRY_ERAS_CACHE['spellings'] = spellings
+        _COUNTRY_ERAS_CACHE['loaded_at'] = now
+        return _COUNTRY_ERAS_CACHE
+
+
+def _country_eras_for(country_key):
+    """(title, eras) for a country key — built-in first, then generated."""
+    if country_key in COUNTRY_ERAS:
+        return COUNTRY_ERAS[country_key]
+    return _generated_country_eras()['entries'].get(country_key)
+
+
+# ── Generated country histories ─────────────────────────────────────────
+#
+# The built-in COUNTRY_ERAS dict covers the countries in the collection
+# when it was written. New countries arrive with new notes; their era
+# bands are generated once by Claude, stored in the country_eras table,
+# and served through the same panel machinery from then on.
+
+_COUNTRY_HISTORY_INFLIGHT = set()
+_COUNTRY_HISTORY_INFLIGHT_LOCK = threading.Lock()
+
+_COUNTRY_ERAS_PROMPT = """You are writing the monetary-history panel for a banknote collection app. Produce the sequence of monetary eras for {name} — the whole span a collector's notes from this place could date from.
+
+Match this register exactly — factual: names, institutions, dates, numbers, consequences. No drama, no editorializing. One model era from the app, for tone and density:
+
+"War finance ran on note issue after loan capacity faded; the krone lost most of its purchasing power by 1918. The empire dissolved in November 1918 and successor states overstamped its notes while establishing their own currencies."
+
+Rules:
+- 4 to 8 consecutive, non-overlapping eras. start/end are Gregorian years; the final era ends at {current_year}.
+- Begin with the FIRST paper money that circulated in the territory — NOT at independence. Colonial monetary arrangements get full coverage where they existed: which chartered banks, colonial governments, or currency boards issued the paper, what backed it, and how the currency transitioned at independence.
+- Occupations, currency reforms, redenominations, hyperinflations, and currency unions (CFA franc, East Caribbean dollar, euro) each get their own era where significant.
+- Each era body is 40-90 words of plain prose.
+- title: the country's common display name (e.g. "Sri Lanka", "Rhodesia" only if the modern name would be wrong for the territory).
+- spellings: lowercase names catalogues use for this territory's notes that should all map here — the modern name, colonial and former names, and common variants (e.g. ["sri lanka", "ceylon", "british ceylon"]).
+
+Reply with ONLY a JSON object, no prose:
+{{"title": "...", "spellings": ["...", "..."], "eras": [{{"start": 1884, "end": 1913, "label": "...", "body": "..."}}, ...]}}"""
+
+
+def generate_country_eras(country_name):
+    """One Anthropic call producing the era bands for a country. Returns
+    {'title', 'spellings', 'eras'} with eras as [start, end, label, body]
+    lists, validated. Raises RuntimeError on any failure."""
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+    client = anthropic.Anthropic(api_key=api_key)
+    model = anthropic_lookup_model(api_key, 'ANTHROPIC_COUNTRY_ERAS_MODEL')
+    prompt = _COUNTRY_ERAS_PROMPT.format(
+        name=country_name, current_year=datetime.utcnow().year)
+    resp = client.messages.create(
+        model=model,
+        max_tokens=3000,
+        tools=[anthropic_web_search_tool(3)],
+        messages=[{'role': 'user', 'content': prompt}],
+    )
+    text = ''
+    for block in resp.content:
+        if getattr(block, 'type', None) == 'text':
+            text += block.text
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if not m:
+        raise RuntimeError(f'no JSON in response: {text[:120]}')
+    data = json.loads(m.group(0))
+
+    title = str(data.get('title') or '').strip()
+    spellings = [str(s).strip().lower() for s in (data.get('spellings') or [])
+                 if str(s).strip()]
+    eras = []
+    for e in (data.get('eras') or []):
+        start, end = int(e['start']), int(e['end'])
+        label = str(e.get('label') or '').strip()
+        body = str(e.get('body') or '').strip()
+        if not label or not body or start > end:
+            raise RuntimeError(f'bad era in response: {e!r}')
+        eras.append([start, end, label, body])
+    eras.sort(key=lambda e: e[0])
+    if not title or not (3 <= len(eras) <= 10):
+        raise RuntimeError(f'unusable response: title={title!r}, {len(eras)} eras')
+    return {'title': title, 'spellings': spellings, 'eras': eras}
+
+
+def _run_country_history_job(country_name, slug):
+    try:
+        data = generate_country_eras(country_name)
+        spellings = sorted(set(data['spellings']) | {country_name.strip().lower()})
+        db = open_db_connection()
+        try:
+            db.execute(
+                "INSERT OR REPLACE INTO country_eras "
+                "(country_key, title, eras, spellings, source_country, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (slug, data['title'], json.dumps(data['eras']),
+                 json.dumps(spellings), country_name,
+                 datetime.utcnow().isoformat()),
+            )
+            db.commit()
+        finally:
+            db.close()
+        _generated_country_eras(force=True)
+        print(f'country history generated: {country_name} ({slug}), '
+              f'{len(data["eras"])} eras', flush=True)
+    except Exception as e:
+        print(f'country history generation failed for {country_name}: {e}',
+              flush=True)
+    finally:
+        with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+            _COUNTRY_HISTORY_INFLIGHT.discard(slug)
+
+
+def _country_history_slug(country_name):
+    """The key a generation for this country would store under, or None
+    when the country already has history (or there's nothing to key on).
+    US notes have their own panel machinery and never need generation."""
+    name = (country_name or '').strip()
+    if not name:
+        return None
+    key = _country_key(name)
+    if key == 'us' or (key and _country_eras_for(key)):
+        return None
+    return key or _country_slug(name)
+
+
+def ensure_country_history(country_name):
+    """Fire-and-forget: generate and store era bands for a country that
+    has none. Called after any banknote write that sets a country, and
+    from the startup backfill. No-op when covered, in flight, or no API
+    key."""
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        return
+    slug = _country_history_slug(country_name)
+    if not slug:
+        return
+    with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+        if slug in _COUNTRY_HISTORY_INFLIGHT:
+            return
+        _COUNTRY_HISTORY_INFLIGHT.add(slug)
+    threading.Thread(
+        target=_run_country_history_job,
+        args=((country_name or '').strip(), slug),
+        daemon=True,
+    ).start()
+
+
+def _backfill_country_histories():
+    """Startup sweep: every distinct banknote country gets a history.
+    Runs in one daemon thread, sequentially — first boot after this
+    feature ships fills the existing gaps; later boots find nothing to
+    do."""
+    try:
+        db = open_db_connection()
+        try:
+            rows = db.execute(
+                "SELECT DISTINCT country FROM banknotes "
+                "WHERE country IS NOT NULL AND TRIM(country) != ''"
+            ).fetchall()
+        finally:
+            db.close()
+    except sqlite3.Error as e:
+        print(f'country history backfill skipped: {e}', flush=True)
+        return
+    for row in rows:
+        name = (row['country'] or '').strip()
+        slug = _country_history_slug(name)
+        if not slug:
+            continue
+        with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+            if slug in _COUNTRY_HISTORY_INFLIGHT:
+                continue
+            _COUNTRY_HISTORY_INFLIGHT.add(slug)
+        _run_country_history_job(name, slug)
 
 
 # A decade written as "1850s" (in a series label or date text) resolves to
@@ -3651,9 +3905,10 @@ def _note_year(row):
 
 
 def _country_era(country_key, year):
-    if not year or country_key not in COUNTRY_ERAS:
+    entry = _country_eras_for(country_key) if year else None
+    if not entry:
         return None
-    title, eras = COUNTRY_ERAS[country_key]
+    title, eras = entry
     for start, end, label, body in eras:
         if start <= year <= end:
             return {'label': label, 'body': body, 'span': f'{start}–{end}'}
@@ -3703,10 +3958,11 @@ def _series_panel_for_row(row):
         series_raw = (_row_get(row, 'series') or '').strip()
         # Era placement lands on the issue's actual start year —
         # _series_year maps 'Fourth Issue' to 1869, not the Act date the
-        # note carries.
+        # note carries. Year-labeled fractionals ('1874') resolve to
+        # their issue by date.
         fractional_title = None
         if note_class and note_class['name'] == 'Fractional Currency':
-            fractional_title = _fractional_issue_title(series_raw)
+            fractional_title = _fractional_issue_for_note(series_raw, year)[0]
         era = _us_monetary_era(year)
         if not note_class and not era:
             return None
@@ -3734,7 +3990,7 @@ def _series_panel_for_row(row):
         return None
     return {
         'country_key': country_key,
-        'title': COUNTRY_ERAS[country_key][0],
+        'title': _country_eras_for(country_key)[0],
         'title_span': '',
         'note_type': None,
         'series': (_row_get(row, 'series') or '').strip(),
@@ -3991,6 +4247,18 @@ def init_db():
          'usd_rate REAL NOT NULL, '
          'fetched_at TEXT NOT NULL, '
          'PRIMARY KEY (currency, date))'),
+        # LLM-generated country monetary histories — era bands for
+        # countries not covered by the built-in COUNTRY_ERAS dict. A row
+        # is written once per new country (on note save / startup
+        # backfill) and read into the same panel machinery. eras and
+        # spellings are JSON.
+        ('CREATE TABLE IF NOT EXISTS country_eras ('
+         'country_key TEXT PRIMARY KEY, '
+         'title TEXT NOT NULL, '
+         'eras TEXT NOT NULL, '
+         'spellings TEXT, '
+         'source_country TEXT, '
+         "created_at TEXT DEFAULT (datetime('now')))"),
         ('CREATE TABLE IF NOT EXISTS record_documents ('
          'id TEXT PRIMARY KEY, '
          'category TEXT NOT NULL, '
@@ -10282,6 +10550,11 @@ def new_record(category):
                 [record_id]).fetchone()['banknote_id']
 
         db.commit()
+
+        # First note from a new country: generate its history panel in
+        # the background.
+        if category == 'banknotes' and data.get('country'):
+            ensure_country_history(data['country'])
         detail_url = url_for('detail_view', category=category, record_id=record_id)
         save_url = url_for('save_field', category=category, record_id=record_id)
         # AJAX path (used by autosave-on-/new flow): return JSON so the
@@ -10986,6 +11259,11 @@ def save_field(category, record_id):
             [record_id]).fetchone()['banknote_id']
 
     db.commit()
+
+    # A country this collection hasn't seen before gets its history
+    # generated in the background — the panel appears on the next reload.
+    if category == 'banknotes' and field_name == 'country' and value:
+        ensure_country_history(value)
     response = {'ok': True}
     if synced_watch_actual_delivery:
         response['actual_delivery_date'] = synced_watch_actual_delivery
@@ -14107,6 +14385,8 @@ def banknote_apply_lookup_specs(record_id):
                    (new_cat, record_id))
         updates['cat_id'] = new_cat
     db.commit()
+    if updates.get('country'):
+        ensure_country_history(updates['country'])
     return jsonify({
         'updated': len(updates),
         'fields': list(updates.keys()),
@@ -25113,6 +25393,12 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 with app.app_context():
     init_db()
+
+# Fill in history for any country already in the collection that has
+# none — one sequential daemon thread, a no-op once every country is
+# covered.
+if os.environ.get('ANTHROPIC_API_KEY'):
+    threading.Thread(target=_backfill_country_histories, daemon=True).start()
 
 if __name__ == '__main__':
     app.run(debug=True, port=int(os.environ.get('PORT', 5001)))
