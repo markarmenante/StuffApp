@@ -3576,6 +3576,21 @@ def _us_note_class(row):
     return None
 
 
+def _us_note_group_sql(country, series, issuer, official, lettering,
+                       lettering_translation, other_catalog, description):
+    """Sort key for the banknotes ORDER BY: 0 for every non-US row and
+    for US federal issues, 1 for US state/obsolete issues (nothing in
+    the note's text matches a federal note class). Keeps the federal
+    run — the fractional issues in particular — contiguous, with state
+    paper as its own block after."""
+    if _country_key(country) != 'us':
+        return 0
+    row = {'series': series, 'issuer': issuer, 'official': official,
+           'lettering': lettering, 'lettering_translation': lettering_translation,
+           'other_catalog': other_catalog, 'description': description}
+    return 0 if _us_note_class(row) else 1
+
+
 def _us_monetary_era(year):
     if not year:
         return None
@@ -4126,6 +4141,12 @@ def _configure_db_connection(db):
     # SERIES_YEAR(series) — the issue-year pulled from a series label, so
     # the note list groups by year regardless of label wording.
     db.create_function('SERIES_YEAR', 1, _series_year,
+                       deterministic=True)
+    # US_NOTE_GROUP — within the US, federal issues run first (0), state
+    # and obsolete issues (no federal note class matches) form their own
+    # block after (1). Non-US rows all return 0 so the key is inert for
+    # every other country.
+    db.create_function('US_NOTE_GROUP', 8, _us_note_group_sql,
                        deterministic=True)
     return db
 
@@ -4849,9 +4870,11 @@ def init_db():
     # per-town blocks ahead of the national notes. v7: SERIES_YEAR maps
     # Fractional Currency issue labels to the issue's actual start year,
     # so Third Issue files before Fourth despite both carrying 1863.
+    # v8: US state/obsolete issues sort as their own block after the
+    # federal run (US_NOTE_GROUP).
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v7',),
+        ('banknote_display_number_v8',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -4859,7 +4882,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v7', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v8', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -8148,7 +8171,10 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
-    # Country, issue-year, town, denomination, then date. Notgeld files
+    # Country, issue-year, town, denomination, then date. Within the US,
+    # state and obsolete issues form their own block after the federal
+    # run (US_NOTE_GROUP), keeping the fractional issues contiguous.
+    # Notgeld files
     # inside its country's chronological run like any national note —
     # municipality is only a tiebreak within a year, keeping a town's
     # same-year set together without splitting Germany or Austria into
@@ -8160,6 +8186,8 @@ CATEGORY_ORDER_BY = {
     # than 1, 10, 2 by text. date_1 is a final tiebreak. Blanks sort
     # last per level.
     'banknotes': ("COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
+                  "US_NOTE_GROUP(country, series, issuer, official, lettering, "
+                  "lettering_translation, other_catalog, description) ASC, "
                   "COALESCE(SERIES_YEAR(series), date_1, 99999) ASC, "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
