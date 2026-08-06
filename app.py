@@ -2253,6 +2253,11 @@ COUNTRY_KEYS = {
                  'côte française des somalis', 'cote francaise des somalis',
                  'french territory of the afars and issas',
                  'afars and issas'),
+    # Bare 'guinea' stays out of the spellings — it would be ambiguous
+    # with Guinea-Conakry, which files separately if it ever arrives.
+    'guinea-bissau': ('guinea-bissau', 'guinea bissau', 'guiné-bissau',
+                      'guine-bissau', 'portuguese guinea',
+                      'guiné portuguesa', 'guine portuguesa'),
     'egypt': ('egypt', 'united arab republic'),
     'south-africa': ('south africa', 'union of south africa'),
     'canada': ('canada', 'dominion of canada'),
@@ -2828,6 +2833,24 @@ COUNTRY_ERAS = {
          'franc and its US-dollar peg under a currency-board '
          'arrangement, with the national bank — later the Central Bank '
          'of Djibouti — taking over issue.'),
+    )),
+    'guinea-bissau': ('Guinea-Bissau', (
+        (1879, 1974, 'Portuguese Guinea',
+         'Portugal organized its Guinea coast holdings as a separate '
+         'colony in 1879. The Banco Nacional Ultramarino, Portugal\'s '
+         'colonial bank of issue, provided the paper — denominated in '
+         'réis, then in escudos from 1914 at par with the Portuguese '
+         'escudo.'),
+        (1974, 1997, 'Independence and the peso',
+         'Guinea-Bissau declared independence in 1973, recognized by '
+         'Portugal in 1974. The Guinea-Bissau peso replaced the escudo '
+         'at par in 1975, issued by the Banco Nacional da Guiné-Bissau; '
+         'persistent inflation followed.'),
+        (1997, 2100, 'The CFA franc',
+         'Guinea-Bissau joined the West African Economic and Monetary '
+         'Union in 1997, replacing the peso with the West African CFA '
+         'franc issued by the BCEAO — pegged to the French franc, then '
+         'to the euro from 1999.'),
     )),
     'egypt': ('Egypt', (
         (1834, 1913, 'The Egyptian pound',
