@@ -125,3 +125,21 @@ for y in (1914, 1975, 2005):
     p = stuffapp._series_panel_for_row({'country': 'Portuguese Guinea', 'series': '', 'date_1': y})
     assert p and p['era'], (y, p)
 print('GUINEA-BISSAU ASSERTIONS PASSED')
+
+# Bermuda and British Guiana (Guyana) have panels; British Guiana files
+# under G, not B.
+assert stuffapp._nation_sort_name('Bermuda') == 'Bermuda'
+assert stuffapp._nation_sort_name('British Guiana') == 'Guyana'
+p = stuffapp._series_panel_for_row({'country': 'Bermuda', 'series': '', 'date_1': 1952})
+assert p and p['title'] == 'Bermuda' and p['era']['label'] == 'The Bermuda pound', p
+p = stuffapp._series_panel_for_row({'country': 'British Guiana', 'series': '', 'date_1': 1942})
+assert p and p['title'] == 'Guyana' and 'West Indian dollar' in p['era']['label'], p
+
+# A year outside every band clamps to the nearest band instead of
+# dropping the panel (Malta's bands start at 1800; 1750 still panels).
+p = stuffapp._series_panel_for_row({'country': 'Malta', 'series': '', 'date_1': 1750})
+assert p and p['era'] and p['era']['span'].startswith('1800'), p
+# Colonial America stays strict: no clamping past 1783.
+assert stuffapp._series_panel_for_row(
+    {'country': 'Pennsylvania Colony', 'series': '', 'date_1': 1872}) is None
+print('BERMUDA/GUYANA/CLAMP ASSERTIONS PASSED')

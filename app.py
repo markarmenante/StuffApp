@@ -2244,6 +2244,9 @@ COUNTRY_KEYS = {
     'belgian-congo': ('belgian congo', 'congo', 'congo free state',
                       'democratic republic of the congo', 'zaire', 'zaïre'),
     'jamaica': ('jamaica',),
+    'bermuda': ('bermuda', 'bermuda islands', 'somers isles'),
+    # Bare 'guiana' stays out — it would swallow French and Dutch Guiana.
+    'guyana': ('guyana', 'british guiana', 'demerara'),
     'kenya': ('kenya', 'east africa', 'british east africa'),
     'somalia': ('italian somaliland', 'somalia', 'somaliland',
                 'british somaliland'),
@@ -2833,6 +2836,36 @@ COUNTRY_ERAS = {
          'franc and its US-dollar peg under a currency-board '
          'arrangement, with the national bank — later the Central Bank '
          'of Djibouti — taking over issue.'),
+    )),
+    'bermuda': ('Bermuda', (
+        (1914, 1969, 'The Bermuda pound',
+         'The Government of Bermuda issued its own pound notes from '
+         '1914, at par with sterling and backed by sterling assets — a '
+         'currency-board arrangement alongside circulating British '
+         'coin.'),
+        (1970, 2100, 'The Bermuda dollar',
+         'Bermuda decimalized in 1970: the dollar replaced the pound '
+         'at 2.40 dollars per pound and was pegged to the US dollar at '
+         'par from 1972. The Bermuda Monetary Authority, created in '
+         '1969, has issued the notes since.'),
+    )),
+    'guyana': ('Guyana', (
+        (1831, 1915, 'British Guiana and the colonial banks',
+         'Demerara, Essequibo and Berbice united as British Guiana in '
+         '1831. Private banks — the Colonial Bank and the British '
+         'Guiana Bank — issued dollar notes, with accounts kept in '
+         'dollars fixed at 4 shillings 2 pence.'),
+        (1916, 1965, 'Government notes and the West Indian dollar',
+         'The Government of British Guiana issued its own dollar notes '
+         'from 1916. From 1951 the British Caribbean Currency Board\'s '
+         'West Indian dollar, issued for the eastern colonies as a '
+         'group, served the colony.'),
+        (1966, 2100, 'The Guyana dollar',
+         'Guyana became independent in 1966 and the Bank of Guyana '
+         'issued the Guyana dollar, replacing the British Caribbean '
+         'issue at par. Managed devaluations through the 1980s–90s '
+         'moved the rate from parity fractions to hundreds per US '
+         'dollar.'),
     )),
     'guinea-bissau': ('Guinea-Bissau', (
         (1879, 1974, 'Portuguese Guinea',
@@ -4004,7 +4037,16 @@ def _country_era(country_key, year):
     for start, end, label, body in eras:
         if start <= year <= end:
             return {'label': label, 'body': body, 'span': f'{start}–{end}'}
-    return None
+    # A year outside every band (typical of generated histories whose
+    # spans came out too narrow): fall back to the nearest band so the
+    # note still gets its divider and history instead of rendering
+    # bare. Colonial America stays strict — its bands end at 1783 by
+    # design, and a later note must not wear a colonial panel.
+    if country_key == 'colonial-america':
+        return None
+    start, end, label, body = min(
+        eras, key=lambda e: min(abs(year - e[0]), abs(year - e[1])))
+    return {'label': label, 'body': body, 'span': f'{start}–{end}'}
 
 
 def _display_series(series, year):
