@@ -3593,6 +3593,26 @@ def _us_note_group_sql(country, series, issuer, official, lettering,
     return 0 if _us_note_class(row) else 1
 
 
+def _nation_sort_name(country):
+    """First sort key for the banknotes ORDER BY: the modern nation the
+    note files under, matching the title its history panel shows. The
+    stored country keeps the territory name as issued ('British
+    Honduras', 'British East Africa'), but the panels present those as
+    eras of the modern nation (Belize, Kenya) — sorting on the raw text
+    would wedge Kenya's colonial notes between Belize's two eras.
+    Unknown countries sort by their own name; blanks sort last."""
+    raw = (country or '').strip()
+    if not raw:
+        return 'zzz'
+    key = _country_key(raw)
+    if key is None:
+        return raw
+    if key == 'us':
+        return 'United States'
+    entry = _country_eras_for(key)
+    return entry[0] if entry else raw
+
+
 def _us_monetary_era(year):
     if not year:
         return None
@@ -4150,6 +4170,12 @@ def _configure_db_connection(db):
     # every other country.
     db.create_function('US_NOTE_GROUP', 8, _us_note_group_sql,
                        deterministic=True)
+    # NATION_NAME — the modern nation a note's territory belongs to
+    # (matching its panel title), so 'British Honduras' files under
+    # Belize rather than alphabetically between 'British East Africa'
+    # and 'Cameroon'. Not marked deterministic: the mapping can shift
+    # when a generated country history lands mid-process.
+    db.create_function('NATION_NAME', 1, _nation_sort_name)
     return db
 
 
@@ -4873,10 +4899,12 @@ def init_db():
     # Fractional Currency issue labels to the issue's actual start year,
     # so Third Issue files before Fourth despite both carrying 1863.
     # v8: US state/obsolete issues sort as their own block after the
-    # federal run (US_NOTE_GROUP).
+    # federal run (US_NOTE_GROUP). v9: NATION_NAME groups historical
+    # territories under their modern nation (British Honduras under
+    # Belize), eras in chronological order.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v8',),
+        ('banknote_display_number_v9',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -4884,7 +4912,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v8', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v9', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -8173,7 +8201,12 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
-    # Country, issue-year, town, denomination, then date. Within the US,
+    # Nation, issue-year, town, denomination, then date. NATION_NAME
+    # folds historical territories onto the modern nation the panels
+    # present them as ('British Honduras' files under Belize, 'British
+    # East Africa' under Kenya), so a nation's eras run adjacent and in
+    # order instead of scattering alphabetically by territory name; the
+    # raw country is kept as a tiebreak within a year. Within the US,
     # state and obsolete issues form their own block after the federal
     # run (US_NOTE_GROUP), keeping the fractional issues contiguous.
     # Notgeld files
@@ -8187,10 +8220,11 @@ CATEGORY_ORDER_BY = {
     # dollar), then the number — so a group reads 1, 2, 10 Rupees rather
     # than 1, 10, 2 by text. date_1 is a final tiebreak. Blanks sort
     # last per level.
-    'banknotes': ("COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
+    'banknotes': ("NATION_NAME(country) COLLATE NODIACRITIC, "
                   "US_NOTE_GROUP(country, series, issuer, official, lettering, "
                   "lettering_translation, other_catalog, description) ASC, "
                   "COALESCE(SERIES_YEAR(series), date_1, 99999) ASC, "
+                  "COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
                   "DENOM_UNIT(denomination) ASC, "
