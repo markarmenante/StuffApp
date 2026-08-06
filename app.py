@@ -22,7 +22,36 @@ except Exception:
     pass
 
 app = Flask(__name__)
-app.secret_key = 'stuffapp-secret-key-change-me'
+# Session is used only for flash() (never for identity), so a fresh random
+# key per boot is fine when SECRET_KEY isn't set — the only cost is that
+# any in-flight flash message is dropped across a restart. Setting
+# SECRET_KEY in the environment makes flashes survive restarts.
+app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32)
+
+# Cap request bodies so a single oversized upload can't exhaust memory or
+# fill the disk (save_upload reads the whole body). Override via env.
+app.config['MAX_CONTENT_LENGTH'] = int(
+    os.environ.get('STUFFAPP_MAX_CONTENT_LENGTH', str(32 * 1024 * 1024)))
+
+# Always served over HTTPS (Cloudflare in front), so mark the flash cookie
+# Secure/HttpOnly and constrain it to same-site requests.
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+)
+
+
+@app.after_request
+def _security_headers(resp):
+    """Conservative response headers. No CSP here — the app relies on
+    inline scripts/styles and a CSP strict enough to matter would need
+    per-page nonces; that's a separate, testable change."""
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    resp.headers.setdefault('X-Frame-Options', 'DENY')
+    resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    return resp
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get('DATA_DIR', BASE_DIR)
@@ -16534,6 +16563,32 @@ def _load_user_and_authorize():
             abort(403)
 
 
+_SAFE_METHODS = {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
+
+
+@app.before_request
+def _reject_cross_site_writes():
+    """CSRF guard. Auth here is ambient (a cookie set by Cloudflare
+    Access), so a state-changing request forged by another site would
+    otherwise ride the owner's session. Block any write whose Origin is a
+    different host, or that the browser tags Sec-Fetch-Site: cross-site.
+
+    Deliberately lenient on absent headers: server-to-server calls, the
+    iOS app, and curl send neither Origin nor Sec-Fetch-Site, and must
+    keep working — only a *present, mismatched* signal is treated as an
+    attack, so this can't lock out a legitimate client."""
+    if request.method in _SAFE_METHODS:
+        return
+    origin = request.headers.get('Origin')
+    if origin:
+        from urllib.parse import urlparse
+        if urlparse(origin).netloc and urlparse(origin).netloc != request.host:
+            abort(403, description='Cross-site request blocked.')
+        return
+    if request.headers.get('Sec-Fetch-Site') == 'cross-site':
+        abort(403, description='Cross-site request blocked.')
+
+
 def require_owner():
     """Call inside an owner-only route to 403 non-owners."""
     if not g.get('current_user') or g.current_user.get('role') != 'owner':
@@ -16544,7 +16599,11 @@ def require_owner():
 # Missing-rows import endpoints (coins + watches). Safe to re-run.
 # ---------------------------------------------------------------------------
 
-IMPORT_MISSING_SECRET = 'stuffapp-bulk-import-2026'
+# Second factor on the admin/import/backup routes, on top of the CF Access
+# auth. Set STUFFAPP_ADMIN_SECRET in the environment to rotate it away from
+# this in-source default (which should be treated as already-compromised).
+IMPORT_MISSING_SECRET = os.environ.get(
+    'STUFFAPP_ADMIN_SECRET') or 'stuffapp-bulk-import-2026'
 
 
 def _csv_rows(filename):
