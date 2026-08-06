@@ -27,7 +27,37 @@ Claude Code web sessions: `.claude/hooks/session-start.sh` does the venv +
 install automatically once registered as a SessionStart hook in
 `.claude/settings.json`.
 
-Tests: `.venv/bin/python tests/test_banknote_sort.py`
+Tests: `.venv/bin/python tests/run_all.py`
+
+## Open security decisions (need Mark)
+
+Two items were left for you because fixing them unattended risks a
+lockout or a failed deploy:
+
+- **Auth rests on a trusted header with an owner fallback.**
+  `_resolve_user_email` (app.py) falls back to `OWNER_EMAIL` when no
+  `Cf-Access-Authenticated-User-Email` header is present, so anything
+  hitting the app without that header is owner. The Railway origin
+  `web-production-fca7e.up.railway.app` is public (Cloudflare proxies to
+  it), so that origin is a direct, unauthenticated bypass of Cloudflare
+  Access. Fix is a Cloudflare-side control (Authenticated Origin Pulls,
+  a Tunnel, or an IP allowlist) — NOT deleting the railway domain (CF
+  pulls from it). Only after the origin is locked down should the
+  `or OWNER_EMAIL` fallback be dropped and the CF Access JWT validated;
+  removing the fallback first would fail the `/` healthcheck and lock
+  everyone out.
+- **Admin secret was an in-source constant.** Now reads
+  `STUFFAPP_ADMIN_SECRET` from the env with the old value as fallback.
+  Set a fresh value on Railway to rotate; it's still rendered into
+  admin.html, so treat the old one as burned.
+
+## Deferred refactors (surveyed, not yet done — all behavior-preserving)
+
+Left for a supervised pass because each touches security- or
+data-write-sensitive paths: person/property slot machinery (~200 lines,
+health data), the 9-copy Anthropic lookup scaffold (~155), the 48-copy
+import-secret guard → decorator (~48-92, security gate), and the
+one-shot bulk-UPDATE admin routes → table-driven registry (~100).
 
 ## Gotchas
 

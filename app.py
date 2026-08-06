@@ -645,7 +645,7 @@ def _migrate_canonicalize_us_banknotes(db):
     every existing note and resequence Display Numbers if anything changed.
     Fixes notes added under 'United States' / '1 Dollar' before the save
     hook existed."""
-    cols = {r['name'] for r in db.execute("PRAGMA table_info(banknotes)").fetchall()}
+    cols = _table_cols(db, 'banknotes')
     if not {'country', 'denomination'}.issubset(cols):
         return
     changed = False
@@ -787,7 +787,7 @@ def _backfill_english_banknote_lettering(db):
 
 def _migrate_coin_history_context_into_condition(db):
     """Move legacy generated coin history into the editable notes field."""
-    cols = {r['name'] for r in db.execute("PRAGMA table_info(coins)").fetchall()}
+    cols = _table_cols(db, 'coins')
     if not {'condition', 'history_context'}.issubset(cols):
         return
 
@@ -811,7 +811,7 @@ def _migrate_coin_history_context_into_condition(db):
 
 def _cleanup_coin_research_headings(db):
     """Remove legacy generated section wrapper headings from coin prose."""
-    cols = {r['name'] for r in db.execute("PRAGMA table_info(coins)").fetchall()}
+    cols = _table_cols(db, 'coins')
     needed = {'id', 'condition', 'coin_references'}
     if not needed.issubset(cols):
         return
@@ -4309,6 +4309,14 @@ def open_db_connection():
     return _configure_db_connection(sqlite3.connect(DATABASE))
 
 
+def _table_cols(db, table):
+    """Set of column names on `table`, or an empty set if it doesn't
+    exist. The canonical form of the PRAGMA table_info idiom repeated
+    throughout the migration and save paths."""
+    return {row['name']
+            for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
 def get_db():
     if 'db' not in g:
         g.db = open_db_connection()
@@ -5089,7 +5097,7 @@ def _backfill_persons_doc_slots(db):
     ]
 
     def existing_cols():
-        return {r['name'] for r in db.execute("PRAGMA table_info(persons)").fetchall()}
+        return _table_cols(db, 'persons')
     cols = existing_cols()
 
     def copy_one(slot_prefix, slot_idx, src_col, num_col, base_label):
@@ -5188,7 +5196,7 @@ def _migrate_receipt_into_documents(db, table):
     The legacy `receipt` column is left populated so old code paths
     and existing exports that still reference it keep working. The
     detail templates no longer render it as a fixed cell."""
-    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    cols = _table_cols(db, table)
     if 'documents' not in cols or 'receipt' not in cols:
         return
     rows = db.execute(f"SELECT id, receipt, documents FROM {table}").fetchall()
@@ -5239,7 +5247,7 @@ def _dedupe_receipt_docs(db, table):
     Other shared titles are left alone — only literal 'Receipt'
     duplicates are collapsed, since the user might intentionally have
     multiple docs with other matching titles. Idempotent."""
-    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    cols = _table_cols(db, table)
     if 'documents' not in cols:
         return
     cat = next((c for c, info in CATEGORIES.items()
@@ -5319,7 +5327,7 @@ def _undo_receipt_phantoms(db, table, dry_run, write_tombstones=True):
     Sample entries: {record_id, ident, label, filename, ext, group}.
     """
     out = {'matched': 0, 'sample': []}
-    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    cols = _table_cols(db, table)
     if 'documents' not in cols or 'receipt' not in cols:
         return out
     cat = next((c for c, info in CATEGORIES.items()
@@ -5400,7 +5408,7 @@ def _undo_numbered_doc_phantoms(db, table, dry_run):
     aren't matched because the suffix has to be a bare integer.
     """
     out = {'matched': 0, 'sample': []}
-    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    cols = _table_cols(db, table)
     cat = next((c for c, info in CATEGORIES.items()
                 if info.get('table') == table), None)
     if not cat:
@@ -5494,7 +5502,7 @@ def _backfill_docs_json(db, table, target_col, sources):
     fall back to the default. Idempotent: a row whose `target_col` is
     already populated is left alone, so re-running doesn't clobber
     edits made through the dynamic UI."""
-    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    cols = _table_cols(db, table)
     if target_col not in cols:
         return
     selectable = {'id', target_col}
@@ -7118,7 +7126,7 @@ def get_global_vendor_typeahead():
         table = cfg.get('table')
         if not table:
             continue
-        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        cols = _table_cols(db, table)
         if 'vendor' not in cols:
             continue
         rows = db.execute(
@@ -8006,7 +8014,7 @@ def _autofill_title_from_filename(db, table, record_id, category,
     title_field = _title_field_for(category, file_field)
     if not title_field:
         return None
-    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    cols = _table_cols(db, table)
     if title_field not in cols:
         return None
     cur = db.execute(
@@ -8444,20 +8452,12 @@ def _cat_id_prefix(property_name=None, date_1=None):
 
 
 def next_cat_id(db, property_name=None, date_1=None):
-    """Next sequential cat_id, zero-padded to 3 digits (e.g. 'C001').
-    Single global series — no location/era partition. Always returns
-    a value; the legacy `None` path no longer triggers."""
-    row = db.execute(
-        "SELECT cat_id FROM coins "
-        "WHERE cat_id GLOB 'C[0-9]*' "
-        "ORDER BY CAST(SUBSTR(cat_id, 2) AS INTEGER) DESC LIMIT 1"
-    ).fetchone()
-    n = 1
-    if row and row['cat_id']:
-        m = CAT_ID_RE.match(row['cat_id'])
-        if m:
-            n = int(m.group(1)) + 1
-    return f'C{n:03d}'
+    """Next sequential coin cat_id, zero-padded to 3 digits (e.g.
+    'C001'). Single global series — no location/era partition. This is
+    the coins/'C' case of next_serial_cat_id; property_name/date_1 are
+    accepted only for backwards-compat with a few legacy callers and
+    are ignored."""
+    return next_serial_cat_id(db, 'coins', CAT_ID_PREFIX)
 
 
 # Watches and Art use the same flat-serial scheme as coins, just with
@@ -11513,7 +11513,7 @@ def delete_record(category, record_id):
     # `existing` (already fetched), not the DB, so they survive the
     # DELETE below.
     plan = EXPORT_LAYOUT.get(category, {})
-    cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    cols = _table_cols(db, table)
     for spec in plan.get('files', []):
         field, default_label, t_field = spec
         if field not in cols:
@@ -18816,7 +18816,7 @@ def _collect_referenced_uploads(db):
         file_cols = [f['name'] for f in fields if f.get('type') == 'file']
         if not file_cols:
             continue
-        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        cols = _table_cols(db, table)
         present = [c for c in file_cols if c in cols]
         if not present:
             continue
@@ -18848,7 +18848,7 @@ def _collect_referenced_uploads(db):
         pass
     for cat, sets in DOC_SETS_BY_CATEGORY.items():
         table = CATEGORIES[cat]['table']
-        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        cols = _table_cols(db, table)
         json_cols = [c for c in sets.values() if c in cols]
         if not json_cols:
             continue
@@ -18888,7 +18888,7 @@ def _iter_item_image_slots(db):
         if not info:
             continue
         table = info['table']
-        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        cols = _table_cols(db, table)
         present = [f for f in sorted(fields) if f in cols]
         if not present or 'id' not in cols:
             continue
@@ -21656,9 +21656,8 @@ def _coin_collection_narrative(scope_label, q, summary, top_regions,
 
 
 def _table_column_names(db, table):
-    return {
-        row['name'] for row in db.execute(f"PRAGMA table_info({table})").fetchall()
-    }
+    # Kept as an alias for its existing callers; _table_cols is canonical.
+    return _table_cols(db, table)
 
 
 def _item_report_row_value(row, columns, *names):
@@ -23675,7 +23674,7 @@ def sweep_files():
                         # to build the export folder name.
                         seed = _finalize_sweep_seed(seed, cat, user, db, now)
                         table = CATEGORIES[cat]['table']
-                        table_cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+                        table_cols = _table_cols(db, table)
                         seed = {k: v for k, v in seed.items() if k in table_cols}
                         cols_sql = ', '.join(seed.keys())
                         placeholders = ', '.join(['?'] * len(seed))
@@ -23716,7 +23715,7 @@ def sweep_files():
             # locally and doesn't want deleted.
             _track_upload(cat, row, target_label, parsed['ext'])
             table = CATEGORIES[cat]['table']
-            cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+            cols = _table_cols(db, table)
 
             # Resolve the slot. Try label match first. Also track whether
             # we matched a label whose slot is already filled — that's a
@@ -24001,7 +24000,7 @@ def admin_heal_doc_lists():
         named_slots = []  # list of (field, default_label, title_field)
         for spec in plan.get('files', []):
             named_slots.append(spec)
-        cols = {r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        cols = _table_cols(db, table)
         json_cols = [c for c in DOC_SETS_BY_CATEGORY[cat].values() if c in cols]
         if not json_cols:
             continue
@@ -24214,6 +24213,42 @@ def cameras_owner_mark():
                    total=db.execute('SELECT COUNT(*) FROM cameras').fetchone()[0])
 
 
+def _restore_docs_from_slots(db, table, cols, rows, json_col, sources):
+    """Rebuild a documents JSON column from legacy per-slot file columns
+    for rows whose JSON is currently empty, and return the count
+    restored. Rows that already carry tiles are left untouched. Shared
+    by the persons and properties restore endpoints. Caller commits."""
+    if json_col not in cols:
+        return 0
+    restored = 0
+    for row in rows:
+        try:
+            existing = json.loads(row[json_col] or '[]')
+        except (TypeError, ValueError):
+            existing = []
+        if isinstance(existing, list) and existing:
+            continue  # JSON already has tiles — leave alone
+        docs = []
+        for fn_col, title_col, default_title in sources:
+            if fn_col not in cols:
+                continue
+            fn = row[fn_col] if fn_col in row.keys() else None
+            if not fn:
+                continue
+            title = ''
+            if title_col in cols and title_col in row.keys():
+                title = (row[title_col] or '').strip()
+            if not title:
+                title = default_title
+            docs.append({'title': title, 'filename': fn})
+        if not docs:
+            continue
+        _docs_update(db, table, row['id'], docs, json_col,
+                     datetime.utcnow().isoformat())
+        restored += 1
+    return restored
+
+
 @app.route('/admin/persons-restore-docs', methods=['POST'])
 def persons_restore_docs():
     """Repopulate id_documents / health_documents JSON columns from the
@@ -24227,7 +24262,7 @@ def persons_restore_docs():
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
         abort(403)
     db = get_db()
-    cols = {r['name'] for r in db.execute("PRAGMA table_info(persons)").fetchall()}
+    cols = _table_cols(db, 'persons')
     plans = [
         ('id_documents', [
             (f'id_doc_{i}', f'id_doc_{i}_title', f'ID Doc {i}')
@@ -24241,36 +24276,8 @@ def persons_restore_docs():
     out = {}
     rows = db.execute("SELECT * FROM persons").fetchall()
     for json_col, sources in plans:
-        if json_col not in cols:
-            out[json_col] = 0
-            continue
-        restored = 0
-        for row in rows:
-            try:
-                existing = json.loads(row[json_col] or '[]')
-            except (TypeError, ValueError):
-                existing = []
-            if isinstance(existing, list) and existing:
-                continue  # JSON already has tiles — leave alone
-            docs = []
-            for fn_col, title_col, default_title in sources:
-                if fn_col not in cols:
-                    continue
-                fn = row[fn_col] if fn_col in row.keys() else None
-                if not fn:
-                    continue
-                title = ''
-                if title_col in cols and title_col in row.keys():
-                    title = (row[title_col] or '').strip()
-                if not title:
-                    title = default_title
-                docs.append({'title': title, 'filename': fn})
-            if not docs:
-                continue
-            _docs_update(db, 'persons', row['id'], docs, json_col,
-                         datetime.utcnow().isoformat())
-            restored += 1
-        out[json_col] = restored
+        out[json_col] = _restore_docs_from_slots(
+            db, 'persons', cols, rows, json_col, sources)
     db.commit()
     return jsonify(restored=out,
                    total=db.execute('SELECT COUNT(*) FROM persons').fetchone()[0])
@@ -24288,9 +24295,7 @@ def properties_restore_docs():
     if request.form.get('secret') != IMPORT_MISSING_SECRET:
         abort(403)
     db = get_db()
-    cols = {r['name'] for r in db.execute(
-        "PRAGMA table_info(properties)"
-    ).fetchall()}
+    cols = _table_cols(db, 'properties')
     sources = [
         (f'doc_{i}', f'doc_{i}_title', f'Doc {i}')
         for i in range(1, 11)
@@ -24298,32 +24303,8 @@ def properties_restore_docs():
     if 'documents' not in cols:
         return jsonify(restored=0, total=0)
     rows = db.execute("SELECT * FROM properties").fetchall()
-    restored = 0
-    for row in rows:
-        try:
-            existing = json.loads(row['documents'] or '[]')
-        except (TypeError, ValueError):
-            existing = []
-        if isinstance(existing, list) and existing:
-            continue
-        docs = []
-        for fn_col, title_col, default_title in sources:
-            if fn_col not in cols:
-                continue
-            fn = row[fn_col] if fn_col in row.keys() else None
-            if not fn:
-                continue
-            title = ''
-            if title_col in cols and title_col in row.keys():
-                title = (row[title_col] or '').strip()
-            if not title:
-                title = default_title
-            docs.append({'title': title, 'filename': fn})
-        if not docs:
-            continue
-        _docs_update(db, 'properties', row['id'], docs, 'documents',
-                     datetime.utcnow().isoformat())
-        restored += 1
+    restored = _restore_docs_from_slots(
+        db, 'properties', cols, rows, 'documents', sources)
     db.commit()
     return jsonify(restored=restored,
                    total=db.execute(
@@ -24613,11 +24594,13 @@ _RENUMBER_GROUPS = {
 
 def _renumber_coin_groups(db, groups=None):
     """Resequence coin_id (Display Position) for the given groups.
-    Defaults to every Ancient/Modern group. Caller is responsible for
-    commit — we stay inside the surrounding transaction."""
+    Defaults to every Ancient/Modern group. Returns {group: count}
+    renumbered. Caller is responsible for commit — we stay inside the
+    surrounding transaction."""
     if groups is None:
         groups = list(_RENUMBER_GROUPS.keys())
     order_by = CATEGORY_ORDER_BY['coins']
+    counts = {}
     for g in groups:
         if g not in _RENUMBER_GROUPS:
             continue
@@ -24630,6 +24613,8 @@ def _renumber_coin_groups(db, groups=None):
         for i, row in enumerate(rows, start=1):
             db.execute("UPDATE coins SET coin_id = ? WHERE id = ?",
                        (f'{prefix}{i}', row['id']))
+        counts[g] = len(rows)
+    return counts
 
 
 # Changing any of these reorders the note list, so the Display Number
@@ -24692,19 +24677,10 @@ def coins_renumber_group(group):
         abort(404)
     prefix, label = _RENUMBER_GROUPS[group]
     db = get_db()
-    where, extra = CATEGORY_FILTERS['coins'][group]
-    order_by = CATEGORY_ORDER_BY['coins']
-    rows = db.execute(
-        f"SELECT id FROM coins WHERE {where} ORDER BY {order_by}",
-        list(extra),
-    ).fetchall()
-    for i, row in enumerate(rows, start=1):
-        db.execute("UPDATE coins SET coin_id = ? WHERE id = ?",
-                   (f'{prefix}{i}', row['id']))
+    n = _renumber_coin_groups(db, [group])[group]
     db.commit()
     flash(
-        f'Renumbered {len(rows)} {label} coins '
-        f'({prefix}1–{prefix}{len(rows)}).',
+        f'Renumbered {n} {label} coins ({prefix}1–{prefix}{n}).',
         'success',
     )
     return redirect(url_for('list_view', category='coins', filter=group))
