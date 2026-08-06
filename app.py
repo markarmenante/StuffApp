@@ -2247,6 +2247,12 @@ COUNTRY_KEYS = {
     'kenya': ('kenya', 'east africa', 'british east africa'),
     'somalia': ('italian somaliland', 'somalia', 'somaliland',
                 'british somaliland'),
+    # French Somaliland is modern Djibouti, not Somalia — keep the
+    # spellings apart so its notes never fold into the Somalia panel.
+    'djibouti': ('djibouti', 'french somaliland', 'french somali coast',
+                 'côte française des somalis', 'cote francaise des somalis',
+                 'french territory of the afars and issas',
+                 'afars and issas'),
     'egypt': ('egypt', 'united arab republic'),
     'south-africa': ('south africa', 'union of south africa'),
     'canada': ('canada', 'dominion of canada'),
@@ -2804,6 +2810,24 @@ COUNTRY_ERAS = {
          'The Somali shilling replaced the somalo and the East African '
          'shilling at par in 1962. After the state collapsed in 1991, '
          'unofficial print runs continued to circulate.'),
+    )),
+    'djibouti': ('Djibouti', (
+        (1885, 1949, 'French Somaliland',
+         'France organized its Somali Coast settlements around the port '
+         'of Djibouti as the Côte Française des Somalis in 1896. The '
+         'Banque de l\'Indochine\'s Djibouti branch issued the colony\'s '
+         'franc notes from 1910, at par with the French franc.'),
+        (1949, 1977, 'The Djibouti franc',
+         'A 1949 reform detached the colony from the French franc: the '
+         'new Djibouti franc was pegged to the US dollar through a gold '
+         'parity, and the Trésor Public took over note issue from 1952. '
+         'The territory was renamed the French Territory of the Afars '
+         'and the Issas in 1967.'),
+        (1977, 2100, 'Independent Djibouti',
+         'Djibouti became independent in 1977 and kept the Djibouti '
+         'franc and its US-dollar peg under a currency-board '
+         'arrangement, with the national bank — later the Central Bank '
+         'of Djibouti — taking over issue.'),
     )),
     'egypt': ('Egypt', (
         (1834, 1913, 'The Egyptian pound',
