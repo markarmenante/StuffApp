@@ -3604,12 +3604,17 @@ def _us_note_class(row):
 
 def _us_note_group_sql(country, series, issuer, official, lettering,
                        lettering_translation, other_catalog, description):
-    """Sort key for the banknotes ORDER BY: 0 for every non-US row and
+    """Sort key for the banknotes ORDER BY: -1 for Colonial American
+    issues (NATION_NAME files them under the United States, and they
+    open the block, before the federal run), 0 for every non-US row and
     for US federal issues, 1 for US state/obsolete issues (nothing in
     the note's text matches a federal note class). Keeps the federal
     run — the fractional issues in particular — contiguous, with state
     paper as its own block after."""
-    if _country_key(country) != 'us':
+    key = _country_key(country)
+    if key == 'colonial-america':
+        return -1
+    if key != 'us':
         return 0
     row = {'series': series, 'issuer': issuer, 'official': official,
            'lettering': lettering, 'lettering_translation': lettering_translation,
@@ -3631,7 +3636,10 @@ def _nation_sort_name(country):
     key = _country_key(raw)
     if key is None:
         return raw
-    if key == 'us':
+    # Colonial American issues file with the United States rather than
+    # under 'C' — US_NOTE_GROUP then places them ahead of the federal
+    # run, so the nation's paper reads colonies -> federal -> state.
+    if key in ('us', 'colonial-america'):
         return 'United States'
     entry = _country_eras_for(key)
     return entry[0] if entry else raw
@@ -4188,10 +4196,10 @@ def _configure_db_connection(db):
     # the note list groups by year regardless of label wording.
     db.create_function('SERIES_YEAR', 1, _series_year,
                        deterministic=True)
-    # US_NOTE_GROUP — within the US, federal issues run first (0), state
-    # and obsolete issues (no federal note class matches) form their own
-    # block after (1). Non-US rows all return 0 so the key is inert for
-    # every other country.
+    # US_NOTE_GROUP — within the US, Colonial American issues run first
+    # (-1), then federal issues (0), then state and obsolete issues (no
+    # federal note class matches) as their own block after (1). Non-US
+    # rows all return 0 so the key is inert for every other country.
     db.create_function('US_NOTE_GROUP', 8, _us_note_group_sql,
                        deterministic=True)
     # NATION_NAME — the modern nation a note's territory belongs to
@@ -4925,7 +4933,9 @@ def init_db():
     # v8: US state/obsolete issues sort as their own block after the
     # federal run (US_NOTE_GROUP). v9: NATION_NAME groups historical
     # territories under their modern nation (British Honduras under
-    # Belize), eras in chronological order.
+    # Belize), eras in chronological order; Colonial American issues
+    # file with the United States, opening the block before the
+    # federal run.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
         ('banknote_display_number_v9',),
@@ -8230,9 +8240,11 @@ CATEGORY_ORDER_BY = {
     # present them as ('British Honduras' files under Belize, 'British
     # East Africa' under Kenya), so a nation's eras run adjacent and in
     # order instead of scattering alphabetically by territory name; the
-    # raw country is kept as a tiebreak within a year. Within the US,
-    # state and obsolete issues form their own block after the federal
-    # run (US_NOTE_GROUP), keeping the fractional issues contiguous.
+    # raw country is kept as a tiebreak within a year. Colonial American
+    # issues also file under the United States, as the opening block;
+    # then the federal run, with state and obsolete issues as their own
+    # block after (US_NOTE_GROUP), keeping the fractional issues
+    # contiguous.
     # Notgeld files
     # inside its country's chronological run like any national note —
     # municipality is only a tiebreak within a year, keeping a town's
