@@ -51,13 +51,34 @@ lockout or a failed deploy:
   Set a fresh value on Railway to rotate; it's still rendered into
   admin.html, so treat the old one as burned.
 
-## Deferred refactors (surveyed, not yet done — all behavior-preserving)
+## Consolidations done (behavior-preserving, tested)
 
-Left for a supervised pass because each touches security- or
-data-write-sensitive paths: person/property slot machinery (~200 lines,
-health data), the 9-copy Anthropic lookup scaffold (~155), the 48-copy
-import-secret guard → decorator (~48-92, security gate), and the
-one-shot bulk-UPDATE admin routes → table-driven registry (~100).
+- Anthropic scaffold: `_message_text(resp)` and `_require_anthropic_key()`
+  shared across the 9 `fetch_*` functions.
+- Bulk-UPDATE admin routes: the 12 one-shot maintenance endpoints are
+  registered from `_BULK_UPDATE_ROUTES` (rule, endpoint, sql, use_now,
+  total_table) — each route's exact SQL is verbatim in that table.
+- `_table_cols`, `next_cat_id` shim, `_renumber_coin_groups` reuse,
+  `_restore_docs_from_slots` (earlier pass).
+
+## Deferred refactors (still open)
+
+- **person_medications → property_slot spec (F2, ~200 lines).** Left for
+  a *supervised* pass: it writes health records, and the property-slot
+  generics aren't a drop-in (they build the INSERT column list from the
+  spec, add a `_format_us_phone` hook, and use different kwargs), so a
+  slip maps values to the wrong medical columns silently.
+  `tests/test_person_medications.py` pins the current round-trip and is
+  the gate for that merge — do it, keep those tests green.
+- Anthropic retry loop (~110): three different exhaustion semantics;
+  unifying changes behavior.
+- coin `_coerce` twins (~53): genuinely divergent (die_axis /
+  denomination handling) — a merge is a behavior change, not a refactor.
+- import-secret guard → decorator (48 copies): it's the admin-secret
+  gate; left untouched per "don't touch security".
+- Smaller: `_json_row_or_404` (D2) changes the JSON 404 shape unless
+  done with a custom error handler; AI-route error decorator (D3);
+  reportlab cell-style / fit-image helpers (D6/D7).
 
 ## Gotchas
 
