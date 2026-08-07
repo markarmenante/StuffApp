@@ -143,3 +143,13 @@ assert p and p['era'] and p['era']['span'].startswith('1800'), p
 assert stuffapp._series_panel_for_row(
     {'country': 'Pennsylvania Colony', 'series': '', 'date_1': 1872}) is None
 print('BERMUDA/GUYANA/CLAMP ASSERTIONS PASSED')
+
+# Fiji has a built-in history covering the 1965 government pound note.
+assert stuffapp._nation_sort_name('Fiji') == 'Fiji'
+p = stuffapp._series_panel_for_row({'country': 'Fiji', 'series': '', 'date_1': 1965})
+assert p and p['title'] == 'Fiji' and p['era']['label'] == 'The Fiji pound', p
+for y, label in ((1890, 'Kingdom and early colony'), (1969, 'The Fiji dollar'),
+                 (2011, 'The Fiji dollar')):
+    p = stuffapp._series_panel_for_row({'country': 'Fiji', 'series': '', 'date_1': y})
+    assert p and p['era']['label'] == label, (y, p)
+print('FIJI ASSERTIONS PASSED')

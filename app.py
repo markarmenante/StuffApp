@@ -2272,6 +2272,7 @@ COUNTRY_KEYS = {
     'belgian-congo': ('belgian congo', 'congo', 'congo free state',
                       'democratic republic of the congo', 'zaire', 'zaïre'),
     'jamaica': ('jamaica',),
+    'fiji': ('fiji', 'dominion of fiji', 'colony of fiji'),
     'bermuda': ('bermuda', 'bermuda islands', 'somers isles'),
     # Bare 'guiana' stays out — it would swallow French and Dutch Guiana.
     'guyana': ('guyana', 'british guiana', 'demerara'),
@@ -2823,6 +2824,23 @@ COUNTRY_ERAS = {
         (1961, 2100, 'Bank of Jamaica',
          'The Bank of Jamaica issued from 1961; the decimal Jamaican '
          'dollar (10 shillings = J$1) replaced the pound in 1969.'),
+    )),
+    'fiji': ('Fiji', (
+        (1871, 1913, 'Kingdom and early colony',
+         'The Cakobau government issued Fiji\'s first paper money in '
+         '1871–1873. Britain annexed Fiji as a Crown Colony in 1874, and '
+         'commercial banks and the colonial government issued pound '
+         'notes at par with sterling.'),
+        (1914, 1968, 'The Fiji pound',
+         'The Government of Fiji issued its own pound notes from 1914 '
+         'through a Board of Commissioners of Currency, at par with '
+         'sterling and backed by sterling reserves — the standard '
+         'currency-board arrangement.'),
+        (1969, 2100, 'The Fiji dollar',
+         'Fiji replaced the pound with the dollar in 1969 at 2 dollars '
+         'to the pound. The Central Monetary Authority — reconstituted '
+         'as the Reserve Bank of Fiji in 1984 — has issued the notes '
+         'since, with the dollar managed against a currency basket.'),
     )),
     'kenya': ('Kenya', (
         (1919, 1966, 'The East African shilling',
