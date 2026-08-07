@@ -3906,9 +3906,7 @@ def generate_country_eras(country_name):
     """One Anthropic call producing the era bands for a country. Returns
     {'title', 'spellings', 'eras'} with eras as [start, end, label, body]
     lists, validated. Raises RuntimeError on any failure."""
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    api_key = _require_anthropic_key()
     try:
         import anthropic
     except ImportError:
@@ -3923,10 +3921,7 @@ def generate_country_eras(country_name):
         tools=[anthropic_web_search_tool(3)],
         messages=[{'role': 'user', 'content': prompt}],
     )
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    text = _message_text(resp)
     m = re.search(r'\{.*\}', text, re.DOTALL)
     if not m:
         raise RuntimeError(f'no JSON in response: {text[:120]}')
@@ -8675,6 +8670,24 @@ def perplexity_chat_completion(api_key, prompt, *, env_names=None,
     raise RuntimeError(f'Lookup failed after retries: {last_err}')
 
 
+def _require_anthropic_key():
+    """Return the Anthropic API key, or raise RuntimeError if unset. The
+    `import anthropic` stays inline at each call site — the module name is
+    referenced by the retry/except blocks there, so it can't move here."""
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    return api_key
+    return api_key
+
+
+def _message_text(resp):
+    """Concatenate the text blocks of an Anthropic Messages response into
+    one string (non-text blocks — tool_use, etc. — are skipped)."""
+    return ''.join(b.text for b in resp.content
+                   if getattr(b, 'type', None) == 'text')
+
+
 def parse_model_json_object(text):
     text = (text or '').strip()
     try:
@@ -8702,9 +8715,7 @@ def fetch_watch_valuation_anthropic(watch):
     Returns dict {value: float|None, results: str}. Raises RuntimeError
     on missing key or API failure.
     """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    api_key = _require_anthropic_key()
     try:
         import anthropic
     except ImportError:
@@ -8773,10 +8784,7 @@ results_markdown rules:
         raise RuntimeError(f'Rate limited after retries: {last_err}')
 
     # Concatenate all text blocks in the final assistant message
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    text = _message_text(resp)
     text = text.strip()
 
     # Strip possible markdown code fences
@@ -9213,9 +9221,7 @@ def audit_coin_image_vs_description(coin):
     Returns {match: True|False|None, confidence: float|None, reason: str}.
     Returns match=None when there isn't enough material to judge.
     """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    api_key = _require_anthropic_key()
     desc = (coin['description'] or '').strip()
     if not desc:
         return {'match': None, 'confidence': None,
@@ -9255,10 +9261,7 @@ Reply with ONLY a JSON object, no prose:
         max_tokens=300,
         messages=[{'role': 'user', 'content': content}],
     )
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    text = _message_text(resp)
     text = text.strip()
     m = re.search(r'\{.*\}', text, re.DOTALL)
     if not m:
@@ -9669,9 +9672,7 @@ def fetch_coin_context(coin):
     Returns dict {markdown: str}. Raises RuntimeError on missing key
     / API failure.
     """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    api_key = _require_anthropic_key()
     try:
         import anthropic
     except ImportError:
@@ -9725,10 +9726,7 @@ def fetch_coin_context(coin):
     else:
         raise RuntimeError(_friendly_lookup_error('Coin research lookup', last_err))
 
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    text = _message_text(resp)
     text = text.strip()
 
     md = _coin_context_response_markdown(text)
@@ -9807,9 +9805,7 @@ def fetch_coin_history(field_name, topic, coin):
     region or authority. Returns dict {markdown: str}.
     Raises RuntimeError on missing key or API failure.
     """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    api_key = _require_anthropic_key()
     try:
         import anthropic
     except ImportError:
@@ -9908,10 +9904,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
     else:
         raise RuntimeError(_friendly_lookup_error('Coin history lookup', last_err))
 
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    text = _message_text(resp)
     text = text.strip()
 
     m = re.search(r'\{.*\}', text, re.DOTALL)
@@ -10032,9 +10025,7 @@ def fetch_recording_notes(rec):
     or empty model output. Uses Anthropic with web_search, output
     wrapped in <markdown>...</markdown>.
     """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    api_key = _require_anthropic_key()
     try:
         import anthropic
     except ImportError:
@@ -10239,10 +10230,7 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}{label_blo
     else:
         raise RuntimeError(f'Rate limited after retries: {last_err}')
 
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    text = _message_text(resp)
     text = text.strip()
 
     md = ''
@@ -12189,9 +12177,7 @@ def fetch_art_lookup(art):
     couple of sentences about the specific piece if any source has
     something to say. Either may come back as None.
     """
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    api_key = _require_anthropic_key()
     try:
         import anthropic
     except ImportError:
@@ -12271,10 +12257,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
     else:
         raise RuntimeError(f'Lookup failed after retries: {last_err}')
 
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    text = _message_text(resp)
     text = text.strip()
     m = re.search(r'\{.*\}', text, re.DOTALL)
     if not m:
@@ -13310,9 +13293,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
                                  if existing else f'citations: {cite_list}')
         return parsed
 
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    api_key = _require_anthropic_key()
     try:
         import anthropic
     except ImportError:
@@ -13349,10 +13330,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     if resp is None:
         raise RuntimeError('Coin spec lookup returned no response')
 
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    text = _message_text(resp)
     text = text.strip()
     # Strip code fences if the model added them anyway
     text = re.sub(r'^```(?:json)?\s*', '', text)
@@ -14162,9 +14140,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
 }}
 """
 
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        raise RuntimeError('ANTHROPIC_API_KEY not configured')
+    api_key = _require_anthropic_key()
     try:
         import anthropic
     except ImportError:
@@ -14212,10 +14188,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     if getattr(resp, 'stop_reason', None) == 'max_tokens':
         raise RuntimeError('Banknote spec lookup response hit the length limit — try again.')
 
-    text = ''
-    for block in resp.content:
-        if getattr(block, 'type', None) == 'text':
-            text += block.text
+    text = _message_text(resp)
     text = re.sub(r'^```(?:json)?\s*', '', text.strip())
     text = re.sub(r'\s*```$', '', text)
     try:
