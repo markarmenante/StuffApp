@@ -73,5 +73,15 @@ for rule, endpoint, sql, use_now, total_table in stuffapp._BULK_UPDATE_ROUTES:
     assert ('total' in body) == (total_table is not None), (rule, body)
 print(f'BULK-UPDATE ROUTES OK: {len(stuffapp._BULK_UPDATE_ROUTES)} routes')
 
+# Banknote-history diagnostic: 403 without secret, JSON shape with it.
+assert client.get('/admin/banknote-countries-without-history').status_code == 403
+r = client.get('/admin/banknote-countries-without-history', query_string={'secret': secret})
+assert r.status_code == 200, r.status_code
+body = r.get_json()
+assert 'without_history' in body and 'missing_count' in body, body
+# The seeded Belize note is a covered country, so it must not be listed.
+assert all(e['country'] != 'Belize' for e in body['without_history']), body
+print('HISTORY DIAGNOSTIC OK')
+
 print(f'SMOKE OK: / + {len(stuffapp.CATEGORIES)} categories + detail + 404s '
       '+ headers + csrf guard')

@@ -4052,6 +4052,30 @@ def _backfill_country_histories():
         _run_country_history_job(name, slug)
 
 
+@app.route('/admin/banknote-countries-without-history', methods=['GET'])
+def banknote_countries_without_history():
+    """Diagnostic: distinct banknote countries that have no history panel
+    (neither a built-in nor a generated entry), so the gaps can be filled
+    with authoritative built-ins. Owner-only via the shared secret."""
+    if request.args.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    db = get_db()
+    rows = db.execute(
+        "SELECT country, COUNT(*) AS n FROM banknotes "
+        "WHERE country IS NOT NULL AND TRIM(country) != '' "
+        "GROUP BY country ORDER BY country"
+    ).fetchall()
+    missing, covered = [], []
+    for r in rows:
+        name = (r['country'] or '').strip()
+        key = _country_key(name)
+        has_history = bool(key and (key == 'us' or _country_eras_for(key)))
+        (covered if has_history else missing).append(
+            {'country': name, 'notes': r['n']})
+    return jsonify(without_history=missing, covered_count=len(covered),
+                   missing_count=len(missing))
+
+
 # A decade written as "1850s" (in a series label or date text) resolves to
 # the decade's first year, so undated obsolete notes still land in an era.
 _DECADE_RE = re.compile(r'\b((?:1[6-9]|20)\d)0s\b')
@@ -10467,6 +10491,21 @@ def list_view(category):
                                      coin_filter=coin_filter,
                                      at_property=at_property)
     rows = db.execute(sql, params).fetchall()
+    # Self-heal missing banknote histories on view. The startup backfill
+    # sweep can't finish on Railway's container lifecycle (it's killed by
+    # sleep/redeploy before completing), so instead kick off generation
+    # for any uncovered country the moment its notes are shown — the
+    # container is awake because the user is here. ensure_country_history
+    # is a deduped, fire-and-forget no-op when the country already has a
+    # history or no API key is set, so calling it per render is cheap.
+    if category == 'banknotes' and show_history:
+        seen_countries = set()
+        for r in rows:
+            c = (r['country'] if 'country' in r.keys() else None) or ''
+            c = c.strip()
+            if c and c.lower() not in seen_countries:
+                seen_countries.add(c.lower())
+                ensure_country_history(c)
     # When ?at=<name> is set, resolve the matching Property's id so
     # the list page can render a "← back to <Property>" pill that
     # jumps to its detail directly (browser back also works, this
