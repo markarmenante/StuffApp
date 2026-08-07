@@ -711,7 +711,6 @@ def _merge_coin_condition_history(existing_notes, history_context):
     return f"{notes}\n\n{body}"
 
 
-
 def _backfill_english_banknote_lettering(db):
     """One-time split for English-text banknotes: Check historically put
     all inscriptions (Front: + Back:) in `lettering` and left the
@@ -16579,6 +16578,79 @@ IMPORT_MISSING_SECRET = os.environ.get(
     'STUFFAPP_ADMIN_SECRET') or 'stuffapp-bulk-import-2026'
 
 
+# One-shot maintenance endpoints that run a single UPDATE and report the
+# row count. Each was its own near-identical route; they're registered
+# from this table instead. Columns: (rule, endpoint, sql, use_now,
+# total_table). use_now binds datetime.utcnow().isoformat() as the sole
+# `?` param (for the updated_at column); total_table adds a
+# COUNT(*)-of-that-table 'total' to the response. SQL is verbatim from
+# the original routes — a change here changes what the endpoint does.
+_BULK_UPDATE_ROUTES = (
+    ('/admin/pens-owner-mark', 'pens_owner_mark',
+     "UPDATE pens SET owner='Mark'", False, 'pens'),
+    ('/admin/coins-owner-mark', 'coins_owner_mark',
+     "UPDATE coins SET owner='Mark', updated_at=? "
+     "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'Mark'", True, 'coins'),
+    ('/admin/audio-owner-ym', 'audio_owner_ym',
+     "UPDATE audio SET owner='YM', updated_at=? "
+     "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'YM'", True, 'audio'),
+    ('/admin/cameras-owner-mark', 'cameras_owner_mark',
+     "UPDATE cameras SET owner='Mark', updated_at=? "
+     "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'Mark'", True, 'cameras'),
+    ('/admin/lenses-owner-mark', 'lenses_owner_mark',
+     "UPDATE lenses SET owner='Mark', updated_at=? "
+     "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'Mark'", True, 'lenses'),
+    ('/admin/vehicles-default-sold', 'vehicles_default_sold',
+     "UPDATE vehicles SET status='Sold' WHERE status IS NULL OR status=''",
+     False, 'vehicles'),
+    ('/admin/backfill-property-status-own', 'backfill_property_status_own',
+     "UPDATE properties SET status = 'Own' "
+     "WHERE status IS NULL OR TRIM(status) = ''", False, None),
+    ('/admin/set-all-recording-status-own', 'set_all_recording_status_own',
+     "UPDATE recordings SET status = 'Own'", False, None),
+    ('/admin/rename-recording-type-lp-to-vinyl', 'rename_recording_type_lp_to_vinyl',
+     "UPDATE recordings SET type = 'Vinyl' WHERE type = 'LP'", False, None),
+    ('/admin/clear-recording-numeric-notes', 'clear_recording_numeric_notes',
+     "UPDATE recordings SET notes = NULL "
+     "WHERE notes IS NOT NULL "
+     "  AND TRIM(notes) NOT LIKE '% %' "
+     "  AND LENGTH(TRIM(notes)) < 12 "
+     "  AND CAST(TRIM(notes) AS REAL) >= 0 "
+     "  AND TRIM(notes) GLOB '[0-9]*'", False, None),
+    ('/admin/backfill-camera-status-own', 'backfill_camera_status_own',
+     "UPDATE cameras SET status = 'Own' "
+     "WHERE status IS NULL OR TRIM(status) = ''", False, None),
+    ('/admin/backfill-property-owner-ym', 'backfill_property_owner_ym',
+     "UPDATE properties SET owner = 'YM' "
+     "WHERE status = 'Own' AND type IN ('Residential', 'Commercial')",
+     False, None),
+)
+
+
+def _make_bulk_update_route(sql, use_now, total_table):
+    def view():
+        if request.form.get('secret') != IMPORT_MISSING_SECRET:
+            abort(403)
+        db = get_db()
+        params = [datetime.utcnow().isoformat()] if use_now else []
+        r = db.execute(sql, params)
+        db.commit()
+        payload = {'updated': r.rowcount}
+        if total_table:
+            payload['total'] = db.execute(
+                f'SELECT COUNT(*) FROM {total_table}').fetchone()[0]
+        return jsonify(**payload)
+    return view
+
+
+for _rule, _endpoint, _sql, _use_now, _total in _BULK_UPDATE_ROUTES:
+    app.add_url_rule(
+        _rule, _endpoint,
+        _make_bulk_update_route(_sql, _use_now, _total),
+        methods=['POST'],
+    )
+
+
 def _csv_rows(filename):
     import csv, io
     path = os.path.join(BASE_DIR, filename)
@@ -18209,17 +18281,6 @@ def coins_cat_id_audit():
         'duplicate_count': len(duplicates),
         'duplicates':      duplicates,
     })
-
-
-@app.route('/admin/pens-owner-mark', methods=['POST'])
-def pens_owner_mark():
-    """Set owner='Mark' for all pens records."""
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    r = db.execute("UPDATE pens SET owner='Mark'")
-    db.commit()
-    return jsonify(updated=r.rowcount, total=db.execute('SELECT COUNT(*) FROM pens').fetchone()[0])
 
 
 @app.route('/admin/users', methods=['GET'])
@@ -24135,57 +24196,6 @@ def admin_orphan_uploads():
     )
 
 
-@app.route('/admin/coins-owner-mark', methods=['POST'])
-def coins_owner_mark():
-    """Set owner='Mark' on every coin whose owner isn't already 'Mark'."""
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    now = datetime.utcnow().isoformat()
-    r = db.execute(
-        "UPDATE coins SET owner='Mark', updated_at=? "
-        "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'Mark'",
-        [now],
-    )
-    db.commit()
-    return jsonify(updated=r.rowcount,
-                   total=db.execute('SELECT COUNT(*) FROM coins').fetchone()[0])
-
-
-@app.route('/admin/audio-owner-ym', methods=['POST'])
-def audio_owner_ym():
-    """Set owner='YM' on every audio row whose owner isn't already 'YM'."""
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    now = datetime.utcnow().isoformat()
-    r = db.execute(
-        "UPDATE audio SET owner='YM', updated_at=? "
-        "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'YM'",
-        [now],
-    )
-    db.commit()
-    return jsonify(updated=r.rowcount,
-                   total=db.execute('SELECT COUNT(*) FROM audio').fetchone()[0])
-
-
-@app.route('/admin/cameras-owner-mark', methods=['POST'])
-def cameras_owner_mark():
-    """Set owner='Mark' on every camera whose owner isn't already 'Mark'."""
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    now = datetime.utcnow().isoformat()
-    r = db.execute(
-        "UPDATE cameras SET owner='Mark', updated_at=? "
-        "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'Mark'",
-        [now],
-    )
-    db.commit()
-    return jsonify(updated=r.rowcount,
-                   total=db.execute('SELECT COUNT(*) FROM cameras').fetchone()[0])
-
-
 def _restore_docs_from_slots(db, table, cols, rows, json_col, sources):
     """Rebuild a documents JSON column from legacy per-slot file columns
     for rows whose JSON is currently empty, and return the count
@@ -24360,35 +24370,6 @@ def recordings_canonicalize_artists():
     )
 
 
-@app.route('/admin/lenses-owner-mark', methods=['POST'])
-def lenses_owner_mark():
-    """Set owner='Mark' on every lens whose owner isn't already 'Mark'."""
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    now = datetime.utcnow().isoformat()
-    r = db.execute(
-        "UPDATE lenses SET owner='Mark', updated_at=? "
-        "WHERE owner IS NULL OR TRIM(owner) = '' OR owner != 'Mark'",
-        [now],
-    )
-    db.commit()
-    return jsonify(updated=r.rowcount,
-                   total=db.execute('SELECT COUNT(*) FROM lenses').fetchone()[0])
-
-
-@app.route('/admin/vehicles-default-sold', methods=['POST'])
-def vehicles_default_sold():
-    """Set any vehicle with null/empty status to 'Sold'. Safe to re-run."""
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    r = db.execute("UPDATE vehicles SET status='Sold' WHERE status IS NULL OR status=''")
-    db.commit()
-    total = db.execute('SELECT COUNT(*) FROM vehicles').fetchone()[0]
-    return jsonify(updated=r.rowcount, total=total)
-
-
 @app.route('/admin/prune-empty-coin-id-dupes', methods=['POST'])
 def prune_empty_coin_id_dupes():
     """Delete coins rows whose coin_id is empty and whose id isn't a CSV UUID.
@@ -24535,25 +24516,6 @@ def property_type_audit():
         "FROM properties GROUP BY type, status ORDER BY type, status"
     ).fetchall()
     return jsonify(rows=[dict(r) for r in rows])
-
-
-@app.route('/admin/backfill-property-status-own', methods=['POST'])
-def backfill_property_status_own():
-    """Set status='Own' for any property with a NULL/blank status.
-
-    Matches the local DB after the 2026 data cleanup that restricted
-    the Property Status dropdown to {Own, Sold}. Preserves existing
-    'Sold' rows. Safe to re-run.
-    """
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    r = db.execute(
-        "UPDATE properties SET status = 'Own' "
-        "WHERE status IS NULL OR TRIM(status) = ''"
-    )
-    db.commit()
-    return jsonify(updated=r.rowcount)
 
 
 _RENUMBER_GROUPS = {
@@ -24728,63 +24690,6 @@ def backfill_status_own_all():
     return jsonify(updated=total, per_table=per_table)
 
 
-@app.route('/admin/set-all-recording-status-own', methods=['POST'])
-def set_all_recording_status_own():
-    """Set every recording's status to 'Own'.
-
-    Matches the local backfill alongside the dropdown restriction
-    to {Own, Ordered}. Safe to re-run.
-    """
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    r = db.execute("UPDATE recordings SET status = 'Own'")
-    db.commit()
-    return jsonify(updated=r.rowcount)
-
-
-@app.route('/admin/rename-recording-type-lp-to-vinyl', methods=['POST'])
-def rename_recording_type_lp_to_vinyl():
-    """Rename recordings.type 'LP' -> 'Vinyl'.
-
-    Dropdown is now {Vinyl, CD, SACD, Tape}. Any stale 'LP' rows
-    (from an earlier short-lived migration) are flipped back to
-    'Vinyl'. Safe to re-run.
-    """
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    r = db.execute("UPDATE recordings SET type = 'Vinyl' WHERE type = 'LP'")
-    db.commit()
-    return jsonify(updated=r.rowcount)
-
-
-@app.route('/admin/clear-recording-numeric-notes', methods=['POST'])
-def clear_recording_numeric_notes():
-    """Null out recordings.notes where it's a bare number.
-
-    The earlier FM import mistakenly wrote CSV column 6 (price) into
-    the notes column. Any row whose notes is just an integer or
-    decimal (< 12 chars, no spaces) is that stale price data. Run
-    this on Railway once, then hit /admin/upsert-recordings to fill
-    the real price + notes columns from Recording.csv. Safe to
-    re-run.
-    """
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    r = db.execute(
-        "UPDATE recordings SET notes = NULL "
-        "WHERE notes IS NOT NULL "
-        "  AND TRIM(notes) NOT LIKE '% %' "
-        "  AND LENGTH(TRIM(notes)) < 12 "
-        "  AND CAST(TRIM(notes) AS REAL) >= 0 "
-        "  AND TRIM(notes) GLOB '[0-9]*'"
-    )
-    db.commit()
-    return jsonify(updated=r.rowcount)
-
-
 @app.route('/admin/upsert-recordings', methods=['POST'])
 def upsert_recordings():
     """Upsert Recording.csv into the recordings table.
@@ -24878,43 +24783,6 @@ def upsert_recordings():
     total = db.execute('SELECT COUNT(*) FROM recordings').fetchone()[0]
     return jsonify(updated=updated, filled_columns=filled_cols,
                    inserted=inserted, skipped=skipped, total=total)
-
-
-@app.route('/admin/backfill-camera-status-own', methods=['POST'])
-def backfill_camera_status_own():
-    """Set status='Own' for any camera with a NULL/blank status.
-
-    Mirrors the local backfill after the Camera Status dropdown was
-    restricted to {Own, Sold, Gifted}. Preserves existing non-blank
-    values. Safe to re-run.
-    """
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    r = db.execute(
-        "UPDATE cameras SET status = 'Own' "
-        "WHERE status IS NULL OR TRIM(status) = ''"
-    )
-    db.commit()
-    return jsonify(updated=r.rowcount)
-
-
-@app.route('/admin/backfill-property-owner-ym', methods=['POST'])
-def backfill_property_owner_ym():
-    """Set owner='YM' for every Own Residential/Commercial property.
-
-    Mirrors the local backfill done after the Owner field was added.
-    Leaves Sold rows alone. Safe to re-run.
-    """
-    if request.form.get('secret') != IMPORT_MISSING_SECRET:
-        abort(403)
-    db = get_db()
-    r = db.execute(
-        "UPDATE properties SET owner = 'YM' "
-        "WHERE status = 'Own' AND type IN ('Residential', 'Commercial')"
-    )
-    db.commit()
-    return jsonify(updated=r.rowcount)
 
 
 # FileMaker container-field export filename -> (table, column)

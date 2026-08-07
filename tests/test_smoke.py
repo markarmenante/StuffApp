@@ -59,5 +59,19 @@ assert r.status_code == 403, ('cross-site fetch not blocked', r.status_code)
 r = client.post('/banknotes/999999/delete')
 assert r.status_code != 403, ('header-less write wrongly blocked', r.status_code)
 
+# Every table-driven bulk-UPDATE admin route is wired and returns the
+# right shape (secret required; owner via the dev fallback; no Origin so
+# the CSRF guard allows it).
+secret = stuffapp.IMPORT_MISSING_SECRET
+for rule, endpoint, sql, use_now, total_table in stuffapp._BULK_UPDATE_ROUTES:
+    # Wrong secret → 403.
+    assert client.post(rule, data={'secret': 'nope'}).status_code == 403, rule
+    r = client.post(rule, data={'secret': secret})
+    assert r.status_code == 200, (rule, r.status_code)
+    body = r.get_json()
+    assert 'updated' in body, (rule, body)
+    assert ('total' in body) == (total_table is not None), (rule, body)
+print(f'BULK-UPDATE ROUTES OK: {len(stuffapp._BULK_UPDATE_ROUTES)} routes')
+
 print(f'SMOKE OK: / + {len(stuffapp.CATEGORIES)} categories + detail + 404s '
       '+ headers + csrf guard')
