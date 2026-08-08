@@ -15,6 +15,17 @@ Cloudflare). One main module — `app.py` — plus `templates/`,
 `static/css/style.css`, and `schema.sql`. See README.md for local paths and
 the Railway start command.
 
+## Railway topology (checked Aug 2026)
+
+Production `stuff.armenante.com` is project **courageous-adventure**,
+service `web` (origin `web-production-cf059.up.railway.app`). Two other
+Railway projects — observant-success (`web-production-fca7e`) and
+poetic-peace (`web-production-ac478`) — ALSO auto-deploy this repo's
+`main` but serve no custom domain; they look like stale duplicates that
+triple every deploy. When debugging production, read logs from
+courageous-adventure, not the others. Ask Mark before deleting the
+extras.
+
 ## Dev setup
 
 ```bash
@@ -38,7 +49,7 @@ lockout or a failed deploy:
   `_resolve_user_email` (app.py) falls back to `OWNER_EMAIL` when no
   `Cf-Access-Authenticated-User-Email` header is present, so anything
   hitting the app without that header is owner. The Railway origin
-  `web-production-fca7e.up.railway.app` is public (Cloudflare proxies to
+  `web-production-cf059.up.railway.app` is public (Cloudflare proxies to
   it), so that origin is a direct, unauthenticated bypass of Cloudflare
   Access. Fix is a Cloudflare-side control (Authenticated Origin Pulls,
   a Tunnel, or an IP allowlist) — NOT deleting the railway domain (CF
