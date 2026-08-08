@@ -7758,32 +7758,54 @@ def _cv_note_quad(img):
     # away, plastic is smooth. The biggest banknote-shaped edge blob
     # marks the printed design; whatever quad we accept must be this
     # design plus margins, never the slab (whose proportions also pass
-    # a banknote aspect gate).
+    # a banknote aspect gate). Two Canny sensitivities: the default
+    # picks up fine engraving, but on textured felt the fibre grain
+    # edges close into one frame-sized blob that swallows the design —
+    # the stricter pass keeps only high-contrast ink edges, which the
+    # felt grain doesn't have.
     ink_box = None
-    canny = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 60, 160)
-    canny = cv2.morphologyEx(canny, cv2.MORPH_CLOSE,
-                             np.ones((11, 11), np.uint8))
-    ink_contours, _ = cv2.findContours(canny, cv2.RETR_EXTERNAL,
-                                       cv2.CHAIN_APPROX_SIMPLE)
     frame_area = float(sw * sh)
-    ink_best = 0
-    for c in ink_contours:
-        bx, by, bw_, bh_ = cv2.boundingRect(c)
-        area = bw_ * bh_
-        if not 0.03 * frame_area <= area <= 0.70 * frame_area:
-            continue
-        if not 1.15 <= bw_ / float(bh_) <= 3.8:
-            continue
-        # Engraving fills its box with texture; the outline of a slab
-        # or holder encloses the same kind of box while its interior
-        # stays empty — edge density separates them where contour
-        # area (which counts everything a closed outline encloses)
-        # cannot.
-        if float((canny[by:by + bh_, bx:bx + bw_] > 0).mean()) < 0.30:
-            continue
-        if area > ink_best:
-            ink_best = area
-            ink_box = (bx, by, bx + bw_, by + bh_)
+    for canny_lo, canny_hi in ((60, 160), (130, 280)):
+        canny = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0),
+                          canny_lo, canny_hi)
+        canny = cv2.morphologyEx(canny, cv2.MORPH_CLOSE,
+                                 np.ones((11, 11), np.uint8))
+        ink_contours, _ = cv2.findContours(canny, cv2.RETR_EXTERNAL,
+                                           cv2.CHAIN_APPROX_SIMPLE)
+        ink_best = 0
+        for c in ink_contours:
+            bx, by, bw_, bh_ = cv2.boundingRect(c)
+            area = bw_ * bh_
+            if not 0.03 * frame_area <= area <= 0.70 * frame_area:
+                continue
+            if not 1.15 <= bw_ / float(bh_) <= 3.8:
+                continue
+            # Engraving fills its box with texture; the outline of a slab
+            # or holder encloses the same kind of box while its interior
+            # stays empty. Raw density separates them only for allover
+            # lathework — a design built of a solid vignette, corner
+            # counters and big blank watermark fields is mostly
+            # edge-free by area. Distribution is the robust cue: real
+            # designs put SOME edge in most cells of a coarse grid,
+            # while a bare outline touches only the boundary cells
+            # (~30% of a 12x12 grid).
+            roi = canny[by:by + bh_, bx:bx + bw_] > 0
+            if float(roi.mean()) < 0.30:
+                gy = max(1, bh_ // 12)
+                gx = max(1, bw_ // 12)
+                cells = hit = 0
+                for cy in range(0, bh_ - gy + 1, gy):
+                    for cx in range(0, bw_ - gx + 1, gx):
+                        cells += 1
+                        if roi[cy:cy + gy, cx:cx + gx].any():
+                            hit += 1
+                if not cells or hit / float(cells) < 0.55:
+                    continue
+            if area > ink_best:
+                ink_best = area
+                ink_box = (bx, by, bx + bw_, by + bh_)
+        if ink_box is not None:
+            break
 
     # Local mask around the design: threshold ONLY the neighbourhood
     # of the ink box, so the split is paper vs its immediate
@@ -7803,18 +7825,21 @@ def _cv_note_quad(img):
         local_mask = np.zeros_like(gray)
         local_mask[ry0:ry1, rx0:rx1] = cv2.morphologyEx(
             lm, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+        local_roi = (rx0, ry0, rx1, ry1)
 
         def local_binarize(roi, t=t_loc):
             return (cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY) > t) \
                 .astype(np.uint8) * 255
 
-    def _pick(mask):
+    def _pick(mask, why, roi=None):
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
                                        cv2.CHAIN_APPROX_SIMPLE)
         best = None
         for c in contours:
             area = cv2.contourArea(c)
             if not 0.05 * frame_area <= area <= 0.90 * frame_area:
+                if area > 0.01 * frame_area:
+                    why['area'] = why.get('area', 0) + 1
                 continue
             peri = cv2.arcLength(c, True)
             quad = cv2.approxPolyDP(c, 0.02 * peri, True)
@@ -7838,31 +7863,31 @@ def _cv_note_quad(img):
                 continue
             if not (0.75 <= top / bottom <= 1.33
                     and 0.75 <= left / right <= 1.33):
+                why['sides'] = why.get('sides', 0) + 1
                 continue
             aspect = ((top + bottom) / 2.0) / ((left + right) / 2.0)
             if not 1.15 <= aspect <= 3.8:
+                why['aspect'] = why.get('aspect', 0) + 1
                 continue
-            # The note must stand out from its immediate surroundings
-            # in the mask that found it: solid inside the quad, absent
-            # in the ring around it. Judging the mask (not raw
-            # intensity means) keeps this valid for every background
-            # the binarization can separate — dark holder, furniture,
-            # or a saturated backdrop — and heavy overprint ink can't
-            # drag an intensity mean below some fixed contrast bar.
-            qmask = np.zeros((sh, sw), np.uint8)
-            cv2.fillPoly(qmask, [ordered.astype(np.int32)], 255)
-            ring = cv2.dilate(qmask, np.ones((25, 25), np.uint8)) & ~qmask
-            if not ring.any():
-                continue
-            m_in = float((mask[qmask > 0] > 0).mean())
-            m_ring = float((mask[ring > 0] > 0).mean())
-            if m_in < 0.85 or m_ring > 0.35:
-                continue
+            # A quad edge lying ON the local-ROI window (where that
+            # window is not the frame edge) is the window clipping a
+            # component that really extends further — holder or
+            # backdrop spillover, never the note's own edge.
+            if roi is not None:
+                qx0, qy0 = pts[:, 0].min(), pts[:, 1].min()
+                qx1, qy1 = pts[:, 0].max(), pts[:, 1].max()
+                if ((qx0 <= roi[0] + 3 and roi[0] > 0)
+                        or (qy0 <= roi[1] + 3 and roi[1] > 0)
+                        or (qx1 >= roi[2] - 4 and roi[2] < sw)
+                        or (qy1 >= roi[3] - 4 and roi[3] < sh)):
+                    why['roi-clip'] = why.get('roi-clip', 0) + 1
+                    continue
             # Tie the quad to the printed design: it must cover the
             # ink box without dwarfing it. A slab-sized quad passes
             # every geometric gate above (slab proportions are
             # banknote-ish) — but it is several times the design's
             # area, while the real note is design + margins.
+            ink_ok = False
             if ink_box is not None:
                 ib_area = (ink_box[2] - ink_box[0]) \
                     * (ink_box[3] - ink_box[1])
@@ -7873,24 +7898,59 @@ def _cv_note_quad(img):
                 if cv2.pointPolygonTest(
                         ordered.astype(np.float32), (icx, icy),
                         False) < 0:
+                    why['ink-out'] = why.get('ink-out', 0) + 1
                     continue
                 if quad_area > 2.2 * ib_area:
+                    why['ink-dwarf'] = why.get('ink-dwarf', 0) + 1
                     continue
+                ink_ok = True
+            # The note must stand out from its immediate surroundings
+            # in the mask that found it: solid inside the quad, absent
+            # in the ring around it. Judging the mask (not raw
+            # intensity means) keeps this valid for every background
+            # the binarization can separate — dark holder, furniture,
+            # or a saturated backdrop — and heavy overprint ink can't
+            # drag an intensity mean below some fixed contrast bar.
+            # A solid dark vignette (portrait, volcano) punches a big
+            # hole in any brightness mask, so full coverage is only
+            # demanded when no ink anchor ties the quad down: once the
+            # quad is pinned to the design box (contains it, at most
+            # design-plus-margins sized), the paper that IS in the
+            # mask just has to be real — a low floor keeps hollow
+            # holder-highlight rings out.
+            qmask = np.zeros((sh, sw), np.uint8)
+            cv2.fillPoly(qmask, [ordered.astype(np.int32)], 255)
+            ring = cv2.dilate(qmask, np.ones((25, 25), np.uint8)) & ~qmask
+            if not ring.any():
+                continue
+            m_in = float((mask[qmask > 0] > 0).mean())
+            m_ring = float((mask[ring > 0] > 0).mean())
+            if m_in < (0.30 if ink_ok else 0.85):
+                why['cover'] = why.get('cover', 0) + 1
+                continue
+            if m_ring > 0.35:
+                why['ring'] = why.get('ring', 0) + 1
+                continue
             if best is None or area > best[0]:
                 best = (area, ordered)
         return best
 
     candidates = []
     if local_mask is not None:
-        candidates.append((local_mask, local_binarize))
-    candidates += [(otsu_mask, _gray_binarize),
-                   (paper_mask, _paper_binarize)]
-    for mask, binarize in candidates:
-        best = _pick(mask)
+        candidates.append(('local', local_mask, local_binarize, local_roi))
+    candidates += [('otsu', otsu_mask, _gray_binarize, None),
+                   ('paper', paper_mask, _paper_binarize, None)]
+    whys = []
+    for name, mask, binarize, roi_rect in candidates:
+        why = {}
+        best = _pick(mask, why, roi=roi_rect)
         if best is None:
+            whys.append('%s{%s}' % (name, ','.join(
+                f'{k}:{v}' for k, v in why.items()) or 'no-contour'))
             continue
         approx = tuple((float(px) / scale, float(py) / scale)
                        for px, py in best[1])
+        app.logger.info('trim-cv: %s mask quad', name)
         # approxPolyDP corners are only ~2%-of-perimeter accurate, and
         # the detection ran downscaled — up to a dozen full-res pixels
         # off, which reads as a leftover sliver or a faint residual
@@ -7898,6 +7958,11 @@ def _cv_note_quad(img):
         # each edge on the actual contour pixels and intersect into
         # sub-pixel corners.
         return _cv_refine_quad(rgb, approx, binarize) or approx
+    app.logger.info('trim-cv: no quad (ink_box=%s; %s)',
+                    'x'.join(str(v) for v in (
+                        ink_box[2] - ink_box[0],
+                        ink_box[3] - ink_box[1])) if ink_box else 'none',
+                    ' '.join(whys))
     return None
 
 
@@ -8230,12 +8295,15 @@ def _largest_note_component(blob, step=2, max_area=0.92, min_area=0.08):
     return best[1:] if best else None
 
 
-def _ring_mostly_uniform(blob, box):
+def _ring_mostly_uniform(blob, box, skip_top=False):
     """True when the band around the box is texture-free — holder
     plastic or backing sheet of any colour. Rejects busy dealer-page
     surroundings that happen to contain a banknote-shaped blob. A small
     guard band is skipped first: the note's own edge shadow lines the
-    box and is expected content, not surroundings."""
+    box and is expected content, not surroundings. ``skip_top``
+    excludes the band above the box: when a grading label sits there
+    its printed text is expected slab content, and judging it as
+    "busy surroundings" rejects every tight slab crop."""
     x0, y0, x1, y1 = box
     w, h = blob.size
     guard = max(2, int(0.02 * min(x1 - x0, y1 - y0)))
@@ -8244,6 +8312,8 @@ def _ring_mostly_uniform(blob, box):
     gx1, gy1 = x1 + guard, y1 + guard
     rx0, ry0 = max(0, gx0 - ring), max(0, gy0 - ring)
     rx1, ry1 = min(w - 1, gx1 + ring), min(h - 1, gy1 + ring)
+    if skip_top:
+        ry0 = max(ry0, gy0)
     px = blob.load()
     vals = [px[x, y]
             for y in range(ry0, ry1 + 1)
@@ -8479,17 +8549,26 @@ def _detect_light_note_box(img):
     raw_edges, blob = _note_edge_masks(small.convert('L'))
     box = _largest_note_component(blob)
     if not box:
+        app.logger.info('trim-light: no banknote-shaped edge component')
         return None
     x0, y0, x1, y1 = box
+    # A grading-label band above the design is slab evidence either
+    # way: it lets a frame-filling design through the trimmed-already
+    # gate, and it excuses the label's own text from the ring test —
+    # a tight slab crop puts the label right inside the ring, and
+    # judging that expected content as busy surroundings rejected
+    # every such crop.
+    has_label = _label_band_above(blob, box, aw, ah)
     # A design spanning nearly the whole frame is USUALLY the
     # already-trimmed note — re-trimming would shave its margins on
     # every Check run. The exception is a large note photographed
     # close: then the grading label still shows as a wide flat band
     # above the note, which a stored trim never has.
     if (x1 - x0) > 0.90 * aw or (y1 - y0) > 0.90 * ah:
-        if not _label_band_above(blob, box, aw, ah):
+        if not has_label:
             return None
-    if not _ring_mostly_uniform(raw_edges, box):
+    if not _ring_mostly_uniform(raw_edges, box, skip_top=has_label):
+        app.logger.info('trim-light: ring busy (label_above=%s)', has_label)
         return None
     return (int(x0 / scale), int(y0 / scale),
             int(x1 / scale), int(y1 / scale))

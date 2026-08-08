@@ -283,6 +283,170 @@ for x, y in ((6, 6), (tw - 7, 6), (6, th - 7), (tw - 7, th - 7)):
 print('GREEN-FELT SLAB ASSERTIONS PASSED')
 
 
+# --- Notes with a solid dark vignette --------------------------------------
+# The BPI/Victory/PNB failures of Aug 2026: a real portrait or volcano
+# vignette is a solid dark mass that punches a big hole in every
+# brightness mask, so demanding near-full mask coverage inside the
+# accepted quad rejected the real note every time. Three scenes:
+#   V1 green felt (nothing trimmed at all in production),
+#   V2 tight slab crop with the grading label still on (label's text
+#      used to fail the ring-uniformity gate => label never came off),
+#   V3 slab BACK with the small edge-dense PMG hologram sticker that
+#      the ink anchor used to lock onto (crop came out as the sticker).
+
+def _draw_vignette_note(draw, quad, vignette_frac=0.55):
+    """Paper quad with border, sparse lathework, solid dark central
+    vignette (with the fine light line texture real engraving has) and
+    solid corner counters."""
+    draw.polygon(quad, fill=PAPER)
+
+    def lerp2(u, v):
+        (ax, ay), (bx, by), (cx, cy), (dx, dy) = quad
+        return ((1 - u) * (1 - v) * ax + u * (1 - v) * bx
+                + u * v * cx + (1 - u) * v * dx,
+                (1 - u) * (1 - v) * ay + u * (1 - v) * by
+                + u * v * cy + (1 - u) * v * dy)
+
+    m = 0.06
+    border = [lerp2(m, m), lerp2(1 - m, m), lerp2(1 - m, 1 - m),
+              lerp2(m, 1 - m)]
+    draw.polygon(border, outline=INK, width=5)
+    u = m + 0.02
+    while u < 1 - m - 0.02:
+        draw.line([lerp2(u, m + 0.03), lerp2(u, 1 - m - 0.03)],
+                  fill=INK, width=1)
+        u += 0.035
+    v0, v1 = 0.5 - vignette_frac / 2, 0.5 + vignette_frac / 2
+    vig = [lerp2(v0, 0.18), lerp2(v1, 0.18), lerp2(v1, 0.85),
+           lerp2(v0, 0.85)]
+    draw.polygon(vig, fill=INK)
+    vv = 0.20
+    while vv < 0.84:
+        draw.line([lerp2(v0 + 0.01, vv), lerp2(v1 - 0.01, vv)],
+                  fill=(130, 132, 142), width=2)
+        vv += 0.045
+    for (u, v) in ((0.12, 0.2), (0.88, 0.2), (0.12, 0.8), (0.88, 0.8)):
+        cx, cy = lerp2(u, v)
+        draw.ellipse([cx - 28, cy - 28, cx + 28, cy + 28], fill=INK)
+
+
+# V1: green felt, solid vignette — must still find the note.
+img = Image.new('RGB', (1600, 1200), (40, 120, 70))
+draw = ImageDraw.Draw(img)
+for i in range(0, 1600, 9):
+    for j in range(0, 1200, 7):
+        dv = ((i * 11 + j * 17) % 50) - 25
+        draw.rectangle([i, j, i + 8, j + 6],
+                       fill=(40 + dv, 120 + dv, 70 + dv))
+for i in range(SLAB[0], SLAB[2], 9):
+    for j in range(SLAB[1], SLAB[3], 7):
+        dv = ((i * 11 + j * 17) % 30) - 15
+        draw.rectangle([i, j, min(i + 8, SLAB[2]), min(j + 6, SLAB[3])],
+                       fill=(120 + dv, 200 + dv, 150 + dv))
+draw.rectangle([270, 180, 1330, 330], fill=(245, 248, 245))
+for k in range(5):
+    draw.line([(300 + k * 180, 230), (400 + k * 180, 230)],
+              fill=(30, 30, 30), width=6)
+_draw_vignette_note(draw, NOTE_QUAD)
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'vignette note on green felt was not trimmed'
+tw, th = trimmed.size
+want = _quad_aspect(NOTE_QUAD)
+got = tw / float(th)
+assert abs(got - want) / want < 0.08, \
+    f'vignette green-felt crop is not the note: got {got:.3f}, want {want:.3f}'
+px = trimmed.load()
+for x, y in ((6, 6), (tw - 7, 6), (6, th - 7), (tw - 7, th - 7)):
+    r, g, b = px[x, y][:3]
+    assert not (g - r > 30 and g - b > 30), \
+        f'green felt left at {(x, y)}: {(r, g, b)}'
+print('VIGNETTE GREEN-FELT ASSERTIONS PASSED')
+
+
+# V2: tight slab crop — teal grading label on top, dark note below,
+# white background showing through the clear holder. The label must
+# come off even though its text sits right inside the ring the light
+# detector inspects.
+img = Image.new('RGB', (1220, 650), (238, 238, 236))
+draw = ImageDraw.Draw(img)
+draw.rectangle([8, 6, 1212, 190], fill=(214, 236, 228))
+for k in range(6):
+    draw.line([(40 + k * 190, 60), (170 + k * 190, 60)],
+              fill=(40, 60, 55), width=8)
+    draw.line([(40 + k * 190, 120), (150 + k * 190, 120)],
+              fill=(60, 80, 75), width=5)
+SLAB_NOTE = [(60, 225), (1160, 230), (1157, 625), (63, 620)]
+_draw_vignette_note(draw, SLAB_NOTE, vignette_frac=0.6)
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'tight slab crop was not trimmed'
+tw, th = trimmed.size
+want = _quad_aspect(SLAB_NOTE)
+got = tw / float(th)
+assert abs(got - want) / want < 0.08, \
+    f'slab-crop result is not the note: got {got:.3f}, want {want:.3f}'
+px = trimmed.load()
+r, g, b = px[tw // 2, 4][:3]
+assert not (g - r > 10 and g - b > 4), \
+    f'grading label left at top: {(r, g, b)}'
+print('TIGHT SLAB-CROP LABEL ASSERTIONS PASSED')
+
+
+# V3: slab back — the hologram sticker (small, guilloche-dense,
+# banknote-ish aspect) must not become the crop.
+img = Image.new('RGB', (1600, 860), (240, 240, 238))
+draw = ImageDraw.Draw(img)
+draw.rectangle([8, 8, 1592, 215], fill=(216, 233, 224))
+draw.rectangle([30, 45, 495, 200], fill=(70, 110, 160))
+for k in range(30, 495, 6):
+    draw.line([(k, 45), (k + 30, 200)], fill=(150, 200, 230), width=1)
+    draw.line([(k, 200), (k + 30, 45)], fill=(40, 60, 110), width=1)
+for k in range(1300, 1560, 7):
+    draw.line([(k, 60), (k, 175)], fill=(30, 30, 30),
+              width=2 if k % 3 else 4)
+BACK_NOTE = [(70, 245), (1530, 250), (1526, 830), (74, 825)]
+draw.polygon(BACK_NOTE, fill=(232, 222, 196))
+
+
+def _lerp_back(u, v):
+    (ax, ay), (bx, by), (cx, cy), (dx, dy) = BACK_NOTE
+    return ((1 - u) * (1 - v) * ax + u * (1 - v) * bx
+            + u * v * cx + (1 - u) * v * dx,
+            (1 - u) * (1 - v) * ay + u * (1 - v) * by
+            + u * v * cy + (1 - u) * v * dy)
+
+
+BROWN = (150, 92, 48)
+draw.polygon([_lerp_back(0.05, 0.06), _lerp_back(0.95, 0.06),
+              _lerp_back(0.95, 0.94), _lerp_back(0.05, 0.94)],
+             outline=BROWN, width=6)
+u = 0.07
+while u < 0.93:
+    draw.line([_lerp_back(u, 0.10), _lerp_back(u, 0.90)],
+              fill=BROWN, width=2)
+    u += 0.009
+v = 0.12
+while v < 0.90:
+    draw.line([_lerp_back(0.07, v), _lerp_back(0.93, v)],
+              fill=BROWN, width=2)
+    v += 0.05
+for (u, v) in ((0.10, 0.5), (0.90, 0.5)):
+    cx, cy = _lerp_back(u, v)
+    draw.ellipse([cx - 55, cy - 55, cx + 55, cy + 55], fill=BROWN)
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'slab back was not trimmed'
+tw, th = trimmed.size
+assert tw > 900, \
+    f'crop locked onto the hologram sticker: {trimmed.size}'
+want = _quad_aspect(BACK_NOTE)
+got = tw / float(th)
+assert abs(got - want) / want < 0.10, \
+    f'slab-back crop is not the note: got {got:.3f}, want {want:.3f}'
+print('HOLOGRAM-STICKER SLAB-BACK ASSERTIONS PASSED')
+
+
 # --- Light-holder keystone shots -----------------------------------------
 # A flat note rendered through a REAL homography into a light-holder
 # scene: the trimmer must warp it square-on and keep a border around
