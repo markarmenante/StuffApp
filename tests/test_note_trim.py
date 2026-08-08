@@ -173,6 +173,32 @@ assert _holder_fraction(trimmed) < 0.02, 'holder plastic left in frame'
 print('LEVEL DARK-SLAB ASSERTIONS PASSED')
 
 
+# --- Clear slab photographed on couch fabric ------------------------------
+# The real-world case the ring gate used to reject: a clear holder on
+# furniture, so the ring around the note is textured mid-dark fabric —
+# nowhere near black, but clearly darker than the paper. Contrast
+# evidence must let the slab-shot gate pass and the keystone come out.
+img = Image.new('RGB', (1300, 950), (78, 70, 64))
+draw = ImageDraw.Draw(img)
+# blotchy weave texture, deterministic
+for i in range(0, 1300, 13):
+    for j in range(0, 950, 11):
+        v = 55 + ((i * 7 + j * 13) % 47)
+        draw.rectangle([i, j, i + 12, j + 10], fill=(v, v - 6, v - 10))
+_draw_note(draw, KEYSTONE, label_band=(280, 60, 1040, 190))
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'couch-background slab shot was not trimmed'
+tw, th = trimmed.size
+want = _quad_aspect(KEYSTONE)
+got = tw / float(th)
+assert abs(got - want) / want < 0.08, \
+    f'couch aspect off: got {got:.3f}, want {want:.3f}'
+lumas = _corner_luma(trimmed)
+assert all(v > 140 for v in lumas), f'couch wedge left in corner: {lumas}'
+print('COUCH-BACKGROUND SLAB ASSERTIONS PASSED')
+
+
 # --- Light-holder keystone shots -----------------------------------------
 # A flat note rendered through a REAL homography into a light-holder
 # scene: the trimmer must warp it square-on and keep a border around

@@ -7383,10 +7383,18 @@ def _trim_slabbed_note_image(data):
     # later Check finds nothing left to shave. Each pass only ever
     # shrinks the image; 3 passes covers the worst real case.
     out = None
-    for _ in range(3):
-        step = _trim_dark_slab_note(img) or _trim_light_slab_note(img)
+    for i in range(3):
+        step = _trim_dark_slab_note(img)
+        which = 'dark'
         if step is None:
+            step = _trim_light_slab_note(img)
+            which = 'light'
+        if step is None:
+            app.logger.info('trim: pass %d %sfound nothing to do (%dx%d)',
+                            i + 1, '' if i else 'on original ', *img.size)
             break
+        app.logger.info('trim: pass %d %s detector trimmed %dx%d',
+                        i + 1, which, *img.size)
         out = step
         img = _flatten_image_for_jpeg(_open_upload_image(step))
     return out
@@ -7714,6 +7722,7 @@ def _trim_dark_slab_note(img):
     bright_mask = bright_mask.filter(ImageFilter.MaxFilter(5))
     box = _largest_note_component(bright_mask, max_area=0.90, min_area=0.05)
     if not box:
+        app.logger.info('trim-dark: no bright note component')
         return None
     x0, y0, x1, y1 = box
 
@@ -7732,7 +7741,23 @@ def _trim_dark_slab_note(img):
                if not (x0 <= x <= x1 and y0 <= y <= y1)]
     if not ring_px:
         return None
-    if sum(1 for v in ring_px if v < 60) / len(ring_px) < 0.7:
+    # Slab-shot evidence, two forms: the classic near-black holder
+    # ring, or a ring clearly DARKER than the note itself. The second
+    # covers a clear holder photographed on furniture or carpet — the
+    # background shows through the plastic around the note, far from
+    # black but well below paper brightness. A dealer-page screenshot
+    # still fails both: its surroundings are as bright as the note.
+    ring_dark = sum(1 for v in ring_px if v < 60) / len(ring_px)
+    note_med = _median([px[x, y]
+                        for y in range(y0 + (y1 - y0) // 4,
+                                       y1 - (y1 - y0) // 4, 4)
+                        for x in range(x0 + (x1 - x0) // 4,
+                                       x1 - (x1 - x0) // 4, 4)])
+    ring_med = _median(ring_px)
+    if ring_dark < 0.7 and ring_med > note_med - 60:
+        app.logger.info(
+            'trim-dark: rejected ring (dark=%.2f ring_med=%d note_med=%d)',
+            ring_dark, ring_med, note_med)
         return None
 
     fx0, fy0 = int(x0 / scale), int(y0 / scale)
@@ -7743,7 +7768,19 @@ def _trim_dark_slab_note(img):
     # shot is keystoned, not just rotated — each edge carries its own
     # slope, which the rotate-only fallback below can never level.
     crop = None
-    quad = _note_quad_from_mask(bright_mask, box)
+    # Fit on an adaptive mask when the surroundings aren't pure black:
+    # midway between ring and note tone cleanly separates paper from a
+    # couch or carpet whose highlights leak past the fixed threshold
+    # and bend an edge line.
+    adaptive = max(BRIGHT, (int(note_med) + int(ring_med)) // 2)
+    if adaptive != BRIGHT:
+        qmask = g.point(lambda v, t=adaptive: 255 if v > t else 0)
+        qmask = qmask.filter(ImageFilter.MaxFilter(5))
+        qbox = _largest_note_component(qmask, max_area=0.90,
+                                       min_area=0.05) or box
+    else:
+        qmask, qbox = bright_mask, box
+    quad = _note_quad_from_mask(qmask, qbox)
     if quad:
         full_quad = tuple((qx / scale, qy / scale) for qx, qy in quad)
         # The bright mask is dilated ~2px (MaxFilter(5)); pull the
@@ -8174,6 +8211,7 @@ def _trim_light_slab_note(img):
 
     box = _detect_light_note_box(img)
     if not box:
+        app.logger.info('trim-light: no design component / gates failed')
         return None
     w, h = img.size
     fx0, fy0, fx1, fy1 = box
