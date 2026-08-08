@@ -7743,6 +7743,19 @@ def _cv_note_quad(img):
     # close hard so the note stays one contour with straight edges.
     paper_mask = cv2.morphologyEx(paper_mask, cv2.MORPH_CLOSE,
                                   np.ones((15, 15), np.uint8))
+    # Channel-dominance split: paper is neutral-to-warm (r ~ g), while
+    # a coloured backdrop stays green- or blue-dominant even when the
+    # holder plastic washes its saturation below any fixed sat bar.
+    # This is what isolates the note from felt seen THROUGH the
+    # pocket — and it excludes a pale teal grading label too.
+    ch_r = small_rgb[:, :, 0].astype(np.int16)
+    ch_g = small_rgb[:, :, 1].astype(np.int16)
+    ch_b = small_rgb[:, :, 2].astype(np.int16)
+    warm_mask = ((ch_r >= ch_g - 8) & (val > 130)).astype(np.uint8) * 255
+    warm_mask = cv2.morphologyEx(warm_mask, cv2.MORPH_CLOSE,
+                                 np.ones((15, 15), np.uint8))
+    green_dom = ch_g - ch_r
+    blue_dom = ch_b - ch_r
 
     def _gray_binarize(roi):
         return (cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY) > otsu) \
@@ -7752,6 +7765,12 @@ def _cv_note_quad(img):
         rh = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
         return ((rh[:, :, 1] < 70) & (rh[:, :, 2] > 130)) \
             .astype(np.uint8) * 255
+
+    def _warm_binarize(roi):
+        rr = roi[:, :, 0].astype(np.int16)
+        rg = roi[:, :, 1].astype(np.int16)
+        rv = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)[:, :, 2]
+        return ((rr >= rg - 8) & (rv > 130)).astype(np.uint8) * 255
 
     # The note's own anchor: engraving is the densest edge texture in
     # any slab shot — the label is sparse text, felt/couch grain blurs
@@ -7776,7 +7795,11 @@ def _cv_note_quad(img):
         for c in ink_contours:
             bx, by, bw_, bh_ = cv2.boundingRect(c)
             area = bw_ * bh_
-            if not 0.03 * frame_area <= area <= 0.70 * frame_area:
+            # Cap at 0.85, not lower: on a pocket-tight crop the design
+            # legitimately fills ~3/4 of the frame (plus close-dilation)
+            # and still needs to anchor the final shave. A design that
+            # IS the frame — the already-trimmed case — stays excluded.
+            if not 0.03 * frame_area <= area <= 0.85 * frame_area:
                 continue
             if not 1.15 <= bw_ / float(bh_) <= 3.8:
                 continue
@@ -7931,6 +7954,28 @@ def _cv_note_quad(img):
             if m_ring > 0.35:
                 why['ring'] = why.get('ring', 0) + 1
                 continue
+            # Backdrop spill: the band just inside a CORRECT note quad
+            # is paper margin; inside a pocket quad it is the same
+            # coloured backdrop as the ring outside (holder plastic
+            # washes its saturation, but green stays green-dominant
+            # and blue blue-dominant). A holder pocket has banknote
+            # proportions and, mask permitting, full coverage — this
+            # colour signature is what tells the two apart.
+            spilled = False
+            k = max(3, int(0.05 * min(top, bottom, left, right)))
+            inner = qmask & ~cv2.erode(
+                qmask, np.ones((2 * k + 1, 2 * k + 1), np.uint8))
+            if inner.any():
+                for dom in (green_dom, blue_dom):
+                    ring_med = float(np.median(dom[ring > 0]))
+                    if ring_med > 25:
+                        spill = float((dom[inner > 0] > 15).mean())
+                        if spill > 0.25:
+                            spilled = True
+                            break
+            if spilled:
+                why['spill'] = why.get('spill', 0) + 1
+                continue
             if best is None or area > best[0]:
                 best = (area, ordered)
         return best
@@ -7939,7 +7984,8 @@ def _cv_note_quad(img):
     if local_mask is not None:
         candidates.append(('local', local_mask, local_binarize, local_roi))
     candidates += [('otsu', otsu_mask, _gray_binarize, None),
-                   ('paper', paper_mask, _paper_binarize, None)]
+                   ('paper', paper_mask, _paper_binarize, None),
+                   ('warm', warm_mask, _warm_binarize, None)]
     whys = []
     for name, mask, binarize, roi_rect in candidates:
         why = {}

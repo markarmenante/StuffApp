@@ -447,6 +447,94 @@ assert abs(got - want) / want < 0.10, \
 print('HOLOGRAM-STICKER SLAB-BACK ASSERTIONS PASSED')
 
 
+# --- Holder pocket on felt: crop the note, not the pocket ------------------
+# The PCGS 1-Peso failure: felt seen through the holder plastic is
+# DESATURATED (below any fixed saturation bar) but stays
+# green-dominant. The pocket region (note + washed felt stripes) is
+# itself banknote-shaped and used to win as the accepted quad, leaving
+# green stripes and the shot's tilt in the stored image. The
+# backdrop-spill gate plus the channel-dominance (warm) mask must
+# yield the note itself, levelled.
+
+def _rot_quad(cx, cy, hw, hh, deg):
+    rad = math.radians(deg)
+    out = []
+    for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+        dx, dy = sx * hw, sy * hh
+        out.append((cx + dx * math.cos(rad) - dy * math.sin(rad),
+                    cy + dx * math.sin(rad) + dy * math.cos(rad)))
+    return out
+
+
+img = Image.new('RGB', (1600, 1200), (36, 150, 90))
+draw = ImageDraw.Draw(img)
+for i in range(0, 1600, 9):
+    for j in range(0, 1200, 7):
+        dv = ((i * 13 + j * 19) % 46) - 23
+        draw.rectangle([i, j, i + 8, j + 6],
+                       fill=(36 + dv, 150 + dv, 90 + dv))
+POCKET = (100, 200, 1520, 1080)
+for i in range(POCKET[0], POCKET[2], 9):
+    for j in range(POCKET[1], POCKET[3], 7):
+        dv = ((i * 13 + j * 19) % 28) - 14
+        draw.rectangle([i, j, min(i + 8, POCKET[2]), min(j + 6, POCKET[3])],
+                       fill=(168 + dv, 205 + dv, 182 + dv))
+draw.rectangle([120, 230, 1500, 400], fill=(228, 240, 230))
+for k in range(6):
+    draw.line([(160 + k * 200, 290), (300 + k * 200, 290)],
+              fill=(20, 25, 20), width=8)
+    draw.line([(160 + k * 200, 340), (280 + k * 200, 340)],
+              fill=(40, 45, 40), width=5)
+POCKET_NOTE = _rot_quad(800, 760, 540, 245, 1.5)
+_draw_vignette_note(draw, POCKET_NOTE, vignette_frac=0.35)
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'pocket-on-felt shot was not trimmed'
+tw, th = trimmed.size
+want = 540 / 245.0
+got = tw / float(th)
+assert abs(got - want) / want < 0.09, \
+    f'pocket crop is not the note: got {got:.3f}, want {want:.3f}'
+px = trimmed.load()
+for x, y in ((5, 5), (tw - 6, 5), (5, th - 6), (tw - 6, th - 6),
+             (5, th // 2), (tw - 6, th // 2)):
+    r, g, b = px[x, y][:3]
+    assert not (g - r > 25 and g - b > 25), \
+        f'washed felt left in crop at {(x, y)}: {(r, g, b)}'
+print('POCKET-ON-FELT ASSERTIONS PASSED')
+
+
+# --- Pocket crop dead-end: green stripes must still come off --------------
+# Production pass-2 state after a pocket quad was accepted: note plus
+# washed-felt stripes, slight tilt. The design fills ~3/4 of the frame
+# — the ink anchor must survive (cap 0.85) so the strict coverage bar
+# stays relaxed and the stripes come off.
+img = Image.new('RGB', (1490, 505), (168, 205, 182))
+draw = ImageDraw.Draw(img)
+for i in range(0, 1490, 9):
+    for j in range(0, 505, 7):
+        dv = ((i * 13 + j * 19) % 28) - 14
+        draw.rectangle([i, j, i + 8, j + 6],
+                       fill=(168 + dv, 205 + dv, 182 + dv))
+STRIPE_NOTE = _rot_quad(745, 252, 590, 232, 1.0)
+_draw_vignette_note(draw, STRIPE_NOTE, vignette_frac=0.35)
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'pocket-crop dead-end: stripes never removed'
+tw, th = trimmed.size
+want = 590 / 232.0
+got = tw / float(th)
+assert abs(got - want) / want < 0.09, \
+    f'stripe crop is not the note: got {got:.3f}, want {want:.3f}'
+px = trimmed.load()
+for x, y in ((5, 5), (tw - 6, 5), (5, th - 6), (tw - 6, th - 6),
+             (5, th // 2), (tw - 6, th // 2)):
+    r, g, b = px[x, y][:3]
+    assert not (g - r > 25 and g - b > 25), \
+        f'washed felt left in stripe crop at {(x, y)}: {(r, g, b)}'
+print('POCKET-CROP STRIPE ASSERTIONS PASSED')
+
+
 # --- Light-holder keystone shots -----------------------------------------
 # A flat note rendered through a REAL homography into a light-holder
 # scene: the trimmer must warp it square-on and keep a border around
