@@ -22,6 +22,11 @@ except Exception:
     pass
 
 app = Flask(__name__)
+# Without this, app.logger sits at the root default (WARNING) under
+# gunicorn and every app.logger.info diagnostic — image optimization,
+# slab-trim decisions — is silently dropped in production.
+app.logger.setLevel(
+    os.environ.get('STUFFAPP_LOG_LEVEL', 'INFO').upper())
 # Session is used only for flash() (never for identity), so a fresh random
 # key per boot is fine when SECRET_KEY isn't set — the only cost is that
 # any in-flight flash message is dropped across a restart. Setting
@@ -7384,8 +7389,11 @@ def _trim_slabbed_note_image(data):
     # shrinks the image; 3 passes covers the worst real case.
     out = None
     for i in range(3):
-        step = _trim_dark_slab_note(img)
-        which = 'dark'
+        step = _trim_slab_note_cv(img)
+        which = 'cv'
+        if step is None:
+            step = _trim_dark_slab_note(img)
+            which = 'dark'
         if step is None:
             step = _trim_light_slab_note(img)
             which = 'light'
@@ -7694,6 +7702,104 @@ def _note_quad_from_mask(mask, box):
             / max(1.0, (left + right) / 2.0) <= 3.8):
         return None
     return quad
+
+
+def _cv_note_quad(img):
+    """OpenCV note-corner detection, the primary detector when cv2 is
+    installed. Otsu-thresholds the frame (paper vs whatever is behind
+    the slab — black holder, couch, carpet), takes the biggest
+    banknote-shaped 4-gon contour, and returns its corners (NW, NE,
+    SE, SW) at full resolution. None when cv2 is missing or nothing
+    note-shaped stands out — the pure-PIL detectors then run."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+
+    arr = np.asarray(img.convert('L'))
+    h, w = arr.shape
+    scale = min(1.0, 1100.0 / max(w, h))
+    if scale < 1.0:
+        small = cv2.resize(arr, (int(w * scale), int(h * scale)),
+                           interpolation=cv2.INTER_AREA)
+    else:
+        small = arr
+    sh, sw = small.shape
+    _, mask = cv2.threshold(small, 0, 255,
+                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
+                            np.ones((5, 5), np.uint8))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    frame_area = float(sw * sh)
+    best = None
+    for c in contours:
+        area = cv2.contourArea(c)
+        if not 0.05 * frame_area <= area <= 0.90 * frame_area:
+            continue
+        peri = cv2.arcLength(c, True)
+        quad = cv2.approxPolyDP(c, 0.02 * peri, True)
+        if len(quad) != 4 or not cv2.isContourConvex(quad):
+            continue
+        pts = quad.reshape(4, 2).astype(float)
+        # Order NW, NE, SE, SW by coordinate sums/differences.
+        s = pts.sum(axis=1)
+        d = pts[:, 0] - pts[:, 1]
+        ordered = np.array([pts[np.argmin(s)], pts[np.argmax(d)],
+                            pts[np.argmax(s)], pts[np.argmin(d)]])
+        top = np.linalg.norm(ordered[1] - ordered[0])
+        bottom = np.linalg.norm(ordered[2] - ordered[3])
+        left = np.linalg.norm(ordered[3] - ordered[0])
+        right = np.linalg.norm(ordered[2] - ordered[1])
+        if min(top, bottom, left, right) < 10:
+            continue
+        if not (0.75 <= top / bottom <= 1.33
+                and 0.75 <= left / right <= 1.33):
+            continue
+        aspect = ((top + bottom) / 2.0) / ((left + right) / 2.0)
+        if not 1.15 <= aspect <= 3.8:
+            continue
+        # The note must be brighter than its immediate surroundings —
+        # this keeps holder reflections and page fragments out.
+        qmask = np.zeros_like(small)
+        cv2.fillPoly(qmask, [ordered.astype(np.int32)], 255)
+        ring = cv2.dilate(qmask, np.ones((25, 25), np.uint8)) & ~qmask
+        if not ring.any():
+            continue
+        inside = float(small[qmask > 0].mean())
+        outside = float(small[ring > 0].mean())
+        if inside - outside < 40:
+            continue
+        if best is None or area > best[0]:
+            best = (area, ordered)
+    if best is None:
+        return None
+    return tuple((float(px) / scale, float(py) / scale)
+                 for px, py in best[1])
+
+
+def _trim_slab_note_cv(img):
+    """OpenCV-first trim: detect the note's corner quad and warp it
+    square-on. Handles what the mask-based detectors' gates reject —
+    above all a clear holder photographed on furniture, where the
+    surroundings are neither black nor uniform."""
+    quad = _cv_note_quad(img)
+    if not quad:
+        return None
+    import math
+
+    qw = (math.hypot(quad[1][0] - quad[0][0], quad[1][1] - quad[0][1])
+          + math.hypot(quad[2][0] - quad[3][0], quad[2][1] - quad[3][1])) / 2
+    qh = (math.hypot(quad[3][0] - quad[0][0], quad[3][1] - quad[0][1])
+          + math.hypot(quad[2][0] - quad[1][0], quad[2][1] - quad[1][1])) / 2
+    inset = max(2.0, 0.004 * min(qw, qh))
+    rect = _rectify_note_quad(img, quad, inset_px=inset, fill=(0, 0, 0))
+    if not rect:
+        return None
+    app.logger.info('trim-cv: quad %s -> %dx%d',
+                    [(int(a), int(b)) for a, b in quad], *rect[0].size)
+    return _encode_trimmed_note(rect[0])
 
 
 def _trim_dark_slab_note(img):
