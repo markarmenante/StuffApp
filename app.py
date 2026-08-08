@@ -7364,11 +7364,15 @@ def _trim_slabbed_note_image(data):
     Two detectors run in sequence: the classic dark holder (bright note
     in black plastic) and the light holder (note on a white/grey clear
     holder, found by its engraving texture). Both cut away the label
-    band and holder frame and level a slight skew so the note's bottom
-    edge runs horizontal. Returns JPEG bytes, or None when there is
-    nothing to do — well-trimmed notes pass through untouched (an
-    already-trimmed image that needs redoing is re-processed from its
-    original photo, never by shaving the stored copy).
+    band and holder frame, then square the note up: the four edge lines
+    of the note (or its printed design) are fitted and the resulting
+    quad is perspective-warped flat, so a handheld shot's keystone and
+    tilt come out level with the note filling the frame edge to edge.
+    When the corner fit isn't confident the old rotate-only deskew
+    still runs. Returns JPEG bytes, or None when there is nothing to
+    do — well-trimmed notes pass through untouched (an already-trimmed
+    image that needs redoing is re-processed from its original photo,
+    never by shaving the stored copy).
     """
     img = _flatten_image_for_jpeg(_open_upload_image(data))
     w, h = img.size
@@ -7450,6 +7454,240 @@ def _fit_note_bottom_angle(mask_px, cw, ch, hit, y_start=None, y_stop=None):
     return 0.0 if abs(angle) > 4.0 else angle
 
 
+def _perspective_coeffs(quad, out_w, out_h):
+    """PIL ``Image.transform(PERSPECTIVE)`` coefficients mapping the
+    output rectangle's corners back onto ``quad`` (NW, NE, SE, SW in
+    source pixels). The standard 8-unknown homography system, solved
+    with plain Gaussian elimination — no numpy, like the rest of this
+    pipeline. None when the quad is degenerate."""
+    dst = ((0.0, 0.0), (float(out_w), 0.0),
+           (float(out_w), float(out_h)), (0.0, float(out_h)))
+    m = []
+    for (dx, dy), (sx, sy) in zip(dst, quad):
+        m.append([dx, dy, 1.0, 0.0, 0.0, 0.0, -sx * dx, -sx * dy, sx])
+        m.append([0.0, 0.0, 0.0, dx, dy, 1.0, -sy * dx, -sy * dy, sy])
+    for col in range(8):
+        piv = max(range(col, 8), key=lambda r: abs(m[r][col]))
+        if abs(m[piv][col]) < 1e-9:
+            return None
+        m[col], m[piv] = m[piv], m[col]
+        pv = m[col][col]
+        m[col] = [v / pv for v in m[col]]
+        for r in range(8):
+            if r != col and m[r][col]:
+                f = m[r][col]
+                m[r] = [v - f * u for v, u in zip(m[r], m[col])]
+    return [m[r][8] for r in range(8)]
+
+
+def _quad_point(quad, u, v):
+    """Bilinear point of ``quad`` (NW, NE, SE, SW) at unit-square
+    coords (u, v). Values outside [0, 1] extrapolate — which is how a
+    quad is grown or shrunk while following its own perspective."""
+    (ax, ay), (bx, by), (cx, cy), (dx, dy) = quad
+    x = ((1 - u) * (1 - v) * ax + u * (1 - v) * bx
+         + u * v * cx + (1 - u) * v * dx)
+    y = ((1 - u) * (1 - v) * ay + u * (1 - v) * by
+         + u * v * cy + (1 - u) * v * dy)
+    return x, y
+
+
+def _rectify_note_quad(img, quad, inset_px=0.0, context=0.0, fill=None):
+    """Perspective-warp ``quad`` (NW, NE, SE, SW, full-res) square-on.
+
+    The output rectangle takes its dimensions from the quad's average
+    side lengths, so the note keeps its physical aspect ratio instead
+    of the camera's foreshortening. ``inset_px`` pulls the quad inward
+    first (stay on paper when the mask edge is dilated); ``context``
+    grows it fractionally instead (keep margin and holder around a
+    design quad for the paper-edge walk that follows). Returns
+    (warped_image, inner_box) — inner_box being where the original
+    quad landed in the output — or None when the quad is degenerate."""
+    import math
+
+    from PIL import Image
+
+    def _side(a, b):
+        return math.hypot(quad[b][0] - quad[a][0], quad[b][1] - quad[a][1])
+
+    qw = (_side(0, 1) + _side(3, 2)) / 2.0
+    qh = (_side(0, 3) + _side(1, 2)) / 2.0
+    if qw < 60 or qh < 30:
+        return None
+    fu = max(0.0, inset_px) / qw
+    fv = max(0.0, inset_px) / qh
+    u0, v0 = fu - context, fv - context
+    u1, v1 = 1.0 - fu + context, 1.0 - fv + context
+    if u1 - u0 < 0.5 or v1 - v0 < 0.5:
+        return None
+    src = (_quad_point(quad, u0, v0), _quad_point(quad, u1, v0),
+           _quad_point(quad, u1, v1), _quad_point(quad, u0, v1))
+    out_w = int(round(qw * (u1 - u0)))
+    out_h = int(round(qh * (v1 - v0)))
+    if out_w < 40 or out_h < 20:
+        return None
+    coeffs = _perspective_coeffs(src, out_w, out_h)
+    if not coeffs:
+        return None
+    warped = img.transform((out_w, out_h), Image.PERSPECTIVE, coeffs,
+                           resample=Image.BICUBIC, fillcolor=fill)
+    sx = out_w / (u1 - u0)
+    sy = out_h / (v1 - v0)
+    inner = (max(0, int(round((0.0 - u0) * sx))),
+             max(0, int(round((0.0 - v0) * sy))),
+             min(out_w, int(round((1.0 - u0) * sx))),
+             min(out_h, int(round((1.0 - v0) * sy))))
+    return warped, inner
+
+
+def _fit_edge_line(pts, dim):
+    """Outlier-rejecting least-squares line v = m*u + b through edge
+    points (same recipe as _fit_note_bottom_angle: fit, keep the
+    points near the line, refit on those). None when the cloud isn't
+    line-like — a ragged or partly-occluded edge must not contribute
+    a fake line to the quad."""
+    def _ls(points):
+        n = len(points)
+        su = float(sum(p[0] for p in points))
+        sv = float(sum(p[1] for p in points))
+        suu = float(sum(p[0] * p[0] for p in points))
+        suv = float(sum(p[0] * p[1] for p in points))
+        d = n * suu - su * su
+        if not d:
+            return None
+        m = (n * suv - su * sv) / d
+        return m, (sv - m * su) / n
+
+    if len(pts) < 15:
+        return None
+    fit = _ls(pts)
+    if not fit:
+        return None
+    m, b = fit
+    tol = max(2.5, 0.006 * dim)
+    good = [p for p in pts if abs(p[1] - (m * p[0] + b)) < tol]
+    if len(good) < max(10, int(0.6 * len(pts))):
+        return None
+    return _ls(good) or (m, b)
+
+
+def _note_quad_from_mask(mask, box):
+    """Sub-pixel corner quad (NW, NE, SE, SW) of the note in a binary
+    mask, or None when the evidence doesn't support a warp.
+
+    Per side, scanlines across the middle 80% record the first
+    sustained hit walking inward from just outside ``box`` (the
+    component bbox); a line is fitted through each side's point cloud
+    and adjacent lines intersect into corners. All-or-nothing: any
+    side without a clean line, an implausible quad (wild slopes,
+    mismatched opposite sides, non-banknote aspect), or a quad that IS
+    the bounding box already (level shot — a plain crop needs no
+    resampling) each return None, leaving the caller on the classic
+    crop-and-rotate path."""
+    import math
+
+    px = mask.load()
+    w, h = mask.size
+    x0, y0, x1, y1 = box
+    bw, bh = x1 - x0, y1 - y0
+    if bw < 60 or bh < 30:
+        return None
+    pad_x = max(3, int(0.05 * bw))
+    pad_y = max(3, int(0.05 * bh))
+
+    def _hit_v(x, y, d):
+        return (px[x, y] and px[x, min(h - 1, max(0, y + 2 * d))]
+                and px[x, min(h - 1, max(0, y + 4 * d))])
+
+    def _hit_h(x, y, d):
+        return (px[x, y] and px[min(w - 1, max(0, x + 2 * d)), y]
+                and px[min(w - 1, max(0, x + 4 * d)), y])
+
+    def _edge_points(side):
+        pts = []
+        if side in ('top', 'bottom'):
+            lo, hi = x0 + int(0.10 * bw), x1 - int(0.10 * bw)
+            step = max(1, (hi - lo) // 90)
+            depth = int(0.35 * bh)
+            for x in range(lo, hi, step):
+                if side == 'top':
+                    ys, d = range(max(0, y0 - pad_y), y0 + depth), 1
+                else:
+                    ys, d = range(min(h - 1, y1 + pad_y), y1 - depth, -1), -1
+                for y in ys:
+                    if _hit_v(x, y, d):
+                        pts.append((x, y))
+                        break
+        else:
+            lo, hi = y0 + int(0.10 * bh), y1 - int(0.10 * bh)
+            step = max(1, (hi - lo) // 90)
+            depth = int(0.35 * bw)
+            for y in range(lo, hi, step):
+                if side == 'left':
+                    xs, d = range(max(0, x0 - pad_x), x0 + depth), 1
+                else:
+                    xs, d = range(min(w - 1, x1 + pad_x), x1 - depth, -1), -1
+                for x in xs:
+                    if _hit_h(x, y, d):
+                        pts.append((y, x))
+                        break
+        return pts
+
+    lines = {}
+    for side, dim in (('top', bh), ('bottom', bh),
+                      ('left', bw), ('right', bw)):
+        lines[side] = _fit_edge_line(_edge_points(side), dim)
+        if not lines[side]:
+            return None
+    # Slopes beyond ~10° are not a slab resting a little askew —
+    # they're a mis-fit (label band, holder seam).
+    if any(abs(fit[0]) > 0.18 for fit in lines.values()):
+        return None
+    # All edges level means the quad IS the bounding box: warping
+    # would only resample. Leave it to the classic crop.
+    if all(abs(fit[0]) < 0.003 for fit in lines.values()):
+        return None
+
+    def _corner(hside, vside):
+        mh, bh_ = lines[hside]   # y = mh*x + bh_
+        mv, bv = lines[vside]    # x = mv*y + bv
+        den = 1.0 - mh * mv
+        if abs(den) < 1e-6:
+            return None
+        y = (mh * bv + bh_) / den
+        return (mv * y + bv, y)
+
+    nw = _corner('top', 'left')
+    ne = _corner('top', 'right')
+    se = _corner('bottom', 'right')
+    sw = _corner('bottom', 'left')
+    quad = (nw, ne, se, sw)
+    if any(c is None for c in quad):
+        return None
+    for cx, cy in quad:
+        if not (x0 - 3 * pad_x <= cx <= x1 + 3 * pad_x
+                and y0 - 3 * pad_y <= cy <= y1 + 3 * pad_y):
+            return None
+    if not (nw[0] < ne[0] - 0.5 * bw and sw[0] < se[0] - 0.5 * bw
+            and nw[1] < sw[1] - 0.5 * bh and ne[1] < se[1] - 0.5 * bh):
+        return None
+
+    def _len(a, b):
+        return math.hypot(b[0] - a[0], b[1] - a[1])
+
+    top, bottom = _len(nw, ne), _len(sw, se)
+    left, right = _len(nw, sw), _len(ne, se)
+    # Opposite sides of a real note differ only by perspective — a
+    # bigger mismatch means one line locked onto something else.
+    if not (0.8 <= top / max(1.0, bottom) <= 1.25
+            and 0.8 <= left / max(1.0, right) <= 1.25):
+        return None
+    if not (1.15 <= ((top + bottom) / 2.0)
+            / max(1.0, (left + right) / 2.0) <= 3.8):
+        return None
+    return quad
+
+
 def _trim_dark_slab_note(img):
     """Dark-holder detector: the note is the big bright block framed by
     black holder plastic."""
@@ -7499,22 +7737,40 @@ def _trim_dark_slab_note(img):
 
     fx0, fy0 = int(x0 / scale), int(y0 / scale)
     fx1, fy1 = int((x1 + 1) / scale), int((y1 + 1) / scale)
-    mx = max(4, int(0.02 * (fx1 - fx0)))
-    my = max(4, int(0.02 * (fy1 - fy0)))
-    crop = img.crop((max(0, fx0 - mx), max(0, fy0 - my),
-                     min(w, fx1 + mx), min(h, fy1 + my)))
 
-    # Deskew on the note's bottom edge (lowest sustained-bright pixel
-    # per column).
-    cg = crop.convert('L')
-    cw, ch = cg.size
-    angle = _fit_note_bottom_angle(
-        cg.load(), cw, ch,
-        lambda p, x, y: (p[x, y] > BRIGHT and p[x, max(0, y - 3)] > BRIGHT
-                         and p[x, max(0, y - 6)] > BRIGHT))
-    if abs(angle) >= 0.05:
-        crop = crop.rotate(angle, resample=Image.BICUBIC, expand=True,
-                           fillcolor=(0, 0, 0))
+    # Perspective rectification first: fit the four edge lines of the
+    # bright component and warp that quad square-on. A handheld slab
+    # shot is keystoned, not just rotated — each edge carries its own
+    # slope, which the rotate-only fallback below can never level.
+    crop = None
+    quad = _note_quad_from_mask(bright_mask, box)
+    if quad:
+        full_quad = tuple((qx / scale, qy / scale) for qx, qy in quad)
+        # The bright mask is dilated ~2px (MaxFilter(5)); pull the
+        # quad back inside the paper by that much plus a sliver. The
+        # tighten pass below still shaves anything that survives.
+        inset = 2.5 / scale + max(2.0, 0.004 * min(fx1 - fx0, fy1 - fy0))
+        rect = _rectify_note_quad(img, full_quad, inset_px=inset,
+                                  fill=(0, 0, 0))
+        if rect:
+            crop = rect[0]
+    if crop is None:
+        mx = max(4, int(0.02 * (fx1 - fx0)))
+        my = max(4, int(0.02 * (fy1 - fy0)))
+        crop = img.crop((max(0, fx0 - mx), max(0, fy0 - my),
+                         min(w, fx1 + mx), min(h, fy1 + my)))
+
+        # Deskew on the note's bottom edge (lowest sustained-bright
+        # pixel per column).
+        cg = crop.convert('L')
+        cw, ch = cg.size
+        angle = _fit_note_bottom_angle(
+            cg.load(), cw, ch,
+            lambda p, x, y: (p[x, y] > BRIGHT and p[x, max(0, y - 3)] > BRIGHT
+                             and p[x, max(0, y - 6)] > BRIGHT))
+        if abs(angle) >= 0.05:
+            crop = crop.rotate(angle, resample=Image.BICUBIC, expand=True,
+                               fillcolor=(0, 0, 0))
 
     # Tighten to the levelled note and shave a sliver so no dark edge
     # survives the crop.
@@ -7692,13 +7948,21 @@ def _expand_note_box_to_paper(img, box):
     sides = (('top', y0, -1, h, nh), ('bottom', y1, 1, h, nh),
              ('left', x0, -1, w, nw), ('right', x1, 1, w, nw))
 
-    # Margin reference = bright AND warm. Candidates at several offsets
-    # per side; ink is warm but dark, holder bright but neutral, page
-    # background very bright but neutral — only true margin is both.
+    # Margin reference = bright AND tinted. Candidates at several
+    # offsets per side; ink is tinted but dark, holder bright but
+    # neutral, page background very bright but neutral — only true
+    # margin is both. Tint is the signed r-b distance from neutral:
+    # aged paper sits warm (positive), blue-tinted paper negative —
+    # both count, only near-zero (holder plastic, white page) doesn't.
+    # Lines just inside the box count too: when the component overran
+    # the paper edge (strong paper-holder contrast puts the boundary
+    # itself in the mask), the true margin lies INSIDE the box and
+    # must still be able to anchor the reference tone.
     candidates = []
     for side, start, step, limit, nd in sides:
-        for frac in (0.01, 0.03, 0.05, 0.08):
-            off = max(1, int(frac * nd))
+        for frac in (-0.04, -0.02, 0.01, 0.03, 0.05, 0.08):
+            off = min(-1, int(frac * nd)) if frac < 0 \
+                else max(1, int(frac * nd))
             vals = []
             for k in (off, off + 1, off + 2):
                 pos = start + step * k
@@ -7711,16 +7975,21 @@ def _expand_note_box_to_paper(img, box):
         return x0, y0, x1, y1
     max_lum = max(c[0] for c in candidates)
     bright = [c for c in candidates if c[0] >= max_lum - 25]
-    # Median of the warm-bright cluster, not the single warmest sample:
-    # one sample catching warm ornament remnants would drag the anchor
-    # past the real margin tone and the tolerance band would then
-    # exclude the margin itself.
-    warm_cluster = [c for c in bright if c[1] >= 15]
-    if len(warm_cluster) >= 3:
-        ref = (_median([c[0] for c in warm_cluster]),
-               _median([c[1] for c in warm_cluster]))
+    # Median of the tinted-bright cluster, not the single most-tinted
+    # sample: one sample catching ornament remnants would drag the
+    # anchor past the real margin tone and the tolerance band would
+    # then exclude the margin itself. A cluster mixing warm and blue
+    # is no cluster — split by sign and take the larger side.
+    tinted = [c for c in bright if abs(c[1]) >= 15]
+    warm_cluster = [c for c in tinted if c[1] > 0]
+    cool_cluster = [c for c in tinted if c[1] < 0]
+    cluster = warm_cluster if len(warm_cluster) >= len(cool_cluster) \
+        else cool_cluster
+    if len(cluster) >= 3:
+        ref = (_median([c[0] for c in cluster]),
+               _median([c[1] for c in cluster]))
     else:
-        ref = max(bright, key=lambda c: c[1])
+        ref = max(bright, key=lambda c: abs(c[1]))
 
     def is_paper(st):
         return abs(st[0] - ref[0]) <= 18 and abs(st[1] - ref[1]) <= 7
@@ -7880,6 +8149,24 @@ def _detect_light_note_box(img):
             int(x1 / scale), int(y1 / scale))
 
 
+def _detect_light_note_quad(img, full_box):
+    """Full-res corner quad (NW, NE, SE, SW) of the printed design on
+    a light holder, or None. Re-derives the edge blob that the box
+    detection ran on and fits the design's four border lines in it."""
+    w, h = img.size
+    scale = min(1.0, 900.0 / max(w, h))
+    aw, ah = max(1, int(w * scale)), max(1, int(h * scale))
+    blob = _note_edge_blob(img.resize((aw, ah)).convert('L'))
+    sbox = (max(0, int(full_box[0] * scale)),
+            max(0, int(full_box[1] * scale)),
+            min(aw - 1, int(full_box[2] * scale)),
+            min(ah - 1, int(full_box[3] * scale)))
+    quad = _note_quad_from_mask(blob, sbox)
+    if not quad:
+        return None
+    return tuple((qx / scale, qy / scale) for qx, qy in quad)
+
+
 def _trim_light_slab_note(img):
     """Light-holder detector: the note is found by its engraving
     texture, then each side walks out to the true paper edge."""
@@ -7891,57 +8178,74 @@ def _trim_light_slab_note(img):
     w, h = img.size
     fx0, fy0, fx1, fy1 = box
 
-    # The crop is used ONLY to measure the skew of the design's bottom
-    # line at full resolution.
-    mx = max(8, int(0.10 * (fx1 - fx0)))
-    my = max(8, int(0.10 * (fy1 - fy0)))
-    crop = img.crop((max(0, fx0 - mx), max(0, fy0 - my),
-                     min(w, fx1 + mx), min(h, fy1 + my)))
-    ce = _note_edge_blob(crop.convert('L'))
-    # Fit the skew on the design's bottom line only: scanning from the
-    # crop bottom would seed the fit with backing-sheet noise below the
-    # note and rotate a level scan.
-    box_bot = (fy1 - fy0) + my
-    box_h = fy1 - fy0
-    angle = _fit_note_bottom_angle(ce.load(), ce.width, ce.height,
-                                   lambda p, x, y: p[x, y] > 0,
-                                   y_start=box_bot + int(0.06 * box_h),
-                                   y_stop=box_bot - int(0.25 * box_h))
-    if abs(angle) >= 0.05:
-        import math
-
-        fill = img.load()[2, 2]
-        rotated = img.rotate(angle, resample=Image.BICUBIC, expand=True,
-                             fillcolor=fill)
-        # Map the ink box through the rotation analytically. Re-running
-        # detection on the rotated frame is fragile: resampling smears
-        # faint texture over the flat holder (worst on re-encoded JPEG
-        # uploads) and the component bleeds far beyond the note.
-        th = math.radians(angle)
-        cos, sin = math.cos(th), math.sin(th)
-        cx, cy = w / 2.0, h / 2.0
-        cx2, cy2 = rotated.width / 2.0, rotated.height / 2.0
-
-        def _map(x, y):
-            dx, dy = x - cx, y - cy
-            return (cos * dx + sin * dy + cx2, -sin * dx + cos * dy + cy2)
-
-        corners = [_map(fx0, fy0), _map(fx1, fy0),
-                   _map(fx0, fy1), _map(fx1, fy1)]
-        xs = [c[0] for c in corners]
-        ys = [c[1] for c in corners]
-        # Inscribe: shave the tilt sliver so the box stays on the note;
-        # the paper walk below re-expands to the true edges.
-        shave_x = abs((fy1 - fy0) * sin)
-        shave_y = abs((fx1 - fx0) * sin)
-        img = rotated
+    # Perspective rectification first: the printed design's four
+    # border lines carry the camera's keystone directly. Warp the
+    # design quad square-on WITH surrounding context, so the
+    # paper-edge walk below still has margin and holder to measure —
+    # the design is only the note's ink, never its paper edge.
+    rectified = None
+    quad = _detect_light_note_quad(img, box)
+    if quad:
+        rectified = _rectify_note_quad(img, quad, context=0.18,
+                                       fill=img.load()[2, 2])
+    if rectified:
+        img, (fx0, fy0, fx1, fy1) = rectified
         w, h = img.size
-        fx0 = max(0, int(min(xs) + shave_x))
-        fx1 = min(w - 1, int(max(xs) - shave_x))
-        fy0 = max(0, int(min(ys) + shave_y))
-        fy1 = min(h - 1, int(max(ys) - shave_y))
-        if fx1 - fx0 < 20 or fy1 - fy0 < 20:
-            return None
+    else:
+        # Rotate-only fallback: measure the skew of the design's
+        # bottom line at full resolution. The crop is used ONLY for
+        # that measurement.
+        mx = max(8, int(0.10 * (fx1 - fx0)))
+        my = max(8, int(0.10 * (fy1 - fy0)))
+        crop = img.crop((max(0, fx0 - mx), max(0, fy0 - my),
+                         min(w, fx1 + mx), min(h, fy1 + my)))
+        ce = _note_edge_blob(crop.convert('L'))
+        # Fit the skew on the design's bottom line only: scanning from
+        # the crop bottom would seed the fit with backing-sheet noise
+        # below the note and rotate a level scan.
+        box_bot = (fy1 - fy0) + my
+        box_h = fy1 - fy0
+        angle = _fit_note_bottom_angle(ce.load(), ce.width, ce.height,
+                                       lambda p, x, y: p[x, y] > 0,
+                                       y_start=box_bot + int(0.06 * box_h),
+                                       y_stop=box_bot - int(0.25 * box_h))
+        if abs(angle) >= 0.05:
+            import math
+
+            fill = img.load()[2, 2]
+            rotated = img.rotate(angle, resample=Image.BICUBIC, expand=True,
+                                 fillcolor=fill)
+            # Map the ink box through the rotation analytically.
+            # Re-running detection on the rotated frame is fragile:
+            # resampling smears faint texture over the flat holder
+            # (worst on re-encoded JPEG uploads) and the component
+            # bleeds far beyond the note.
+            th = math.radians(angle)
+            cos, sin = math.cos(th), math.sin(th)
+            cx, cy = w / 2.0, h / 2.0
+            cx2, cy2 = rotated.width / 2.0, rotated.height / 2.0
+
+            def _map(x, y):
+                dx, dy = x - cx, y - cy
+                return (cos * dx + sin * dy + cx2,
+                        -sin * dx + cos * dy + cy2)
+
+            corners = [_map(fx0, fy0), _map(fx1, fy0),
+                       _map(fx0, fy1), _map(fx1, fy1)]
+            xs = [c[0] for c in corners]
+            ys = [c[1] for c in corners]
+            # Inscribe: shave the tilt sliver so the box stays on the
+            # note; the paper walk below re-expands to the true edges.
+            shave_x = abs((fy1 - fy0) * sin)
+            shave_y = abs((fx1 - fx0) * sin)
+            img = rotated
+            w, h = img.size
+            fx0 = max(0, int(min(xs) + shave_x))
+            fx1 = min(w - 1, int(max(xs) - shave_x))
+            fy0 = max(0, int(min(ys) + shave_y))
+            fy1 = min(h - 1, int(max(ys) - shave_y))
+            if fx1 - fx0 < 20 or fy1 - fy0 < 20:
+                return None
 
     # The detected paper edges ARE the note rectangle — the printed
     # design sits centred inside it, so cropping to them yields the
@@ -7958,6 +8262,31 @@ def _trim_light_slab_note(img):
     outward = {'left': -1, 'top': -1, 'right': 1, 'bottom': 1}
     ndim = {'left': fx1 - fx0, 'right': fx1 - fx0,
             'top': fy1 - fy0, 'bottom': fy1 - fy0}
+    ipx = img.load()
+    qx = (fx1 - fx0) // 4
+    qy = (fy1 - fy0) // 4
+
+    def _band_dark(side, a, b):
+        """Dark-pixel fraction of the strip [a, b] along ``side``'s
+        axis, sampled across the middle half of the other axis."""
+        lo, hi = int(min(a, b)), int(max(a, b)) + 1
+        dark = n = 0
+        if side in ('left', 'right'):
+            for x in range(max(0, lo), min(w, hi)):
+                for y in range(fy0 + qy, fy1 - qy, 3):
+                    n += 1
+                    p = ipx[x, y]
+                    if (p[0] + p[1] + p[2]) // 3 < 128:
+                        dark += 1
+        else:
+            for y in range(max(0, lo), min(h, hi)):
+                for x in range(fx0 + qx, fx1 - qx, 3):
+                    n += 1
+                    p = ipx[x, y]
+                    if (p[0] + p[1] + p[2]) // 3 < 128:
+                        dark += 1
+        return dark / n if n else 1.0
+
     res = {}
     for side in ('left', 'top', 'right', 'bottom'):
         cands = []
@@ -7965,8 +8294,13 @@ def _trim_light_slab_note(img):
         m = (pos - boxpos[side]) * outward[side]
         # A "boundary" implying a margin beyond 12% of the note is not
         # the note's edge — the run sailed over a paper-toned holder
-        # and stopped at some remote page feature.
-        if ok and -0.05 * ndim[side] <= m <= 0.12 * ndim[side]:
+        # and stopped at some remote page feature. A negative margin
+        # claims the mask overran the paper edge: believe it only when
+        # the strip it cuts away is ink-free (a swallowed holder
+        # sliver) — a walk that died inside a solid ornament band
+        # claims the same thing and would clip the design.
+        if ok and -0.05 * ndim[side] <= m <= 0.12 * ndim[side] and \
+                (m >= 0 or _band_dark(side, pos, boxpos[side]) <= 0.05):
             cands.append(pos)
         d = _faint_note_edge_line(img, (fx0, fy0, fx1, fy1), side)
         if d is not None:
@@ -7981,18 +8315,40 @@ def _trim_light_slab_note(img):
     def _margin(side):
         return max(0, (res[side] - boxpos[side]) * outward[side])
 
-    for a, b in (('left', 'right'), ('right', 'left'),
-                 ('top', 'bottom'), ('bottom', 'top')):
-        if res[a] is None and res[b] is not None:
-            res[a] = boxpos[a] + outward[a] * _margin(b)
-    if res['left'] is None and res['top'] is not None:
-        m = (_margin('top') + _margin('bottom')) // 2
-        res['left'] = boxpos['left'] - m
-        res['right'] = boxpos['right'] + m
-    if res['top'] is None and res['left'] is not None:
-        m = (_margin('left') + _margin('right')) // 2
-        res['top'] = boxpos['top'] - m
-        res['bottom'] = boxpos['bottom'] + m
+    if rectified:
+        # The design box is exact in the rectified frame, so a border
+        # can be guaranteed outright: per-side paper evidence is used
+        # where it exists (already vetted above) and a missing side
+        # gets a default. Whatever the paper colour — warm, white,
+        # blue — the printed area always comes out with a visible
+        # margin around it.
+        for side in ('left', 'top', 'right', 'bottom'):
+            if res[side] is not None:
+                m = (res[side] - boxpos[side]) * outward[side]
+            else:
+                t = max(3, int(0.02 * ndim[side]))
+                inside_dark = _band_dark(
+                    side, boxpos[side], boxpos[side] - outward[side] * t)
+                # An ink-free band inside the box means the component
+                # reached the paper edge, not just the ink — the
+                # border is already in the box, and a default margin
+                # on top would ring the note with holder plastic.
+                m = 0.0 if inside_dark < 0.02 else 0.07 * ndim[side]
+            m = max(-0.05 * ndim[side], min(0.12 * ndim[side], m))
+            res[side] = boxpos[side] + outward[side] * int(m)
+    else:
+        for a, b in (('left', 'right'), ('right', 'left'),
+                     ('top', 'bottom'), ('bottom', 'top')):
+            if res[a] is None and res[b] is not None:
+                res[a] = boxpos[a] + outward[a] * _margin(b)
+        if res['left'] is None and res['top'] is not None:
+            m = (_margin('top') + _margin('bottom')) // 2
+            res['left'] = boxpos['left'] - m
+            res['right'] = boxpos['right'] + m
+        if res['top'] is None and res['left'] is not None:
+            m = (_margin('left') + _margin('right')) // 2
+            res['top'] = boxpos['top'] - m
+            res['bottom'] = boxpos['bottom'] + m
     px0 = max(0, res['left']) if res['left'] is not None else 0
     py0 = max(0, res['top']) if res['top'] is not None else 0
     px1 = min(w - 1, res['right']) if res['right'] is not None else w - 1
