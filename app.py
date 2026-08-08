@@ -7706,96 +7706,133 @@ def _note_quad_from_mask(mask, box):
 
 def _cv_note_quad(img):
     """OpenCV note-corner detection, the primary detector when cv2 is
-    installed. Otsu-thresholds the frame (paper vs whatever is behind
-    the slab — black holder, couch, carpet), takes the biggest
-    banknote-shaped 4-gon contour, and returns its corners (NW, NE,
-    SE, SW) at full resolution. None when cv2 is missing or nothing
-    note-shaped stands out — the pure-PIL detectors then run."""
+    installed. Two binarizations run in turn: an Otsu split of the
+    grey frame (paper vs black holder, couch, carpet), then a
+    low-saturation+bright mask (paper vs a saturated backdrop — a
+    slab on a blue board reads mid-grey in luminance, but its
+    saturation gives it away). The biggest banknote-shaped 4-gon
+    contour that stands out from its surroundings in brightness OR
+    saturation wins, its corners refined to sub-pixel at full
+    resolution. Returns (NW, NE, SE, SW) or None — the pure-PIL
+    detectors then run."""
     try:
         import cv2
         import numpy as np
     except ImportError:
         return None
 
-    arr = np.asarray(img.convert('L'))
-    h, w = arr.shape
+    rgb = np.asarray(img.convert('RGB'))
+    h, w = rgb.shape[:2]
     scale = min(1.0, 1100.0 / max(w, h))
     if scale < 1.0:
-        small = cv2.resize(arr, (int(w * scale), int(h * scale)),
-                           interpolation=cv2.INTER_AREA)
+        small_rgb = cv2.resize(rgb, (int(w * scale), int(h * scale)),
+                               interpolation=cv2.INTER_AREA)
     else:
-        small = arr
-    sh, sw = small.shape
-    otsu, mask = cv2.threshold(small, 0, 255,
-                               cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
-                            np.ones((5, 5), np.uint8))
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
-                                   cv2.CHAIN_APPROX_SIMPLE)
-    frame_area = float(sw * sh)
-    best = None
-    for c in contours:
-        area = cv2.contourArea(c)
-        if not 0.05 * frame_area <= area <= 0.90 * frame_area:
+        small_rgb = rgb
+    gray = cv2.cvtColor(small_rgb, cv2.COLOR_RGB2GRAY)
+    hsv = cv2.cvtColor(small_rgb, cv2.COLOR_RGB2HSV)
+    sat, val = hsv[:, :, 1], hsv[:, :, 2]
+    sh, sw = gray.shape
+
+    otsu, otsu_mask = cv2.threshold(gray, 0, 255,
+                                    cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    otsu_mask = cv2.morphologyEx(otsu_mask, cv2.MORPH_CLOSE,
+                                 np.ones((5, 5), np.uint8))
+    paper_mask = ((sat < 70) & (val > 130)).astype(np.uint8) * 255
+    # A dense overprint punches saturated holes in the paper mask —
+    # close hard so the note stays one contour with straight edges.
+    paper_mask = cv2.morphologyEx(paper_mask, cv2.MORPH_CLOSE,
+                                  np.ones((15, 15), np.uint8))
+
+    def _gray_binarize(roi):
+        return (cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY) > otsu) \
+            .astype(np.uint8) * 255
+
+    def _paper_binarize(roi):
+        rh = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
+        return ((rh[:, :, 1] < 70) & (rh[:, :, 2] > 130)) \
+            .astype(np.uint8) * 255
+
+    def _pick(mask):
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        frame_area = float(sw * sh)
+        best = None
+        for c in contours:
+            area = cv2.contourArea(c)
+            if not 0.05 * frame_area <= area <= 0.90 * frame_area:
+                continue
+            peri = cv2.arcLength(c, True)
+            quad = cv2.approxPolyDP(c, 0.02 * peri, True)
+            if len(quad) != 4 or not cv2.isContourConvex(quad):
+                continue
+            pts = quad.reshape(4, 2).astype(float)
+            # Order NW, NE, SE, SW by coordinate sums/differences.
+            s = pts.sum(axis=1)
+            d = pts[:, 0] - pts[:, 1]
+            ordered = np.array([pts[np.argmin(s)], pts[np.argmax(d)],
+                                pts[np.argmax(s)], pts[np.argmin(d)]])
+            top = np.linalg.norm(ordered[1] - ordered[0])
+            bottom = np.linalg.norm(ordered[2] - ordered[3])
+            left = np.linalg.norm(ordered[3] - ordered[0])
+            right = np.linalg.norm(ordered[2] - ordered[1])
+            if min(top, bottom, left, right) < 10:
+                continue
+            if not (0.75 <= top / bottom <= 1.33
+                    and 0.75 <= left / right <= 1.33):
+                continue
+            aspect = ((top + bottom) / 2.0) / ((left + right) / 2.0)
+            if not 1.15 <= aspect <= 3.8:
+                continue
+            # The note must stand out from its immediate surroundings
+            # in the mask that found it: solid inside the quad, absent
+            # in the ring around it. Judging the mask (not raw
+            # intensity means) keeps this valid for every background
+            # the binarization can separate — dark holder, furniture,
+            # or a saturated backdrop — and heavy overprint ink can't
+            # drag an intensity mean below some fixed contrast bar.
+            qmask = np.zeros((sh, sw), np.uint8)
+            cv2.fillPoly(qmask, [ordered.astype(np.int32)], 255)
+            ring = cv2.dilate(qmask, np.ones((25, 25), np.uint8)) & ~qmask
+            if not ring.any():
+                continue
+            m_in = float((mask[qmask > 0] > 0).mean())
+            m_ring = float((mask[ring > 0] > 0).mean())
+            if m_in < 0.85 or m_ring > 0.35:
+                continue
+            if best is None or area > best[0]:
+                best = (area, ordered)
+        return best
+
+    for mask, binarize in ((otsu_mask, _gray_binarize),
+                           (paper_mask, _paper_binarize)):
+        best = _pick(mask)
+        if best is None:
             continue
-        peri = cv2.arcLength(c, True)
-        quad = cv2.approxPolyDP(c, 0.02 * peri, True)
-        if len(quad) != 4 or not cv2.isContourConvex(quad):
-            continue
-        pts = quad.reshape(4, 2).astype(float)
-        # Order NW, NE, SE, SW by coordinate sums/differences.
-        s = pts.sum(axis=1)
-        d = pts[:, 0] - pts[:, 1]
-        ordered = np.array([pts[np.argmin(s)], pts[np.argmax(d)],
-                            pts[np.argmax(s)], pts[np.argmin(d)]])
-        top = np.linalg.norm(ordered[1] - ordered[0])
-        bottom = np.linalg.norm(ordered[2] - ordered[3])
-        left = np.linalg.norm(ordered[3] - ordered[0])
-        right = np.linalg.norm(ordered[2] - ordered[1])
-        if min(top, bottom, left, right) < 10:
-            continue
-        if not (0.75 <= top / bottom <= 1.33
-                and 0.75 <= left / right <= 1.33):
-            continue
-        aspect = ((top + bottom) / 2.0) / ((left + right) / 2.0)
-        if not 1.15 <= aspect <= 3.8:
-            continue
-        # The note must be brighter than its immediate surroundings —
-        # this keeps holder reflections and page fragments out.
-        qmask = np.zeros_like(small)
-        cv2.fillPoly(qmask, [ordered.astype(np.int32)], 255)
-        ring = cv2.dilate(qmask, np.ones((25, 25), np.uint8)) & ~qmask
-        if not ring.any():
-            continue
-        inside = float(small[qmask > 0].mean())
-        outside = float(small[ring > 0].mean())
-        if inside - outside < 40:
-            continue
-        if best is None or area > best[0]:
-            best = (area, ordered)
-    if best is None:
-        return None
-    approx = tuple((float(px) / scale, float(py) / scale)
-                   for px, py in best[1])
-    # approxPolyDP corners are only ~2%-of-perimeter accurate, and the
-    # detection ran downscaled — up to a dozen full-res pixels off,
-    # which reads as a leftover sliver or a faint residual tilt after
-    # the warp. Refine at full resolution: line-fit each edge on the
-    # actual contour pixels and intersect into sub-pixel corners.
-    return _cv_refine_quad(arr, approx, otsu) or approx
+        approx = tuple((float(px) / scale, float(py) / scale)
+                       for px, py in best[1])
+        # approxPolyDP corners are only ~2%-of-perimeter accurate, and
+        # the detection ran downscaled — up to a dozen full-res pixels
+        # off, which reads as a leftover sliver or a faint residual
+        # tilt after the warp. Refine at full resolution: line-fit
+        # each edge on the actual contour pixels and intersect into
+        # sub-pixel corners.
+        return _cv_refine_quad(rgb, approx, binarize) or approx
+    return None
 
 
-def _cv_refine_quad(arr, quad, thresh):
+def _cv_refine_quad(arr, quad, binarize):
     """Sub-pixel refinement of an approximate note quad (NW, NE, SE,
-    SW, full-res): binarize a padded ROI at the detection threshold,
-    take the note's full-resolution contour, robust-fit a line to each
-    side's inlier points (excluding the corner zones), and intersect
-    adjacent lines. None when any side lacks support or the refined
-    corners drift implausibly far from the approximation."""
+    SW, full-res): binarize a padded ROI with the same rule the
+    detection used, take the note's full-resolution contour,
+    robust-fit a line to each side's inlier points (excluding the
+    corner zones), and intersect adjacent lines. None when any side
+    lacks support or the refined corners drift implausibly far from
+    the approximation."""
     import cv2
     import numpy as np
 
-    h, w = arr.shape
+    h, w = arr.shape[:2]
     pts = np.array(quad, dtype=float)
     side = min(np.linalg.norm(pts[1] - pts[0]),
                np.linalg.norm(pts[3] - pts[0]))
@@ -7807,7 +7844,7 @@ def _cv_refine_quad(arr, quad, thresh):
     roi = arr[y0:y1, x0:x1]
     if roi.size == 0:
         return None
-    mask = (roi > thresh).astype(np.uint8) * 255
+    mask = binarize(roi)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
                             np.ones((7, 7), np.uint8))
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,

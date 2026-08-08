@@ -199,6 +199,49 @@ assert all(v > 140 for v in lumas), f'couch wedge left in corner: {lumas}'
 print('COUCH-BACKGROUND SLAB ASSERTIONS PASSED')
 
 
+# --- Slab on a saturated blue backdrop ------------------------------------
+# The 50-Pesos failure: a dealer shot of the slab on a blue board. In
+# grayscale the inked note and the blue backdrop are nearly the same
+# brightness, so the Otsu path finds nothing — the low-saturation
+# paper mask has to carry it.
+img = Image.new('RGB', (1600, 900), (100, 130, 200))
+draw = ImageDraw.Draw(img)
+BLUE_QUAD = [(300, 250), (1290, 262), (1286, 700), (306, 690)]
+draw.polygon(BLUE_QUAD, fill=(235, 232, 225))
+
+
+def _lerp_q(quad, u, v):
+    (ax, ay), (bx, by), (cx, cy), (dx, dy) = quad
+    return ((1 - u) * (1 - v) * ax + u * (1 - v) * bx
+            + u * v * cx + (1 - u) * v * dx,
+            (1 - u) * (1 - v) * ay + u * (1 - v) * by
+            + u * v * cy + (1 - u) * v * dy)
+
+
+# dense two-colour overprint like a Victory note — most of the paper
+# is saturated ink, only margins and gaps stay pale
+u = 0.08
+while u < 0.92:
+    ink = (40, 60, 140) if int(u * 100) % 2 else (170, 40, 50)
+    draw.line([_lerp_q(BLUE_QUAD, u, 0.10), _lerp_q(BLUE_QUAD, u, 0.90)],
+              fill=ink, width=5)
+    u += 0.008
+draw.rectangle([280, 40, 1300, 190], fill=(240, 245, 240))  # PMG label
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'blue-backdrop slab shot was not trimmed'
+tw, th = trimmed.size
+want = _quad_aspect(BLUE_QUAD)
+got = tw / float(th)
+assert abs(got - want) / want < 0.08, \
+    f'blue-backdrop aspect off: got {got:.3f}, want {want:.3f}'
+px = trimmed.load()
+for x, y in ((6, 6), (tw - 7, 6), (6, th - 7), (tw - 7, th - 7)):
+    r, g, b = px[x, y][:3]
+    assert b - r < 40, f'blue backdrop left at {(x, y)}: {(r, g, b)}'
+print('BLUE-BACKDROP SLAB ASSERTIONS PASSED')
+
+
 # --- Light-holder keystone shots -----------------------------------------
 # A flat note rendered through a REAL homography into a light-holder
 # scene: the trimmer must warp it square-on and keep a border around
