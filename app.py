@@ -7726,8 +7726,8 @@ def _cv_note_quad(img):
     else:
         small = arr
     sh, sw = small.shape
-    _, mask = cv2.threshold(small, 0, 255,
-                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    otsu, mask = cv2.threshold(small, 0, 255,
+                               cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
                             np.ones((5, 5), np.uint8))
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
@@ -7775,8 +7775,94 @@ def _cv_note_quad(img):
             best = (area, ordered)
     if best is None:
         return None
-    return tuple((float(px) / scale, float(py) / scale)
-                 for px, py in best[1])
+    approx = tuple((float(px) / scale, float(py) / scale)
+                   for px, py in best[1])
+    # approxPolyDP corners are only ~2%-of-perimeter accurate, and the
+    # detection ran downscaled — up to a dozen full-res pixels off,
+    # which reads as a leftover sliver or a faint residual tilt after
+    # the warp. Refine at full resolution: line-fit each edge on the
+    # actual contour pixels and intersect into sub-pixel corners.
+    return _cv_refine_quad(arr, approx, otsu) or approx
+
+
+def _cv_refine_quad(arr, quad, thresh):
+    """Sub-pixel refinement of an approximate note quad (NW, NE, SE,
+    SW, full-res): binarize a padded ROI at the detection threshold,
+    take the note's full-resolution contour, robust-fit a line to each
+    side's inlier points (excluding the corner zones), and intersect
+    adjacent lines. None when any side lacks support or the refined
+    corners drift implausibly far from the approximation."""
+    import cv2
+    import numpy as np
+
+    h, w = arr.shape
+    pts = np.array(quad, dtype=float)
+    side = min(np.linalg.norm(pts[1] - pts[0]),
+               np.linalg.norm(pts[3] - pts[0]))
+    pad = max(8, int(0.04 * side))
+    x0 = max(0, int(pts[:, 0].min()) - pad)
+    y0 = max(0, int(pts[:, 1].min()) - pad)
+    x1 = min(w, int(pts[:, 0].max()) + pad)
+    y1 = min(h, int(pts[:, 1].max()) + pad)
+    roi = arr[y0:y1, x0:x1]
+    if roi.size == 0:
+        return None
+    mask = (roi > thresh).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
+                            np.ones((7, 7), np.uint8))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_NONE)
+    if not contours:
+        return None
+    contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(contour) < 0.5 * cv2.contourArea(
+            (pts - (x0, y0)).astype(np.float32)):
+        return None
+    cpts = contour.reshape(-1, 2).astype(float)
+    corners = pts - (x0, y0)
+
+    lines = []
+    for i in range(4):
+        a, b = corners[i], corners[(i + 1) % 4]
+        ab = b - a
+        length = np.linalg.norm(ab)
+        if length < 20:
+            return None
+        u = ab / length
+        rel = cpts - a
+        along = rel @ u
+        dist = np.abs(rel[:, 0] * u[1] - rel[:, 1] * u[0])
+        sel = (along > 0.08 * length) & (along < 0.92 * length) \
+            & (dist < max(4.0, 0.03 * length))
+        seg = cpts[sel]
+        if len(seg) < 20:
+            return None
+        vx, vy, px_, py_ = cv2.fitLine(seg.astype(np.float32),
+                                       cv2.DIST_HUBER, 0, 0.01,
+                                       0.01).flatten()
+        lines.append((float(vx), float(vy), float(px_), float(py_)))
+
+    def _intersect(l1, l2):
+        vx1, vy1, px1, py1 = l1
+        vx2, vy2, px2, py2 = l2
+        d = vx1 * vy2 - vy1 * vx2
+        if abs(d) < 1e-9:
+            return None
+        t = ((px2 - px1) * vy2 - (py2 - py1) * vx2) / d
+        return (px1 + t * vx1, py1 + t * vy1)
+
+    drift_cap = max(6.0, 0.02 * side)
+    refined = []
+    for j in range(4):
+        p = _intersect(lines[(j - 1) % 4], lines[j])
+        if p is None:
+            return None
+        fx, fy = p[0] + x0, p[1] + y0
+        if abs(fx - pts[j][0]) > drift_cap or \
+                abs(fy - pts[j][1]) > drift_cap:
+            return None
+        refined.append((fx, fy))
+    return tuple(refined)
 
 
 def _trim_slab_note_cv(img):
