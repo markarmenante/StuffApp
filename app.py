@@ -7753,10 +7753,64 @@ def _cv_note_quad(img):
         return ((rh[:, :, 1] < 70) & (rh[:, :, 2] > 130)) \
             .astype(np.uint8) * 255
 
+    # The note's own anchor: engraving is the densest edge texture in
+    # any slab shot — the label is sparse text, felt/couch grain blurs
+    # away, plastic is smooth. The biggest banknote-shaped edge blob
+    # marks the printed design; whatever quad we accept must be this
+    # design plus margins, never the slab (whose proportions also pass
+    # a banknote aspect gate).
+    ink_box = None
+    canny = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 60, 160)
+    canny = cv2.morphologyEx(canny, cv2.MORPH_CLOSE,
+                             np.ones((11, 11), np.uint8))
+    ink_contours, _ = cv2.findContours(canny, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+    frame_area = float(sw * sh)
+    ink_best = 0
+    for c in ink_contours:
+        bx, by, bw_, bh_ = cv2.boundingRect(c)
+        area = bw_ * bh_
+        if not 0.03 * frame_area <= area <= 0.70 * frame_area:
+            continue
+        if not 1.15 <= bw_ / float(bh_) <= 3.8:
+            continue
+        # Engraving fills its box with texture; the outline of a slab
+        # or holder encloses the same kind of box while its interior
+        # stays empty — edge density separates them where contour
+        # area (which counts everything a closed outline encloses)
+        # cannot.
+        if float((canny[by:by + bh_, bx:bx + bw_] > 0).mean()) < 0.30:
+            continue
+        if area > ink_best:
+            ink_best = area
+            ink_box = (bx, by, bx + bw_, by + bh_)
+
+    # Local mask around the design: threshold ONLY the neighbourhood
+    # of the ink box, so the split is paper vs its immediate
+    # surroundings (holder plastic, felt seen through it) — global
+    # Otsu can't find that boundary when a bright label and backdrop
+    # skew the histogram.
+    local_mask = None
+    local_binarize = None
+    if ink_box is not None:
+        bx0, by0, bx1, by1 = ink_box
+        mx_ = int(0.22 * (bx1 - bx0))
+        my_ = int(0.22 * (by1 - by0))
+        rx0, ry0 = max(0, bx0 - mx_), max(0, by0 - my_)
+        rx1, ry1 = min(sw, bx1 + mx_), min(sh, by1 + my_)
+        t_loc, lm = cv2.threshold(gray[ry0:ry1, rx0:rx1], 0, 255,
+                                  cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        local_mask = np.zeros_like(gray)
+        local_mask[ry0:ry1, rx0:rx1] = cv2.morphologyEx(
+            lm, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+
+        def local_binarize(roi, t=t_loc):
+            return (cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY) > t) \
+                .astype(np.uint8) * 255
+
     def _pick(mask):
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
                                        cv2.CHAIN_APPROX_SIMPLE)
-        frame_area = float(sw * sh)
         best = None
         for c in contours:
             area = cv2.contourArea(c)
@@ -7765,8 +7819,12 @@ def _cv_note_quad(img):
             peri = cv2.arcLength(c, True)
             quad = cv2.approxPolyDP(c, 0.02 * peri, True)
             if len(quad) != 4 or not cv2.isContourConvex(quad):
-                continue
-            pts = quad.reshape(4, 2).astype(float)
+                # Rounded holder corners or a nick in the outline break
+                # the clean 4-gon; the min-area rectangle still carries
+                # the position and skew, and the sub-pixel refinement
+                # below re-fits the true edges.
+                quad = cv2.boxPoints(cv2.minAreaRect(c))
+            pts = np.asarray(quad).reshape(4, 2).astype(float)
             # Order NW, NE, SE, SW by coordinate sums/differences.
             s = pts.sum(axis=1)
             d = pts[:, 0] - pts[:, 1]
@@ -7800,12 +7858,34 @@ def _cv_note_quad(img):
             m_ring = float((mask[ring > 0] > 0).mean())
             if m_in < 0.85 or m_ring > 0.35:
                 continue
+            # Tie the quad to the printed design: it must cover the
+            # ink box without dwarfing it. A slab-sized quad passes
+            # every geometric gate above (slab proportions are
+            # banknote-ish) — but it is several times the design's
+            # area, while the real note is design + margins.
+            if ink_box is not None:
+                ib_area = (ink_box[2] - ink_box[0]) \
+                    * (ink_box[3] - ink_box[1])
+                icx = (ink_box[0] + ink_box[2]) / 2.0
+                icy = (ink_box[1] + ink_box[3]) / 2.0
+                quad_area = cv2.contourArea(
+                    ordered.astype(np.float32))
+                if cv2.pointPolygonTest(
+                        ordered.astype(np.float32), (icx, icy),
+                        False) < 0:
+                    continue
+                if quad_area > 2.2 * ib_area:
+                    continue
             if best is None or area > best[0]:
                 best = (area, ordered)
         return best
 
-    for mask, binarize in ((otsu_mask, _gray_binarize),
-                           (paper_mask, _paper_binarize)):
+    candidates = []
+    if local_mask is not None:
+        candidates.append((local_mask, local_binarize))
+    candidates += [(otsu_mask, _gray_binarize),
+                   (paper_mask, _paper_binarize)]
+    for mask, binarize in candidates:
         best = _pick(mask)
         if best is None:
             continue

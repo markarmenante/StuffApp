@@ -242,6 +242,47 @@ for x, y in ((6, 6), (tw - 7, 6), (6, th - 7), (tw - 7, th - 7)):
 print('BLUE-BACKDROP SLAB ASSERTIONS PASSED')
 
 
+# --- Slab on green felt (clear holder shows felt through plastic) ---------
+# The 100-Pesos failure: the whole slab region reads as one bright-ish
+# blob, and the slab's own proportions pass a banknote aspect gate, so
+# a global threshold either finds nothing or crops to the SLAB. The
+# ink anchor has to tie the accepted quad to the printed design.
+img = Image.new('RGB', (1600, 1200), (40, 120, 70))
+draw = ImageDraw.Draw(img)
+for i in range(0, 1600, 9):
+    for j in range(0, 1200, 7):
+        dv = ((i * 11 + j * 17) % 50) - 25
+        draw.rectangle([i, j, i + 8, j + 6],
+                       fill=(40 + dv, 120 + dv, 70 + dv))
+# clear slab: felt seen through plastic reads brighter and washed out
+SLAB = (250, 150, 1350, 1050)
+for i in range(SLAB[0], SLAB[2], 9):
+    for j in range(SLAB[1], SLAB[3], 7):
+        dv = ((i * 11 + j * 17) % 30) - 15
+        draw.rectangle([i, j, min(i + 8, SLAB[2]), min(j + 6, SLAB[3])],
+                       fill=(120 + dv, 200 + dv, 150 + dv))
+draw.rectangle([270, 180, 1330, 330], fill=(245, 248, 245))  # label
+for k in range(5):
+    draw.line([(300 + k * 180, 230), (400 + k * 180, 230)],
+              fill=(30, 30, 30), width=6)
+NOTE_QUAD = [(350, 420), (1250, 435), (1240, 950), (360, 935)]
+_draw_note(draw, NOTE_QUAD)
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'green-felt slab shot was not trimmed'
+tw, th = trimmed.size
+want = _quad_aspect(NOTE_QUAD)
+got = tw / float(th)
+assert abs(got - want) / want < 0.08, \
+    f'green-felt crop is not the note (slab?): got {got:.3f}, want {want:.3f}'
+px = trimmed.load()
+for x, y in ((6, 6), (tw - 7, 6), (6, th - 7), (tw - 7, th - 7)):
+    r, g, b = px[x, y][:3]
+    assert not (g - r > 30 and g - b > 30), \
+        f'green felt left at {(x, y)}: {(r, g, b)}'
+print('GREEN-FELT SLAB ASSERTIONS PASSED')
+
+
 # --- Light-holder keystone shots -----------------------------------------
 # A flat note rendered through a REAL homography into a light-holder
 # scene: the trimmer must warp it square-on and keep a border around
