@@ -72,6 +72,35 @@ assert stuffapp._nation_sort_name('Italian Somaliland') == 'Somalia'
 assert stuffapp._nation_sort_name('British Somaliland') == 'Somalia'
 print('DJIBOUTI ASSERTIONS PASSED')
 
+# Philippines: occupation money and the legitimate government's notes
+# share the same years (1942-45) — the issuer tells them apart. JIM
+# notes go under Japanese occupation; VICTORY notes printed for the
+# 1944 liberation are Commonwealth; the 1949 Central Bank overprint
+# opens the Central Bank era.
+for year, issuer, series, want in (
+    (1943, 'The Japanese Government', '', 'Japanese occupation'),
+    (1944, 'The Japanese Government', '', 'Japanese occupation'),
+    (1944, 'Commonwealth of the Philippines (Treasury of the '
+           'Philippines)', 'Victory Series No. 66', 'Commonwealth'),
+    (1944, 'Commonwealth of the Philippines (Philippine Treasury)', '',
+     'Commonwealth'),
+    (1949, 'Treasury of the Philippines (Central Bank of the '
+           'Philippines overprint)', 'Victory Series No. 66',
+     'Central Bank'),
+    (1937, 'Philippine National Bank', 'Series of 1937', 'Commonwealth'),
+    (1933, 'Bank of the Philippine Islands', 'Series of 1933',
+     'US administration'),
+    (1921, 'Philippine National Bank', 'Series of 1921',
+     'US administration'),
+    # No issuer on file: the gate stays open, year-only status quo.
+    (1944, '', '', 'Japanese occupation'),
+):
+    p = stuffapp._series_panel_for_row(
+        {'country': 'Philippines', 'issuer': issuer, 'series': series,
+         'date_1': year})
+    assert p and p['era']['label'] == want, (year, issuer, p and p['era'])
+print('PHILIPPINES ERA ASSERTIONS PASSED')
+
 # Colonial American issues file under the United States, ahead of the
 # federal run, with state/obsolete issues still last — and Portuguese
 # Guinea no longer wedges between the colonies.

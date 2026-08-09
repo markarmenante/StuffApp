@@ -3082,13 +3082,24 @@ COUNTRY_ERAS = {
          'removed three zeros.'),
     )),
     'philippines': ('Philippines', (
-        (1903, 1941, 'US administration',
-         'The peso was held at two per US dollar under a gold-exchange '
-         'standard; Treasury certificates and bank notes circulated.'),
+        # The occupation band is issuer-gated: its years blanket 1942-45,
+        # but the VICTORY notes printed for the 1944 liberation are
+        # Commonwealth money, the opposite side of the same years. First
+        # match wins, so the gated band sits first.
         (1942, 1945, 'Japanese occupation',
          'Japanese military pesos ("Mickey Mouse money") depreciated to '
          'worthlessness by 1944–45, with prices doubling in weeks; '
-         'guerrilla and emergency notes were issued in the provinces.'),
+         'guerrilla and emergency notes were issued in the provinces.',
+         ('japanese',)),
+        (1903, 1935, 'US administration',
+         'The peso was held at two per US dollar under a gold-exchange '
+         'standard; Treasury certificates and bank notes circulated.'),
+        (1935, 1948, 'Commonwealth',
+         'The 1935 Commonwealth kept the peso at two per US dollar; '
+         'Treasury certificates replaced the older bank issues. '
+         'VICTORY-overprinted notes printed by the US Bureau of '
+         'Engraving and Printing arrived with the October 1944 '
+         'liberation, and the occupation pesos were invalidated.'),
         (1949, 2100, 'Central Bank',
          'The Central Bank of the Philippines issued from 1949.'),
     )),
@@ -4099,13 +4110,29 @@ def _note_year(row):
     return None
 
 
-def _country_era(country_key, year):
+def _country_era(country_key, year, context=''):
+    """Era band for a note. ``context`` is free text about the note
+    (issuer, series) used by keyword-gated bands: an era tuple may
+    carry a 5th element of lowercase keywords, and then claims a note
+    only when one appears in the context — occupation money and the
+    legitimate government's notes share the same years and are told
+    apart by who issued them. With no context on file the gate stays
+    open, so ungated behaviour (and old data) is unchanged."""
     entry = _country_eras_for(country_key) if year else None
     if not entry:
         return None
     title, eras = entry
-    for start, end, label, body in eras:
-        if start <= year <= end:
+    context = (context or '').strip().lower()
+
+    def _claims(era_row):
+        keywords = era_row[4] if len(era_row) > 4 else None
+        if not keywords or not context:
+            return True
+        return any(k in context for k in keywords)
+
+    for era_row in eras:
+        start, end, label, body = era_row[:4]
+        if start <= year <= end and _claims(era_row):
             return {'label': label, 'body': body, 'span': f'{start}–{end}'}
     # A year outside every band (typical of generated histories whose
     # spans came out too narrow): fall back to the nearest band so the
@@ -4114,8 +4141,10 @@ def _country_era(country_key, year):
     # design, and a later note must not wear a colonial panel.
     if country_key == 'colonial-america':
         return None
+    candidates = [e for e in eras if _claims(e)] or list(eras)
     start, end, label, body = min(
-        eras, key=lambda e: min(abs(year - e[0]), abs(year - e[1])))
+        candidates,
+        key=lambda e: min(abs(year - e[0]), abs(year - e[1])))[:4]
     return {'label': label, 'body': body, 'span': f'{start}–{end}'}
 
 
@@ -4201,7 +4230,8 @@ def _series_panel_for_row(row):
             'era': era,
         }
 
-    era = _country_era(country_key, year)
+    era = _country_era(country_key, year, context='%s %s' % (
+        _row_get(row, 'issuer') or '', _row_get(row, 'series') or ''))
     if era is None:
         return None
     return {
