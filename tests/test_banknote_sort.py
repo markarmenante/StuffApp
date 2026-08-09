@@ -101,6 +101,46 @@ for year, issuer, series, want in (
     assert p and p['era']['label'] == want, (year, issuer, p and p['era'])
 print('PHILIPPINES ERA ASSERTIONS PASSED')
 
+# The LIST keeps each era block contiguous even where bands overlap in
+# years: occupation scrip must not be split by the 1944 VICTORY notes.
+db2 = sqlite3.connect(':memory:')
+stuffapp._configure_db_connection(db2)
+db2.execute("""CREATE TABLE banknotes (
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
+    other_catalog TEXT, description TEXT, denomination TEXT, date_1 INTEGER)""")
+ph_rows = [
+    # (denomination, issuer, series, date_1) — the screenshot's mix
+    ('5 Pesos', 'The Japanese Government', '', 1943),
+    ('20 Pesos', 'Commonwealth of the Philippines (Treasury of the '
+     'Philippines)', 'Victory Series No. 66', 1944),
+    ('100 Pesos', 'Commonwealth of the Philippines (Philippine Treasury)',
+     '', 1944),
+    ('500 Pesos', 'The Japanese Government', '', 1944),
+    ('1 Peso', 'Treasury of the Philippines (Central Bank of the '
+     'Philippines overprint)', 'Victory Series No. 66', 1949),
+    ('10 Pesos', 'Philippine National Bank', 'Series of 1937', 1937),
+    ('1 Peso', 'Philippine National Bank', 'Series of 1921', 1921),
+]
+for i, (d, iss, s, y) in enumerate(ph_rows, 1):
+    db2.execute(
+        "INSERT INTO banknotes (id, country, issuer, series, denomination, "
+        "date_1) VALUES (?, 'Philippines', ?, ?, ?, ?)", (i, iss, s, d, y))
+got = [(r[0], r[1]) for r in db2.execute(
+    "SELECT denomination, date_1 FROM banknotes ORDER BY "
+    + stuffapp.CATEGORY_ORDER_BY['banknotes'])]
+expected = [
+    ('1 Peso', 1921),        # US administration (1903)
+    ('10 Pesos', 1937),      # Commonwealth (1935)
+    ('20 Pesos', 1944),      # Commonwealth — VICTORY
+    ('100 Pesos', 1944),     # Commonwealth — VICTORY
+    ('5 Pesos', 1943),       # Japanese occupation (1942), contiguous
+    ('500 Pesos', 1944),     # Japanese occupation
+    ('1 Peso', 1949),        # Central Bank (1949)
+]
+assert got == expected, f"\nexpected {expected}\ngot      {got}"
+print('PHILIPPINES ERA ORDER ASSERTIONS PASSED')
+
 # Colonial American issues file under the United States, ahead of the
 # federal run, with state/obsolete issues still last — and Portuguese
 # Guinea no longer wedges between the colonies.

@@ -4133,7 +4133,8 @@ def _country_era(country_key, year, context=''):
     for era_row in eras:
         start, end, label, body = era_row[:4]
         if start <= year <= end and _claims(era_row):
-            return {'label': label, 'body': body, 'span': f'{start}–{end}'}
+            return {'label': label, 'body': body, 'start': start,
+                    'span': f'{start}–{end}'}
     # A year outside every band (typical of generated histories whose
     # spans came out too narrow): fall back to the nearest band so the
     # note still gets its divider and history instead of rendering
@@ -4145,7 +4146,36 @@ def _country_era(country_key, year, context=''):
     start, end, label, body = min(
         candidates,
         key=lambda e: min(abs(year - e[0]), abs(year - e[1])))[:4]
-    return {'label': label, 'body': body, 'span': f'{start}–{end}'}
+    return {'label': label, 'body': body, 'start': start,
+            'span': f'{start}–{end}'}
+
+
+def _banknote_era_start(country, issuer, series, date_1):
+    """Sort key for CATEGORY_ORDER_BY['banknotes']: the start year of
+    the era band the note files under, so a country's list runs band
+    by band instead of strictly by note year. Needed wherever bands
+    overlap in years and are told apart by issuer — the 1944 Philippine
+    VICTORY notes (Commonwealth) otherwise wedge between the 1943 and
+    1944 occupation notes and split the occupation block in two. For
+    every country with plain chronological bands the band start orders
+    exactly like the year did, so nothing else moves. Falls back to
+    the note's own year (blanks last) when no era resolves — including
+    the US, whose panels are series-based, keeping its ordering
+    untouched."""
+    year = _series_year(series)
+    if not year:
+        try:
+            year = int(date_1) if date_1 else None
+        except (TypeError, ValueError):
+            year = None
+    if not year:
+        return 99999
+    ck = _country_key(country)
+    if not ck:
+        return year
+    era = _country_era(ck, year, context='%s %s' % (issuer or '',
+                                                    series or ''))
+    return era['start'] if era and 'start' in era else year
 
 
 def _display_series(series, year):
@@ -4373,6 +4403,11 @@ def _configure_db_connection(db):
     # and 'Cameroon'. Not marked deterministic: the mapping can shift
     # when a generated country history lands mid-process.
     db.create_function('NATION_NAME', 1, _nation_sort_name)
+    # COUNTRY_ERA_START — the era band a note files under, as its start
+    # year, so a nation's list runs band by band (see
+    # _banknote_era_start). Not deterministic for the same reason as
+    # NATION_NAME.
+    db.create_function('COUNTRY_ERA_START', 4, _banknote_era_start)
     return db
 
 
@@ -5108,10 +5143,12 @@ def init_db():
     # territories under their modern nation (British Honduras under
     # Belize), eras in chronological order; Colonial American issues
     # file with the United States, opening the block before the
-    # federal run.
+    # federal run. v10: COUNTRY_ERA_START files a nation's notes band
+    # by band where era bands overlap in years (Philippine VICTORY
+    # notes vs occupation scrip), keeping each era block contiguous.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v9',),
+        ('banknote_display_number_v10',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5119,7 +5156,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v9', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v10', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -9477,6 +9514,7 @@ CATEGORY_ORDER_BY = {
     'banknotes': ("NATION_NAME(country) COLLATE NODIACRITIC, "
                   "US_NOTE_GROUP(country, series, issuer, official, lettering, "
                   "lettering_translation, other_catalog, description) ASC, "
+                  "COUNTRY_ERA_START(country, issuer, series, date_1) ASC, "
                   "COALESCE(SERIES_YEAR(series), date_1, 99999) ASC, "
                   "COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
