@@ -535,6 +535,74 @@ for x, y in ((5, 5), (tw - 6, 5), (5, th - 6), (tw - 6, th - 6),
 print('POCKET-CROP STRIPE ASSERTIONS PASSED')
 
 
+# --- Ornate frame, blank centre: never cut INTO the note -------------------
+# The JIM 5-Pesos reverse: an already-trimmed note whose saturated
+# border frame surrounds a big blank field. The blank field is
+# banknote-shaped and solid in the paper mask — without full design
+# containment the detector cropped to it, amputating the border. All
+# printed area must survive every trim: correct behaviour is a no-op
+# (or at minimum a crop that keeps the full frame width).
+img = Image.new('RGB', (1180, 505), (245, 238, 215))
+draw = ImageDraw.Draw(img)
+RUST = (165, 75, 55)
+draw.rectangle([47, 20, 1133, 485], outline=RUST, width=42)
+for k in range(60, 1120, 24):
+    draw.line([(k, 22), (k + 14, 60)], fill=(200, 120, 95), width=3)
+    draw.line([(k, 483), (k + 14, 445)], fill=(200, 120, 95), width=3)
+for k in range(30, 480, 22):
+    draw.line([(49, k), (87, k + 12)], fill=(200, 120, 95), width=3)
+    draw.line([(1131, k), (1093, k + 12)], fill=(200, 120, 95), width=3)
+for x in range(330, 850, 90):
+    draw.rectangle([x, 210, x + 60, 300], outline=RUST, width=14)
+
+trimmed = _trim_to_image(img)
+assert trimmed is None or trimmed.size[0] >= 1050, \
+    f'cut into the note (border amputated): {trimmed.size}'
+print('ORNATE-FRAME BLANK-CENTRE ASSERTIONS PASSED')
+
+
+# --- Design-union fallback crop --------------------------------------------
+# When no detector finds a paper edge (note on a same-tone backing),
+# the fallback must deliver ALL printed area plus a small margin.
+img = Image.new('RGB', (1600, 900), (243, 236, 214))
+draw = ImageDraw.Draw(img)
+FALLBACK_NOTE = [(260, 220), (1340, 226), (1336, 680), (264, 674)]
+_draw_vignette_note(draw, FALLBACK_NOTE, vignette_frac=0.4)
+buf = io.BytesIO()
+img.save(buf, format='JPEG', quality=92)
+img2 = stuffapp._flatten_image_for_jpeg(
+    stuffapp._open_upload_image(buf.getvalue()))
+out = stuffapp._trim_note_design_crop(img2)
+assert out is not None, 'design fallback found nothing'
+trimmed = Image.open(io.BytesIO(out))
+tw, th = trimmed.size
+assert 1.15 <= tw / float(th) <= 3.8, f'fallback aspect wild: {trimmed.size}'
+g2 = trimmed.convert('L')
+gpx = g2.load()
+# margin present: no ink ON the crop edge...
+assert not any(gpx[x, 1] < 120 or gpx[x, th - 2] < 120
+               for x in range(0, tw, 3)), 'design touches crop edge'
+assert not any(gpx[1, y] < 120 or gpx[tw - 2, y] < 120
+               for y in range(0, th, 3)), 'design touches crop edge'
+
+
+def _has_ink_band(xs, ys):
+    return any(gpx[x, y] < 120 for x in xs for y in ys)
+
+
+# ...but all printed area kept close to every edge (nothing amputated,
+# margins small): ink must appear within 9% of each edge.
+assert _has_ink_band(range(0, tw, 3), range(2, int(0.09 * th))), \
+    'top border lost or margin too wide'
+assert _has_ink_band(range(0, tw, 3), range(th - int(0.09 * th), th - 2)), \
+    'bottom border lost or margin too wide'
+assert _has_ink_band(range(2, int(0.09 * tw)), range(0, th, 3)), \
+    'left border lost or margin too wide'
+assert _has_ink_band(range(tw - int(0.09 * tw), tw - 2), range(0, th, 3)), \
+    'right border lost or margin too wide'
+print('DESIGN-UNION FALLBACK ASSERTIONS PASSED')
+
+
 # --- Light-holder keystone shots -----------------------------------------
 # A flat note rendered through a REAL homography into a light-holder
 # scene: the trimmer must warp it square-on and keep a border around

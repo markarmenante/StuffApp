@@ -7398,6 +7398,12 @@ def _trim_slabbed_note_image(data):
             step = _trim_light_slab_note(img)
             which = 'light'
         if step is None:
+            # Nothing found the paper edge — fall back to the union of
+            # all printed area plus a fixed margin, which is what the
+            # stored image must show at minimum.
+            step = _trim_note_design_crop(img)
+            which = 'design'
+        if step is None:
             app.logger.info('trim: pass %d %sfound nothing to do (%dx%d)',
                             i + 1, '' if i else 'on original ', *img.size)
             break
@@ -7704,6 +7710,37 @@ def _note_quad_from_mask(mask, box):
     return quad
 
 
+
+
+def _pick_design_box(cands):
+    """Biggest qualifying edge box that is not a SHELL. With every
+    contour retrieved (RETR_LIST), a closed slab outline shows up as a
+    box enclosing the true design; its bounding box out-sizes the
+    design while most of the edge mass inside it IS the design's.
+    Suppress any candidate that contains a smaller candidate holding
+    half or more of its mass, then take the biggest survivor.
+    ``cands``: (x0, y0, x1, y1, mass) tuples. Returns (x0, y0, x1, y1)
+    or None."""
+    cands = sorted(cands, key=lambda c: (c[2] - c[0]) * (c[3] - c[1]),
+                   reverse=True)
+    for i, (x0, y0, x1, y1, mass) in enumerate(cands):
+        area = (x1 - x0) * (y1 - y0)
+        shell = False
+        for (ox0, oy0, ox1, oy1, omass) in cands[i + 1:]:
+            oarea = (ox1 - ox0) * (oy1 - oy0)
+            if ox0 >= x0 - 2 and oy0 >= y0 - 2 \
+                    and ox1 <= x1 + 2 and oy1 <= y1 + 2 \
+                    and oarea <= 0.8 * area and omass >= 0.5 * mass:
+                shell = True
+                break
+        if not shell:
+            return (x0, y0, x1, y1)
+    return None
+
+
+
+
+
 def _cv_note_quad(img):
     """OpenCV note-corner detection, the primary detector when cv2 is
     installed. Two binarizations run in turn: an Otsu split of the
@@ -7777,21 +7814,23 @@ def _cv_note_quad(img):
     # away, plastic is smooth. The biggest banknote-shaped edge blob
     # marks the printed design; whatever quad we accept must be this
     # design plus margins, never the slab (whose proportions also pass
-    # a banknote aspect gate). Two Canny sensitivities: the default
-    # picks up fine engraving, but on textured felt the fibre grain
-    # edges close into one frame-sized blob that swallows the design —
-    # the stricter pass keeps only high-contrast ink edges, which the
-    # felt grain doesn't have.
+    # a banknote aspect gate). Sensitivities run loose to strict: the
+    # loose pass sees the full extent of faint designs; when backdrop
+    # grain floods it (a washed holder region closes into one
+    # slab-sized blob), the ring-contrast gate below rejects that blob
+    # and a stricter pass — which felt grain doesn't survive — takes
+    # over. Strict passes fragment faint designs, so they never run
+    # first.
     ink_box = None
     frame_area = float(sw * sh)
-    for canny_lo, canny_hi in ((60, 160), (130, 280)):
+    for canny_lo, canny_hi in ((60, 160), (130, 280), (210, 430)):
         canny = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0),
                           canny_lo, canny_hi)
         canny = cv2.morphologyEx(canny, cv2.MORPH_CLOSE,
                                  np.ones((11, 11), np.uint8))
-        ink_contours, _ = cv2.findContours(canny, cv2.RETR_EXTERNAL,
+        ink_contours, _ = cv2.findContours(canny, cv2.RETR_LIST,
                                            cv2.CHAIN_APPROX_SIMPLE)
-        ink_best = 0
+        ink_cands = []
         for c in ink_contours:
             bx, by, bw_, bh_ = cv2.boundingRect(c)
             area = bw_ * bh_
@@ -7824,9 +7863,29 @@ def _cv_note_quad(img):
                             hit += 1
                 if not cells or hit / float(cells) < 0.55:
                     continue
-            if area > ink_best:
-                ink_best = area
-                ink_box = (bx, by, bx + bw_, by + bh_)
+            # A printed design is a dense-edge region on a QUIET
+            # surround (paper margins, holder, label gap). A textured
+            # backdrop region — felt grain flooding a loose Canny —
+            # is equally busy outside its own bounds. Require clear
+            # in-vs-around contrast so backdrop blobs never become
+            # the anchor; with no room for a ring there is no
+            # evidence against the box, and it stands.
+            rgx = max(3, int(0.12 * bw_))
+            rgy = max(3, int(0.12 * bh_))
+            ox0, oy0 = max(0, bx - rgx), max(0, by - rgy)
+            ox1 = min(canny.shape[1], bx + bw_ + rgx)
+            oy1 = min(canny.shape[0], by + bh_ + rgy)
+            outer = canny[oy0:oy1, ox0:ox1] > 0
+            ring_n = outer.size - roi.size
+            if ring_n > 0.2 * roi.size:
+                ring_density = (float(outer.sum()) - float(roi.sum())) \
+                    / ring_n
+                if float(roi.mean()) < 1.7 * max(ring_density, 0.02):
+                    continue
+            ink_cands.append((bx, by, bx + bw_, by + bh_,
+                              int(roi.sum())))
+        if ink_cands:
+            ink_box = _pick_design_box(ink_cands)
         if ink_box is not None:
             break
 
@@ -7914,13 +7973,26 @@ def _cv_note_quad(img):
             if ink_box is not None:
                 ib_area = (ink_box[2] - ink_box[0]) \
                     * (ink_box[3] - ink_box[1])
-                icx = (ink_box[0] + ink_box[2]) / 2.0
-                icy = (ink_box[1] + ink_box[3]) / 2.0
                 quad_area = cv2.contourArea(
                     ordered.astype(np.float32))
-                if cv2.pointPolygonTest(
-                        ordered.astype(np.float32), (icx, icy),
-                        False) < 0:
+                # The WHOLE design must lie inside the quad, not just
+                # its centre: a blank field inside the note's printed
+                # frame is banknote-shaped and solid in a paper mask,
+                # and its quad still contains the design centre — only
+                # full containment stops a crop that amputates the
+                # border (all printed area must survive every trim).
+                # 6% inset: the closed-Canny box overshoots the paper
+                # edge by its dilation on dense allover designs, and
+                # the quad corners carry approx error — while a crop
+                # that amputates real content misses 15%+ per side.
+                ix0, iy0, ix1, iy1 = ink_box
+                itx = 0.06 * (ix1 - ix0)
+                ity = 0.06 * (iy1 - iy0)
+                qf = ordered.astype(np.float32)
+                if any(cv2.pointPolygonTest(qf, (cx_, cy_), False) < 0
+                       for cx_, cy_ in
+                       ((ix0 + itx, iy0 + ity), (ix1 - itx, iy0 + ity),
+                        (ix1 - itx, iy1 - ity), (ix0 + itx, iy1 - ity))):
                     why['ink-out'] = why.get('ink-out', 0) + 1
                     continue
                 if quad_area > 2.2 * ib_area:
@@ -8114,6 +8186,156 @@ def _trim_slab_note_cv(img):
     app.logger.info('trim-cv: quad %s -> %dx%d',
                     [(int(a), int(b)) for a, b in quad], *rect[0].size)
     return _encode_trimmed_note(rect[0])
+
+
+def _trim_note_design_crop(img):
+    """Last-resort trim straight from the user's spec: find ALL the
+    engraved/printed area and crop to it plus a small margin.
+
+    No paper-edge or backdrop reasoning at all — the union of edge
+    components around the dominant banknote-shaped design blob IS the
+    note's printed extent, and a fixed ~4.5% margin stands in for the
+    physical margins. The result can never cut printed area (the crop
+    contains the union by construction) and never keeps backdrop
+    stripes (the margin is bounded). Level shots crop straight; a
+    small measured tilt is warped level. Returns JPEG bytes or None
+    (design not found, or the crop would be the frame itself —
+    the already-trimmed no-op)."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+
+    rgb = np.asarray(img.convert('RGB'))
+    h, w = rgb.shape[:2]
+    scale = min(1.0, 1100.0 / max(w, h))
+    if scale < 1.0:
+        small = cv2.resize(rgb, (int(w * scale), int(h * scale)),
+                           interpolation=cv2.INTER_AREA)
+    else:
+        small = rgb
+    gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY)
+    sh, sw = gray.shape
+    frame_area = float(sw * sh)
+
+    seed = None
+    comps = []
+    for lo, hi in ((60, 160), (130, 280), (210, 430)):
+        canny = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), lo, hi)
+        canny = cv2.morphologyEx(canny, cv2.MORPH_CLOSE,
+                                 np.ones((11, 11), np.uint8))
+        contours, _ = cv2.findContours(canny, cv2.RETR_LIST,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        comps = []
+        seed_cands = []
+        for c in contours:
+            bx, by, bw_, bh_ = cv2.boundingRect(c)
+            area = bw_ * bh_
+            if area < 0.0004 * frame_area:
+                continue
+            comps.append((bx, by, bx + bw_, by + bh_))
+            if not 0.03 * frame_area <= area <= 0.92 * frame_area:
+                continue
+            if not 1.15 <= bw_ / float(bh_) <= 3.8:
+                continue
+            roi = canny[by:by + bh_, bx:bx + bw_] > 0
+            if float(roi.mean()) < 0.30:
+                gy = max(1, bh_ // 12)
+                gx = max(1, bw_ // 12)
+                cells = hit = 0
+                for cy in range(0, bh_ - gy + 1, gy):
+                    for cx in range(0, bw_ - gx + 1, gx):
+                        cells += 1
+                        if roi[cy:cy + gy, cx:cx + gx].any():
+                            hit += 1
+                if not cells or hit / float(cells) < 0.55:
+                    continue
+            # A printed design is a dense-edge region on a QUIET
+            # surround (paper margins, holder, label gap). A textured
+            # backdrop region — felt grain flooding a loose Canny —
+            # is equally busy outside its own bounds. Require clear
+            # in-vs-around contrast so backdrop blobs never become
+            # the anchor; with no room for a ring there is no
+            # evidence against the box, and it stands.
+            rgx = max(3, int(0.12 * bw_))
+            rgy = max(3, int(0.12 * bh_))
+            ox0, oy0 = max(0, bx - rgx), max(0, by - rgy)
+            ox1 = min(canny.shape[1], bx + bw_ + rgx)
+            oy1 = min(canny.shape[0], by + bh_ + rgy)
+            outer = canny[oy0:oy1, ox0:ox1] > 0
+            ring_n = outer.size - roi.size
+            if ring_n > 0.2 * roi.size:
+                ring_density = (float(outer.sum()) - float(roi.sum())) \
+                    / ring_n
+                if float(roi.mean()) < 1.7 * max(ring_density, 0.02):
+                    continue
+            seed_cands.append((bx, by, bx + bw_, by + bh_,
+                               int(roi.sum()), c))
+        if seed_cands:
+            pick = _pick_design_box([sc[:5] for sc in seed_cands])
+            if pick is not None:
+                for sc in seed_cands:
+                    if sc[:4] == pick:
+                        seed = (pick, sc[5])
+                        break
+        if seed is not None:
+            break
+    if seed is None:
+        return None
+    (sx0, sy0, sx1, sy1), seed_contour = seed
+    # Union in the stragglers: border corners, counters or signature
+    # bits that broke off the main blob sit just outside its bbox; a
+    # label band, sticker or barcode sits well away and stays out.
+    gx_ = 0.06 * (sx1 - sx0)
+    gy_ = 0.06 * (sy1 - sy0)
+    ux0, uy0, ux1, uy1 = sx0, sy0, sx1, sy1
+    for bx0, by0, bx1, by1 in comps:
+        if bx0 >= sx0 - gx_ and by0 >= sy0 - gy_ \
+                and bx1 <= sx1 + gx_ and by1 <= sy1 + gy_:
+            ux0, uy0 = min(ux0, bx0), min(uy0, by0)
+            ux1, uy1 = max(ux1, bx1), max(uy1, by1)
+
+    mx = 0.045 * (ux1 - ux0)
+    my = 0.045 * (uy1 - uy0)
+    fx0 = max(0.0, (ux0 - mx) / scale)
+    fy0 = max(0.0, (uy0 - my) / scale)
+    fx1 = min(float(w), (ux1 + mx) / scale)
+    fy1 = min(float(h), (uy1 + my) / scale)
+    # The crop being (nearly) the frame means the image already IS the
+    # note plus margins — nothing to do, and no shave-a-sliver loop on
+    # every future Check.
+    if fx1 - fx0 >= 0.90 * w and fy1 - fy0 >= 0.90 * h:
+        return None
+    if not 1.15 <= (fx1 - fx0) / max(1.0, fy1 - fy0) <= 3.8:
+        return None
+
+    angle = cv2.minAreaRect(seed_contour)[2]
+    if angle > 45.0:
+        angle -= 90.0
+    if 0.4 <= abs(angle) <= 4.0:
+        # Rotated shot: warp the design's tilted rectangle level, with
+        # the margin riding along the tilt so no wedge of backdrop
+        # lands in the corners.
+        import math
+        rad = math.radians(-angle)
+        ccx = (fx0 + fx1) / 2.0
+        ccy = (fy0 + fy1) / 2.0
+        hw = (fx1 - fx0) / 2.0
+        hh = (fy1 - fy0) / 2.0
+        quad = []
+        for qx, qy in ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)):
+            quad.append((ccx + qx * math.cos(rad) - qy * math.sin(rad),
+                         ccy + qx * math.sin(rad) + qy * math.cos(rad)))
+        rect = _rectify_note_quad(img, tuple(quad),
+                                  fill=img.load()[2, 2])
+        if rect:
+            app.logger.info('trim-design: union %dx%d angle %.1f',
+                            int(fx1 - fx0), int(fy1 - fy0), angle)
+            return _encode_trimmed_note(rect[0])
+    crop = img.crop((int(fx0), int(fy0), int(fx1), int(fy1)))
+    app.logger.info('trim-design: union crop %dx%d', *crop.size)
+    return _encode_trimmed_note(crop)
 
 
 def _trim_dark_slab_note(img):
