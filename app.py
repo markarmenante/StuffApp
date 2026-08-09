@@ -694,6 +694,39 @@ def _backfill_blank_status_own(db):
             )
 
 
+def _strip_cite_tag_markup(db):
+    """Scrub <cite index="..."> / </cite> markup out of stored text.
+
+    Check lookups that ran with the web-search tool before _message_text
+    stripped citations wrote raw cite tags into fields (issuer, printer,
+    historical context, ...). Idempotent: only touches rows that still
+    contain '<cite'."""
+    cite_re = re.compile(r'</?cite\b[^>]*>', re.IGNORECASE)
+    for category, info in CATEGORIES.items():
+        table = info['table']
+        cols = [
+            r['name'] for r in db.execute(f"PRAGMA table_info({table})").fetchall()
+            if (r['type'] or '').upper().startswith('TEXT') or not r['type']
+        ]
+        text_cols = [c for c in cols if c != 'id']
+        if not text_cols:
+            continue
+        where = ' OR '.join(f"{c} LIKE '%<cite%'" for c in text_cols)
+        rows = db.execute(f"SELECT * FROM {table} WHERE {where}").fetchall()
+        for row in rows:
+            updates = {
+                c: cite_re.sub('', row[c])
+                for c in text_cols
+                if isinstance(row[c], str) and '<cite' in row[c].lower()
+            }
+            if updates:
+                assignments = ', '.join(f"{c} = ?" for c in updates)
+                db.execute(
+                    f"UPDATE {table} SET {assignments} WHERE id = ?",
+                    (*updates.values(), row['id']),
+                )
+
+
 def _merge_coin_condition_history(existing_notes, history_context):
     """Preserve manual notes while replacing the generated history block."""
     notes = (existing_notes or '').strip()
@@ -4686,6 +4719,7 @@ def init_db():
     _ensure_owner_user(db)
     _normalize_owned_status_values(db)
     _backfill_blank_status_own(db)
+    _strip_cite_tag_markup(db)
     _backfill_english_banknote_lettering(db)
     _migrate_coin_history_context_into_condition(db)
     _cleanup_coin_research_headings(db)
@@ -9852,9 +9886,16 @@ def _require_anthropic_key():
 
 def _message_text(resp):
     """Concatenate the text blocks of an Anthropic Messages response into
-    one string (non-text blocks — tool_use, etc. — are skipped)."""
-    return ''.join(b.text for b in resp.content
+    one string (non-text blocks — tool_use, etc. — are skipped).
+
+    Web-search responses wrap cited spans in <cite index="...">...</cite>;
+    stripped HERE so no caller can leak citation markup into stored
+    fields again (the P-119b lookup wrote raw cite tags into Issuer,
+    Printer and the history note). Idempotent with the per-caller strips
+    that already existed."""
+    text = ''.join(b.text for b in resp.content
                    if getattr(b, 'type', None) == 'text')
+    return re.sub(r'</?cite\b[^>]*>', '', text, flags=re.IGNORECASE)
 
 
 def parse_model_json_object(text):
