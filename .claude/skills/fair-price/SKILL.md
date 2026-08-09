@@ -86,7 +86,11 @@ When the input is a dealer email, auction alert, or message offering an item:
    number that fails lookup or matches a different item, a price far below
    fair value from an unknown seller (bait), pressure language, payment by
    irreversible rails only.
-4. Verdict: **pursue / counter at $X / pass**, one sentence of reasoning.
+4. Collection fit: when `references/collection-profile.md` (or the live
+   collection) is available, say whether the item fills a stated gap or
+   duplicates a holding — a fair price on a gap-filler outranks a bargain
+   duplicate. Skip silently when no profile is on hand.
+5. Verdict: **pursue / counter at $X / pass**, one sentence of reasoning.
    When countering, anchor at the low end of the fair private range.
 
 ## Ground rules
