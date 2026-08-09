@@ -19,6 +19,16 @@ search ("heritage auctions philippines 20 pesos victory PMG 63").
 - **eBay sold** for bullion-adjacent and mid-value.
 - Cert lookup: pcgs.com/cert, ngccoin.com/certlookup.
 
+## Ancient coins
+- **acsearch.info** — THE realized-price database for ancients; search any
+  type, see decades of hammer prices. Start here for every comp.
+- **CNG (cngcoins.com)** — auctions + fixed-price; deep archives.
+- **Leu Numismatik / Nomos AG / Numismatica Ars Classica** — Swiss houses,
+  strong archives (via biddr.com / sixbid.com).
+- **Heritage ancients**, **VCoins ancients**, **MA-Shops** — dealer stock.
+- Cert lookup: ngccoin.com/certlookup (NGC Ancients).
+- Provenance matters: a named old-collection pedigree adds real value.
+
 ## Watches
 - **WatchCharts** — market price index per reference; tracks real transactions.
 - **Chrono24** — asking prices (discount 10–15% for realized); "sold" data behind their index.

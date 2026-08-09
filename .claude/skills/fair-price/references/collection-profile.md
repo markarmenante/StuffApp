@@ -26,7 +26,30 @@ a category, judge offers on value alone and say gap-matching was skipped.
 - Philippines JIM: P-109 (1 Peso), P-111/112 (10 Pesos), high-denomination
   inflation issues beyond P-114
 - Philippine Treasury certificates 1929–1936 denominations not yet held
-- (add coin gaps here)
+### Ancient Greek coins — gaps to hunt
+
+Derived from the 647-coin export (Coin.csv, Feb 2026). The collection is
+deep in: Athens, Syracuse (30 incl. dekadrachms), Aegina, Corinth,
+Alexander III / Lysimachos / Ptolemaic / Seleucid royal issues, Kyzikos +
+Mytilene electrum (hektai, trites), Magna Graecia (Tarentum, Metapontion,
+Kroton, Sybaris), Aitolia, Thessaly, stephanophoric tets (Kyme, Myrina,
+Magnesia). Notable ABSENT types — classic, recognized, worth hunting:
+
+- Cistophoric tetradrachm (Pergamon / Ephesos, 2nd c. BC) — none held
+- Crete: Gortyna (Europa in plane tree) or Knossos (Labyrinth) — none
+- Poseidonia archaic/classical stater (striding Poseidon)
+- Velia didrachm (Athena / lion)
+- Rhegion tetradrachm (lion mask / Apollo)
+- Naxos (Sicily) tetradrachm or drachm (Dionysos / Silenos) — trophy piece
+- Eretria (Euboia) — cow / octopus types
+- Samos (lion scalp), Chios (sphinx), Knidos (Aphrodite / lion)
+- Cyprus: Salamis or Kition royal sigloi/staters
+- Persian daric: only 1 held — a second, finer example acceptable as upgrade
+
+Ancients grade language: prefer EF/gVF for common types, VF acceptable for
+rare types; the "55 floor" is paper-money language and does not apply.
+NGC Ancients slabs welcome but raw with good provenance equally fine —
+provenance (old collections, named sales) adds real value on ancients.
 
 ## Standing rules
 
