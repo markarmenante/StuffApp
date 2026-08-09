@@ -81,9 +81,11 @@ for year, issuer, series, want in (
     (1943, 'The Japanese Government', '', 'Japanese occupation'),
     (1944, 'The Japanese Government', '', 'Japanese occupation'),
     (1944, 'Commonwealth of the Philippines (Treasury of the '
-           'Philippines)', 'Victory Series No. 66', 'Commonwealth'),
+           'Philippines)', 'Victory Series No. 66', 'Liberation'),
     (1944, 'Commonwealth of the Philippines (Philippine Treasury)', '',
-     'Commonwealth'),
+     'Liberation'),
+    (1941, 'Treasury of the Philippines (Commonwealth of the '
+           'Philippines)', '', 'Commonwealth'),
     (1949, 'Treasury of the Philippines (Central Bank of the '
            'Philippines overprint)', 'Victory Series No. 66',
      'Central Bank'),
@@ -132,10 +134,10 @@ got = [(r[0], r[1]) for r in db2.execute(
 expected = [
     ('1 Peso', 1921),        # US administration (1903)
     ('10 Pesos', 1937),      # Commonwealth (1935)
-    ('20 Pesos', 1944),      # Commonwealth — VICTORY
-    ('100 Pesos', 1944),     # Commonwealth — VICTORY
     ('5 Pesos', 1943),       # Japanese occupation (1942), contiguous
     ('500 Pesos', 1944),     # Japanese occupation
+    ('20 Pesos', 1944),      # Liberation (1944) — VICTORY, after occupation
+    ('100 Pesos', 1944),     # Liberation — VICTORY
     ('1 Peso', 1949),        # Central Bank (1949)
 ]
 assert got == expected, f"\nexpected {expected}\ngot      {got}"

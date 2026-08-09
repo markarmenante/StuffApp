@@ -3094,12 +3094,19 @@ COUNTRY_ERAS = {
         (1903, 1935, 'US administration',
          'The peso was held at two per US dollar under a gold-exchange '
          'standard; Treasury certificates and bank notes circulated.'),
-        (1935, 1948, 'Commonwealth',
+        (1935, 1941, 'Commonwealth',
          'The 1935 Commonwealth kept the peso at two per US dollar; '
-         'Treasury certificates replaced the older bank issues. '
+         'Treasury certificates replaced the older bank issues.'),
+        # Liberation money is its own band AFTER the occupation — the
+        # VICTORY notes arrived with the October 1944 landings and
+        # replaced the occupation pesos, so the list reads pre-war
+        # Commonwealth, occupation scrip, then the Victory series.
+        (1944, 1948, 'Liberation',
          'VICTORY-overprinted notes printed by the US Bureau of '
          'Engraving and Printing arrived with the October 1944 '
-         'liberation, and the occupation pesos were invalidated.'),
+         'liberation; the occupation pesos were invalidated. '
+         'Remaining Victory stock was overprinted for the new '
+         'Central Bank in 1949.'),
         (1949, 2100, 'Central Bank',
          'The Central Bank of the Philippines issued from 1949.'),
     )),
@@ -5146,9 +5153,12 @@ def init_db():
     # federal run. v10: COUNTRY_ERA_START files a nation's notes band
     # by band where era bands overlap in years (Philippine VICTORY
     # notes vs occupation scrip), keeping each era block contiguous.
+    # v11: the VICTORY notes move to their own Liberation band (1944)
+    # AFTER the occupation, reading pre-war Commonwealth, occupation,
+    # liberation, Central Bank.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v10',),
+        ('banknote_display_number_v11',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5156,7 +5166,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v10', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v11', datetime.utcnow().isoformat()),
         )
         db.commit()
 
