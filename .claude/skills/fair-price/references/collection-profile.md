@@ -35,6 +35,8 @@ a category, judge offers on value alone and say gap-matching was skipped.
   rarity, where the census shows essentially nothing available at higher
   grades; then a lower-grade example may be surfaced, with the population
   evidence stated.
-- Budget comfort per item without asking: up to ~$1,500; flag anything
-  above as "worth a look" rather than pursue.
+- No price ceiling. Mark decides on price himself — the scanner's job is
+  the fair-value evidence and the verdict, never a budget gate. "Worth a
+  look" means the evidence is thin or the call is genuinely his, not that
+  a number crossed some line.
 - Never a duplicate unless it is a grade upgrade at a fair price.
