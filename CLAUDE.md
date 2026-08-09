@@ -7,6 +7,14 @@
 - **Proactively install/connect whatever tools, MCP connectors, or
   dependencies streamline development**, and tell Mark when something needs a
   one-time authorization on his side.
+- **Always look for resources in other apps first** (2026-08-09). Before
+  minting a credential or asking Mark to copy one: check the boardroom
+  repo's CONNECTORS.md registry, the other apps' deployments (Railway,
+  Vercel) and their local Mac checkouts (this app: `~/Developer/stuffapp`
+  with its `.env`; boardroom `/Users/markarmenante/GitHub/boardroom`;
+  Family Office, museum-of-time, n552ym under `~/Documents/GitHub/`).
+  Reuse what exists; never re-mint, never make Mark hand-copy what a
+  loader can find.
 
 ## What this is
 
