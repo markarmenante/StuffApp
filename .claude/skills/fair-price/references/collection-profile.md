@@ -30,8 +30,11 @@ a category, judge offers on value alone and say gap-matching was skipped.
 
 ## Standing rules
 
-- Grades: prefer UNC / Choice UNC and better for type notes; EF acceptable
-  for scarce issues.
+- Grade floor: **55 (About Uncirculated) is as low as Mark goes** — prefer
+  UNC / Choice UNC and better for type notes. The ONLY exception: genuine
+  rarity, where the census shows essentially nothing available at higher
+  grades; then a lower-grade example may be surfaced, with the population
+  evidence stated.
 - Budget comfort per item without asking: up to ~$1,500; flag anything
   above as "worth a look" rather than pursue.
 - Never a duplicate unless it is a grade upgrade at a fair price.
