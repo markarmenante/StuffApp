@@ -3998,7 +3998,12 @@ def generate_country_eras(country_name):
     text = _message_text(resp)
     m = re.search(r'\{.*\}', text, re.DOTALL)
     if not m:
-        raise RuntimeError(f'no JSON in response: {text[:120]}')
+        blocks = [getattr(b, 'type', '?') for b in resp.content]
+        usage = getattr(resp, 'usage', None)
+        raise RuntimeError(
+            f'no JSON in response (stop={getattr(resp, "stop_reason", "?")}, '
+            f'blocks={blocks}, '
+            f'out_tokens={getattr(usage, "output_tokens", "?")}): {text[:120]}')
     data = json.loads(m.group(0))
 
     title = str(data.get('title') or '').strip()
