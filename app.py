@@ -8401,9 +8401,24 @@ def _trim_note_design_crop(img):
     gx_ = 0.06 * (sx1 - sx0)
     gy_ = 0.06 * (sy1 - sy0)
     ux0, uy0, ux1, uy1 = sx0, sy0, sx1, sy1
+    seed_area = float(max(1, (sx1 - sx0) * (sy1 - sy0)))
     for bx0, by0, bx1, by1 in comps:
         if bx0 >= sx0 - gx_ and by0 >= sy0 - gy_ \
                 and bx1 <= sx1 + gx_ and by1 <= sy1 + gy_:
+            ux0, uy0 = min(ux0, bx0), min(uy0, by0)
+            ux1, uy1 = max(ux1, bx1), max(uy1, by1)
+            continue
+        # The reverse containment: when shell suppression demoted the
+        # note's own printed border frame (it "contains" the interior
+        # text with most of the mass, exactly like a slab outline
+        # does), the seed is the interior and the frame is a comp
+        # CONTAINING it. A frame is note-shaped and only modestly
+        # bigger than its interior; a slab outline is several times
+        # the design's size — the area cap keeps holders out.
+        cw_, ch_ = bx1 - bx0, by1 - by0
+        if bx0 <= sx0 and by0 <= sy0 and bx1 >= sx1 and by1 >= sy1 \
+                and ch_ > 0 and 1.15 <= cw_ / float(ch_) <= 3.8 \
+                and cw_ * ch_ <= 3.0 * seed_area:
             ux0, uy0 = min(ux0, bx0), min(uy0, by0)
             ux1, uy1 = max(ux1, bx1), max(uy1, by1)
 
