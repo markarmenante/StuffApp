@@ -9920,19 +9920,24 @@ def _anthropic_create(client, **kwargs):
     tokens on thinking + search rounds BEFORE any text — Serbia's
     generation died at stop_reason='max_tokens' with 4,896 tokens
     spent and zero text against a 3,000 budget. A turn cut off by
-    max_tokens is retried once from scratch at 4x the budget."""
+    max_tokens is retried from scratch at 4x the budget, escalating to
+    a 32k ceiling (German East Africa still overran the first 4x
+    retry — 12,232 tokens of mostly thinking, JSON cut mid-stream)."""
     base_messages = list(kwargs.pop('messages'))
     resp = None
-    for round_ in range(2):
+    for round_ in range(3):
         messages = list(base_messages)
         for _ in range(6):
             resp = client.messages.create(messages=messages, **kwargs)
             if getattr(resp, 'stop_reason', None) != 'pause_turn':
                 break
             messages.append({'role': 'assistant', 'content': resp.content})
-        if getattr(resp, 'stop_reason', None) != 'max_tokens' or round_:
+        if getattr(resp, 'stop_reason', None) != 'max_tokens':
             break
-        kwargs['max_tokens'] = min(4 * kwargs.get('max_tokens', 4096), 32000)
+        bumped = min(4 * kwargs.get('max_tokens', 4096), 32000)
+        if bumped == kwargs.get('max_tokens'):
+            break
+        kwargs['max_tokens'] = bumped
     return resp
 
 
