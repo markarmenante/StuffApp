@@ -3988,7 +3988,8 @@ def generate_country_eras(country_name):
     model = anthropic_lookup_model(api_key, 'ANTHROPIC_COUNTRY_ERAS_MODEL')
     prompt = _COUNTRY_ERAS_PROMPT.format(
         name=country_name, current_year=datetime.utcnow().year)
-    resp = client.messages.create(
+    resp = _anthropic_create(
+        client,
         model=model,
         max_tokens=3000,
         tools=[anthropic_web_search_tool(3)],
@@ -9899,6 +9900,26 @@ def _require_anthropic_key():
     return api_key
 
 
+def _anthropic_create(client, **kwargs):
+    """client.messages.create plus web-search pause_turn continuation.
+
+    A turn using a server tool (web search) can pause mid-run: the
+    response arrives with stop_reason='pause_turn' and typically no
+    text blocks yet, and the paused content must be sent back as an
+    assistant turn to resume. Callers that treated that pause as the
+    final answer saw an empty response ("no JSON in response" on the
+    country-history generator, Serbia and German East Africa). Bounded
+    so a pathological pause loop still terminates."""
+    messages = list(kwargs.pop('messages'))
+    resp = None
+    for _ in range(6):
+        resp = client.messages.create(messages=messages, **kwargs)
+        if getattr(resp, 'stop_reason', None) != 'pause_turn':
+            break
+        messages.append({'role': 'assistant', 'content': resp.content})
+    return resp
+
+
 def _message_text(resp):
     """Concatenate the text blocks of an Anthropic Messages response into
     one string (non-text blocks — tool_use, etc. — are skipped).
@@ -9988,7 +10009,8 @@ results_markdown rules:
     last_err = None
     for attempt in range(3):
         try:
-            resp = client.messages.create(
+            resp = _anthropic_create(
+                client,
                 model=lookup_model,
                 max_tokens=1536,
                 tools=[web_search],
@@ -10935,7 +10957,8 @@ def fetch_coin_context(coin):
     transient_errs = _anthropic_transient_errs(anthropic)
     for attempt in range(attempts):
         try:
-            resp = client.messages.create(
+            resp = _anthropic_create(
+                client,
                 model=lookup_model,
                 max_tokens=max_tokens,
                 tools=[web_search],
@@ -11113,7 +11136,8 @@ Reply with ONLY a JSON object, no prose, no code fences:
     transient_errs = _anthropic_transient_errs(anthropic)
     for attempt in range(attempts):
         try:
-            resp = client.messages.create(
+            resp = _anthropic_create(
+                client,
                 model=lookup_model,
                 max_tokens=900,
                 tools=[web_search],
@@ -11436,7 +11460,8 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}{label_blo
     last_err = None
     for attempt in range(3):
         try:
-            resp = client.messages.create(
+            resp = _anthropic_create(
+                client,
                 model=lookup_model,
                 max_tokens=2000,
                 tools=[web_search],
@@ -13477,7 +13502,8 @@ Reply with ONLY a JSON object, no prose, no code fences:
     transient_errs = _anthropic_transient_errs(anthropic)
     for attempt in range(3):
         try:
-            resp = client.messages.create(
+            resp = _anthropic_create(
+                client,
                 model=lookup_model,
                 max_tokens=1024,
                 tools=[web_search],
@@ -14548,7 +14574,8 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     resp = None
     for attempt in range(3):
         try:
-            resp = client.messages.create(
+            resp = _anthropic_create(
+                client,
                 model=lookup_model,
                 max_tokens=1024,
                 tools=[web_search],
@@ -15411,7 +15438,8 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     # catches any remaining truncation instead of failing cryptically.
     for attempt in range(3):
         try:
-            resp = client.messages.create(
+            resp = _anthropic_create(
+                client,
                 model=lookup_model,
                 max_tokens=8192,
                 tools=[web_search],
