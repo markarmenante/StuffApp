@@ -9914,14 +9914,25 @@ def _anthropic_create(client, **kwargs):
     assistant turn to resume. Callers that treated that pause as the
     final answer saw an empty response ("no JSON in response" on the
     country-history generator, Serbia and German East Africa). Bounded
-    so a pathological pause loop still terminates."""
-    messages = list(kwargs.pop('messages'))
+    so a pathological pause loop still terminates.
+
+    Budget rescue: models with thinking on by default spend output
+    tokens on thinking + search rounds BEFORE any text — Serbia's
+    generation died at stop_reason='max_tokens' with 4,896 tokens
+    spent and zero text against a 3,000 budget. A turn cut off by
+    max_tokens is retried once from scratch at 4x the budget."""
+    base_messages = list(kwargs.pop('messages'))
     resp = None
-    for _ in range(6):
-        resp = client.messages.create(messages=messages, **kwargs)
-        if getattr(resp, 'stop_reason', None) != 'pause_turn':
+    for round_ in range(2):
+        messages = list(base_messages)
+        for _ in range(6):
+            resp = client.messages.create(messages=messages, **kwargs)
+            if getattr(resp, 'stop_reason', None) != 'pause_turn':
+                break
+            messages.append({'role': 'assistant', 'content': resp.content})
+        if getattr(resp, 'stop_reason', None) != 'max_tokens' or round_:
             break
-        messages.append({'role': 'assistant', 'content': resp.content})
+        kwargs['max_tokens'] = min(4 * kwargs.get('max_tokens', 4096), 32000)
     return resp
 
 
