@@ -28,14 +28,16 @@ a category, judge offers on value alone and say gap-matching was skipped.
 - Philippine Treasury certificates 1929–1936 denominations not yet held
 ### Ancient Greek coins — gaps to hunt
 
-Derived from the 647-coin export (Coin.csv, Feb 2026). The collection is
-deep in: Athens, Syracuse (30 incl. dekadrachms), Aegina, Corinth,
-Alexander III / Lysimachos / Ptolemaic / Seleucid royal issues, Kyzikos +
-Mytilene electrum (hektai, trites), Magna Graecia (Tarentum, Metapontion,
-Kroton, Sybaris), Aitolia, Thessaly, stephanophoric tets (Kyme, Myrina,
-Magnesia). Notable ABSENT types — classic, recognized, worth hunting:
+Derived from the 647-coin export (Coin.csv, Feb 2026); corrected by Mark
+Aug 2026. The collection is deep in: Athens, Syracuse (30 incl.
+dekadrachms), Aegina, Corinth, Alexander III / Lysimachos / Ptolemaic /
+Seleucid royal issues, Kyzikos + Mytilene electrum (hektai, trites),
+Magna Graecia (Tarentum, Metapontion, Kroton, Sybaris), Aitolia,
+Thessaly, stephanophoric tets (Kyme, Myrina, Magnesia), and
+**cistophoric tetradrachms (6 held — Ephesos and Pergamon, incl. civic
+issues; NOT a gap, only a named-magistrate/date upgrade would count)**.
+Notable ABSENT types — classic, recognized, worth hunting:
 
-- Cistophoric tetradrachm (Pergamon / Ephesos, 2nd c. BC) — none held
 - Crete: Gortyna (Europa in plane tree) or Knossos (Labyrinth) — none
 - Poseidonia archaic/classical stater (striding Poseidon)
 - Velia didrachm (Athena / lion)
