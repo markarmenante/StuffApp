@@ -46,18 +46,24 @@ Magnesia). Notable ABSENT types — classic, recognized, worth hunting:
 - Cyprus: Salamis or Kition royal sigloi/staters
 - Persian daric: only 1 held — a second, finer example acceptable as upgrade
 
-Ancients grade language: prefer EF/gVF for common types, VF acceptable for
-rare types; the "55 floor" is paper-money language and does not apply.
+Ancients grade language: EF (XF) or better — Mark wants high-grade
+coins. VF may be surfaced ONLY when genuine rarity means finer examples
+essentially never trade, with that evidence stated.
 NGC Ancients slabs welcome but raw with good provenance equally fine —
 provenance (old collections, named sales) adds real value on ancients.
 
 ## Standing rules
 
-- Grade floor: **55 (About Uncirculated) is as low as Mark goes** — prefer
-  UNC / Choice UNC and better for type notes. The ONLY exception: genuine
-  rarity, where the census shows essentially nothing available at higher
-  grades; then a lower-grade example may be surfaced, with the population
-  evidence stated.
+- Banknote grade floor: **55 (About Uncirculated) is as low as Mark
+  goes** — prefer UNC / Choice UNC and better for type notes. The ONLY
+  exception: genuine rarity, where the census shows essentially nothing
+  available at higher grades; then a lower-grade example may be
+  surfaced, with the population evidence stated.
+- Coin grades: **recommend only XF/EF, AU, or MS coins — Mark wants
+  high-grade coins.** Sheldon-scale: XF40 is the floor; prefer AU and
+  MS. Applies to US, world, and ancient coins alike (ancients in
+  adjectival grades: EF or better). Same rarity-only exception as
+  notes, with population/census evidence stated.
 - No price ceiling. Mark decides on price himself — the scanner's job is
   the fair-value evidence and the verdict, never a budget gate. "Worth a
   look" means the evidence is thin or the call is genuinely his, not that
