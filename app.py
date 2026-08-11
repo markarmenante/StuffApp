@@ -15795,6 +15795,17 @@ def banknote_lookup_specs(record_id):
         if images_updated:
             db.commit()
 
+    # A country this collection hasn't seen before: start its history
+    # panel generating NOW, while the user is still reviewing the Check
+    # suggestions — generation takes a minute or two, so by the time
+    # the note is saved the era band already exists. No-op when the
+    # country is covered or a generation is already in flight.
+    check_country = filled.get('country') \
+        or (overwritten.get('country') or {}).get('new') \
+        or _coin_row_value(note, 'country')
+    if check_country:
+        ensure_country_history(str(check_country))
+
     return jsonify({
         'filled': filled,
         'overwritten': overwritten,
