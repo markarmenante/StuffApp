@@ -1239,7 +1239,7 @@ document.addEventListener('DOMContentLoaded', function () {
        fills Short Desc with a one-line obverse/reverse description. -->
   <div class="dgrid coin-top-row" style="grid-template-columns: 1fr 150px;">
     {{ cell('obv_rev','Short Desc') }}
-    {{ cell('storage_location','Location') }}
+    {{ tacell('storage_location','Location', ta.get('storage_location', [])) }}
   </div>
 
   <!-- Banknote images (front + back) — pinned near the top like coins. -->
