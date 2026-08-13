@@ -9,3 +9,5 @@ pillow-heif>=0.18.0
 pypdfium2>=4.30.0
 anthropic>=0.40.0
 python-dotenv>=1.0.0
+rembg>=2.0.60
+onnxruntime>=1.17

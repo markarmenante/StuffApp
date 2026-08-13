@@ -7480,6 +7480,63 @@ def save_upload(file_obj, *, optimize_image=False):
     return stored_name
 
 
+_REMBG_SESSION = None
+_REMBG_LOCK = threading.Lock()
+
+
+def _rembg_session():
+    global _REMBG_SESSION
+    with _REMBG_LOCK:
+        if _REMBG_SESSION is None:
+            from rembg import new_session
+            _REMBG_SESSION = new_session('u2net')
+        return _REMBG_SESSION
+
+
+def _warm_rembg():
+    try:
+        _rembg_session()
+    except Exception as e:
+        print(f'rembg warm-up skipped: {e}', flush=True)
+
+
+def _object_isolation_crop(img):
+    """Third-party background removal (rembg / U²-Net segmentation, the
+    engine behind remove.bg-class products): mask the salient object —
+    slab, sleeve, or bare note — and crop to its bounding box. Kills
+    ANY backdrop (felt, couch, table, carpet) with no color heuristics,
+    leaving the label-band and printed-area logic a clean image to work
+    on. Returns JPEG bytes or None (no rembg, mask empty, or nothing
+    worth cropping)."""
+    try:
+        from rembg import remove
+    except ImportError:
+        return None
+    try:
+        mask = remove(img.convert('RGB'), session=_rembg_session(),
+                      only_mask=True)
+    except Exception as e:
+        app.logger.info('trim-object: rembg failed: %s', e)
+        return None
+    box = mask.point(lambda v: 255 if v > 80 else 0).getbbox()
+    if not box:
+        app.logger.info('trim-object: empty mask')
+        return None
+    w, h = img.size
+    x0, y0, x1, y1 = box
+    mx, my = int(0.01 * w), int(0.01 * h)
+    x0, y0 = max(0, x0 - mx), max(0, y0 - my)
+    x1, y1 = min(w, x1 + mx), min(h, y1 + my)
+    area = (x1 - x0) * (y1 - y0)
+    if area >= 0.92 * w * h:
+        return None          # object already fills the frame
+    if area < 0.10 * w * h:
+        app.logger.info('trim-object: mask implausibly small')
+        return None
+    app.logger.info('trim-object: %dx%d -> %dx%d', w, h, x1 - x0, y1 - y0)
+    return _encode_trimmed_note(img.crop((x0, y0, x1, y1)))
+
+
 def _ai_note_quad(img):
     """Vision fallback: when every local detector has failed on a photo
     (glare through a sleeve, felt grain, washed edges — the scenes CV
@@ -7592,6 +7649,7 @@ def _trim_slabbed_note_image(data):
     # shrinks the image; 3 passes covers the worst real case.
     out = None
     ai_tried = False
+    obj_tried = False
     for i in range(3):
         step = _trim_slab_note_cv(img)
         which = 'cv'
@@ -7607,10 +7665,21 @@ def _trim_slabbed_note_image(data):
             # stored image must show at minimum.
             step = _trim_note_design_crop(img)
             which = 'design'
+        if step is None and not obj_tried \
+                and _note_paper_fraction(img) < 0.45:
+            # Every local detector failed AND the frame is not mostly
+            # note yet. Third-party background removal (rembg) isolates
+            # the slab/sleeve/note object so the next pass works on a
+            # clean image. The paper-fraction gate keeps rembg away
+            # from already-trimmed notes — U²-Net happily segments a
+            # borderless note's inner design and would cut into it.
+            obj_tried = True
+            step = _object_isolation_crop(img)
+            if step is not None:
+                which = 'object'
         if step is None and not ai_tried:
-            # Every local detector failed (sleeve glare, felt grain,
-            # washed edges). Ask the vision model where the note is —
-            # one small call, once per image.
+            # Object isolation didn't resolve it either — ask the
+            # vision model for the printed-area rectangle, once.
             ai_tried = True
             quad = _ai_note_quad(img)
             if quad is not None:
@@ -7632,7 +7701,7 @@ def _trim_slabbed_note_image(data):
         # gone wrong (glare-split paper mask, collapsed ink anchor —
         # the Victory 10 Pesos front lost its portrait and borders this
         # way), so keep what we have instead of the runaway crop.
-        if i and which != 'ai' \
+        if i and which not in ('ai', 'object') \
                 and nxt.size[0] * nxt.size[1] < 0.55 * (img.size[0] * img.size[1]):
             app.logger.info(
                 'trim: pass %d %s runaway shrink %dx%d -> %dx%d; keeping previous',
@@ -7692,50 +7761,31 @@ def _square_up_note(img):
     return rot.crop((dx, dy, w - dx, h - dy))
 
 
-def _shave_backdrop_margins(img):
-    """Shave straight backdrop stripes an overshot AI rectangle leaves
-    on one or more sides (the Victory 10 Pesos front kept a felt band
-    down its left edge): walk in from each edge while the edge line is
-    mostly not paper. Bounded to 18% per side; the crop stops at the
-    paper edge, so the note's own margins are what remains. Returns a
-    PIL image or None when nothing needed shaving."""
-    rgb = img.convert('RGB')
-    px = rgb.load()
-    w, h = rgb.size
+def _finish_ai_crop(crop, refine=True):
+    """Post-process the vision model's rectangle into the stored image.
 
-    ys = list(range(2, h - 2, max(1, h // 60)))
-    xs = list(range(2, w - 2, max(1, w // 60)))
-
-    def col_paper(x):
-        return sum(_is_paperish(px, x, y) for y in ys) / float(len(ys) or 1)
-
-    def row_paper(y):
-        return sum(_is_paperish(px, x, y) for x in xs) / float(len(xs) or 1)
-
-    x0, x1, y0, y1 = 0, w, 0, h
-    lim_x, lim_y = int(0.18 * w), int(0.18 * h)
-    while x0 < lim_x and col_paper(x0) < 0.5:
-        x0 += 1
-    while w - x1 < lim_x and col_paper(x1 - 1) < 0.5:
-        x1 -= 1
-    while y0 < lim_y and row_paper(y0) < 0.5:
-        y0 += 1
-    while h - y1 < lim_y and row_paper(y1 - 1) < 0.5:
-        y1 -= 1
-    if (x0, y0, x1, y1) == (0, 0, w, h):
-        return None
-    if x1 - x0 < 60 or y1 - y0 < 30:
-        return None
-    return rgb.crop((x0, y0, x1, y1))
-
-
-def _finish_ai_crop(crop):
-    """Post-process the vision model's rectangle into the stored image:
-    level any residual tilt, shave any overshot backdrop stripes,
-    encode."""
+    Level any residual tilt, then give the model ONE second look at its
+    own crop: on a mostly-note image the printed-area rectangle is easy,
+    so an overshot backdrop band from the first pass (busy scene) gets
+    removed by the model itself rather than by any color heuristic — a
+    heuristic shave ate through the Victory 10 Pesos front's margins
+    because its engraved border does not read as paper. The second quad
+    only applies when it keeps at least half the crop, and a crop the
+    model says already fills the frame comes back None (no-op)."""
     leveled = _square_up_note(crop) or crop
-    shaved = _shave_backdrop_margins(leveled)
-    return _encode_trimmed_note(shaved or leveled)
+    if refine:
+        quad = _ai_note_quad(leveled)
+        if quad is not None:
+            rect = _rectify_note_quad(leveled, quad, context=0.05,
+                                      fill=leveled.load()[2, 2])
+            if rect:
+                cand = rect[0]
+                w0, h0 = leveled.size
+                if cand.size[0] * cand.size[1] >= 0.5 * w0 * h0:
+                    leveled = _square_up_note(cand) or cand
+                    app.logger.info('trim-ai: second-look refine %dx%d -> %dx%d',
+                                    w0, h0, *leveled.size)
+    return _encode_trimmed_note(leveled)
 
 
 def _note_paper_fraction(img):
@@ -8664,12 +8714,15 @@ def _trim_note_design_crop(img):
     # every future Check.
     if fx1 - fx0 >= 0.90 * w and fy1 - fy0 >= 0.90 * h:
         return None
-    # A union spanning one full frame dimension but not the other is
-    # not a note design — a design never runs edge-to-edge of a raw
-    # photo (there is always backdrop or holder beyond it). Seen on the
-    # Victory 10 Pesos back: felt/label edges merged into the union,
-    # 1600 of 1600 wide, and the bogus "trim" halted the pipeline.
-    if fx1 - fx0 >= 0.92 * w or fy1 - fy0 >= 0.92 * h:
+    # A union literally touching both opposite frame edges is not a
+    # note design — a design never runs edge-to-edge of a photo (there
+    # is always backdrop, holder, or at least paper margin beyond it).
+    # Seen on the Victory 10 Pesos back: felt/label edges merged into
+    # the union, 1600 of 1600 wide, and the bogus "trim" halted the
+    # pipeline. Merely-large unions stay legal — on an already-isolated
+    # object crop the design legitimately fills most of the frame.
+    if (fx0 <= 0.01 * w and fx1 >= 0.99 * w) \
+            or (fy0 <= 0.01 * h and fy1 >= 0.99 * h):
         return None
     if not 1.15 <= (fx1 - fx0) / max(1.0, fy1 - fy0) <= 3.8:
         return None
@@ -26998,6 +27051,7 @@ with app.app_context():
 # covered.
 if os.environ.get('ANTHROPIC_API_KEY'):
     threading.Thread(target=_backfill_country_histories, daemon=True).start()
+    threading.Thread(target=_warm_rembg, daemon=True).start()
 
 if __name__ == '__main__':
     app.run(debug=True, port=int(os.environ.get('PORT', 5001)))
