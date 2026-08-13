@@ -747,6 +747,51 @@ assert stuffapp._trim_note_design_crop(img) is None, \
 print('EDGE-TO-EDGE UNION ASSERTIONS PASSED')
 
 
+# --- Vision-model handover (printed-area rectangle + margin) ---------------
+# When the local detectors fail or "succeed" uselessly (a shave that
+# keeps the felt-and-label scene), the pipeline asks the vision model
+# for the rectangle around the printed area and crops to it + margin.
+_saved = (stuffapp._trim_slab_note_cv, stuffapp._trim_dark_slab_note,
+          stuffapp._trim_light_slab_note, stuffapp._trim_note_design_crop,
+          stuffapp._ai_note_quad)
+_light_calls = {'n': 0}
+
+
+def _fake_light(im):
+    _light_calls['n'] += 1
+    if _light_calls['n'] == 1:
+        w, h = im.size
+        return stuffapp._encode_trimmed_note(im.crop((0, 0, w, int(h * 0.97))))
+    return None
+
+
+img = Image.new('RGB', (1600, 1200), (40, 150, 80))
+draw = ImageDraw.Draw(img)
+draw.rectangle([210, 160, 1430, 300], fill=(242, 246, 244))
+draw.rectangle([330, 380, 1310, 990], fill=PAPER)
+draw.rectangle([380, 420, 1260, 950], outline=INK, width=6)
+buf = io.BytesIO()
+img.save(buf, format='JPEG', quality=90)
+stuffapp._trim_slab_note_cv = lambda im: None
+stuffapp._trim_dark_slab_note = lambda im: None
+stuffapp._trim_light_slab_note = _fake_light
+stuffapp._trim_note_design_crop = lambda im: None
+stuffapp._ai_note_quad = lambda im: (
+    (380.0, 420.0), (1260.0, 420.0), (1260.0, 950.0), (380.0, 950.0))
+try:
+    out = stuffapp._trim_slabbed_note_image(buf.getvalue())
+finally:
+    (stuffapp._trim_slab_note_cv, stuffapp._trim_dark_slab_note,
+     stuffapp._trim_light_slab_note, stuffapp._trim_note_design_crop,
+     stuffapp._ai_note_quad) = _saved
+res = Image.open(io.BytesIO(out))
+_aspect = res.size[0] / float(res.size[1])
+assert abs(_aspect - 880 / 530) / (880 / 530) < 0.10, \
+    f'AI rectangle crop aspect off: {_aspect:.3f}'
+assert stuffapp._note_paper_fraction(res) > 0.6, 'AI crop not mostly paper'
+print('VISION-MODEL HANDOVER ASSERTIONS PASSED')
+
+
 # --- Homography sanity ----------------------------------------------------
 # The PERSPECTIVE coefficients must map each output corner exactly onto
 # its source-quad corner (PIL samples source = H(output)).

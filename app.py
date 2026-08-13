@@ -7505,13 +7505,16 @@ def _ai_note_quad(img):
     prompt = (
         f"This {sw}x{sh}px photo shows a paper banknote, possibly inside a "
         "plastic grading holder or sleeve, on some backdrop, possibly with a "
-        "grading label above it. Reply with ONLY JSON, no prose: "
-        '{"found": true, "corners": [[x,y],[x,y],[x,y],[x,y]]} — the four '
-        "corners of the BANKNOTE PAPER itself (never the holder edge, sleeve, "
-        "label, or backdrop), in pixels of this image, ordered top-left, "
-        "top-right, bottom-right, bottom-left. Aim tight to the paper edge, "
-        "but when unsure err a few pixels OUTSIDE the paper — the printed "
-        "design must never be cut. "
+        "grading label. Draw the rectangle around the outer points of the "
+        "note's PRINTED AREA: every printed or engraved element — border, "
+        "corner ornaments, portrait, seals, serial numbers, signatures, "
+        "overprints — but never the grading label, holder edge, sleeve or "
+        "backdrop. Reply with ONLY JSON, no prose: "
+        '{"found": true, "corners": [[x,y],[x,y],[x,y],[x,y]]} — that '
+        "rectangle's corners in pixels of this image (tilted with the note "
+        "if the photo is tilted), ordered top-left, top-right, bottom-right, "
+        "bottom-left. When unsure err OUTSIDE the printed area — it must "
+        "never be cut. "
         'If no single banknote is clearly visible: {"found": false}.')
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -7611,7 +7614,9 @@ def _trim_slabbed_note_image(data):
             ai_tried = True
             quad = _ai_note_quad(img)
             if quad is not None:
-                rect = _rectify_note_quad(img, quad, context=0.02,
+                # The quad is the printed area's extent; the context
+                # margin stands in for the paper margins around it.
+                rect = _rectify_note_quad(img, quad, context=0.05,
                                           fill=img.load()[2, 2])
                 if rect:
                     step = _encode_trimmed_note(rect[0])
@@ -7637,7 +7642,39 @@ def _trim_slabbed_note_image(data):
                         i + 1, which, *img.size)
         out = step
         img = nxt
+    # A detector can "succeed" uselessly — a light-detector shave that
+    # keeps the whole felt-and-label scene. If what we ended with is
+    # not mostly note (warm bright paper), the trim failed no matter
+    # what the passes reported: ask the vision model for the printed
+    # area's rectangle and use that.
+    if not ai_tried and _note_paper_fraction(img) < 0.45:
+        quad = _ai_note_quad(img)
+        if quad is not None:
+            rect = _rectify_note_quad(img, quad, context=0.05,
+                                      fill=img.load()[2, 2])
+            if rect:
+                out = _encode_trimmed_note(rect[0])
+                app.logger.info('trim: post-pass ai rectangle from %dx%d',
+                                *img.size)
     return out
+
+
+def _note_paper_fraction(img):
+    """Fraction of the frame that reads as banknote paper — warm,
+    bright, low-saturation. A finished trim is mostly note; a felt or
+    holder scene is not, whatever the detectors claimed."""
+    small = img.convert('RGB').copy()
+    small.thumbnail((80, 80))
+    px = small.load()
+    w, h = small.size
+    paper = 0
+    for y in range(h):
+        for x in range(w):
+            r, g, b = px[x, y][:3]
+            mx = max(r, g, b)
+            if mx > 140 and mx - min(r, g, b) < 70 and r >= g - 10:
+                paper += 1
+    return paper / float(w * h or 1)
 
 
 def _encode_trimmed_note(crop):
