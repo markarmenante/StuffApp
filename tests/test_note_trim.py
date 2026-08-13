@@ -695,6 +695,58 @@ for name, paper, holder in (
     print(f'LIGHT-HOLDER ({name}) ASSERTIONS PASSED')
 
 
+# --- Runaway pass-2 shrink (Victory 10 Pesos front) -----------------------
+# Pass 1 legitimately cuts a raw photo down to the note region; passes
+# 2-3 only shave slivers. A pass-2 detector gone wrong (glare-split
+# paper mask, collapsed ink anchor) that discards most of the remaining
+# image must be refused — the final crop is pass 1's, never the band.
+_real_cv = stuffapp._trim_slab_note_cv
+_calls = {'n': 0}
+
+
+def _fake_cv(img):
+    _calls['n'] += 1
+    w, h = img.size
+    if _calls['n'] == 1:
+        crop = img.crop((int(w * 0.1), int(h * 0.1), int(w * 0.9), int(h * 0.85)))
+    elif _calls['n'] == 2:
+        crop = img.crop((int(w * 0.2), int(h * 0.35), int(w * 0.75), int(h * 0.62)))
+    else:
+        return None
+    return stuffapp._encode_trimmed_note(crop)
+
+
+img = Image.new('RGB', (1600, 1200), (40, 150, 80))
+draw = ImageDraw.Draw(img)
+draw.rectangle([300, 300, 1300, 900], fill=PAPER)
+buf = io.BytesIO()
+img.save(buf, format='JPEG', quality=90)
+stuffapp._trim_slab_note_cv = _fake_cv
+try:
+    out = stuffapp._trim_slabbed_note_image(buf.getvalue())
+finally:
+    stuffapp._trim_slab_note_cv = _real_cv
+res = Image.open(io.BytesIO(out))
+assert abs(res.size[0] - 1280) < 4 and abs(res.size[1] - 900) < 4, \
+    f'runaway pass-2 crop kept: {res.size}'
+print('RUNAWAY PASS-2 SHRINK ASSERTIONS PASSED')
+
+
+# --- Design union spanning the frame is not a design (Victory back) --------
+# Felt/label edges merged into the union so it ran edge-to-edge of the
+# photo; a real printed design never does — reject instead of "trimming"
+# to a full-width band and halting the pipeline on a bogus success.
+img = Image.new('RGB', (1600, 700), (40, 150, 80))
+draw = ImageDraw.Draw(img)
+draw.rectangle([0, 180, 1599, 560], fill=PAPER)
+for row in range(5):
+    y = 220 + row * 60
+    draw.rectangle([10, y, 1590, y + 26], fill=(120, 75, 45))
+assert stuffapp._trim_note_design_crop(img) is None, \
+    'edge-to-edge design union must be rejected'
+print('EDGE-TO-EDGE UNION ASSERTIONS PASSED')
+
+
 # --- Homography sanity ----------------------------------------------------
 # The PERSPECTIVE coefficients must map each output corner exactly onto
 # its source-quad corner (PIL samples source = H(output)).

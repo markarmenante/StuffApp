@@ -7524,10 +7524,22 @@ def _trim_slabbed_note_image(data):
             app.logger.info('trim: pass %d %sfound nothing to do (%dx%d)',
                             i + 1, '' if i else 'on original ', *img.size)
             break
+        nxt = _flatten_image_for_jpeg(_open_upload_image(step))
+        # Pass 1 may cut aggressively (raw photo -> note). Passes 2-3
+        # exist to shave slivers off an already-isolated note; a step
+        # that discards most of the remaining image there is a detector
+        # gone wrong (glare-split paper mask, collapsed ink anchor —
+        # the Victory 10 Pesos front lost its portrait and borders this
+        # way), so keep what we have instead of the runaway crop.
+        if i and nxt.size[0] * nxt.size[1] < 0.55 * (img.size[0] * img.size[1]):
+            app.logger.info(
+                'trim: pass %d %s runaway shrink %dx%d -> %dx%d; keeping previous',
+                i + 1, which, *img.size, *nxt.size)
+            break
         app.logger.info('trim: pass %d %s detector trimmed %dx%d',
                         i + 1, which, *img.size)
         out = step
-        img = _flatten_image_for_jpeg(_open_upload_image(step))
+        img = nxt
     return out
 
 
@@ -8438,6 +8450,13 @@ def _trim_note_design_crop(img):
     # note plus margins — nothing to do, and no shave-a-sliver loop on
     # every future Check.
     if fx1 - fx0 >= 0.90 * w and fy1 - fy0 >= 0.90 * h:
+        return None
+    # A union spanning one full frame dimension but not the other is
+    # not a note design — a design never runs edge-to-edge of a raw
+    # photo (there is always backdrop or holder beyond it). Seen on the
+    # Victory 10 Pesos back: felt/label edges merged into the union,
+    # 1600 of 1600 wide, and the bogus "trim" halted the pipeline.
+    if fx1 - fx0 >= 0.92 * w or fy1 - fy0 >= 0.92 * h:
         return None
     if not 1.15 <= (fx1 - fx0) / max(1.0, fy1 - fy0) <= 3.8:
         return None
