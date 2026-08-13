@@ -7677,9 +7677,13 @@ def _trim_slabbed_note_image(data):
             step = _object_isolation_crop(img)
             if step is not None:
                 which = 'object'
-        if step is None and not ai_tried:
+        if step is None and not ai_tried \
+                and min(img.size) >= 300:
             # Object isolation didn't resolve it either — ask the
             # vision model for the printed-area rectangle, once.
+            # Tiny sources (thumbnail uploads) are left whole: cropping
+            # a 375px photo yields an unusable smear, and the operator
+            # should re-upload the full-size photo instead.
             ai_tried = True
             quad = _ai_note_quad(img)
             if quad is not None:
@@ -7832,6 +7836,12 @@ def _finish_ai_crop(crop, refine=True):
     only applies when it keeps at least half the crop, and a crop the
     model says already fills the frame comes back None (no-op)."""
     leveled = _square_up_note(crop) or crop
+    # Below ~700px wide the model's pixel precision is a large relative
+    # error — a second look at a 355px crop shaved a quarter of its
+    # height (the 500x375 BPI back thumbnail). Small crops keep the
+    # first rectangle.
+    if leveled.size[0] < 700:
+        refine = False
     if refine:
         quad = _ai_note_quad(leveled)
         if quad is not None:
