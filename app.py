@@ -7767,13 +7767,14 @@ def _square_up_note(img):
 
 
 def _clamp_ai_margins(warped, inner):
-    """Pull each margin side in to the paper edge, scanning ONLY the
-    band between the crop edge and the model's printed-area rectangle
-    (the ``inner`` box _rectify_note_quad reports). The uniform context
-    margin lands on backdrop wherever the note's own paper margin is
-    thinner — the Victory front's green band. Because the scan never
-    enters the inner box, this can trim backdrop but structurally
-    cannot cut printed area."""
+    """Trim backdrop off the edges of the model's crop. The uniform
+    context margin — and the model's own err-outside slack — land on
+    backdrop wherever the note's paper margin is thinner (the Victory
+    front's left band, the back's right band). From each edge, trim
+    lines that are backdrop-like: NOT mostly paper AND essentially
+    ink-free. The scan covers the added margin band plus at most 6%
+    into the model's rectangle, and stops dead at the first line with
+    real ink or paper — printed area stays untouchable."""
     px = warped.convert('RGB').load()
     w, h = warped.size
     ix0, iy0, ix1, iy1 = [int(v) for v in inner]
@@ -7785,20 +7786,34 @@ def _clamp_ai_margins(warped, inner):
     ys = list(range(iy0, iy1, max(1, (iy1 - iy0) // 40)))
     xs = list(range(ix0, ix1, max(1, (ix1 - ix0) // 40)))
 
-    def col_paper(x):
-        return sum(_is_paperish(px, x, y) for y in ys) / float(len(ys))
+    def line_stats(coords):
+        paper = ink = 0
+        for x, y in coords:
+            r, g, b = px[x, y][:3]
+            if max(r, g, b) < 95:
+                ink += 1
+            elif _is_paperish(px, x, y):
+                paper += 1
+        n = float(len(coords) or 1)
+        return paper / n, ink / n
 
-    def row_paper(y):
-        return sum(_is_paperish(px, x, y) for x in xs) / float(len(xs))
+    def backdroppy(coords):
+        paper, ink = line_stats(coords)
+        return paper < 0.55 and ink < 0.03
 
+    in_x, in_y = int(0.15 * w), int(0.15 * h)
     x0, x1, y0, y1 = 0, w, 0, h
-    while x0 < ix0 and col_paper(x0) < 0.55:
+    while x0 < min(ix0 + in_x, w - 60) \
+            and backdroppy([(x0, y) for y in ys]):
         x0 += 1
-    while x1 > ix1 and col_paper(x1 - 1) < 0.55:
+    while x1 > max(ix1 - in_x, x0 + 60) \
+            and backdroppy([(x1 - 1, y) for y in ys]):
         x1 -= 1
-    while y0 < iy0 and row_paper(y0) < 0.55:
+    while y0 < min(iy0 + in_y, h - 30) \
+            and backdroppy([(x, y0) for x in xs]):
         y0 += 1
-    while y1 > iy1 and row_paper(y1 - 1) < 0.55:
+    while y1 > max(iy1 - in_y, y0 + 30) \
+            and backdroppy([(x, y1 - 1) for x in xs]):
         y1 -= 1
     if (x0, y0, x1, y1) == (0, 0, w, h):
         return warped
