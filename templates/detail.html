@@ -1234,10 +1234,12 @@ document.addEventListener('DOMContentLoaded', function () {
     {{ cell('series','Series / Set') }}
   </div>
 
-  <!-- Row 4: Short Desc (obv_rev) — full width, like coins. Check
-       fills it with a one-line obverse/reverse description. -->
-  <div class="dgrid dg1 coin-top-row">
+  <!-- Row 4: Short Desc (obv_rev) with the Location field at its
+       right — sized to a town name (Carpinteria) plus padding. Check
+       fills Short Desc with a one-line obverse/reverse description. -->
+  <div class="dgrid coin-top-row" style="grid-template-columns: 1fr 150px;">
     {{ cell('obv_rev','Short Desc') }}
+    {{ cell('storage_location','Location') }}
   </div>
 
   <!-- Banknote images (front + back) — pinned near the top like coins. -->
@@ -1410,11 +1412,6 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
   {% endif %}
-
-  <!-- Extra fields -->
-  <div class="dgrid dg1">
-    {{ cell('storage_location','Storage') }}
-  </div>
 
   {# Unbounded table-backed docs row, same shape as coins. #}
   {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
