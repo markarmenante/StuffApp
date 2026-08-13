@@ -7619,8 +7619,7 @@ def _trim_slabbed_note_image(data):
                 rect = _rectify_note_quad(img, quad, context=0.05,
                                           fill=img.load()[2, 2])
                 if rect:
-                    step = _square_up_note(rect[0]) \
-                        or _encode_trimmed_note(rect[0])
+                    step = _finish_ai_crop(rect[0])
                     which = 'ai'
         if step is None:
             app.logger.info('trim: pass %d %sfound nothing to do (%dx%d)',
@@ -7654,19 +7653,25 @@ def _trim_slabbed_note_image(data):
             rect = _rectify_note_quad(img, quad, context=0.05,
                                       fill=img.load()[2, 2])
             if rect:
-                out = _square_up_note(rect[0]) \
-                    or _encode_trimmed_note(rect[0])
+                out = _finish_ai_crop(rect[0])
                 app.logger.info('trim: post-pass ai rectangle from %dx%d',
                                 *img.size)
     return out
+
+
+def _is_paperish(px, x, y):
+    """Warm, bright, low-saturation — reads as banknote paper."""
+    r, g, b = px[x, y][:3]
+    mx = max(r, g, b)
+    return mx > 140 and mx - min(r, g, b) < 70 and r >= g - 10
 
 
 def _square_up_note(img):
     """Level the small residual tilt an axis-aligned AI rectangle
     leaves on a rotated note (backdrop wedges in the corners, note
     edges not parallel to the frame). Fits the note's bottom paper
-    edge, rotates level, and shaves the rotation wedges. Returns JPEG
-    bytes or None when there is no measurable tilt."""
+    edge, rotates level, and shaves the rotation wedges. Returns a PIL
+    image or None when there is no measurable tilt."""
     import math
 
     from PIL import Image
@@ -7674,13 +7679,7 @@ def _square_up_note(img):
     rgb = img.convert('RGB')
     px = rgb.load()
     w, h = rgb.size
-
-    def hit(p, x, y):
-        r, g, b = p[x, y][:3]
-        mx = max(r, g, b)
-        return mx > 140 and mx - min(r, g, b) < 70 and r >= g - 10
-
-    angle = _fit_note_bottom_angle(px, w, h, hit)
+    angle = _fit_note_bottom_angle(px, w, h, _is_paperish)
     if not angle or abs(angle) < 0.4:
         return None
     rot = rgb.rotate(angle, resample=Image.BICUBIC, expand=False,
@@ -7690,7 +7689,53 @@ def _square_up_note(img):
     dy = int(t * w / 2) + 2
     if w - 2 * dx < 60 or h - 2 * dy < 30:
         return None
-    return _encode_trimmed_note(rot.crop((dx, dy, w - dx, h - dy)))
+    return rot.crop((dx, dy, w - dx, h - dy))
+
+
+def _shave_backdrop_margins(img):
+    """Shave straight backdrop stripes an overshot AI rectangle leaves
+    on one or more sides (the Victory 10 Pesos front kept a felt band
+    down its left edge): walk in from each edge while the edge line is
+    mostly not paper. Bounded to 18% per side; the crop stops at the
+    paper edge, so the note's own margins are what remains. Returns a
+    PIL image or None when nothing needed shaving."""
+    rgb = img.convert('RGB')
+    px = rgb.load()
+    w, h = rgb.size
+
+    ys = list(range(2, h - 2, max(1, h // 60)))
+    xs = list(range(2, w - 2, max(1, w // 60)))
+
+    def col_paper(x):
+        return sum(_is_paperish(px, x, y) for y in ys) / float(len(ys) or 1)
+
+    def row_paper(y):
+        return sum(_is_paperish(px, x, y) for x in xs) / float(len(xs) or 1)
+
+    x0, x1, y0, y1 = 0, w, 0, h
+    lim_x, lim_y = int(0.18 * w), int(0.18 * h)
+    while x0 < lim_x and col_paper(x0) < 0.5:
+        x0 += 1
+    while w - x1 < lim_x and col_paper(x1 - 1) < 0.5:
+        x1 -= 1
+    while y0 < lim_y and row_paper(y0) < 0.5:
+        y0 += 1
+    while h - y1 < lim_y and row_paper(y1 - 1) < 0.5:
+        y1 -= 1
+    if (x0, y0, x1, y1) == (0, 0, w, h):
+        return None
+    if x1 - x0 < 60 or y1 - y0 < 30:
+        return None
+    return rgb.crop((x0, y0, x1, y1))
+
+
+def _finish_ai_crop(crop):
+    """Post-process the vision model's rectangle into the stored image:
+    level any residual tilt, shave any overshot backdrop stripes,
+    encode."""
+    leveled = _square_up_note(crop) or crop
+    shaved = _shave_backdrop_margins(leveled)
+    return _encode_trimmed_note(shaved or leveled)
 
 
 def _note_paper_fraction(img):
