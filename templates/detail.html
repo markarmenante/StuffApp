@@ -1239,7 +1239,7 @@ document.addEventListener('DOMContentLoaded', function () {
        fills Short Desc with a one-line obverse/reverse description. -->
   <div class="dgrid coin-top-row" style="grid-template-columns: 1fr 150px;">
     {{ cell('obv_rev','Short Desc') }}
-    {{ tacell('storage_location','Location', ta.get('storage_location', [])) }}
+    {{ selcell('property_name','Location', vlists.property) }}
   </div>
 
   <!-- Banknote images (front + back) — pinned near the top like coins. -->
@@ -1448,14 +1448,6 @@ document.addEventListener('DOMContentLoaded', function () {
              onclick="if(this.value){navigator.clipboard?.writeText('(' + this.value + ')')}; this.select();"
              style="text-align:center;cursor:pointer;color:#666;font-family:var(--font-mono,monospace)">
       <span class="blabel">Cat ID (auto)</span>
-    </div>
-    <div class="bottom-cell">
-      {% set _pn = val('property_name') %}
-      <select name="property_name">
-        <option value=""></option>
-        {% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if _pn==o }}>{{ o }}</option>{% endfor %}
-      </select>
-      <span class="blabel">Location</span>
     </div>
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">

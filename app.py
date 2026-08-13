@@ -7299,8 +7299,7 @@ def get_global_vendor_typeahead():
 TYPEAHEAD_FIELDS = {
     'watches':      ('brand', 'dial_color', 'strap_color', 'vendor'),
     'coins':        ('region', 'mint', 'denomination', 'vendor'),
-    'banknotes':    ('country', 'municipality', 'issuer', 'printer', 'vendor',
-                     'storage_location'),
+    'banknotes':    ('country', 'municipality', 'issuer', 'printer', 'vendor'),
     'art':          ('artist', 'medium', 'vendor', 'property', 'location'),
     # Items typeahead: only the fields still present in the form
     # (type/subtype/make/model were removed). `type` is the key one —
