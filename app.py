@@ -7684,11 +7684,12 @@ def _trim_slabbed_note_image(data):
             quad = _ai_note_quad(img)
             if quad is not None:
                 # The quad is the printed area's extent; the context
-                # margin stands in for the paper margins around it.
+                # margin stands in for the paper margins around it,
+                # clamped per side so it never overshoots onto backdrop.
                 rect = _rectify_note_quad(img, quad, context=0.05,
                                           fill=img.load()[2, 2])
                 if rect:
-                    step = _finish_ai_crop(rect[0])
+                    step = _finish_ai_crop(_clamp_ai_margins(rect[0], rect[1]))
                     which = 'ai'
         if step is None:
             app.logger.info('trim: pass %d %sfound nothing to do (%dx%d)',
@@ -7711,6 +7712,10 @@ def _trim_slabbed_note_image(data):
                         i + 1, which, *img.size)
         out = step
         img = nxt
+        if which == 'ai':
+            # The model's rectangle + margin IS the deliverable
+            # ("...and you're done") — later passes may not shave it.
+            return out
     # A detector can "succeed" uselessly — a light-detector shave that
     # keeps the whole felt-and-label scene. If what we ended with is
     # not mostly note (warm bright paper), the trim failed no matter
@@ -7722,7 +7727,7 @@ def _trim_slabbed_note_image(data):
             rect = _rectify_note_quad(img, quad, context=0.05,
                                       fill=img.load()[2, 2])
             if rect:
-                out = _finish_ai_crop(rect[0])
+                out = _finish_ai_crop(_clamp_ai_margins(rect[0], rect[1]))
                 app.logger.info('trim: post-pass ai rectangle from %dx%d',
                                 *img.size)
     return out
@@ -7761,6 +7766,45 @@ def _square_up_note(img):
     return rot.crop((dx, dy, w - dx, h - dy))
 
 
+def _clamp_ai_margins(warped, inner):
+    """Pull each margin side in to the paper edge, scanning ONLY the
+    band between the crop edge and the model's printed-area rectangle
+    (the ``inner`` box _rectify_note_quad reports). The uniform context
+    margin lands on backdrop wherever the note's own paper margin is
+    thinner — the Victory front's green band. Because the scan never
+    enters the inner box, this can trim backdrop but structurally
+    cannot cut printed area."""
+    px = warped.convert('RGB').load()
+    w, h = warped.size
+    ix0, iy0, ix1, iy1 = [int(v) for v in inner]
+    ix0, ix1 = max(0, min(ix0, w)), max(0, min(ix1, w))
+    iy0, iy1 = max(0, min(iy0, h)), max(0, min(iy1, h))
+    if ix1 <= ix0 or iy1 <= iy0:
+        return warped
+
+    ys = list(range(iy0, iy1, max(1, (iy1 - iy0) // 40)))
+    xs = list(range(ix0, ix1, max(1, (ix1 - ix0) // 40)))
+
+    def col_paper(x):
+        return sum(_is_paperish(px, x, y) for y in ys) / float(len(ys))
+
+    def row_paper(y):
+        return sum(_is_paperish(px, x, y) for x in xs) / float(len(xs))
+
+    x0, x1, y0, y1 = 0, w, 0, h
+    while x0 < ix0 and col_paper(x0) < 0.55:
+        x0 += 1
+    while x1 > ix1 and col_paper(x1 - 1) < 0.55:
+        x1 -= 1
+    while y0 < iy0 and row_paper(y0) < 0.55:
+        y0 += 1
+    while y1 > iy1 and row_paper(y1 - 1) < 0.55:
+        y1 -= 1
+    if (x0, y0, x1, y1) == (0, 0, w, h):
+        return warped
+    return warped.crop((x0, y0, x1, y1))
+
+
 def _finish_ai_crop(crop, refine=True):
     """Post-process the vision model's rectangle into the stored image.
 
@@ -7779,7 +7823,7 @@ def _finish_ai_crop(crop, refine=True):
             rect = _rectify_note_quad(leveled, quad, context=0.05,
                                       fill=leveled.load()[2, 2])
             if rect:
-                cand = rect[0]
+                cand = _clamp_ai_margins(rect[0], rect[1])
                 w0, h0 = leveled.size
                 if cand.size[0] * cand.size[1] >= 0.5 * w0 * h0:
                     leveled = _square_up_note(cand) or cand
