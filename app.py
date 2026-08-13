@@ -7619,7 +7619,8 @@ def _trim_slabbed_note_image(data):
                 rect = _rectify_note_quad(img, quad, context=0.05,
                                           fill=img.load()[2, 2])
                 if rect:
-                    step = _encode_trimmed_note(rect[0])
+                    step = _square_up_note(rect[0]) \
+                        or _encode_trimmed_note(rect[0])
                     which = 'ai'
         if step is None:
             app.logger.info('trim: pass %d %sfound nothing to do (%dx%d)',
@@ -7653,10 +7654,43 @@ def _trim_slabbed_note_image(data):
             rect = _rectify_note_quad(img, quad, context=0.05,
                                       fill=img.load()[2, 2])
             if rect:
-                out = _encode_trimmed_note(rect[0])
+                out = _square_up_note(rect[0]) \
+                    or _encode_trimmed_note(rect[0])
                 app.logger.info('trim: post-pass ai rectangle from %dx%d',
                                 *img.size)
     return out
+
+
+def _square_up_note(img):
+    """Level the small residual tilt an axis-aligned AI rectangle
+    leaves on a rotated note (backdrop wedges in the corners, note
+    edges not parallel to the frame). Fits the note's bottom paper
+    edge, rotates level, and shaves the rotation wedges. Returns JPEG
+    bytes or None when there is no measurable tilt."""
+    import math
+
+    from PIL import Image
+
+    rgb = img.convert('RGB')
+    px = rgb.load()
+    w, h = rgb.size
+
+    def hit(p, x, y):
+        r, g, b = p[x, y][:3]
+        mx = max(r, g, b)
+        return mx > 140 and mx - min(r, g, b) < 70 and r >= g - 10
+
+    angle = _fit_note_bottom_angle(px, w, h, hit)
+    if not angle or abs(angle) < 0.4:
+        return None
+    rot = rgb.rotate(angle, resample=Image.BICUBIC, expand=False,
+                     fillcolor=px[2, 2])
+    t = abs(math.tan(math.radians(angle)))
+    dx = int(t * h / 2) + 2
+    dy = int(t * w / 2) + 2
+    if w - 2 * dx < 60 or h - 2 * dy < 30:
+        return None
+    return _encode_trimmed_note(rot.crop((dx, dy, w - dx, h - dy)))
 
 
 def _note_paper_fraction(img):
