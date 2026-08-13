@@ -7480,6 +7480,89 @@ def save_upload(file_obj, *, optimize_image=False):
     return stored_name
 
 
+def _ai_note_quad(img):
+    """Vision fallback: when every local detector has failed on a photo
+    (glare through a sleeve, felt grain, washed edges — the scenes CV
+    heuristics keep losing), ask the same model Check already uses to
+    point at the note. One small call on a downscaled copy; returns the
+    banknote paper's (NW, NE, SE, SW) in full-res pixels, or None."""
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        return None
+    from io import BytesIO
+
+    w, h = img.size
+    small = img.convert('RGB').copy()
+    small.thumbnail((1024, 1024))
+    sw, sh = small.size
+    buf = BytesIO()
+    small.save(buf, format='JPEG', quality=85)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    prompt = (
+        f"This {sw}x{sh}px photo shows a paper banknote, possibly inside a "
+        "plastic grading holder or sleeve, on some backdrop, possibly with a "
+        "grading label above it. Reply with ONLY JSON, no prose: "
+        '{"found": true, "corners": [[x,y],[x,y],[x,y],[x,y]]} — the four '
+        "corners of the BANKNOTE PAPER itself (never the holder edge, sleeve, "
+        "label, or backdrop), in pixels of this image, ordered top-left, "
+        "top-right, bottom-right, bottom-left. Aim tight to the paper edge, "
+        "but when unsure err a few pixels OUTSIDE the paper — the printed "
+        "design must never be cut. "
+        'If no single banknote is clearly visible: {"found": false}.')
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        model = anthropic_lookup_model(
+            api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
+        resp = client.messages.create(
+            model=model,
+            max_tokens=300,
+            messages=[{'role': 'user', 'content': [
+                {'type': 'image', 'source': {
+                    'type': 'base64', 'media_type': 'image/jpeg',
+                    'data': b64}},
+                {'type': 'text', 'text': prompt},
+            ]}],
+        )
+        data = parse_model_json_object(_message_text(resp))
+    except Exception as e:
+        app.logger.info('trim-ai: quad lookup failed: %s', e)
+        return None
+    if not data.get('found'):
+        app.logger.info('trim-ai: no note found')
+        return None
+    corners = data.get('corners')
+    if not (isinstance(corners, list) and len(corners) == 4):
+        return None
+    try:
+        pts = [(float(x), float(y)) for x, y in corners]
+    except (TypeError, ValueError):
+        return None
+    pad = 0.03
+    if not all(-pad * sw <= x <= (1 + pad) * sw
+               and -pad * sh <= y <= (1 + pad) * sh for x, y in pts):
+        app.logger.info('trim-ai: corners out of bounds')
+        return None
+    import math
+    qw = (math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
+          + math.hypot(pts[2][0] - pts[3][0], pts[2][1] - pts[3][1])) / 2.0
+    qh = (math.hypot(pts[3][0] - pts[0][0], pts[3][1] - pts[0][1])
+          + math.hypot(pts[2][0] - pts[1][0], pts[2][1] - pts[1][1])) / 2.0
+    if qh <= 0 or not 1.1 <= qw / qh <= 4.0:
+        app.logger.info('trim-ai: quad not note-shaped (%.0fx%.0f)', qw, qh)
+        return None
+    if qw * qh < 0.04 * sw * sh:
+        app.logger.info('trim-ai: quad too small')
+        return None
+    if qw >= 0.96 * sw and qh >= 0.96 * sh:
+        return None          # note already fills the frame — nothing to do
+    scale = w / float(sw)
+    return tuple((x * scale, y * scale) for x, y in pts)
+
+
 def _trim_slabbed_note_image(data):
     """Crop a graded-holder photo (PMG/PCGS slab) down to just the note.
 
@@ -7505,6 +7588,7 @@ def _trim_slabbed_note_image(data):
     # later Check finds nothing left to shave. Each pass only ever
     # shrinks the image; 3 passes covers the worst real case.
     out = None
+    ai_tried = False
     for i in range(3):
         step = _trim_slab_note_cv(img)
         which = 'cv'
@@ -7520,6 +7604,18 @@ def _trim_slabbed_note_image(data):
             # stored image must show at minimum.
             step = _trim_note_design_crop(img)
             which = 'design'
+        if step is None and not ai_tried:
+            # Every local detector failed (sleeve glare, felt grain,
+            # washed edges). Ask the vision model where the note is —
+            # one small call, once per image.
+            ai_tried = True
+            quad = _ai_note_quad(img)
+            if quad is not None:
+                rect = _rectify_note_quad(img, quad, context=0.02,
+                                          fill=img.load()[2, 2])
+                if rect:
+                    step = _encode_trimmed_note(rect[0])
+                    which = 'ai'
         if step is None:
             app.logger.info('trim: pass %d %sfound nothing to do (%dx%d)',
                             i + 1, '' if i else 'on original ', *img.size)
@@ -7531,7 +7627,8 @@ def _trim_slabbed_note_image(data):
         # gone wrong (glare-split paper mask, collapsed ink anchor —
         # the Victory 10 Pesos front lost its portrait and borders this
         # way), so keep what we have instead of the runaway crop.
-        if i and nxt.size[0] * nxt.size[1] < 0.55 * (img.size[0] * img.size[1]):
+        if i and which != 'ai' \
+                and nxt.size[0] * nxt.size[1] < 0.55 * (img.size[0] * img.size[1]):
             app.logger.info(
                 'trim: pass %d %s runaway shrink %dx%d -> %dx%d; keeping previous',
                 i + 1, which, *img.size, *nxt.size)
