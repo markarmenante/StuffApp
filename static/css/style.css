@@ -212,6 +212,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .list-count { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-right: 6px; }
 .list-cat-title { font-size: 13px; font-weight: 600; flex: 1; }
+.list-price-total { font-weight: 400; color: var(--text-secondary); margin-left: 6px; white-space: nowrap; }
 .list-cat-title-count {
   color: var(--text-secondary);
   white-space: nowrap;

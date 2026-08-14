@@ -8,7 +8,7 @@
   <span class="list-cat-title list-cat-title-count">{{ result_count }} Coins{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
   {% else %}
   <span class="list-count">{{ result_count }}</span>
-  <span class="list-cat-title">{{ cat_info.name }}{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
+  <span class="list-cat-title">{{ cat_info.name }}{% if category == 'art' and art_price_total %} <span class="list-price-total">{{ art_price_total | currency }}</span>{% endif %}{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
   {% endif %}
   {# When drilled in from a Property, the toolbar collapses to just
      the back-pill + search. The Add button and category-specific

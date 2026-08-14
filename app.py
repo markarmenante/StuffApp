@@ -12108,6 +12108,18 @@ def list_view(category):
             if prop_row:
                 at_property_url = url_for('detail_view', category='properties',
                                           record_id=prop_row['id'])
+    # Art header shows the total paid across whatever the current
+    # search/filter selected, next to the count.
+    art_price_total = None
+    if category == 'art':
+        art_price_total = 0
+        for r in rows:
+            v = r['price'] if 'price' in r.keys() else None
+            try:
+                art_price_total += float(
+                    str(v).replace(',', '').replace('$', ''))
+            except (TypeError, ValueError):
+                pass
     counts = get_counts()
     cat_info = CATEGORIES[category]
     extra_fields = LIST_EXTRA_FIELDS.get(category, [])
@@ -12172,6 +12184,7 @@ def list_view(category):
                            prop_type=prop_type,
                            today_iso=date.today().isoformat(),
                            result_count=len(rows),
+                           art_price_total=art_price_total,
                            has_ordered=has_ordered,
                            has_no_longer_owned=has_no_longer_owned,
                            has_in_service=has_in_service,
