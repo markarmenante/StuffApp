@@ -224,3 +224,48 @@ for y, label in ((1890, 'Kingdom and early colony'), (1969, 'The Fiji dollar'),
     p = stuffapp._series_panel_for_row({'country': 'Fiji', 'series': '', 'date_1': y})
     assert p and p['era']['label'] == label, (y, p)
 print('FIJI ASSERTIONS PASSED')
+
+# Netherlands Indies files as its own nation — not folded into the
+# Netherlands — and a parenthetical translation doesn't split the
+# denomination into its own currency family (1/2 must sort before 10).
+assert stuffapp._nation_sort_name('Netherlands Indies') == 'Netherlands Indies'
+assert stuffapp._nation_sort_name('Dutch East Indies') == 'Netherlands Indies'
+assert stuffapp._nation_sort_name('Netherlands') == 'Netherlands'
+assert stuffapp._denom_value('1/2 Roepiah (Setengah Roepiah)') == 0.5
+assert (stuffapp._denom_currency('1/2 Roepiah (Setengah Roepiah)')
+        == stuffapp._denom_currency('10 Roepiah'))
+p = stuffapp._series_panel_for_row(
+    {'country': 'Netherlands Indies', 'series': '', 'date_1': 1944})
+assert p and p['title'] == 'Netherlands Indies' \
+    and p['era']['label'] == 'Japanese occupation', p
+for y, label in ((1900, 'The gulden'), (1948, 'Succession to Indonesia')):
+    p = stuffapp._series_panel_for_row(
+        {'country': 'Netherlands Indies', 'series': '', 'date_1': y})
+    assert p and p['era']['label'] == label, (y, p)
+
+db3 = sqlite3.connect(':memory:')
+stuffapp._configure_db_connection(db3)
+db3.execute("""CREATE TABLE banknotes (
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
+    other_catalog TEXT, description TEXT, denomination TEXT, date_1 INTEGER)""")
+ni_rows = [
+    ('Netherlands', '10 Gulden', 1943),
+    ('Netherlands Indies', '10 Roepiah', 1944),
+    ('Netherlands Indies', '1/2 Roepiah (Setengah Roepiah)', 1944),
+    ('New Zealand', '1 Pound', 1940),
+]
+for i, (c, d, y) in enumerate(ni_rows, 1):
+    db3.execute("INSERT INTO banknotes (id, country, denomination, date_1) "
+                "VALUES (?, ?, ?, ?)", (i, c, d, y))
+got3 = [(r[0], r[1]) for r in db3.execute(
+    "SELECT country, denomination FROM banknotes ORDER BY "
+    + stuffapp.CATEGORY_ORDER_BY['banknotes'])]
+expected3 = [
+    ('Netherlands', '10 Gulden'),
+    ('Netherlands Indies', '1/2 Roepiah (Setengah Roepiah)'),
+    ('Netherlands Indies', '10 Roepiah'),
+    ('New Zealand', '1 Pound'),
+]
+assert got3 == expected3, f"\nexpected {expected3}\ngot      {got3}"
+print('NETHERLANDS INDIES ASSERTIONS PASSED')

@@ -1651,6 +1651,10 @@ _DENOM_SCALES = {
 _DENOM_THOUSANDS_RE = re.compile(r'(?<=\d)[.,](?=\d{3}(?:\D|$))')
 _DENOM_FRACTION_RE = re.compile(r'(\d+)\s*/\s*(\d+)')
 _DENOM_NUMBER_RE = re.compile(r'\d+(?:[.,]\d+)?')
+# '1/2 Roepiah (Setengah Roepiah)' — the parenthetical is a
+# translation or annotation, not sort information; parsing it would
+# split the note into its own currency family away from its siblings.
+_DENOM_PAREN_RE = re.compile(r'\([^)]*\)')
 # Sorts blank/unparseable denominations last, matching the 'zzz' and
 # 99999 blanks-last convention the rest of CATEGORY_ORDER_BY uses.
 _DENOM_VALUE_LAST = 1e18
@@ -1663,27 +1667,36 @@ def _denom_value(text):
     s = _strip_diacritics(text).strip()
     if not s:
         return _DENOM_VALUE_LAST
-    frac = _DENOM_FRACTION_RE.search(s)
-    if frac:
-        num, den = float(frac.group(1)), float(frac.group(2))
-        base = num / den if den else num
-    else:
-        m = _DENOM_NUMBER_RE.search(_DENOM_THOUSANDS_RE.sub('', s))
-        if not m:
-            return _DENOM_VALUE_LAST
-        base = float(m.group(0).replace(',', '.'))
-    scale = 1.0
-    for word in s.split():
-        if word in _DENOM_SCALES:
-            scale = _DENOM_SCALES[word]
-            break
-    return base * scale
+    # Parse the text outside any parenthetical first; fall back to the
+    # full string for the odd value that only appears inside parens.
+    bare = _DENOM_PAREN_RE.sub(' ', s).strip()
+    for cand in ([bare] if bare else []) + [s]:
+        frac = _DENOM_FRACTION_RE.search(cand)
+        if frac:
+            num, den = float(frac.group(1)), float(frac.group(2))
+            base = num / den if den else num
+        else:
+            m = _DENOM_NUMBER_RE.search(_DENOM_THOUSANDS_RE.sub('', cand))
+            if not m:
+                continue
+            base = float(m.group(0).replace(',', '.'))
+        scale = 1.0
+        for word in cand.split():
+            if word in _DENOM_SCALES:
+                scale = _DENOM_SCALES[word]
+                break
+        return base * scale
+    return _DENOM_VALUE_LAST
 
 
 def _denom_lookup(text):
     """(family, unit worth) for a denomination's currency. Unknown
     currencies become their own family at unit 1.0; blank sorts last."""
     s = _strip_diacritics(text)
+    # Drop parenthetical translations unless the text is nothing else.
+    bare = _DENOM_PAREN_RE.sub(' ', s)
+    if bare.strip():
+        s = bare
     s = _DENOM_FRACTION_RE.sub(' ', s)
     s = _DENOM_NUMBER_RE.sub(' ', s)
     words = [w.strip('.,-/') for w in s.split()]
@@ -2335,8 +2348,13 @@ COUNTRY_KEYS = {
     'brazil': ('brazil',),
     'spain': ('spain', 'kingdom of spain'),
     'portugal': ('portugal',),
-    'netherlands': ('netherlands', 'holland', 'kingdom of the netherlands',
-                    'netherlands indies', 'dutch east indies'),
+    'netherlands': ('netherlands', 'holland', 'kingdom of the netherlands'),
+    # The Netherlands Indies files as its own nation, like Ceylon and
+    # French Indochina — collectors know the JIM-era paper under the
+    # territory's name, and modern Indonesia has its own panel.
+    'netherlands-indies': ('netherlands indies', 'dutch east indies',
+                           'netherlands east indies', 'nederlandsch-indie',
+                           'nederlandsch indie', 'nederlands-indie'),
     'belgium': ('belgium', 'kingdom of belgium'),
     'czechoslovakia': ('czechoslovakia', 'czech republic', 'slovakia',
                        'bohemia and moravia'),
@@ -3058,11 +3076,25 @@ COUNTRY_ERAS = {
          'De Nederlandsche Bank issued from 1814. The Netherlands stayed '
          'on gold until 1936, among the last countries to leave.'),
         (1940, 1945, 'Occupation',
-         'Occupation issues circulated; in the East Indies, Japanese '
-         'invasion money replaced the Javasche Bank guilder.'),
+         'Under German occupation De Nederlandsche Bank kept issuing '
+         'while Reichskreditkassen scrip circulated; the swollen money '
+         'supply set up the 1945 purge.'),
         (1945, 2001, 'Money purge to euro',
          'The 1945 Lieftinck reform briefly withdrew all cash to tax '
          'wartime gains. The guilder was replaced by the euro in 2002.'),
+    )),
+    'netherlands-indies': ('Netherlands Indies', (
+        (1828, 1941, 'The gulden',
+         'De Javasche Bank issued the Netherlands Indies gulden from '
+         '1828, tied to the Dutch guilder.'),
+        (1942, 1945, 'Japanese occupation',
+         'The Imperial Japanese Government replaced the Javasche Bank '
+         'gulden with invasion money — gulden, then roepiah from 1944 — '
+         'printed without backing and rapidly inflated.'),
+        (1945, 2100, 'Succession to Indonesia',
+         'NICA gulden and the Republic’s ORI rupiah competed through '
+         'the independence war; sovereignty passed in 1949 and the '
+         'rupiah succeeded the gulden.'),
     )),
     'belgium': ('Belgium', (
         (1832, 1913, 'The Belgian franc',
@@ -5195,10 +5227,13 @@ def init_db():
     # notes vs occupation scrip), keeping each era block contiguous.
     # v11: the VICTORY notes move to their own Liberation band (1944)
     # AFTER the occupation, reading pre-war Commonwealth, occupation,
-    # liberation, Central Bank.
+    # liberation, Central Bank. v12: the Netherlands Indies files as
+    # its own nation instead of folding into the Netherlands, and
+    # parenthetical translations no longer split a denomination into
+    # its own currency family ('1/2 Roepiah (Setengah Roepiah)').
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v11',),
+        ('banknote_display_number_v12',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5206,7 +5241,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v11', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v12', datetime.utcnow().isoformat()),
         )
         db.commit()
 
