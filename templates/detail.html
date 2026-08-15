@@ -4341,6 +4341,13 @@ document.querySelectorAll('.comp-item').forEach(item => {
         }
         // URL bar swaps to the detail URL — back button still goes home.
         window.history.replaceState({}, '', d.detail_url);
+        // ← Back now has a real record to land on: anchor the list at
+        // it so it scrolls to + highlights the just-created row, same
+        // as Back from an existing record's detail page.
+        const backLink = document.querySelector('.back-link');
+        if (backLink && d.id) {
+          backLink.href = backLink.href.split('#')[0] + '#item-' + d.id;
+        }
         // Future file uploads need a real record_id; rewrite form action
         // and any per-field upload URLs (data-upload-url on .drop-zone).
         form.action = d.detail_url;
