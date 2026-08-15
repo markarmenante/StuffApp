@@ -178,7 +178,7 @@
     {% set _panel = _placement.panel %}
     {% include 'partials/series_panel.html' %}
   {% endif %}
-  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None, dot='1' if dot else None) }}">
+  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None, dot='1' if dot else None, history=None if show_history else '0') }}">
 
     <!-- Thumbnail -->
     {% if category != 'persons' %}

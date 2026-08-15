@@ -12687,10 +12687,11 @@ def detail_view(category, record_id):
         back_filter = (request.args.get('filter') or '').strip() or None
         back_at = (request.args.get('at') or '').strip() or None
         back_dot = request.args.get('dot') or None
-        if back_q or back_filter or back_at or back_dot:
+        back_history = '0' if request.args.get('history') == '0' else None
+        if back_q or back_filter or back_at or back_dot or back_history:
             back_href = url_for('list_view', category=category,
                                 q=back_q, filter=back_filter, at=back_at,
-                                dot=back_dot) \
+                                dot=back_dot, history=back_history) \
                         + f'#item-{record_id}'
 
     # Camera detail: list every lens with the same mount and property,
