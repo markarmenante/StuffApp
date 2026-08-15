@@ -3774,6 +3774,108 @@ COUNTRY_ERAS = {
     )),
 }
 
+# One-line colonial timeline per country key: who colonized, when, and the
+# date of independence. Rendered once at the top of a country's first
+# history panel in the banknote list. Countries that were never colonized
+# get a line saying so where that's the interesting fact; colonizer
+# nations (France, Spain, Great Britain…) simply have no entry.
+COUNTRY_COLONIAL = {
+    'afghanistan': 'Never fully colonized; Britain controlled foreign affairs from the 1879 Treaty of Gandamak until independence on 19 August 1919.',
+    'algeria': 'French from the 1830 invasion of Algiers, later annexed as departments of France; independent 5 July 1962 after the 1954–62 war.',
+    'angola': 'Portuguese from the founding of Luanda in 1575; independent 11 November 1975.',
+    'argentina': 'Spanish from the 1500s (Viceroyalty of the Río de la Plata from 1776); independence declared 9 July 1816.',
+    'australia': 'British from the 1788 settlement at Sydney; the six colonies federated as a self-governing dominion on 1 January 1901.',
+    'bangladesh': 'Under British rule from 1757 as part of Bengal; East Pakistan from 1947; independence declared 26 March 1971 and won that 16 December.',
+    'belgian-congo': "Leopold II's Congo Free State from 1885, annexed by Belgium in 1908; independent as the Republic of the Congo on 30 June 1960.",
+    'belize': 'English logwood settlement from 1638, crown colony of British Honduras from 1862; independent 21 September 1981.',
+    'bermuda': 'English from the 1612 settlement; never independent — a British Overseas Territory today.',
+    'bolivia': 'Spanish from the 1530s (Audiencia of Charcas); independent 6 August 1825.',
+    'brazil': 'Portuguese from 1500, settled from the 1530s; independent 7 September 1822 under Pedro I.',
+    'bulgaria': 'Under Ottoman rule from 1396; autonomous from 1878, fully independent 22 September 1908.',
+    'burma': 'British through the three Anglo-Burmese wars of 1824–1885, fully annexed 1 January 1886; independent 4 January 1948.',
+    'cambodia': 'French protectorate from 11 August 1863; independent 9 November 1953.',
+    'cameroon': 'German Kamerun from 1884, divided into French and British mandates in 1919; French Cameroun independent 1 January 1960, the British south joining in 1961.',
+    'canada': 'French from 1608 (Quebec), ceded to Britain in 1763; a self-governing dominion from Confederation, 1 July 1867.',
+    'ceylon': 'Coastal Ceylon Portuguese from 1505 and Dutch from 1658; British from 1796, the whole island from 1815; independent 4 February 1948.',
+    'chile': 'Spanish from 1541 (Santiago); independence declared 12 February 1818.',
+    'colombia': 'Spanish from the 1520s (Bogotá founded 1538); independence declared 20 July 1810, secured at Boyacá 7 August 1819.',
+    'colonial-america': 'British colonies from Jamestown in 1607; independence declared 4 July 1776, recognized by the Treaty of Paris in 1783.',
+    'cuba': 'Spanish from 1511; Spanish rule ended in 1898, and after US occupation the republic became independent 20 May 1902.',
+    'cyprus': 'Ottoman from 1571, British-administered from 1878 and a crown colony from 1925; independent 16 August 1960.',
+    'djibouti': 'French Somaliland from 1888 (Côte Française des Somalis from 1896); independent 27 June 1977, the last French colony in Africa.',
+    'ecuador': 'Spanish from 1534 (Quito); liberated at Pichincha 24 May 1822, a separate republic from 13 May 1830.',
+    'egypt': 'Ottoman from 1517, British-occupied from 1882 and a protectorate from 1914; nominally independent 28 February 1922, fully sovereign after the 1952 revolution.',
+    'el-salvador': 'Spanish from 1524; independent with Central America 15 September 1821.',
+    'ethiopia': 'Never colonized — the 1896 victory at Adwa preserved independence; Italian occupation 1936–1941 only.',
+    'faroe-islands': 'Under Norwegian, then Danish rule from 1380; home rule within Denmark since 1948.',
+    'fiji': 'Ceded to Britain 10 October 1874; independent 10 October 1970, ninety-six years to the day.',
+    'french-west-africa': 'French conquests federated as Afrique-Occidentale Française in 1895; its eight territories became independent in 1958–1960.',
+    'ghana': 'British Gold Coast colony from 1874, Ashanti annexed 1902; independent 6 March 1957, the first sub-Saharan colony to be freed.',
+    'gibraltar': 'Taken by Britain in 1704 and ceded by Spain at Utrecht in 1713; a British Overseas Territory today.',
+    'greece': 'Under Ottoman rule from the fifteenth century; independence won in the 1821–29 war, recognized 3 February 1830.',
+    'guatemala': 'Spanish from 1524; independent with Central America 15 September 1821.',
+    'guernsey': 'A possession of the English Crown since 1204; a self-governing Crown Dependency, never a colony.',
+    'guinea-bissau': 'Portuguese Guinea — posts from the 1600s, effective control from 1879; independence declared 24 September 1973, recognized 10 September 1974.',
+    'guyana': 'Dutch from 1616 (Essequibo), British from 1803 and united as British Guiana in 1831; independent 26 May 1966.',
+    'hong-kong': 'British from 1841 (ceded 1842, the New Territories leased 1898); returned to China 1 July 1997.',
+    'iceland': 'Under Norwegian, then Danish rule from 1262; sovereign in union with Denmark 1 December 1918, a republic 17 June 1944.',
+    'india': 'East India Company rule from Plassey in 1757, Crown rule from 1858; independent 15 August 1947.',
+    'indochina': 'French from 1862 (Cochinchina), unified as the Indochinese Union in 1887; dissolved at Geneva in 1954 into Vietnam, Laos, and Cambodia.',
+    'indonesia': "Dutch from the VOC's Batavia (1619), a state colony from 1800; independence proclaimed 17 August 1945, recognized 27 December 1949.",
+    'iran': 'Never colonized, though partitioned into Anglo-Russian spheres of influence in 1907 and occupied 1941–46.',
+    'iraq': 'Ottoman from 1534; British mandate from 1920; independent 3 October 1932.',
+    'ireland': 'Under English rule from the twelfth century, in union with Britain from 1801; Free State 6 December 1922, republic 18 April 1949.',
+    'israel': 'Ottoman from 1516, British mandate Palestine from 1920; the state declared independence 14 May 1948.',
+    'jamaica': 'Spanish from 1509, English from 1655; independent 6 August 1962.',
+    'jordan': 'Ottoman from 1516; the British-mandate emirate of Transjordan from 1921; independent 25 May 1946.',
+    'kenya': 'British East Africa Protectorate from 1895, Kenya Colony from 1920; independent 12 December 1963.',
+    'kuwait': 'British protectorate from 1899; independent 19 June 1961.',
+    'laos': 'French protectorate from 1893; independent 22 October 1953.',
+    'lebanon': 'Ottoman from 1516; French mandate from 1920; independent 22 November 1943.',
+    'libya': 'Ottoman from 1551, Italian from 1911; under Allied administration from 1943, independent 24 December 1951.',
+    'macau': 'Portuguese from 1557, a formal colony from 1887; returned to China 20 December 1999.',
+    'malawi': 'British Central Africa Protectorate from 1891, Nyasaland from 1907; independent 6 July 1964.',
+    'malaya': 'British from Penang in 1786; independent as the Federation of Malaya 31 August 1957, Malaysia from 1963.',
+    'malta': 'British from 1800, formally ceded in 1814; independent 21 September 1964.',
+    'mexico': 'Spanish from the 1521 fall of Tenochtitlan; independence declared 16 September 1810, won 27 September 1821.',
+    'mongolia': 'Under Qing rule from 1691; declared independence in 1911 and secured it in 1921.',
+    'morocco': 'French and Spanish protectorates from the Treaty of Fes, 30 March 1912; independent 2 March 1956.',
+    'mozambique': 'Portuguese from 1505; independent 25 June 1975.',
+    'nepal': 'Never colonized; the 1816 Treaty of Sugauli fixed the border with British India but left Nepal sovereign.',
+    'netherlands-indies': "Dutch from the VOC's Batavia (1619), a state colony from 1800; became independent Indonesia — proclaimed 17 August 1945, transferred 27 December 1949.",
+    'new-zealand': 'British from the Treaty of Waitangi, 6 February 1840; a self-governing dominion from 26 September 1907.',
+    'nicaragua': 'Spanish from 1524; independent with Central America 15 September 1821.',
+    'nigeria': 'Lagos a British colony from 1861, the protectorates amalgamated in 1914; independent 1 October 1960.',
+    'pakistan': 'Under Company, then Crown rule with British India (Sind 1843, Punjab 1849); independent 14 August 1947.',
+    'panama': 'Spanish from 1519; independent of Spain 28 November 1821 (joining Colombia), separated from Colombia 3 November 1903.',
+    'paraguay': 'Spanish from Asunción, 1537; independent 14 May 1811.',
+    'peru': 'Spanish from 1532; independence declared 28 July 1821, secured at Ayacucho in December 1824.',
+    'philippines': 'Spanish from 1565, American from 1898; independent 4 July 1946.',
+    'saint-helena': 'English East India Company from 1659; a British Overseas Territory today.',
+    'sao-tome': 'Portuguese from the 1470s, settled 1493; independent 12 July 1975.',
+    'sarawak': 'Ruled by the Brooke "White Rajahs" from 1841, a British crown colony from 1946; joined Malaysia 16 September 1963.',
+    'saudi-arabia': 'Never colonized; the kingdom was unified by Ibn Saud and proclaimed 23 September 1932.',
+    'somalia': 'British Somaliland (protectorate from 1884) and Italian Somalia (from 1889); united and independent 1 July 1960.',
+    'south-africa': 'Dutch from 1652 (the Cape), British from 1806; the Union a self-governing dominion 31 May 1910, a republic 31 May 1961.',
+    'south-korea': 'Annexed by Japan 29 August 1910; liberated 15 August 1945, the republic proclaimed 15 August 1948.',
+    'sudan': 'Ottoman-Egyptian from 1821, Anglo-Egyptian condominium from 1899; independent 1 January 1956.',
+    'syria': 'Ottoman from 1516; French mandate from 1920; independent 17 April 1946.',
+    'taiwan': 'Japanese colony from the 1895 Treaty of Shimonoseki; handed to the Republic of China 25 October 1945.',
+    'tanzania': 'German East Africa from 1885, British-mandated Tanganyika from 1919; independent 9 December 1961, united with Zanzibar 26 April 1964.',
+    'thailand': 'Never colonized — the only Southeast Asian state to keep its independence, ceding border territories to Britain and France instead.',
+    'togo': 'German Togoland from 1884, the eastern part a French mandate from 1919; independent 27 April 1960.',
+    'tunisia': 'French protectorate from the Treaty of Bardo, 12 May 1881; independent 20 March 1956.',
+    'uganda': 'British protectorate from 1894; independent 9 October 1962.',
+    'uruguay': 'Spanish from the 1620s (Montevideo founded 1724); independence declared 25 August 1825, recognized 1828.',
+    'uzbekistan': 'Conquered by Russia 1865–1876 (Tashkent, Bukhara, Khiva); a Soviet republic from 1924, independent 1 September 1991.',
+    'venezuela': 'Spanish from the 1520s; independence declared 5 July 1811, secured at Carabobo in June 1821.',
+    'vietnam': 'French from 1862 (Cochinchina), protectorates over Annam and Tonkin from 1883–84; independence declared 2 September 1945, French rule ended at Geneva in 1954.',
+    'west-african-states': 'The CFA-franc union of former French West Africa — federated under France from 1895, its member territories independent in 1960.',
+    'yemen': 'Aden a British colony from 1839 with protectorates beyond; the north left Ottoman rule in 1918, the south became independent 30 November 1967.',
+    'zambia': 'British South Africa Company rule from 1891, the Northern Rhodesia protectorate from 1924; independent 24 October 1964.',
+    'zimbabwe': 'BSAC rule from 1890, the self-governing colony of Southern Rhodesia from 1923; UDI in 1965, recognized independence 18 April 1980.',
+}
+
 
 def _us_note_class(row):
     """Match a note to its class from the text it carries. Series and
@@ -3998,6 +4100,7 @@ Match this register exactly — factual: names, institutions, dates, numbers, co
 Rules:
 - 4 to 8 consecutive, non-overlapping eras. start/end are Gregorian years; the final era ends at {current_year}.
 - Begin with the FIRST paper money that circulated in the territory — NOT at independence. Colonial monetary arrangements get full coverage where they existed: which chartered banks, colonial governments, or currency boards issued the paper, what backed it, and how the currency transitioned at independence.
+- If the territory was a colony, protectorate, or mandate, the colonial timeline must be explicit and dated: name the colonizing power(s), the year colonization (or the protectorate/mandate) began, and the exact date of independence. Put these dates in the era bodies they belong to.
 - Occupations, currency reforms, redenominations, hyperinflations, and currency unions (CFA franc, East Caribbean dollar, euro) each get their own era where significant.
 - Each era body is 40-90 words of plain prose.
 - title: the country's common display name (e.g. "Sri Lanka", "Rhodesia" only if the modern name would be wrong for the territory).
@@ -4353,6 +4456,7 @@ def _series_panel_for_row(row):
         'clause': None,
         'previous_clause': None,
         'era': era,
+        'colonial': COUNTRY_COLONIAL.get(country_key),
     }
 
 

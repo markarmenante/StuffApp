@@ -31,6 +31,13 @@
     {% endif %}
   </div>
 
+  {# Colonial timeline — who colonized, when, and the independence date.
+     Country-level, so it prints once, on the first panel of a country's
+     run, not on every era panel down the list. #}
+  {% if _panel.colonial and not _panel.continues_country %}
+  <p class="usp-colonial"><span class="usp-lbl">Colonial timeline</span>{{ _panel.colonial }}</p>
+  {% endif %}
+
   {% if _panel.note_type %}
   <p class="usp-note-type">
     <span class="usp-lbl">Note type</span>{{ _panel.note_type }}{% if _panel.note_class and _panel.note_class.years %} · {{ _panel.note_class.years }}{% endif %}
