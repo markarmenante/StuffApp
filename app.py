@@ -7901,11 +7901,20 @@ def _clamp_ai_margins(warped, inner):
     """Trim backdrop off the edges of the model's crop. The uniform
     context margin — and the model's own err-outside slack — land on
     backdrop wherever the note's paper margin is thinner (the Victory
-    front's left band, the back's right band). From each edge, trim
-    lines that are backdrop-like: NOT mostly paper AND essentially
-    ink-free. The scan covers the added margin band plus at most 6%
-    into the model's rectangle, and stops dead at the first line with
-    real ink or paper — printed area stays untouchable."""
+    front's left band, the back's right band).
+
+    What counts as paper is sampled from THIS note: the ring just
+    outside the model's design rectangle is note margin by
+    construction, and its median colour is the reference — so green,
+    blue, and white papers all read as paper (a fixed warm-paper test
+    shaved the margins clean off the greenish JIM 10-Pesos front). A
+    mostly-dark line is holder plastic, not engraving (an ink test
+    that refused to trim dark lines kept black PMG holder slivers on
+    slab shots). From each edge, trim lines that are NOT mostly
+    reference-paper AND are either featureless or mostly dark. The
+    scan covers the added margin band plus at most 6% into the
+    model's rectangle, and stops dead at the first line of paper or
+    mixed ink-on-paper — printed area stays untouchable."""
     px = warped.convert('RGB').load()
     w, h = warped.size
     ix0, iy0, ix1, iy1 = [int(v) for v in inner]
@@ -7917,20 +7926,39 @@ def _clamp_ai_margins(warped, inner):
     ys = list(range(iy0, iy1, max(1, (iy1 - iy0) // 40)))
     xs = list(range(ix0, ix1, max(1, (ix1 - ix0) // 40)))
 
+    ring = []
+    pad = 3
+    for x in xs:
+        for y in (iy0 - pad, iy1 + pad - 1):
+            if 0 <= y < h:
+                ring.append(px[x, y][:3])
+    for y in ys:
+        for x in (ix0 - pad, ix1 + pad - 1):
+            if 0 <= x < w:
+                ring.append(px[x, y][:3])
+    bright = [c for c in ring if max(c) >= 95]
+    if not bright:
+        return warped
+    ref = []
+    for i in range(3):
+        vals = sorted(c[i] for c in bright)
+        ref.append(vals[len(vals) // 2])
+
     def line_stats(coords):
-        paper = ink = 0
+        paper = dark = 0
         for x, y in coords:
-            r, g, b = px[x, y][:3]
-            if max(r, g, b) < 95:
-                ink += 1
-            elif _is_paperish(px, x, y):
+            c = px[x, y][:3]
+            if max(c) < 95:
+                dark += 1
+            elif abs(c[0] - ref[0]) + abs(c[1] - ref[1]) \
+                    + abs(c[2] - ref[2]) < 110:
                 paper += 1
         n = float(len(coords) or 1)
-        return paper / n, ink / n
+        return paper / n, dark / n
 
     def backdroppy(coords):
-        paper, ink = line_stats(coords)
-        return paper < 0.55 and ink < 0.03
+        paper, dark = line_stats(coords)
+        return paper < 0.55 and (dark < 0.03 or dark > 0.60)
 
     in_x, in_y = int(0.15 * w), int(0.15 * h)
     x0, x1, y0, y1 = 0, w, 0, h

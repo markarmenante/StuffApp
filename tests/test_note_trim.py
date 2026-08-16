@@ -793,6 +793,28 @@ assert stuffapp._note_paper_fraction(res) > 0.6, 'AI crop not mostly paper'
 print('VISION-MODEL HANDOVER ASSERTIONS PASSED')
 
 
+# --- Margin clamp: cool paper kept, dark holder trimmed --------------------
+# The clamp's paper reference is sampled from the note's own margin ring,
+# so greenish JIM paper is not shaved as backdrop; and a mostly-dark edge
+# band is holder plastic, not engraving, so it IS trimmed.
+GREEN_PAPER = (215, 224, 205)
+img = Image.new('RGB', (1000, 500), GREEN_PAPER)
+draw = ImageDraw.Draw(img)
+draw.rectangle([0, 0, 59, 499], fill=(28, 28, 30))       # dark holder band, left
+draw.rectangle([120, 60, 940, 440], outline=INK, width=8)  # design
+for gx in range(140, 920, 20):
+    draw.line([(gx, 80), (gx, 420)], fill=INK, width=2)
+inner = (120, 60, 940, 440)
+out = stuffapp._clamp_ai_margins(img, inner)
+ow, oh = out.size
+assert ow <= 1000 - 55, f'dark holder band kept: {out.size}'
+assert oh == 500, f'green paper margins shaved vertically: {out.size}'
+opx = out.convert('RGB').load()
+c = opx[5, 250]
+assert max(c) >= 95, f'left edge still holder-dark: {c}'
+print('MARGIN-CLAMP (cool paper / dark holder) ASSERTIONS PASSED')
+
+
 # --- Homography sanity ----------------------------------------------------
 # The PERSPECTIVE coefficients must map each output corner exactly onto
 # its source-quad corner (PIL samples source = H(output)).
