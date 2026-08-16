@@ -46,6 +46,10 @@ fold new standing instructions in here — nowhere else.)
   When denormalization is warranted, do it surgically — a specific
   redundant column, a materialized view, or a cached/reporting table —
   with the normalized tables remaining the source of truth.
+- **Remember the apps** (2026-08-16): the registry of all of Mark's
+  apps — repos, deploy targets, status — lives in the boardroom repo's
+  root `CLAUDE.md`. When you work on an app that isn't listed there,
+  add it in the same session.
 
 ## What this is
 
