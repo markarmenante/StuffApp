@@ -35,6 +35,17 @@ fold new standing instructions in here — nowhere else.)
     stuff.armenante.com, e.g. ✓ Check (`POST
     /banknotes/<id>/lookup-specs`) runs the spec lookup and image
     re-trim with production's own key.
+- **Database design, all apps** (2026-08-16): normalize to Third Normal
+  Form as the default starting point — it resolves most redundancy and
+  integrity issues without excess complexity. Junction tables for
+  many-to-many relationships, with their foreign keys indexed for join
+  performance. Enforce integrity with database constraints (primary,
+  foreign, unique) rather than application code alone. Never
+  denormalize preemptively: ship the normalized schema first and
+  measure real query performance (EXPLAIN ANALYZE) before touching it.
+  When denormalization is warranted, do it surgically — a specific
+  redundant column, a materialized view, or a cached/reporting table —
+  with the normalized tables remaining the source of truth.
 
 ## What this is
 
