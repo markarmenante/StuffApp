@@ -58,16 +58,17 @@ Cloudflare). One main module — `app.py` — plus `templates/`,
 `static/css/style.css`, and `schema.sql`. See README.md for local paths and
 the Railway start command.
 
-## Railway topology (checked Aug 2026)
+## Railway topology (updated 2026-08-16)
 
 Production `stuff.armenante.com` is project **courageous-adventure**,
-service `web` (origin `web-production-cf059.up.railway.app`). Two other
-Railway projects — observant-success (`web-production-fca7e`) and
-poetic-peace (`web-production-ac478`) — ALSO auto-deploy this repo's
-`main` but serve no custom domain; they look like stale duplicates that
-triple every deploy. When debugging production, read logs from
-courageous-adventure, not the others. Ask Mark before deleting the
-extras.
+service `web` (origin `web-production-cf059.up.railway.app`). The two
+stale duplicate projects that used to triple every deploy —
+observant-success (`web-production-fca7e`) and poetic-peace
+(`web-production-ac478`) — had their services removed on 2026-08-16
+with Mark's approval; only empty project shells remain, which Mark
+deletes from the Railway dashboard. Every push to `main` deploys
+production exactly once now — so batch doc-only commits, and check
+nobody is mid-Check before pushing.
 
 ## Dev setup
 
