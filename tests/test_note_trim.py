@@ -747,10 +747,11 @@ assert stuffapp._trim_note_design_crop(img) is None, \
 print('EDGE-TO-EDGE UNION ASSERTIONS PASSED')
 
 
-# --- Vision-model handover (printed-area rectangle + margin) ---------------
-# When the local detectors fail or "succeed" uselessly (a shave that
-# keeps the felt-and-label scene), the pipeline asks the vision model
-# for the rectangle around the printed area and crops to it + margin.
+# --- Vision-model primary path (engraved area + margin, squared) -----------
+# The vision model is the pipeline's primary detector: it outlines the
+# engraved area, which is warped level and cropped with a margin. The
+# CV detectors (faked out below) must never override that result — they
+# are reached only when the model is unavailable or finds nothing.
 _saved = (stuffapp._trim_slab_note_cv, stuffapp._trim_dark_slab_note,
           stuffapp._trim_light_slab_note, stuffapp._trim_note_design_crop,
           stuffapp._ai_note_quad)

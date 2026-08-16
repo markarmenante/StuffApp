@@ -7763,18 +7763,21 @@ def _ai_note_quad(img):
 
 
 def _trim_slabbed_note_image(data):
-    """Crop a graded-holder photo (PMG/PCGS slab) down to just the note.
+    """Crop a note photo (PMG/PCGS slab, sleeve, or bare) down to the
+    engraved area plus its paper margins, squared up.
 
-    Two detectors run in sequence: the classic dark holder (bright note
-    in black plastic) and the light holder (note on a white/grey clear
-    holder, found by its engraving texture). Both cut away the label
-    band and holder frame, then square the note up: the four edge lines
-    of the note (or its printed design) are fitted and the resulting
-    quad is perspective-warped flat, so a handheld shot's keystone and
-    tilt come out level with the note filling the frame edge to edge.
-    When the corner fit isn't confident the old rotate-only deskew
-    still runs. Returns JPEG bytes, or None when there is nothing to
-    do — well-trimmed notes pass through untouched (an already-trimmed
+    The vision model is the PRIMARY detector: it outlines the printed
+    area's four corners, that quad is perspective-warped flat so the
+    design sits level — aligned horizontally and vertically — with a
+    uniform context margin standing in for the paper margins, and any
+    backdrop the margin swept in is clamped off per side. One detector,
+    one geometry, every photo — the CV heuristic cascade (dark holder,
+    light holder, design union) fights each scene differently and left
+    inconsistent crops, so it now runs only when the vision model is
+    unavailable (no API key), errors out, or finds nothing.
+
+    Returns JPEG bytes, or None when there is nothing to do —
+    well-trimmed notes pass through untouched (an already-trimmed
     image that needs redoing is re-processed from its original photo,
     never by shaving the stored copy).
     """
@@ -7782,12 +7785,33 @@ def _trim_slabbed_note_image(data):
     w, h = img.size
     if w < 200 or h < 100:
         return None
-    # Iterate to a fixed point (a fuzzy paper edge can leave a sliver
-    # that only the next pass sees) so the stored image is final and a
-    # later Check finds nothing left to shave. Each pass only ever
-    # shrinks the image; 3 passes covers the worst real case.
+    # Tiny sources (thumbnail uploads) are left to the CV cascade:
+    # cropping a 375px photo by model-pixel coordinates yields an
+    # unusable smear, and the operator should re-upload full-size.
+    if min(w, h) >= 300:
+        quad = _ai_note_quad(img)
+        if quad is not None:
+            # The quad is the engraved area's extent; the context
+            # margin stands in for the paper margins around it,
+            # clamped per side so it never overshoots onto backdrop.
+            rect = _rectify_note_quad(img, quad, context=0.05,
+                                      fill=img.load()[2, 2])
+            if rect:
+                return _finish_ai_crop(_clamp_ai_margins(rect[0], rect[1]))
+        # None is ambiguous: no key / API failure / no note found / the
+        # note already fills the frame (a finished trim). The cascade
+        # below no-ops on finished trims, so falling through is safe in
+        # every one of those cases.
+    return _trim_note_cv_cascade(img)
+
+
+def _trim_note_cv_cascade(img):
+    """Fallback trim without the vision model: the local detector
+    cascade, iterated to a fixed point (a fuzzy paper edge can leave a
+    sliver that only the next pass sees) so the stored image is final
+    and a later Check finds nothing left to shave. Each pass only ever
+    shrinks the image; 3 passes covers the worst real case."""
     out = None
-    ai_tried = False
     obj_tried = False
     for i in range(3):
         step = _trim_slab_note_cv(img)
@@ -7816,24 +7840,6 @@ def _trim_slabbed_note_image(data):
             step = _object_isolation_crop(img)
             if step is not None:
                 which = 'object'
-        if step is None and not ai_tried \
-                and min(img.size) >= 300:
-            # Object isolation didn't resolve it either — ask the
-            # vision model for the printed-area rectangle, once.
-            # Tiny sources (thumbnail uploads) are left whole: cropping
-            # a 375px photo yields an unusable smear, and the operator
-            # should re-upload the full-size photo instead.
-            ai_tried = True
-            quad = _ai_note_quad(img)
-            if quad is not None:
-                # The quad is the printed area's extent; the context
-                # margin stands in for the paper margins around it,
-                # clamped per side so it never overshoots onto backdrop.
-                rect = _rectify_note_quad(img, quad, context=0.05,
-                                          fill=img.load()[2, 2])
-                if rect:
-                    step = _finish_ai_crop(_clamp_ai_margins(rect[0], rect[1]))
-                    which = 'ai'
         if step is None:
             app.logger.info('trim: pass %d %sfound nothing to do (%dx%d)',
                             i + 1, '' if i else 'on original ', *img.size)
@@ -7845,7 +7851,7 @@ def _trim_slabbed_note_image(data):
         # gone wrong (glare-split paper mask, collapsed ink anchor —
         # the Victory 10 Pesos front lost its portrait and borders this
         # way), so keep what we have instead of the runaway crop.
-        if i and which not in ('ai', 'object') \
+        if i and which != 'object' \
                 and nxt.size[0] * nxt.size[1] < 0.55 * (img.size[0] * img.size[1]):
             app.logger.info(
                 'trim: pass %d %s runaway shrink %dx%d -> %dx%d; keeping previous',
@@ -7855,24 +7861,6 @@ def _trim_slabbed_note_image(data):
                         i + 1, which, *img.size)
         out = step
         img = nxt
-        if which == 'ai':
-            # The model's rectangle + margin IS the deliverable
-            # ("...and you're done") — later passes may not shave it.
-            return out
-    # A detector can "succeed" uselessly — a light-detector shave that
-    # keeps the whole felt-and-label scene. If what we ended with is
-    # not mostly note (warm bright paper), the trim failed no matter
-    # what the passes reported: ask the vision model for the printed
-    # area's rectangle and use that.
-    if not ai_tried and _note_paper_fraction(img) < 0.45:
-        quad = _ai_note_quad(img)
-        if quad is not None:
-            rect = _rectify_note_quad(img, quad, context=0.05,
-                                      fill=img.load()[2, 2])
-            if rect:
-                out = _finish_ai_crop(_clamp_ai_margins(rect[0], rect[1]))
-                app.logger.info('trim: post-pass ai rectangle from %dx%d',
-                                *img.size)
     return out
 
 
