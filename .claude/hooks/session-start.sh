@@ -11,6 +11,12 @@ fi
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$PROJECT_DIR"
 
+# Print Mark's standing instructions into the session's opening context
+# — they must be READ FIRST, not just sit in CLAUDE.md. Prints from the
+# standing-instructions heading up to the next '## ' section, so edits
+# to that section flow through with no second copy to maintain.
+awk '/^## /{on = ($0 ~ /^## Standing instructions/)} on' CLAUDE.md
+
 # Same layout the README prescribes for local dev. A venv sidesteps the
 # container's debian-managed site-packages, which pip can't upgrade.
 python3 -m venv .venv

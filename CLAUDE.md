@@ -1,6 +1,10 @@
 # CLAUDE.md — StuffApp
 
-## Standing instructions from Mark
+## Standing instructions from Mark — read and follow these FIRST
+
+(The SessionStart hook prints this whole section into every web
+session's opening context. Keep it the first section of this file, and
+fold new standing instructions in here — nowhere else.)
 
 - **Commit and push directly to `main`.** No draft-PR round-trips — `main` is
   the deploy branch; Railway auto-deploys it.
@@ -14,7 +18,23 @@
   with its `.env`; boardroom `/Users/markarmenante/GitHub/boardroom`;
   Family Office, museum-of-time, n552ym under `~/Documents/GitHub/`).
   Reuse what exists; never re-mint, never make Mark hand-copy what a
-  loader can find.
+  loader can find. Where the keys for THIS app actually are (swept
+  2026-08-16; exact env names in CONNECTORS.md):
+  - The Anthropic and Perplexity model keys live in Railway project
+    `courageous-adventure`, service `web`; the Anthropic key is also in
+    the boardroom Vercel envs and the Mac checkout's `.env`.
+  - A cloud session cannot READ those values: the Railway and Vercel
+    MCP connectors return variable names only, and the Mac is reachable
+    only when a local session appears in ListAgents. The claude.ai
+    environment's own env config is the reuse recipe for cloud
+    sessions, and as of Aug 2026 it does NOT yet carry the Anthropic
+    key (one-time add by Mark).
+  - So: never treat a missing env var as a dead end, and never skip
+    validation because the sandbox lacks a key — production has it.
+    Model-dependent behavior can be exercised server-side on
+    stuff.armenante.com, e.g. ✓ Check (`POST
+    /banknotes/<id>/lookup-specs`) runs the spec lookup and image
+    re-trim with production's own key.
 
 ## What this is
 
