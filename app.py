@@ -8156,7 +8156,92 @@ def _finish_ai_crop(crop, refine=True, expect_aspect=None):
                     app.logger.info(
                         'trim-ai: second look rejected, aspect %.3f -> '
                         '%.3f', was, now)
+    if crop.size[0] >= 700:
+        crop = _shave_backdrop_slivers(crop)
     return _encode_trimmed_note(crop)
+
+
+def _shave_backdrop_slivers(crop):
+    """Final quality pass on a finished crop: a paper outline that
+    OVERSHOT the sheet leaves wedges of backdrop in the warped output
+    (green holder felt at a corner, 2026-08-17 front-of-note). The
+    aspect guards cannot see it — an overshot crop can have a perfect
+    ratio. So ask the model the one question that catches it: how many
+    pixels of non-paper are visible along each side? Shave what it
+    reports, clamped to 3% per side so a hallucinated sliver can only
+    nibble, never eat a margin. Shrink-only by construction — this
+    pass cannot cut anything the outline didn't already include."""
+    sides = _edge_qa_sides(crop)
+    if not sides:
+        return crop
+    w, h = crop.size
+    l = min(sides['left'], 0.03 * w)
+    t = min(sides['top'], 0.03 * h)
+    r = min(sides['right'], 0.03 * w)
+    b = min(sides['bottom'], 0.03 * h)
+    if l + t + r + b < 2:
+        return crop
+    app.logger.info('trim-ai: edge QA shaved l%.0f t%.0f r%.0f b%.0f',
+                    l, t, r, b)
+    return crop.crop((int(round(l)), int(round(t)),
+                      w - int(round(r)), h - int(round(b))))
+
+
+def _edge_qa_sides(crop):
+    """Ask the model for the width of any non-paper sliver along each
+    side of a finished crop. Returns {'left','top','right','bottom'}
+    in crop pixels, or None (no key, API failure, bad answer)."""
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        return None
+    from io import BytesIO
+
+    small = crop.convert('RGB').copy()
+    small.thumbnail((1568, 1568))
+    sw, sh = small.size
+    buf = BytesIO()
+    small.save(buf, format='JPEG', quality=85)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    prompt = (
+        f"This {sw}x{sh}px image should show EXACTLY one banknote's "
+        "full paper sheet, edge to edge — nothing else. Some crops "
+        "leave a sliver of backdrop, holder plastic, or table beyond "
+        "the paper along a side or in a corner. For EACH side, give "
+        "the widest such sliver in pixels of this image (0 if that "
+        "side already ends at or inside the paper). Shadowed or "
+        "discolored paper is still paper — count only true non-paper "
+        "background; when unsure use 0. Reply ONLY JSON: "
+        '{"left": n, "top": n, "right": n, "bottom": n}')
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
+        resp = client.messages.create(
+            model=model,
+            max_tokens=100,
+            messages=[{'role': 'user', 'content': [
+                {'type': 'image', 'source': {
+                    'type': 'base64', 'media_type': 'image/jpeg',
+                    'data': b64}},
+                {'type': 'text', 'text': prompt},
+            ]}],
+        )
+        data = parse_model_json_object(_message_text(resp))
+    except Exception as e:
+        app.logger.info('trim-ai: edge QA failed: %s', e)
+        return None
+    out = {}
+    scale = crop.size[0] / float(sw)
+    for k in ('left', 'top', 'right', 'bottom'):
+        try:
+            v = float(data.get(k, 0))
+        except (TypeError, ValueError):
+            return None
+        out[k] = max(0.0, v) * scale
+    return out
 
 
 def _encode_trimmed_note(crop):

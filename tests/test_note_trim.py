@@ -412,6 +412,45 @@ assert abs(got - EXPECT) / EXPECT < 0.06, \
 print('CATALOG-RATIO REFINE GUARD ASSERTIONS PASSED')
 
 
+# --- Edge QA: overshoot slivers are shaved, clamped, shrink-only ----------
+# The 2026-08-17 front-of-note failure inverted: a paper outline that
+# OVERSHOT the sheet leaves backdrop wedges in the warp, and no aspect
+# guard can see it — the ratio can be perfect. The QA pass shaves what
+# the model reports per side, clamped to 3% so a hallucinated answer
+# can only nibble.
+img = Image.new('RGB', (1600, 1200), HOLDER)
+draw = ImageDraw.Draw(img)
+paper_quad = ((300, 300), (1340, 300), (1340, 880), (300, 880))
+design = _draw_note(draw, paper_quad)
+# outline overshoots the sheet: 24px of holder on the left, 18 below
+over = ((276, 300), (1340, 300), (1340, 898), (276, 898))
+stuffapp._ai_note_quad = _fake_quads(design, over)
+
+reported = {}
+
+
+def _fake_qa(crop):
+    w2, h2 = crop.size
+    reported['size'] = (w2, h2)
+    return {'left': 24.0, 'top': 300.0, 'right': 0.0, 'bottom': 18.0}
+
+
+_real_qa = stuffapp._edge_qa_sides
+stuffapp._edge_qa_sides = _fake_qa
+trimmed = _trim_to_image(img)
+stuffapp._edge_qa_sides = _real_qa
+assert trimmed is not None, 'edge-QA shot was not trimmed'
+assert reported, 'edge QA pass never ran'
+w0, h0 = reported['size']
+# left/bottom shaved as reported; the absurd 300px top claim clamped to 3%
+assert trimmed.size[0] == w0 - 24, \
+    f'left sliver not shaved: {trimmed.size[0]} vs {w0 - 24}'
+assert trimmed.size[1] == h0 - 18 - int(round(0.03 * h0)), \
+    f'top clamp / bottom shave wrong: {trimmed.size[1]}'
+assert _paper_frac(trimmed) > 0.9, 'backdrop sliver survived the QA pass'
+print('EDGE-QA (sliver shave, clamped) ASSERTIONS PASSED')
+
+
 # --- Homography sanity ----------------------------------------------------
 quad = ((10.0, 20.0), (410.0, 44.0), (400.0, 260.0), (18.0, 240.0))
 W, H = 400, 220
