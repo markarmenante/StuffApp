@@ -27,8 +27,12 @@ fold new standing instructions in here — nowhere else.)
     MCP connectors return variable names only, and the Mac is reachable
     only when a local session appears in ListAgents. The claude.ai
     environment's own env config is the reuse recipe for cloud
-    sessions, and as of Aug 2026 it does NOT yet carry the Anthropic
-    key (one-time add by Mark).
+    sessions — and as of 2026-08-17 the Default environment CARRIES
+    `ANTHROPIC_API_KEY` (and `BOARD_DATABASE_URL`), so sessions started
+    after that date can run model-dependent code (trim pipeline, Check
+    prompts, country histories) directly in the sandbox. If the var is
+    missing, check you're in the Default environment before assuming
+    it's gone.
   - To reach the Mac from a cloud session: Claude Code is already
     installed there; Mark opens the Claude desktop app with Remote
     Control enabled (or leaves a `claude` session running) and the Mac
