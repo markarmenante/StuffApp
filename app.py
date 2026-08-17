@@ -7788,7 +7788,7 @@ def save_upload(file_obj, *, optimize_image=False):
     return stored_name
 
 
-def _ai_note_quad(img, retry_collapsed=False):
+def _ai_note_quad(img, retry_collapsed=False, expect_aspect=None):
     """The trimmer's one detector: ask the same model Check already
     uses to outline the note. One small call on a downscaled copy;
     returns (design_quad, paper_quad_or_None) — the engraved area's
@@ -7799,7 +7799,10 @@ def _ai_note_quad(img, retry_collapsed=False):
     ``retry_collapsed`` is the second ask after the first paper
     rectangle came back drawn on the printed border instead of the
     sheet edge (see ``_margins_collapsed``); it says so plainly rather
-    than repeating an identical prompt."""
+    than repeating an identical prompt. ``expect_aspect`` is the
+    sheet's catalog long:short ratio when the record knows it — stated
+    in the prompt so paper_corners has a physical target, and checked
+    by the caller against what comes back."""
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
         return None
@@ -7840,6 +7843,15 @@ def _ai_note_quad(img, retry_collapsed=False):
         '{"found": true, "corners": [[x,y],[x,y],[x,y],[x,y]], '
         '"paper_corners": [[x,y],[x,y],[x,y],[x,y]]}. '
         'If no single banknote is clearly visible: {"found": false}.')
+    if expect_aspect:
+        prompt += (
+            f" This note's physical sheet is known to be about "
+            f"{expect_aspect:.2f} times as long as it is tall. After "
+            "correcting for any tilt, paper_corners should outline a "
+            "rectangle of roughly that ratio; if the rectangle you are "
+            "about to give is noticeably more elongated than that, the "
+            "top and bottom edges are on the printed border, not the "
+            "paper — move them outward to the true sheet edge.")
     if retry_collapsed:
         prompt += (
             " NOTE: a previous answer for this photo put paper_corners "
@@ -7925,9 +7937,31 @@ def _ai_note_quad(img, retry_collapsed=False):
     return design, paper
 
 
-def _trim_slabbed_note_image(data):
+def _aspect_off(size, expect_aspect):
+    """Relative deviation of a crop's long:short ratio from the
+    sheet's catalog ratio; 0.0 when no expectation is known."""
+    if not expect_aspect:
+        return 0.0
+    w, h = size
+    if not (w and h):
+        return 0.0
+    got = max(w, h) / float(min(w, h))
+    return abs(got - expect_aspect) / expect_aspect
+
+
+def _trim_slabbed_note_image(data, expect_aspect=None):
     """Crop a note photo (PMG/PCGS slab, sleeve, or bare) down to the
     engraved area plus its paper margins, squared up.
+
+    ``expect_aspect`` — the sheet's catalog long:short ratio (Check
+    passes size_width/size_height when the record has them) — is the
+    guard the collapse test cannot be: a paper outline that shaves
+    MOST of a margin leaves both sides nonzero and sails through
+    ``_margins_collapsed``, but it cannot fake the sheet's physical
+    ratio. The 2-Peso Victory back shipped at 2.72:1 against a
+    2.42:1 sheet that way (2026-08-17). A paper-path crop more than
+    6% off the catalog ratio triggers the same re-ask as a collapse;
+    still off after the re-ask, the design frame stands.
 
     The vision model is the ONLY detector, and it answers with TWO
     rectangles in one call: the engraved area (which is warped flat so
@@ -7953,26 +7987,40 @@ def _trim_slabbed_note_image(data):
     # 375px photo by model-pixel coordinates yields an unusable
     # smear, and the operator should re-upload the full-size photo.
     if min(w, h) >= 300:
-        quads = _ai_note_quad(img)
+        quads = _ai_note_quad(img, expect_aspect=expect_aspect)
         if quads is not None:
             crop, status = _crop_engraved_area(img, quads[0], quads[1])
-            if status == 'collapsed':
-                # The paper rectangle landed on the printed border, so
-                # the note would lose the margins on a whole axis. Ask
-                # once more, saying so; if the second answer collapses
-                # too, the design quad's own context frame stands —
-                # never a crop that shaves the sheet.
-                retry = _ai_note_quad(img, retry_collapsed=True)
+            bad = status == 'collapsed'
+            if not bad and crop is not None and status == 'paper' \
+                    and _aspect_off(crop.size, expect_aspect) > 0.06:
+                app.logger.info(
+                    'trim-ai: paper crop %dx%d is %.0f%% off the '
+                    'catalog ratio %.2f — asking again', *crop.size,
+                    _aspect_off(crop.size, expect_aspect) * 100,
+                    expect_aspect)
+                bad = True
+            if bad:
+                # The paper rectangle landed on (or hugged) the printed
+                # border, so the note would lose its margins. Ask once
+                # more, saying so; if the second answer is collapsed or
+                # still off the sheet's ratio, the design quad's own
+                # context frame stands — never a crop that shaves the
+                # sheet.
+                retry = _ai_note_quad(img, retry_collapsed=True,
+                                      expect_aspect=expect_aspect)
                 if retry is not None:
                     crop, status = _crop_engraved_area(
                         img, retry[0], retry[1])
-                    if status == 'collapsed':
+                    if status == 'collapsed' or (
+                            crop is not None and status == 'paper'
+                            and _aspect_off(crop.size,
+                                            expect_aspect) > 0.06):
                         crop, status = _crop_engraved_area(
                             img, retry[0], None)
                 else:
                     crop, status = _crop_engraved_area(img, quads[0], None)
             if crop is not None:
-                return _finish_ai_crop(crop)
+                return _finish_ai_crop(crop, expect_aspect=expect_aspect)
         # None is ambiguous: no key / API failure / no note found / the
         # note already fills the frame (a finished trim). In every one
         # of those cases the right move is the same: leave the stored
@@ -8068,7 +8116,7 @@ def _crop_engraved_area(img, design, paper):
     return (rect[0] if rect else None), 'design'
 
 
-def _finish_ai_crop(crop, refine=True):
+def _finish_ai_crop(crop, refine=True, expect_aspect=None):
     """Give the model ONE second look at its own crop: on a mostly-note
     image the rectangles are easy, so a first-pass overshoot from a
     busy scene is corrected by the model itself — never by pixel
@@ -8079,7 +8127,7 @@ def _finish_ai_crop(crop, refine=True):
     if crop.size[0] < 700:
         refine = False
     if refine:
-        quads = _ai_note_quad(crop)
+        quads = _ai_note_quad(crop, expect_aspect=expect_aspect)
         if quads is not None:
             cand, status = _crop_engraved_area(crop, quads[0], quads[1])
             if cand is not None and status != 'collapsed' \
@@ -8089,10 +8137,17 @@ def _finish_ai_crop(crop, refine=True):
                 # the note. Both faces of one sheet share an aspect
                 # ratio, and a refine that moves it is eating a margin,
                 # not trimming a holder — the 2026-08-17 back-of-note
-                # crop drifted 2.57 -> 2.71 that way.
+                # crop drifted 2.57 -> 2.71 that way. With the catalog
+                # ratio known the rule is sharper still: the refine may
+                # only move the aspect TOWARD the sheet's real shape.
                 was = crop.size[0] / float(crop.size[1])
                 now = cand.size[0] / float(cand.size[1])
-                if abs(now - was) / was <= 0.04:
+                if expect_aspect:
+                    ok = _aspect_off(cand.size, expect_aspect) \
+                        <= _aspect_off(crop.size, expect_aspect) + 0.005
+                else:
+                    ok = abs(now - was) / was <= 0.04
+                if ok:
                     app.logger.info(
                         'trim-ai: second-look refine %dx%d -> %dx%d',
                         *crop.size, *cand.size)
@@ -14852,6 +14907,25 @@ def banknote_lookup_specs(record_id):
     # original stays on disk (orphan-uploads can sweep it later).
     images_updated = {}
     if not lookup_error:
+        # The sheet's catalog long:short ratio anchors the trim (see
+        # _trim_slabbed_note_image). Freshest wins: a dimension this
+        # very lookup just read beats the stored column.
+        expect_aspect = None
+        dims = []
+        for f in ('size_width', 'size_height'):
+            v = filled.get(f)
+            if v in (None, ''):
+                v = (overwritten.get(f) or {}).get('new')
+            if v in (None, ''):
+                v = _coin_row_value(note, f)
+            try:
+                dims.append(float(v))
+            except (TypeError, ValueError):
+                dims.append(0.0)
+        if all(d > 0 for d in dims):
+            ratio = max(dims) / min(dims)
+            if 1.2 <= ratio <= 4.0:
+                expect_aspect = ratio
         for field in ('image_1', 'image_2'):
             fname = _coin_row_value(note, field)
             if not fname or not is_image_filter(fname):
@@ -14870,7 +14944,8 @@ def banknote_lookup_specs(record_id):
             try:
                 with open(os.path.join(UPLOAD_FOLDER, source), 'rb') as fh:
                     raw = fh.read()
-                trimmed = _trim_slabbed_note_image(raw)
+                trimmed = _trim_slabbed_note_image(
+                    raw, expect_aspect=expect_aspect)
             except Exception as e:
                 app.logger.warning('banknote %s: trim of %s (%s) failed: %s',
                                    record_id, field, source, e)

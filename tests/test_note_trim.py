@@ -67,7 +67,7 @@ def _fake_quads(design, paper=None):
     full-scene coordinates to the cropped image."""
     calls = {'n': 0}
 
-    def fake(im):
+    def fake(im, **kw):
         calls['n'] += 1
         return (design, paper) if calls['n'] == 1 else None
     return fake
@@ -233,7 +233,7 @@ flat = ((design[0][0] - 30, design[0][1] - 2),
 answers = {'n': 0}
 
 
-def _collapsing_then_right(im, retry_collapsed=False):
+def _collapsing_then_right(im, retry_collapsed=False, **kw):
     """First answer collapses top/bottom onto the border; the re-ask
     (and only the re-ask) returns the true sheet edge."""
     answers['n'] += 1
@@ -264,7 +264,7 @@ print('COLLAPSED-PAPER-OUTLINE (re-ask) ASSERTIONS PASSED')
 answers2 = {'n': 0}
 
 
-def _always_collapsing(im, retry_collapsed=False):
+def _always_collapsing(im, retry_collapsed=False, **kw):
     answers2['n'] += 1
     return (design, flat) if answers2['n'] <= 2 else None
 
@@ -295,7 +295,7 @@ shorter = ((paper_quad[0][0], paper_quad[0][1] + 60),
 looks = {'n': 0}
 
 
-def _refine_restretches(im, retry_collapsed=False):
+def _refine_restretches(im, retry_collapsed=False, **kw):
     looks['n'] += 1
     if looks['n'] == 1:
         return design, tuple(map(tuple, paper_quad))
@@ -315,6 +315,101 @@ want = 1180.0 / 600.0
 assert abs(got - want) / want < 0.08, \
     f'a restretching second look was applied: got {got:.3f}, want {want:.3f}'
 print('SECOND-LOOK ASPECT GUARD ASSERTIONS PASSED')
+
+
+# --- Catalog ratio: a margin-shaving outline is caught by physics ----------
+# The guard _margins_collapsed cannot catch: the model shaves MOST of
+# the top/bottom margin (thin-but-nonzero survives the collapse test),
+# giving a 2.18:1 crop of a 1.79:1 sheet. With the record's catalog
+# dimensions known, the ratio itself convicts the outline; the re-ask
+# (told the expected ratio) returns the true sheet edge.
+img = Image.new('RGB', (1600, 1200), HOLDER)
+draw = ImageDraw.Draw(img)
+paper_quad = ((300, 300), (1340, 300), (1340, 880), (300, 880))
+design = _draw_note(draw, paper_quad)
+# margins mostly (not entirely) eaten top and bottom, kept left/right
+shaved = ((285, 330), (1355, 330), (1355, 850), (285, 850))
+EXPECT = 1040.0 / 580.0
+
+asked = {'n': 0, 'retry_seen': False}
+
+
+def _shaved_then_true(im, retry_collapsed=False, expect_aspect=None):
+    asked['n'] += 1
+    assert expect_aspect is not None, 'catalog ratio was not threaded through'
+    if asked['n'] == 1:
+        return design, shaved
+    if asked['n'] == 2:
+        asked['retry_seen'] = retry_collapsed
+        return design, paper_quad
+    return None
+
+
+def _trim_expect(img, expect):
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG', quality=92)
+    out = stuffapp._trim_slabbed_note_image(buf.getvalue(),
+                                            expect_aspect=expect)
+    return Image.open(io.BytesIO(out)) if out else None
+
+
+stuffapp._ai_note_quad = _shaved_then_true
+trimmed = _trim_expect(img, EXPECT)
+assert trimmed is not None, 'ratio-guard shot was not trimmed'
+assert asked['n'] >= 2 and asked['retry_seen'], \
+    'the off-ratio outline was accepted without a re-ask'
+got = trimmed.size[0] / float(trimmed.size[1])
+assert abs(got - EXPECT) / EXPECT < 0.06, \
+    f'ratio-guard aspect off: got {got:.3f}, want {EXPECT:.3f}'
+insets = _design_insets(trimmed)
+assert all(f >= 0.01 for f in insets), \
+    f'margins still shaved with the catalog ratio known: {insets}'
+print('CATALOG-RATIO GUARD (re-ask) ASSERTIONS PASSED')
+
+
+# --- Catalog ratio: shaved twice -> the design frame stands ---------------
+asked2 = {'n': 0}
+
+
+def _always_shaved(im, retry_collapsed=False, expect_aspect=None):
+    asked2['n'] += 1
+    return (design, shaved) if asked2['n'] <= 2 else None
+
+
+stuffapp._ai_note_quad = _always_shaved
+trimmed = _trim_expect(img, EXPECT)
+assert trimmed is not None, 'twice-shaved shot was not trimmed'
+dw = design[1][0] - design[0][0]
+dh = design[3][1] - design[0][1]
+assert abs(trimmed.size[0] - dw * 1.2) <= 4 and \
+    abs(trimmed.size[1] - dh * 1.2) <= 4, \
+    f'expected the design frame, got {trimmed.size}'
+print('CATALOG-RATIO TWICE-SHAVED (design frame) ASSERTIONS PASSED')
+
+
+# --- Catalog ratio: refine may only move the aspect toward the sheet's ----
+looks2 = {'n': 0}
+
+
+def _refine_away_from_catalog(im, retry_collapsed=False, expect_aspect=None):
+    looks2['n'] += 1
+    if looks2['n'] == 1:
+        return design, paper_quad             # correct 1.79:1 crop
+    if looks2['n'] == 2:                      # second look shaves again
+        w2, h2 = im.size
+        inset = ((6.0, 40.0), (w2 - 6.0, 40.0),
+                 (w2 - 6.0, h2 - 40.0), (6.0, h2 - 40.0))
+        return inset, inset
+    return None
+
+
+stuffapp._ai_note_quad = _refine_away_from_catalog
+trimmed = _trim_expect(img, EXPECT)
+assert trimmed is not None, 'refine-away shot was not trimmed'
+got = trimmed.size[0] / float(trimmed.size[1])
+assert abs(got - EXPECT) / EXPECT < 0.06, \
+    f'refine moved the aspect away from catalog: got {got:.3f}'
+print('CATALOG-RATIO REFINE GUARD ASSERTIONS PASSED')
 
 
 # --- Homography sanity ----------------------------------------------------
