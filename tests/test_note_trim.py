@@ -1,12 +1,11 @@
-"""Tests for the slabbed-banknote trimmer (vision-primary pipeline).
+"""Tests for the slabbed-banknote trimmer (vision-only pipeline).
 
-The vision model is the trimmer's only detector: it outlines the
-engraved area, which is perspective-warped level and cropped with a
-uniform paper margin; backdrop swept into the margin is clamped per
-side. These tests fake the model's quad and assert the geometry that
-follows from it. Without a quad (no API key, nothing found) the
-trimmer must leave the image untouched — no heuristic guessing; the
-old CV cascade was deleted 2026-08-16.
+The vision model outlines TWO rectangles in one call: the engraved
+area (alignment) and the note's physical paper edge (margins). The
+design quad is warped level; the paper quad is mapped through the
+same homography and bounds the crop per side. There is no pixel
+classification anywhere — shadows and backgrounds are irrelevant by
+construction, and without a model answer the image is left untouched.
 Run: .venv/bin/python tests/test_note_trim.py
 """
 import io
@@ -28,10 +27,9 @@ from PIL import Image, ImageDraw
 import app as stuffapp
 
 
-PAPER = (228, 219, 188)     # warm aged paper
-GREEN_PAPER = (215, 224, 205)  # cool JIM-style paper
+PAPER = (228, 219, 188)
 INK = (60, 55, 70)
-HOLDER = (24, 24, 26)       # dark PMG holder
+HOLDER = (24, 24, 26)
 
 
 def _lerp2(quad, u, v):
@@ -41,12 +39,10 @@ def _lerp2(quad, u, v):
     return x, y
 
 
-def _draw_note(draw, quad, paper=PAPER):
-    """Paper quad with a dark design inside it (border + line work).
-    Returns the design quad (the outline the vision model would draw),
-    at 7% in from the paper edge."""
+def _draw_note(draw, quad, paper=PAPER, m=0.07):
+    """Paper quad with a dark design inside it; returns the design quad
+    (the outline the vision model would draw), m in from the paper."""
     draw.polygon(quad, fill=paper)
-    m = 0.07
     design = [_lerp2(quad, m, m), _lerp2(quad, 1 - m, m),
               _lerp2(quad, 1 - m, 1 - m), _lerp2(quad, m, 1 - m)]
     draw.polygon(design, outline=INK, width=4)
@@ -65,20 +61,32 @@ def _trim_to_image(img):
     return Image.open(io.BytesIO(out)) if out else None
 
 
-def _fake_quad(quad):
-    """Monkeypatch factory: return `quad` on the first call, None after
-    (so _finish_ai_crop's second look skips instead of re-applying
-    full-scene coordinates to the already-cropped image)."""
+def _fake_quads(design, paper=None):
+    """Monkeypatch factory: (design, paper) on the first call, None
+    after — the second-look refine skips instead of re-applying
+    full-scene coordinates to the cropped image."""
     calls = {'n': 0}
 
     def fake(im):
         calls['n'] += 1
-        return quad if calls['n'] == 1 else None
+        return (design, paper) if calls['n'] == 1 else None
     return fake
 
 
+def _paper_frac(img):
+    """Test-side check that an output is mostly warm paper (the app
+    itself no longer classifies pixels — that is the point)."""
+    small = img.convert('RGB').copy()
+    small.thumbnail((80, 80))
+    px = small.load()
+    w, h = small.size
+    n = sum(1 for y in range(h) for x in range(w)
+            if max(px[x, y][:3]) > 140
+            and max(px[x, y][:3]) - min(px[x, y][:3]) < 70)
+    return n / float(w * h or 1)
+
+
 def _design_insets(img, ring=8):
-    """Fractional inset of the printed area from each output edge."""
     g = img.convert('L')
     px = g.load()
     w, h = g.size
@@ -99,37 +107,35 @@ img = Image.new('RGB', (1600, 1200), HOLDER)
 draw = ImageDraw.Draw(img)
 _draw_note(draw, [(300, 300), (1300, 306), (1296, 900), (304, 894)])
 assert _trim_to_image(img) is None, \
-    'without a vision quad the trimmer must not touch the image'
+    'without a vision answer the trimmer must not touch the image'
 print('NO-MODEL NO-OP ASSERTIONS PASSED')
 
 
-# --- Level slab shot: engraved area + margins, squared ---------------------
+# --- Level slab shot, paper quad given: margins end at the paper edge ------
 img = Image.new('RGB', (1600, 1200), HOLDER)
 draw = ImageDraw.Draw(img)
-design = _draw_note(draw, [(300, 300), (1340, 300), (1340, 880), (300, 880)])
-stuffapp._ai_note_quad = _fake_quad(design)
+paper_quad = [(300, 300), (1340, 300), (1340, 880), (300, 880)]
+design = _draw_note(draw, paper_quad)
+stuffapp._ai_note_quad = _fake_quads(design, tuple(map(tuple, paper_quad)))
 trimmed = _trim_to_image(img)
 assert trimmed is not None, 'level slab shot was not trimmed'
-qw = design[1][0] - design[0][0]
-qh = design[3][1] - design[0][1]
 got = trimmed.size[0] / float(trimmed.size[1])
-assert abs(got - qw / qh) / (qw / qh) < 0.08, \
-    f'aspect off: got {got:.3f}, want {qw / qh:.3f}'
+want = 1040.0 / 580.0     # the paper's aspect: margins bounded by paper edge
+assert abs(got - want) / want < 0.08, \
+    f'aspect off: got {got:.3f}, want {want:.3f}'
 insets = _design_insets(trimmed)
 assert all(f >= 0.01 for f in insets), f'design touches edge: {insets}'
 assert all(f <= 0.12 for f in insets), f'margins too wide: {insets}'
-assert stuffapp._note_paper_fraction(trimmed) > 0.6, 'output not mostly paper'
-print('LEVEL SLAB ASSERTIONS PASSED')
+assert _paper_frac(trimmed) > 0.8, 'holder left in the crop'
+print('LEVEL SLAB (paper-bounded margins) ASSERTIONS PASSED')
 
 
-# --- Keystoned shot: the quad is warped level ------------------------------
-# The note photographed at an angle: the model's tilted quad must come
-# out square-on — that IS the "align horizontally and vertically"
-# contract. Aspect follows the quad's average side lengths.
+# --- Keystoned shot: the design quad is warped level -----------------------
 img = Image.new('RGB', (1600, 1200), HOLDER)
 draw = ImageDraw.Draw(img)
-design = _draw_note(draw, [(340, 330), (1290, 380), (1260, 930), (370, 860)])
-stuffapp._ai_note_quad = _fake_quad(design)
+paper_quad = [(320, 310), (1310, 400), (1280, 950), (350, 840)]
+design = _draw_note(draw, paper_quad)
+stuffapp._ai_note_quad = _fake_quads(design, tuple(map(tuple, paper_quad)))
 trimmed = _trim_to_image(img)
 assert trimmed is not None, 'keystoned slab shot was not trimmed'
 davg_w = (math.hypot(design[1][0] - design[0][0], design[1][1] - design[0][1])
@@ -138,77 +144,54 @@ davg_h = (math.hypot(design[3][0] - design[0][0], design[3][1] - design[0][1])
           + math.hypot(design[2][0] - design[1][0], design[2][1] - design[1][1])) / 2
 want = davg_w / davg_h
 got = trimmed.size[0] / float(trimmed.size[1])
-assert abs(got - want) / want < 0.08, \
+assert abs(got - want) / want < 0.12, \
     f'keystone aspect off: got {got:.3f}, want {want:.3f}'
 insets = _design_insets(trimmed)
 assert all(f >= 0.005 for f in insets), f'design touches edge: {insets}'
-assert stuffapp._note_paper_fraction(trimmed) > 0.55, 'output not mostly paper'
+assert _paper_frac(trimmed) > 0.6, 'output not mostly paper'
 print('KEYSTONE ASSERTIONS PASSED')
 
 
-# --- Margin clamp: cool paper kept, dark holder trimmed --------------------
-# The clamp's paper reference is sampled from the note's own margin ring,
-# so greenish JIM paper is not shaved as backdrop; and a mostly-dark edge
-# band is holder plastic, not engraving, so it IS trimmed.
-img = Image.new('RGB', (1000, 500), GREEN_PAPER)
+# --- Thin bottom margin: crop ends at the paper edge, not the 7% frame -----
+# The paper quad's bottom sits 2% below the design; the top margin is a
+# full 7%. The output must be asymmetric to match the REAL margins —
+# no color/shadow reasoning involved.
+img = Image.new('RGB', (1600, 1200), HOLDER)
 draw = ImageDraw.Draw(img)
-draw.rectangle([0, 0, 59, 499], fill=(28, 28, 30))       # dark holder band, left
-draw.rectangle([120, 60, 940, 440], outline=INK, width=8)  # design
-for gx in range(140, 920, 20):
-    draw.line([(gx, 80), (gx, 420)], fill=INK, width=2)
-inner = (120, 60, 940, 440)
-out = stuffapp._clamp_ai_margins(img, inner)
-ow, oh = out.size
-assert ow <= 1000 - 55, f'dark holder band kept: {out.size}'
-assert oh == 500, f'green paper margins shaved vertically: {out.size}'
-opx = out.convert('RGB').load()
-c = opx[5, 250]
-assert max(c) >= 95, f'left edge still holder-dark: {c}'
-print('MARGIN-CLAMP (cool paper / dark holder) ASSERTIONS PASSED')
+draw.rectangle([300, 300, 1340, 892], fill=PAPER)   # paper: bottom margin thin
+design = ((373, 341), (1267, 341), (1267, 880), (373, 880))
+draw.rectangle([373, 341, 1267, 880], outline=INK, width=4)
+for gx in range(395, 1250, 20):
+    draw.line([(gx, 361), (gx, 860)], fill=INK, width=2)
+paper_quad = ((300, 300), (1340, 300), (1340, 892), (300, 892))
+stuffapp._ai_note_quad = _fake_quads(design, paper_quad)
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'thin-margin shot was not trimmed'
+left, top, right, bottom = _design_insets(trimmed)
+assert bottom < top, \
+    f'bottom margin should be thinner than top: top {top:.3f}, bottom {bottom:.3f}'
+assert bottom >= 0.004, f'floor margin missing at bottom: {bottom:.3f}'
+assert _paper_frac(trimmed) > 0.8, 'holder included beyond the paper edge'
+print('THIN-MARGIN (paper-bounded) ASSERTIONS PASSED')
 
 
-# --- Margin clamp: shadowed bottom margin is paper, not backdrop -----------
-# In a holder photo the note's bottom edge sits in shadow: darker than
-# the reference paper but the same hue. The clamp must keep it (the JIM
-# notes lost their bottom margins to a fixed color-distance test) and
-# may never eat more than a sliver into the model's rectangle.
-SHADOW = tuple(int(v * 0.55) for v in PAPER)
-img = Image.new('RGB', (1000, 560), PAPER)
+# --- No paper quad: the fixed context frame stands as the margin -----------
+img = Image.new('RGB', (1600, 1200), PAPER)   # borderless: same-tone backdrop
 draw = ImageDraw.Draw(img)
-draw.rectangle([120, 60, 940, 440], outline=INK, width=8)   # design
-for gx in range(140, 920, 20):
-    draw.line([(gx, 80), (gx, 420)], fill=INK, width=2)
-draw.rectangle([0, 470, 999, 509], fill=SHADOW)             # shadowed margin
-draw.rectangle([0, 510, 999, 559], fill=(22, 22, 24))       # holder below
-inner = (120, 60, 940, 440)
-out = stuffapp._clamp_ai_margins(img, inner)
-ow, oh = out.size
-assert oh >= 505, f'shadowed bottom margin eaten: {out.size}'
-assert oh <= 520, f'holder band below shadow kept: {out.size}'
-print('MARGIN-CLAMP (shadowed bottom) ASSERTIONS PASSED')
-
-
-# --- Margin clamp: deep-shadow margin still keeps a floor margin -----------
-# A margin so dark it reads as holder (the JIM reverse's bottom) must
-# not let the clamp cut flush to the design: the crop always ends at
-# least ~1.5% of the design size beyond the model's rectangle.
-DEEP = tuple(int(v * 0.25) for v in PAPER)
-img = Image.new('RGB', (1000, 560), PAPER)
-draw = ImageDraw.Draw(img)
-draw.rectangle([120, 60, 940, 440], outline=INK, width=8)
-for gx in range(140, 920, 20):
-    draw.line([(gx, 80), (gx, 420)], fill=INK, width=2)
-draw.rectangle([0, 450, 999, 559], fill=DEEP)   # deep shadow below design
-inner = (120, 60, 940, 440)
-out = stuffapp._clamp_ai_margins(img, inner)
-assert out.size[1] >= 440 + max(3, int(0.015 * 380)), \
-    f'deep-shadow bottom cut flush to the design: {out.size}'
-print('MARGIN-CLAMP (deep-shadow floor) ASSERTIONS PASSED')
+design = ((373, 341), (1267, 341), (1267, 880), (373, 880))
+draw.rectangle(list(design[0] + design[2]), outline=INK, width=4)
+for gx in range(395, 1250, 20):
+    draw.line([(gx, 361), (gx, 860)], fill=INK, width=2)
+stuffapp._ai_note_quad = _fake_quads(design, None)
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'no-paper-quad shot was not trimmed'
+insets = _design_insets(trimmed)
+assert all(0.03 <= f <= 0.10 for f in insets), \
+    f'context-frame margins off: {insets}'
+print('NO-PAPER-QUAD (context frame) ASSERTIONS PASSED')
 
 
 # --- Homography sanity ----------------------------------------------------
-# The PERSPECTIVE coefficients must map each output corner exactly onto
-# its source-quad corner (PIL samples source = H(output)).
 quad = ((10.0, 20.0), (410.0, 44.0), (400.0, 260.0), (18.0, 240.0))
 W, H = 400, 220
 c = stuffapp._perspective_coeffs(quad, W, H)
@@ -220,5 +203,13 @@ for (dx, dy), (sx, sy) in zip(((0, 0), (W, 0), (W, H), (0, H)), quad):
     assert abs(mx - sx) < 1e-6 and abs(my - sy) < 1e-6, \
         (dx, dy, mx, my, sx, sy)
 print('HOMOGRAPHY ASSERTIONS PASSED')
+
+
+# --- Round-trip: paper corners land where the inverse mapping says ---------
+coeffs = stuffapp._perspective_coeffs(quad, W, H)
+back = stuffapp._map_source_points_to_output(coeffs, quad)
+for (gx, gy), (ex, ey) in zip(back, ((0, 0), (W, 0), (W, H), (0, H))):
+    assert abs(gx - ex) < 1e-4 and abs(gy - ey) < 1e-4, (gx, gy, ex, ey)
+print('INVERSE-MAPPING ASSERTIONS PASSED')
 
 print('ALL NOTE-TRIM ASSERTIONS PASSED')

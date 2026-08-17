@@ -7620,11 +7620,12 @@ def save_upload(file_obj, *, optimize_image=False):
 
 
 def _ai_note_quad(img):
-    """Vision fallback: when every local detector has failed on a photo
-    (glare through a sleeve, felt grain, washed edges — the scenes CV
-    heuristics keep losing), ask the same model Check already uses to
-    point at the note. One small call on a downscaled copy; returns the
-    banknote paper's (NW, NE, SE, SW) in full-res pixels, or None."""
+    """The trimmer's one detector: ask the same model Check already
+    uses to outline the note. One small call on a downscaled copy;
+    returns (design_quad, paper_quad_or_None) — the engraved area's
+    (NW, NE, SE, SW) and the note's physical paper outline, both in
+    full-res pixels — or None (no key, API failure, nothing found, or
+    the note already fills the frame)."""
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
         return None
@@ -7644,16 +7645,21 @@ def _ai_note_quad(img):
     prompt = (
         f"This {sw}x{sh}px photo shows a paper banknote, possibly inside a "
         "plastic grading holder or sleeve, on some backdrop, possibly with a "
-        "grading label. Draw the rectangle around the outer points of the "
-        "note's PRINTED AREA: every printed or engraved element — border, "
-        "corner ornaments, portrait, seals, serial numbers, signatures, "
-        "overprints — but never the grading label, holder edge, sleeve or "
-        "backdrop. Reply with ONLY JSON, no prose: "
-        '{"found": true, "corners": [[x,y],[x,y],[x,y],[x,y]]} — that '
-        "rectangle's corners in pixels of this image (tilted with the note "
-        "if the photo is tilted), ordered top-left, top-right, bottom-right, "
-        "bottom-left. When unsure err OUTSIDE the printed area — it must "
-        "never be cut. "
+        "grading label. Draw TWO rectangles, both in pixels of this image, "
+        "tilted with the note if the photo is tilted, corners ordered "
+        "top-left, top-right, bottom-right, bottom-left. "
+        "(1) corners: around the outer points of the note's PRINTED AREA — "
+        "every printed or engraved element: border, corner ornaments, "
+        "portrait, seals, serial numbers, signatures, overprints — but "
+        "never the grading label, holder edge, sleeve or backdrop. When "
+        "unsure err OUTSIDE the printed area; it must never be cut. "
+        "(2) paper_corners: around the note's PHYSICAL PAPER edge, where "
+        "the paper sheet meets holder plastic, sleeve, or backdrop. Shadows "
+        "or discoloration on the paper are still paper — follow the true "
+        "sheet edge, exactly. Use null for paper_corners only if the paper "
+        "edge is genuinely not visible. Reply with ONLY JSON, no prose: "
+        '{"found": true, "corners": [[x,y],[x,y],[x,y],[x,y]], '
+        '"paper_corners": [[x,y],[x,y],[x,y],[x,y]]}. '
         'If no single banknote is clearly visible: {"found": false}.')
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -7702,23 +7708,48 @@ def _ai_note_quad(img):
     if qw >= 0.96 * sw and qh >= 0.96 * sh:
         return None          # note already fills the frame — nothing to do
     scale = w / float(sw)
-    return tuple((x * scale, y * scale) for x, y in pts)
+    design = tuple((x * scale, y * scale) for x, y in pts)
+
+    # Paper outline: optional, and only trusted when it is a sane
+    # superset of the design (each paper corner at or beyond its
+    # design corner, small tolerance) — otherwise margins fall back
+    # to the fixed context frame.
+    paper = None
+    raw = data.get('paper_corners')
+    if isinstance(raw, list) and len(raw) == 4:
+        try:
+            ppts = [(float(x), float(y)) for x, y in raw]
+        except (TypeError, ValueError):
+            ppts = None
+        if ppts and all(-pad * sw <= x <= (1 + pad) * sw
+                        and -pad * sh <= y <= (1 + pad) * sh
+                        for x, y in ppts):
+            tol = 0.02 * max(sw, sh)
+            signs = ((-1, -1), (1, -1), (1, 1), (-1, 1))
+            if all((px_ - dx_) * sx_ >= -tol and (py_ - dy_) * sy_ >= -tol
+                   for (px_, py_), (dx_, dy_), (sx_, sy_)
+                   in zip(ppts, pts, signs)):
+                paper = tuple((x * scale, y * scale) for x, y in ppts)
+    if raw and paper is None:
+        app.logger.info('trim-ai: paper_corners rejected (not a sane '
+                        'superset of the design) — context frame stands')
+    return design, paper
 
 
 def _trim_slabbed_note_image(data):
     """Crop a note photo (PMG/PCGS slab, sleeve, or bare) down to the
     engraved area plus its paper margins, squared up.
 
-    The vision model is the ONLY detector: it outlines the printed
-    area's four corners, that quad is perspective-warped flat so the
-    design sits level — aligned horizontally and vertically — with a
-    uniform context margin standing in for the paper margins, and any
-    backdrop the margin swept in is clamped off per side. One detector,
-    one geometry, every photo. The old CV heuristic cascade (dark
-    holder, light holder, design union, rembg) fought each scene
-    differently and left inconsistent crops; it was deleted outright
-    2026-08-16 — when the model is unavailable or finds nothing, the
-    image is left untouched instead of guessed at.
+    The vision model is the ONLY detector, and it answers with TWO
+    rectangles in one call: the engraved area (which is warped flat so
+    the design sits level — aligned horizontally and vertically) and
+    the note's physical paper outline (mapped through the same
+    homography to bound the margins per side). Holder, backdrop, and
+    shadows are excluded by where the paper edge IS — pure geometry,
+    no pixel classification anywhere. The old CV heuristic cascade and
+    the later color-clamp heuristics were deleted outright (2026-08-16
+    /17); when the model is unavailable or finds nothing, the image is
+    left untouched instead of guessed at.
 
     Returns JPEG bytes, or None when there is nothing to do —
     well-trimmed notes pass through untouched (an already-trimmed
@@ -7733,15 +7764,11 @@ def _trim_slabbed_note_image(data):
     # 375px photo by model-pixel coordinates yields an unusable
     # smear, and the operator should re-upload the full-size photo.
     if min(w, h) >= 300:
-        quad = _ai_note_quad(img)
-        if quad is not None:
-            # The quad is the engraved area's extent; the context
-            # margin stands in for the paper margins around it,
-            # clamped per side so it never overshoots onto backdrop.
-            rect = _rectify_note_quad(img, quad, context=0.07,
-                                      fill=img.load()[2, 2])
-            if rect:
-                return _finish_ai_crop(_clamp_ai_margins(rect[0], rect[1]))
+        quads = _ai_note_quad(img)
+        if quads is not None:
+            crop = _crop_engraved_area(img, quads[0], quads[1])
+            if crop is not None:
+                return _finish_ai_crop(crop)
         # None is ambiguous: no key / API failure / no note found / the
         # note already fills the frame (a finished trim). In every one
         # of those cases the right move is the same: leave the stored
@@ -7749,198 +7776,85 @@ def _trim_slabbed_note_image(data):
     return None
 
 
-def _is_paperish(px, x, y):
-    """Warm, bright, low-saturation — reads as banknote paper."""
-    r, g, b = px[x, y][:3]
-    mx = max(r, g, b)
-    return mx > 140 and mx - min(r, g, b) < 70 and r >= g - 10
+def _map_source_points_to_output(coeffs, pts):
+    """Invert the PERSPECTIVE mapping for specific source points.
+
+    PIL's coefficients map output(x, y) -> source(X, Y); solving the
+    2x2 linear system per point gives where a source point lands in
+    the output — how the paper outline is placed on the warped crop
+    without touching a single pixel value."""
+    a, b, c, d, e, f, g, hh = coeffs
+    out = []
+    for X, Y in pts:
+        a11, a12 = a - X * g, b - X * hh
+        a21, a22 = d - Y * g, e - Y * hh
+        det = a11 * a22 - a12 * a21
+        if abs(det) < 1e-9:
+            return None
+        rx, ry = X - c, Y - f
+        out.append(((rx * a22 - a12 * ry) / det,
+                    (a11 * ry - rx * a21) / det))
+    return out
 
 
-def _square_up_note(img):
-    """Level the small residual tilt an axis-aligned AI rectangle
-    leaves on a rotated note (backdrop wedges in the corners, note
-    edges not parallel to the frame). Fits the note's bottom paper
-    edge, rotates level, and shaves the rotation wedges. Returns a PIL
-    image or None when there is no measurable tilt."""
-    import math
+def _crop_engraved_area(img, design, paper):
+    """Engraved area plus its real paper margins, squared — geometry
+    only, no pixel classification.
 
-    from PIL import Image
-
-    rgb = img.convert('RGB')
-    px = rgb.load()
-    w, h = rgb.size
-    angle = _fit_note_bottom_angle(px, w, h, _is_paperish)
-    if not angle or abs(angle) < 0.4:
+    The design quad is warped level inside a 7% context frame; the
+    paper quad (seen by the same model call) is mapped through the
+    same homography and bounds the crop per side, so holder and
+    backdrop are excluded because of where the paper edge IS, not what
+    its pixels look like — shadows and backgrounds are irrelevant.
+    Margins never drop below ~1.5% of the design (a visible border
+    survives even a wrong paper edge) and never exceed the frame.
+    Without a trusted paper quad the frame stands as the margin."""
+    rect = _rectify_note_quad(img, design, context=0.07,
+                              fill=img.load()[2, 2])
+    if not rect:
         return None
-    rot = rgb.rotate(angle, resample=Image.BICUBIC, expand=False,
-                     fillcolor=px[2, 2])
-    t = abs(math.tan(math.radians(angle)))
-    dx = int(t * h / 2) + 2
-    dy = int(t * w / 2) + 2
-    if w - 2 * dx < 60 or h - 2 * dy < 30:
-        return None
-    return rot.crop((dx, dy, w - dx, h - dy))
-
-
-def _clamp_ai_margins(warped, inner):
-    """Trim backdrop off the edges of the model's crop. The uniform
-    context margin — and the model's own err-outside slack — land on
-    backdrop wherever the note's paper margin is thinner (the Victory
-    front's left band, the back's right band).
-
-    What counts as paper is sampled from THIS note: the ring just
-    outside the model's design rectangle is note margin by
-    construction, and its median colour is the reference — so green,
-    blue, and white papers all read as paper (a fixed warm-paper test
-    shaved the margins clean off the greenish JIM 10-Pesos front). A
-    mostly-dark line is holder plastic, not engraving (an ink test
-    that refused to trim dark lines kept black PMG holder slivers on
-    slab shots). From each edge, trim lines that are NOT mostly
-    reference-paper AND are either featureless or mostly dark. The
-    scan covers the added margin band plus at most 6% into the
-    model's rectangle, and stops dead at the first line of paper or
-    mixed ink-on-paper — printed area stays untouchable."""
-    px = warped.convert('RGB').load()
+    warped, inner, coeffs = rect
     w, h = warped.size
-    ix0, iy0, ix1, iy1 = [int(v) for v in inner]
-    ix0, ix1 = max(0, min(ix0, w)), max(0, min(ix1, w))
-    iy0, iy1 = max(0, min(iy0, h)), max(0, min(iy1, h))
-    if ix1 <= ix0 or iy1 <= iy0:
-        return warped
-
-    ys = list(range(iy0, iy1, max(1, (iy1 - iy0) // 40)))
-    xs = list(range(ix0, ix1, max(1, (ix1 - ix0) // 40)))
-
-    ring = []
-    pad = 3
-    for x in xs:
-        for y in (iy0 - pad, iy1 + pad - 1):
-            if 0 <= y < h:
-                ring.append(px[x, y][:3])
-    for y in ys:
-        for x in (ix0 - pad, ix1 + pad - 1):
-            if 0 <= x < w:
-                ring.append(px[x, y][:3])
-    bright = [c for c in ring if max(c) >= 95]
-    if not bright:
-        return warped
-    ref = []
-    for i in range(3):
-        vals = sorted(c[i] for c in bright)
-        ref.append(vals[len(vals) // 2])
-
-    ref_sum = float(sum(ref)) or 1.0
-
-    def line_stats(coords):
-        # Shadowed paper reads darker than the reference but keeps its
-        # hue (the note's bottom edge sits in shadow inside a holder),
-        # so compare colour after normalizing the sample's brightness
-        # to the reference — a bottom margin at 50% brightness is still
-        # paper, while grey holder plastic differs in chroma however
-        # bright it is.
-        paper = dark = 0
-        for x, y in coords:
-            c = px[x, y][:3]
-            if max(c) < 60:
-                dark += 1
-                continue
-            s = ref_sum / float(sum(c) or 1)
-            if 0.5 <= s <= 2.2 and \
-                    abs(c[0] * s - ref[0]) + abs(c[1] * s - ref[1]) \
-                    + abs(c[2] * s - ref[2]) < 110:
-                paper += 1
-            elif max(c) < 95:
-                dark += 1
-        n = float(len(coords) or 1)
-        return paper / n, dark / n
-
-    def backdroppy(coords):
-        paper, dark = line_stats(coords)
-        return paper < 0.55 and (dark < 0.03 or dark > 0.60)
-
-    # The walk may cross the inner box by only a sliver: the model's
-    # rectangle hugs the printed area, so anything deeper than ~2%
-    # inside it is design, and eating into it is how the JIM notes
-    # lost their bottom borders to the old 15% allowance.
-    in_x, in_y = max(2, int(0.02 * w)), max(2, int(0.02 * h))
-    x0, x1, y0, y1 = 0, w, 0, h
-    while x0 < min(ix0 + in_x, w - 60) \
-            and backdroppy([(x0, y) for y in ys]):
-        x0 += 1
-    while x1 > max(ix1 - in_x, x0 + 60) \
-            and backdroppy([(x1 - 1, y) for y in ys]):
-        x1 -= 1
-    while y0 < min(iy0 + in_y, h - 30) \
-            and backdroppy([(x, y0) for x in xs]):
-        y0 += 1
-    while y1 > max(iy1 - in_y, y0 + 30) \
-            and backdroppy([(x, y1 - 1) for x in xs]):
-        y1 -= 1
-    # Hard floor: whatever the colour tests said, the crop never ends
-    # closer than ~1.5% of the design size to the model's rectangle —
-    # a deep-shadow margin row can defeat any classifier (the JIM
-    # reverse's bottom margin did), and a sliver of kept holder is
-    # cheaper than a design cut flush to the edge.
+    ix0, iy0, ix1, iy1 = inner
     floor_x = max(3, int(0.015 * (ix1 - ix0)))
     floor_y = max(3, int(0.015 * (iy1 - iy0)))
-    x0 = min(x0, max(0, ix0 - floor_x))
-    y0 = min(y0, max(0, iy0 - floor_y))
-    x1 = max(x1, min(w, ix1 + floor_x))
-    y1 = max(y1, min(h, iy1 + floor_y))
+    x0, y0, x1, y1 = 0, 0, w, h
+    mapped = _map_source_points_to_output(coeffs, paper) if paper else None
+    if mapped:
+        (nwx, nwy), (nex, ney), (sex, sey), (swx, swy) = mapped
+        # Innermost extent per side, so a rotated paper outline can't
+        # sweep backdrop corners into the crop.
+        x0 = max(0, int(min(max(nwx, swx), ix0 - floor_x)))
+        y0 = max(0, int(min(max(nwy, ney), iy0 - floor_y)))
+        x1 = min(w, int(max(min(nex, sex), ix1 + floor_x)) + 1)
+        y1 = min(h, int(max(min(swy, sey), iy1 + floor_y)) + 1)
+    if x1 - x0 < 60 or y1 - y0 < 30:
+        return None
     if (x0, y0, x1, y1) == (0, 0, w, h):
         return warped
     return warped.crop((x0, y0, x1, y1))
 
 
 def _finish_ai_crop(crop, refine=True):
-    """Post-process the vision model's rectangle into the stored image.
-
-    Level any residual tilt, then give the model ONE second look at its
-    own crop: on a mostly-note image the printed-area rectangle is easy,
-    so an overshot backdrop band from the first pass (busy scene) gets
-    removed by the model itself rather than by any color heuristic — a
-    heuristic shave ate through the Victory 10 Pesos front's margins
-    because its engraved border does not read as paper. The second quad
-    only applies when it keeps at least half the crop, and a crop the
-    model says already fills the frame comes back None (no-op)."""
-    leveled = _square_up_note(crop) or crop
-    # Below ~700px wide the model's pixel precision is a large relative
-    # error — a second look at a 355px crop shaved a quarter of its
-    # height (the 500x375 BPI back thumbnail). Small crops keep the
-    # first rectangle.
-    if leveled.size[0] < 700:
+    """Give the model ONE second look at its own crop: on a mostly-note
+    image the rectangles are easy, so a first-pass overshoot from a
+    busy scene is corrected by the model itself — never by pixel
+    heuristics. The second answer only applies when it keeps at least
+    half the crop. Below ~700px wide the model's pixel precision is a
+    large relative error (a 355px crop once lost a quarter of its
+    height to a second look), so small crops keep the first result."""
+    if crop.size[0] < 700:
         refine = False
     if refine:
-        quad = _ai_note_quad(leveled)
-        if quad is not None:
-            rect = _rectify_note_quad(leveled, quad, context=0.07,
-                                      fill=leveled.load()[2, 2])
-            if rect:
-                cand = _clamp_ai_margins(rect[0], rect[1])
-                w0, h0 = leveled.size
-                if cand.size[0] * cand.size[1] >= 0.5 * w0 * h0:
-                    leveled = _square_up_note(cand) or cand
-                    app.logger.info('trim-ai: second-look refine %dx%d -> %dx%d',
-                                    w0, h0, *leveled.size)
-    return _encode_trimmed_note(leveled)
-
-
-def _note_paper_fraction(img):
-    """Fraction of the frame that reads as banknote paper — warm,
-    bright, low-saturation. A finished trim is mostly note; a felt or
-    holder scene is not, whatever the detectors claimed."""
-    small = img.convert('RGB').copy()
-    small.thumbnail((80, 80))
-    px = small.load()
-    w, h = small.size
-    paper = 0
-    for y in range(h):
-        for x in range(w):
-            r, g, b = px[x, y][:3]
-            mx = max(r, g, b)
-            if mx > 140 and mx - min(r, g, b) < 70 and r >= g - 10:
-                paper += 1
-    return paper / float(w * h or 1)
+        quads = _ai_note_quad(crop)
+        if quads is not None:
+            cand = _crop_engraved_area(crop, quads[0], quads[1])
+            if cand is not None and cand.size[0] * cand.size[1] \
+                    >= 0.5 * (crop.size[0] * crop.size[1]):
+                app.logger.info('trim-ai: second-look refine %dx%d -> %dx%d',
+                                *crop.size, *cand.size)
+                crop = cand
+    return _encode_trimmed_note(crop)
 
 
 def _encode_trimmed_note(crop):
@@ -7952,57 +7866,6 @@ def _encode_trimmed_note(crop):
     crop.save(out, format='JPEG', quality=OPTIMIZED_IMAGE_JPEG_QUALITY,
               optimize=True, progressive=True)
     return out.getvalue()
-
-
-def _fit_note_bottom_angle(mask_px, cw, ch, hit, y_start=None, y_stop=None):
-    """Skew of the note's bottom edge: least-squares line through the
-    lowest matching pixel per sampled column, with an outlier-rejecting
-    refit. Positive slope (right side lower) needs a counter-clockwise
-    = positive PIL rotate. Returns 0.0 when the evidence is bad (too few
-    points, or a fit steeper than any real slab shot)."""
-    import math
-
-    if y_start is None:
-        y_start = ch - 1
-    if y_stop is None:
-        y_stop = ch // 2
-    pts = []
-    for x in range(int(cw * 0.15), int(cw * 0.85), max(1, cw // 80)):
-        for y in range(min(ch - 1, y_start), max(0, y_stop), -1):
-            if hit(mask_px, x, y):
-                pts.append((x, y))
-                break
-    if len(pts) < 20:
-        return 0.0
-
-    def _fit(points):
-        n = len(points)
-        sx = sum(p[0] for p in points)
-        sy = sum(p[1] for p in points)
-        sxx = sum(p[0] * p[0] for p in points)
-        sxy = sum(p[0] * p[1] for p in points)
-        d = n * sxx - sx * sx
-        if not d:
-            return None
-        slope = (n * sxy - sx * sy) / d
-        return slope, (sy - slope * sx) / n
-
-    fit = _fit(pts)
-    if not fit:
-        return 0.0
-    slope, intercept = fit
-    tol = max(3.0, 0.004 * ch)
-    good = [p for p in pts if abs(p[1] - (slope * p[0] + intercept)) < tol]
-    # A zigzag border or noisy edge scatters the points off any line —
-    # rotating on that evidence tilts a level scan. Only rotate when a
-    # solid majority of points actually lie on the fitted line.
-    if len(good) < max(10, int(0.6 * len(pts))):
-        return 0.0
-    refit = _fit(good)
-    if refit:
-        slope = refit[0]
-    angle = math.degrees(math.atan(slope))
-    return 0.0 if abs(angle) > 4.0 else angle
 
 
 def _perspective_coeffs(quad, out_w, out_h):
@@ -8052,8 +7915,10 @@ def _rectify_note_quad(img, quad, inset_px=0.0, context=0.0, fill=None):
     first (stay on paper when the mask edge is dilated); ``context``
     grows it fractionally instead (keep margin and holder around a
     design quad for the paper-edge walk that follows). Returns
-    (warped_image, inner_box) — inner_box being where the original
-    quad landed in the output — or None when the quad is degenerate."""
+    (warped_image, inner_box, coeffs) — inner_box being where the
+    original quad landed in the output, coeffs the PERSPECTIVE
+    mapping (output -> source) used — or None when the quad is
+    degenerate."""
     import math
 
     from PIL import Image
@@ -8088,7 +7953,7 @@ def _rectify_note_quad(img, quad, inset_px=0.0, context=0.0, fill=None):
              max(0, int(round((0.0 - v0) * sy))),
              min(out_w, int(round((1.0 - u0) * sx))),
              min(out_h, int(round((1.0 - v0) * sy))))
-    return warped, inner
+    return warped, inner, coeffs
 
 
 def _median(vals):
