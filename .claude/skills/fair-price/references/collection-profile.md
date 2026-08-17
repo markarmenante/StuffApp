@@ -100,26 +100,31 @@ provenance (old collections, named sales) adds real value on ancients.
   apply. When a scanned offer includes colonial material, say which
   empire/administration it belongs to in the recommendation — it ties
   into the collection's colonial-timeline focus in the app.
-- **US type-set gap fill — LARGE-SIZE ONLY** (2026-08-17): also look
-  for US banknotes missing from the collection, limited to large-size
-  notes (the pre-1929 large format). Do NOT assume the holdings —
-  fetch the current US block from the app (stuff.armenante.com
-  banknote list; each US record carries its note class and "Series
-  of" label) and compare offers against it. The checklist:
-  Demand Notes; Legal Tender / United States Notes; Compound Interest
-  and Interest Bearing (rarity exception applies); Refunding
-  Certificates; Silver Certificates (incl. the 1896 Educational
-  series, 1899 Chief and Black Eagle, 1923 Peace); Gold Certificates;
-  1890–91 Treasury (Coin) Notes; National Bank Notes by charter
-  period; 1915/1918 Federal Reserve Bank Notes; 1914 Federal Reserve
-  Notes.
-  Small-size US notes (1928 on) and Fractional Currency are NOT
-  recommended — do not surface them even as gap fills. An offer that
-  fills a large-size class, major series, or denomination not in the
-  collection outranks a duplicate type, and the recommendation must
-  NAME the gap it fills ("no Treasury Note in the collection").
-  Grade floor and EPQ rules still apply, with the usual rarity
-  exception for the genuinely scarce classes.
+- **US type-set gap fill — THROUGH SERIES 1929, fractionals OK**
+  (2026-08-17): also look for US banknotes missing from the
+  collection, limited to issues with a series/issue year through
+  1929. Do NOT assume the holdings — fetch the current US block from
+  the app (stuff.armenante.com banknote list; each US record carries
+  its note class and "Series of" label) and compare offers against
+  it. In scope:
+  - All large-size classes: Demand Notes; Legal Tender / United
+    States Notes; Compound Interest and Interest Bearing (rarity
+    exception applies); Refunding Certificates; Silver Certificates
+    (incl. the 1896 Educational series, 1899 Chief and Black Eagle,
+    1923 Peace); Gold Certificates; 1890–91 Treasury (Coin) Notes;
+    National Bank Notes by charter period; 1915/1918 Federal Reserve
+    Bank Notes; 1914 Federal Reserve Notes.
+  - Fractional Currency, First through Fifth issues.
+  - Early small-size through 1929: the Series 1928 classes (Legal
+    Tender, Silver Certificate, Gold Certificate, FRN) and the 1929
+    National Bank Notes (Types 1–2) and 1929 Federal Reserve Bank
+    Notes.
+  Series after 1929 (1934 on) are NOT recommended. An offer that
+  fills a class, major series, or denomination not in the collection
+  outranks a duplicate type, and the recommendation must NAME the gap
+  it fills ("no Treasury Note in the collection"). Grade floor and
+  EPQ rules still apply, with the usual rarity exception for the
+  genuinely scarce classes.
 - Coin grades: **recommend only XF/EF, AU, or MS coins — Mark wants
   high-grade coins.** Sheldon-scale: XF40 is the floor; prefer AU and
   MS. Applies to US, world, and ancient coins alike (ancients in
