@@ -8161,7 +8161,7 @@ def _finish_ai_crop(crop, refine=True, expect_aspect=None):
     return _encode_trimmed_note(crop)
 
 
-def _shave_backdrop_slivers(crop):
+def _shave_backdrop_slivers(crop, max_rounds=3):
     """Final quality pass on a finished crop: a paper outline that
     OVERSHOT the sheet leaves wedges of backdrop in the warped output
     (green holder felt at a corner, 2026-08-17 front-of-note). The
@@ -8170,21 +8170,29 @@ def _shave_backdrop_slivers(crop):
     pixels of non-paper are visible along each side? Shave what it
     reports, clamped to 3% per side so a hallucinated sliver can only
     nibble, never eat a margin. Shrink-only by construction — this
-    pass cannot cut anything the outline didn't already include."""
-    sides = _edge_qa_sides(crop)
-    if not sides:
-        return crop
-    w, h = crop.size
-    l = min(sides['left'], 0.03 * w)
-    t = min(sides['top'], 0.03 * h)
-    r = min(sides['right'], 0.03 * w)
-    b = min(sides['bottom'], 0.03 * h)
-    if l + t + r + b < 2:
-        return crop
-    app.logger.info('trim-ai: edge QA shaved l%.0f t%.0f r%.0f b%.0f',
-                    l, t, r, b)
-    return crop.crop((int(round(l)), int(round(t)),
-                      w - int(round(r)), h - int(round(b))))
+    pass cannot cut anything the outline didn't already include.
+
+    Iterative because the model under-measures: the front's green
+    bottom strip got a 6px answer and a 6px shave, and the rest of the
+    strip shipped (2026-08-17). Asking again on the shaved crop
+    converges — each round removes what the previous one missed, until
+    a round reports (near) zero or the per-round clamps run out."""
+    for _ in range(max_rounds):
+        sides = _edge_qa_sides(crop)
+        if not sides:
+            return crop
+        w, h = crop.size
+        l = min(sides['left'], 0.03 * w)
+        t = min(sides['top'], 0.03 * h)
+        r = min(sides['right'], 0.03 * w)
+        b = min(sides['bottom'], 0.03 * h)
+        if l + t + r + b < 2:
+            return crop
+        app.logger.info('trim-ai: edge QA shaved l%.0f t%.0f r%.0f b%.0f',
+                        l, t, r, b)
+        crop = crop.crop((int(round(l)), int(round(t)),
+                          w - int(round(r)), h - int(round(b))))
+    return crop
 
 
 def _edge_qa_sides(crop):

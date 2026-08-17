@@ -426,13 +426,20 @@ design = _draw_note(draw, paper_quad)
 over = ((276, 300), (1340, 300), (1340, 898), (276, 898))
 stuffapp._ai_note_quad = _fake_quads(design, over)
 
-reported = {}
+reported = {'rounds': 0}
 
 
 def _fake_qa(crop):
-    w2, h2 = crop.size
-    reported['size'] = (w2, h2)
-    return {'left': 24.0, 'top': 300.0, 'right': 0.0, 'bottom': 18.0}
+    """Under-measures like the real model: reports part of the sliver,
+    the rest on the next round, then clean — the iterative shave must
+    keep asking until a round comes back (near) zero."""
+    reported['rounds'] += 1
+    if reported['rounds'] == 1:
+        reported['size'] = crop.size
+        return {'left': 24.0, 'top': 300.0, 'right': 0.0, 'bottom': 10.0}
+    if reported['rounds'] == 2:
+        return {'left': 0.0, 'top': 0.0, 'right': 0.0, 'bottom': 8.0}
+    return {'left': 0.0, 'top': 0.0, 'right': 0.0, 'bottom': 0.0}
 
 
 _real_qa = stuffapp._edge_qa_sides
@@ -440,15 +447,17 @@ stuffapp._edge_qa_sides = _fake_qa
 trimmed = _trim_to_image(img)
 stuffapp._edge_qa_sides = _real_qa
 assert trimmed is not None, 'edge-QA shot was not trimmed'
-assert reported, 'edge QA pass never ran'
+assert reported['rounds'] >= 3, \
+    f'QA must re-ask until clean: only {reported["rounds"]} round(s)'
 w0, h0 = reported['size']
-# left/bottom shaved as reported; the absurd 300px top claim clamped to 3%
+# round 1: left 24 + bottom 10, absurd 300px top claim clamped to 3%;
+# round 2: the under-measured remainder (8px bottom) caught on re-ask
 assert trimmed.size[0] == w0 - 24, \
     f'left sliver not shaved: {trimmed.size[0]} vs {w0 - 24}'
-assert trimmed.size[1] == h0 - 18 - int(round(0.03 * h0)), \
-    f'top clamp / bottom shave wrong: {trimmed.size[1]}'
+assert trimmed.size[1] == h0 - 10 - 8 - int(round(0.03 * h0)), \
+    f'iterative bottom shave / top clamp wrong: {trimmed.size[1]}'
 assert _paper_frac(trimmed) > 0.9, 'backdrop sliver survived the QA pass'
-print('EDGE-QA (sliver shave, clamped) ASSERTIONS PASSED')
+print('EDGE-QA (iterative shave, clamped) ASSERTIONS PASSED')
 
 
 # --- Homography sanity ----------------------------------------------------
