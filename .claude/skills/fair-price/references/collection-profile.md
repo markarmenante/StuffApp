@@ -100,6 +100,30 @@ provenance (old collections, named sales) adds real value on ancients.
   apply. When a scanned offer includes colonial material, say which
   empire/administration it belongs to in the recommendation — it ties
   into the collection's colonial-timeline focus in the app.
+- **US type-set gap fill** (2026-08-17): also look for US banknotes
+  missing from the collection. Do NOT assume the holdings — fetch the
+  current US block from the app (stuff.armenante.com banknote list;
+  each US record carries its note class and "Series of" label) and
+  compare offers against it. The type checklist to compare against,
+  class by class:
+  - Large-size: Demand Notes; Legal Tender / United States Notes;
+    Compound Interest and Interest Bearing (rarity exception applies);
+    Refunding Certificates; Silver Certificates (incl. the 1896
+    Educational series, 1899 Chief and Black Eagle, 1923 Peace); Gold
+    Certificates; 1890–91 Treasury (Coin) Notes; National Bank Notes
+    by charter period; 1915/1918 Federal Reserve Bank Notes; 1914
+    Federal Reserve Notes.
+  - Small-size: Legal Tender, Silver Certificates, Gold Certificates,
+    National Bank Notes (Types 1–2), Federal Reserve Bank Notes,
+    early Federal Reserve Notes; the WWII emergency issues (Hawaii
+    overprints, North Africa yellow seals); star/replacement notes of
+    classes already held.
+  - Fractional Currency by issue (First through Fifth).
+  An offer that fills a class, major series, or denomination not in
+  the collection outranks a duplicate type, and the recommendation
+  must NAME the gap it fills ("no Treasury Note in the collection").
+  Grade floor and EPQ rules still apply, with the usual rarity
+  exception for the genuinely scarce classes.
 - Coin grades: **recommend only XF/EF, AU, or MS coins — Mark wants
   high-grade coins.** Sheldon-scale: XF40 is the floor; prefer AU and
   MS. Applies to US, world, and ancient coins alike (ancients in
