@@ -103,7 +103,7 @@
   val('sell_net_gain_loss') or val('sold_to') or val('sell_keep') == 'Sell' or
   (val('status')|lower == 'sold')
 ) %}
-{% set _sell_purchase = val('sell_purchase_price') if val('sell_purchase_price') else (val('price')|currency) %}
+{% set _sell_purchase = (val('sell_purchase_price')|currency) if val('sell_purchase_price') else (val('price')|currency) %}
 {% set _sell_status = 'Sold' if val('status') == 'Sold' else 'Own' %}
 {% set _sell_keep = val('sell_keep') if val('sell_keep') in ['Sell','Keep'] else 'Keep' %}
 {% set _sell_tax_state = val('sell_tax_state') if val('sell_tax_state') in ['NY','CA'] else 'NY' %}

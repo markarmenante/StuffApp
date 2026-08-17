@@ -559,3 +559,26 @@ CREATE TABLE IF NOT EXISTS property_people (id TEXT PRIMARY KEY, property_id TEX
 CREATE INDEX IF NOT EXISTS idx_property_people_property ON property_people(property_id, position);
 CREATE TABLE IF NOT EXISTS property_alarm_codes (id TEXT PRIMARY KEY, property_id TEXT NOT NULL, position INTEGER NOT NULL, entry TEXT, code TEXT, note TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), FOREIGN KEY(property_id) REFERENCES properties(id) ON DELETE CASCADE, UNIQUE(property_id, position));
 CREATE INDEX IF NOT EXISTS idx_property_alarm_codes_property ON property_alarm_codes(property_id, position);
+CREATE TABLE IF NOT EXISTS sale_plans (
+    id TEXT PRIMARY KEY,
+    category TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    sell_keep TEXT,
+    purchase_price REAL,
+    estimated_sales_price REAL,
+    commission_percent REAL,
+    net_sales_price REAL,
+    tax_state TEXT,
+    federal_tax_rate REAL,
+    ny_tax_rate REAL,
+    ca_tax_rate REAL,
+    tax_rates_checked_at TEXT,
+    federal_tax REAL,
+    state_tax REAL,
+    gross_gain_loss REAL,
+    net_gain_loss REAL,
+    sold_to TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(category, record_id)
+);

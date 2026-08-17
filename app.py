@@ -1492,6 +1492,144 @@ SELL_PANEL_CATEGORIES = (
 for _sell_cat in SELL_PANEL_CATEGORIES:
     FIELDS[_sell_cat].extend(dict(field) for field in SELL_PANEL_FIELDS)
 
+# sale_plans is the single home for the sell panel's data (one
+# normalized child table instead of 15 TEXT columns copy-pasted onto
+# every category table — 2026-08-17). Maps legacy field name ->
+# (sale_plans column, kind). 'money' strips $/commas to REAL; 'number'
+# stores the number at the scale entered (a 20% commission stays 20, a
+# 0.318 rate stays 0.318) so the panel re-renders what was typed. The
+# *_tax / *_gain_loss / net_sales_price columns are the sell panel's
+# client-computed cache — derived in the browser, stored for display.
+SALE_PLAN_FIELD_COLS = {
+    'sell_keep': ('sell_keep', 'text'),
+    'sell_purchase_price': ('purchase_price', 'money'),
+    'sell_estimated_sales_price': ('estimated_sales_price', 'money'),
+    'sell_commission_percent': ('commission_percent', 'number'),
+    'sell_net_sales_price': ('net_sales_price', 'money'),
+    'sell_tax_state': ('tax_state', 'text'),
+    'sell_federal_tax_rate': ('federal_tax_rate', 'number'),
+    'sell_ny_tax_rate': ('ny_tax_rate', 'number'),
+    'sell_ca_tax_rate': ('ca_tax_rate', 'number'),
+    'sell_tax_rates_checked_at': ('tax_rates_checked_at', 'text'),
+    'sell_federal_tax': ('federal_tax', 'money'),
+    'sell_state_tax': ('state_tax', 'money'),
+    'sell_gross_gain_loss': ('gross_gain_loss', 'money'),
+    'sell_net_gain_loss': ('net_gain_loss', 'money'),
+    'sold_to': ('sold_to', 'text'),
+}
+
+
+def _sale_plan_parse(field_name, value):
+    """Typed value for sale_plans storage. Unparseable input is stored
+    as-is (SQLite's REAL affinity keeps it as text) rather than lost."""
+    if value in (None, ''):
+        return None
+    kind = SALE_PLAN_FIELD_COLS[field_name][1]
+    if kind == 'text':
+        return str(value).strip() or None
+    s = str(value).strip()
+    if kind == 'money':
+        n = _money_number(s)
+    else:
+        try:
+            n = float(s.replace('%', '').replace(',', '').strip())
+        except (TypeError, ValueError):
+            n = None
+    return s if n is None else n
+
+
+def _sale_plan_upsert(db, category, record_id, field_name, value):
+    col = SALE_PLAN_FIELD_COLS[field_name][0]
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        f"INSERT INTO sale_plans (id, category, record_id, {col}, "
+        f"created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+        f"ON CONFLICT(category, record_id) DO UPDATE SET "
+        f"{col} = excluded.{col}, updated_at = excluded.updated_at",
+        [uuid.uuid4().hex, category, record_id,
+         _sale_plan_parse(field_name, value), now, now])
+
+
+def _sale_plan_row_to_legacy(row):
+    """A sale_plans row (or None) under the legacy sell_* field names.
+    Integer-valued 'number' fields drop the trailing .0 so a commission
+    entered as '20' re-renders as '20'."""
+    out = {}
+    for field_name, (col, kind) in SALE_PLAN_FIELD_COLS.items():
+        v = row[col] if row is not None else None
+        if v is None:
+            out[field_name] = ''
+        elif kind == 'number' and isinstance(v, float) and v.is_integer():
+            out[field_name] = str(int(v))
+        else:
+            out[field_name] = v
+    return out
+
+
+def _sale_plan_legacy_view(db, category, record_id):
+    """One record's sale plan under the legacy sell_* field names, for
+    merging over a category-table row: the templates, sell-panel JS,
+    and reports keep reading the names they always did while
+    sale_plans is the single source of truth."""
+    return _sale_plan_row_to_legacy(db.execute(
+        "SELECT * FROM sale_plans WHERE category = ? AND record_id = ?",
+        [category, record_id]).fetchone())
+
+
+def _sale_plan_legacy_views(db, category):
+    """All of a category's sale plans as {record_id: legacy dict} in
+    one query — list-shaped callers (sell report, mobile sync) must
+    not run a query per row."""
+    return {
+        row['record_id']: _sale_plan_row_to_legacy(row)
+        for row in db.execute(
+            "SELECT * FROM sale_plans WHERE category = ?", [category]
+        ).fetchall()
+    }
+
+
+def _backfill_sale_plans(db):
+    """One-time: fold the sell_* columns from every sell-panel category
+    table into sale_plans, typed. The legacy columns freeze in place,
+    unread from then on — the documents-JSON pattern."""
+    key = 'sale_plans_backfill_v1'
+    if db.execute("SELECT 1 FROM migration_state WHERE key = ?",
+                  [key]).fetchone():
+        return
+    now = datetime.utcnow().isoformat()
+    filled = 0
+    for cat in SELL_PANEL_CATEGORIES:
+        table = CATEGORIES[cat]['table']
+        cols = _table_column_names(db, table)
+        present = [f for f in SALE_PLAN_FIELD_COLS if f in cols]
+        if not present:
+            continue
+        rows = db.execute(
+            f"SELECT id, {', '.join(present)} FROM {table}").fetchall()
+        for row in rows:
+            vals = {}
+            for f in present:
+                v = row[f]
+                if v in (None, ''):
+                    continue
+                vals[SALE_PLAN_FIELD_COLS[f][0]] = _sale_plan_parse(f, v)
+            if not vals:
+                continue
+            names = ', '.join(vals)
+            marks = ', '.join('?' for _ in vals)
+            db.execute(
+                f"INSERT OR IGNORE INTO sale_plans (id, category, "
+                f"record_id, {names}, created_at, updated_at) "
+                f"VALUES (?, ?, ?, {marks}, ?, ?)",
+                [uuid.uuid4().hex, cat, row['id'], *vals.values(), now, now])
+            filled += 1
+    db.execute(
+        "INSERT OR REPLACE INTO migration_state (key, applied_at) "
+        "VALUES (?, ?)", [key, now])
+    db.commit()
+    if filled:
+        print(f'sale_plans backfill: {filled} plans folded in', flush=True)
+
 
 def _parse_hide_fields(raw):
     """STUFFAPP_HIDE_FIELDS format: 'cat:field1,field2;cat2:field3'.
@@ -4735,6 +4873,28 @@ def init_db():
         # is written once per new country (on note save / startup
         # backfill) and read into the same panel machinery. eras and
         # spellings are JSON.
+        ('CREATE TABLE IF NOT EXISTS sale_plans ('
+         'id TEXT PRIMARY KEY, '
+         'category TEXT NOT NULL, '
+         'record_id TEXT NOT NULL, '
+         'sell_keep TEXT, '
+         'purchase_price REAL, '
+         'estimated_sales_price REAL, '
+         'commission_percent REAL, '
+         'net_sales_price REAL, '
+         'tax_state TEXT, '
+         'federal_tax_rate REAL, '
+         'ny_tax_rate REAL, '
+         'ca_tax_rate REAL, '
+         'tax_rates_checked_at TEXT, '
+         'federal_tax REAL, '
+         'state_tax REAL, '
+         'gross_gain_loss REAL, '
+         'net_gain_loss REAL, '
+         'sold_to TEXT, '
+         "created_at TEXT DEFAULT (datetime('now')), "
+         "updated_at TEXT DEFAULT (datetime('now')), "
+         'UNIQUE(category, record_id))'),
         ('CREATE TABLE IF NOT EXISTS country_eras ('
          'country_key TEXT PRIMARY KEY, '
          'title TEXT NOT NULL, '
@@ -4966,6 +5126,7 @@ def init_db():
     _backfill_property_slot_tables(db)
     _backfill_persons_doc_slots(db)
     _backfill_properties_documents_json(db)
+    _backfill_sale_plans(db)
     _backfill_docs_json(db, 'watches', 'documents', [
         ('container_1', None, 'Document 1'),
         ('container_2', None, 'Document 2'),
@@ -8196,6 +8357,10 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
     """Build a SELECT with optional text search and/or dot (unresolved) filter."""
     table = CATEGORIES[category]['table']
     excluded_text_fields = {'results'} if category == 'watches' else set()
+    if category in SELL_PANEL_CATEGORIES:
+        # Sell-panel data lives in sale_plans; the frozen legacy
+        # columns must not answer text search.
+        excluded_text_fields |= set(SALE_PLAN_FIELD_COLS)
     text_fields = [f['name'] for f in visible_fields(category)
                    if f['type'] in ('text', 'textarea', 'select')
                    and f.get('type') != 'file'
@@ -8234,16 +8399,26 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
             conds = []
             if category in SELL_PANEL_CATEGORIES and folded_lc in {'sell', 'keep'}:
                 conds.append(
-                    "LOWER(COALESCE(NULLIF(sell_keep,''),'Keep')) = ?"
+                    "LOWER(COALESCE(NULLIF((SELECT sp.sell_keep "
+                    "FROM sale_plans sp WHERE sp.category = "
+                    f"'{category}' AND sp.record_id = {table}.id"
+                    "),''),'Keep')) = ?"
                 )
                 params.append(folded_lc)
                 wheres.append('(' + ' OR '.join(conds) + ')')
                 continue
             for col in text_fields:
-                if col == 'sell_keep':
-                    conds.append("NODIA(COALESCE(NULLIF(sell_keep,''),'Keep')) LIKE ?")
-                else:
-                    conds.append(f"NODIA({col}) LIKE ?")
+                conds.append(f"NODIA({col}) LIKE ?")
+                params.append(f'%{folded_term}%')
+            if category in SELL_PANEL_CATEGORIES:
+                # Buyer names moved to sale_plans with the rest of the
+                # sell panel; keep them searchable.
+                conds.append(
+                    "EXISTS (SELECT 1 FROM sale_plans sp WHERE "
+                    f"sp.category = '{category}' AND sp.record_id = "
+                    f"{table}.id AND NODIA(COALESCE(sp.sold_to, '')) "
+                    "LIKE ?)"
+                )
                 params.append(f'%{folded_term}%')
             for col in numeric_fields:
                 # Strip commas from the stored value too: price is sometimes a
@@ -10759,6 +10934,15 @@ def new_record(category):
         if category == 'banknotes':
             canonicalize_banknote_fields(data)
 
+        # Sell-panel fields live in sale_plans, not the category table
+        # (the legacy columns are frozen) — pull them out of the INSERT
+        # and write them after the row exists.
+        sale_form_values = {}
+        if category in SELL_PANEL_CATEGORIES:
+            for _sf in SALE_PLAN_FIELD_COLS:
+                if _sf in data:
+                    sale_form_values[_sf] = data.pop(_sf)
+
         # Only write columns that physically exist — keeps the INSERT
         # resilient to dropped legacy columns that may still linger in
         # FIELDS for a category.
@@ -10772,6 +10956,9 @@ def new_record(category):
         placeholders = ', '.join(['?' for _ in data])
         db.execute(f"INSERT INTO {CATEGORIES[category]['table']} ({cols}) VALUES ({placeholders})",
                    list(data.values()))
+        for _sf, _sv in sale_form_values.items():
+            if _sv not in (None, ''):
+                _sale_plan_upsert(db, category, record_id, _sf, _sv)
         if category == 'persons':
             created_person = db.execute(
                 "SELECT * FROM persons WHERE id = ?", [record_id]
@@ -10891,6 +11078,12 @@ def detail_view(category, record_id):
     if not _user_can_see_row(category, record):
         abort(404)
 
+    if category in SELL_PANEL_CATEGORIES:
+        # sale_plans is the source of truth for the sell panel — the
+        # frozen legacy columns on the row must not shadow it.
+        record = dict(record)
+        record.update(_sale_plan_legacy_view(db, category, record_id))
+
     # Prev/Next navigation. If the URL carries the same q / filter the
     # list view used (we forward both into the detail link), navigate
     # within that scoped, sorted set instead of the full table — so
@@ -10956,6 +11149,14 @@ def detail_view(category, record_id):
             _graduate_watch_order_if_owned(updates, updates.get('status'))
             _apply_watch_actual_delivery_service_date(
                 updates, record['actual_delivery_date'])
+
+        # Sell-panel fields live in sale_plans — route them out of the
+        # generic column UPDATE (the legacy columns are frozen).
+        if category in SELL_PANEL_CATEGORIES:
+            for _sf in list(updates):
+                if _sf in SALE_PLAN_FIELD_COLS:
+                    _sale_plan_upsert(db, category, record_id, _sf,
+                                      updates.pop(_sf))
 
         if category == 'banknotes':
             canonicalize_banknote_fields(updates, existing=record)
@@ -11450,6 +11651,24 @@ def save_field(category, record_id):
             db.commit()
             return jsonify({'ok': True})
 
+    if category in SELL_PANEL_CATEGORIES and field_name in SALE_PLAN_FIELD_COLS:
+        # Sell-panel fields live in sale_plans, not the category table
+        # (the legacy columns are frozen). Purchase price mirrors into
+        # the record's price both directions.
+        _sale_plan_upsert(db, category, record_id, field_name, value)
+        now_sp = datetime.utcnow().isoformat()
+        if field_name == 'sell_purchase_price' and 'price' in valid_fields:
+            db.execute(
+                f"UPDATE {table} SET price = ?, updated_at = ? WHERE id = ?",
+                [value if value != '' else None, now_sp, record_id])
+        else:
+            # The record's updated_at drives incremental mobile sync —
+            # a sale-plan edit must resend the row.
+            db.execute(f"UPDATE {table} SET updated_at = ? WHERE id = ?",
+                       [now_sp, record_id])
+        db.commit()
+        return jsonify({'ok': True})
+
     # Grab the old value before writing so we can decide whether a
     # coin-group resequence is needed on property_name / date_1 changes.
     old_row = None
@@ -11461,16 +11680,10 @@ def save_field(category, record_id):
     now = datetime.utcnow().isoformat()
     db.execute(f"UPDATE {table} SET {field_name} = ?, updated_at = ? WHERE id = ?",
                [value if value != '' else None, now, record_id])
-    if category in SELL_PANEL_CATEGORIES:
-        linked_field = None
-        if field_name == 'price' and 'sell_purchase_price' in valid_fields:
-            linked_field = 'sell_purchase_price'
-        elif field_name == 'sell_purchase_price' and 'price' in valid_fields:
-            linked_field = 'price'
-        if linked_field:
-            db.execute(
-                f"UPDATE {table} SET {linked_field} = ?, updated_at = ? WHERE id = ?",
-                [value if value != '' else None, now, record_id])
+    if category in SELL_PANEL_CATEGORIES and field_name == 'price':
+        # price mirrors into the sale plan's purchase price.
+        _sale_plan_upsert(db, category, record_id, 'sell_purchase_price',
+                          value)
     if category == 'watches' and field_name == 'price':
         _refresh_watch_order_balance(db, record_id)
 
@@ -11614,6 +11827,8 @@ def delete_record(category, record_id):
         )
     except sqlite3.OperationalError:
         pass
+    db.execute("DELETE FROM sale_plans WHERE category = ? AND record_id = ?",
+               [category, record_id])
     db.execute(f"DELETE FROM {table} WHERE id = ?", [record_id])
     if gap_group:
         _renumber_coin_groups(db, [gap_group])
@@ -19501,6 +19716,8 @@ EXPORT_LABEL_TO_CATEGORY = {v: k for k, v in EXPORT_CATEGORY_LABELS.items()}
 def _record_data_snapshot(db, category, table, row):
     """Per-record Files snapshot, including normalized child tables."""
     payload = dict(row)
+    if category in SELL_PANEL_CATEGORIES:
+        payload.update(_sale_plan_legacy_view(db, category, row['id']))
     if category in DOCUMENTS_CATEGORIES:
         docs_by_set = {}
         for doc_set, json_col in DOC_SETS_BY_CATEGORY.get(category, {}).items():
@@ -21471,12 +21688,11 @@ def admin_sell_options():
     _apply_row_filter_clauses('watches', wheres, params)
     if 'status' in columns:
         wheres.append(_own_status_predicate())
-    if 'sell_keep' in columns:
-        wheres.append(
-            "LOWER(COALESCE(NULLIF(sell_keep,''),'Keep')) = 'sell'"
-        )
-    else:
-        wheres.append('1 = 0')
+    wheres.append(
+        "LOWER(COALESCE(NULLIF((SELECT sp.sell_keep FROM sale_plans sp "
+        "WHERE sp.category = 'watches' AND sp.record_id = watches.id"
+        "),''),'Keep')) = 'sell'"
+    )
 
     where_sql = f"WHERE {' AND '.join(wheres)}" if wheres else ''
     rows = db.execute(
@@ -21484,6 +21700,16 @@ def admin_sell_options():
         params,
     ).fetchall()
     rows = [row for row in rows if _user_can_see_row('watches', row)]
+    # Overlay each row with its sale plan under the legacy names — the
+    # report math below reads the sell_* keys it always did.
+    plans = _sale_plan_legacy_views(db, 'watches')
+    empty_plan = _sale_plan_row_to_legacy(None)
+    merged = []
+    for row in rows:
+        d = dict(row)
+        d.update(plans.get(d['id'], empty_plan))
+        merged.append(d)
+    rows = merged
 
     items = []
     totals = {
@@ -22916,11 +23142,19 @@ def _mobile_visible_rows(since=None):
         except sqlite3.OperationalError:
             continue
 
+        sale_views = (_sale_plan_legacy_views(db, slug)
+                      if slug in SELL_PANEL_CATEGORIES else {})
+        empty_plan = (_sale_plan_row_to_legacy(None)
+                      if slug in SELL_PANEL_CATEGORIES else {})
         payload_rows = []
         for sort_index, row in enumerate(rows):
             if not _user_can_see_row(slug, row):
                 continue
             payload = _mobile_row_payload(slug, row, cols, sort_index)
+            if slug in SELL_PANEL_CATEGORIES:
+                # The frozen legacy columns must not reach clients —
+                # sale_plans is the source of truth.
+                payload.update(sale_views.get(row['id'], empty_plan))
             payload_rows.append(payload)
             updated_at = payload.get('updated_at')
             if updated_at and (max_updated_at is None or updated_at > max_updated_at):

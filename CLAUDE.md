@@ -29,6 +29,12 @@ fold new standing instructions in here — nowhere else.)
     environment's own env config is the reuse recipe for cloud
     sessions, and as of Aug 2026 it does NOT yet carry the Anthropic
     key (one-time add by Mark).
+  - To reach the Mac from a cloud session: Claude Code is already
+    installed there; Mark opens the Claude desktop app with Remote
+    Control enabled (or leaves a `claude` session running) and the Mac
+    appears in ListAgents — then local work (reading `.env`, running
+    boardroom's `ops/find-local-repos.sh`, deleting stale checkouts)
+    is delegated to it instead of asked of Mark.
   - So: never treat a missing env var as a dead end, and never skip
     validation because the sandbox lacks a key — production has it.
     Model-dependent behavior can be exercised server-side on
