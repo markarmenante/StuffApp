@@ -4868,6 +4868,14 @@ def init_db():
          'usd_rate REAL NOT NULL, '
          'fetched_at TEXT NOT NULL, '
          'PRIMARY KEY (currency, date))'),
+        # Trimmed note image -> the untrimmed photo it was cut from.
+        # The trimmer keeps the original on disk but used to drop the
+        # reference, so a bad crop could never be redone (a shaved note
+        # fills its own frame and the detector rightly no-ops). source
+        # is always the ORIGINAL upload, never an intermediate trim.
+        ('CREATE TABLE IF NOT EXISTS trimmed_image_sources ('
+         'trimmed TEXT PRIMARY KEY, '
+         'source TEXT NOT NULL)'),
         # LLM-generated country monetary histories — era bands for
         # countries not covered by the built-in COUNTRY_ERAS dict. A row
         # is written once per new country (on note save / startup
@@ -14848,19 +14856,33 @@ def banknote_lookup_specs(record_id):
             fname = _coin_row_value(note, field)
             if not fname or not is_image_filter(fname):
                 continue
+            # A stored file that is itself a trim re-processes from its
+            # recorded original — a re-run of Check must be able to
+            # REDO a bad crop, and a shaved note fills its own frame,
+            # so trimming the stored copy again is a guaranteed no-op.
+            source = fname
+            src_row = db.execute(
+                'SELECT source FROM trimmed_image_sources WHERE trimmed = ?',
+                (fname,)).fetchone()
+            if src_row and os.path.exists(
+                    os.path.join(UPLOAD_FOLDER, src_row['source'])):
+                source = src_row['source']
             try:
-                with open(os.path.join(UPLOAD_FOLDER, fname), 'rb') as fh:
+                with open(os.path.join(UPLOAD_FOLDER, source), 'rb') as fh:
                     raw = fh.read()
                 trimmed = _trim_slabbed_note_image(raw)
             except Exception as e:
                 app.logger.warning('banknote %s: trim of %s (%s) failed: %s',
-                                   record_id, field, fname, e)
+                                   record_id, field, source, e)
                 continue
             if not trimmed:
                 continue
             new_name = f"{uuid.uuid4().hex}.jpg"
             with open(os.path.join(UPLOAD_FOLDER, new_name), 'wb') as fh:
                 fh.write(trimmed)
+            db.execute(
+                'INSERT OR REPLACE INTO trimmed_image_sources '
+                '(trimmed, source) VALUES (?, ?)', (new_name, source))
             db.execute(
                 f"UPDATE banknotes SET {field} = ?, updated_at = ? WHERE id = ?",
                 (new_name, datetime.utcnow().isoformat(), record_id))
@@ -19282,6 +19304,18 @@ def _collect_referenced_uploads(db):
                     fn = (d.get('filename') or '').strip()
                     if fn:
                         referenced.add(fn)
+    # Untrimmed originals behind currently-referenced note trims: a
+    # re-run of Check re-processes from these, so they are live as
+    # long as their trim is. Sources of since-replaced trims stay
+    # sweepable.
+    try:
+        for row in db.execute(
+                'SELECT trimmed, source FROM trimmed_image_sources'
+        ).fetchall():
+            if row['trimmed'] in referenced:
+                referenced.add(row['source'])
+    except sqlite3.OperationalError:
+        pass
     return referenced
 
 
