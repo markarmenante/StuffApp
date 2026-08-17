@@ -167,6 +167,27 @@ assert max(c) >= 95, f'left edge still holder-dark: {c}'
 print('MARGIN-CLAMP (cool paper / dark holder) ASSERTIONS PASSED')
 
 
+# --- Margin clamp: shadowed bottom margin is paper, not backdrop -----------
+# In a holder photo the note's bottom edge sits in shadow: darker than
+# the reference paper but the same hue. The clamp must keep it (the JIM
+# notes lost their bottom margins to a fixed color-distance test) and
+# may never eat more than a sliver into the model's rectangle.
+SHADOW = tuple(int(v * 0.55) for v in PAPER)
+img = Image.new('RGB', (1000, 560), PAPER)
+draw = ImageDraw.Draw(img)
+draw.rectangle([120, 60, 940, 440], outline=INK, width=8)   # design
+for gx in range(140, 920, 20):
+    draw.line([(gx, 80), (gx, 420)], fill=INK, width=2)
+draw.rectangle([0, 470, 999, 509], fill=SHADOW)             # shadowed margin
+draw.rectangle([0, 510, 999, 559], fill=(22, 22, 24))       # holder below
+inner = (120, 60, 940, 440)
+out = stuffapp._clamp_ai_margins(img, inner)
+ow, oh = out.size
+assert oh >= 505, f'shadowed bottom margin eaten: {out.size}'
+assert oh <= 520, f'holder band below shadow kept: {out.size}'
+print('MARGIN-CLAMP (shadowed bottom) ASSERTIONS PASSED')
+
+
 # --- Homography sanity ----------------------------------------------------
 # The PERSPECTIVE coefficients must map each output corner exactly onto
 # its source-quad corner (PIL samples source = H(output)).

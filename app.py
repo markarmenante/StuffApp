@@ -7738,7 +7738,7 @@ def _trim_slabbed_note_image(data):
             # The quad is the engraved area's extent; the context
             # margin stands in for the paper margins around it,
             # clamped per side so it never overshoots onto backdrop.
-            rect = _rectify_note_quad(img, quad, context=0.05,
+            rect = _rectify_note_quad(img, quad, context=0.07,
                                       fill=img.load()[2, 2])
             if rect:
                 return _finish_ai_crop(_clamp_ai_margins(rect[0], rect[1]))
@@ -7829,15 +7829,28 @@ def _clamp_ai_margins(warped, inner):
         vals = sorted(c[i] for c in bright)
         ref.append(vals[len(vals) // 2])
 
+    ref_sum = float(sum(ref)) or 1.0
+
     def line_stats(coords):
+        # Shadowed paper reads darker than the reference but keeps its
+        # hue (the note's bottom edge sits in shadow inside a holder),
+        # so compare colour after normalizing the sample's brightness
+        # to the reference — a bottom margin at 50% brightness is still
+        # paper, while grey holder plastic differs in chroma however
+        # bright it is.
         paper = dark = 0
         for x, y in coords:
             c = px[x, y][:3]
-            if max(c) < 95:
+            if max(c) < 60:
                 dark += 1
-            elif abs(c[0] - ref[0]) + abs(c[1] - ref[1]) \
-                    + abs(c[2] - ref[2]) < 110:
+                continue
+            s = ref_sum / float(sum(c) or 1)
+            if 0.5 <= s <= 2.2 and \
+                    abs(c[0] * s - ref[0]) + abs(c[1] * s - ref[1]) \
+                    + abs(c[2] * s - ref[2]) < 110:
                 paper += 1
+            elif max(c) < 95:
+                dark += 1
         n = float(len(coords) or 1)
         return paper / n, dark / n
 
@@ -7845,7 +7858,11 @@ def _clamp_ai_margins(warped, inner):
         paper, dark = line_stats(coords)
         return paper < 0.55 and (dark < 0.03 or dark > 0.60)
 
-    in_x, in_y = int(0.15 * w), int(0.15 * h)
+    # The walk may cross the inner box by only a sliver: the model's
+    # rectangle hugs the printed area, so anything deeper than ~2%
+    # inside it is design, and eating into it is how the JIM notes
+    # lost their bottom borders to the old 15% allowance.
+    in_x, in_y = max(2, int(0.02 * w)), max(2, int(0.02 * h))
     x0, x1, y0, y1 = 0, w, 0, h
     while x0 < min(ix0 + in_x, w - 60) \
             and backdroppy([(x0, y) for y in ys]):
@@ -7885,7 +7902,7 @@ def _finish_ai_crop(crop, refine=True):
     if refine:
         quad = _ai_note_quad(leveled)
         if quad is not None:
-            rect = _rectify_note_quad(leveled, quad, context=0.05,
+            rect = _rectify_note_quad(leveled, quad, context=0.07,
                                       fill=leveled.load()[2, 2])
             if rect:
                 cand = _clamp_ai_margins(rect[0], rect[1])
