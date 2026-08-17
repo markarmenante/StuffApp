@@ -7637,7 +7637,7 @@ def _ai_note_quad(img):
 
     w, h = img.size
     small = img.convert('RGB').copy()
-    small.thumbnail((1024, 1024))
+    small.thumbnail((1568, 1568))
     sw, sh = small.size
     buf = BytesIO()
     small.save(buf, format='JPEG', quality=85)
@@ -7653,6 +7653,11 @@ def _ai_note_quad(img):
         "portrait, seals, serial numbers, signatures, overprints — but "
         "never the grading label, holder edge, sleeve or backdrop. When "
         "unsure err OUTSIDE the printed area; it must never be cut. "
+        "The most common error is drawing a bottom edge too high: before "
+        "answering, verify the LOWEST printed elements — bottom border "
+        "line, bottom corner numerals, bottom banner — sit fully inside "
+        "corners, and the paper sheet's true bottom edge sits inside "
+        "paper_corners. "
         "(2) paper_corners: around the note's PHYSICAL PAPER edge, where "
         "the paper sheet meets holder plastic, sleeve, or backdrop. Shadows "
         "or discoloration on the paper are still paper — follow the true "
@@ -7809,7 +7814,7 @@ def _crop_engraved_area(img, design, paper):
     Margins never drop below ~1.5% of the design (a visible border
     survives even a wrong paper edge) and never exceed the frame.
     Without a trusted paper quad the frame stands as the margin."""
-    rect = _rectify_note_quad(img, design, context=0.07,
+    rect = _rectify_note_quad(img, design, context=0.10,
                               fill=img.load()[2, 2])
     if not rect:
         return None
