@@ -138,10 +138,11 @@ design = _draw_note(draw, paper_quad)
 stuffapp._ai_note_quad = _fake_quads(design, tuple(map(tuple, paper_quad)))
 trimmed = _trim_to_image(img)
 assert trimmed is not None, 'keystoned slab shot was not trimmed'
-davg_w = (math.hypot(design[1][0] - design[0][0], design[1][1] - design[0][1])
-          + math.hypot(design[2][0] - design[3][0], design[2][1] - design[3][1])) / 2
-davg_h = (math.hypot(design[3][0] - design[0][0], design[3][1] - design[0][1])
-          + math.hypot(design[2][0] - design[1][0], design[2][1] - design[1][1])) / 2
+pq = paper_quad
+davg_w = (math.hypot(pq[1][0] - pq[0][0], pq[1][1] - pq[0][1])
+          + math.hypot(pq[2][0] - pq[3][0], pq[2][1] - pq[3][1])) / 2
+davg_h = (math.hypot(pq[3][0] - pq[0][0], pq[3][1] - pq[0][1])
+          + math.hypot(pq[2][0] - pq[1][0], pq[2][1] - pq[1][1])) / 2
 want = davg_w / davg_h
 got = trimmed.size[0] / float(trimmed.size[1])
 assert abs(got - want) / want < 0.12, \
@@ -189,6 +190,26 @@ insets = _design_insets(trimmed)
 assert all(0.03 <= f <= 0.10 for f in insets), \
     f'context-frame margins off: {insets}'
 print('NO-PAPER-QUAD (context frame) ASSERTIONS PASSED')
+
+
+# --- Bad paper outline: rejected, design frame stands ----------------------
+img = Image.new('RGB', (1600, 1200), HOLDER)
+draw = ImageDraw.Draw(img)
+paper_quad = [(300, 300), (1340, 300), (1340, 880), (300, 880)]
+design = _draw_note(draw, paper_quad)
+bogus_paper = ((500, 400), (900, 400), (900, 700), (500, 700))  # inside design
+stuffapp._ai_note_quad = _fake_quads(design, bogus_paper)
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'bad-paper shot was not trimmed at all'
+# The fallback is the design quad + 10% frame — verify by dimensions
+# (in this synthetic scene the frame band lands partly on dark holder,
+# which an ink-based inset measure cannot tell apart from design).
+dw = design[1][0] - design[0][0]
+dh = design[3][1] - design[0][1]
+assert abs(trimmed.size[0] - dw * 1.2) <= 4 and \
+    abs(trimmed.size[1] - dh * 1.2) <= 4, \
+    f'design-frame fallback dims off: {trimmed.size} vs {(dw * 1.2, dh * 1.2)}'
+print('BAD-PAPER-OUTLINE (fallback) ASSERTIONS PASSED')
 
 
 # --- Homography sanity ----------------------------------------------------

@@ -7803,41 +7803,35 @@ def _map_source_points_to_output(coeffs, pts):
 
 
 def _crop_engraved_area(img, design, paper):
-    """Engraved area plus its real paper margins, squared — geometry
-    only, no pixel classification.
+    """The note, squared — engraved area aligned, margins exactly as
+    printed. Pure geometry, no pixel classification.
 
-    The design quad is warped level inside a 7% context frame; the
-    paper quad (seen by the same model call) is mapped through the
-    same homography and bounds the crop per side, so holder and
-    backdrop are excluded because of where the paper edge IS, not what
-    its pixels look like — shadows and backgrounds are irrelevant.
-    Margins never drop below ~1.5% of the design (a visible border
-    survives even a wrong paper edge) and never exceed the frame.
-    Without a trusted paper quad the frame stands as the margin."""
-    rect = _rectify_note_quad(img, design, context=0.10,
-                              fill=img.load()[2, 2])
-    if not rect:
-        return None
-    warped, inner, coeffs = rect
-    w, h = warped.size
-    ix0, iy0, ix1, iy1 = inner
-    floor_x = max(3, int(0.015 * (ix1 - ix0)))
-    floor_y = max(3, int(0.015 * (iy1 - iy0)))
-    x0, y0, x1, y1 = 0, 0, w, h
-    mapped = _map_source_points_to_output(coeffs, paper) if paper else None
-    if mapped:
-        (nwx, nwy), (nex, ney), (sex, sey), (swx, swy) = mapped
-        # Innermost extent per side, so a rotated paper outline can't
-        # sweep backdrop corners into the crop.
-        x0 = max(0, int(min(max(nwx, swx), ix0 - floor_x)))
-        y0 = max(0, int(min(max(nwy, ney), iy0 - floor_y)))
-        x1 = min(w, int(max(min(nex, sex), ix1 + floor_x)) + 1)
-        y1 = min(h, int(max(min(swy, sey), iy1 + floor_y)) + 1)
-    if x1 - x0 < 60 or y1 - y0 < 30:
-        return None
-    if (x0, y0, x1, y1) == (0, 0, w, h):
-        return warped
-    return warped.crop((x0, y0, x1, y1))
+    When the model gave a paper outline, THAT rectangle is warped flat
+    and the output is the paper itself: notes are printed parallel to
+    their paper edges, so leveling the paper levels the engraving, and
+    the margins are the note's real margins — holder, backdrop, and
+    shadows end at the paper edge by construction. The design quad
+    validates the answer: warped through the same homography it must
+    land fully inside the paper, else the paper outline was wrong and
+    the design quad plus a 10% context frame stands in (also the path
+    when no paper outline was given)."""
+    fill = img.load()[2, 2]
+    if paper:
+        rect = _rectify_note_quad(img, paper, fill=fill)
+        if rect:
+            warped, _inner, coeffs = rect
+            mapped = _map_source_points_to_output(coeffs, design)
+            if mapped:
+                xs = [p[0] for p in mapped]
+                ys = [p[1] for p in mapped]
+                w, h = warped.size
+                if min(xs) >= 1 and min(ys) >= 1 \
+                        and max(xs) <= w - 1 and max(ys) <= h - 1:
+                    return warped
+        app.logger.info('trim-ai: paper outline unusable (design not '
+                        'inside it) — design frame stands')
+    rect = _rectify_note_quad(img, design, context=0.10, fill=fill)
+    return rect[0] if rect else None
 
 
 def _finish_ai_crop(crop, refine=True):
