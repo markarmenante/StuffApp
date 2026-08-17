@@ -69,6 +69,37 @@ provenance (old collections, named sales) adds real value on ancients.
   available (state that), or under the same rarity exception as the
   grade floor. Always name the designation in the recommendation and
   price EPQ premiums from EPQ-to-EPQ comps, not the plain-grade line.
+- **Actively seek colonial issues** (2026-08-17): banknote
+  recommendations should look for colonial-era paper across the
+  empires, not just modern national issues. In scope:
+  - **British Empire**: India, Ceylon, Burma, Malaya, Sarawak, Hong
+    Kong, Palestine, Cyprus, Malta, East Africa, West Africa, Southern
+    Rhodesia, British Guiana, British Honduras, the Caribbean boards,
+    Fiji, and the rest of the crown colonies and currency boards.
+  - **French**: Indochina, French West/Equatorial Africa, Madagascar,
+    Morocco, Tunisia, Algeria, French Somaliland, the Antilles.
+  - **Portuguese**: Angola, Mozambique, Portuguese Guinea, Cape Verde,
+    São Tomé, Portuguese India, Macau, Timor (Banco Nacional
+    Ultramarino issues).
+  - **German**: German East Africa (incl. the WWI emergency issues),
+    Kamerun, German New Guinea, German South-West Africa.
+  - **Italian**: Italian East Africa, Italian Somaliland, Tripolitania
+    / Libya, the occupation issues.
+  - **Spanish**: Spanish Philippines, Puerto Rico, Cuba under Spain,
+    Spanish Morocco, Fernando Poo.
+  - **Dutch**: Netherlands Indies (incl. Japanese occupation and
+    NICA), Curaçao, Surinam.
+  - **Other colonial**: Belgian Congo, Danish West Indies, Japanese
+    colonial/occupation issues (Taiwan, Korea, Manchukuo, JIM),
+    Russian Turkestan — any imperial or mandate paper.
+  - **USA-administered territories**: the Philippines under US
+    administration (Silver/Treasury Certificates, PNB, Commonwealth,
+    VICTORY overprints), Hawaii overprints, Puerto Rico, the Panama
+    Canal Zone, Cuba under US administration.
+  These rank alongside EPQ preference, and grade rules above still
+  apply. When a scanned offer includes colonial material, say which
+  empire/administration it belongs to in the recommendation — it ties
+  into the collection's colonial-timeline focus in the app.
 - Coin grades: **recommend only XF/EF, AU, or MS coins — Mark wants
   high-grade coins.** Sheldon-scale: XF40 is the floor; prefer AU and
   MS. Applies to US, world, and ancient coins alike (ancients in
