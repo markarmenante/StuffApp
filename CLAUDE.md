@@ -16,7 +16,8 @@ fold new standing instructions in here — nowhere else.)
   repo's CONNECTORS.md registry, the other apps' deployments (Railway,
   Vercel) and their local Mac checkouts (this app: `~/Developer/stuffapp`
   with its `.env`; boardroom `/Users/markarmenante/GitHub/boardroom`;
-  Family Office, museum-of-time, n552ym under `~/Documents/GitHub/`).
+  family-office and n552ym under `~/GitHub/`; museum lives in
+  boardroom at `apps/museum`).
   Reuse what exists; never re-mint, never make Mark hand-copy what a
   loader can find. Where the keys for THIS app actually are (swept
   2026-08-16; exact env names in CONNECTORS.md):

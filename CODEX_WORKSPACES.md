@@ -9,17 +9,17 @@ Canonical local project home:
 Use these project folders:
 
 ```text
-StuffApp:      /Users/markarmenante/Documents/GitHub/stuffapp
-N552YM:        /Users/markarmenante/Documents/GitHub/n552ym
-Family Office: /Users/markarmenante/Documents/GitHub/Family Office
-Museum:        /Users/markarmenante/Documents/GitHub/museum-of-time
+StuffApp:      /Users/markarmenante/GitHub/StuffApp
+N552YM:        /Users/markarmenante/GitHub/n552ym
+Family Office: /Users/markarmenante/GitHub/family-office
+Museum:        /Users/markarmenante/GitHub/boardroom/apps/museum
 ```
 
 The `~/Developer` paths are convenience symlinks for StuffApp and N552YM:
 
 ```text
-/Users/markarmenante/Developer/stuffapp -> /Users/markarmenante/Documents/GitHub/stuffapp
-/Users/markarmenante/Developer/n552ym -> /Users/markarmenante/Documents/GitHub/n552ym
+/Users/markarmenante/Developer/stuffapp -> /Users/markarmenante/GitHub/StuffApp
+/Users/markarmenante/Developer/n552ym -> /Users/markarmenante/GitHub/n552ym
 ```
 
 Production:
@@ -34,10 +34,10 @@ Family Office: https://ym-familyoffice-production.up.railway.app on Railway
 Development quick starts:
 
 ```text
-Museum:        cd /Users/markarmenante/Documents/GitHub/museum-of-time && npm run dev
-StuffApp:      cd /Users/markarmenante/Documents/GitHub/stuffapp && flask --app app run --port 5001
-N552YM:        cd /Users/markarmenante/Documents/GitHub/n552ym && npm run dev
-Family Office: cd /Users/markarmenante/Documents/GitHub/Family\ Office && npm run dev
+Museum:        cd /Users/markarmenante/GitHub/boardroom && npm run dev -w apps/museum
+StuffApp:      cd /Users/markarmenante/GitHub/StuffApp && flask --app app run --port 5001
+N552YM:        cd /Users/markarmenante/GitHub/n552ym && npm run dev
+Family Office: cd /Users/markarmenante/GitHub/family-office && npm run dev
 ```
 
 The stale `stuff-app` Next/Vercel rebuilds (GitHub checkout and old iCloud

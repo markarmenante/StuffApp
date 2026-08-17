@@ -10,15 +10,15 @@ Related projects:
 
 ```text
 Museum of Time
-/Users/markarmenante/Documents/GitHub/museum-of-time
+/Users/markarmenante/GitHub/boardroom/apps/museum
 https://museum-of-time-peach.vercel.app
 
 N552YM
-/Users/markarmenante/Documents/GitHub/n552ym
+/Users/markarmenante/GitHub/n552ym
 https://n552ym.vercel.app/trips
 
 Family Office
-/Users/markarmenante/Documents/GitHub/Family Office
+/Users/markarmenante/GitHub/family-office
 https://ym-familyoffice-production.up.railway.app
 ```
 
@@ -32,10 +32,10 @@ Keep these projects separate:
 Actual GitHub checkouts:
 
 ```text
-StuffApp: /Users/markarmenante/Documents/GitHub/stuffapp
-N552YM:   /Users/markarmenante/Documents/GitHub/n552ym
-Family Office: /Users/markarmenante/Documents/GitHub/Family Office
-Museum of Time: /Users/markarmenante/Documents/GitHub/museum-of-time
+StuffApp: /Users/markarmenante/GitHub/StuffApp
+N552YM:   /Users/markarmenante/GitHub/n552ym
+Family Office: /Users/markarmenante/GitHub/family-office
+Museum of Time: /Users/markarmenante/GitHub/boardroom/apps/museum
 ```
 
 Production targets:

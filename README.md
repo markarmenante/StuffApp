@@ -17,7 +17,7 @@ Canonical local path:
 Actual GitHub checkout:
 
 ```text
-/Users/markarmenante/Documents/GitHub/stuffapp
+/Users/markarmenante/GitHub/StuffApp
 ```
 
 GitHub repo:
@@ -45,9 +45,9 @@ gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300
 Related app:
 
 ```text
-Museum of Time: /Users/markarmenante/Documents/GitHub/museum-of-time
-N552YM:         /Users/markarmenante/Documents/GitHub/n552ym
-Family Office: /Users/markarmenante/Documents/GitHub/Family Office
+Museum of Time: /Users/markarmenante/GitHub/boardroom/apps/museum
+N552YM:         /Users/markarmenante/GitHub/n552ym
+Family Office: /Users/markarmenante/GitHub/family-office
 ```
 
 Production switcher:

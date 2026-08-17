@@ -6,31 +6,31 @@ workspace from scratch.
 ## Clone Apps
 
 ```bash
-mkdir -p "$HOME/Documents/GitHub" "$HOME/Developer"
+mkdir -p "$HOME/GitHub" "$HOME/Developer"
 
-test -d "$HOME/Documents/GitHub/stuffapp/.git" || \
-  git clone https://github.com/markarmenante/StuffApp.git "$HOME/Documents/GitHub/stuffapp"
+test -d "$HOME/GitHub/StuffApp/.git" || \
+  git clone https://github.com/markarmenante/StuffApp.git "$HOME/GitHub/StuffApp"
 
-test -d "$HOME/Documents/GitHub/n552ym/.git" || \
-  git clone https://github.com/markarmenante/n552ym.git "$HOME/Documents/GitHub/n552ym"
+test -d "$HOME/GitHub/n552ym/.git" || \
+  git clone https://github.com/markarmenante/n552ym.git "$HOME/GitHub/n552ym"
 
-test -d "$HOME/Documents/GitHub/museum-of-time/.git" || \
-  git clone https://github.com/markarmenante/museum-of-time.git "$HOME/Documents/GitHub/museum-of-time"
+test -d "$HOME/GitHub/boardroom/.git" || \
+  git clone https://github.com/markarmenante/boardroom.git "$HOME/GitHub/boardroom"
 
-test -d "$HOME/Documents/GitHub/Family Office/.git" || \
-  git clone https://github.com/markarmenante/family-office.git "$HOME/Documents/GitHub/Family Office"
+test -d "$HOME/GitHub/family-office/.git" || \
+  git clone https://github.com/markarmenante/family-office.git "$HOME/GitHub/family-office"
 
-ln -sfn "$HOME/Documents/GitHub/stuffapp" "$HOME/Developer/stuffapp"
-ln -sfn "$HOME/Documents/GitHub/n552ym" "$HOME/Developer/n552ym"
+ln -sfn "$HOME/GitHub/StuffApp" "$HOME/Developer/stuffapp"
+ln -sfn "$HOME/GitHub/n552ym" "$HOME/Developer/n552ym"
 ```
 
 Canonical quick-switch paths:
 
 ```text
-Museum:        /Users/markarmenante/Documents/GitHub/museum-of-time
-StuffApp:      /Users/markarmenante/Documents/GitHub/stuffapp
-N552YM:        /Users/markarmenante/Documents/GitHub/n552ym
-Family Office: /Users/markarmenante/Documents/GitHub/Family Office
+Museum:        /Users/markarmenante/GitHub/boardroom/apps/museum
+StuffApp:      /Users/markarmenante/GitHub/StuffApp
+N552YM:        /Users/markarmenante/GitHub/n552ym
+Family Office: /Users/markarmenante/GitHub/family-office
 ```
 
 ## Production Targets
@@ -77,11 +77,11 @@ N552YM deploys from `markarmenante/n552ym` on Vercel.
 ## Start Museum Locally
 
 ```bash
-cd /Users/markarmenante/Documents/GitHub/museum-of-time
+cd /Users/markarmenante/GitHub/boardroom
 git pull --ff-only
 npm install
-npm run db:setup
-npm run dev
+npm run db:setup -w apps/museum
+npm run dev -w apps/museum
 ```
 
 For Apple Messages and Google Drive ingest on the Mac:
@@ -90,12 +90,14 @@ For Apple Messages and Google Drive ingest on the Mac:
 npm run source:webhook
 ```
 
-Museum deploys from `markarmenante/museum-of-time` on Vercel.
+Museum deploys from `markarmenante/boardroom` on Vercel (Root
+Directory `apps/museum`); the standalone museum-of-time repo was
+deleted 2026-08-17.
 
 ## Start Family Office Locally
 
 ```bash
-cd /Users/markarmenante/Documents/GitHub/Family\ Office
+cd /Users/markarmenante/GitHub/family-office
 git pull --ff-only
 npm install
 npm run dev
