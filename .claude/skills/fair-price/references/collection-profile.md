@@ -61,6 +61,14 @@ provenance (old collections, named sales) adds real value on ancients.
   exception: genuine rarity, where the census shows essentially nothing
   available at higher grades; then a lower-grade example may be
   surfaced, with the population evidence stated.
+- **Prioritize EPQ notes** (2026-08-17): among candidate banknotes,
+  rank PMG EPQ (Exceptional Paper Quality — original, unpressed paper;
+  PCGS "PPQ" is the equivalent) ahead of non-EPQ examples, including a
+  non-EPQ note one numeric grade higher — a 58 EPQ beats a plain 60.
+  Surface a non-EPQ note only when no EPQ/PPQ example is realistically
+  available (state that), or under the same rarity exception as the
+  grade floor. Always name the designation in the recommendation and
+  price EPQ premiums from EPQ-to-EPQ comps, not the plain-grade line.
 - Coin grades: **recommend only XF/EF, AU, or MS coins — Mark wants
   high-grade coins.** Sheldon-scale: XF40 is the floor; prefer AU and
   MS. Applies to US, world, and ancient coins alike (ancients in
