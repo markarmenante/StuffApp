@@ -7876,6 +7876,17 @@ def _clamp_ai_margins(warped, inner):
     while y1 > max(iy1 - in_y, y0 + 30) \
             and backdroppy([(x, y1 - 1) for x in xs]):
         y1 -= 1
+    # Hard floor: whatever the colour tests said, the crop never ends
+    # closer than ~1.5% of the design size to the model's rectangle —
+    # a deep-shadow margin row can defeat any classifier (the JIM
+    # reverse's bottom margin did), and a sliver of kept holder is
+    # cheaper than a design cut flush to the edge.
+    floor_x = max(3, int(0.015 * (ix1 - ix0)))
+    floor_y = max(3, int(0.015 * (iy1 - iy0)))
+    x0 = min(x0, max(0, ix0 - floor_x))
+    y0 = min(y0, max(0, iy0 - floor_y))
+    x1 = max(x1, min(w, ix1 + floor_x))
+    y1 = max(y1, min(h, iy1 + floor_y))
     if (x0, y0, x1, y1) == (0, 0, w, h):
         return warped
     return warped.crop((x0, y0, x1, y1))

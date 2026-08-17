@@ -188,6 +188,24 @@ assert oh <= 520, f'holder band below shadow kept: {out.size}'
 print('MARGIN-CLAMP (shadowed bottom) ASSERTIONS PASSED')
 
 
+# --- Margin clamp: deep-shadow margin still keeps a floor margin -----------
+# A margin so dark it reads as holder (the JIM reverse's bottom) must
+# not let the clamp cut flush to the design: the crop always ends at
+# least ~1.5% of the design size beyond the model's rectangle.
+DEEP = tuple(int(v * 0.25) for v in PAPER)
+img = Image.new('RGB', (1000, 560), PAPER)
+draw = ImageDraw.Draw(img)
+draw.rectangle([120, 60, 940, 440], outline=INK, width=8)
+for gx in range(140, 920, 20):
+    draw.line([(gx, 80), (gx, 420)], fill=INK, width=2)
+draw.rectangle([0, 450, 999, 559], fill=DEEP)   # deep shadow below design
+inner = (120, 60, 940, 440)
+out = stuffapp._clamp_ai_margins(img, inner)
+assert out.size[1] >= 440 + max(3, int(0.015 * 380)), \
+    f'deep-shadow bottom cut flush to the design: {out.size}'
+print('MARGIN-CLAMP (deep-shadow floor) ASSERTIONS PASSED')
+
+
 # --- Homography sanity ----------------------------------------------------
 # The PERSPECTIVE coefficients must map each output corner exactly onto
 # its source-quad corner (PIL samples source = H(output)).
