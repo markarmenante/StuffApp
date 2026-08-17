@@ -7780,13 +7780,18 @@ def save_upload(file_obj, *, optimize_image=False):
     return stored_name
 
 
-def _ai_note_quad(img):
+def _ai_note_quad(img, retry_collapsed=False):
     """The trimmer's one detector: ask the same model Check already
     uses to outline the note. One small call on a downscaled copy;
     returns (design_quad, paper_quad_or_None) — the engraved area's
     (NW, NE, SE, SW) and the note's physical paper outline, both in
     full-res pixels — or None (no key, API failure, nothing found, or
-    the note already fills the frame)."""
+    the note already fills the frame).
+
+    ``retry_collapsed`` is the second ask after the first paper
+    rectangle came back drawn on the printed border instead of the
+    sheet edge (see ``_margins_collapsed``); it says so plainly rather
+    than repeating an identical prompt."""
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
         return None
@@ -7827,6 +7832,16 @@ def _ai_note_quad(img):
         '{"found": true, "corners": [[x,y],[x,y],[x,y],[x,y]], '
         '"paper_corners": [[x,y],[x,y],[x,y],[x,y]]}. '
         'If no single banknote is clearly visible: {"found": false}.')
+    if retry_collapsed:
+        prompt += (
+            " NOTE: a previous answer for this photo put paper_corners "
+            "straight onto the printed border on one axis, leaving the "
+            "note with no paper margin at all on those two sides. That "
+            "was wrong. A banknote sheet always extends past its printed "
+            "border on every side. Look again at where the PAPER meets "
+            "the holder plastic or backdrop — above the topmost printed "
+            "element and below the lowest one — and put paper_corners "
+            "there, outside corners, never on the border itself.")
     try:
         client = anthropic.Anthropic(api_key=api_key)
         model = anthropic_lookup_model(
@@ -7932,7 +7947,22 @@ def _trim_slabbed_note_image(data):
     if min(w, h) >= 300:
         quads = _ai_note_quad(img)
         if quads is not None:
-            crop = _crop_engraved_area(img, quads[0], quads[1])
+            crop, status = _crop_engraved_area(img, quads[0], quads[1])
+            if status == 'collapsed':
+                # The paper rectangle landed on the printed border, so
+                # the note would lose the margins on a whole axis. Ask
+                # once more, saying so; if the second answer collapses
+                # too, the design quad's own context frame stands —
+                # never a crop that shaves the sheet.
+                retry = _ai_note_quad(img, retry_collapsed=True)
+                if retry is not None:
+                    crop, status = _crop_engraved_area(
+                        img, retry[0], retry[1])
+                    if status == 'collapsed':
+                        crop, status = _crop_engraved_area(
+                            img, retry[0], None)
+                else:
+                    crop, status = _crop_engraved_area(img, quads[0], None)
             if crop is not None:
                 return _finish_ai_crop(crop)
         # None is ambiguous: no key / API failure / no note found / the
@@ -7963,9 +7993,39 @@ def _map_source_points_to_output(coeffs, pts):
     return out
 
 
+def _margins_collapsed(size, mapped):
+    """True when the paper outline hugs the printed area along a whole
+    axis: BOTH margins on one axis are ~zero while the other axis keeps
+    real margin.
+
+    That shape is not a note. A sheet always extends past its border on
+    every side, so two opposite margins vanishing together means the
+    model outlined the printed border instead of the paper edge — the
+    failure that shipped a 2.71:1 crop of a 2.43:1 note (2026-08-17).
+    A genuinely thin margin on ONE side is real and must survive: a
+    miscut note with a 2% bottom and a 7% top is not collapsed, and the
+    thin-margin test pins that."""
+    w, h = size
+    xs = [p[0] for p in mapped]
+    ys = [p[1] for p in mapped]
+    left, right = min(xs), w - max(xs)
+    top, bottom = min(ys), h - max(ys)
+    flat_x = max(left, right) <= 0.006 * w
+    flat_y = max(top, bottom) <= 0.006 * h
+    live_x = min(left, right) >= 0.012 * w
+    live_y = min(top, bottom) >= 0.012 * h
+    return (flat_y and live_x) or (flat_x and live_y)
+
+
 def _crop_engraved_area(img, design, paper):
     """The note, squared — engraved area aligned, margins exactly as
     printed. Pure geometry, no pixel classification.
+
+    Returns ``(crop, status)``: status is 'paper' when the paper
+    outline bounded the margins, 'design' when the design quad plus its
+    context frame stood in, or 'collapsed' (with crop None) when the
+    paper outline hugged the printed area on a whole axis and the
+    caller should ask the model again.
 
     When the model gave a paper outline, THAT rectangle is warped flat
     and the output is the paper itself: notes are printed parallel to
@@ -7988,11 +8048,16 @@ def _crop_engraved_area(img, design, paper):
                 w, h = warped.size
                 if min(xs) >= 1 and min(ys) >= 1 \
                         and max(xs) <= w - 1 and max(ys) <= h - 1:
-                    return warped
+                    if _margins_collapsed(warped.size, mapped):
+                        app.logger.info(
+                            'trim-ai: paper outline collapsed onto the '
+                            'printed border (%dx%d) — asking again', w, h)
+                        return None, 'collapsed'
+                    return warped, 'paper'
         app.logger.info('trim-ai: paper outline unusable (design not '
                         'inside it) — design frame stands')
     rect = _rectify_note_quad(img, design, context=0.10, fill=fill)
-    return rect[0] if rect else None
+    return (rect[0] if rect else None), 'design'
 
 
 def _finish_ai_crop(crop, refine=True):
@@ -8008,12 +8073,26 @@ def _finish_ai_crop(crop, refine=True):
     if refine:
         quads = _ai_note_quad(crop)
         if quads is not None:
-            cand = _crop_engraved_area(crop, quads[0], quads[1])
-            if cand is not None and cand.size[0] * cand.size[1] \
+            cand, status = _crop_engraved_area(crop, quads[0], quads[1])
+            if cand is not None and status != 'collapsed' \
+                    and cand.size[0] * cand.size[1] \
                     >= 0.5 * (crop.size[0] * crop.size[1]):
-                app.logger.info('trim-ai: second-look refine %dx%d -> %dx%d',
-                                *crop.size, *cand.size)
-                crop = cand
+                # A second look tightens margins; it must not restretch
+                # the note. Both faces of one sheet share an aspect
+                # ratio, and a refine that moves it is eating a margin,
+                # not trimming a holder — the 2026-08-17 back-of-note
+                # crop drifted 2.57 -> 2.71 that way.
+                was = crop.size[0] / float(crop.size[1])
+                now = cand.size[0] / float(cand.size[1])
+                if abs(now - was) / was <= 0.04:
+                    app.logger.info(
+                        'trim-ai: second-look refine %dx%d -> %dx%d',
+                        *crop.size, *cand.size)
+                    crop = cand
+                else:
+                    app.logger.info(
+                        'trim-ai: second look rejected, aspect %.3f -> '
+                        '%.3f', was, now)
     return _encode_trimmed_note(crop)
 
 

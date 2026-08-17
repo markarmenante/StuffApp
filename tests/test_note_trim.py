@@ -212,6 +212,111 @@ assert abs(trimmed.size[0] - dw * 1.2) <= 4 and \
 print('BAD-PAPER-OUTLINE (fallback) ASSERTIONS PASSED')
 
 
+# --- Paper outline collapsed on one axis: ask again -----------------------
+# The real 2026-08-17 failure: on the back of a PMG-slabbed 2-Peso note
+# the model drew paper_corners along the printed border top and bottom
+# while keeping real left/right margins, so the crop came out 2.71:1
+# for a 2.43:1 sheet — the note's own margins shaved off. The trimmer
+# must notice the collapsed axis and re-ask instead of shipping it.
+img = Image.new('RGB', (1600, 1200), HOLDER)
+draw = ImageDraw.Draw(img)
+paper_quad = ((300, 300), (1340, 300), (1340, 880), (300, 880))
+design = _draw_note(draw, paper_quad)
+# Just outside the design vertically — a couple of pixels, the way a
+# real answer traced onto the printed border looks: it clears the
+# "design must sit inside the paper" test, and is still no margin.
+flat = ((design[0][0] - 30, design[0][1] - 2),
+        (design[1][0] + 30, design[1][1] - 2),
+        (design[2][0] + 30, design[2][1] + 2),
+        (design[3][0] - 30, design[3][1] + 2))
+
+answers = {'n': 0}
+
+
+def _collapsing_then_right(im, retry_collapsed=False):
+    """First answer collapses top/bottom onto the border; the re-ask
+    (and only the re-ask) returns the true sheet edge."""
+    answers['n'] += 1
+    if answers['n'] == 1:
+        assert not retry_collapsed, 'first ask must not carry the retry hint'
+        return design, flat
+    if answers['n'] == 2:
+        assert retry_collapsed, 'the second ask must say the outline collapsed'
+        return design, tuple(map(tuple, paper_quad))
+    return None            # no third-look refine in this test
+
+
+stuffapp._ai_note_quad = _collapsing_then_right
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'collapsed-outline shot was not trimmed'
+assert answers['n'] >= 2, 'the collapsed outline was accepted without a re-ask'
+got = trimmed.size[0] / float(trimmed.size[1])
+want = 1040.0 / 580.0
+assert abs(got - want) / want < 0.08, \
+    f'collapsed-outline aspect off: got {got:.3f}, want {want:.3f}'
+insets = _design_insets(trimmed)
+assert all(f >= 0.01 for f in insets), \
+    f'margins still shaved after the re-ask: {insets}'
+print('COLLAPSED-PAPER-OUTLINE (re-ask) ASSERTIONS PASSED')
+
+
+# --- Collapsed twice: the design frame stands, never a shaved sheet --------
+answers2 = {'n': 0}
+
+
+def _always_collapsing(im, retry_collapsed=False):
+    answers2['n'] += 1
+    return (design, flat) if answers2['n'] <= 2 else None
+
+
+stuffapp._ai_note_quad = _always_collapsing
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'twice-collapsed shot was not trimmed'
+dw = design[1][0] - design[0][0]
+dh = design[3][1] - design[0][1]
+assert abs(trimmed.size[0] - dw * 1.2) <= 4 and \
+    abs(trimmed.size[1] - dh * 1.2) <= 4, \
+    f'expected the design frame, got {trimmed.size}'
+print('TWICE-COLLAPSED (design frame) ASSERTIONS PASSED')
+
+
+# --- A second look may tighten, but may not restretch the note ------------
+# 1179x459 -> 1165x430 was the shipped regression: 2.57 -> 2.71, a 5.4%
+# aspect move that is a margin being eaten, not a holder being trimmed.
+img = Image.new('RGB', (1600, 1200), HOLDER)
+draw = ImageDraw.Draw(img)
+paper_quad = ((240, 300), (1420, 300), (1420, 900), (240, 900))
+design = _draw_note(draw, paper_quad)
+shorter = ((paper_quad[0][0], paper_quad[0][1] + 60),
+           (paper_quad[1][0], paper_quad[1][1] + 60),
+           (paper_quad[2][0], paper_quad[2][1] - 60),
+           (paper_quad[3][0], paper_quad[3][1] - 60))
+
+looks = {'n': 0}
+
+
+def _refine_restretches(im, retry_collapsed=False):
+    looks['n'] += 1
+    if looks['n'] == 1:
+        return design, tuple(map(tuple, paper_quad))
+    if looks['n'] == 2:                      # the second look, on the crop
+        w2, h2 = im.size
+        inset = ((6.0, 70.0), (w2 - 6.0, 70.0),
+                 (w2 - 6.0, h2 - 70.0), (6.0, h2 - 70.0))
+        return inset, inset
+    return None
+
+
+stuffapp._ai_note_quad = _refine_restretches
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'refine-guard shot was not trimmed'
+got = trimmed.size[0] / float(trimmed.size[1])
+want = 1180.0 / 600.0
+assert abs(got - want) / want < 0.08, \
+    f'a restretching second look was applied: got {got:.3f}, want {want:.3f}'
+print('SECOND-LOOK ASPECT GUARD ASSERTIONS PASSED')
+
+
 # --- Homography sanity ----------------------------------------------------
 quad = ((10.0, 20.0), (410.0, 44.0), (400.0, 260.0), (18.0, 240.0))
 W, H = 400, 220
