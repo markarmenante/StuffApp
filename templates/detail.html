@@ -1365,8 +1365,6 @@ document.addEventListener('DOMContentLoaded', function () {
     {{ cell('grade_modifier','EPQ / ★') }}
     {{ cell('grade_condition','Condition') }}
   </div>
-  {{ formatted_notescell('condition','Historical Context, Notes') }}
-
   <!-- Description -->
   <div class="section-bar">Description</div>
   {% set _desc = val('description') %}
@@ -1375,6 +1373,8 @@ document.addEventListener('DOMContentLoaded', function () {
       <textarea name="description" rows="8" {% if is_new and not _desc %}placeholder="Description"{% endif %}>{{ _desc }}</textarea>
     </div>
   </div>
+
+  {{ formatted_notescell('condition','Historical Context, Notes') }}
 
   <!-- Lettering / Translation — filled by Check scanning the note images.
        English notes need no translation, so the two panels hold the two
