@@ -400,6 +400,8 @@
           </div>
           <div class="idr">
             {% if row['property'] %}<span>{{ row['property'] }}</span>{% endif %}
+            {% if row['price'] %}<span>{{ row['price'] | currency }}</span>{% endif %}
+            {% if row['vendor'] %}<span>{{ row['vendor'] }}</span>{% endif %}
             {% if row['location'] %}<span>{{ row['location'] }}</span>{% endif %}
             {% if row['dimensions'] %}<span>{{ row['dimensions'] }}</span>{% endif %}
             {% if row['cat_id'] %}<span class="item-cat-id">{{ row['cat_id'] }}</span>{% endif %}
