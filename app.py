@@ -18922,6 +18922,123 @@ def coins_print_pdf():
                     headers={'Content-Disposition': f'inline; filename="{filename}"'})
 
 
+@app.route('/art/report-pdf')
+def art_report_pdf():
+    """The art collection as a flowing PDF report, laid out like the
+    art list and grouped by artist: each new artist gets a subheading
+    with their biography (the `notes` / "Artist Notes" field — first
+    non-empty one among their rows), each piece renders as the list
+    row does (title; medium, year, dimensions; property, location,
+    price paid, vendor), and a piece with Object Notes gets that
+    detail as a paragraph after its row. Honors the list's current
+    search and filter params."""
+    from xml.sax.saxutils import escape as xesc
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (HRFlowable, KeepTogether, Paragraph,
+                                    SimpleDocTemplate, Spacer)
+    import io as _io
+
+    db = get_db()
+    q = (request.args.get('q') or '').strip()
+    art_filter = (request.args.get('filter') or '').strip() or None
+    sql, params = build_search_query('art', q, dot=False,
+                                     coin_filter=art_filter)
+    rows = [r for r in db.execute(sql, params).fetchall()
+            if _user_can_see_row('art', r)]
+
+    total = 0.0
+    for r in rows:
+        try:
+            total += float(str(r['price'] or '')
+                           .replace(',', '').replace('$', ''))
+        except (TypeError, ValueError):
+            pass
+
+    st_title = ParagraphStyle('title', fontName='Helvetica-Bold',
+                              fontSize=17, leading=21, spaceAfter=2)
+    st_sub = ParagraphStyle('sub', fontName='Helvetica', fontSize=9.5,
+                            leading=12, textColor=colors.HexColor('#666666'),
+                            spaceAfter=10)
+    st_artist = ParagraphStyle('artist', fontName='Helvetica-Bold',
+                               fontSize=12.5, leading=15, spaceBefore=14,
+                               spaceAfter=1)
+    st_bio = ParagraphStyle('bio', fontName='Helvetica-Oblique',
+                            fontSize=9, leading=11.5,
+                            textColor=colors.HexColor('#444444'),
+                            spaceAfter=6)
+    st_piece = ParagraphStyle('piece', fontName='Helvetica-Bold',
+                              fontSize=10, leading=12.5, spaceBefore=5,
+                              leftIndent=10)
+    st_meta = ParagraphStyle('meta', fontName='Helvetica', fontSize=8.5,
+                             leading=10.5,
+                             textColor=colors.HexColor('#555555'),
+                             leftIndent=10)
+    st_notes = ParagraphStyle('objnotes', fontName='Helvetica', fontSize=8.5,
+                              leading=11, leftIndent=10, spaceBefore=2,
+                              textColor=colors.HexColor('#333333'))
+
+    def dotline(parts):
+        return '  ·  '.join(xesc(str(p).strip()) for p in parts
+                            if p not in (None, '') and str(p).strip())
+
+    story = [Paragraph('Art Collection', st_title),
+             Paragraph(dotline([
+                 date.today().strftime('%B %-d, %Y'),
+                 f'{len(rows)} piece{"s" if len(rows) != 1 else ""}',
+                 (f'total paid {currency_filter(total)}' if total else None),
+                 (f'search: {q}' if q else None),
+                 (f'filter: {art_filter}' if art_filter else None),
+             ]), st_sub)]
+
+    prev_artist_key = None
+    first_group = True
+    for r in rows:
+        artist = (r['artist'] or '').strip()
+        blocks = []
+        if first_group or artist.lower() != prev_artist_key:
+            first_group = False
+            prev_artist_key = artist.lower()
+            blocks.append(HRFlowable(width='100%', thickness=0.6,
+                                     color=colors.HexColor('#bbbbbb'),
+                                     spaceBefore=8, spaceAfter=0))
+            blocks.append(Paragraph(xesc(artist) or '(no artist)',
+                                    st_artist))
+            bio = (r['notes'] or '').strip()
+            if bio:
+                blocks.append(Paragraph(xesc(bio), st_bio))
+        blocks.append(Paragraph(xesc((r['title'] or '').strip() or '—'),
+                                st_piece))
+        meta1 = dotline([r['medium'], r['year'], r['dimensions']])
+        meta2 = dotline([r['property'], r['location'],
+                         currency_filter(r['price']),
+                         r['vendor'], r['cat_id']])
+        if meta1:
+            blocks.append(Paragraph(meta1, st_meta))
+        if meta2:
+            blocks.append(Paragraph(meta2, st_meta))
+        detail = (r['object_notes'] or '').strip()
+        if detail:
+            blocks.append(Paragraph(xesc(detail), st_notes))
+        blocks.append(Spacer(1, 2))
+        # An artist heading never strands at a page bottom: it stays
+        # glued to its bio and first piece.
+        story.append(KeepTogether(blocks))
+
+    buf = _io.BytesIO()
+    SimpleDocTemplate(buf, pagesize=letter,
+                      leftMargin=0.8 * inch, rightMargin=0.8 * inch,
+                      topMargin=0.7 * inch, bottomMargin=0.7 * inch,
+                      title='Art Collection').build(story)
+    buf.seek(0)
+    return Response(buf.read(), mimetype='application/pdf',
+                    headers={'Content-Disposition':
+                             'inline; filename="art-report.pdf"'})
+
+
 COIN_BIN_PREFIXES = ('C', 'CM', 'N', 'NM')
 # Alternation order: longer prefixes first so "CM5" hits the CM branch
 # instead of C with leftover M5.
