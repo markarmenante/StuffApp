@@ -59,8 +59,8 @@
   <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
      title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
   {% endif %}
-  {% if category == 'art' and not at_property %}
-  <a href="{{ url_for('art_report_pdf', q=q or None, filter=coin_filter or None) }}"
+  {% if category == 'art' %}
+  <a href="{{ url_for('art_report_pdf', q=q or None, filter=coin_filter or None, at=at_property or None) }}"
      class="toolbar-btn pill"
      title="Collection report grouped by artist, with biographies and object notes (PDF)"
      target="_blank">Report</a>

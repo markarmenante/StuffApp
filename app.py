@@ -18947,10 +18947,23 @@ def art_report_pdf():
     db = get_db()
     q = (request.args.get('q') or '').strip()
     art_filter = (request.args.get('filter') or '').strip() or None
+    at_property = (request.args.get('at') or '').strip() or None
     sql, params = build_search_query('art', q, dot=False,
-                                     coin_filter=art_filter)
+                                     coin_filter=art_filter,
+                                     at_property=at_property)
     rows = [r for r in db.execute(sql, params).fetchall()
             if _user_can_see_row('art', r)]
+
+    # Title prefix: the property narrowing this report — explicit ?at=
+    # first, else the single property every row shares (a filtered or
+    # searched set that happens to sit at one place reads that way
+    # too). Mixed properties: plain "Art Collection".
+    prop_name = at_property
+    if not prop_name:
+        props = {(r['property'] or '').strip() for r in rows}
+        props.discard('')
+        if len(props) == 1:
+            prop_name = props.pop()
 
     total = 0.0
     for r in rows:
@@ -19008,7 +19021,8 @@ def art_report_pdf():
         return '  ·  '.join(xesc(str(p).strip()) for p in parts
                             if p not in (None, '') and str(p).strip())
 
-    story = [Paragraph('Art Collection', st_title),
+    title = f'{prop_name} Art Collection' if prop_name else 'Art Collection'
+    story = [Paragraph(xesc(title), st_title),
              Paragraph(dotline([
                  date.today().strftime('%B %-d, %Y'),
                  f'{len(rows)} piece{"s" if len(rows) != 1 else ""}',
@@ -19069,7 +19083,7 @@ def art_report_pdf():
     SimpleDocTemplate(buf, pagesize=letter,
                       leftMargin=0.8 * inch, rightMargin=0.8 * inch,
                       topMargin=0.7 * inch, bottomMargin=0.7 * inch,
-                      title='Art Collection').build(story)
+                      title=title).build(story)
     buf.seek(0)
     return Response(buf.read(), mimetype='application/pdf',
                     headers={'Content-Disposition':
