@@ -18938,8 +18938,10 @@ def art_report_pdf():
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import inch
-    from reportlab.platypus import (HRFlowable, KeepTogether, Paragraph,
-                                    SimpleDocTemplate, Spacer)
+    from reportlab.platypus import (HRFlowable, Image as RLImage,
+                                    KeepTogether, Paragraph,
+                                    SimpleDocTemplate, Spacer, Table,
+                                    TableStyle)
     import io as _io
 
     db = get_db()
@@ -18981,6 +18983,27 @@ def art_report_pdf():
                               leading=11, leftIndent=10, spaceBefore=2,
                               textColor=colors.HexColor('#333333'))
 
+    def piece_image(filename):
+        """Small thumbnail flowable for a piece, or None. Downscaled
+        and re-encoded so a shelf of 8MB photos doesn't become an
+        80MB PDF; any unreadable file just means a text-only row."""
+        if not filename or not is_image_filter(filename):
+            return None
+        try:
+            img = _open_upload_image(
+                open(os.path.join(UPLOAD_FOLDER, filename), 'rb').read())
+            img = _flatten_image_for_jpeg(img)
+            img.thumbnail((420, 420))
+            jb = _io.BytesIO()
+            img.save(jb, format='JPEG', quality=80)
+            jb.seek(0)
+            w, h = img.size
+            box = 1.25 * inch
+            scale = min(box / w, box / h)
+            return RLImage(jb, width=w * scale, height=h * scale)
+        except Exception:
+            return None
+
     def dotline(parts):
         return '  ·  '.join(xesc(str(p).strip()) for p in parts
                             if p not in (None, '') and str(p).strip())
@@ -19010,19 +19033,33 @@ def art_report_pdf():
             bio = (r['notes'] or '').strip()
             if bio:
                 blocks.append(Paragraph(xesc(bio), st_bio))
-        blocks.append(Paragraph(xesc((r['title'] or '').strip() or '—'),
-                                st_piece))
+        piece = [Paragraph(xesc((r['title'] or '').strip() or '—'),
+                           st_piece)]
         meta1 = dotline([r['medium'], r['year'], r['dimensions']])
         meta2 = dotline([r['property'], r['location'],
                          currency_filter(r['price']),
                          r['vendor'], r['cat_id']])
         if meta1:
-            blocks.append(Paragraph(meta1, st_meta))
+            piece.append(Paragraph(meta1, st_meta))
         if meta2:
-            blocks.append(Paragraph(meta2, st_meta))
+            piece.append(Paragraph(meta2, st_meta))
         detail = (r['object_notes'] or '').strip()
         if detail:
-            blocks.append(Paragraph(xesc(detail), st_notes))
+            piece.append(Paragraph(xesc(detail), st_notes))
+        thumb = piece_image(r['image'])
+        if thumb is not None:
+            blocks.append(Table(
+                [[thumb, piece]],
+                colWidths=[1.45 * inch, None],
+                style=TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (0, 0), 10),
+                    ('LEFTPADDING', (1, 0), (1, 0), 0),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ])))
+        else:
+            blocks.extend(piece)
         blocks.append(Spacer(1, 2))
         # An artist heading never strands at a page bottom: it stays
         # glued to its bio and first piece.
