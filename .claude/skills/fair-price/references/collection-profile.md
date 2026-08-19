@@ -56,6 +56,14 @@ provenance (old collections, named sales) adds real value on ancients.
 
 ## Standing rules
 
+- **Major auction houses only** (2026-08-19): surface buy
+  candidates/notices solely from major auction houses' upcoming or
+  live sales — Heritage, Stack's Bowers, CNG, Leu, Nomos, NAC, and
+  peer houses (biddr/sixbid list them). Never surface eBay Buy It Now
+  or any other fixed-price marketplace / dealer-store listing (eBay,
+  VCoins, MA-Shops, dealer eShops) as a buy notice. Those venues — and
+  eBay sold results — remain price-evidence/comparables only, per
+  sources.md.
 - Banknote grade floor: **55 (About Uncirculated) is as low as Mark
   goes** — prefer UNC / Choice UNC and better for type notes. The ONLY
   exception: genuine rarity, where the census shows essentially nothing
