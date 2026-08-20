@@ -8914,6 +8914,19 @@ def _trim_dark_slab_note(img):
             qmask = qraw.filter(ImageFilter.MaxFilter(5))
         qbox = _largest_note_component(qmask, max_area=0.90,
                                        min_area=0.05) or box
+        if backdrop_cleared:
+            # The grading label survives the border flood too — it is
+            # ringed by black plastic just like the note. Blank
+            # everything outside the note's own box so the quad fit
+            # can't lock onto the label's bottom edge above the paper.
+            from PIL import ImageChops, ImageDraw
+            keep = Image.new('L', qmask.size, 0)
+            pad = 3
+            ImageDraw.Draw(keep).rectangle(
+                [max(0, qbox[0] - pad), max(0, qbox[1] - pad),
+                 min(aw - 1, qbox[2] + pad), min(ah - 1, qbox[3] + pad)],
+                fill=255)
+            qmask = ImageChops.darker(qmask, keep)
     else:
         qmask, qbox = bright_mask, box
     quad = _note_quad_from_mask(qmask, qbox)
