@@ -1875,6 +1875,9 @@ def _denom_unit(text):
 # meaningful sort key, so the same issue-year groups regardless of how
 # the label was typed. Matches a 4-digit 1600s-2099 year.
 _SERIES_YEAR_RE = re.compile(r'\b(1[6-9]\d\d|20\d\d)\b')
+# A year that OPENS a range ('1933-1939 Issue', '1937-39') names an
+# issue period, not a series year.
+_SERIES_RANGE_RE = re.compile(r'\s*[-–—]\s*(?:1[6-9]\d\d|20\d\d|\d\d)\b')
 
 
 def _series_year(text):
@@ -1886,8 +1889,15 @@ def _series_year(text):
     no year, so the caller falls back to the note's own date."""
     if not text:
         return None
-    m = _SERIES_YEAR_RE.search(str(text))
+    s = str(text)
+    m = _SERIES_YEAR_RE.search(s)
     if m:
+        # '1933-1939 Issue' / '1937-39' name a PERIOD, not a series
+        # year — pinning every note of the period to its first year
+        # files a 1939 note ahead of its same-year neighbours. No year
+        # from a range: the note's own date is the truer key.
+        if _SERIES_RANGE_RE.match(s, m.end()):
+            return None
         return int(m.group(1))
     issue = _fractional_issue(text)
     return issue[0] if issue else None
@@ -5525,9 +5535,13 @@ def init_db():
     # v13: 'United States (Colonial - ...)' country forms map to
     # Colonial America instead of the US federal/state run, so those
     # notes open the United States block with the other colonial paper.
+    # v14: a series label naming a RANGE ('1933-1939 Issue') no longer
+    # pins its notes to the range's first year — SERIES_YEAR returns
+    # NULL and the note's own date sorts it, so same-year notes file
+    # together in denomination order.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v13',),
+        ('banknote_display_number_v14',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5535,7 +5549,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v13', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v14', datetime.utcnow().isoformat()),
         )
         db.commit()
 
