@@ -7942,6 +7942,13 @@ def _trim_note_cv_cascade(img, expect_aspect=None):
             step = _object_isolation_crop(img)
             if step is not None:
                 which = 'object'
+        if step is None and expect_aspect and i == 0:
+            # Grey holders (PCGS slabs) beat every mask detector; the
+            # engraving anchor still stands, and the catalog ratio
+            # vouches for it.
+            step = _ink_anchored_crop(img, expect_aspect)
+            if step is not None:
+                which = 'ink'
         if step is None:
             app.logger.info('trim: pass %d %sfound nothing to do (%dx%d)',
                             i + 1, '' if i else 'on original ', *img.size)
@@ -8234,6 +8241,138 @@ def _pick_design_box(cands):
 
 
 
+def _ink_box_small(gray):
+    """The printed design's bounding box on a downscaled grayscale
+    frame, or None. Extracted from _cv_note_quad so last-resort crops
+    can anchor on the design too; see the comment in _cv_note_quad for
+    how the loose-to-strict Canny ladder and the gates work."""
+    import cv2
+    import numpy as np
+
+    sh, sw = gray.shape
+    ink_box = None
+    frame_area = float(sw * sh)
+    for canny_lo, canny_hi in ((60, 160), (130, 280), (210, 430)):
+        canny = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0),
+                          canny_lo, canny_hi)
+        canny = cv2.morphologyEx(canny, cv2.MORPH_CLOSE,
+                                 np.ones((11, 11), np.uint8))
+        ink_contours, _ = cv2.findContours(canny, cv2.RETR_LIST,
+                                           cv2.CHAIN_APPROX_SIMPLE)
+        ink_cands = []
+        for c in ink_contours:
+            bx, by, bw_, bh_ = cv2.boundingRect(c)
+            area = bw_ * bh_
+            # Cap at 0.85, not lower: on a pocket-tight crop the design
+            # legitimately fills ~3/4 of the frame (plus close-dilation)
+            # and still needs to anchor the final shave. A design that
+            # IS the frame — the already-trimmed case — stays excluded.
+            if not 0.03 * frame_area <= area <= 0.85 * frame_area:
+                continue
+            if not 1.15 <= bw_ / float(bh_) <= 3.8:
+                continue
+            # Engraving fills its box with texture; the outline of a slab
+            # or holder encloses the same kind of box while its interior
+            # stays empty. Raw density separates them only for allover
+            # lathework — a design built of a solid vignette, corner
+            # counters and big blank watermark fields is mostly
+            # edge-free by area. Distribution is the robust cue: real
+            # designs put SOME edge in most cells of a coarse grid,
+            # while a bare outline touches only the boundary cells
+            # (~30% of a 12x12 grid).
+            roi = canny[by:by + bh_, bx:bx + bw_] > 0
+            if float(roi.mean()) < 0.30:
+                gy = max(1, bh_ // 12)
+                gx = max(1, bw_ // 12)
+                cells = hit = 0
+                for cy in range(0, bh_ - gy + 1, gy):
+                    for cx in range(0, bw_ - gx + 1, gx):
+                        cells += 1
+                        if roi[cy:cy + gy, cx:cx + gx].any():
+                            hit += 1
+                if not cells or hit / float(cells) < 0.55:
+                    continue
+            # A printed design is a dense-edge region on a QUIET
+            # surround (paper margins, holder, label gap). A textured
+            # backdrop region — felt grain flooding a loose Canny —
+            # is equally busy outside its own bounds. Require clear
+            # in-vs-around contrast so backdrop blobs never become
+            # the anchor; with no room for a ring there is no
+            # evidence against the box, and it stands.
+            rgx = max(3, int(0.12 * bw_))
+            rgy = max(3, int(0.12 * bh_))
+            ox0, oy0 = max(0, bx - rgx), max(0, by - rgy)
+            ox1 = min(canny.shape[1], bx + bw_ + rgx)
+            oy1 = min(canny.shape[0], by + bh_ + rgy)
+            outer = canny[oy0:oy1, ox0:ox1] > 0
+            ring_n = outer.size - roi.size
+            if ring_n > 0.2 * roi.size:
+                ring_density = (float(outer.sum()) - float(roi.sum())) \
+                    / ring_n
+                if float(roi.mean()) < 1.7 * max(ring_density, 0.02):
+                    continue
+            ink_cands.append((bx, by, bx + bw_, by + bh_,
+                              int(roi.sum())))
+        if ink_cands:
+            ink_box = _pick_design_box(ink_cands)
+        if ink_box is not None:
+            break
+
+    return ink_box
+
+
+def _note_ink_box(img):
+    """The printed design's bounding box in full-resolution pixels, or
+    None. Same detector _cv_note_quad anchors on, standalone."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+    rgb = np.asarray(img.convert('RGB'))
+    h, w = rgb.shape[:2]
+    scale = min(1.0, 1100.0 / max(w, h))
+    if scale < 1.0:
+        small = cv2.resize(rgb, (int(w * scale), int(h * scale)),
+                           interpolation=cv2.INTER_AREA)
+    else:
+        small = rgb
+    gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY)
+    box = _ink_box_small(gray)
+    if not box:
+        return None
+    return tuple(int(v / scale) for v in box)
+
+
+def _ink_anchored_crop(img, expect_aspect):
+    """Last-resort crop when every edge/mask detector failed but the
+    printed design itself was found: the ink box plus a fixed margin.
+    Grey holders defeat the mask detectors — neither dark plastic nor
+    a quiet light ring — while the engraving anchor still stands. Only
+    fires when the design's own aspect agrees with the sheet's catalog
+    ratio (a partial or backdrop-flooded ink box does not), so the
+    crop contains the whole design by construction and carries at most
+    a thin ring of holder, which the downstream cleanup and the vision
+    validator judge."""
+    box = _note_ink_box(img)
+    if not box:
+        return None
+    x0, y0, x1, y1 = box
+    bw, bh = x1 - x0, y1 - y0
+    if bw < 120 or bh < 60:
+        return None
+    if abs(bw / float(bh) - expect_aspect) / expect_aspect > 0.12:
+        return None
+    w, h = img.size
+    mx, my = int(0.05 * bw), int(0.05 * bh)
+    crop = img.crop((max(0, x0 - mx), max(0, y0 - my),
+                     min(w, x1 + mx), min(h, y1 + my)))
+    if crop.size[0] * crop.size[1] >= 0.92 * w * h:
+        return None
+    app.logger.info('trim-ink: design box %dx%d + margin', bw, bh)
+    return _encode_trimmed_note(crop)
+
+
 def _cv_note_quad(img, expect_aspect=None):
     """OpenCV note-corner detection, the primary detector when cv2 is
     installed. Two binarizations run in turn: an Otsu split of the
@@ -8314,73 +8453,8 @@ def _cv_note_quad(img, expect_aspect=None):
     # and a stricter pass — which felt grain doesn't survive — takes
     # over. Strict passes fragment faint designs, so they never run
     # first.
-    ink_box = None
     frame_area = float(sw * sh)
-    for canny_lo, canny_hi in ((60, 160), (130, 280), (210, 430)):
-        canny = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0),
-                          canny_lo, canny_hi)
-        canny = cv2.morphologyEx(canny, cv2.MORPH_CLOSE,
-                                 np.ones((11, 11), np.uint8))
-        ink_contours, _ = cv2.findContours(canny, cv2.RETR_LIST,
-                                           cv2.CHAIN_APPROX_SIMPLE)
-        ink_cands = []
-        for c in ink_contours:
-            bx, by, bw_, bh_ = cv2.boundingRect(c)
-            area = bw_ * bh_
-            # Cap at 0.85, not lower: on a pocket-tight crop the design
-            # legitimately fills ~3/4 of the frame (plus close-dilation)
-            # and still needs to anchor the final shave. A design that
-            # IS the frame — the already-trimmed case — stays excluded.
-            if not 0.03 * frame_area <= area <= 0.85 * frame_area:
-                continue
-            if not 1.15 <= bw_ / float(bh_) <= 3.8:
-                continue
-            # Engraving fills its box with texture; the outline of a slab
-            # or holder encloses the same kind of box while its interior
-            # stays empty. Raw density separates them only for allover
-            # lathework — a design built of a solid vignette, corner
-            # counters and big blank watermark fields is mostly
-            # edge-free by area. Distribution is the robust cue: real
-            # designs put SOME edge in most cells of a coarse grid,
-            # while a bare outline touches only the boundary cells
-            # (~30% of a 12x12 grid).
-            roi = canny[by:by + bh_, bx:bx + bw_] > 0
-            if float(roi.mean()) < 0.30:
-                gy = max(1, bh_ // 12)
-                gx = max(1, bw_ // 12)
-                cells = hit = 0
-                for cy in range(0, bh_ - gy + 1, gy):
-                    for cx in range(0, bw_ - gx + 1, gx):
-                        cells += 1
-                        if roi[cy:cy + gy, cx:cx + gx].any():
-                            hit += 1
-                if not cells or hit / float(cells) < 0.55:
-                    continue
-            # A printed design is a dense-edge region on a QUIET
-            # surround (paper margins, holder, label gap). A textured
-            # backdrop region — felt grain flooding a loose Canny —
-            # is equally busy outside its own bounds. Require clear
-            # in-vs-around contrast so backdrop blobs never become
-            # the anchor; with no room for a ring there is no
-            # evidence against the box, and it stands.
-            rgx = max(3, int(0.12 * bw_))
-            rgy = max(3, int(0.12 * bh_))
-            ox0, oy0 = max(0, bx - rgx), max(0, by - rgy)
-            ox1 = min(canny.shape[1], bx + bw_ + rgx)
-            oy1 = min(canny.shape[0], by + bh_ + rgy)
-            outer = canny[oy0:oy1, ox0:ox1] > 0
-            ring_n = outer.size - roi.size
-            if ring_n > 0.2 * roi.size:
-                ring_density = (float(outer.sum()) - float(roi.sum())) \
-                    / ring_n
-                if float(roi.mean()) < 1.7 * max(ring_density, 0.02):
-                    continue
-            ink_cands.append((bx, by, bx + bw_, by + bh_,
-                              int(roi.sum())))
-        if ink_cands:
-            ink_box = _pick_design_box(ink_cands)
-        if ink_box is not None:
-            break
+    ink_box = _ink_box_small(gray)
 
     # Local mask around the design: threshold ONLY the neighbourhood
     # of the ink box, so the split is paper vs its immediate
@@ -16530,6 +16604,59 @@ def _coerce_banknote_spec(field, raw):
     return raw
 
 
+_DIMS_MM_RE = re.compile(
+    r'(\d{2,3})(?:[.,]\d)?(?:\s*mm)?\s*[x×*]\s*(\d{2,3})(?:[.,]\d)?\s*mm',
+    re.I)
+
+
+def _banknote_dims_scan_or_lookup(note, dealer_text):
+    """The sheet's W/H in millimetres for the trim's catalog-ratio
+    anchor, when neither the record nor this run's main lookup carries
+    them. Two steps, cheap first: scan the dealer's own text for an
+    explicit '122 x 70 mm'; failing that, one focused model lookup
+    from the note's catalog identity (Pick number, country,
+    denomination, date). Returns (width, height) or None; failures are
+    silent — the trim just runs unanchored, as it always did."""
+    m = _DIMS_MM_RE.search(dealer_text or '')
+    if m:
+        w, h = float(m.group(1)), float(m.group(2))
+        if 40 <= min(w, h) and max(w, h) <= 300 and w != h:
+            app.logger.info('dims: %sx%s mm from dealer text', w, h)
+            return (w, h)
+    ident = ', '.join(str(v) for v in (
+        _coin_row_value(note, 'pick_number'),
+        _coin_row_value(note, 'country'),
+        _coin_row_value(note, 'denomination'),
+        _coin_row_value(note, 'date_1') or _coin_row_value(note, 'series'),
+    ) if v not in (None, ''))
+    if not ident:
+        return None
+    try:
+        api_key = _require_anthropic_key()
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
+        resp = client.messages.create(
+            model=model, max_tokens=100,
+            messages=[{'role': 'user', 'content':
+                       'Catalogue dimensions in millimetres of this '
+                       'banknote: ' + ident + '. Reply ONLY JSON '
+                       '{"width_mm": <number>, "height_mm": <number>} '
+                       'with the standard catalogue (Pick/SCWPM) size, '
+                       'or {"width_mm": null, "height_mm": null} if '
+                       'unsure.'}])
+        data = parse_model_json_object(_message_text(resp))
+        w = float(data.get('width_mm') or 0)
+        h = float(data.get('height_mm') or 0)
+        if 40 <= min(w, h) and max(w, h) <= 300 and w != h:
+            app.logger.info('dims: %sx%s mm from catalog lookup (%s)',
+                            w, h, ident)
+            return (w, h)
+    except Exception as e:
+        app.logger.info('dims lookup failed: %s', e)
+    return None
+
+
 @app.route('/banknotes/<record_id>/lookup-specs', methods=['POST'])
 def banknote_lookup_specs(record_id):
     """Fill blank banknote fields — description first, then web lookup."""
@@ -16761,6 +16888,20 @@ def banknote_lookup_specs(record_id):
                 dims.append(float(v))
             except (TypeError, ValueError):
                 dims.append(0.0)
+        if not all(d > 0 for d in dims):
+            # Still no sheet size: scan the dealer text for an explicit
+            # 'W x H mm', then fall back to one focused catalog lookup
+            # by the note's identifiers — the trim needs its geometry
+            # anchor BEFORE the images are processed. Whatever is found
+            # also joins the suggestions for the review modal.
+            found = _banknote_dims_scan_or_lookup(note, dealer_text)
+            if found:
+                dims = list(found)
+                for f, v in (('size_width', found[0]),
+                             ('size_height', found[1])):
+                    if _coin_row_value(note, f) in (None, '') and \
+                            filled.get(f) in (None, ''):
+                        filled[f] = v
         if all(d > 0 for d in dims):
             ratio = max(dims) / min(dims)
             if 1.2 <= ratio <= 4.0:
