@@ -173,6 +173,41 @@ assert _holder_fraction(trimmed) < 0.02, 'holder plastic left in frame'
 print('LEVEL DARK-SLAB ASSERTIONS PASSED')
 
 
+# --- Dark slab photographed on a bright backdrop --------------------------
+# The Javasche-Bank reverse failure (Aug 2026): an eBay photo of the
+# slab on a near-white table. Backdrop, grading label, and note all
+# clear the brightness threshold, and a thin seam highlight across the
+# holder ties them into ONE frame-filling component, so the plain mask
+# holds no banknote-shaped blob. The erode + border-flood retry must
+# isolate the note — the one bright block ringed by black plastic.
+img = Image.new('RGB', (1600, 1000), (205, 204, 200))      # bright table
+draw = ImageDraw.Draw(img)
+draw.rectangle([60, 20, 1540, 980], fill=(14, 14, 16))     # slab plastic
+draw.rectangle([80, 40, 1520, 240], fill=(228, 232, 226))  # grading label
+for i in range(6):
+    lx = 120 + i * 90
+    draw.line([(lx, 90), (lx + 60, 90)], fill=(30, 30, 30), width=4)
+BRIGHT_BACK = [(210, 300), (1390, 300), (1390, 890), (210, 890)]
+# Seam highlight along the note's top edge, running to both frame
+# borders — the thin bridge that merges note and backdrop.
+draw.line([(0, 300), (1600, 300)], fill=(210, 210, 208), width=3)
+_draw_note(draw, BRIGHT_BACK)
+
+dark_direct = stuffapp._trim_dark_slab_note(img)
+assert dark_direct is not None, \
+    'dark detector did not isolate the border-bridged ringed note'
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'bright-backdrop dark-slab shot was not trimmed'
+tw, th = trimmed.size
+want = (1390 - 210) / float(890 - 300)
+got = tw / float(th)
+assert abs(got - want) / want < 0.08, \
+    f'bright-backdrop aspect off: got {got:.3f}, want {want:.3f}'
+assert _holder_fraction(trimmed) < 0.02, 'holder plastic left in frame'
+print('BRIGHT-BACKDROP DARK-SLAB ASSERTIONS PASSED')
+
+
 # --- Clear slab photographed on couch fabric ------------------------------
 # The real-world case the ring gate used to reject: a clear holder on
 # furniture, so the ring around the note is textured mid-dark fabric —

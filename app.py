@@ -8836,9 +8836,27 @@ def _trim_dark_slab_note(img):
     bright_mask = g.point(lambda v: 255 if v > BRIGHT else 0)
     bright_mask = bright_mask.filter(ImageFilter.MaxFilter(5))
     box = _largest_note_component(bright_mask, max_area=0.90, min_area=0.05)
+    backdrop_cleared = False
     if not box:
-        app.logger.info('trim-dark: no bright note component')
-        return None
+        # A slab photographed on a bright backdrop: backdrop, label,
+        # and note all clear the threshold and merge into one
+        # frame-filling blob no gate accepts — often tied together only
+        # by thin bright bridges (a slab seam highlight, a sleeve
+        # edge). Only the backdrop side of those bridges reaches the
+        # frame border; the note sits ringed by dark holder plastic. So
+        # cut the bridges, flood the border away, and look again.
+        # (An already-trimmed note also fills the frame, but it IS the
+        # border-connected blob, so the retry finds nothing and this
+        # stays the no-op it always was.)
+        cleared = _isolate_ringed_bright(
+            g.point(lambda v: 255 if v > BRIGHT else 0))
+        box = _largest_note_component(cleared, max_area=0.90, min_area=0.05)
+        if not box:
+            app.logger.info('trim-dark: no bright note component')
+            return None
+        bright_mask = cleared
+        backdrop_cleared = True
+        app.logger.info('trim-dark: bright backdrop cleared at the border')
     x0, y0, x1, y1 = box
 
     # Slab-shot signature: the band IMMEDIATELY around the note must be
@@ -8889,8 +8907,11 @@ def _trim_dark_slab_note(img):
     # and bend an edge line.
     adaptive = max(BRIGHT, (int(note_med) + int(ring_med)) // 2)
     if adaptive != BRIGHT:
-        qmask = g.point(lambda v, t=adaptive: 255 if v > t else 0)
-        qmask = qmask.filter(ImageFilter.MaxFilter(5))
+        qraw = g.point(lambda v, t=adaptive: 255 if v > t else 0)
+        if backdrop_cleared:
+            qmask = _isolate_ringed_bright(qraw)
+        else:
+            qmask = qraw.filter(ImageFilter.MaxFilter(5))
         qbox = _largest_note_component(qmask, max_area=0.90,
                                        min_area=0.05) or box
     else:
@@ -8984,6 +9005,50 @@ def _note_edge_masks(gray):
 
 def _note_edge_blob(gray):
     return _note_edge_masks(gray)[1]
+
+
+def _isolate_ringed_bright(raw_mask):
+    """Isolate bright blobs that do NOT reach the frame border, cutting
+    the thin bright bridges that tie them to it first. For a slab shot
+    on a bright backdrop: erode hard enough to sever seam highlights
+    and sleeve edges (anything under ~9px wide at analysis scale),
+    flood the border-connected remainder away, then re-dilate the
+    survivors past their pre-erosion extent to the same +2px envelope
+    the plain MaxFilter(5) mask carries."""
+    from PIL import ImageFilter
+
+    eroded = raw_mask.filter(ImageFilter.MinFilter(9))
+    cleared = _clear_border_connected(eroded)
+    return cleared.filter(ImageFilter.MaxFilter(13))
+
+
+def _clear_border_connected(mask):
+    """Zero every ON pixel connected to the frame border. Returns a new
+    mask; the input is left untouched."""
+    from collections import deque
+
+    out = mask.copy()
+    px = out.load()
+    w, h = out.size
+    q = deque()
+    for x in range(w):
+        for y in (0, h - 1):
+            if px[x, y] > 0:
+                px[x, y] = 0
+                q.append((x, y))
+    for y in range(h):
+        for x in (0, w - 1):
+            if px[x, y] > 0:
+                px[x, y] = 0
+                q.append((x, y))
+    while q:
+        cx, cy = q.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = cx + dx, cy + dy
+            if 0 <= nx < w and 0 <= ny < h and px[nx, ny] > 0:
+                px[nx, ny] = 0
+                q.append((nx, ny))
+    return out
 
 
 def _largest_note_component(blob, step=2, max_area=0.92, min_area=0.08):
