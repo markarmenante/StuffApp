@@ -70,16 +70,19 @@ Cloudflare). One main module — `app.py` — plus `templates/`,
 `static/css/style.css`, and `schema.sql`. See README.md for local paths and
 the Railway start command.
 
-## Railway topology (updated 2026-08-17)
+## Railway topology (updated 2026-08-20)
 
 Production `stuff.armenante.com` is project **courageous-adventure**,
-service `web` (origin `web-production-cf059.up.railway.app`). The
+service `web` (origin `web-production-cf059.up.railway.app`). The same
+project also runs service **`gerri`** → `gerri.armenante.com`: a second
+instance of this repo with its own `/data` volume and its own
+`STUFFAPP_OWNER_*` env (separate owner, separate collection DB). The
 account holds exactly two Railway projects, both production and both
 permanent: courageous-adventure (this app) and ym-familyoffice
 (Family Office). The old duplicate projects observant-success and
 poetic-peace were fully deleted 2026-08-17. Every push to `main`
-deploys production exactly once — so batch doc-only commits, and
-check nobody is mid-Check before pushing.
+deploys BOTH instances — so batch doc-only commits, and check nobody
+is mid-Check on either before pushing.
 
 ## Dev setup
 
