@@ -4133,6 +4133,11 @@ def _country_key(country):
     base = re.sub(r'\s*\([^)]*\)\s*$', '', value).strip()
     for candidate in (value, base):
         if candidate in US_COUNTRY_NAMES or candidate.startswith('united states'):
+            # "United States (Colonial - Pennsylvania)" and kin are
+            # pre-federal issues: they file under Colonial America, not
+            # in the US federal/state run.
+            if 'colonial' in value:
+                return 'colonial-america'
             return 'us'
         for key, spellings in COUNTRY_KEYS.items():
             if candidate in spellings:
@@ -5504,9 +5509,12 @@ def init_db():
     # its own nation instead of folding into the Netherlands, and
     # parenthetical translations no longer split a denomination into
     # its own currency family ('1/2 Roepiah (Setengah Roepiah)').
+    # v13: 'United States (Colonial - ...)' country forms map to
+    # Colonial America instead of the US federal/state run, so those
+    # notes open the United States block with the other colonial paper.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v12',),
+        ('banknote_display_number_v13',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5514,7 +5522,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v12', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v13', datetime.utcnow().isoformat()),
         )
         db.commit()
 
