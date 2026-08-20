@@ -9632,6 +9632,71 @@ def _trim_light_slab_note(img):
 
 
 
+def _shave_dark_border(img):
+    """Strip leftover holder plastic from a finished crop's frame edge:
+    edge rows/columns that read as mostly near-black are walked inward
+    until the paper starts (a band along one side, a wedge in a
+    corner — the signature of a corner quad fitted slightly outside
+    the paper). Returns the shaved image, or None when there is
+    nothing to shave. Conservative on purpose: acts only when the
+    crop's interior is clearly bright paper, and never takes more than
+    8% off a side — dark aged paper and dark printed borders are left
+    alone."""
+    g = img.convert('L')
+    w, h = g.size
+    if w < 60 or h < 60:
+        return None
+    px = g.load()
+    inner = [px[x, y]
+             for y in range(h // 4, 3 * h // 4, max(1, h // 40))
+             for x in range(w // 4, 3 * w // 4, max(1, w // 40))]
+    if _median(inner) < 120:
+        return None
+
+    DARK, FRAC = 60, 0.35
+
+    def row_dark(y, x0, x1):
+        vals = [px[x, y] for x in range(x0, x1, 2)]
+        return sum(1 for v in vals if v < DARK) / max(1, len(vals))
+
+    def col_dark(x, y0, y1):
+        vals = [px[x, y] for y in range(y0, y1, 2)]
+        return sum(1 for v in vals if v < DARK) / max(1, len(vals))
+
+    x0, y0, x1, y1 = 0, 0, w, h
+    max_x, max_y = int(0.08 * w), int(0.08 * h)
+    changed = True
+    while changed:
+        changed = False
+        if y0 < max_y and row_dark(y0, x0, x1) >= FRAC:
+            y0 += 1
+            changed = True
+        if h - y1 < max_y and row_dark(y1 - 1, x0, x1) >= FRAC:
+            y1 -= 1
+            changed = True
+        if x0 < max_x and col_dark(x0, y0, y1) >= FRAC:
+            x0 += 1
+            changed = True
+        if w - x1 < max_x and col_dark(x1 - 1, y0, y1) >= FRAC:
+            x1 -= 1
+            changed = True
+    if (x0, y0, x1, y1) == (0, 0, w, h):
+        return None
+    # A sliver past each shaved edge so no residual dark line survives.
+    pad = 2
+    if x0:
+        x0 += pad
+    if y0:
+        y0 += pad
+    if x1 < w:
+        x1 -= pad
+    if y1 < h:
+        y1 -= pad
+    if x1 - x0 < 0.8 * w or y1 - y0 < 0.8 * h:
+        return None
+    return img.crop((x0, y0, x1, y1))
+
+
 def _trim_slabbed_note_image(data, expect_aspect=None):
     """Crop a note photo (PMG/PCGS slab, sleeve, or bare) down to the
     engraved area plus its paper margins, squared up.
@@ -9664,6 +9729,17 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
     if out is None:
         return None
     crop = _open_upload_image(out)
+    # A slightly-off corner quad leaves holder plastic at the frame
+    # edge (a band along one side, a wedge in a corner). Shave it
+    # before the gates judge the crop — the shave no-ops on a clean
+    # crop, so well-fitted quads ship exactly as before.
+    shaved = _shave_dark_border(crop)
+    if shaved is not None:
+        app.logger.info('trim: shaved dark border %dx%d -> %dx%d',
+                        *(crop.size + shaved.size))
+        crop = shaved
+        out = _encode_trimmed_note(crop)
+        crop = _open_upload_image(out)
     if expect_aspect and _aspect_off(crop.size, expect_aspect) > 0.08:
         app.logger.info(
             'trim: CV crop %dx%d is %.0f%% off the catalog ratio %.2f '
