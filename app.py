@@ -7902,7 +7902,7 @@ def _trim_note_cv_cascade(img, expect_aspect=None):
     out = None
     obj_tried = False
     for i in range(3):
-        step = _trim_slab_note_cv(img)
+        step = _trim_slab_note_cv(img, expect_aspect=expect_aspect)
         which = 'cv'
         if step is None:
             step = _trim_dark_slab_note(img)
@@ -8220,7 +8220,7 @@ def _pick_design_box(cands):
 
 
 
-def _cv_note_quad(img):
+def _cv_note_quad(img, expect_aspect=None):
     """OpenCV note-corner detection, the primary detector when cv2 is
     installed. Two binarizations run in turn: an Otsu split of the
     grey frame (paper vs black holder, couch, carpet), then a
@@ -8429,6 +8429,13 @@ def _cv_note_quad(img):
             aspect = ((top + bottom) / 2.0) / ((left + right) / 2.0)
             if not 1.15 <= aspect <= 3.8:
                 why['aspect'] = why.get('aspect', 0) + 1
+                continue
+            # With the sheet's catalog ratio known, a candidate far off
+            # it is never the note — it is the pocket, the slab, or a
+            # scene-sized blob that happens to be banknote-shaped.
+            if expect_aspect and \
+                    abs(aspect - expect_aspect) / expect_aspect > 0.15:
+                why['ratio'] = why.get('ratio', 0) + 1
                 continue
             # A quad edge lying ON the local-ROI window (where that
             # window is not the frame edge) is the window clipping a
@@ -8644,12 +8651,12 @@ def _cv_refine_quad(arr, quad, binarize):
     return tuple(refined)
 
 
-def _trim_slab_note_cv(img):
+def _trim_slab_note_cv(img, expect_aspect=None):
     """OpenCV-first trim: detect the note's corner quad and warp it
     square-on. Handles what the mask-based detectors' gates reject —
     above all a clear holder photographed on furniture, where the
     surroundings are neither black nor uniform."""
-    quad = _cv_note_quad(img)
+    quad = _cv_note_quad(img, expect_aspect=expect_aspect)
     if not quad:
         return None
     import math
@@ -9881,7 +9888,7 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
         a cleanup step may approach the sheet ratio, never leave it."""
         return bool(expect_aspect) and \
             _aspect_off(candidate.size, expect_aspect) > \
-            _aspect_off(crop.size, expect_aspect) + 0.03
+            _aspect_off(crop.size, expect_aspect) + 0.015
 
     # A corner quad that locked onto the holder pocket instead of the
     # paper leaves a slanted junk band along a side; re-fit the paper
