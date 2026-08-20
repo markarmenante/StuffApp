@@ -1806,6 +1806,31 @@ document.addEventListener('DOMContentLoaded', function () {
           <span class="clabel">Art ID</span>
         </div>
       </div>
+      {# Sales Terms — the realized transaction, shown once the piece
+         is marked Sold. The inputs stay in the DOM while hidden so
+         their values keep round-tripping through sale_plans on every
+         save; the Status select toggles visibility live. #}
+      <div id="artSalesTerms" {% if val('status') != 'Sold' %}style="display:none"{% endif %}>
+        <div class="section-bar">Sales Terms</div>
+        <div class="dgrid dg3">
+          {{ datecell('sale_date','Sale Date', seed_today=false) }}
+          <div class="dcell">
+            <input type="text" name="sale_price" value="{{ val('sale_price')|currency }}"
+                   class="price-input" inputmode="numeric">
+            <span class="clabel">Sale Price</span>
+          </div>
+          {{ tacell('sold_to','Sold To', ta.get('sold_to', ta.get('vendor', []))) }}
+        </div>
+      </div>
+      <script>
+        (function () {
+          var terms = document.getElementById('artSalesTerms');
+          var sel = document.querySelector('select[name="status"]');
+          if (terms && sel) sel.addEventListener('change', function () {
+            terms.style.display = this.value === 'Sold' ? '' : 'none';
+          });
+        })();
+      </script>
       {# Artist Notes + Object Notes — section-bar headers match the
          Topics / People / Notes treatment used elsewhere so the two
          text blocks read as proper sections, not stray cells. The

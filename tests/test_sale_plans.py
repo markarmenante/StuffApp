@@ -111,6 +111,48 @@ assert 'value="$500"' in html, 'purchase price must render as $500, not 500.0'
 print('PURCHASE RENDER ASSERTIONS PASSED')
 
 
+# --- Art Sales Terms: shown when Sold, values round-trip through
+# sale_plans (sale_date / sale_price / sold_to) -----------------------------
+with appmod.app.app_context():
+    db = appmod.get_db()
+    db.execute("INSERT INTO art (id, title, artist, status) "
+               "VALUES ('a1', 'Nocturne', 'Whistler', 'Own')")
+    db.commit()
+
+html = client.get('/art/a1', headers=HDR).get_data(as_text=True)
+assert 'Sales Terms' in html, 'Sales Terms section missing from art detail'
+import re as _re
+_terms = _re.search(r'<div id="artSalesTerms"[^>]*>', html).group(0)
+assert 'display:none' in _terms, \
+    'Sales Terms must stay hidden while the piece is not Sold'
+
+r = client.post('/art/a1/save-field',
+                json={'field': 'status', 'value': 'Sold'}, headers=HDR)
+assert r.status_code == 200, r.get_data()
+for f, v in (('sale_date', '2026-08-01'), ('sale_price', '$12,500'),
+             ('sold_to', 'Christie’s')):
+    r = client.post('/art/a1/save-field',
+                    json={'field': f, 'value': v}, headers=HDR)
+    assert r.status_code == 200, (f, r.status_code, r.get_data())
+
+with appmod.app.app_context():
+    db = appmod.get_db()
+    sp = db.execute("SELECT * FROM sale_plans WHERE category = 'art' "
+                    "AND record_id = 'a1'").fetchone()
+    assert sp is not None, 'no sale_plans row for the art record'
+    assert sp['sale_date'] == '2026-08-01', sp['sale_date']
+    assert sp['sale_price'] == 12500.0, sp['sale_price']
+    assert sp['sold_to'] == 'Christie’s'
+
+html = client.get('/art/a1', headers=HDR).get_data(as_text=True)
+_terms = _re.search(r'<div id="artSalesTerms"[^>]*>', html).group(0)
+assert 'display:none' not in _terms, \
+    'Sales Terms must be visible once the piece is Sold'
+assert 'value="2026-08-01"' in html, 'sale date lost on re-render'
+assert 'value="$12,500"' in html, 'sale price must re-render as currency'
+print('ART SALES-TERMS ASSERTIONS PASSED')
+
+
 # --- Create form: sell fields land in sale_plans, not frozen columns -------
 resp = client.post('/watches/new', headers=HDR, data={
     'brand': 'Patek', 'model': 'Calatrava', 'status': 'Own',

@@ -1482,6 +1482,12 @@ SELL_PANEL_FIELDS = [
     {'name': 'sell_state_tax', 'label': 'State Tax', 'type': 'text'},
     {'name': 'sell_gross_gain_loss', 'label': 'Gross Gain / Loss', 'type': 'text'},
     {'name': 'sell_net_gain_loss', 'label': 'Net Gain / Loss', 'type': 'text'},
+    # Sales Terms — the realized transaction once a record is marked
+    # Sold (vs. the planning estimates above). Rendered as its own
+    # "Sales Terms" section on art detail; other categories can adopt
+    # the same section as needed.
+    {'name': 'sale_date', 'label': 'Sale Date', 'type': 'date'},
+    {'name': 'sale_price', 'label': 'Sale Price', 'type': 'text'},
     {'name': 'sold_to', 'label': 'Sold To', 'type': 'text'},
 ]
 SELL_PANEL_CATEGORIES = (
@@ -1515,6 +1521,8 @@ SALE_PLAN_FIELD_COLS = {
     'sell_state_tax': ('state_tax', 'money'),
     'sell_gross_gain_loss': ('gross_gain_loss', 'money'),
     'sell_net_gain_loss': ('net_gain_loss', 'money'),
+    'sale_date': ('sale_date', 'text'),
+    'sale_price': ('sale_price', 'money'),
     'sold_to': ('sold_to', 'text'),
 }
 
@@ -4774,6 +4782,9 @@ def init_db():
         'ALTER TABLE watches ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE art ADD COLUMN object_notes TEXT',
         'ALTER TABLE art ADD COLUMN art_searched_at TEXT',
+        # Sales Terms (realized sale) on the sale_plans child table.
+        'ALTER TABLE sale_plans ADD COLUMN sale_date TEXT',
+        'ALTER TABLE sale_plans ADD COLUMN sale_price REAL',
         # Notgeld layer on banknotes (table shipped before these).
         'ALTER TABLE banknotes ADD COLUMN municipality TEXT',
         'ALTER TABLE banknotes ADD COLUMN issue_type TEXT',
@@ -4904,6 +4915,8 @@ def init_db():
          'state_tax REAL, '
          'gross_gain_loss REAL, '
          'net_gain_loss REAL, '
+         'sale_date TEXT, '
+         'sale_price REAL, '
          'sold_to TEXT, '
          "created_at TEXT DEFAULT (datetime('now')), "
          "updated_at TEXT DEFAULT (datetime('now')), "
