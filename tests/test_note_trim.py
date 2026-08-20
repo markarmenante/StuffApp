@@ -208,6 +208,38 @@ assert _holder_fraction(trimmed) < 0.02, 'holder plastic left in frame'
 print('BRIGHT-BACKDROP DARK-SLAB ASSERTIONS PASSED')
 
 
+# --- Note in a bright holder pocket (edge line outside the paper) ----------
+# The Javasche-Bank obverse failure (Aug 2026): the slab's inner pocket
+# reflects as a bright line just OUTSIDE the paper, separated from it
+# by a dark shadow gap. The quad detector locks onto the pocket line,
+# so the rectified crop carries the gap as a slanted dark band that an
+# axis-aligned shave can only remove by eating the opposite margin.
+# _refine_rectified_paper_edges must re-find the paper's own edges.
+img = Image.new('RGB', (1300, 950), (12, 12, 14))
+draw = ImageDraw.Draw(img)
+POCKET_NOTE = [(300, 260), (1020, 300), (985, 725), (330, 680)]
+_cx = sum(p[0] for p in POCKET_NOTE) / 4.0
+_cy = sum(p[1] for p in POCKET_NOTE) / 4.0
+POCKET_LINE = [(_cx + (px_ - _cx) * 1.075, _cy + (py_ - _cy) * 1.075)
+               for px_, py_ in POCKET_NOTE]
+draw.polygon(POCKET_LINE, outline=(212, 212, 216), width=7)
+_draw_note(draw, POCKET_NOTE, label_band=(280, 60, 1040, 190))
+
+trimmed = _trim_to_image(img)
+assert trimmed is not None, 'pocket-edge slab shot was not trimmed'
+tw, th = trimmed.size
+want = _quad_aspect(POCKET_NOTE)
+got = tw / float(th)
+assert abs(got - want) / want < 0.08, \
+    f'pocket-edge aspect off: got {got:.3f}, want {want:.3f}'
+lumas = _corner_luma(trimmed)
+assert all(v > 140 for v in lumas), \
+    f'pocket shadow left in a corner: {lumas}'
+assert _holder_fraction(trimmed) < 0.02, \
+    'pocket shadow band left in frame'
+print('POCKET-EDGE REFINEMENT ASSERTIONS PASSED')
+
+
 # --- Clear slab photographed on couch fabric ------------------------------
 # The real-world case the ring gate used to reject: a clear holder on
 # furniture, so the ring around the note is textured mid-dark fabric —

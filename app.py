@@ -9632,6 +9632,134 @@ def _trim_light_slab_note(img):
 
 
 
+def _refine_rectified_paper_edges(img):
+    """Second-chance geometry for a rectified slab crop whose corner
+    quad locked onto the holder pocket's edge instead of the paper's:
+    the crop then carries the pocket sliver and the dark gap between
+    pocket and paper as a SLANTED band along one or more sides — which
+    no axis-aligned shave can remove without eating the opposite end's
+    paper margin. On the rectified image the paper's true edge is a
+    near-straight brightness transition, so re-find it per side (the
+    first sustained bright run walking inward — a pocket sliver is too
+    short a run to qualify), fit a line through the per-scanline
+    starts, and when any side moved, warp once more to the refined
+    corners. Returns the refined image, or None when every side
+    already starts on paper."""
+    from PIL import Image
+
+    g = img.convert('L')
+    w, h = g.size
+    if w < 240 or h < 120:
+        return None
+    px = g.load()
+    inner = [px[x, y]
+             for y in range(h // 4, 3 * h // 4, max(1, h // 40))
+             for x in range(w // 4, 3 * w // 4, max(1, w // 40))]
+    if _median(inner) < 120:
+        return None
+
+    BRIGHT = 96
+    RUN = max(10, min(w, h) // 40)   # longer than any pocket sliver
+
+    def paper_start(horiz, fixed, backwards, depth):
+        """Index (distance from the edge, walking inward) where a
+        sustained bright run begins on one scanline; None when none
+        does within ``depth``."""
+        run = 0
+        for i in range(depth):
+            if horiz:
+                x = (w - 1 - i) if backwards else i
+                v = px[x, fixed]
+            else:
+                y = (h - 1 - i) if backwards else i
+                v = px[fixed, y]
+            if v > BRIGHT:
+                run += 1
+                if run >= RUN:
+                    return i - RUN + 1
+            else:
+                run = 0
+        return None
+
+    def side_line(horiz, backwards):
+        """(slope, intercept) of one side's paper-edge offsets as a
+        function of the cross coordinate, or 0-offset for a clean
+        side, or None when the evidence is unusable."""
+        span = h if horiz else w
+        depth = int(0.12 * (w if horiz else h))
+        pts = []
+        for t in range(int(span * 0.06), int(span * 0.94),
+                       max(2, span // 48)):
+            s = paper_start(horiz, t, backwards, depth)
+            if s is not None:
+                pts.append((t, s))
+        if len(pts) < 12:
+            return None
+        dirty = [p for p in pts if p[1] > 2]
+        if not dirty or max(p[1] for p in pts) < 3:
+            return (0.0, 0.0)
+        if len(dirty) >= 8:
+            n = len(dirty)
+            st = sum(p[0] for p in dirty)
+            ss = sum(p[1] for p in dirty)
+            stt = sum(p[0] * p[0] for p in dirty)
+            sts = sum(p[0] * p[1] for p in dirty)
+            d = n * stt - st * st
+            if d:
+                a = (n * sts - st * ss) / d
+                b = (ss - a * st) / n
+                resid = _median([abs(p[1] - (a * p[0] + b)) for p in dirty])
+                if abs(a) <= 0.2 and resid <= 4.0:
+                    return (a, b)
+        # No trustworthy line: a flat cut at the deepest start still
+        # beats keeping the junk.
+        return (0.0, float(max(p[1] for p in dirty)))
+
+    left = side_line(True, False)
+    right = side_line(True, True)
+    top = side_line(False, False)
+    bottom = side_line(False, True)
+    if None in (left, right, top, bottom):
+        return None
+    if all(line == (0.0, 0.0) for line in (left, right, top, bottom)):
+        return None
+
+    # Side lines in image coordinates. x = aL*y + bL (left),
+    # x = w-1 - (aR*y + bR) (right); y likewise for top/bottom.
+    def x_left(y):
+        return left[0] * y + left[1]
+
+    def x_right(y):
+        return (w - 1) - (right[0] * y + right[1])
+
+    def y_top(x):
+        return top[0] * x + top[1]
+
+    def y_bottom(x):
+        return (h - 1) - (bottom[0] * x + bottom[1])
+
+    def corner(fx, fy, x0, y0):
+        for _ in range(3):
+            x0 = fx(y0)
+            y0 = fy(x0)
+        return (x0, y0)
+
+    quad = (corner(x_left, y_top, 0, 0),
+            corner(x_right, y_top, w - 1, 0),
+            corner(x_right, y_bottom, w - 1, h - 1),
+            corner(x_left, y_bottom, 0, h - 1))
+    for qx, qy in quad:
+        if not (-5 <= qx <= w + 5 and -5 <= qy <= h + 5):
+            return None
+    # Keep this a refinement, not a re-crop: reject anything that
+    # would move the frame by more than the search depth.
+    if (quad[1][0] - quad[0][0]) < 0.75 * w or \
+            (quad[3][1] - quad[0][1]) < 0.75 * h:
+        return None
+    rect = _rectify_note_quad(img, quad, inset_px=2.0, fill=(0, 0, 0))
+    return rect[0] if rect else None
+
+
 def _shave_dark_border(img):
     """Strip leftover holder plastic from a finished crop's frame edge:
     edge rows/columns that read as mostly near-black are walked inward
@@ -9729,6 +9857,14 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
     if out is None:
         return None
     crop = _open_upload_image(out)
+    # A corner quad that locked onto the holder pocket instead of the
+    # paper leaves a slanted junk band along a side; re-fit the paper
+    # edges on the rectified crop and warp once more.
+    refined = _refine_rectified_paper_edges(crop)
+    if refined is not None:
+        app.logger.info('trim: refined paper edges %dx%d -> %dx%d',
+                        *(crop.size + refined.size))
+        crop = refined
     # A slightly-off corner quad leaves holder plastic at the frame
     # edge (a band along one side, a wedge in a corner). Shave it
     # before the gates judge the crop — the shave no-ops on a clean
@@ -9738,6 +9874,7 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
         app.logger.info('trim: shaved dark border %dx%d -> %dx%d',
                         *(crop.size + shaved.size))
         crop = shaved
+    if refined is not None or shaved is not None:
         out = _encode_trimmed_note(crop)
         crop = _open_upload_image(out)
     if expect_aspect and _aspect_off(crop.size, expect_aspect) > 0.08:
