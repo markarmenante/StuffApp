@@ -7889,12 +7889,16 @@ def _object_isolation_crop(img):
 
 
 
-def _trim_note_cv_cascade(img):
+def _trim_note_cv_cascade(img, expect_aspect=None):
     """Fallback trim without the vision model: the local detector
     cascade, iterated to a fixed point (a fuzzy paper edge can leave a
     sliver that only the next pass sees) so the stored image is final
     and a later Check finds nothing left to shave. Each pass only ever
-    shrinks the image; 3 passes covers the worst real case."""
+    shrinks the image; 3 passes covers the worst real case. With the
+    sheet's catalog ratio known, no later pass may move the crop AWAY
+    from it — a detector that cuts a correctly-cropped note further
+    (rembg segmenting an orange note's design out of its own paper)
+    always breaks the ratio before anything else notices."""
     out = None
     obj_tried = False
     for i in range(3):
@@ -7929,6 +7933,20 @@ def _trim_note_cv_cascade(img):
                             i + 1, '' if i else 'on original ', *img.size)
             break
         nxt = _flatten_image_for_jpeg(_open_upload_image(step))
+        # Once a crop is accepted, the catalog ratio is a one-way
+        # gate: a later pass may approach it but never move away
+        # (the original photo's own ratio is meaningless, so pass 1
+        # stays free — the final ratio gate still judges it).
+        if expect_aspect and out is not None and \
+                _aspect_off(nxt.size, expect_aspect) > \
+                _aspect_off(img.size, expect_aspect) + 0.03:
+            app.logger.info(
+                'trim: pass %d %s moves off the catalog ratio '
+                '(%.0f%% -> %.0f%%); keeping previous',
+                i + 1, which,
+                _aspect_off(img.size, expect_aspect) * 100,
+                _aspect_off(nxt.size, expect_aspect) * 100)
+            break
         # Pass 1 may cut aggressively (raw photo -> note). Passes 2-3
         # exist to shave slivers off an already-isolated note; a step
         # that discards most of the remaining image there is a detector
@@ -9853,14 +9871,26 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
     w, h = img.size
     if w < 200 or h < 100:
         return None
-    out = _trim_note_cv_cascade(img)
+    out = _trim_note_cv_cascade(img, expect_aspect=expect_aspect)
     if out is None:
         return None
     crop = _open_upload_image(out)
+
+    def _worsens_ratio(candidate):
+        """The same one-way catalog-ratio gate the cascade passes use:
+        a cleanup step may approach the sheet ratio, never leave it."""
+        return bool(expect_aspect) and \
+            _aspect_off(candidate.size, expect_aspect) > \
+            _aspect_off(crop.size, expect_aspect) + 0.03
+
     # A corner quad that locked onto the holder pocket instead of the
     # paper leaves a slanted junk band along a side; re-fit the paper
     # edges on the rectified crop and warp once more.
     refined = _refine_rectified_paper_edges(crop)
+    if refined is not None and _worsens_ratio(refined):
+        app.logger.info('trim: edge refinement %dx%d moves off the '
+                        'catalog ratio; discarded', *refined.size)
+        refined = None
     if refined is not None:
         app.logger.info('trim: refined paper edges %dx%d -> %dx%d',
                         *(crop.size + refined.size))
@@ -9870,6 +9900,10 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
     # before the gates judge the crop — the shave no-ops on a clean
     # crop, so well-fitted quads ship exactly as before.
     shaved = _shave_dark_border(crop)
+    if shaved is not None and _worsens_ratio(shaved):
+        app.logger.info('trim: dark-border shave %dx%d moves off the '
+                        'catalog ratio; discarded', *shaved.size)
+        shaved = None
     if shaved is not None:
         app.logger.info('trim: shaved dark border %dx%d -> %dx%d',
                         *(crop.size + shaved.size))

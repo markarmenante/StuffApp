@@ -846,7 +846,7 @@ buf = io.BytesIO(); img.save(buf, format='JPEG', quality=92)
 
 stretched = Image.new('RGB', (1200, 400), PAPER)   # 3.0:1 "crop"
 sb = io.BytesIO(); stretched.save(sb, format='JPEG', quality=90)
-stuffapp._trim_note_cv_cascade = lambda im: sb.getvalue()
+stuffapp._trim_note_cv_cascade = lambda im, **kw: sb.getvalue()
 out = stuffapp._trim_slabbed_note_image(buf.getvalue(), expect_aspect=1.79)
 assert out is None, 'a 3.0:1 crop of a 1.79:1 sheet must not ship'
 print('CATALOG-RATIO VETO ASSERTIONS PASSED')
@@ -854,7 +854,7 @@ print('CATALOG-RATIO VETO ASSERTIONS PASSED')
 # --- Ratio inside tolerance ships (validator absent without a key) ---------
 okimg = Image.new('RGB', (1040, 580), PAPER)
 ob = io.BytesIO(); okimg.save(ob, format='JPEG', quality=90)
-stuffapp._trim_note_cv_cascade = lambda im: ob.getvalue()
+stuffapp._trim_note_cv_cascade = lambda im, **kw: ob.getvalue()
 out = stuffapp._trim_slabbed_note_image(buf.getvalue(), expect_aspect=1.79)
 assert out is not None, 'an on-ratio CV crop must ship'
 print('ON-RATIO SHIP ASSERTIONS PASSED')
