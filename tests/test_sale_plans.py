@@ -150,6 +150,8 @@ assert 'display:none' not in _terms, \
     'Sales Terms must be visible once the piece is Sold'
 assert 'value="2026-08-01"' in html, 'sale date lost on re-render'
 assert 'value="$12,500"' in html, 'sale price must re-render as currency'
+assert 'id="artGainLoss"' in html and 'Gain / Loss' in html, \
+    'Gain / Loss cell missing from the purchase row'
 print('ART SALES-TERMS ASSERTIONS PASSED')
 
 
