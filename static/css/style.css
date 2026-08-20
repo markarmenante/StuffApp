@@ -1281,11 +1281,6 @@ textarea.results-raw { display: none !important; }
   .art-specs .art-purchase-row.dg3 {
     grid-template-columns: 1fr 1fr 2fr;
   }
-  /* Same row with the Gain/Loss cell appended (dg4): Vendor keeps
-     its double weight, the computed cell matches the others. */
-  .art-specs .art-purchase-row.dg4 {
-    grid-template-columns: 1fr 1fr 2fr 1fr;
-  }
   /* Let the two notes rows split the leftover vertical space inside
      .art-specs so they bottom-align with the image instead of leaving
      an empty band. The textareas inside fill their cell's height. */

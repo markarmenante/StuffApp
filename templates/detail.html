@@ -1769,19 +1769,11 @@ document.addEventListener('DOMContentLoaded', function () {
         {{ cell('dimensions','H x W x D') }}
         {{ numcell('year','Year') }}
       </div>
-      <!-- Date | Price | Vendor | Gain/Loss -->
-      <div class="dgrid dg4 art-purchase art-purchase-row">
+      <!-- Date | Price | Vendor -->
+      <div class="dgrid dg3 art-purchase art-purchase-row">
         {{ datecell('date','Date') }}
         <div class="dcell"><input type="text" name="price" value="{{ val('price')|currency }}" class="price-input" inputmode="numeric"><span class="clabel">Price</span></div>
         {{ tacell('vendor','Vendor', ta.get('vendor', [])) }}
-        {# Display-only (no name attribute, never submitted): sale
-           price minus purchase price, computed live by the Sales
-           Terms script below. Blank until both prices exist. #}
-        <div class="dcell">
-          <input type="text" id="artGainLoss" value="" readonly tabindex="-1"
-                 style="color:#666">
-          <span class="clabel">Gain / Loss</span>
-        </div>
       </div>
       <!-- Property | Location -->
       <div class="dgrid dg2 art-purchase">
@@ -1820,7 +1812,7 @@ document.addEventListener('DOMContentLoaded', function () {
          save; the Status select toggles visibility live. #}
       <div id="artSalesTerms" {% if val('status') != 'Sold' %}style="display:none"{% endif %}>
         <div class="section-bar">Sales Terms</div>
-        <div class="dgrid dg3">
+        <div class="dgrid dg4">
           {{ datecell('sale_date','Sale Date', seed_today=false) }}
           <div class="dcell">
             <input type="text" name="sale_price" value="{{ val('sale_price')|currency }}"
@@ -1828,6 +1820,14 @@ document.addEventListener('DOMContentLoaded', function () {
             <span class="clabel">Sale Price</span>
           </div>
           {{ tacell('sold_to','Sold To', ta.get('sold_to', ta.get('vendor', []))) }}
+          {# Display-only (no name attribute, never submitted): sale
+             price minus purchase price, computed live by the script
+             below. Blank until both prices exist. #}
+          <div class="dcell">
+            <input type="text" id="artGainLoss" value="" readonly tabindex="-1"
+                   style="color:#666">
+            <span class="clabel">Gain / Loss</span>
+          </div>
         </div>
       </div>
       <script>
