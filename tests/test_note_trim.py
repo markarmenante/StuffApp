@@ -771,7 +771,7 @@ _real_cv = stuffapp._trim_slab_note_cv
 _calls = {'n': 0}
 
 
-def _fake_cv(img):
+def _fake_cv(img, **kw):
     _calls['n'] += 1
     w, h = img.size
     if _calls['n'] == 1:
