@@ -7940,7 +7940,7 @@ def _object_isolation_crop(img):
 
 
 
-def _trim_note_cv_cascade(img, expect_aspect=None):
+def _trim_note_cv_cascade(img, expect_aspect=None, steps=None):
     """Fallback trim without the vision model: the local detector
     cascade, iterated to a fixed point (a fuzzy paper edge can leave a
     sliver that only the next pass sees) so the stored image is final
@@ -8021,6 +8021,11 @@ def _trim_note_cv_cascade(img, expect_aspect=None):
                         i + 1, which, *img.size)
         out = step
         img = nxt
+        # Every accepted pass is kept (steps): a later pass can be the
+        # one that over-crops, and the caller's validator then falls
+        # back to an earlier, wider crop instead of shipping nothing.
+        if steps is not None:
+            steps.append(step)
     return out
 
 
@@ -10003,7 +10008,9 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
     w, h = img.size
     if w < 200 or h < 100:
         return None
-    out = _trim_note_cv_cascade(img, expect_aspect=expect_aspect)
+    cascade_steps = []
+    out = _trim_note_cv_cascade(img, expect_aspect=expect_aspect,
+                                steps=cascade_steps)
     if out is None:
         return None
     crop = _open_upload_image(out)
@@ -10055,6 +10062,13 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
     _add(shaved)
     _add(refined)
     _add(crop)
+    # Earlier cascade passes stay candidates too (newest first): a
+    # later pass can be the one that over-cropped — the Algeria 100
+    # Dinars front lost its margins to the design-union pass, both
+    # cleanup candidates were rightly vetoed, and the wider pass-1
+    # crop was the answer nobody could reach.
+    for step in reversed(cascade_steps[:-1]):
+        _add(_flatten_image_for_jpeg(_open_upload_image(step)))
 
     if expect_aspect and all(
             _aspect_off(c.size, expect_aspect) > 0.08 for c in candidates):
@@ -16522,7 +16536,7 @@ Target fields:
 - grade_condition: condition qualifier(s) noted alongside the grade — e.g. "minor rust", "pinholes", "annotation", "small tear". Comma-separated, lowercase; else null.
 - grade_modifier: "EPQ" when the text shows EPQ (Exceptional Paper Quality), "★" for a star designation, "EPQ★" for both, "+" for a plus grade. Else null.
 - sheet_position: THIS note's position on the printing sheet, when identifiable from the images or the dealer's text — an uncut/partial-sheet position stated like "2 of 4", or the plate-position letter/number printed in the note's margin or corner (e.g. "A", "D12", "Position 7"). Direct evidence only — never inferred from a catalogue. Null when not shown or stated.
-- label_comments: EVERYTHING ELSE printed on the grading-service holder label that no other field captures, verbatim, comma-separated in label order — variety/attribution notes ('Narrow "V" in Left Sign.', "Number at Lower L & Upper R"), status designations ("Remainder", "Specimen", "Proof", "Cancelled", "Replacement/Star"), net grades and condition comments ("Net", "Staple Holes", "Rust", "Ink", "Annotations", "Minor Repairs"), pedigree/collection lines, and the watermark line if it was NOT already captured in the watermark field. Nothing on the label may be lost. Null only when the label shows nothing beyond fields already captured, or there is no label.
+- label_comments: EVERYTHING ELSE printed on the grading-service holder label that no other field captures, verbatim, comma-separated in label order — variety/attribution notes ('Narrow "V" in Left Sign.', "Number at Lower L & Upper R"), status designations ("Remainder", "Specimen", "Proof", "Cancelled", "Replacement/Star"), net grades and condition comments ("Net", "Staple Holes", "Rust", "Ink", "Annotations", "Minor Repairs"), pedigree/collection lines, and the watermark line if it was NOT already captured in the watermark field. Nothing human-readable on the label may be lost — but NEVER include the label's barcode / machine-verification string (the long letters-and-digits run that just concatenates the Pick number, grade, and cert number, e.g. "125a64E8038100041G"), nor the serial number, nor any value already returned in another field. Null when the label shows nothing beyond fields already captured, or there is no label.
 - lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text. EXCEPTION — when the note's text is already ENGLISH: no translation is needed, so the two fields become the two sides instead: put ONLY the FRONT inscriptions here (lines prefixed "Front:"), matching the front image on the left.
 - lettering_translation: English translation of each lettering line, same order and same Front:/Back: prefixes. Transliterate non-Latin scripts in parentheses where helpful. EXCEPTION — when the note's text is already ENGLISH: put ONLY the BACK inscriptions here (lines prefixed "Back:"), matching the back image on the right, with the front inscriptions in lettering. Null only when there is nothing to report.
 - history_context: a VERY SHORT historical-context narrative — 2-3 sentences, under 70 words. Why this note existed: who issued it, what was happening then and there (hyperinflation, war, occupation, nationalization, currency reform), and anything notable about this type. Plain prose, no headings, no citations inline. Web searches allowed. Null if you cannot say anything reliable.
@@ -16932,6 +16946,28 @@ def banknote_lookup_specs(record_id):
     # label is lost. Image reads only — the label sits IN the photos,
     # the same evidence rule as _SLAB_LABEL_FIELDS.
     label_comments = suggestions.get('label_comments')
+    if isinstance(label_comments, str) and label_comments.strip():
+        # Belt to the prompt's braces: drop the label's barcode /
+        # machine-verification run ('125a64E8038100041G' — a spaceless
+        # hash-like token) and any part another field already carries.
+        _known_key = re.sub(r'[^a-z0-9]', '', ' '.join(
+            str(suggestions.get(f) or _coin_row_value(note, f) or '')
+            for f in ('pick_number', 'grade', 'grade_numeric',
+                      'slab_number', 'serial_number', 'grade_modifier',
+                      'grade_condition', 'watermark')).lower())
+        kept = []
+        for part in re.split(r'[,;]\s*', label_comments):
+            part = part.strip()
+            if not part:
+                continue
+            if re.fullmatch(r'[0-9A-Za-z-]{10,}', part):
+                continue
+            core = re.sub(r'(?i)^wmk\.?:?\s*', '', part)
+            part_key = re.sub(r'[^a-z0-9]', '', core.lower())
+            if part_key and part_key in _known_key:
+                continue
+            kept.append(part)
+        label_comments = ', '.join(kept)
     if _has_images and isinstance(label_comments, str) \
             and label_comments.strip():
         label_comments = label_comments.strip()
