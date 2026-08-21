@@ -2497,6 +2497,9 @@ COUNTRY_KEYS = {
     'guinea-bissau': ('guinea-bissau', 'guinea bissau', 'guiné-bissau',
                       'guine-bissau', 'portuguese guinea',
                       'guiné portuguesa', 'guine portuguesa'),
+    # French Sudan is modern Mali; bare 'sudan' stays with Sudan.
+    'mali': ('mali', 'republic of mali', 'mali federation',
+             'french sudan', 'soudan français', 'soudan francais'),
     'egypt': ('egypt', 'united arab republic'),
     'south-africa': ('south africa', 'union of south africa'),
     'canada': ('canada', 'dominion of canada'),
@@ -3876,6 +3879,27 @@ COUNTRY_ERAS = {
         (1945, 1960, 'The CFA franc',
          'The CFA franc was created in December 1945, at the same time France ratified the Bretton Woods agreement, deliberately set at a stronger rate than the metropolitan franc. Issue passed to a public institute in the 1950s, the predecessor of the BCEAO.'),
     )),
+    'mali': ('Mali', (
+        (1880, 1959, 'French Sudan',
+         'France conquered the middle Niger from the 1880s and governed '
+         'it as the Soudan Français, a territory of French West Africa '
+         "from 1895. The Banque de l'Afrique Occidentale's franc, then "
+         'the CFA franc from 1945, served the territory.'),
+        (1959, 1962, 'Independence and the Mali Federation',
+         'The territory joined Senegal in the short-lived Mali '
+         'Federation in 1959; when it broke up, the Republic of Mali '
+         'declared independence on 22 September 1960 under Modibo '
+         'Keïta, keeping the CFA franc at first.'),
+        (1962, 1984, 'The Malian franc',
+         'Mali left the franc zone on 1 July 1962: the franc malien, '
+         'issued by the Banque de la République du Mali and from 1968 '
+         'by the Banque Centrale du Mali, started at par with the CFA '
+         'franc but was devalued by half in 1967.'),
+        (1984, 2100, 'Return to the CFA franc',
+         'Mali rejoined the West African Monetary Union on 1 June 1984 '
+         'at two Malian francs per CFA franc; the BCEAO has issued its '
+         'notes since, with the letter code D marking the Mali issues.'),
+    )),
     'west-african-states': ('West African States', (
         (1959, 2100, 'The shared CFA franc',
          'The Central Bank of West African States (BCEAO) issues one CFA franc for eight countries — Benin, Burkina Faso, Ivory Coast, Guinea-Bissau, Mali, Niger, Senegal, Togo. The currency is guaranteed by the French Treasury at a fixed parity, in return for which the members long held part of their reserves in Paris. It was pegged to the French franc, devalued by half in January 1994, and pegged to the euro since 1999. Notes carry a letter code for the issuing country.'),
@@ -3992,6 +4016,7 @@ COUNTRY_COLONIAL = {
     'macau': 'Portuguese from 1557, a formal colony from 1887; returned to China 20 December 1999.',
     'malawi': 'British Central Africa Protectorate from 1891, Nyasaland from 1907; independent 6 July 1964.',
     'malaya': 'British from Penang in 1786; independent as the Federation of Malaya 31 August 1957, Malaysia from 1963.',
+    'mali': 'French Sudan from the 1880s conquest, a territory of French West Africa from 1895; independent 22 September 1960 after the brief Mali Federation with Senegal.',
     'malta': 'British from 1800, formally ceded in 1814; independent 21 September 1964.',
     'mexico': 'Spanish from the 1521 fall of Tenochtitlan; independence declared 16 September 1810, won 27 September 1821.',
     'mongolia': 'Under Qing rule from 1691; declared independence in 1911 and secured it in 1921.',
