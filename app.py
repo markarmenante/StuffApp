@@ -10214,9 +10214,13 @@ def _note_geometry_scan(img):
 
     small = img.convert('RGB').copy()
     small.thumbnail((1024, 1024))
+    tw, th = small.size
     buf = BytesIO()
     small.save(buf, format='JPEG', quality=85)
     b64 = base64.b64encode(buf.getvalue()).decode()
+    # PIXEL coordinates of the image actually sent, normalized HERE —
+    # models asked for "0-1000 normalized" answer in image pixels
+    # anyway, which silently collapses the short axis.
     prompt = (
         'Locate the BANKNOTE\'s paper sheet in this photo. The note may '
         'sit inside a grading holder (PMG/PCGS slab) with a printed '
@@ -10225,13 +10229,14 @@ def _note_geometry_scan(img):
         'own blank margins, excluding holder plastic, the grading '
         'label, and everything else. Corners need only be approximate '
         '(within about 2% of the frame) — precision comes later.\n'
+        f'This image is {tw}x{th} pixels.\n'
         'Reply ONLY JSON:\n'
         '{"note": [[x,y],[x,y],[x,y],[x,y]], "holder": true|false, '
         '"label": true|false}\n'
-        'note = the four corners in THIS image as [x, y] with both '
-        'axes normalized to 0-1000, in order NW, NE, SE, SW. holder = '
-        'a rigid grading holder or sleeve is visible. label = a '
-        'grading-service label is visible.')
+        f'note = the four corners as PIXEL [x, y] in this {tw}x{th} '
+        'image, in order NW, NE, SE, SW. holder = a rigid grading '
+        'holder or sleeve is visible. label = a grading-service label '
+        'is visible.')
     try:
         client = anthropic.Anthropic(api_key=api_key)
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
@@ -10259,7 +10264,8 @@ def _note_geometry_scan(img):
             x, y = float(p[0]), float(p[1])
         except (TypeError, ValueError, IndexError):
             return None
-        pts.append((min(1000.0, max(0.0, x)), min(1000.0, max(0.0, y))))
+        pts.append((min(1000.0, max(0.0, x / tw * 1000.0)),
+                    min(1000.0, max(0.0, y / th * 1000.0))))
     # Re-derive corner order from the points themselves — models
     # occasionally shuffle NW/NE — top pair by y, then left/right by x.
     by_y = sorted(pts, key=lambda p: p[1])
@@ -10438,7 +10444,12 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
     if failed:
         app.logger.info('trim-v2: metrics flagged: %s (%dx%d)',
                         '; '.join(failed), *crop.size)
-        if _vision_crop_verdict(crop) is not True:
+        # The catalog ratio is not the validator's to waive: a crop
+        # that far off the sheet's physical shape is wrong however
+        # plausible it looks. The validator may only overrule the
+        # texture checks (ink coverage, perimeter ring).
+        if any(f.startswith('aspect') for f in failed) \
+                or _vision_crop_verdict(crop) is not True:
             app.logger.info('trim-v2: validator did not rescue — '
                             'falling back to the cascade')
             return 'fail', None
