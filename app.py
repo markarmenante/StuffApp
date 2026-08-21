@@ -4463,17 +4463,29 @@ def banknote_countries_without_history():
 # the decade's first year, so undated obsolete notes still land in an era.
 _DECADE_RE = re.compile(r'\b((?:1[6-9]|20)\d)0s\b')
 
+# The non-dated catalog idiom — 'ND (1970-84)', '1970-1984' — in a series
+# label or date text: the start year places the note in an era.
+_YEAR_RANGE_RE = re.compile(r'\b((?:1[6-9]|20)\d\d)\s*[-–/]\s*\d{2,4}\b')
+
 
 def _note_year(row):
     """Best year for era placement: a 4-digit year in the series label, then
-    date_1, then a decade like '1850s' in the series or date text."""
+    date_1, then a decade like '1850s' or a year range like 'ND (1970-84)'
+    in the series or date text. A range yields its START year — that is
+    era placement, not sorting: SERIES_YEAR deliberately refuses ranges so
+    the note's own date orders it, but the era band only needs the period
+    the note could date from, and the range's start names it."""
     year = _series_year(_row_get(row, 'series')) or _row_get(row, 'date_1')
     if year:
         return year
     for field in ('series', 'date_1_text'):
-        m = _DECADE_RE.search(str(_row_get(row, field) or ''))
+        text = str(_row_get(row, field) or '')
+        m = _DECADE_RE.search(text)
         if m:
             return int(m.group(1) + '0')
+        m = _YEAR_RANGE_RE.search(text)
+        if m:
+            return int(m.group(1))
     return None
 
 
