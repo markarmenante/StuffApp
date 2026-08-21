@@ -9971,54 +9971,84 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
         return None
     crop = _open_upload_image(out)
 
-    def _worsens_ratio(candidate):
+    def _worsens_ratio(candidate, base):
         """The same one-way catalog-ratio gate the cascade passes use:
         a cleanup step may approach the sheet ratio, never leave it."""
         return bool(expect_aspect) and \
             _aspect_off(candidate.size, expect_aspect) > \
-            _aspect_off(crop.size, expect_aspect) + 0.015
+            _aspect_off(base.size, expect_aspect) + 0.015
+
+    # Cleanup variants of the cascade crop, most-cleaned first. A
+    # cleanup step can itself be the thing that ruins a good crop
+    # (edge refinement swallowing the paper margins), so each stage
+    # stays a candidate: the gates below judge them in order and the
+    # first one that validates ships, instead of one bad cleanup or
+    # one veto discarding the whole trim.
+    candidates = []
+
+    def _add(cand):
+        if cand is not None and \
+                not any(cand.size == c.size for c in candidates):
+            candidates.append(cand)
 
     # A corner quad that locked onto the holder pocket instead of the
     # paper leaves a slanted junk band along a side; re-fit the paper
     # edges on the rectified crop and warp once more.
     refined = _refine_rectified_paper_edges(crop)
-    if refined is not None and _worsens_ratio(refined):
+    if refined is not None and _worsens_ratio(refined, crop):
         app.logger.info('trim: edge refinement %dx%d moves off the '
                         'catalog ratio; discarded', *refined.size)
         refined = None
     if refined is not None:
         app.logger.info('trim: refined paper edges %dx%d -> %dx%d',
                         *(crop.size + refined.size))
-        crop = refined
     # A slightly-off corner quad leaves holder plastic at the frame
     # edge (a band along one side, a wedge in a corner). Shave it
     # before the gates judge the crop — the shave no-ops on a clean
     # crop, so well-fitted quads ship exactly as before.
-    shaved = _shave_dark_border(crop)
-    if shaved is not None and _worsens_ratio(shaved):
+    base = refined if refined is not None else crop
+    shaved = _shave_dark_border(base)
+    if shaved is not None and _worsens_ratio(shaved, base):
         app.logger.info('trim: dark-border shave %dx%d moves off the '
                         'catalog ratio; discarded', *shaved.size)
         shaved = None
     if shaved is not None:
         app.logger.info('trim: shaved dark border %dx%d -> %dx%d',
-                        *(crop.size + shaved.size))
-        crop = shaved
-    if refined is not None or shaved is not None:
-        out = _encode_trimmed_note(crop)
-        crop = _open_upload_image(out)
-    if expect_aspect and _aspect_off(crop.size, expect_aspect) > 0.08:
-        app.logger.info(
-            'trim: CV crop %dx%d is %.0f%% off the catalog ratio %.2f '
-            '— leaving the image untouched', *crop.size,
-            _aspect_off(crop.size, expect_aspect) * 100, expect_aspect)
-        return None
-    verdict = _vision_crop_verdict(crop)
-    if verdict is False:
-        app.logger.info('trim: vision validator vetoed the CV crop '
-                        '(%dx%d) — leaving the image untouched',
-                        *crop.size)
-        return None
-    return out
+                        *(base.size + shaved.size))
+    _add(shaved)
+    _add(refined)
+    _add(crop)
+
+    if expect_aspect and all(
+            _aspect_off(c.size, expect_aspect) > 0.08 for c in candidates):
+        # Every variant carries too much holder to sit on the catalog
+        # ratio — a light pocket edge no mask detector sees. The
+        # engraving anchor still stands: cut to the design box plus
+        # its margin and let the gates judge that.
+        rescued = _ink_anchored_crop(crop, expect_aspect)
+        if rescued is not None:
+            _add(_open_upload_image(rescued))
+
+    vetoes = 0
+    for cand in candidates:
+        if expect_aspect and _aspect_off(cand.size, expect_aspect) > 0.08:
+            app.logger.info(
+                'trim: candidate %dx%d is %.0f%% off the catalog ratio '
+                '%.2f — skipped', *cand.size,
+                _aspect_off(cand.size, expect_aspect) * 100, expect_aspect)
+            continue
+        verdict = _vision_crop_verdict(cand)
+        if verdict is False:
+            vetoes += 1
+            app.logger.info('trim: vision validator vetoed candidate '
+                            '%d (%dx%d)', vetoes, *cand.size)
+            if vetoes >= 3:
+                break
+            continue
+        return out if cand is crop else _encode_trimmed_note(cand)
+    app.logger.info('trim: no candidate crop validated '
+                    '— leaving the image untouched')
+    return None
 
 
 def _vision_crop_verdict(crop):
@@ -10046,6 +10076,9 @@ def _vision_crop_verdict(crop):
         "sheet: every printed element present, the sheet's own paper "
         "margins visible on all four sides, and nothing beyond the "
         "paper (no backdrop, holder plastic, grading label, or table). "
+        "A plain unprinted rectangle or oval INSIDE the design is a "
+        "watermark window — a normal security feature, not an obscured "
+        "or edited area; never fail the image for one. "
         "Judge only those criteria. Reply ONLY JSON: "
         '{"good": true} or {"good": false, "why": "<a few words>"}.')
     try:
