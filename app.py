@@ -4824,6 +4824,9 @@ def init_db():
     # Idempotent column additions for existing DBs
     for stmt in (
         'ALTER TABLE watches ADD COLUMN value REAL',
+        # Trim v2 records the crop's source quad (JSON [[x,y]x4] in
+        # original-photo coords) so crops are re-derivable transforms.
+        'ALTER TABLE trimmed_image_sources ADD COLUMN quad TEXT',
         'ALTER TABLE watches ADD COLUMN results TEXT',
         'ALTER TABLE watches ADD COLUMN value_searched_at TEXT',
         'ALTER TABLE watches ADD COLUMN specs_searched_at TEXT',
@@ -9980,7 +9983,7 @@ def _shave_dark_border(img):
     return img.crop((x0, y0, x1, y1))
 
 
-def _trim_slabbed_note_image(data, expect_aspect=None):
+def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
     """Crop a note photo (PMG/PCGS slab, sleeve, or bare) down to the
     engraved area plus its paper margins, squared up.
 
@@ -10008,6 +10011,16 @@ def _trim_slabbed_note_image(data, expect_aspect=None):
     w, h = img.size
     if w < 200 or h < 100:
         return None
+    # Seeded geometry pipeline first when enabled: 'ok' ships its crop,
+    # 'noop' means the frame already is the note (store nothing), and
+    # only a genuine failure falls through to the detector cascade.
+    if _trim_v2_enabled():
+        v2_status, v2_out = _trim_note_v2(img, expect_aspect, meta=meta)
+        if v2_status == 'ok':
+            return v2_out
+        if v2_status == 'noop':
+            return None
+        app.logger.info('trim: v2 pipeline passed — running the cascade')
     cascade_steps = []
     out = _trim_note_cv_cascade(img, expect_aspect=expect_aspect,
                                 steps=cascade_steps)
@@ -10165,6 +10178,280 @@ def _encode_trimmed_note(crop):
     crop.save(out, format='JPEG', quality=OPTIMIZED_IMAGE_JPEG_QUALITY,
               optimize=True, progressive=True)
     return out.getvalue()
+
+
+# --- Trim v2: seeded geometry pipeline (2026-08-21) -------------------
+#
+# The rewrite of the trim process, bottom-up: the model does
+# UNDERSTANDING (where the note roughly is), local CV does PIXELS
+# (snap the model's seed quad to the paper's edges, constrained by the
+# catalog ratio), and GEOMETRY does judgment (measurable acceptance
+# instead of a model veto; the vision validator survives only as a
+# tiebreaker when the measurements flag the crop). Every v2 crop
+# records its source quad, so re-runs and future manual fix-ups always
+# derive from the original photo. Runs ahead of the detector cascade
+# only when STUFFAPP_TRIM_V2 is set; any failure falls back to the
+# cascade unchanged.
+
+def _trim_v2_enabled():
+    return os.environ.get('STUFFAPP_TRIM_V2', '').strip() not in ('', '0')
+
+
+def _note_geometry_scan(img):
+    """One vision call: the note paper's corner quad in normalized
+    0-1000 coordinates, plus holder/label presence. The model is asked
+    only for what it is reliably good at — coarse localization — never
+    pixel-precise edges. Returns {'quad': [(x, y) x4 norm], 'area_frac',
+    'holder', 'label'} or None (no key, API failure, implausible quad)."""
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        return None
+    from io import BytesIO
+
+    small = img.convert('RGB').copy()
+    small.thumbnail((1024, 1024))
+    buf = BytesIO()
+    small.save(buf, format='JPEG', quality=85)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    prompt = (
+        'Locate the BANKNOTE\'s paper sheet in this photo. The note may '
+        'sit inside a grading holder (PMG/PCGS slab) with a printed '
+        'label, inside a sleeve, or lie on a backdrop — I want the '
+        'corners of the PAPER SHEET only: the full sheet including its '
+        'own blank margins, excluding holder plastic, the grading '
+        'label, and everything else. Corners need only be approximate '
+        '(within about 2% of the frame) — precision comes later.\n'
+        'Reply ONLY JSON:\n'
+        '{"note": [[x,y],[x,y],[x,y],[x,y]], "holder": true|false, '
+        '"label": true|false}\n'
+        'note = the four corners in THIS image as [x, y] with both '
+        'axes normalized to 0-1000, in order NW, NE, SE, SW. holder = '
+        'a rigid grading holder or sleeve is visible. label = a '
+        'grading-service label is visible.')
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
+        resp = client.messages.create(
+            model=model,
+            max_tokens=300,
+            messages=[{'role': 'user', 'content': [
+                {'type': 'image', 'source': {
+                    'type': 'base64', 'media_type': 'image/jpeg',
+                    'data': b64}},
+                {'type': 'text', 'text': prompt},
+            ]}],
+        )
+        data = parse_model_json_object(_message_text(resp))
+    except Exception as e:
+        app.logger.info('trim-v2: geometry scan unavailable: %s', e)
+        return None
+    raw = data.get('note')
+    if not (isinstance(raw, list) and len(raw) == 4):
+        app.logger.info('trim-v2: geometry scan returned no quad')
+        return None
+    pts = []
+    for p in raw:
+        try:
+            x, y = float(p[0]), float(p[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        pts.append((min(1000.0, max(0.0, x)), min(1000.0, max(0.0, y))))
+    # Re-derive corner order from the points themselves — models
+    # occasionally shuffle NW/NE — top pair by y, then left/right by x.
+    by_y = sorted(pts, key=lambda p: p[1])
+    top = sorted(by_y[:2], key=lambda p: p[0])
+    bot = sorted(by_y[2:], key=lambda p: p[0])
+    quad = (top[0], top[1], bot[1], bot[0])
+    area = 0.0
+    for i in range(4):
+        x0, y0 = quad[i]
+        x1, y1 = quad[(i + 1) % 4]
+        area += x0 * y1 - x1 * y0
+    area_frac = abs(area) / 2.0 / 1_000_000.0
+    if area_frac < 0.05:
+        app.logger.info('trim-v2: geometry quad implausibly small (%.0f%%)',
+                        area_frac * 100)
+        return None
+    return {'quad': quad, 'area_frac': area_frac,
+            'holder': bool(data.get('holder')),
+            'label': bool(data.get('label'))}
+
+
+def _snap_rect_edges(warped, inner, expect_aspect):
+    """Snap the seed rectangle ``inner`` (where the model's quad landed
+    in the rectified image) to the strongest nearby gradient line per
+    side — the paper's physical edge. A side with no convincing edge
+    keeps the model's position. With the catalog ratio known, the two
+    weakest sides are then nudged within their search bands to honor
+    it. Returns (box, strengths) — box the snapped (x0, y0, x1, y1)."""
+    x0, y0, x1, y1 = inner
+    w, h = warped.size
+    try:
+        import numpy as np
+    except ImportError:
+        return (x0, y0, x1, y1), {'left': 0, 'right': 0,
+                                  'top': 0, 'bottom': 0}
+    g = np.asarray(warped.convert('L'), dtype=np.float32)
+    bx = max(6, int(0.06 * w))
+    by = max(6, int(0.06 * h))
+    iy0, iy1 = y0 + (y1 - y0) // 10, y1 - (y1 - y0) // 10
+    ix0, ix1 = x0 + (x1 - x0) // 10, x1 - (x1 - x0) // 10
+    gx = np.abs(np.diff(g[iy0:iy1, :], axis=1)).mean(axis=0)
+    gy = np.abs(np.diff(g[:, ix0:ix1], axis=0)).mean(axis=1)
+
+    # Absolute mean-gradient floor for a real edge. The paper's edge is
+    # by construction the OUTERMOST sustained transition in the band —
+    # walking outside-in and taking the first crossing beats taking the
+    # strongest response, which on a boldly framed note is the printed
+    # border, not the paper.
+    EDGE = 4.5
+
+    def snap(profile, center, lo, hi, from_lo):
+        lo = max(0, lo)
+        hi = min(len(profile), hi)
+        if hi - lo < 4:
+            return center, 0.0
+        band = profile[lo:hi]
+        idxs = range(len(band)) if from_lo \
+            else range(len(band) - 1, -1, -1)
+        for i in idxs:
+            if band[i] >= EDGE:
+                return lo + i, float(band[i])
+        return center, 0.0
+
+    L, sl = snap(gx, x0, x0 - bx, x0 + bx, True)
+    R, sr = snap(gx, x1, x1 - bx, x1 + bx, False)
+    T, st = snap(gy, y0, y0 - by, y0 + by, True)
+    B, sb = snap(gy, y1, y1 - by, y1 + by, False)
+    # A snapped side lands ON the edge gradient — step one pixel onto
+    # the paper so the crop never carries the transition line itself.
+    L = (L + 2) if sl >= EDGE else x0
+    R = (R - 1) if sr >= EDGE else x1
+    T = (T + 2) if st >= EDGE else y0
+    B = (B - 1) if sb >= EDGE else y1
+    if R - L < 40 or B - T < 20:
+        L, T, R, B = x0, y0, x1, y1
+    strengths = {'left': sl, 'right': sr, 'top': st, 'bottom': sb}
+
+    if expect_aspect:
+        cur = max(R - L, B - T) / max(1, min(R - L, B - T))
+        if abs(cur - expect_aspect) / expect_aspect > 0.055:
+            # Only sides the walk did NOT find an edge for may move —
+            # they still sit at the model's ±2% guess, so a bounded
+            # nudge toward the catalog ratio is honest. A side snapped
+            # to a real edge stays put; a remaining ratio miss is the
+            # metrics gate's problem, not geometry's to invent.
+            landscape = (R - L) >= (B - T)
+            want_w = (B - T) * expect_aspect if landscape \
+                else (B - T) / expect_aspect
+            need = want_w - (R - L)
+            if sl < EDGE and abs(need) >= 1:
+                moved = max(x0 - bx, min(x0 + bx, L - need))
+                need -= (L - moved)
+                L = int(round(moved))
+            if sr < EDGE and abs(need) >= 1:
+                moved = max(x1 - bx, min(x1 + bx, R + need))
+                need -= (moved - R)
+                R = int(round(moved))
+    L, T = max(0, int(L)), max(0, int(T))
+    R, B = min(w, int(R)), min(h, int(B))
+    return (L, T, R, B), strengths
+
+
+def _note_crop_metrics(crop, expect_aspect):
+    """Deterministic acceptance for a finished v2 crop. Returns a list
+    of failed checks — empty means the crop ships without asking any
+    model. Checks: catalog ratio, an ink box with real margins on all
+    four sides that still fills most of the frame, and no dark holder
+    ring in the perimeter band."""
+    failed = []
+    w, h = crop.size
+    if expect_aspect and _aspect_off(crop.size, expect_aspect) > 0.06:
+        failed.append('aspect %.0f%% off' %
+                      (_aspect_off(crop.size, expect_aspect) * 100))
+    ink = _note_ink_box(crop)
+    if not ink:
+        failed.append('no ink box')
+    else:
+        x0, y0, x1, y1 = ink
+        insets = (x0, y0, w - x1, h - y1)
+        if min(insets) < 1:
+            failed.append('design touches the frame edge')
+        if x0 > 0.2 * w or (w - x1) > 0.2 * w \
+                or y0 > 0.2 * h or (h - y1) > 0.2 * h:
+            failed.append('surround too wide')
+        frac = (x1 - x0) * (y1 - y0) / float(w * h)
+        if frac < 0.5:
+            failed.append('ink fills only %.0f%%' % (frac * 100))
+    band = max(2, int(0.015 * min(w, h)))
+    g = crop.convert('L')
+    px = g.load()
+    ring = []
+    for x in range(0, w, 3):
+        for y in tuple(range(band)) + tuple(range(h - band, h)):
+            ring.append(px[x, y])
+    for y in range(band, h - band, 3):
+        for x in tuple(range(band)) + tuple(range(w - band, w)):
+            ring.append(px[x, y])
+    if ring:
+        dark = sum(1 for v in ring if v < 60) / len(ring)
+        if _median(ring) < 90 or dark > 0.10:
+            failed.append('dark perimeter ring')
+    return failed
+
+
+def _apply_perspective(coeffs, x, y):
+    a, b, c, d, e, f, gg, hh = coeffs
+    den = gg * x + hh * y + 1.0
+    return (round((a * x + b * y + c) / den, 1),
+            round((d * x + e * y + f) / den, 1))
+
+
+def _trim_note_v2(img, expect_aspect=None, meta=None):
+    """The seeded pipeline: model locates, CV snaps, geometry judges.
+    Returns (status, jpeg_bytes) — status 'ok' (ship bytes), 'noop'
+    (frame already is the note; store nothing), or 'fail' (couldn't
+    produce a defensible crop; the caller falls back to the cascade)."""
+    w, h = img.size
+    geo = _note_geometry_scan(img)
+    if geo is None:
+        return 'fail', None
+    if geo['area_frac'] >= 0.955 and not geo['holder'] and not geo['label']:
+        app.logger.info('trim-v2: frame already is the note (%.0f%%)',
+                        geo['area_frac'] * 100)
+        return 'noop', None
+    quad = tuple((x / 1000.0 * w, y / 1000.0 * h) for x, y in geo['quad'])
+    rect = _rectify_note_quad(img, quad, context=0.08)
+    if rect is None:
+        app.logger.info('trim-v2: degenerate seed quad')
+        return 'fail', None
+    warped, inner, coeffs = rect
+    box, strengths = _snap_rect_edges(warped, inner, expect_aspect)
+    crop = warped.crop(box)
+    if crop.size[0] * crop.size[1] >= 0.94 * w * h:
+        return 'noop', None
+    failed = _note_crop_metrics(crop, expect_aspect)
+    if failed:
+        app.logger.info('trim-v2: metrics flagged: %s (%dx%d)',
+                        '; '.join(failed), *crop.size)
+        if _vision_crop_verdict(crop) is not True:
+            app.logger.info('trim-v2: validator did not rescue — '
+                            'falling back to the cascade')
+            return 'fail', None
+    if meta is not None:
+        meta['engine'] = 'v2'
+        meta['quad'] = [_apply_perspective(coeffs, x, y)
+                       for x, y in ((box[0], box[1]), (box[2], box[1]),
+                                    (box[2], box[3]), (box[0], box[3]))]
+    app.logger.info(
+        'trim-v2: %dx%d -> %dx%d (edge strengths %s%s)', w, h, *crop.size,
+        ' '.join(f'{k}:{v:.1f}' for k, v in strengths.items()),
+        '; metrics clean' if not failed else '; validator rescued')
+    return 'ok', _encode_trimmed_note(crop)
 
 
 def _perspective_coeffs(quad, out_w, out_h):
@@ -17049,11 +17336,12 @@ def banknote_lookup_specs(record_id):
             if src_row and os.path.exists(
                     os.path.join(UPLOAD_FOLDER, src_row['source'])):
                 source = src_row['source']
+            trim_meta = {}
             try:
                 with open(os.path.join(UPLOAD_FOLDER, source), 'rb') as fh:
                     raw = fh.read()
                 trimmed = _trim_slabbed_note_image(
-                    raw, expect_aspect=expect_aspect)
+                    raw, expect_aspect=expect_aspect, meta=trim_meta)
             except Exception as e:
                 app.logger.warning('banknote %s: trim of %s (%s) failed: %s',
                                    record_id, field, source, e)
@@ -17065,7 +17353,10 @@ def banknote_lookup_specs(record_id):
                 fh.write(trimmed)
             db.execute(
                 'INSERT OR REPLACE INTO trimmed_image_sources '
-                '(trimmed, source) VALUES (?, ?)', (new_name, source))
+                '(trimmed, source, quad) VALUES (?, ?, ?)',
+                (new_name, source,
+                 json.dumps(trim_meta['quad'])
+                 if trim_meta.get('quad') else None))
             db.execute(
                 f"UPDATE banknotes SET {field} = ?, updated_at = ? WHERE id = ?",
                 (new_name, datetime.utcnow().isoformat(), record_id))
@@ -28226,6 +28517,178 @@ def import_audio_missing():
     total = db.execute('SELECT COUNT(*) FROM audio').fetchone()[0]
     return jsonify(inserted=inserted, skipped_existing=skipped_existing,
                    skipped_bad=skipped_bad, total=total)
+
+
+# ---------------------------------------------------------------------------
+# Trim v2 offline A/B — run the seeded pipeline over every banknote's
+# recorded original WITHOUT touching stored images, so the rewrite is
+# judged against the shipped crops before it goes live. Start with
+# /banknote-trim-ab?secret=…, review at /banknote-trim-ab-report.
+# ---------------------------------------------------------------------------
+
+_TRIM_AB = {'running': False, 'done': 0, 'total': 0, 'rows': [],
+            'error': None, 'started_at': None}
+_TRIM_AB_LOCK = threading.Lock()
+
+
+def _trim_ab_report_path():
+    return os.path.join(DATA_DIR, 'trim_ab_report.json')
+
+
+def _run_trim_ab(limit=None, offset=0):
+    import time
+
+    db = open_db_connection()
+    try:
+        notes = db.execute(
+            'SELECT id, country, denomination, image_1, image_2, '
+            'size_width, size_height FROM banknotes '
+            'ORDER BY country, denomination').fetchall()
+        jobs = []
+        for n in notes:
+            for field in ('image_1', 'image_2'):
+                fname = n[field]
+                if fname and is_image_filter(fname):
+                    jobs.append((n, field, fname))
+        jobs = jobs[offset:offset + limit] if limit else jobs[offset:]
+        with _TRIM_AB_LOCK:
+            _TRIM_AB['total'] = len(jobs)
+        for n, field, fname in jobs:
+            row = {'record': n['id'],
+                   'label': ' '.join(str(v) for v in
+                                     (n['country'], n['denomination']) if v),
+                   'field': field, 'current': fname}
+            try:
+                cur_path = os.path.join(UPLOAD_FOLDER, fname)
+                if os.path.exists(cur_path):
+                    row['current_size'] = list(
+                        _open_upload_image(open(cur_path, 'rb').read()).size)
+                src_row = db.execute(
+                    'SELECT source FROM trimmed_image_sources '
+                    'WHERE trimmed = ?', (fname,)).fetchone()
+                source = fname
+                if src_row and os.path.exists(
+                        os.path.join(UPLOAD_FOLDER, src_row['source'])):
+                    source = src_row['source']
+                row['source'] = source
+                with open(os.path.join(UPLOAD_FOLDER, source), 'rb') as fh:
+                    raw = fh.read()
+                img = _flatten_image_for_jpeg(_open_upload_image(raw))
+                expect = None
+                try:
+                    dims = (float(n['size_width'] or 0),
+                            float(n['size_height'] or 0))
+                    if all(d > 0 for d in dims):
+                        ratio = max(dims) / min(dims)
+                        if 1.2 <= ratio <= 4.0:
+                            expect = ratio
+                except (TypeError, ValueError):
+                    pass
+                row['expect_aspect'] = expect
+                meta = {}
+                t0 = time.time()
+                status, out = _trim_note_v2(img, expect, meta=meta)
+                row['secs'] = round(time.time() - t0, 1)
+                row['v2'] = {'status': status}
+                if out:
+                    ab_name = f'abtest_{uuid.uuid4().hex}.jpg'
+                    with open(os.path.join(UPLOAD_FOLDER, ab_name),
+                              'wb') as fh:
+                        fh.write(out)
+                    crop = _open_upload_image(out)
+                    row['v2'].update({
+                        'file': ab_name, 'size': list(crop.size),
+                        'aspect_off': round(_aspect_off(crop.size, expect), 3)
+                        if expect else None,
+                        'quad': meta.get('quad'),
+                    })
+            except Exception as e:
+                row['v2'] = {'status': 'error', 'error': str(e)[:200]}
+            with _TRIM_AB_LOCK:
+                _TRIM_AB['rows'].append(row)
+                _TRIM_AB['done'] += 1
+                snapshot = dict(_TRIM_AB)
+            if snapshot['done'] % 5 == 0 or snapshot['done'] == snapshot['total']:
+                with open(_trim_ab_report_path(), 'w') as fh:
+                    json.dump(snapshot, fh)
+    except Exception as e:
+        with _TRIM_AB_LOCK:
+            _TRIM_AB['error'] = str(e)
+    finally:
+        db.close()
+        with _TRIM_AB_LOCK:
+            _TRIM_AB['running'] = False
+            snapshot = dict(_TRIM_AB)
+        with open(_trim_ab_report_path(), 'w') as fh:
+            json.dump(snapshot, fh)
+
+
+@app.route('/banknote-trim-ab')
+def banknote_trim_ab_start():
+    if request.args.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    with _TRIM_AB_LOCK:
+        if _TRIM_AB['running']:
+            return jsonify({'error': 'already running',
+                            'done': _TRIM_AB['done'],
+                            'total': _TRIM_AB['total']}), 409
+        _TRIM_AB.update({'running': True, 'done': 0, 'total': 0,
+                         'rows': [], 'error': None,
+                         'started_at': datetime.utcnow().isoformat()})
+    limit = request.args.get('limit', type=int)
+    offset = request.args.get('offset', type=int) or 0
+    threading.Thread(target=_run_trim_ab, kwargs={'limit': limit,
+                                                  'offset': offset},
+                     daemon=True).start()
+    return jsonify({'started': True, 'limit': limit, 'offset': offset})
+
+
+@app.route('/banknote-trim-ab-report')
+def banknote_trim_ab_report():
+    if request.args.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    with _TRIM_AB_LOCK:
+        state = dict(_TRIM_AB)
+    if not state['rows'] and os.path.exists(_trim_ab_report_path()):
+        with open(_trim_ab_report_path()) as fh:
+            state = json.load(fh)
+    if request.args.get('format') == 'json':
+        return jsonify(state)
+    from markupsafe import escape
+
+    counts = {}
+    for r in state['rows']:
+        s = (r.get('v2') or {}).get('status', '?')
+        counts[s] = counts.get(s, 0) + 1
+    parts = [
+        '<meta charset="utf-8"><title>Trim v2 A/B</title>'
+        '<style>body{font-family:sans-serif;background:#f4f4f4}'
+        'td{vertical-align:top;padding:6px;background:#fff}'
+        'img{max-width:340px;height:auto;display:block}'
+        'table{border-spacing:6px}</style>',
+        f"<h2>Trim v2 A/B — {state['done']}/{state['total']}"
+        f"{' (running)' if state['running'] else ''}</h2>",
+        f"<p>status counts: {escape(json.dumps(counts))}"
+        f"{' — ERROR: ' + escape(str(state['error'])) if state['error'] else ''}</p>",
+        '<table><tr><th>note</th><th>current stored</th>'
+        '<th>v2 crop</th><th>verdict</th></tr>',
+    ]
+    for r in state['rows']:
+        v2 = r.get('v2') or {}
+        cur = (f"<img src='/uploads/{escape(r['current'])}'>"
+               f"<br>{r.get('current_size')}")
+        new = (f"<img src='/uploads/{escape(v2['file'])}'>"
+               f"<br>{v2.get('size')} off:{v2.get('aspect_off')}"
+               if v2.get('file') else '—')
+        parts.append(
+            f"<tr><td>{escape(r['label'])}<br><small>{escape(r['field'])}"
+            f" · {r.get('secs', '')}s</small></td>"
+            f"<td>{cur}</td><td>{new}</td>"
+            f"<td>{escape(v2.get('status', '?'))}"
+            f"{('<br><small>' + escape(v2.get('error', '')) + '</small>') if v2.get('error') else ''}"
+            f"</td></tr>")
+    parts.append('</table>')
+    return '\n'.join(parts)
 
 
 # ---------------------------------------------------------------------------
