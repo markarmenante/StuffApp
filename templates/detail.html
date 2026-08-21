@@ -1352,9 +1352,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- Grade, Conditions -->
   {{ notescell('notes','Grade, Conditions') }}
-  {# Grading-service row: authority, cert number, combined grade readout,
-     numeric grade, EPQ/★ designation, condition qualifier. #}
-  <div class="dgrid coin-grading-row" style="grid-template-columns: 1.2fr 1.3fr 1.1fr 0.6fr 0.6fr 1.1fr;">
+  {# Grading-service row: authority (narrow — it holds "PMG"/"PCGS"),
+     cert number, combined grade readout, numeric grade, EPQ/★
+     designation, condition qualifier (wide — label comment lists). #}
+  <div class="dgrid coin-grading-row" style="grid-template-columns: 0.7fr 1.3fr 1.1fr 0.6fr 0.6fr 1.6fr;">
     {{ cell('grading_authority','Grading Authority') }}
     {{ cell('slab_number','Cert Number') }}
     <div class="dcell">

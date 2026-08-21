@@ -16156,7 +16156,7 @@ BANKNOTE_SPECS_RESPONSE_SCHEMA = {
             'serial_number',
             'watermark', 'material', 'grade', 'grading_authority',
             'slab_number', 'grade_condition', 'grade_modifier',
-            'sheet_position',
+            'sheet_position', 'label_comments',
             'lettering', 'lettering_translation', 'history_context',
             'vendor', 'price', 'purchase_date', 'obv_rev',
         )},
@@ -16511,7 +16511,7 @@ Target fields:
 - printer: the printing firm (e.g. "Harrison & Sons", "Thomas De La Rue"; notgeld was often locally printed).
 - signatures: signature combination as stated or visible (e.g. "Nasser-Emami").
 - serial_number: THIS note's serial number, from the images or the text; else null.
-- watermark: watermark description if stated or catalogued (e.g. "Young Shah portrait").
+- watermark: watermark description if stated or catalogued (e.g. "Young Shah portrait"). Grading-service labels often print it outright ("Wmk: Man's Head") — read it off the holder label when present.
 - material: EXACTLY one of [{materials}]; null if unknown.
 - date_1: integer Gregorian year of issue (e.g. 1954, 1921). A date printed on the note counts as direct evidence. If the note is dated in a local era (SH/AH/BE), convert to the Gregorian year the dealer gives; do not compute your own conversion unless the dealer states it.
 - size_width: printed note width in mm (float); size_height: height in mm (float).
@@ -16522,6 +16522,7 @@ Target fields:
 - grade_condition: condition qualifier(s) noted alongside the grade — e.g. "minor rust", "pinholes", "annotation", "small tear". Comma-separated, lowercase; else null.
 - grade_modifier: "EPQ" when the text shows EPQ (Exceptional Paper Quality), "★" for a star designation, "EPQ★" for both, "+" for a plus grade. Else null.
 - sheet_position: THIS note's position on the printing sheet, when identifiable from the images or the dealer's text — an uncut/partial-sheet position stated like "2 of 4", or the plate-position letter/number printed in the note's margin or corner (e.g. "A", "D12", "Position 7"). Direct evidence only — never inferred from a catalogue. Null when not shown or stated.
+- label_comments: EVERYTHING ELSE printed on the grading-service holder label that no other field captures, verbatim, comma-separated in label order — variety/attribution notes ('Narrow "V" in Left Sign.', "Number at Lower L & Upper R"), status designations ("Remainder", "Specimen", "Proof", "Cancelled", "Replacement/Star"), net grades and condition comments ("Net", "Staple Holes", "Rust", "Ink", "Annotations", "Minor Repairs"), pedigree/collection lines, and the watermark line if it was NOT already captured in the watermark field. Nothing on the label may be lost. Null only when the label shows nothing beyond fields already captured, or there is no label.
 - lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text. EXCEPTION — when the note's text is already ENGLISH: no translation is needed, so the two fields become the two sides instead: put ONLY the FRONT inscriptions here (lines prefixed "Front:"), matching the front image on the left.
 - lettering_translation: English translation of each lettering line, same order and same Front:/Back: prefixes. Transliterate non-Latin scripts in parentheses where helpful. EXCEPTION — when the note's text is already ENGLISH: put ONLY the BACK inscriptions here (lines prefixed "Back:"), matching the back image on the right, with the front inscriptions in lettering. Null only when there is nothing to report.
 - history_context: a VERY SHORT historical-context narrative — 2-3 sentences, under 70 words. Why this note existed: who issued it, what was happening then and there (hyperinflation, war, occupation, nationalization, currency reform), and anything notable about this type. Plain prose, no headings, no citations inline. Web searches allowed. Null if you cannot say anything reliable.
@@ -16540,7 +16541,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "date_1": null, "size_width": null, "size_height": null,
   "grade": null, "grade_numeric": null, "grading_authority": null,
   "slab_number": null, "grade_condition": null, "grade_modifier": null,
-  "sheet_position": null,
+  "sheet_position": null, "label_comments": null,
   "lettering": null, "lettering_translation": null, "history_context": null,
   "vendor": null, "price": null, "purchase_date": null, "obv_rev": null,
   "sources": "one-line note of where each value came from (note images vs dealer text vs which web source)"
@@ -16923,9 +16924,30 @@ def banknote_lookup_specs(record_id):
     # 'Label: value; ...' rewrite of the description for approval.
     current_description = str(_coin_row_value(note, 'description') or '')
     compacted = compact_banknote_description(current_description)
-    if compacted:
-        overwritten['description'] = {'current': current_description,
-                                      'new': compacted}
+    new_description = compacted or current_description
+    # Grading-label extras — variety notes ('Narrow "V" in Left Sign.'),
+    # status words (Remainder, Specimen, Net), condition comments
+    # (Staple Holes, Rust), pedigree lines — have no column of their
+    # own: append them to the description so nothing printed on the
+    # label is lost. Image reads only — the label sits IN the photos,
+    # the same evidence rule as _SLAB_LABEL_FIELDS.
+    label_comments = suggestions.get('label_comments')
+    if _has_images and isinstance(label_comments, str) \
+            and label_comments.strip():
+        label_comments = label_comments.strip()
+        _lc_key = re.sub(r'[^a-z0-9]', '', label_comments.lower())
+        _base_key = re.sub(r'[^a-z0-9]', '',
+                           (new_description + dealer_text).lower())
+        if _lc_key and _lc_key not in _base_key:
+            line = f'Grading label: {label_comments}'
+            new_description = f'{new_description}\n{line}' \
+                if new_description.strip() else line
+    if new_description.strip() and new_description != current_description:
+        if current_description.strip():
+            overwritten['description'] = {'current': current_description,
+                                          'new': new_description}
+        else:
+            filled['description'] = new_description
 
     # Only stamp a fully successful run: a partial (description-only)
     # result keeps the Check button un-done so a retry isn't skipped.
