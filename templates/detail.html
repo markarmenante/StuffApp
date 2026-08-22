@@ -1243,12 +1243,15 @@ document.addEventListener('DOMContentLoaded', function () {
     {{ selcell('property_name','Location', vlists.property) }}
   </div>
 
-  <!-- Banknote images (front + back) — pinned near the top like coins. -->
+  <!-- Banknote images (front + back) — pinned near the top like coins.
+       The ✂ button opens the quad-corner crop fix-up: the recorded
+       original with the stored crop's corners draggable. -->
   <div class="coin-imgs coin-imgs-large banknote-imgs">
     <div class="coin-img-panel drop-zone" data-field="image_1"
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_1'] and r['image_1']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="">
+        {% if not is_new %}<button type="button" class="quad-fix-btn" title="Adjust crop" onclick="openQuadFix(event, 'image_1')">✂</button>{% endif %}
       {% else %}<span style="font-size:28px;color:#ccc">💵</span>{% endif %}
       <label class="file-upload-lbl">
         <input type="file" name="image_1" accept="image/*" style="display:none"
@@ -1259,6 +1262,7 @@ document.addEventListener('DOMContentLoaded', function () {
          data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_2'] and r['image_2']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="">
+        {% if not is_new %}<button type="button" class="quad-fix-btn" title="Adjust crop" onclick="openQuadFix(event, 'image_2')">✂</button>{% endif %}
       {% else %}<span style="font-size:28px;color:#ccc">💵</span>{% endif %}
       <label class="file-upload-lbl">
         <input type="file" name="image_2" accept="image/*" style="display:none"
@@ -1266,6 +1270,147 @@ document.addEventListener('DOMContentLoaded', function () {
       </label>
     </div>
   </div>
+
+  {% if not is_new %}
+  <style>
+    .banknote-imgs .coin-img-panel { position: relative; }
+    .quad-fix-btn {
+      position: absolute; top: 6px; right: 6px; z-index: 5;
+      width: 30px; height: 30px; border-radius: 15px;
+      border: 1px solid #bbb; background: rgba(255,255,255,.92);
+      font-size: 15px; line-height: 1; cursor: pointer;
+      opacity: 0; transition: opacity .15s;
+    }
+    .banknote-imgs .coin-img-panel:hover .quad-fix-btn { opacity: 1; }
+    .quad-modal {
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(20,20,24,.82);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+    }
+    .quad-modal canvas { background: #111; border-radius: 4px;
+      touch-action: none; cursor: crosshair;
+      box-shadow: 0 8px 40px rgba(0,0,0,.5); }
+    .quad-modal .qm-hint { color: #ddd; font-size: 13px; }
+    .quad-modal .qm-row { display: flex; gap: 10px; }
+    .quad-modal button {
+      padding: 8px 22px; border-radius: 6px; font-size: 14px;
+      border: 1px solid #888; background: #f4f4f4; cursor: pointer; }
+    .quad-modal button.qm-save {
+      background: #2f6fef; border-color: #2f6fef; color: #fff; }
+    .quad-modal button[disabled] { opacity: .5; cursor: default; }
+  </style>
+  <script>
+  async function openQuadFix(ev, field) {
+    ev.preventDefault(); ev.stopPropagation();
+    var recordId = {{ r['id']|tojson }};
+    var base = '/banknotes/' + recordId + '/trim-quad/' + field;
+    var info;
+    try {
+      info = await (await fetch(base)).json();
+    } catch (e) { info = {error: 'Could not load the crop data.'}; }
+    if (info.error) { alert(info.error); return; }
+    var img = new Image();
+    img.onload = function () {
+      var scale = Math.min((window.innerWidth * 0.92) / info.width,
+                           (window.innerHeight * 0.72) / info.height, 1);
+      var cw = Math.round(info.width * scale),
+          ch = Math.round(info.height * scale);
+      var quad = info.quad.map(function (p) {
+        return [p[0] * scale, p[1] * scale];
+      });
+
+      var modal = document.createElement('div');
+      modal.className = 'quad-modal';
+      modal.innerHTML =
+        '<div class="qm-hint">Drag the corners onto the note’s paper' +
+        ' edges — Save re-crops from the original photo.</div>' +
+        '<canvas width="' + cw + '" height="' + ch + '"></canvas>' +
+        '<div class="qm-row"><button type="button" class="qm-save">' +
+        'Save crop</button><button type="button" class="qm-cancel">' +
+        'Cancel</button></div>';
+      document.body.appendChild(modal);
+      var canvas = modal.querySelector('canvas');
+      var ctx = canvas.getContext('2d');
+      var HANDLE = 9, active = -1;
+
+      function draw() {
+        ctx.clearRect(0, 0, cw, ch);
+        ctx.drawImage(img, 0, 0, cw, ch);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, cw, ch);
+        ctx.moveTo(quad[0][0], quad[0][1]);
+        for (var i = 3; i >= 0; i--) ctx.lineTo(quad[i][0], quad[i][1]);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(10,10,14,.5)';
+        ctx.fill('evenodd');
+        ctx.restore();
+        ctx.beginPath();
+        ctx.moveTo(quad[0][0], quad[0][1]);
+        for (var j = 1; j < 4; j++) ctx.lineTo(quad[j][0], quad[j][1]);
+        ctx.closePath();
+        ctx.strokeStyle = '#4f8bff'; ctx.lineWidth = 2; ctx.stroke();
+        quad.forEach(function (p) {
+          ctx.beginPath();
+          ctx.arc(p[0], p[1], HANDLE, 0, 7);
+          ctx.fillStyle = '#fff'; ctx.fill();
+          ctx.strokeStyle = '#2f6fef'; ctx.lineWidth = 2; ctx.stroke();
+        });
+      }
+
+      function pos(e) {
+        var b = canvas.getBoundingClientRect();
+        return [Math.max(0, Math.min(cw, e.clientX - b.left)),
+                Math.max(0, Math.min(ch, e.clientY - b.top))];
+      }
+      canvas.addEventListener('pointerdown', function (e) {
+        var p = pos(e);
+        active = -1;
+        for (var i = 0; i < 4; i++) {
+          if (Math.hypot(quad[i][0] - p[0], quad[i][1] - p[1]) < HANDLE * 2.2) {
+            active = i; break;
+          }
+        }
+        if (active >= 0) canvas.setPointerCapture(e.pointerId);
+      });
+      canvas.addEventListener('pointermove', function (e) {
+        if (active < 0) return;
+        quad[active] = pos(e);
+        draw();
+      });
+      canvas.addEventListener('pointerup', function () { active = -1; });
+
+      function close() { modal.remove(); }
+      modal.querySelector('.qm-cancel').addEventListener('click', close);
+      modal.addEventListener('click', function (e) {
+        if (e.target === modal) close();
+      });
+      modal.querySelector('.qm-save').addEventListener('click', async function () {
+        this.disabled = true;
+        var body = {quad: quad.map(function (p) {
+          return [p[0] / scale, p[1] / scale];
+        })};
+        var rsp;
+        try {
+          rsp = await (await fetch(base, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+          })).json();
+        } catch (e) { rsp = {error: 'Save failed.'}; }
+        if (rsp.error) { alert(rsp.error); this.disabled = false; return; }
+        var panel = document.querySelector(
+          '.banknote-imgs .coin-img-panel[data-field="' + field + '"] img');
+        if (panel) panel.src = rsp.url + '?v=' + Date.now();
+        close();
+      });
+      draw();
+    };
+    img.src = info.source_url;
+  }
+  </script>
+  {% endif %}
 
   <!-- Denomination / Material / Date / Age -->
   <div class="dgrid" style="grid-template-columns: repeat(4, 1fr);">

@@ -4939,9 +4939,14 @@ def init_db():
         # reference, so a bad crop could never be redone (a shaved note
         # fills its own frame and the detector rightly no-ops). source
         # is always the ORIGINAL upload, never an intermediate trim.
+        # quad: the crop's corner coordinates in original-photo pixels
+        # (JSON [[x,y]x4]), recorded by trim v2 and the fix-up UI.
+        # Existing DBs get it via the ALTER above; this CREATE runs
+        # after the ALTER list, so fresh DBs need it here too.
         ('CREATE TABLE IF NOT EXISTS trimmed_image_sources ('
          'trimmed TEXT PRIMARY KEY, '
-         'source TEXT NOT NULL)'),
+         'source TEXT NOT NULL, '
+         'quad TEXT)'),
         # LLM-generated country monetary histories — era bands for
         # countries not covered by the built-in COUNTRY_ERAS dict. A row
         # is written once per new country (on note save / startup
@@ -17497,6 +17502,163 @@ def banknote_apply_lookup_specs(record_id):
         'updated': len(updates),
         'fields': list(updates.keys()),
         'values': updates,
+    })
+
+
+# --- Quad-corner crop fix-up ------------------------------------------
+#
+# Every trimmed banknote image is a recorded transform of its original
+# photo (trimmed_image_sources: source + quad). These routes close the
+# loop for the notes no automation gets right: the detail page shows
+# the ORIGINAL with the stored quad's corners draggable, and a save
+# re-warps from the original — so a fix takes seconds, loses nothing,
+# and stays a re-derivable transform like every other crop.
+
+BANKNOTE_QUAD_FIELDS = ('image_1', 'image_2')
+
+
+def _banknote_trim_source(db, note, field):
+    """(stored_filename, source_filename, stored_quad_or_None) for a
+    banknote image field — source resolving to the recorded original
+    when it is still on disk, else the stored file itself."""
+    fname = _coin_row_value(note, field)
+    if not fname or not is_image_filter(fname):
+        return None, None, None
+    source, quad = fname, None
+    src_row = db.execute(
+        'SELECT source, quad FROM trimmed_image_sources WHERE trimmed = ?',
+        (fname,)).fetchone()
+    if src_row and os.path.exists(
+            os.path.join(UPLOAD_FOLDER, src_row['source'])):
+        source = src_row['source']
+        if src_row['quad']:
+            try:
+                quad = json.loads(src_row['quad'])
+            except ValueError:
+                quad = None
+    return fname, source, quad
+
+
+def _parse_client_quad(raw, w, h):
+    """Validate a posted corner quad against the source dimensions:
+    four numeric [x, y] points, clamped to the frame, re-ordered
+    NW/NE/SE/SW from the points themselves (a drag can cross sides),
+    and large enough to warp. Returns the quad tuple or None."""
+    if not (isinstance(raw, list) and len(raw) == 4):
+        return None
+    pts = []
+    for p in raw:
+        try:
+            x, y = float(p[0]), float(p[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            return None
+        pts.append((min(float(w), max(0.0, x)),
+                    min(float(h), max(0.0, y))))
+    by_y = sorted(pts, key=lambda p: p[1])
+    top = sorted(by_y[:2], key=lambda p: p[0])
+    bot = sorted(by_y[2:], key=lambda p: p[0])
+    quad = (top[0], top[1], bot[1], bot[0])
+    if quad[1][0] - quad[0][0] < 40 or quad[3][1] - quad[0][1] < 20:
+        return None
+    return quad
+
+
+@app.route('/banknotes/<record_id>/trim-quad/<field>')
+def banknote_trim_quad_info(record_id, field):
+    """The crop-adjust modal's data: the recorded original, its pixel
+    dimensions, and the stored quad. A crop with no recorded transform
+    gets a slightly inset full-frame default to drag from."""
+    if field not in BANKNOTE_QUAD_FIELDS:
+        return jsonify({'error': 'Unknown image field'}), 400
+    db = get_db()
+    note = db.execute("SELECT * FROM banknotes WHERE id = ?",
+                      (record_id,)).fetchone()
+    if not note:
+        return jsonify({'error': 'Banknote not found'}), 404
+    fname, source, quad = _banknote_trim_source(db, note, field)
+    if not fname:
+        return jsonify({'error': 'No image on this field'}), 404
+    path = os.path.join(UPLOAD_FOLDER, source)
+    if not os.path.exists(path):
+        return jsonify({'error': 'Source image file is missing'}), 404
+    with open(path, 'rb') as fh:
+        img = _flatten_image_for_jpeg(_open_upload_image(fh.read()))
+    w, h = img.size
+    if not (isinstance(quad, list) and len(quad) == 4):
+        mx, my = 0.02 * w, 0.02 * h
+        quad = [[mx, my], [w - mx, my], [w - mx, h - my], [mx, h - my]]
+    return jsonify({
+        'source_url': url_for('banknote_trim_source_file',
+                              record_id=record_id, field=field),
+        'width': w, 'height': h, 'quad': quad, 'trimmed': fname,
+    })
+
+
+@app.route('/banknotes/<record_id>/trim-source/<field>')
+def banknote_trim_source_file(record_id, field):
+    """Serve the recorded ORIGINAL behind a banknote image field. The
+    original is linked to no row, so the /uploads visibility check
+    rightly refuses it — but the crop-adjust modal for a visible
+    banknote needs the photo its crop derives from."""
+    if field not in BANKNOTE_QUAD_FIELDS:
+        abort(404)
+    db = get_db()
+    note = db.execute("SELECT * FROM banknotes WHERE id = ?",
+                      (record_id,)).fetchone()
+    if not note:
+        abort(404)
+    fname, source, _quad = _banknote_trim_source(db, note, field)
+    if not fname or not os.path.exists(os.path.join(UPLOAD_FOLDER, source)):
+        abort(404)
+    return send_from_directory(UPLOAD_FOLDER, source)
+
+
+@app.route('/banknotes/<record_id>/trim-quad/<field>', methods=['POST'])
+def banknote_trim_quad_apply(record_id, field):
+    """Apply a hand-adjusted corner quad: warp the recorded original
+    square-on, store the result as the field's image, and record the
+    quad so the crop stays a re-derivable transform."""
+    if field not in BANKNOTE_QUAD_FIELDS:
+        return jsonify({'error': 'Unknown image field'}), 400
+    db = get_db()
+    note = db.execute("SELECT * FROM banknotes WHERE id = ?",
+                      (record_id,)).fetchone()
+    if not note:
+        return jsonify({'error': 'Banknote not found'}), 404
+    fname, source, _quad = _banknote_trim_source(db, note, field)
+    if not fname:
+        return jsonify({'error': 'No image on this field'}), 404
+    path = os.path.join(UPLOAD_FOLDER, source)
+    if not os.path.exists(path):
+        return jsonify({'error': 'Source image file is missing'}), 404
+    data = request.get_json(force=True) or {}
+    with open(path, 'rb') as fh:
+        img = _flatten_image_for_jpeg(_open_upload_image(fh.read()))
+    quad = _parse_client_quad(data.get('quad'), *img.size)
+    if quad is None:
+        return jsonify({'error': 'Corners are too close together or '
+                                 'malformed.'}), 400
+    rect = _rectify_note_quad(img, quad)
+    if rect is None:
+        return jsonify({'error': 'Corners are too close together.'}), 400
+    warped = rect[0]
+    out = _encode_trimmed_note(warped)
+    new_name = f"{uuid.uuid4().hex}.jpg"
+    with open(os.path.join(UPLOAD_FOLDER, new_name), 'wb') as fh:
+        fh.write(out)
+    db.execute(
+        'INSERT OR REPLACE INTO trimmed_image_sources '
+        '(trimmed, source, quad) VALUES (?, ?, ?)',
+        (new_name, source,
+         json.dumps([[round(x, 1), round(y, 1)] for x, y in quad])))
+    db.execute(
+        f"UPDATE banknotes SET {field} = ?, updated_at = ? WHERE id = ?",
+        (new_name, datetime.utcnow().isoformat(), record_id))
+    db.commit()
+    final = _open_upload_image(out)
+    return jsonify({
+        'url': url_for('uploaded_file', filename=new_name),
+        'width': final.size[0], 'height': final.size[1],
     })
 
 

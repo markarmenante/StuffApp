@@ -4,7 +4,7 @@ import os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ['test_helpers.py', 'test_smoke.py', 'test_banknote_sort.py',
          'test_person_medications.py', 'test_note_trim.py',
-         'test_sale_plans.py']
+         'test_trim_quad.py', 'test_sale_plans.py']
 
 failed = []
 for t in TESTS:
