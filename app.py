@@ -10457,6 +10457,24 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
     if crop.size[0] * crop.size[1] >= 0.94 * w * h:
         return 'noop', None
     failed = _note_crop_metrics(crop, expect_aspect)
+    if any(f.startswith('dark') for f in failed):
+        # Backdrop or holder survived along an edge the snap could not
+        # place — the felt-through-the-pocket case. The cascade's own
+        # cleanup passes handle exactly this: re-find the paper edge on
+        # the rectified crop, then shave any residual dark border.
+        for cleaner in (_refine_rectified_paper_edges, _shave_dark_border):
+            cleaned = cleaner(crop)
+            if cleaned is not None and (
+                    not expect_aspect
+                    or _aspect_off(cleaned.size, expect_aspect)
+                    <= _aspect_off(crop.size, expect_aspect) + 0.015):
+                crop = cleaned
+        refreshed = _note_crop_metrics(crop, expect_aspect)
+        if len(refreshed) < len(failed):
+            app.logger.info('trim-v2: edge cleanup %s -> %s',
+                            '; '.join(failed) or '-',
+                            '; '.join(refreshed) or 'clean')
+        failed = refreshed
     if failed:
         app.logger.info('trim-v2: metrics flagged: %s (%dx%d)',
                         '; '.join(failed), *crop.size)
