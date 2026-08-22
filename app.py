@@ -10292,13 +10292,15 @@ def _note_geometry_scan(img):
             'label': bool(data.get('label'))}
 
 
-def _snap_rect_edges(warped, inner, expect_aspect):
+def _snap_rect_edges(warped, inner, expect_aspect, inward_frac=0.06):
     """Snap the seed rectangle ``inner`` (where the model's quad landed
-    in the rectified image) to the strongest nearby gradient line per
+    in the rectified image) to the outermost sustained gradient per
     side — the paper's physical edge. A side with no convincing edge
-    keeps the model's position. With the catalog ratio known, the two
-    weakest sides are then nudged within their search bands to honor
-    it. Returns (box, strengths) — box the snapped (x0, y0, x1, y1)."""
+    keeps the model's position. ``inward_frac`` caps how far a snap
+    may pull INWARD from the seed (outward always gets the full band).
+    With the catalog ratio known, the sides the walk found no edge for
+    are nudged within their bands to honor it. Returns
+    (box, strengths) — box the snapped (x0, y0, x1, y1)."""
     x0, y0, x1, y1 = inner
     w, h = warped.size
     try:
@@ -10334,15 +10336,8 @@ def _snap_rect_edges(warped, inner, expect_aspect):
                 return lo + i, float(band[i])
         return center, 0.0
 
-    # A snap may move INWARD from the model's seed only slightly: the
-    # model is semantically right about where the paper ends but
-    # pixel-blind, while an invisible edge (white paper on a white
-    # backdrop) makes the walk's first crossing the printed design
-    # frame — which once amputated the Mozambique front's margins.
-    # Outward the full band stands: that direction only adds surround,
-    # and the per-side checks and intrusion cutter police it.
-    ix = max(3, int(0.025 * w))
-    iy = max(3, int(0.025 * h))
+    ix = max(3, int(inward_frac * w))
+    iy = max(3, int(inward_frac * h))
     L, sl = snap(gx, x0, x0 - bx, x0 + ix, True)
     R, sr = snap(gx, x1, x1 - ix, x1 + bx, False)
     T, st = snap(gy, y0, y0 - by, y0 + iy, True)
@@ -10511,52 +10506,84 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
         app.logger.info('trim-v2: degenerate seed quad')
         return 'fail', None
     warped, inner, coeffs = rect
-    box, strengths = _snap_rect_edges(warped, inner, expect_aspect)
-    crop = warped.crop(box)
-    if crop.size[0] * crop.size[1] >= 0.94 * w * h:
+    def _judge(box):
+        """(crop, failures) for one candidate box, with the dark-band
+        cleanup chain applied when holder or backdrop survived along
+        an edge the snap could not place."""
+        crop = warped.crop(box)
+        failed = _note_crop_metrics(crop, expect_aspect)
+        if any(f.startswith('dark') for f in failed):
+            for cleaner in (_cut_edge_intrusions,
+                            _refine_rectified_paper_edges,
+                            _shave_dark_border):
+                cleaned = cleaner(crop)
+                if cleaned is not None and (
+                        not expect_aspect
+                        or _aspect_off(cleaned.size, expect_aspect)
+                        <= _aspect_off(crop.size, expect_aspect) + 0.015):
+                    crop = cleaned
+            refreshed = _note_crop_metrics(crop, expect_aspect)
+            if len(refreshed) < len(failed):
+                app.logger.info('trim-v2: edge cleanup %s -> %s',
+                                '; '.join(failed),
+                                '; '.join(refreshed) or 'clean')
+            failed = refreshed
+        return crop, failed
+
+    # Two geometry candidates: the full edge-snap (right when the
+    # model overshot into the holder — the snap walks in to the paper
+    # edge) and a seed-faithful variant whose sides may barely move
+    # inward (right when the paper edge is invisible, white on white,
+    # and the snap's first crossing is the printed design frame).
+    # Locally the two cases look identical; the acceptance metrics
+    # tell them apart — the same candidates-then-gates shape that
+    # fixed the cascade.
+    boxes = []
+    for inward in (0.06, 0.025):
+        box, _strengths = _snap_rect_edges(warped, inner, expect_aspect,
+                                           inward_frac=inward)
+        if box not in boxes:
+            boxes.append(box)
+    if all(warped.crop(b).size[0] * warped.crop(b).size[1]
+           >= 0.94 * w * h for b in boxes):
         return 'noop', None
-    failed = _note_crop_metrics(crop, expect_aspect)
-    if any(f.startswith('dark') for f in failed):
-        # Backdrop or holder survived along an edge the snap could not
-        # place — the felt-through-the-pocket case. The cascade's own
-        # cleanup passes handle exactly this: re-find the paper edge on
-        # the rectified crop, then shave any residual dark border.
-        for cleaner in (_cut_edge_intrusions,
-                        _refine_rectified_paper_edges, _shave_dark_border):
-            cleaned = cleaner(crop)
-            if cleaned is not None and (
-                    not expect_aspect
-                    or _aspect_off(cleaned.size, expect_aspect)
-                    <= _aspect_off(crop.size, expect_aspect) + 0.015):
-                crop = cleaned
-        refreshed = _note_crop_metrics(crop, expect_aspect)
-        if len(refreshed) < len(failed):
-            app.logger.info('trim-v2: edge cleanup %s -> %s',
-                            '; '.join(failed) or '-',
-                            '; '.join(refreshed) or 'clean')
-        failed = refreshed
-    if failed:
-        app.logger.info('trim-v2: metrics flagged: %s (%dx%d)',
-                        '; '.join(failed), *crop.size)
-        # The catalog ratio is not the validator's to waive: a crop
-        # that far off the sheet's physical shape is wrong however
-        # plausible it looks. The validator may only overrule the
-        # texture checks (ink coverage, perimeter ring).
-        if any(f.startswith('aspect') for f in failed) \
-                or _vision_crop_verdict(crop) is not True:
-            app.logger.info('trim-v2: validator did not rescue — '
-                            'falling back to the cascade')
-            return 'fail', None
+    chosen = chosen_box = None
+    soft = None
+    for box in boxes:
+        crop, failed = _judge(box)
+        if not failed:
+            chosen, chosen_box = crop, box
+            break
+        app.logger.info('trim-v2: candidate %dx%d flagged: %s',
+                        crop.size[0], crop.size[1], '; '.join(failed))
+        # aspect and dark bands are not the validator's to waive: the
+        # sheet's physical shape and holder plastic at an edge are
+        # wrong however plausible the crop looks. Only texture flags
+        # (ink coverage, busy band, surround) may go to the validator
+        # — and the least-flagged candidate gets that one call.
+        if not any(f.startswith(('aspect', 'dark')) for f in failed):
+            if soft is None or len(failed) < len(soft[2]):
+                soft = (crop, box, failed)
+    if chosen is None and soft is not None:
+        if _vision_crop_verdict(soft[0]) is True:
+            chosen, chosen_box = soft[0], soft[1]
+            app.logger.info('trim-v2: validator accepted the flagged '
+                            'candidate (%dx%d)', *chosen.size)
+    if chosen is None:
+        app.logger.info('trim-v2: no candidate passed — '
+                        'falling back to the cascade')
+        return 'fail', None
+    if chosen.size[0] * chosen.size[1] >= 0.94 * w * h:
+        return 'noop', None
     if meta is not None:
         meta['engine'] = 'v2'
         meta['quad'] = [_apply_perspective(coeffs, x, y)
-                       for x, y in ((box[0], box[1]), (box[2], box[1]),
-                                    (box[2], box[3]), (box[0], box[3]))]
-    app.logger.info(
-        'trim-v2: %dx%d -> %dx%d (edge strengths %s%s)', w, h, *crop.size,
-        ' '.join(f'{k}:{v:.1f}' for k, v in strengths.items()),
-        '; metrics clean' if not failed else '; validator rescued')
-    return 'ok', _encode_trimmed_note(crop)
+                        for x, y in ((chosen_box[0], chosen_box[1]),
+                                     (chosen_box[2], chosen_box[1]),
+                                     (chosen_box[2], chosen_box[3]),
+                                     (chosen_box[0], chosen_box[3]))]
+    app.logger.info('trim-v2: %dx%d -> %dx%d', w, h, *chosen.size)
+    return 'ok', _encode_trimmed_note(chosen)
 
 
 def _perspective_coeffs(quad, out_w, out_h):
