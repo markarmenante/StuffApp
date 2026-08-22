@@ -10376,7 +10376,8 @@ def _note_crop_metrics(crop, expect_aspect):
     ring in the perimeter band."""
     failed = []
     w, h = crop.size
-    if expect_aspect and _aspect_off(crop.size, expect_aspect) > 0.06:
+    # Same 8% catalog-ratio tolerance the cascade's final gate uses.
+    if expect_aspect and _aspect_off(crop.size, expect_aspect) > 0.08:
         failed.append('aspect %.0f%% off' %
                       (_aspect_off(crop.size, expect_aspect) * 100))
     ink = _note_ink_box(crop)
