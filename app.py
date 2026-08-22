@@ -10334,10 +10334,19 @@ def _snap_rect_edges(warped, inner, expect_aspect):
                 return lo + i, float(band[i])
         return center, 0.0
 
-    L, sl = snap(gx, x0, x0 - bx, x0 + bx, True)
-    R, sr = snap(gx, x1, x1 - bx, x1 + bx, False)
-    T, st = snap(gy, y0, y0 - by, y0 + by, True)
-    B, sb = snap(gy, y1, y1 - by, y1 + by, False)
+    # A snap may move INWARD from the model's seed only slightly: the
+    # model is semantically right about where the paper ends but
+    # pixel-blind, while an invisible edge (white paper on a white
+    # backdrop) makes the walk's first crossing the printed design
+    # frame — which once amputated the Mozambique front's margins.
+    # Outward the full band stands: that direction only adds surround,
+    # and the per-side checks and intrusion cutter police it.
+    ix = max(3, int(0.025 * w))
+    iy = max(3, int(0.025 * h))
+    L, sl = snap(gx, x0, x0 - bx, x0 + ix, True)
+    R, sr = snap(gx, x1, x1 - ix, x1 + bx, False)
+    T, st = snap(gy, y0, y0 - by, y0 + iy, True)
+    B, sb = snap(gy, y1, y1 - iy, y1 + by, False)
     # A snapped side lands ON the edge gradient — step one pixel onto
     # the paper so the crop never carries the transition line itself.
     L = (L + 2) if sl >= EDGE else x0
