@@ -10402,7 +10402,10 @@ def _note_crop_metrics(crop, expect_aspect):
     # Perimeter judged PER SIDE: a grading-label strip or holder band
     # along one edge disappears into aggregate ring statistics, but on
     # a correct crop every individual side's outer band is quiet paper.
-    band = max(2, int(0.015 * min(w, h)))
+    # The band reaches 4% deep — a thin one samples only the bright
+    # label sliver that can sit OUTSIDE the holder's black bar (the
+    # Mozambique reverse shipped exactly that sandwich).
+    band = min(48, max(4, int(0.04 * min(w, h))))
     g = crop.convert('L')
     sides = {'top': (0, 0, w, band), 'bottom': (0, h - band, w, h),
              'left': (0, 0, band, h), 'right': (w - band, 0, w, h)}
@@ -10420,6 +10423,48 @@ def _note_crop_metrics(crop, expect_aspect):
             # holder seam, or a design cut without its margin.
             failed.append(f'busy {name} band')
     return failed
+
+
+def _cut_edge_intrusions(img):
+    """Cut label slivers and holder bars off a crop's edges — including
+    the bright-sliver-OUTSIDE-dark-bar sandwich that defeats the
+    edge-walking cleaners (they see the bright outermost rows and
+    stop). Scan the outer 8% of each side for the INNERMOST strongly
+    dark scanline and cut everything outside it. Returns the cut image
+    or None when the edges are clean."""
+    g = img.convert('L')
+    w, h = g.size
+    if w < 80 or h < 40:
+        return None
+    px = g.load()
+
+    def row_dark(y):
+        vals = [px[x, y] for x in range(0, w, 3)]
+        return sum(1 for v in vals if v < 60) / len(vals)
+
+    def col_dark(x):
+        vals = [px[x, y] for y in range(0, h, 3)]
+        return sum(1 for v in vals if v < 60) / len(vals)
+
+    DARK, PAD = 0.35, 3
+    x0, y0, x1, y1 = 0, 0, w, h
+    for y in range(int(0.08 * h)):
+        if row_dark(y) >= DARK:
+            y0 = y + PAD
+    for y in range(h - 1, h - 1 - int(0.08 * h), -1):
+        if row_dark(y) >= DARK:
+            y1 = y - PAD
+    for x in range(int(0.08 * w)):
+        if col_dark(x) >= DARK:
+            x0 = x + PAD
+    for x in range(w - 1, w - 1 - int(0.08 * w), -1):
+        if col_dark(x) >= DARK:
+            x1 = x - PAD
+    if (x0, y0, x1, y1) == (0, 0, w, h):
+        return None
+    if x1 - x0 < 0.8 * w or y1 - y0 < 0.8 * h:
+        return None
+    return img.crop((x0, y0, x1, y1))
 
 
 def _apply_perspective(coeffs, x, y):
@@ -10467,7 +10512,8 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
         # place — the felt-through-the-pocket case. The cascade's own
         # cleanup passes handle exactly this: re-find the paper edge on
         # the rectified crop, then shave any residual dark border.
-        for cleaner in (_refine_rectified_paper_edges, _shave_dark_border):
+        for cleaner in (_cut_edge_intrusions,
+                        _refine_rectified_paper_edges, _shave_dark_border):
             cleaned = cleaner(crop)
             if cleaned is not None and (
                     not expect_aspect
