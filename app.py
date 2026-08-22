@@ -28654,6 +28654,18 @@ def banknote_trim_ab_start():
     return jsonify({'started': True, 'limit': limit, 'offset': offset})
 
 
+@app.route('/banknote-trim-ab-file/<filename>')
+def banknote_trim_ab_file(filename):
+    """Serve an A/B candidate crop. abtest_* files are linked to no
+    record, so the normal /uploads visibility check rightly 404s them —
+    the report needs its own secret-gated lane."""
+    if request.args.get('secret') != IMPORT_MISSING_SECRET:
+        abort(403)
+    if not re.fullmatch(r'abtest_[0-9a-f]{32}\.jpg', filename):
+        abort(404)
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+
 @app.route('/banknote-trim-ab-report')
 def banknote_trim_ab_report():
     if request.args.get('secret') != IMPORT_MISSING_SECRET:
@@ -28688,7 +28700,8 @@ def banknote_trim_ab_report():
         v2 = r.get('v2') or {}
         cur = (f"<img src='/uploads/{escape(r['current'])}'>"
                f"<br>{r.get('current_size')}")
-        new = (f"<img src='/uploads/{escape(v2['file'])}'>"
+        new = (f"<img src='/banknote-trim-ab-file/{escape(v2['file'])}"
+               f"?secret={escape(request.args.get('secret', ''))}'>"
                f"<br>{v2.get('size')} off:{v2.get('aspect_off')}"
                if v2.get('file') else '—')
         parts.append(
