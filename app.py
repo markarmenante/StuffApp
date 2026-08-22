@@ -10394,20 +10394,26 @@ def _note_crop_metrics(crop, expect_aspect):
         frac = (x1 - x0) * (y1 - y0) / float(w * h)
         if frac < 0.5:
             failed.append('ink fills only %.0f%%' % (frac * 100))
+    # Perimeter judged PER SIDE: a grading-label strip or holder band
+    # along one edge disappears into aggregate ring statistics, but on
+    # a correct crop every individual side's outer band is quiet paper.
     band = max(2, int(0.015 * min(w, h)))
     g = crop.convert('L')
-    px = g.load()
-    ring = []
-    for x in range(0, w, 3):
-        for y in tuple(range(band)) + tuple(range(h - band, h)):
-            ring.append(px[x, y])
-    for y in range(band, h - band, 3):
-        for x in tuple(range(band)) + tuple(range(w - band, w)):
-            ring.append(px[x, y])
-    if ring:
-        dark = sum(1 for v in ring if v < 60) / len(ring)
-        if _median(ring) < 90 or dark > 0.10:
-            failed.append('dark perimeter ring')
+    sides = {'top': (0, 0, w, band), 'bottom': (0, h - band, w, h),
+             'left': (0, 0, band, h), 'right': (w - band, 0, w, h)}
+    for name, box in sides.items():
+        vals = list(g.crop(box).getdata())[::3]
+        if not vals:
+            continue
+        dark = sum(1 for v in vals if v < 60) / len(vals)
+        mean = sum(vals) / len(vals)
+        var = sum((v - mean) ** 2 for v in vals) / len(vals)
+        if _median(vals) < 90 or dark > 0.10:
+            failed.append(f'dark {name} band')
+        elif var ** 0.5 > 30:
+            # High-contrast content at the very edge: a label strip,
+            # holder seam, or a design cut without its margin.
+            failed.append(f'busy {name} band')
     return failed
 
 
@@ -10424,6 +10430,15 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
     (frame already is the note; store nothing), or 'fail' (couldn't
     produce a defensible crop; the caller falls back to the cascade)."""
     w, h = img.size
+    # Pre-gate, before any vision spend: an image that already passes
+    # the acceptance metrics IS a finished note crop — re-cropping it
+    # buys at most slivers and risks clipping imprints and margins
+    # (the Indo-China/Gibraltar/Italy A/B regressions, all of this
+    # class). A slab or backdrop photo cannot pass these metrics.
+    if not _note_crop_metrics(img, expect_aspect):
+        app.logger.info('trim-v2: frame already reads as a clean note '
+                        '(%dx%d)', w, h)
+        return 'noop', None
     geo = _note_geometry_scan(img)
     if geo is None:
         return 'fail', None
