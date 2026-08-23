@@ -170,21 +170,13 @@ input[type="number"]::-webkit-outer-spin-button {
 .flash-error   { background: #b03030; }
 
 /* ── LIST PAGE ── */
+/* Every list keeps its toolbar (count, filter pills, search) pinned
+   below the top nav while the rows scroll. */
 .list-toolbar {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px;
   background: var(--nav-bg);
   border-bottom: 1px solid var(--nav-border);
-}
-
-/* Watch + Coins lists: keep toolbar (incl. search) pinned below the top nav.
-   Same treatment for any list drilled in from a Property (?at=...) so the
-   "← back to Property" pill and search bar stay reachable on long lists. */
-.list-toolbar-watches,
-.list-toolbar-coins,
-.list-toolbar-banknotes,
-.list-toolbar-recordings,
-.list-toolbar-at-prop {
   position: sticky;
   top: var(--nav-height);
   z-index: 90;

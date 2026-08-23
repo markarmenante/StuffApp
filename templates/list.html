@@ -140,11 +140,8 @@
      class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
      title="Sold vehicles">Sold</a>
   {% endif %}
-  {# Hide the search bar on lists short enough to scan visually
-     (rifles / audio / vehicles / pens / persons / credit_cards).
-     The other categories are large enough that search earns its
-     spot at the top. #}
-  {% if category not in ('rifles', 'audio', 'vehicles', 'pens', 'persons', 'credit_cards') %}
+  {# Every list carries the search bar in its sticky toolbar — even the
+     short ones — so the subheading reads the same across categories. #}
   <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
     <div class="search-wrap">
       <button type="submit" title="Search">🔍</button>
@@ -159,7 +156,6 @@
       {% if q %}<a class="search-clear" href="{{ url_for('list_view', category=category) }}">×</a>{% endif %}
     </div>
   </form>
-  {% endif %}
 </div>
 
 <!-- List -->
