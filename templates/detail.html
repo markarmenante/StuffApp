@@ -783,10 +783,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
   {% set _order_status = (r['status'] if r and 'status' in r.keys() and r['status'] else ('Own' if is_new else '')) %}
   {% set _has_commission = (_order_status == 'Ordered') or val('order_deposit') or val('order_deposit_2') or val('expected_delivery_date') or val('actual_delivery_date') %}
+  {# The pill mirrors Status: Consigned/Sold win outright; otherwise a
+     commissioned order (or leftover deposit data) reads Commissioned. #}
+  {% set _pill_mode = 'Consigned' if _order_status == 'Consigned' else ('Sold' if _order_status == 'Sold' else ('Commissioned' if _has_commission else 'Purchased')) %}
   <div id="watchOrderPanel" class="watch-order-panel {{ 'is-commissioned-active' if _has_commission else '' }}">
     <div class="section-bar watch-order-bar">
       <span>Purchase History</span>
-      <button type="button" class="watch-history-pill {{ 'is-active' if _has_commission else '' }}" data-watch-commissioned>{{ 'Commissioned' if _has_commission else 'Purchased' }}</button>
+      <span class="watch-history-pills">
+        {% for _m in ['Purchased', 'Commissioned', 'Consigned', 'Sold'] %}
+        <button type="button" class="watch-history-pill {{ 'is-active' if _pill_mode == _m else '' }}" data-watch-mode="{{ _m }}">{{ _m }}</button>
+        {% endfor %}
+      </span>
       <span class="watch-order-spacer"></span>
       <span id="valueSearchedAt" class="value-fetch-stamp">{% if r and r['value_searched_at'] %}as of {{ r['value_searched_at']|short_date }}{% endif %}</span>
       <button type="button" id="valueBtn" class="value-search-pill"
@@ -4347,20 +4354,29 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (rem) parts.push(rem + ' mo');
     return parts.join(' ') + ' late';
   }
-  function setWatchCommissioned(isCommissioned) {
+  // Purchase-history pill ↔ Status field. Each pill maps to a status;
+  // the commission grids (deposits / delivery) only show in
+  // Commissioned mode.
+  const WATCH_MODE_STATUS = {
+    Purchased: 'Own', Commissioned: 'Ordered',
+    Consigned: 'Consigned', Sold: 'Sold',
+  };
+  function setWatchModeUI(mode) {
     if (!watchOrderPanel) return;
-    watchOrderPanel.classList.toggle('is-commissioned-active', isCommissioned);
-    const commissionedPill = watchOrderPanel.querySelector('[data-watch-commissioned]');
-    if (commissionedPill) {
-      commissionedPill.classList.toggle('is-active', isCommissioned);
-      commissionedPill.textContent = isCommissioned ? 'Commissioned' : 'Purchased';
-    }
+    watchOrderPanel.classList.toggle('is-commissioned-active', mode === 'Commissioned');
+    watchOrderPanel.querySelectorAll('[data-watch-mode]').forEach(pill => {
+      pill.classList.toggle('is-active', pill.dataset.watchMode === mode);
+    });
+  }
+  function setWatchMode(mode) {
+    if (!watchOrderPanel) return;
+    setWatchModeUI(mode);
     const statusSelect = form.querySelector('select[name="status"]');
     if (statusSelect) {
-      const nextStatus = isCommissioned ? 'Ordered' : 'Own';
+      const nextStatus = WATCH_MODE_STATUS[mode] || 'Own';
       if (statusSelect.value !== nextStatus) {
         statusSelect.value = nextStatus;
-        statusSelect.classList.toggle('status-ordered', isCommissioned);
+        statusSelect.classList.toggle('status-ordered', nextStatus === 'Ordered');
         if (typeof recordExists === 'undefined' || recordExists) {
           statusSelect.dispatchEvent(new Event('input', { bubbles: true }));
           statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -4402,9 +4418,8 @@ document.querySelectorAll('.comp-item').forEach(item => {
     }
   }
   if (watchOrderPanel) {
-    const commissionedPill = watchOrderPanel.querySelector('[data-watch-commissioned]');
-    commissionedPill?.addEventListener('click', () => {
-      setWatchCommissioned(!watchOrderPanel.classList.contains('is-commissioned-active'));
+    watchOrderPanel.querySelectorAll('[data-watch-mode]').forEach(pill => {
+      pill.addEventListener('click', () => setWatchMode(pill.dataset.watchMode));
     });
     watchOrderPanel.querySelectorAll('.watch-order-money').forEach(input => {
       input.addEventListener('focus', () => {
@@ -4445,12 +4460,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
       const isOrdered = statusSelect.value === 'Ordered';
       statusSelect.classList.toggle('status-ordered', isOrdered);
       if (watchOrderPanel) {
-        watchOrderPanel.classList.toggle('is-commissioned-active', isOrdered);
-        const commissionedPill = watchOrderPanel.querySelector('[data-watch-commissioned]');
-        if (commissionedPill) {
-          commissionedPill.classList.toggle('is-active', isOrdered);
-          commissionedPill.textContent = isOrdered ? 'Commissioned' : 'Purchased';
-        }
+        const mode = statusSelect.value === 'Consigned' ? 'Consigned'
+          : statusSelect.value === 'Sold' ? 'Sold'
+          : isOrdered ? 'Commissioned' : 'Purchased';
+        setWatchModeUI(mode);
       }
       if (watchOrderPanel && statusSelect.value === 'Own') {
         const actualInput = watchOrderPanel.querySelector('input[name="actual_delivery_date"]');
