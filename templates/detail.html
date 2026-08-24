@@ -433,6 +433,15 @@
 
   <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
   <div class="detail-nav-overlay">
+    {% if category == 'banknotes' and not is_new %}
+    {# Quick status flip: Ordered ↔ Own without scrolling to the
+       bottom Status select. Yellow while Ordered, green once Own. #}
+    {%- set _bn_status = val('status') or 'Own' -%}
+    <button type="button"
+            id="bnStatusPill"
+            class="coin-lookup-btn banknote-status-pill{% if _bn_status == 'Ordered' %} ordered{% endif %}"
+            title="Click to flip status between Ordered and Own">{{ _bn_status }}</button>
+    {% endif %}
     {% if not is_new %}
     <a class="watch-lookup-btn print-pdf-btn"
        href="{{ url_for('record_print_pdf', category=category, record_id=r['id']) }}"
@@ -7747,10 +7756,13 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   }
 
   function restoreInline() {
-    // Move everything from the popover back into the overlay,
-    // before the kebab. Preserves left-to-right order.
+    // Move everything from the popover back into the overlay, right
+    // after the kebab. Capture the anchor once so successive inserts
+    // land in original left-to-right order (inserting each at
+    // kebab.nextSibling would reverse the group).
+    const anchor = kebab.nextSibling;
     while (popover.firstChild) {
-      overlay.insertBefore(popover.firstChild, kebab.nextSibling);
+      overlay.insertBefore(popover.firstChild, anchor);
     }
   }
 
@@ -7788,6 +7800,38 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   if (nav) nav.addEventListener('scroll', applyOverflow, { passive: true });
   // Also re-evaluate immediately so the first paint is correct.
   requestAnimationFrame(applyOverflow);
+})();
+</script>
+
+{# ── Banknote floating-nav status pill ───────────────────────────
+   One-click Ordered ↔ Own flip, mirrored into the canonical bottom
+   Status select and persisted through the shared autosave path. #}
+<script>
+(function setupBanknoteStatusPill() {
+  const pill = document.getElementById('bnStatusPill');
+  if (!pill) return;
+  const statusSelect = document.querySelector('#mainForm select[name="status"]');
+
+  function render(value) {
+    pill.textContent = value || 'Own';
+    pill.classList.toggle('ordered', value === 'Ordered');
+  }
+
+  pill.addEventListener('click', () => {
+    const current = statusSelect ? statusSelect.value : pill.textContent.trim();
+    const next = current === 'Ordered' ? 'Own' : 'Ordered';
+    if (statusSelect) {
+      statusSelect.value = next;
+      statusSelect.classList.toggle('status-ordered', next === 'Ordered');
+    }
+    render(next);
+    if (typeof window.saveField === 'function') window.saveField('status', next);
+  });
+
+  // Keep the pill honest when the user edits the select directly.
+  if (statusSelect) {
+    statusSelect.addEventListener('change', () => render(statusSelect.value));
+  }
 })();
 </script>
 

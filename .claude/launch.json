@@ -4,7 +4,7 @@
     {
       "name": "StuffApp (Flask)",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["/Users/markarmenante/GitHub/StuffApp/app.py"],
+      "runtimeArgs": ["/Users/markarmenante/repos/StuffApp/app.py"],
       "port": 5001,
       "autoPort": true
     },

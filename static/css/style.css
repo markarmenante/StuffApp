@@ -756,6 +756,21 @@ input[type="number"]::-webkit-outer-spin-button {
 .watch-lookup-btn.done:hover:not(:disabled),
 .coin-lookup-btn.done:hover:not(:disabled) { background: #d6efdc; }
 
+/* Banknote status pill (floating nav): green while Own, yellow while
+   Ordered — same yellow as the bottom Status select's ordered tint. */
+.banknote-status-pill {
+  background: #e6f6ea;
+  border-color: #5fb872;
+  color: #1f6b34;
+}
+.banknote-status-pill:hover:not(:disabled) { background: #d6efdc; }
+.banknote-status-pill.ordered {
+  background: #fff3b0;
+  border-color: #d9b23a;
+  color: #6b5410;
+}
+.banknote-status-pill.ordered:hover:not(:disabled) { background: #f7e88f; }
+
 .card-share-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px;
