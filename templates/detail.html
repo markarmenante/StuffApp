@@ -433,14 +433,17 @@
 
   <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
   <div class="detail-nav-overlay">
-    {% if category == 'banknotes' and not is_new %}
+    {%- set _has_status_field = (fields | selectattr('name', 'equalto', 'status') | list) | length > 0 -%}
+    {% if _has_status_field and not is_new %}
     {# Quick status flip: Ordered ↔ Own without scrolling to the
-       bottom Status select. Yellow while Ordered, green once Own. #}
-    {%- set _bn_status = val('status') or 'Own' -%}
+       bottom Status select. Yellow while Ordered, green once Own.
+       The setup JS removes it when the category's Status select has
+       no Ordered option (e.g. properties). #}
+    {%- set _flip_status = val('status') or 'Own' -%}
     <button type="button"
-            id="bnStatusPill"
-            class="coin-lookup-btn banknote-status-pill{% if _bn_status == 'Ordered' %} ordered{% endif %}"
-            title="Click to flip status between Ordered and Own">{{ _bn_status }}</button>
+            id="statusFlipPill"
+            class="coin-lookup-btn status-flip-pill{% if _flip_status == 'Ordered' %} ordered{% endif %}"
+            title="Click to flip status between Ordered and Own">{{ _flip_status }}</button>
     {% endif %}
     {% if not is_new %}
     <a class="watch-lookup-btn print-pdf-btn"
@@ -7803,14 +7806,19 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 })();
 </script>
 
-{# ── Banknote floating-nav status pill ───────────────────────────
-   One-click Ordered ↔ Own flip, mirrored into the canonical bottom
-   Status select and persisted through the shared autosave path. #}
+{# ── Floating-nav status flip pill ───────────────────────────────
+   One-click Ordered ↔ Own flip for any category with a Status
+   select that offers Ordered. Drives the select's real change event
+   so autosave, the inline class toggle, and panel syncs (e.g. the
+   watch sell panel) all fire exactly as if the user used the select. #}
 <script>
-(function setupBanknoteStatusPill() {
-  const pill = document.getElementById('bnStatusPill');
+(function setupStatusFlipPill() {
+  const pill = document.getElementById('statusFlipPill');
   if (!pill) return;
   const statusSelect = document.querySelector('#mainForm select[name="status"]');
+  const hasOrdered = statusSelect &&
+    Array.from(statusSelect.options).some(o => o.value === 'Ordered');
+  if (!hasOrdered) { pill.remove(); return; }
 
   function render(value) {
     pill.textContent = value || 'Own';
@@ -7818,20 +7826,14 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   }
 
   pill.addEventListener('click', () => {
-    const current = statusSelect ? statusSelect.value : pill.textContent.trim();
-    const next = current === 'Ordered' ? 'Own' : 'Ordered';
-    if (statusSelect) {
-      statusSelect.value = next;
-      statusSelect.classList.toggle('status-ordered', next === 'Ordered');
-    }
+    const next = statusSelect.value === 'Ordered' ? 'Own' : 'Ordered';
+    statusSelect.value = next;
+    statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
     render(next);
-    if (typeof window.saveField === 'function') window.saveField('status', next);
   });
 
   // Keep the pill honest when the user edits the select directly.
-  if (statusSelect) {
-    statusSelect.addEventListener('change', () => render(statusSelect.value));
-  }
+  statusSelect.addEventListener('change', () => render(statusSelect.value));
 })();
 </script>
 
