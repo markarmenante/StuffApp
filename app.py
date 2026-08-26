@@ -7,7 +7,7 @@ import base64
 import unicodedata
 import threading
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response,
                    send_file, after_this_request)
@@ -10933,12 +10933,28 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
     purchase_date_op, purchase_date_iso = _coin_purchase_date_search(q) \
         if category == 'coins' else (None, None)
 
+    date_fields = [f['name'] for f in visible_fields(category)
+                   if f['type'] == 'date']
+    search_date_iso = _parse_loose_search_date(q) if q else None
+
     if purchase_date_op and purchase_date_iso:
         wheres.append(
             f"(purchase_date IS NOT NULL AND TRIM(purchase_date) != '' "
             f"AND purchase_date {purchase_date_op} ?)"
         )
         params.append(purchase_date_iso)
+    elif search_date_iso and date_fields:
+        # Bare date query ("4/1/2026", "2026-04-01"): match any of the
+        # category's date columns within ±7 days. ISO strings compare
+        # lexicographically, so BETWEEN on strings is correct.
+        d = date.fromisoformat(search_date_iso)
+        lo = (d - timedelta(days=7)).isoformat()
+        hi = (d + timedelta(days=7)).isoformat()
+        conds = []
+        for col in date_fields:
+            conds.append(f"({col} >= ? AND {col} <= ?)")
+            params += [lo, hi]
+        wheres.append('(' + ' OR '.join(conds) + ')')
     elif q and (text_fields or numeric_fields):
         # Split the query on whitespace and AND the terms together: each
         # term must match at least one searchable field. "Breguet Carp"
