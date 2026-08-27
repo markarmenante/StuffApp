@@ -10377,6 +10377,118 @@ def _snap_rect_edges(warped, inner, expect_aspect, inward_frac=0.06):
     return (L, T, R, B), strengths
 
 
+def _hough_note_quad(img):
+    """Model-free geometry seed: fit the note's four dominant straight
+    silhouette edges (Hough on the largest bright component's outline)
+    and return their intersection quad (NW, NE, SE, SW, full-res
+    pixels), or None. The page's own edges carry the longest straight
+    support, so they out-vote a label strip or a second object poking
+    into frame — the same fit that rescued overlapping-sheet document
+    scans. A bad fit is harmless: the quad becomes one more candidate
+    for the same metrics gates and validator every crop faces."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+
+    w, h = img.size
+    scale = 900.0 / max(w, h)
+    small = cv2.resize(
+        cv2.cvtColor(np.asarray(img.convert('RGB')), cv2.COLOR_RGB2BGR),
+        None, fx=scale, fy=scale)
+    sh, sw = small.shape[:2]
+    gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY),
+                            (5, 5), 0)
+    _, bw = cv2.threshold(gray, 0, 255,
+                          cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(bw)
+    if n < 2:
+        return None
+    biggest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    if stats[biggest, cv2.CC_STAT_AREA] < 0.20 * sh * sw:
+        return None
+    mask = np.where(labels == biggest, 255, 0).astype(np.uint8)
+
+    lines = cv2.HoughLines(cv2.Canny(mask, 50, 150), 1, np.pi / 360,
+                           threshold=60)
+    if lines is None:
+        return None
+    # Strongest well-separated near-horizontal and near-vertical pairs.
+    horiz, vert = [], []
+    for rho, theta in lines[:, 0, :]:
+        if 45 <= np.degrees(theta) <= 135:
+            group, sep = horiz, 0.30 * sh
+        else:
+            group, sep = vert, 0.30 * sw
+        if len(group) < 2 and all(
+                abs(abs(rho) - abs(r0)) > sep for r0, _ in group):
+            group.append((rho, theta))
+        if len(horiz) == 2 and len(vert) == 2:
+            break
+    if len(horiz) < 2 or len(vert) < 2:
+        return None
+
+    corners = []
+    for r1, t1 in horiz:
+        for r2, t2 in vert:
+            a = np.array([[np.cos(t1), np.sin(t1)],
+                          [np.cos(t2), np.sin(t2)]])
+            if abs(np.linalg.det(a)) < 1e-6:
+                return None
+            corners.append(np.linalg.solve(a, np.array([r1, r2])))
+    pts = np.array(corners, dtype=np.float32)
+    s, d = pts.sum(axis=1), pts[:, 0] - pts[:, 1]
+    quad = np.array([pts[np.argmin(s)], pts[np.argmax(d)],
+                     pts[np.argmax(s)], pts[np.argmin(d)]])
+    slack = 0.05 * max(sh, sw)
+    if (quad < -slack).any() or (quad[:, 0] > sw + slack).any() \
+            or (quad[:, 1] > sh + slack).any():
+        return None
+    area = cv2.contourArea(quad.astype(np.float32))
+    if not 0.20 * sh * sw <= area <= 0.92 * sh * sw:
+        return None
+    return tuple((float(x / scale), float(y / scale)) for x, y in quad)
+
+
+def _illumination_flat_gray(img):
+    """Grayscale copy with smooth lighting gradients divided out.
+
+    Fits a linear illumination plane to the BRIGHT pixels only (paper
+    — never ink or holder plastic) and normalizes it away, so a
+    vignetted corner or sidelight falloff stops reading as a dark or
+    busy band in the perimeter judge. Genuinely dark holder plastic is
+    outside the fit and the gain is capped, so a real black bar stays
+    far below the judge's thresholds. Falls back to the plain L copy
+    on any numeric hiccup."""
+    g = img.convert('L')
+    try:
+        import numpy as np
+        a = np.asarray(g, dtype=np.float32)
+        h, w = a.shape
+        step = max(1, min(w, h) // 64)
+        s = a[::step, ::step]
+        ys, xs = np.mgrid[0:s.shape[0], 0:s.shape[1]]
+        paper = s >= max(float(np.percentile(s, 55)), 100.0)
+        if int(paper.sum()) < 50:
+            return g
+        A = np.column_stack([xs[paper], ys[paper],
+                             np.ones(int(paper.sum()), np.float32)])
+        coef, *_ = np.linalg.lstsq(A, s[paper], rcond=None)
+        fy, fx = np.mgrid[0:h, 0:w]
+        plane = coef[0] * (fx / step) + coef[1] * (fy / step) + coef[2]
+        mean = float(plane.mean())
+        if mean <= 0:
+            return g
+        gain = np.clip(mean / np.clip(plane, 1.0, None), 0.7, 1.4)
+        from PIL import Image
+        return Image.fromarray(
+            np.clip(a * gain, 0, 255).astype(np.uint8), 'L')
+    except Exception:
+        return g
+
+
 def _note_crop_metrics(crop, expect_aspect):
     """Deterministic acceptance for a finished v2 crop. Returns a list
     of failed checks — empty means the crop ships without asking any
@@ -10410,7 +10522,10 @@ def _note_crop_metrics(crop, expect_aspect):
     # label sliver that can sit OUTSIDE the holder's black bar (the
     # Mozambique reverse shipped exactly that sandwich).
     band = min(48, max(4, int(0.04 * min(w, h))))
-    g = crop.convert('L')
+    # Judge the bands on an illumination-flattened copy: a lighting
+    # gradient must not read as a dark/busy band, while true holder
+    # plastic stays dark through the capped correction.
+    g = _illumination_flat_gray(crop)
     sides = {'top': (0, 0, w, band), 'bottom': (0, h - band, w, h),
              'left': (0, 0, band, h), 'right': (w - band, 0, w, h)}
     for name, box in sides.items():
@@ -10494,19 +10609,28 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
                         '(%dx%d)', w, h)
         return 'noop', None
     geo = _note_geometry_scan(img)
-    if geo is None:
-        return 'fail', None
-    if geo['area_frac'] >= 0.955 and not geo['holder'] and not geo['label']:
+    if geo is not None and geo['area_frac'] >= 0.955 \
+            and not geo['holder'] and not geo['label']:
         app.logger.info('trim-v2: frame already is the note (%.0f%%)',
                         geo['area_frac'] * 100)
         return 'noop', None
-    quad = tuple((x / 1000.0 * w, y / 1000.0 * h) for x, y in geo['quad'])
-    rect = _rectify_note_quad(img, quad, context=0.08)
-    if rect is None:
-        app.logger.info('trim-v2: degenerate seed quad')
+    # Geometry seeds, model first. The Hough silhouette fit is an
+    # independent second seed: it rescues the pipeline when the model
+    # is unavailable or its quad is degenerate, and its candidates
+    # queue behind the model's when both exist — same rectify, snap,
+    # and gates either way.
+    seeds = []
+    if geo is not None:
+        seeds.append(('model', tuple((x / 1000.0 * w, y / 1000.0 * h)
+                                     for x, y in geo['quad'])))
+    hough_quad = _hough_note_quad(img)
+    if hough_quad is not None:
+        seeds.append(('hough', hough_quad))
+        app.logger.info('trim-v2: hough silhouette seed available')
+    if not seeds:
         return 'fail', None
-    warped, inner, coeffs = rect
-    def _judge(box):
+
+    def _judge(warped, box):
         """(crop, failures) for one candidate box, with the dark-band
         cleanup chain applied when holder or backdrop survived along
         an edge the snap could not place."""
@@ -10530,43 +10654,59 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
             failed = refreshed
         return crop, failed
 
-    # Two geometry candidates: the full edge-snap (right when the
-    # model overshot into the holder — the snap walks in to the paper
-    # edge) and a seed-faithful variant whose sides may barely move
-    # inward (right when the paper edge is invisible, white on white,
-    # and the snap's first crossing is the printed design frame).
-    # Locally the two cases look identical; the acceptance metrics
-    # tell them apart — the same candidates-then-gates shape that
-    # fixed the cascade.
-    boxes = []
-    for inward in (0.06, 0.025):
-        box, _strengths = _snap_rect_edges(warped, inner, expect_aspect,
-                                           inward_frac=inward)
-        if box not in boxes:
-            boxes.append(box)
-    if all(warped.crop(b).size[0] * warped.crop(b).size[1]
-           >= 0.94 * w * h for b in boxes):
-        return 'noop', None
-    chosen = chosen_box = None
+    # Two geometry candidates per seed: the full edge-snap (right when
+    # the seed overshot into the holder — the snap walks in to the
+    # paper edge) and a seed-faithful variant whose sides may barely
+    # move inward (right when the paper edge is invisible, white on
+    # white, and the snap's first crossing is the printed design
+    # frame). Locally the two cases look identical; the acceptance
+    # metrics tell them apart — the same candidates-then-gates shape
+    # that fixed the cascade.
+    cand_list = []
+    for name, quad in seeds:
+        rect = _rectify_note_quad(img, quad, context=0.08)
+        if rect is None:
+            app.logger.info('trim-v2: degenerate %s seed quad', name)
+            continue
+        warped, inner, coeffs = rect
+        boxes = []
+        for inward in (0.06, 0.025):
+            box, _strengths = _snap_rect_edges(warped, inner,
+                                               expect_aspect,
+                                               inward_frac=inward)
+            if box not in boxes:
+                boxes.append(box)
+        big = [warped.crop(b).size[0] * warped.crop(b).size[1]
+               >= 0.94 * w * h for b in boxes]
+        if name == 'model' and all(big):
+            return 'noop', None
+        for box, is_big in zip(boxes, big):
+            if name != 'model' and is_big:
+                continue  # a frame-sized secondary candidate is a no-op
+            cand_list.append((name, warped, box, coeffs))
+    if not cand_list:
+        return 'fail', None
+    chosen = chosen_box = chosen_coeffs = None
     soft = None
-    for box in boxes:
-        crop, failed = _judge(box)
+    for name, warped, box, coeffs in cand_list:
+        crop, failed = _judge(warped, box)
         if not failed:
-            chosen, chosen_box = crop, box
+            chosen, chosen_box, chosen_coeffs = crop, box, coeffs
             break
-        app.logger.info('trim-v2: candidate %dx%d flagged: %s',
-                        crop.size[0], crop.size[1], '; '.join(failed))
+        app.logger.info('trim-v2: %s candidate %dx%d flagged: %s',
+                        name, crop.size[0], crop.size[1],
+                        '; '.join(failed))
         # aspect and dark bands are not the validator's to waive: the
         # sheet's physical shape and holder plastic at an edge are
         # wrong however plausible the crop looks. Only texture flags
         # (ink coverage, busy band, surround) may go to the validator
         # — and the least-flagged candidate gets that one call.
         if not any(f.startswith(('aspect', 'dark')) for f in failed):
-            if soft is None or len(failed) < len(soft[2]):
-                soft = (crop, box, failed)
+            if soft is None or len(failed) < len(soft[3]):
+                soft = (crop, box, coeffs, failed)
     if chosen is None and soft is not None:
         if _vision_crop_verdict(soft[0]) is True:
-            chosen, chosen_box = soft[0], soft[1]
+            chosen, chosen_box, chosen_coeffs = soft[0], soft[1], soft[2]
             app.logger.info('trim-v2: validator accepted the flagged '
                             'candidate (%dx%d)', *chosen.size)
     if chosen is None:
@@ -10577,7 +10717,7 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
         return 'noop', None
     if meta is not None:
         meta['engine'] = 'v2'
-        meta['quad'] = [_apply_perspective(coeffs, x, y)
+        meta['quad'] = [_apply_perspective(chosen_coeffs, x, y)
                         for x, y in ((chosen_box[0], chosen_box[1]),
                                      (chosen_box[2], chosen_box[1]),
                                      (chosen_box[2], chosen_box[3]),
