@@ -4465,16 +4465,36 @@ _DECADE_RE = re.compile(r'\b((?:1[6-9]|20)\d)0s\b')
 
 # The non-dated catalog idiom — 'ND (1970-84)', '1970-1984' — in a series
 # label or date text: the start year places the note in an era.
-_YEAR_RANGE_RE = re.compile(r'\b((?:1[6-9]|20)\d\d)\s*[-–/]\s*\d{2,4}\b')
+_YEAR_RANGE_RE = re.compile(r'\b((?:1[6-9]|20)\d\d)\s*[-–/]\s*(\d{2,4})\b')
+
+
+def _range_end_year(m):
+    '''Last year of a matched year range: Mark's rule (2026-08-30),
+    "if there's a range pick the last date in the range". A 2-digit
+    end ('1970-84') completes in the start's century, rolling forward
+    when it wraps ('1898-01' -> 1901). A nonsense end falls back to
+    the start year.'''
+    start = int(m.group(1))
+    try:
+        end = int(m.group(2))
+    except (TypeError, ValueError):
+        return start
+    if end < 100:
+        end = start - start % 100 + end
+        if end < start:
+            end += 100
+    return end if start <= end <= 2105 else start
 
 
 def _note_year(row):
     """Best year for era placement: a 4-digit year in the series label, then
     date_1, then a decade like '1850s' or a year range like 'ND (1970-84)'
-    in the series or date text. A range yields its START year — that is
-    era placement, not sorting: SERIES_YEAR deliberately refuses ranges so
-    the note's own date orders it, but the era band only needs the period
-    the note could date from, and the range's start names it."""
+    in the series or date text. A range yields its LAST year (Mark's
+    rule, 2026-08-30) — the range's end matches how catalog-dated
+    shelf-mates are stored (the NZ Captain Cook notes all carry 1967),
+    and the decimalisation boundary rule in _country_era keeps
+    old-currency notes out of the new-currency era when that end year
+    lands exactly on the changeover."""
     year = _series_year(_row_get(row, 'series')) or _row_get(row, 'date_1')
     if year:
         return year
@@ -4485,7 +4505,7 @@ def _note_year(row):
             return int(m.group(1) + '0')
         m = _YEAR_RANGE_RE.search(text)
         if m:
-            return int(m.group(1))
+            return _range_end_year(m)
     return None
 
 
@@ -4590,7 +4610,7 @@ def _banknote_era_start(country, issuer, series, date_1,
                 break
             m = _YEAR_RANGE_RE.search(text)
             if m:
-                year = int(m.group(1))
+                year = _range_end_year(m)
                 break
     if not year:
         return 99999
@@ -5632,7 +5652,7 @@ def init_db():
     # together in denomination order.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v16',),
+        ('banknote_display_number_v17',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5640,7 +5660,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v16', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v17', datetime.utcnow().isoformat()),
         )
         db.commit()
 
