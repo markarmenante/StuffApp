@@ -10921,6 +10921,12 @@ CATEGORY_FILTERS = {
         'ny_modern':  ("date_1 >= 500 AND property_name = 'NYC'", []),
         'ordered':    ("LOWER(TRIM(COALESCE(status,''))) = 'ordered'", []),
     },
+    'art': {
+        # Inverts the default list view: shows ONLY sold pieces. The
+        # default art list (no filter) hides Sold — see
+        # build_search_query.
+        'sold': ("LOWER(TRIM(COALESCE(status,''))) = 'sold'", []),
+    },
     'audio': {
         'carp':   ("property IN ('Carpinteria', 'Carp')", []),
         'martis': ("property IN ('Martis', 'Truckee')", []),
@@ -11166,6 +11172,14 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
     if category == 'watches' and coin_filter != 'no_longer_owned':
         wheres.append(
             "(LOWER(TRIM(COALESCE(status,''))) NOT IN ('sold','gifted','lost'))"
+        )
+
+    # Art: same idea — the default list hides Sold pieces. The 'sold'
+    # pill shows only those, and an active text search still finds a
+    # sold piece by name without clicking anything.
+    if category == 'art' and coin_filter != 'sold' and not q:
+        wheres.append(
+            "(LOWER(TRIM(COALESCE(status,''))) != 'sold')"
         )
 
     # "?at=<property name>" — narrow to items physically located at
@@ -13438,6 +13452,12 @@ def list_view(category):
         ).fetchone()[0] == 1
     # Same toggle-when-relevant rule for the No-longer-Owned pill so
     # an empty collection doesn't show a filter that produces nothing.
+    has_sold_art = False
+    if category == 'art':
+        has_sold_art = db.execute(
+            "SELECT EXISTS(SELECT 1 FROM art "
+            "WHERE LOWER(TRIM(COALESCE(status,''))) = 'sold')"
+        ).fetchone()[0] == 1
     has_no_longer_owned = False
     if category == 'watches':
         table = CATEGORIES[category]['table']
@@ -13487,6 +13507,7 @@ def list_view(category):
                            art_price_total=art_price_total,
                            has_ordered=has_ordered,
                            has_no_longer_owned=has_no_longer_owned,
+                           has_sold_art=has_sold_art,
                            has_in_service=has_in_service,
                            watch_open_service_event_ids=watch_open_service_event_ids,
                            extra_fields=extra_fields,

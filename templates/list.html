@@ -103,6 +103,11 @@
      title="Watches that have left the collection (Sold / Gifted / Lost)">✕</a>
   {% endif %}
   {% endif %}
+  {% if category == 'art' and (has_sold_art or coin_filter == 'sold') %}
+  <a href="{{ url_for('list_view', category='art', q=q or None, filter=None if coin_filter == 'sold' else 'sold') }}"
+     class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
+     title="Art that has been sold (hidden from the default list)">Sold</a>
+  {% endif %}
   {# When the user came from the Property tab via ?at=, hide the
      redundant location pill — it targets the same filter, builds URLs
      without ?at=, and would silently break the
