@@ -4489,6 +4489,15 @@ def _note_year(row):
     return None
 
 
+def _era_span(start, end):
+    """Human span for an era band. 2100 is the internal sentinel for
+    the still-ongoing final era — it must never render ("New Zealand
+    1967–2100"); an open-ended era reads "1967–present"."""
+    if end >= 2100:
+        return f'{start}–present'
+    return f'{start}–{end}'
+
+
 def _country_era(country_key, year, context=''):
     """Era band for a note. ``context`` is free text about the note
     (issuer, series) used by keyword-gated bands: an era tuple may
@@ -4509,11 +4518,32 @@ def _country_era(country_key, year, context=''):
             return True
         return any(k in context for k in keywords)
 
-    for era_row in eras:
+    matched = None
+    for i, era_row in enumerate(eras):
         start, end, label, body = era_row[:4]
         if start <= year <= end and _claims(era_row):
-            return {'label': label, 'body': body, 'start': start,
-                    'span': f'{start}–{end}'}
+            matched = i
+            break
+    # Decimalisation boundary: a note denominated in the OLD currency
+    # (pound/shilling) whose catalog year lands exactly on the decimal
+    # era's first year belongs to the pre-decimal era before it — the
+    # NZ 10 Pounds P-161d range ends in 1967, the year the dollar
+    # arrived, and must not file under "THE DOLLAR". Applies only on
+    # the boundary year and only when the adjacent earlier era's text
+    # actually talks about the old currency.
+    if matched is not None and matched > 0:
+        start, end = eras[matched][0], eras[matched][1]
+        era_text = ('%s %s' % (eras[matched][2], eras[matched][3])).lower()
+        prev_text = ('%s %s' % (eras[matched - 1][2],
+                                eras[matched - 1][3])).lower()
+        if year == start and ('dollar' in era_text or 'decimal' in era_text) \
+                and any(wd in context for wd in ('pound', 'shilling', 'pence')) \
+                and any(wd in prev_text for wd in ('pound', 'shilling')):
+            matched -= 1
+    if matched is not None:
+        start, end, label, body = eras[matched][:4]
+        return {'label': label, 'body': body, 'start': start,
+                'span': _era_span(start, end)}
     # A year outside every band (typical of generated histories whose
     # spans came out too narrow): fall back to the nearest band so the
     # note still gets its divider and history instead of rendering
@@ -4526,10 +4556,11 @@ def _country_era(country_key, year, context=''):
         candidates,
         key=lambda e: min(abs(year - e[0]), abs(year - e[1])))[:4]
     return {'label': label, 'body': body, 'start': start,
-            'span': f'{start}–{end}'}
+            'span': _era_span(start, end)}
 
 
-def _banknote_era_start(country, issuer, series, date_1):
+def _banknote_era_start(country, issuer, series, date_1,
+                        denomination=None):
     """Sort key for CATEGORY_ORDER_BY['banknotes']: the start year of
     the era band the note files under, so a country's list runs band
     by band instead of strictly by note year. Needed wherever bands
@@ -4552,8 +4583,8 @@ def _banknote_era_start(country, issuer, series, date_1):
     ck = _country_key(country)
     if not ck:
         return year
-    era = _country_era(ck, year, context='%s %s' % (issuer or '',
-                                                    series or ''))
+    era = _country_era(ck, year, context='%s %s %s' % (
+        issuer or '', series or '', denomination or ''))
     return era['start'] if era and 'start' in era else year
 
 
@@ -4639,8 +4670,9 @@ def _series_panel_for_row(row):
             'era': era,
         }
 
-    era = _country_era(country_key, year, context='%s %s' % (
-        _row_get(row, 'issuer') or '', _row_get(row, 'series') or ''))
+    era = _country_era(country_key, year, context='%s %s %s' % (
+        _row_get(row, 'issuer') or '', _row_get(row, 'series') or '',
+        _row_get(row, 'denomination') or ''))
     if era is None:
         return None
     return {
@@ -4787,7 +4819,7 @@ def _configure_db_connection(db):
     # year, so a nation's list runs band by band (see
     # _banknote_era_start). Not deterministic for the same reason as
     # NATION_NAME.
-    db.create_function('COUNTRY_ERA_START', 4, _banknote_era_start)
+    db.create_function('COUNTRY_ERA_START', 5, _banknote_era_start)
     return db
 
 
@@ -5586,7 +5618,7 @@ def init_db():
     # together in denomination order.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v14',),
+        ('banknote_display_number_v15',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5594,7 +5626,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v14', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v15', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -11291,7 +11323,7 @@ CATEGORY_ORDER_BY = {
     'banknotes': ("NATION_NAME(country) COLLATE NODIACRITIC, "
                   "US_NOTE_GROUP(country, series, issuer, official, lettering, "
                   "lettering_translation, other_catalog, description) ASC, "
-                  "COUNTRY_ERA_START(country, issuer, series, date_1) ASC, "
+                  "COUNTRY_ERA_START(country, issuer, series, date_1, denomination) ASC, "
                   "COALESCE(SERIES_YEAR(series), date_1, 99999) ASC, "
                   "COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
