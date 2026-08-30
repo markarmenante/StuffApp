@@ -13307,6 +13307,15 @@ fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}{label_blo
 LANDING_CATEGORY = (os.environ.get('STUFFAPP_LANDING_CATEGORY') or '').strip()
 
 
+@app.route('/healthz')
+def healthz():
+    """Unauthenticated liveness probe. Railway's healthcheck needs a
+    200: the root path 302-redirects to the landing category, which
+    the checker now counts as failure (every deploy after the platform
+    change hung in DEPLOYING and the site served 502s)."""
+    return Response('ok', mimetype='text/plain')
+
+
 @app.route('/')
 def index():
     allowed = g.get('allowed_cats') or set()
@@ -19826,7 +19835,7 @@ def _upload_visible_to_current_user(filename):
 # Endpoints that everyone gets to hit regardless of category access.
 # Uploaded files and generated thumbnails are NOT exempt: the route
 # handlers enforce category + row-filter access before serving bytes.
-_AUTH_EXEMPT_ENDPOINTS = {'static'}
+_AUTH_EXEMPT_ENDPOINTS = {'static', 'healthz'}
 
 
 @app.before_request
