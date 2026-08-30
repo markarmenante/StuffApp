@@ -4579,6 +4579,20 @@ def _banknote_era_start(country, issuer, series, date_1,
         except (TypeError, ValueError):
             year = None
     if not year:
+        # Same fallbacks as _note_year, so the SORT never disagrees
+        # with the DISPLAY band: an ND note whose series names a range
+        # ('second series (1940-1967)') must file inside that band, not
+        # dangle at 99999 in its own orphan panel (the NZ 5 Pounds).
+        for text in (str(series or ''), str(date_1 or '')):
+            m = _DECADE_RE.search(text)
+            if m:
+                year = int(m.group(1) + '0')
+                break
+            m = _YEAR_RANGE_RE.search(text)
+            if m:
+                year = int(m.group(1))
+                break
+    if not year:
         return 99999
     ck = _country_key(country)
     if not ck:
@@ -5618,7 +5632,7 @@ def init_db():
     # together in denomination order.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v15',),
+        ('banknote_display_number_v16',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5626,7 +5640,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v15', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v16', datetime.utcnow().isoformat()),
         )
         db.commit()
 
