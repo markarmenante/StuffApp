@@ -10722,8 +10722,52 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
                                      (chosen_box[2], chosen_box[1]),
                                      (chosen_box[2], chosen_box[3]),
                                      (chosen_box[0], chosen_box[3]))]
+    leveled = _level_note_crop(chosen, expect_aspect)
+    if leveled is not None:
+        app.logger.info('trim-v2: levelled residual tilt %dx%d -> %dx%d',
+                        chosen.size[0], chosen.size[1], *leveled.size)
+        chosen = leveled
     app.logger.info('trim-v2: %dx%d -> %dx%d', w, h, *chosen.size)
     return 'ok', _encode_trimmed_note(chosen)
+
+
+def _level_note_crop(crop, expect_aspect=None):
+    """Level the small residual tilt a finished v2 crop can carry when
+    the seed quad was axis-aligned on a rotated photo (the NZ 10 Pounds
+    back). Fits the note DESIGN's bottom line — the paper/backdrop edge
+    is usually outside a finished crop — rotates level, and shaves the
+    rotation wedges. Returns a new image, or None when there is no
+    confident tilt to fix (the common, already-level case)."""
+    import math
+
+    from PIL import Image
+
+    cg = crop.convert('L')
+    cw, ch = cg.size
+    if cw < 300 or ch < 150:
+        return None
+    edges = _note_edge_blob(cg)
+    angle = _fit_note_bottom_angle(edges.load(), edges.width, edges.height,
+                                   lambda p, x, y: p[x, y] > 0,
+                                   y_start=ch - 1,
+                                   y_stop=int(ch * 0.55))
+    if not angle or not 0.3 <= abs(angle) <= 4.0:
+        return None
+    px = crop.convert('RGB').load()
+    rot = crop.convert('RGB').rotate(angle, resample=Image.BICUBIC,
+                                     expand=False, fillcolor=px[4, 4])
+    t = abs(math.tan(math.radians(angle)))
+    dx = int(t * ch / 2) + 2
+    dy = int(t * cw / 2) + 2
+    if cw - 2 * dx < 200 or ch - 2 * dy < 100:
+        return None
+    leveled = rot.crop((dx, dy, cw - dx, ch - dy))
+    # Only keep the leveling when it does not worsen the acceptance
+    # metrics — a false angle fit must never degrade a good crop.
+    if len(_note_crop_metrics(leveled, expect_aspect)) \
+            > len(_note_crop_metrics(crop, expect_aspect)):
+        return None
+    return leveled
 
 
 def _perspective_coeffs(quad, out_w, out_h):
