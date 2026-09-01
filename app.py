@@ -1937,6 +1937,39 @@ def _is_us_note(row):
 # willing to commit to in a given year.
 US_NOTE_CLASSES = (
     {
+        # First on purpose: these notes also carry SILVER CERTIFICATE /
+        # FEDERAL RESERVE NOTE text, and the emergency marking is exactly
+        # what should win. HAWAII alone is not enough — a Honolulu
+        # National Bank Note would say Hawaii too — so the overprint match
+        # requires a 1934/1935 series token alongside it. The North Africa
+        # notes are recognizable only from the yellow seal / Operation
+        # Torch context, which lives in the condition narrative — hence
+        # extra_fields widening the haystack for this class alone.
+        'name': 'WWII Emergency Issue',
+        'years': '1942–1944',
+        'pattern': r'(?s)^(?:(?=.*\bhawaii\b)(?=.*\b193[45]\s?a?\b)'
+                   r'|(?=.*(?:north africa|operation torch'
+                   r'|yellow (?:treasury )?seal)))',
+        'extra_fields': ('condition',),
+        # One shared panel heads the whole block — the group is the
+        # story, not any single series.
+        'group_title': 'WWII Emergency Issues',
+        'obligor': 'The United States — as Federal Reserve Notes through '
+                   'San Francisco (HAWAII) and as Treasury Silver '
+                   'Certificates (North Africa). The emergency markings '
+                   'changed the seal and overprint, not the obligation.',
+        'why': 'Currency built to be disowned. After Pearl Harbor the '
+               'notes circulating in Hawaii were recalled and replaced '
+               'with brown-seal notes overprinted HAWAII, so that if the '
+               'islands fell every note there could be demonetized at a '
+               'stroke. For the November 1942 Operation Torch landings, '
+               'troops carried Silver Certificates with a yellow Treasury '
+               'seal in place of the blue, distinguishable — and '
+               'repudiable — if they were captured. Both were withdrawn '
+               'as the threat passed.',
+        'clauses': (),
+    },
+    {
         'name': 'Federal Reserve Bank Note',
         'years': '1915–1934',
         'pattern': r'federal reserve bank note|f\.?r\.?b\.?n\.?\b',
@@ -4067,10 +4100,16 @@ def _us_note_class(row):
         for f in ('series', 'issuer', 'official', 'lettering',
                   'lettering_translation', 'other_catalog', 'description')
     ).lower()
-    if not haystack.strip():
-        return None
     for note_class in US_NOTE_CLASSES:
-        if re.search(note_class['pattern'], haystack):
+        # A class may widen the haystack for itself (the North Africa
+        # yellow-seal signal lives in the condition narrative, which
+        # would be misleading to scan for every class).
+        extra = ' '.join(
+            str(_row_get(row, f) or '')
+            for f in note_class.get('extra_fields', ())
+        ).lower()
+        text = f'{haystack} {extra}' if extra.strip() else haystack
+        if text.strip() and re.search(note_class['pattern'], text):
             return note_class
     return None
 
@@ -4093,6 +4132,29 @@ def _us_note_group_sql(country, series, issuer, official, lettering,
            'lettering': lettering, 'lettering_translation': lettering_translation,
            'other_catalog': other_catalog, 'description': description}
     return 0 if _us_note_class(row) else 1
+
+
+def _us_emergency_sql(country, series, issuer, official, lettering,
+                      lettering_translation, other_catalog, description,
+                      condition):
+    """Non-zero when the note is a WWII emergency issue on a US note:
+    1 for the HAWAII overprints, 2 for the North Africa yellow seals,
+    0 otherwise. Lets the banknotes ORDER BY file the emergency block
+    contiguously at its wartime year (1942) instead of scattering the
+    notes through the regular 1934/1935 series runs — and, within the
+    block, keeps each theater's set together (Hawaii, then North
+    Africa), the way the two named sets are collected."""
+    if _country_key(country) != 'us':
+        return 0
+    row = {'series': series, 'issuer': issuer, 'official': official,
+           'lettering': lettering, 'lettering_translation': lettering_translation,
+           'other_catalog': other_catalog, 'description': description,
+           'condition': condition}
+    note_class = _us_note_class(row)
+    if not note_class or note_class['name'] != 'WWII Emergency Issue':
+        return 0
+    text = ' '.join(str(v or '') for v in row.values()).lower()
+    return 1 if re.search(r'\bhawaii\b', text) else 2
 
 
 def _nation_sort_name(country):
@@ -4677,7 +4739,12 @@ def _series_panel_for_row(row):
         if note_class:
             clause, previous_clause = _clause_for_year(note_class, year)
         if note_class:
-            title = (fractional_title or _display_series(series_raw, year)
+            # A group_title folds every series of the class under ONE
+            # panel (the WWII emergency issues): the shared title makes
+            # the panel signatures equal, so series_panels merges the
+            # block instead of opening a panel per series.
+            title = (note_class.get('group_title') or fractional_title
+                     or _display_series(series_raw, year)
                      or 'United States')
             title_span = ''
         else:
@@ -4842,6 +4909,14 @@ def _configure_db_connection(db):
     # federal note class matches) as their own block after (1). Non-US
     # rows all return 0 so the key is inert for every other country.
     db.create_function('US_NOTE_GROUP', 8, _us_note_group_sql,
+                       deterministic=True)
+    # US_EMERGENCY — non-zero for WWII emergency issues (1 = HAWAII
+    # overprint, 2 = North Africa yellow seal), so the ORDER BY can
+    # file them as one block at 1942, their wartime year — Hawaii set
+    # first, then North Africa — instead of scattering them through
+    # the 1934/1935 series runs. Takes `condition` on top of
+    # US_NOTE_GROUP's args: the North Africa signal lives there.
+    db.create_function('US_EMERGENCY', 9, _us_emergency_sql,
                        deterministic=True)
     # NATION_NAME — the modern nation a note's territory belongs to
     # (matching its panel title), so 'British Honduras' files under
@@ -5650,9 +5725,12 @@ def init_db():
     # pins its notes to the range's first year — SERIES_YEAR returns
     # NULL and the note's own date sorts it, so same-year notes file
     # together in denomination order.
+    # v18: WWII emergency issues (HAWAII overprint, North Africa yellow
+    # seal) file as one block at 1942 (US_EMERGENCY) instead of
+    # scattering through the 1934/1935 series runs.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v17',),
+        ('banknote_display_number_v18',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5660,7 +5738,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v17', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v18', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -11329,6 +11407,12 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
 _MAKE_MODEL_ORDER = ("COALESCE(NULLIF(make, ''), 'zzz') COLLATE NODIACRITIC, "
                      "COALESCE(NULLIF(model, ''), 'zzz') COLLATE NODIACRITIC")
 
+# The US_EMERGENCY call as it appears (three times) in the banknotes
+# ORDER BY — spelled once so the argument list can't drift between uses.
+_US_EMERGENCY_SQL_CALL = ("US_EMERGENCY(country, series, issuer, official, "
+                          "lettering, lettering_translation, other_catalog, "
+                          "description, condition)")
+
 CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
@@ -11354,13 +11438,29 @@ CATEGORY_ORDER_BY = {
     # dollar), then the number — so a group reads 1, 2, 10 Rupees rather
     # than 1, 10, 2 by text. date_1 is a final tiebreak. Blanks sort
     # last per level.
+    # WWII emergency issues (HAWAII overprint, North Africa yellow seal)
+    # file as ONE block at 1942, their wartime year, rather than
+    # scattering through the 1934/1935 runs by series year. The
+    # substitution has to cover BOTH year-shaped keys — for US rows
+    # COUNTRY_ERA_START falls back to the note's own year, so patching
+    # only the year key would leave the block split by the era key.
+    # The bare US_EMERGENCY key after them keeps the block contiguous
+    # against any real-1942 note AND orders the two theater sets
+    # (Hawaii = 1, then North Africa = 2). The municipality key is
+    # neutralized inside the block: some Hawaii notes carry
+    # municipality 'Hawaii' and some don't, and letting it lead would
+    # scramble the denomination order within a set.
     'banknotes': ("NATION_NAME(country) COLLATE NODIACRITIC, "
                   "US_NOTE_GROUP(country, series, issuer, official, lettering, "
                   "lettering_translation, other_catalog, description) ASC, "
-                  "COUNTRY_ERA_START(country, issuer, series, date_1, denomination) ASC, "
-                  "COALESCE(SERIES_YEAR(series), date_1, 99999) ASC, "
+                  f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "
+                  "COUNTRY_ERA_START(country, issuer, series, date_1, denomination) END ASC, "
+                  f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "
+                  "COALESCE(SERIES_YEAR(series), date_1, 99999) END ASC, "
+                  f"{_US_EMERGENCY_SQL_CALL} ASC, "
                   "COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
-                  "COALESCE(NULLIF(municipality, ''), 'zzz') COLLATE NODIACRITIC, "
+                  f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 'zzz' ELSE "
+                  "COALESCE(NULLIF(municipality, ''), 'zzz') END COLLATE NODIACRITIC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
                   "DENOM_UNIT(denomination) ASC, "
                   "DENOM_VALUE(denomination) ASC, "

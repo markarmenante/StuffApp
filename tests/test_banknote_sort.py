@@ -15,7 +15,8 @@ stuffapp._configure_db_connection(db)
 db.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, denomination TEXT, date_1 INTEGER)""")
+    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    date_1 INTEGER)""")
 
 rows = [
     # (country, series, denomination, date_1) — mirrors the screenshot
@@ -110,7 +111,8 @@ stuffapp._configure_db_connection(db2)
 db2.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, denomination TEXT, date_1 INTEGER)""")
+    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    date_1 INTEGER)""")
 ph_rows = [
     # (denomination, issuer, series, date_1) — the screenshot's mix
     ('5 Pesos', 'The Japanese Government', '', 1943),
@@ -151,7 +153,8 @@ stuffapp._configure_db_connection(db2)
 db2.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, denomination TEXT, date_1 INTEGER)""")
+    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    date_1 INTEGER)""")
 us_rows = [
     # (country, series, lettering, issuer, date_1)
     ('Rhode Island and Providence Plantations', '', '', 'State of Rhode Island', 1780),
@@ -248,7 +251,8 @@ stuffapp._configure_db_connection(db3)
 db3.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, denomination TEXT, date_1 INTEGER)""")
+    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    date_1 INTEGER)""")
 ni_rows = [
     ('Netherlands', '10 Gulden', 1943),
     ('Netherlands Indies', '10 Roepiah', 1944),
@@ -269,3 +273,89 @@ expected3 = [
 ]
 assert got3 == expected3, f"\nexpected {expected3}\ngot      {got3}"
 print('NETHERLANDS INDIES ASSERTIONS PASSED')
+
+# WWII emergency issues — the HAWAII overprints (lettering) and the
+# North Africa yellow seals (condition narrative) — classify as one
+# class, share one panel, and file as one block at 1942, after the
+# regular 1928/1935 runs and before the 1950s FRNs.
+hawaii_frn = {
+    'country': 'United States of America', 'series': '1934A',
+    'issuer': 'Federal Reserve Bank of San Francisco',
+    'lettering': 'FEDERAL RESERVE NOTE\nSERIES OF 1934 A\nHAWAII\n'
+                 'WILL PAY TO THE BEARER ON DEMAND FIVE DOLLARS',
+    'date_1': 1934}
+hawaii_sc = {
+    'country': 'United States of America', 'series': 'Series 1935A',
+    'issuer': 'United States Treasury',
+    'lettering': 'SILVER CERTIFICATE\nHAWAII\nSERIES 1935A\nONE DOLLAR',
+    'date_1': 1935}
+nafrica_sc = {
+    'country': 'United States of America', 'series': '1934A',
+    'issuer': 'United States Treasury',
+    'lettering': 'SILVER CERTIFICATE\nSERIES OF 1934 A\nTEN DOLLARS',
+    'condition': 'Issued for U.S. forces during the November 1942 '
+                 'Operation Torch invasion of North Africa, with a '
+                 'distinctive yellow Treasury seal.',
+    'date_1': 1934}
+plain_sc = {
+    'country': 'United States of America', 'series': '1935A',
+    'issuer': 'United States Treasury (Silver Certificate)',
+    'lettering': 'SILVER CERTIFICATE\nSERIES 1935A\nONE DOLLAR',
+    'date_1': 1935}
+for row in (hawaii_frn, hawaii_sc, nafrica_sc):
+    nc = stuffapp._us_note_class(row)
+    assert nc and nc['name'] == 'WWII Emergency Issue', (row['series'], nc)
+    p = stuffapp._series_panel_for_row(row)
+    assert p and p['title'] == 'WWII Emergency Issues', p and p['title']
+# A regular 1935A Silver Certificate stays a Silver Certificate, and a
+# Honolulu National Bank Note is NOT an emergency issue: HAWAII without
+# a 1934/1935 series token doesn't match.
+nc = stuffapp._us_note_class(plain_sc)
+assert nc and nc['name'] == 'Silver Certificate', nc
+nc = stuffapp._us_note_class({
+    'country': 'United States', 'series': '1929',
+    'issuer': 'The Bishop First National Bank of Honolulu, Hawaii',
+    'lettering': 'NATIONAL CURRENCY\nTEN DOLLARS'})
+assert nc and nc['name'] == 'National Bank Note', nc
+
+db4 = sqlite3.connect(':memory:')
+stuffapp._configure_db_connection(db4)
+db4.execute("""CREATE TABLE banknotes (
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
+    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    date_1 INTEGER)""")
+em_rows = [
+    # (series, issuer, lettering, condition, denomination, date_1)
+    ('1928B', 'United States Treasury',
+     'SILVER CERTIFICATE\nONE DOLLAR', '', '$1', 1928),
+    (hawaii_frn['series'], hawaii_frn['issuer'], hawaii_frn['lettering'],
+     '', '$5', 1934),
+    (nafrica_sc['series'], nafrica_sc['issuer'], nafrica_sc['lettering'],
+     nafrica_sc['condition'], '$10', 1934),
+    (plain_sc['series'], plain_sc['issuer'], plain_sc['lettering'],
+     '', '$1', 1935),
+    (hawaii_sc['series'], hawaii_sc['issuer'], hawaii_sc['lettering'],
+     '', '$1', 1935),
+    ('Series of 1950', 'Federal Reserve Bank of New York',
+     'FEDERAL RESERVE NOTE', '', '$20', 1950),
+]
+for i, (s, iss, l, cond, d, y) in enumerate(em_rows, 1):
+    db4.execute(
+        "INSERT INTO banknotes (id, country, series, issuer, lettering, "
+        "condition, denomination, date_1) VALUES "
+        "(?, 'United States of America', ?, ?, ?, ?, ?, ?)",
+        (i, s, iss, l, cond, d, y))
+got4 = [(r[0], r[1]) for r in db4.execute(
+    "SELECT denomination, date_1 FROM banknotes ORDER BY "
+    + stuffapp.CATEGORY_ORDER_BY['banknotes'])]
+expected4 = [
+    ('$1', 1928),    # regular Silver Certificate run
+    ('$1', 1935),    # regular 1935A Silver Certificate
+    ('$1', 1935),    # emergency block opens at 1942: Hawaii set first
+    ('$5', 1934),    # HAWAII $5 FRN
+    ('$10', 1934),   # then North Africa (yellow seal, via condition)
+    ('$20', 1950),   # regular run resumes
+]
+assert got4 == expected4, f"\nexpected {expected4}\ngot      {got4}"
+print('WWII EMERGENCY ISSUE ASSERTIONS PASSED')
