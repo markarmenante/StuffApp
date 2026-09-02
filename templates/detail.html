@@ -444,7 +444,7 @@
     <button type="button"
             id="statusFlipPill"
             class="coin-lookup-btn status-flip-pill{% if _flip_status == 'Ordered' %} ordered{% endif %}"
-            title="Click to flip status">{{ _flip_status }}</button>
+            title="Click to flip status">{{ 'Commissioned' if category == 'watches' and _flip_status == 'Ordered' else _flip_status }}</button>
     {% endif %}
     {% if not is_new %}
     <a class="watch-lookup-btn print-pdf-btn"
@@ -960,10 +960,15 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
     <div class="bottom-cell">
       {% set _s = val('status') if val('status') else ('Own' if is_new else '') %}
+      {# Watches say Commissioned where the stored value is 'Ordered' —
+         a commissioned piece on order (the Purchase History panel's
+         Commissioned mode maps to this same value). Display label
+         only: the value stays 'Ordered' so filters, the sell panel,
+         and the mode wiring are untouched. #}
       <select name="status" class="status-select {{ 'status-ordered' if _s=='Ordered' }}"
               onchange="this.classList.toggle('status-ordered', this.value==='Ordered')">
         <option value=""></option>
-        {% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if _s==s }}>{{ s }}</option>{% endfor %}
+        {% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if _s==s }}>{{ 'Commissioned' if s == 'Ordered' else s }}</option>{% endfor %}
       </select>
       <span class="blabel">Status</span>
     </div>
@@ -7828,11 +7833,18 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     ? 'Ordered'
     : opts.find(v => v !== primary);
   if (!primary || !alt) { pill.remove(); return; }
-  pill.title = `Click to flip status between ${primary} and ${alt}`;
+  // Display the option's LABEL, which can differ from the stored value
+  // (watches label the 'Ordered' value "Commissioned").
+  function labelFor(v) {
+    const opt = Array.from(statusSelect.options).find(o => o.value === v);
+    const label = opt && opt.textContent.trim();
+    return label || v || primary;
+  }
+  pill.title = `Click to flip status between ${labelFor(primary)} and ${labelFor(alt)}`;
 
   function render(value) {
     const v = value || primary;
-    pill.textContent = v;
+    pill.textContent = labelFor(v);
     pill.classList.toggle('ordered', v === 'Ordered');
     pill.classList.toggle('alt', v !== primary && v !== 'Ordered');
   }
