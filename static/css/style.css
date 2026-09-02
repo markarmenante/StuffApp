@@ -764,6 +764,13 @@ input[type="number"]::-webkit-outer-spin-button {
   color: #1f6b34;
 }
 .status-flip-pill:hover:not(:disabled) { background: #d6efdc; }
+/* Non-Own, non-Ordered states (Sold, Loaned, Gifted, …): neutral gray. */
+.status-flip-pill.alt {
+  background: #ececec;
+  border-color: #b8b8b8;
+  color: #444;
+}
+.status-flip-pill.alt:hover:not(:disabled) { background: #e0e0e0; }
 .status-flip-pill.ordered {
   background: #fff3b0;
   border-color: #d9b23a;
@@ -771,13 +778,18 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .status-flip-pill.ordered:hover:not(:disabled) { background: #f7e88f; }
 
+/* Same pill format as the Lookup/Check buttons — labeled, not a bare
+   icon square — so every category's subheader row reads alike. */
 .card-share-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px;
-  padding: 0; margin: 0 4px 0 0;
-  border: 1px solid var(--border); border-radius: 6px;
-  background: #fff; color: var(--blue); cursor: pointer;
+  gap: 4px;
+  font-size: 12px; line-height: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: #fff; color: var(--text); cursor: pointer;
+  white-space: nowrap;
 }
+.card-share-btn svg { width: 11px; height: 13px; color: var(--blue); }
 .card-share-btn:hover { background: rgba(0,0,0,.05); }
 
 /* Watch detail: center all field values */

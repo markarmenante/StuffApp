@@ -435,15 +435,16 @@
   <div class="detail-nav-overlay">
     {%- set _has_status_field = (fields | selectattr('name', 'equalto', 'status') | list) | length > 0 -%}
     {% if _has_status_field and not is_new %}
-    {# Quick status flip: Ordered ↔ Own without scrolling to the
-       bottom Status select. Yellow while Ordered, green once Own.
-       The setup JS removes it when the category's Status select has
-       no Ordered option (e.g. properties). #}
+    {# Quick status flip, every category alike: Own ↔ Ordered where the
+       category's Status select offers Ordered, otherwise Own ↔ its
+       first alternative (Sold, Gifted, …). Yellow while Ordered, gray
+       for other non-Own states, green once Own. The setup JS removes
+       it only when the Status select has nothing to flip to. #}
     {%- set _flip_status = val('status') or 'Own' -%}
     <button type="button"
             id="statusFlipPill"
             class="coin-lookup-btn status-flip-pill{% if _flip_status == 'Ordered' %} ordered{% endif %}"
-            title="Click to flip status between Ordered and Own">{{ _flip_status }}</button>
+            title="Click to flip status">{{ _flip_status }}</button>
     {% endif %}
     {% if not is_new %}
     <a class="watch-lookup-btn print-pdf-btn"
@@ -456,13 +457,14 @@
             onclick="shareCardDetails(event)"
             title="Share card details via Messages / Mail / AirDrop"
             aria-label="Share card">
-      <svg viewBox="0 0 24 28" width="14" height="16" fill="none"
+      <svg viewBox="0 0 24 28" fill="none"
            stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 2 V17"/>
         <path d="M6 8 L12 2 L18 8"/>
         <path d="M5 13 H3 V25 H21 V13 H19"/>
       </svg>
+      Share
     </button>
     {% endif %}
     {# Lookup / Check / History pills are owner-only — they make
@@ -477,7 +479,7 @@
               data-provider="perplexity"
               data-loading-label="⏳ Perplexity…"
               title="{% if r['specs_searched_at'] %}Perplexity lookup last run {{ r['specs_searched_at'][:10] }} — click to re-run{% else %}Prompt Perplexity to look up missing specs from manufacturer, Chrono24, WatchBox, Caliber Corner, EmmyWatch, Watch Pages, Hodinkee, Monochrome, Watch-Wiki{% endif %}">
-        🔎 Lookup
+        ✓ Check
       </button>
       {% endif %}
     {% endif %}
@@ -513,7 +515,7 @@
               class="watch-lookup-btn art-lookup-btn{% if r['art_searched_at'] %} done{% endif %}"
               data-url="{{ url_for('art_lookup_bio', record_id=r['id']) }}"
               title="{% if r['art_searched_at'] %}Lookup last run {{ r['art_searched_at'][:10] }} — click to re-run{% else %}Look up an artist biography (and per-piece notes if available) — checks the vendor / gallery site too{% endif %}">
-        🔎 Lookup
+        ✓ Check
       </button>
       {% endif %}
       {% if category == 'recordings' and _is_owner %}
@@ -523,7 +525,7 @@
               class="watch-lookup-btn rec-lookup-btn{% if _rec_searched %} done{% endif %}"
               data-url="{{ url_for('recording_fetch_notes', record_id=r['id']) }}"
               title="{% if _rec_searched %}Lookup already run — click to refresh notes and metadata{% else %}Pull review + tracklist + personnel via Claude web search{% endif %}">
-        🔎 Lookup
+        ✓ Check
       </button>
       {% endif %}
       {% if category != 'persons' %}
@@ -7813,24 +7815,38 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   const pill = document.getElementById('statusFlipPill');
   if (!pill) return;
   const statusSelect = document.querySelector('#mainForm select[name="status"]');
-  const hasOrdered = statusSelect &&
-    Array.from(statusSelect.options).some(o => o.value === 'Ordered');
-  if (!hasOrdered) { pill.remove(); return; }
+  if (!statusSelect) { pill.remove(); return; }
+  // Same pill on every category: flip between the resting status
+  // (Own) and the category's pending/alternate one — Ordered where the
+  // select offers it, else the first non-Own option (Sold, Gifted, …).
+  const opts = Array.from(statusSelect.options)
+    .map(o => o.value).filter(Boolean);
+  const primary = opts.includes('Own') ? 'Own' : opts[0];
+  const alt = opts.includes('Ordered')
+    ? 'Ordered'
+    : opts.find(v => v !== primary);
+  if (!primary || !alt) { pill.remove(); return; }
+  pill.title = `Click to flip status between ${primary} and ${alt}`;
 
   function render(value) {
-    pill.textContent = value || 'Own';
-    pill.classList.toggle('ordered', value === 'Ordered');
+    const v = value || primary;
+    pill.textContent = v;
+    pill.classList.toggle('ordered', v === 'Ordered');
+    pill.classList.toggle('alt', v !== primary && v !== 'Ordered');
   }
 
   pill.addEventListener('click', () => {
-    const next = statusSelect.value === 'Ordered' ? 'Own' : 'Ordered';
+    const cur = statusSelect.value || primary;
+    const next = cur === primary ? alt : primary;
     statusSelect.value = next;
     statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
     render(next);
   });
 
-  // Keep the pill honest when the user edits the select directly.
+  // Keep the pill honest when the user edits the select directly —
+  // and normalize the initial paint (the template only knows Ordered).
   statusSelect.addEventListener('change', () => render(statusSelect.value));
+  render(statusSelect.value);
 })();
 </script>
 
