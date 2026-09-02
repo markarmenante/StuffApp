@@ -482,31 +482,19 @@
       {% endif %}
     {% endif %}
     {% if category == 'coins' and _is_owner %}
-    {# Check and Research render even on the new-coin form. The autosave-on-new
-       path creates the record on first interaction. #}
+    {# One ✓ Check = the old Check (spec lookup) + Research (historical
+       context + scholarly references) back to back, matching the
+       banknote header's Own / PDF / Check trio. Renders even on the
+       new-coin form — the autosave-on-new path creates the record on
+       first interaction. #}
     <button type="button"
-            class="coin-lookup-btn coin-spec-check-btn{% if r and r['specs_searched_at'] %} done{% endif %}"
+            class="coin-lookup-btn coin-check-all-btn{% if r and r['specs_searched_at'] and r['history_searched_at'] %} done{% endif %}"
             data-spec-url="{% if not is_new %}{{ url_for('coin_lookup_specs', record_id=r['id']) }}{% endif %}"
-            title="{% if r and r['specs_searched_at'] %}Check last run {{ r['specs_searched_at'][:10] }} — click to re-run missing-field lookup{% else %}Check identifying fields and complete missing coin specs{% endif %}">
-      ✓ Check
-    </button>
-    <button type="button"
-            class="coin-lookup-btn coin-history-btn{% if r and r['history_searched_at'] %} done{% endif %}"
             data-url="{% if not is_new %}{{ url_for('coin_fetch_context', record_id=r['id']) }}{% endif %}"
             data-context-path="context"
             data-loading-label="🔎 Researching"
-            title="{% if r and r['history_searched_at'] %}Research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Research historical environment plus scholarly pedigree/reference notes{% endif %}">
-      🔎 Research
-    </button>
-    <button type="button"
-            class="coin-lookup-btn coin-perplexity-btn{% if r and r['history_searched_at'] %} done{% endif %}"
-            data-url="{% if not is_new %}{{ url_for('coin_fetch_context_perplexity', record_id=r['id']) }}{% endif %}"
-            data-spec-url="{% if not is_new %}{{ url_for('coin_lookup_specs', record_id=r['id'], provider='perplexity') }}{% endif %}"
-            data-spec-provider="perplexity"
-            data-context-path="context-perplexity"
-            data-loading-label="Perplexity"
-            title="{% if r and r['history_searched_at'] %}Perplexity research last fetched {{ r['history_searched_at'][:10] }} — click to re-run{% else %}Run the same coin research prompt through Perplexity{% endif %}">
-      Perplexity
+            title="{% if r and r['specs_searched_at'] %}Check last run {{ r['specs_searched_at'][:10] }} — click to re-run{% else %}Complete missing coin specs from the description and the web, then research historical environment plus scholarly pedigree/reference notes{% endif %}">
+      ✓ Check
     </button>
     {% endif %}
     {% if category == 'banknotes' and _is_owner %}
@@ -7412,8 +7400,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     });
   });
 
-  // ── Coin-wide Research pills: historical and reference research only.
-  document.querySelectorAll('.coin-history-btn, .coin-perplexity-btn').forEach(btn => {
+  // ── Coin ✓ Check: the spec lookup and the historical/reference
+  // research run back to back off the one header button. (The old
+  // separate Research / Perplexity pills bound here too — the classes
+  // stay in the selector so any legacy button keeps working.)
+  document.querySelectorAll('.coin-check-all-btn, .coin-history-btn, .coin-perplexity-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const originalText = btn.textContent;
       const notes = document.querySelector('[name="condition"]');
@@ -7425,8 +7416,12 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       btn.classList.add('loading'); btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
       try {
-        if (btn.classList.contains('coin-perplexity-btn')) {
+        if (btn.classList.contains('coin-check-all-btn')
+            || btn.classList.contains('coin-perplexity-btn')) {
           await ensureCoinSpecUrl(btn);
+          // Land any typed-but-unsaved values first: Check reads the
+          // server row, not the DOM.
+          await flushCheckInputFields();
           btn.textContent = '✓ Checking…';
           await runCoinSpecLookup(btn, {
             silentEmpty: true,
