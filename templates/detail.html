@@ -7215,7 +7215,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       'region', 'authority', 'denomination', 'metal', 'mint',
       'date_1', 'date_1_text', 'date_2', 'date_2_text',
       'description', 'coin_references', 'notes',
-      'official', 'weight', 'size', 'die_axis', 'grade',
+      'official', 'weight', 'size', 'die_axis', 'grade', 'obv_rev',
     ];
     const saves = [];
     fields.forEach(name => {
@@ -7236,7 +7236,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       coins: [
         'region', 'authority', 'denomination', 'metal', 'mint',
         'date_1', 'date_2', 'description', 'coin_references', 'notes',
-        'official', 'weight', 'size', 'die_axis', 'grade',
+        'official', 'weight', 'size', 'die_axis', 'grade', 'obv_rev',
       ],
       banknotes: [
         'country', 'municipality', 'issuer', 'official', 'denomination',
@@ -7560,10 +7560,12 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     dragging: true,
     worldCopyJump: !isAncientMap,
   });
-  // Clean basemap — no admin boundaries or territorial-water markings
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap, © CARTO',
-    subdomains: 'abcd', maxZoom: 20,
+  // Esri light-gray canvas — clean, nearly label-free base, no API key.
+  // (CARTO's basemap CDN now watermarks "API KEY REQUIRED" on anonymous
+  // use, so the old cartocdn tiles are gone — same swap as n552ym.)
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri — Esri, DeLorme, NAVTEQ',
+    maxZoom: 16,
   }).addTo(map);
 
   // Plot all city markers. Tooltip only shows on hover by default; the

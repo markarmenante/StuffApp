@@ -46,9 +46,11 @@
     scrollWheelZoom: false, dragging: true,
     worldCopyJump: true,
   });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap, © CARTO',
-    subdomains: 'abcd', maxZoom: 20,
+  // Esri light-gray canvas — the old cartocdn tiles now watermark
+  // "API KEY REQUIRED" on anonymous use (same vendor swap as n552ym).
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri — Esri, DeLorme, NAVTEQ',
+    maxZoom: 16,
   }).addTo(map);
 
   // Scale: radius ~ 8 + 4*sqrt(count), clamped.

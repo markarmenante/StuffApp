@@ -16158,7 +16158,7 @@ def coin_fetch_history(record_id):
 COIN_SPEC_FILLABLE = ('region', 'mint', 'authority', 'official', 'denomination', 'metal',
                       'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
                       'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number',
-                      'grade_condition', 'grade_modifier', 'coin_references')
+                      'grade_condition', 'grade_modifier', 'obv_rev', 'coin_references')
 
 COIN_SPECS_RESPONSE_SCHEMA = {
     'type': 'object',
@@ -16183,13 +16183,16 @@ COIN_SPECS_RESPONSE_SCHEMA = {
         'slab_number': _JSON_NULLABLE_STRING,
         'grade_condition': _JSON_NULLABLE_STRING,
         'grade_modifier': _JSON_NULLABLE_STRING,
+        'obv_rev': _JSON_NULLABLE_STRING,
+        'coin_references': _JSON_NULLABLE_STRING,
         'sources': {'type': 'string'},
     },
     'required': [
         'region', 'mint', 'authority', 'official', 'denomination', 'metal',
         'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
         'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number',
-        'grade_condition', 'grade_modifier', 'sources',
+        'grade_condition', 'grade_modifier', 'obv_rev', 'coin_references',
+        'sources',
     ],
 }
 
@@ -16448,11 +16451,13 @@ def fetch_coin_specs(coin, provider='anthropic'):
     condition = (coin['condition'] or '').strip()
 
     known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items()) or '(none entered)'
+    # Generous caps: the description must reach the model IN FULL — every
+    # line of a pasted dealer/auction listing carries fields to extract.
     dealer_blocks = []
-    if description: dealer_blocks.append(f'DESCRIPTION:\n{description[:4000]}')
-    if pedigree:    dealer_blocks.append(f'REFERENCES / PEDIGREE:\n{pedigree[:2000]}')
-    if grade_notes: dealer_blocks.append(f'GRADE / CONDITIONS NOTES:\n{grade_notes[:2000]}')
-    if condition:   dealer_blocks.append(f'HISTORICAL / OTHER NOTES:\n{condition[:1500]}')
+    if description: dealer_blocks.append(f'DESCRIPTION:\n{description[:12000]}')
+    if pedigree:    dealer_blocks.append(f'REFERENCES / PEDIGREE:\n{pedigree[:4000]}')
+    if grade_notes: dealer_blocks.append(f'GRADE / CONDITIONS NOTES:\n{grade_notes[:4000]}')
+    if condition:   dealer_blocks.append(f'HISTORICAL / OTHER NOTES:\n{condition[:3000]}')
     if obv_rev:     dealer_blocks.append(f'OBVERSE / REVERSE: {obv_rev}')
     if mint:        dealer_blocks.append(f'MINT (as entered): {mint}')
     dealer_text = '\n\n'.join(dealer_blocks) if dealer_blocks else '(no dealer text on file)'
@@ -16466,9 +16471,9 @@ Structured fields the user has already transcribed from the dealer:
 {known_lines}
 
 Rules:
-1. The dealer's text above is the source of truth. For each target field, FIRST take the value the dealer's text states (description, references/pedigree, condition note).
+1. The dealer's text above is the source of truth. Read the DESCRIPTION in its ENTIRETY, line by line — every piece of information it states must land in its matching field below. For each target field, FIRST take the value the dealer's text states (description, references/pedigree, condition note).
 2. Only when the dealer's text does NOT mention a field may you use up to 3 web searches (CoinArchives, ACSearch, Wildwinds, NGC, British Museum, ANS, vCoins, CNG, Roma) to fill it. NEVER override a value the dealer's text states with a web/period guess.
-3. The grading-slab fields (grading_authority, slab_number, strike, surface, sheldon), the dates, and the grade must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
+3. The grading-slab fields (grading_authority, slab_number, strike, surface, sheldon), the dates, the grade, obv_rev, and coin_references must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
 4. The user wants fills (blank fields) and corrections of transcription errors toward the dealer's text. Return null whenever a value is not supported by the text (or, for web-allowed fields, by a reputable source).
 5. If the dealer's text or description quotes the coin's actual inscription / legend (Latin, Greek, Cyrillic, Arabic, etc.), transliterate and translate it — the ruler, titles, mint, denomination and frequently the year are spelled out on the coin (e.g. "VMBERTO I RE D'ITALIA · 1891" → authority "Umberto I", date_1 1891; "ΒΑΣΙΛΕΩΣ ΛΥΣΙΜΑΧΟΥ" → authority "Lysimachos"). Numerals in the legend or exergue (Western, Roman, regnal, or era dates) are direct evidence for date_1. A translated legend counts as the dealer's text, not a web guess.
 
@@ -16492,6 +16497,8 @@ Target fields:
 - slab_number: the grading certification / slab / ticket number if the text states one — capture it verbatim. It usually follows a cue word and is a digit code, often with a hyphen, e.g. "NGC ticket 9829888-003", "NGC cert 9829888-003", "NCG: 9829888-003", "cert #1234567", "PCGS 12345678", "slab 9829888-003" → return "9829888-003" / "1234567" / "12345678". The coin may have been removed from the slab, so it can appear in the description, pedigree, or grade notes. Else null.
 - grade_condition: surface-condition qualifier(s) the dealer or grading service notes alongside the grade — e.g. "brushed", "cleaned", "tooled", "smoothed", "scratched", "porosity", "pitting", "graffiti", "holed", "mounted", "test cut", "edge filing", "deposits", "scratches". Return the qualifier(s) the text states (comma-separated if several, lowercase); else null. Do NOT include the grade itself or the ★/+ designation here.
 - grade_modifier: the NGC/PCGS grade-designation symbol(s) attached to the grade, if any. Return "★" when the text shows a star or the word "Star" (e.g. "XF★", "MS 65 Star", "AU★"), "+" when the grade carries a plus (e.g. "MS65+", "AU58+", "EF+"), or "★+" if both. The designation attaches to the grade itself (XF★) and is distinct from the 5/5 strike & surface sub-grades. Else null.
+- obv_rev: a one-line "obverse / reverse" design description when the dealer's text describes what is ON the coin — the two sides are usually separated by "/" or "//" or given as consecutive lines (e.g. "Diademed head of Kyme r. / Horse standing r., one-handled cup below" → "Diademed head of Kyme right / Horse standing right, one-handled cup below"). Condense to the essentials, expand dealer shorthand (r. → right, l. → left, stg. → standing), keep the "obverse / reverse" order. Do NOT put measurements, grade, or pedigree here. Null if the text never describes the design.
+- coin_references: catalogue references and pedigree the dealer's text cites — Krause ("KM# 2"), RIC, Sear, SNG, Sydenham, Crawford, HGC, or author-style listings ("Robinson & Clement, Group R, 102 (A68/P87)"), and auction pedigree ("Ex CNG 100, lot 123"). Capture them as written, semicolon-separated if several. Null if the text cites none.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
@@ -16500,6 +16507,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "weight": null, "size": null, "die_axis": null, "grade": null,
   "strike": null, "surface": null, "sheldon": null,
   "grading_authority": null, "slab_number": null, "grade_condition": null, "grade_modifier": null,
+  "obv_rev": null, "coin_references": null,
   "sources": "one-line note of where each value came from (dealer text vs which web source)"
 }}
 """
@@ -16546,7 +16554,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
             resp = _anthropic_create(
                 client,
                 model=lookup_model,
-                max_tokens=1024,
+                max_tokens=2048,
                 tools=[web_search],
                 messages=[{'role': 'user', 'content': prompt}],
             )
