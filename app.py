@@ -16158,7 +16158,8 @@ def coin_fetch_history(record_id):
 COIN_SPEC_FILLABLE = ('region', 'mint', 'authority', 'official', 'denomination', 'metal',
                       'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
                       'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number',
-                      'grade_condition', 'grade_modifier', 'obv_rev', 'coin_references')
+                      'grade_condition', 'grade_modifier', 'obv_rev', 'coin_references',
+                      'vendor', 'price', 'purchase_date')
 
 COIN_SPECS_RESPONSE_SCHEMA = {
     'type': 'object',
@@ -16185,6 +16186,9 @@ COIN_SPECS_RESPONSE_SCHEMA = {
         'grade_modifier': _JSON_NULLABLE_STRING,
         'obv_rev': _JSON_NULLABLE_STRING,
         'coin_references': _JSON_NULLABLE_STRING,
+        'vendor': _JSON_NULLABLE_STRING,
+        'price': _JSON_NULLABLE_STRING,
+        'purchase_date': _JSON_NULLABLE_STRING,
         'sources': {'type': 'string'},
     },
     'required': [
@@ -16192,6 +16196,7 @@ COIN_SPECS_RESPONSE_SCHEMA = {
         'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
         'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number',
         'grade_condition', 'grade_modifier', 'obv_rev', 'coin_references',
+        'vendor', 'price', 'purchase_date',
         'sources',
     ],
 }
@@ -16254,6 +16259,11 @@ _COIN_DESC_LABEL_FIELDS = {
     'km#': 'coin_references',
     'km number': 'coin_references',
     'krause': 'coin_references',
+    # Purchase lines a pasted listing/invoice carries ("Price: $6,500",
+    # "My Cost  $450"). The price paid, never a catalog value.
+    'price': 'price',
+    'price paid': 'price',
+    'my cost': 'price',
 }
 
 # composition word -> metal value-list code (see VALUE_LISTS['metal_coin']).
@@ -16319,6 +16329,11 @@ def _coin_description_fields(coin):
             continue
         field = _COIN_DESC_LABEL_FIELDS[re.sub(r'\s+', ' ', m.group(1).strip().lower())]
         value = m.group(2).strip()
+        # The greedy separator makes "Price guide: $500" parse as label
+        # 'price' + value 'guide: $500' — a price is only a price when
+        # the value opens with the amount.
+        if field == 'price' and not re.match(r'[$€£]?\s*\d', value):
+            continue
         if value and field not in pairs:
             pairs[field] = value
 
@@ -16499,6 +16514,7 @@ Rules:
 1. The dealer's text above is the source of truth. Read the DESCRIPTION in its ENTIRETY, line by line — every piece of information it states must land in its matching field below. For each target field, FIRST take the value the dealer's text states (description, references/pedigree, condition note).
 2. Only when the dealer's text does NOT mention a field may you use up to 3 web searches (CoinArchives, ACSearch, Wildwinds, NGC, British Museum, ANS, vCoins, CNG, Roma) to fill it. NEVER override a value the dealer's text states with a web/period guess.
 3. The grading-slab fields (grading_authority, slab_number, strike, surface, sheldon), the dates, the grade, obv_rev, and coin_references must come ONLY from the dealer's text — do not web-search or estimate them. Return null if the text does not state them.
+3b. The purchase fields (vendor, price, purchase_date) must also come ONLY from the dealer's text — an invoice line, "Price: $X", "My Cost", "purchased from". NEVER web-search them, and NEVER report a catalog value, price guide figure, auction estimate, or another sale's realized price as the price paid. Return null if the text does not state them.
 4. The user wants fills (blank fields) and corrections of transcription errors toward the dealer's text. Return null whenever a value is not supported by the text (or, for web-allowed fields, by a reputable source).
 5. If the dealer's text or description quotes the coin's actual inscription / legend (Latin, Greek, Cyrillic, Arabic, etc.), transliterate and translate it — the ruler, titles, mint, denomination and frequently the year are spelled out on the coin (e.g. "VMBERTO I RE D'ITALIA · 1891" → authority "Umberto I", date_1 1891; "ΒΑΣΙΛΕΩΣ ΛΥΣΙΜΑΧΟΥ" → authority "Lysimachos"). Numerals in the legend or exergue (Western, Roman, regnal, or era dates) are direct evidence for date_1. A translated legend counts as the dealer's text, not a web guess.
 
@@ -16524,6 +16540,9 @@ Target fields:
 - grade_modifier: the NGC/PCGS grade-designation symbol(s) attached to the grade, if any. Return "★" when the text shows a star or the word "Star" (e.g. "XF★", "MS 65 Star", "AU★"), "+" when the grade carries a plus (e.g. "MS65+", "AU58+", "EF+"), or "★+" if both. The designation attaches to the grade itself (XF★) and is distinct from the 5/5 strike & surface sub-grades. Else null.
 - obv_rev: a one-line "obverse / reverse" design description when the dealer's text describes what is ON the coin — the two sides are usually separated by "/" or "//" or given as consecutive lines (e.g. "Diademed head of Kyme r. / Horse standing r., one-handled cup below" → "Diademed head of Kyme right / Horse standing right, one-handled cup below"). Condense to the essentials, expand dealer shorthand (r. → right, l. → left, stg. → standing), keep the "obverse / reverse" order. Do NOT put measurements, grade, or pedigree here. Null if the text never describes the design.
 - coin_references: catalogue references and pedigree the dealer's text cites — Krause ("KM# 2"), RIC, Sear, SNG, Sydenham, Crawford, HGC, or author-style listings ("Robinson & Clement, Group R, 102 (A68/P87)"), and auction pedigree ("Ex CNG 100, lot 123"). Capture them as written, semicolon-separated if several. Null if the text cites none.
+- vendor: the selling dealer / firm / auction house, only when the text names who THIS coin was bought from. Null otherwise.
+- price: the price PAID for this coin, only when the text states it ("Price: $6,500", "My Cost", "purchase price", "paid", an invoice total, "purchased for $X"). Format "$1,234" or "$1,234.56". Never a catalog value, estimate, or another sale's realized price.
+- purchase_date: the date THIS coin was purchased, as YYYY-MM-DD, only when the text states it. A pedigree year ("Auction 98, 1933") is NOT the purchase date. Null otherwise.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
@@ -16533,6 +16552,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
   "strike": null, "surface": null, "sheldon": null,
   "grading_authority": null, "slab_number": null, "grade_condition": null, "grade_modifier": null,
   "obv_rev": null, "coin_references": null,
+  "vendor": null, "price": null, "purchase_date": null,
   "sources": "one-line note of where each value came from (dealer text vs which web source)"
 }}
 """
@@ -16739,6 +16759,19 @@ def coin_lookup_specs(record_id):
             return normalize_grading_authority(raw)
         if field == 'grade_modifier':
             return normalize_grade_modifier(raw)
+        if field == 'price':
+            # "$6,500" / "6500" / 6500 → float dollars (the coins column
+            # is numeric, unlike the banknotes' formatted string).
+            digits = re.sub(r'[^\d.]', '', str(raw or ''))
+            if not digits or digits == '.':
+                return None
+            try:
+                n = float(digits)
+            except ValueError:
+                return None
+            return n if 0 < n < 10_000_000 else None
+        if field == 'purchase_date':
+            return _parse_purchase_date(raw)
         if field in ('sheldon', 'slab_number', 'mint', 'grade_condition'):
             # Preserve as written (cert numbers, grade strings like MS-65, mint / firm names).
             v = (raw if isinstance(raw, str) else str(raw)).strip()
@@ -16773,7 +16806,7 @@ def coin_lookup_specs(record_id):
     # the lookup from replacing the dealer's attribution with its own period guess (e.g. -356 -> -440),
     # while still catching a transcription error (entered 345, description says 354 -> suggest 354) and
     # filling a value the description states but the field omits.
-    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade', 'slab_number', 'sheldon', 'grade_condition', 'grade_modifier'}
+    NUMISMATIST_FIELDS = {'date_1', 'date_2', 'grade', 'slab_number', 'sheldon', 'grade_condition', 'grade_modifier', 'price'}
     dealer_text = ' '.join(
         str(_coin_row_value(coin, c) or '')
         for c in ('description', 'coin_references', 'condition', 'notes')
@@ -16806,6 +16839,15 @@ def coin_lookup_specs(record_id):
         if field in ('slab_number', 'sheldon'):
             key = re.sub(r'[^a-z0-9]', '', str(value).lower())
             return len(key) >= 2 and key in _dealer_text_key
+        if field == 'price':
+            # The paid amount's digits must appear in the dealer's own
+            # text ("$6,500" → '6500') — no invented or web-sourced prices.
+            try:
+                n = float(value)
+            except (TypeError, ValueError):
+                return False
+            key = str(int(n)) if n == int(n) else f'{n:.2f}'.replace('.', '')
+            return key in _dealer_text_key
         if field == 'grade_condition':
             # Each qualifier word must actually appear in the dealer's text (no invented conditions).
             words = re.findall(r'[a-z]{3,}', str(value).lower())
@@ -16924,6 +16966,17 @@ def coin_apply_lookup_specs(record_id):
             return normalize_grading_authority(raw_v)
         if field == 'grade_modifier':
             return normalize_grade_modifier(raw_v)
+        if field == 'price':
+            digits = re.sub(r'[^\d.]', '', str(raw_v or ''))
+            if not digits or digits == '.':
+                return None
+            try:
+                n = float(digits)
+            except ValueError:
+                return None
+            return n if 0 < n < 10_000_000 else None
+        if field == 'purchase_date':
+            return _parse_purchase_date(raw_v)
         if field in ('sheldon', 'slab_number', 'mint', 'grade_condition'):
             v = (raw_v if isinstance(raw_v, str) else str(raw_v)).strip()
             return v or None
