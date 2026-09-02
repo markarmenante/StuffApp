@@ -16360,7 +16360,9 @@ _ITALIAN_CONTEXT_RE = re.compile(
 
 def _coin_year_from_prose(text):
     """First plausible coin date in free text: an 'N BC' token (ancient prose)
-    or a Gregorian year 1500-2099. Skips catalogue refs like 'KM 1916'."""
+    or a Gregorian year 1500-2099. Skips catalogue refs like 'KM 1916' and
+    pedigree years — 'Ex Hamburger, Frankfurt, Auction 98, 1933, lot 528'
+    dates the sale, not the coin."""
     s = str(text or '')
     # "480-440 BC" → take the earlier year (-480) as date_1.
     bc_range = re.search(r'\b(\d{1,4})\s*[-–]\s*\d{1,4}\s*B\.?\s*C\.?E?\b', s, re.IGNORECASE)
@@ -16370,11 +16372,27 @@ def _coin_year_from_prose(text):
     if bc:
         return -int(bc.group(1))
     for m in re.finditer(r'(?<![\w#./-])(1[5-9]\d{2}|20\d{2})(?![\w./-])', s):
-        before = s[max(0, m.start() - 6):m.start()].lower()
-        if any(tok in before for tok in ('km', '#', 'no.', 'p.', 'pg', 'lot')):
+        if _prose_year_is_reference(s, m):
             continue
         return int(m.group(1))
     return None
+
+
+def _prose_year_is_reference(s, m):
+    """True when a bare Gregorian year match is a catalogue ref or a
+    pedigree/provenance year rather than the coin's own date. Catalogue
+    cues sit immediately before the number ('KM 1916'); auction/sale cues
+    can sit a clause away ('Auction 98, 1933') or right after ('1933,
+    lot 528'), so those get wider windows."""
+    before6 = s[max(0, m.start() - 6):m.start()].lower()
+    if any(tok in before6 for tok in ('km', '#', 'no.', 'p.', 'pg', 'lot')):
+        return True
+    before32 = s[max(0, m.start() - 32):m.start()].lower()
+    if any(tok in before32 for tok in ('auction', 'sale', ' ex ', 'lot ')) \
+            or before32.startswith('ex '):
+        return True
+    after12 = s[m.end():m.end() + 12].lower()
+    return bool(re.match(r'\s*,?\s*lot\b', after12))
 
 
 def _coin_mintmark_city(text):
@@ -16768,10 +16786,11 @@ def coin_lookup_specs(record_id):
     # Modern issue years are usually stated plainly with no era marker ("YEAR 1891",
     # "5 Lire 1918 R"), so the BC/AD pass above never sees them — leaving a description-
     # sourced date ungrounded and wrongly dropped. Add bare Gregorian years (1500-2099)
-    # too, skipping catalogue refs (KM 1916, #, lot) the same way _coin_year_from_prose does.
+    # too, skipping catalogue refs (KM 1916, #, lot) and pedigree years ("Auction 98,
+    # 1933, lot 528") the same way _coin_year_from_prose does — a pedigree year must
+    # not ground a date_1 proposal.
     for _m in re.finditer(r'(?<![\w#./-])(1[5-9]\d{2}|20\d{2})(?![\w./-])', dealer_text):
-        _before = dealer_text[max(0, _m.start() - 6):_m.start()].lower()
-        if any(_tok in _before for _tok in ('km', '#', 'no.', 'p.', 'pg', 'lot')):
+        if _prose_year_is_reference(dealer_text, _m):
             continue
         _dealer_years.add(int(_m.group(1)))
 
