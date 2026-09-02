@@ -16436,10 +16436,6 @@ def fetch_coin_specs(coin, provider='anthropic'):
         v = coin[f]
         if v not in (None, ''):
             known[f] = v
-    if not known:
-        raise RuntimeError(
-            'Need at least one of region / authority / denomination / metal '
-            '/ date to look up the rest.')
 
     metals = ', '.join(VALUE_LISTS['metal_coin'])
     grades = ', '.join(VALUE_LISTS['coin_grade'])
@@ -16449,6 +16445,17 @@ def fetch_coin_specs(coin, provider='anthropic'):
     pedigree = (coin['coin_references'] or '').strip()
     grade_notes = (coin['notes'] or '').strip()
     condition = (coin['condition'] or '').strip()
+
+    # Description-first flow: a brand-new coin with just a pasted dealer
+    # description must be checkable — the description IS the identifying
+    # text (same gate the banknote Check uses). Only bail when there is
+    # nothing at all to work from.
+    if not known and not description and not pedigree and not grade_notes \
+            and not condition:
+        raise RuntimeError(
+            'Add the dealer description or at least one identifying field '
+            '(region / authority / denomination / metal / date) before '
+            'running Check.')
 
     known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items()) or '(none entered)'
     # Generous caps: the description must reach the model IN FULL — every
