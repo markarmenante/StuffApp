@@ -10737,6 +10737,20 @@ def _apply_perspective(coeffs, x, y):
             round((d * x + e * y + f) / den, 1))
 
 
+def _v2_validator_may_waive(failed):
+    """Whether the vision validator may overrule this candidate's failed
+    metrics. Only texture reads (ink coverage, busy band, wide surround)
+    are its to waive — the sheet's aspect, holder plastic at an edge,
+    and a design that touches the frame edge are measured facts. The
+    last one used to be waivable, and the validator shipped a Rhodesia
+    £1 front with the engraving cut at the frame; a clipped design is
+    wrong however plausible the crop looks."""
+    return not any(
+        f.startswith(('aspect', 'dark'))
+        or f == 'design touches the frame edge'
+        for f in failed)
+
+
 def _trim_note_v2(img, expect_aspect=None, meta=None):
     """The seeded pipeline: model locates, CV snaps, geometry judges.
     Returns (status, jpeg_bytes) — status 'ok' (ship bytes), 'noop'
@@ -10840,12 +10854,11 @@ def _trim_note_v2(img, expect_aspect=None, meta=None):
         app.logger.info('trim-v2: %s candidate %dx%d flagged: %s',
                         name, crop.size[0], crop.size[1],
                         '; '.join(failed))
-        # aspect and dark bands are not the validator's to waive: the
-        # sheet's physical shape and holder plastic at an edge are
-        # wrong however plausible the crop looks. Only texture flags
-        # (ink coverage, busy band, surround) may go to the validator
-        # — and the least-flagged candidate gets that one call.
-        if not any(f.startswith(('aspect', 'dark')) for f in failed):
+        # Aspect, dark bands, and a clipped design are not the
+        # validator's to waive (see _v2_validator_may_waive). Only
+        # texture flags may go to the validator — and the
+        # least-flagged candidate gets that one call.
+        if _v2_validator_may_waive(failed):
             if soft is None or len(failed) < len(soft[3]):
                 soft = (crop, box, coeffs, failed)
     if chosen is None and soft is not None:

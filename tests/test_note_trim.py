@@ -874,4 +874,19 @@ stuffapp._vision_crop_verdict = _real_verdict
 stuffapp._trim_note_cv_cascade = _real_cascade
 print('VISION-VETO ASSERTIONS PASSED')
 
+# --- v2 waive gate: which failed metrics the validator may overrule --------
+# A clipped design is a measured fact, not a texture read — the Rhodesia
+# £1 front shipped with 'design touches the frame edge' waived by the
+# vision validator; that flag is now a hard veto like aspect/dark bands.
+assert not stuffapp._v2_validator_may_waive(['design touches the frame edge'])
+assert not stuffapp._v2_validator_may_waive(
+    ['design touches the frame edge', 'busy right band'])
+assert not stuffapp._v2_validator_may_waive(['aspect 12% off'])
+assert not stuffapp._v2_validator_may_waive(['dark left band'])
+assert stuffapp._v2_validator_may_waive(['busy right band'])
+assert stuffapp._v2_validator_may_waive(
+    ['surround too wide', 'ink fills only 17%'])
+assert stuffapp._v2_validator_may_waive([])
+print('V2 WAIVE-GATE ASSERTIONS PASSED')
+
 print('ALL NOTE-TRIM ASSERTIONS PASSED')
