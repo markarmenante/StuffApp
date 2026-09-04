@@ -2559,6 +2559,11 @@ COUNTRY_KEYS = {
     'ceylon': ('ceylon', 'sri lanka'),
     'malaya': ('malaya', 'malaysia', 'straits settlements',
                'malaya and british borneo', 'singapore'),
+    # The Maldives is its own nation — nothing to do with Malaya, despite
+    # the adjacent alphabetical spot the list files them in.
+    'maldives': ('maldives', 'the maldives', 'maldive islands',
+                 'republic of maldives', 'republic of the maldives',
+                 'maldivian state'),
     'morocco': ('morocco', 'french morocco'),
     'tunisia': ('tunisia', 'french tunisia'),
     'iran': ('iran', 'persia'),
@@ -3413,6 +3418,26 @@ COUNTRY_ERAS = {
          'separate Malaysian ringgit, Singapore dollar, and Brunei '
          'dollar of 1967.'),
     )),
+    'maldives': ('Maldives', (
+        (1887, 1946, 'The sultanate under British protection',
+         'The Maldive Islands, an Islamic sultanate for centuries, came '
+         'under British protection by an 1887 agreement with the '
+         'governor of Ceylon, keeping internal self-rule. Trade ran on '
+         'the sultanate\'s own small coinage and the Ceylon rupee; no '
+         'paper was issued.'),
+        (1947, 1982, 'The Maldivian rupee',
+         'The Maldivian State issued its first banknotes — rupee notes '
+         'dated 1947 over the Government Treasurer\'s signature — with '
+         'higher denominations added in Bradbury, Wilkinson & Co. '
+         'printings through 1960. The islands were briefly a republic '
+         'in 1953–54, became independent of Britain on 26 July 1965, '
+         'and a republic again from 1968.'),
+        (1983, 2100, 'The rufiyaa',
+         'The Maldives Monetary Authority, created in 1981 as the '
+         'central bank, replaced the Treasurer\'s rupee notes in 1983 '
+         'with the rufiyaa of 100 laari, its notes carrying the '
+         'traditional dhoni sailing craft.'),
+    )),
     'morocco': ('Morocco', (
         (1907, 1958, 'Protectorate franc',
          'The Banque d’État du Maroc issued francs from 1910 under '
@@ -4049,6 +4074,7 @@ COUNTRY_COLONIAL = {
     'macau': 'Portuguese from 1557, a formal colony from 1887; returned to China 20 December 1999.',
     'malawi': 'British Central Africa Protectorate from 1891, Nyasaland from 1907; independent 6 July 1964.',
     'malaya': 'British from Penang in 1786; independent as the Federation of Malaya 31 August 1957, Malaysia from 1963.',
+    'maldives': 'An Islamic sultanate under British protection from 1887, administered through Ceylon; independent 26 July 1965, a republic from 11 November 1968.',
     'mali': 'French Sudan from the 1880s conquest, a territory of French West Africa from 1895; independent 22 September 1960 after the brief Mali Federation with Senegal.',
     'malta': 'British from 1800, formally ceded in 1814; independent 21 September 1964.',
     'mexico': 'Spanish from the 1521 fall of Tenochtitlan; independence declared 16 September 1810, won 27 September 1821.',
@@ -5728,9 +5754,13 @@ def init_db():
     # v18: WWII emergency issues (HAWAII overprint, North Africa yellow
     # seal) file as one block at 1942 (US_EMERGENCY) instead of
     # scattering through the 1934/1935 series runs.
+    # v19: the Maldives gets its own built-in history entry, so
+    # COUNTRY_ERA_START resolves its notes to era-band starts instead of
+    # their raw years (relative order is unchanged — the reseed just
+    # keeps the numbers provably in step with the live ORDER BY).
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v18',),
+        ('banknote_display_number_v19',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -5738,7 +5768,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v18', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v19', datetime.utcnow().isoformat()),
         )
         db.commit()
 
