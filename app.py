@@ -11173,14 +11173,6 @@ CATEGORY_FILTERS = {
         'own':  (_own_status_predicate(), []),
         'sold': ("LOWER(TRIM(COALESCE(status,''))) = 'sold'", []),
     },
-    'cameras': {
-        # Inverts the default list view: shows ONLY gifted cameras. The
-        # default camera list (no filter) hides Sold / Gifted — see
-        # build_search_query.
-        'gifted': ("LOWER(TRIM(COALESCE(status,''))) = 'gifted'", []),
-    },
-    # Lenses intentionally have no filter map — the list always shows
-    # every record.
     'properties': {
         # Single-axis filters
         'own':         (_own_status_predicate(), []),
@@ -11194,6 +11186,30 @@ CATEGORY_FILTERS = {
         'sold_residential': ("LOWER(TRIM(COALESCE(status,''))) = 'sold' AND LOWER(TRIM(COALESCE(type,''))) = 'residential'", []),
     },
 }
+
+
+# Lifecycle-status axis, every status-bearing item category alike
+# (properties keep their own compound status+type filter above). Each
+# canonical status becomes a filter key, the default list (no filter,
+# no search) shows only owned items, and the toolbar renders one pill
+# that cycles through the statuses actually present in the table —
+# see build_search_query, list_view, and list.html.
+STATUS_CYCLE_ORDER = ('own', 'ordered', 'sold', 'loaned', 'gifted',
+                      'consigned', 'lost')
+STATUS_CYCLE_CATEGORIES = ('watches', 'coins', 'banknotes', 'cameras',
+                           'lenses', 'pens', 'art', 'items', 'vehicles',
+                           'recordings', 'audio', 'rifles')
+# Filter keys that already pick a status; while one is active the
+# default owned-only clause must stay out of the query (the two would
+# contradict and match nothing).
+STATUS_FILTER_KEYS = set(STATUS_CYCLE_ORDER) | {'no_longer_owned'}
+for _cat in STATUS_CYCLE_CATEGORIES:
+    _cat_filters = CATEGORY_FILTERS.setdefault(_cat, {})
+    for _status in STATUS_CYCLE_ORDER:
+        _pred = _own_status_predicate() if _status == 'own' \
+            else f"LOWER(TRIM(COALESCE(status,''))) = '{_status}'"
+        _cat_filters.setdefault(_status, (_pred, []))
+del _cat, _cat_filters, _status, _pred
 
 
 # Coin list filters are two independent axes encoded in one URL param:
@@ -11401,31 +11417,18 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
         wheres.append(f"({clause})")
         params += list(extra_params)
 
-    # Watches: default list hides Sold / Gifted / Lost — those have
-    # truly left the collection and clutter the working view. The
-    # 'no_longer_owned' pill flips the view to show only those, so
-    # only suppress the default exclusion when that filter is active.
-    if category == 'watches' and coin_filter != 'no_longer_owned':
-        wheres.append(
-            "(LOWER(TRIM(COALESCE(status,''))) NOT IN ('sold','gifted','lost'))"
-        )
-
-    # Art: same idea — the default list hides Sold pieces. The 'sold'
-    # pill shows only those, and an active text search still finds a
-    # sold piece by name without clicking anything.
-    if category == 'art' and coin_filter != 'sold' and not q:
-        wheres.append(
-            "(LOWER(TRIM(COALESCE(status,''))) != 'sold')"
-        )
-
-    # Cameras: default list shows only owned cameras — Sold / Gifted
-    # have left the collection. The Own/Gifted toolbar pill flips to
-    # the gifted-only view, and an active text search still finds a
-    # sold or gifted camera by name without clicking anything.
-    if category == 'cameras' and coin_filter != 'gifted' and not q:
-        wheres.append(
-            "(LOWER(TRIM(COALESCE(status,''))) NOT IN ('sold','gifted'))"
-        )
+    # Every status-bearing list defaults to owned items only — Sold /
+    # Gifted / Lost etc. have left the collection (or, like Ordered,
+    # not yet arrived) and clutter the working view. The status-cycle
+    # pill in the toolbar reaches every other status, an explicit
+    # status filter shows exactly that status, and an active text
+    # search (or the dot filter) still finds any item by name without
+    # clicking anything. Blank statuses count as owned (boot backfills
+    # them to Own anyway).
+    if (category in STATUS_CYCLE_CATEGORIES and not q and not dot
+            and coin_filter not in STATUS_FILTER_KEYS):
+        wheres.append(f"({_own_status_predicate()} "
+                      "OR TRIM(COALESCE(status,'')) = '')")
 
     # "?at=<property name>" — narrow to items physically located at
     # that property. Only meaningful for categories that store a
@@ -13720,27 +13723,30 @@ def list_view(category):
     # row (or the user is already viewing filter=ordered and wants a
     # way to toggle back off).
     has_ordered = False
-    if category in ('coins', 'watches', 'banknotes'):
+    if category in ('coins', 'banknotes'):
         table = CATEGORIES[category]['table']
         has_ordered = db.execute(
             f"SELECT EXISTS(SELECT 1 FROM {table} "
             f"WHERE LOWER(TRIM(COALESCE(status,''))) = 'ordered')"
         ).fetchone()[0] == 1
-    # Same toggle-when-relevant rule for the No-longer-Owned pill so
-    # an empty collection doesn't show a filter that produces nothing.
-    has_sold_art = False
-    if category == 'art':
-        has_sold_art = db.execute(
-            "SELECT EXISTS(SELECT 1 FROM art "
-            "WHERE LOWER(TRIM(COALESCE(status,''))) = 'sold')"
-        ).fetchone()[0] == 1
-    has_no_longer_owned = False
-    if category == 'watches':
+    # Status-cycle pill: the canonical statuses actually present in
+    # this category's table, in cycle order. Only stops with data
+    # (plus Own, the default view) appear, so the cycle never lands
+    # on an empty list.
+    status_cycle, status_current = [], 'own'
+    if category in STATUS_CYCLE_CATEGORIES:
         table = CATEGORIES[category]['table']
-        has_no_longer_owned = db.execute(
-            f"SELECT EXISTS(SELECT 1 FROM {table} "
-            f"WHERE LOWER(TRIM(COALESCE(status,''))) IN ('sold','gifted','lost'))"
-        ).fetchone()[0] == 1
+        present = {
+            row[0] for row in db.execute(
+                f"SELECT DISTINCT LOWER(TRIM(COALESCE(status,''))) "
+                f"FROM {table}"
+            ).fetchall()
+        }
+        present = {'own' if s in ('', 'owned') else s for s in present}
+        present.add('own')
+        status_cycle = [s for s in STATUS_CYCLE_ORDER if s in present]
+        if coin_filter in status_cycle:
+            status_current = coin_filter
     has_in_service = False
     if category == 'watches':
         has_in_service = db.execute(
@@ -13782,8 +13788,8 @@ def list_view(category):
                            result_count=len(rows),
                            art_price_total=art_price_total,
                            has_ordered=has_ordered,
-                           has_no_longer_owned=has_no_longer_owned,
-                           has_sold_art=has_sold_art,
+                           status_cycle=status_cycle,
+                           status_current=status_current,
                            has_in_service=has_in_service,
                            watch_open_service_event_ids=watch_open_service_event_ids,
                            extra_fields=extra_fields,

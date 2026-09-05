@@ -87,26 +87,11 @@
   {% endif %}
   {% endif %}
   {% if category == 'watches' and not at_property %}
-  {% if has_ordered or coin_filter == 'ordered' %}
-  <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
-     class="toolbar-btn pill {% if coin_filter == 'ordered' %}active{% endif %}"
-     title="Watches with status Ordered">Commissioned</a>
-  {% endif %}
   {% if has_in_service or coin_filter == 'in_service' %}
   <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'in_service' else 'in_service') }}"
      class="toolbar-btn pill {% if coin_filter == 'in_service' %}active{% endif %}"
      title="Watches with an open service event">In Service</a>
   {% endif %}
-  {% if has_no_longer_owned or coin_filter == 'no_longer_owned' %}
-  <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'no_longer_owned' else 'no_longer_owned') }}"
-     class="toolbar-btn pill {% if coin_filter == 'no_longer_owned' %}active{% endif %}"
-     title="Watches that have left the collection (Sold / Gifted / Lost)">✕</a>
-  {% endif %}
-  {% endif %}
-  {% if category == 'art' and (has_sold_art or coin_filter == 'sold') %}
-  <a href="{{ url_for('list_view', category='art', q=q or None, filter=None if coin_filter == 'sold' else 'sold') }}"
-     class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
-     title="Art that has been sold (hidden from the default list)">Sold</a>
   {% endif %}
   {# When the user came from the Property tab via ?at=, hide the
      redundant location pill — it targets the same filter, builds URLs
@@ -137,20 +122,24 @@
      class="toolbar-btn pill active"
      title="Toggle: Own ↔ Sold">{{ 'Own' if prop_status == 'own' else 'Sold' }}</a>
   {% endif %}
-  {% if category == 'cameras' and not at_property %}
-  {# Single pill flips between Own and Gifted. Default = own (the list
-     hides Sold / Gifted cameras unless a search is active). #}
-  <a href="{{ url_for('list_view', category='cameras', q=q or None, filter=None if coin_filter == 'gifted' else 'gifted') }}"
+  {# Status-cycle pill, every status-bearing category alike: shows the
+     current status view (default Own — the list hides everything else
+     unless a search is active) and each click advances to the next
+     status actually present in the data, wrapping back to Own.
+     Watches label the Ordered stop "Commissioned", matching the
+     detail page. Banknotes carry the history toggle along so cycling
+     doesn't silently flip the panels back on. #}
+  {% if status_cycle and status_cycle|length > 1 and not at_property %}
+  {%- set _st_idx = status_cycle.index(status_current) if status_current in status_cycle else 0 -%}
+  {%- set _st_next = status_cycle[(_st_idx + 1) % (status_cycle|length)] -%}
+  {%- set _st_hist = (None if show_history else '0') if category == 'banknotes' else None -%}
+  {%- set _st_labels = [] -%}
+  {%- for _s in status_cycle -%}
+    {%- set _ = _st_labels.append('Commissioned' if category == 'watches' and _s == 'ordered' else _s|capitalize) -%}
+  {%- endfor -%}
+  <a href="{{ url_for('list_view', category=category, q=q or None, filter=None if _st_next == 'own' else _st_next, history=_st_hist) }}"
      class="toolbar-btn pill active"
-     title="Toggle: Own ↔ Gifted">{{ 'Gifted' if coin_filter == 'gifted' else 'Own' }}</a>
-  {% endif %}
-  {% if category == 'vehicles' and not at_property %}
-  <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
-     class="toolbar-btn pill {% if coin_filter == 'own' %}active{% endif %}"
-     title="Own vehicles">Own</a>
-  <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'sold' else 'sold') }}"
-     class="toolbar-btn pill {% if coin_filter == 'sold' %}active{% endif %}"
-     title="Sold vehicles">Sold</a>
+     title="Cycle status: {{ _st_labels | join(' → ') }}">{{ 'Commissioned' if category == 'watches' and status_current == 'ordered' else status_current | capitalize }}</a>
   {% endif %}
   {# Every list carries the search bar in its sticky toolbar — even the
      short ones — so the subheading reads the same across categories. #}
