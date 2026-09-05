@@ -435,11 +435,11 @@
   <div class="detail-nav-overlay">
     {%- set _has_status_field = (fields | selectattr('name', 'equalto', 'status') | list) | length > 0 -%}
     {% if _has_status_field and not is_new %}
-    {# Quick status flip, every category alike: Own ↔ Ordered where the
-       category's Status select offers Ordered, otherwise Own ↔ its
-       first alternative (Sold, Gifted, …). Yellow while Ordered, gray
-       for other non-Own states, green once Own. The setup JS removes
-       it only when the Status select has nothing to flip to. #}
+    {# Quick status pill, every category alike: each click advances the
+       Status select to its next option (Own → Ordered → Sold → … → Own),
+       covering every status the category offers. Yellow while Ordered,
+       gray for other non-Own states, green once Own. The setup JS
+       removes it only when the Status select has nothing to cycle to. #}
     {%- set _flip_status = val('status') or 'Own' -%}
     <button type="button"
             id="statusFlipPill"
@@ -7812,27 +7812,26 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 })();
 </script>
 
-{# ── Floating-nav status flip pill ───────────────────────────────
-   One-click Ordered ↔ Own flip for any category with a Status
-   select that offers Ordered. Drives the select's real change event
-   so autosave, the inline class toggle, and panel syncs (e.g. the
-   watch sell panel) all fire exactly as if the user used the select. #}
+{# ── Floating-nav status cycle pill ──────────────────────────────
+   One-click status advance for any category with a Status select:
+   each click moves to the select's next non-blank option, wrapping
+   back to the first (Own → Ordered → Sold → … → Own). Drives the
+   select's real change event so autosave, the inline class toggle,
+   and panel syncs (e.g. the watch sell panel) all fire exactly as
+   if the user used the select. #}
 <script>
 (function setupStatusFlipPill() {
   const pill = document.getElementById('statusFlipPill');
   if (!pill) return;
   const statusSelect = document.querySelector('#mainForm select[name="status"]');
   if (!statusSelect) { pill.remove(); return; }
-  // Same pill on every category: flip between the resting status
-  // (Own) and the category's pending/alternate one — Ordered where the
-  // select offers it, else the first non-Own option (Sold, Gifted, …).
+  // Same pill on every category: cycle through every status the
+  // select offers, in the select's own order, skipping the blank
+  // placeholder option.
   const opts = Array.from(statusSelect.options)
     .map(o => o.value).filter(Boolean);
   const primary = opts.includes('Own') ? 'Own' : opts[0];
-  const alt = opts.includes('Ordered')
-    ? 'Ordered'
-    : opts.find(v => v !== primary);
-  if (!primary || !alt) { pill.remove(); return; }
+  if (opts.length < 2) { pill.remove(); return; }
   // Display the option's LABEL, which can differ from the stored value
   // (watches label the 'Ordered' value "Commissioned").
   function labelFor(v) {
@@ -7840,7 +7839,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const label = opt && opt.textContent.trim();
     return label || v || primary;
   }
-  pill.title = `Click to flip status between ${labelFor(primary)} and ${labelFor(alt)}`;
+  pill.title = `Click to cycle status: ${opts.map(labelFor).join(' → ')}`;
 
   function render(value) {
     const v = value || primary;
@@ -7851,7 +7850,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 
   pill.addEventListener('click', () => {
     const cur = statusSelect.value || primary;
-    const next = cur === primary ? alt : primary;
+    const idx = opts.indexOf(cur);
+    const next = idx === -1 ? opts[0] : opts[(idx + 1) % opts.length];
     statusSelect.value = next;
     statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
     render(next);
