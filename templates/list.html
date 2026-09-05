@@ -137,6 +137,13 @@
      class="toolbar-btn pill active"
      title="Toggle: Own ↔ Sold">{{ 'Own' if prop_status == 'own' else 'Sold' }}</a>
   {% endif %}
+  {% if category == 'cameras' and not at_property %}
+  {# Single pill flips between Own and Gifted. Default = own (the list
+     hides Sold / Gifted cameras unless a search is active). #}
+  <a href="{{ url_for('list_view', category='cameras', q=q or None, filter=None if coin_filter == 'gifted' else 'gifted') }}"
+     class="toolbar-btn pill active"
+     title="Toggle: Own ↔ Gifted">{{ 'Gifted' if coin_filter == 'gifted' else 'Own' }}</a>
+  {% endif %}
   {% if category == 'vehicles' and not at_property %}
   <a href="{{ url_for('list_view', category='vehicles', q=q or None, filter=None if coin_filter == 'own' else 'own') }}"
      class="toolbar-btn pill {% if coin_filter == 'own' %}active{% endif %}"

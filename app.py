@@ -11173,9 +11173,14 @@ CATEGORY_FILTERS = {
         'own':  (_own_status_predicate(), []),
         'sold': ("LOWER(TRIM(COALESCE(status,''))) = 'sold'", []),
     },
-    # Cameras and lenses intentionally have no filter map — both lists
-    # always show every record. Toolbar pills removed; default filter
-    # removed.
+    'cameras': {
+        # Inverts the default list view: shows ONLY gifted cameras. The
+        # default camera list (no filter) hides Sold / Gifted — see
+        # build_search_query.
+        'gifted': ("LOWER(TRIM(COALESCE(status,''))) = 'gifted'", []),
+    },
+    # Lenses intentionally have no filter map — the list always shows
+    # every record.
     'properties': {
         # Single-axis filters
         'own':         (_own_status_predicate(), []),
@@ -11411,6 +11416,15 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
     if category == 'art' and coin_filter != 'sold' and not q:
         wheres.append(
             "(LOWER(TRIM(COALESCE(status,''))) != 'sold')"
+        )
+
+    # Cameras: default list shows only owned cameras — Sold / Gifted
+    # have left the collection. The Own/Gifted toolbar pill flips to
+    # the gifted-only view, and an active text search still finds a
+    # sold or gifted camera by name without clicking anything.
+    if category == 'cameras' and coin_filter != 'gifted' and not q:
+        wheres.append(
+            "(LOWER(TRIM(COALESCE(status,''))) NOT IN ('sold','gifted'))"
         )
 
     # "?at=<property name>" — narrow to items physically located at
