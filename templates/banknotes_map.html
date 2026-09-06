@@ -1,0 +1,149 @@
+{% extends 'base.html' %}
+{% block title %}Banknote Map — StuffApp{% endblock %}
+
+{% block content %}
+<div class="list-toolbar">
+  <span class="list-count">{{ notes|length }}</span>
+  <span class="list-cat-title">Banknote Map — {{ filter_label }}</span>
+  <a href="{{ url_for('list_view', category='banknotes', filter=coin_filter or None) }}"
+     class="toolbar-btn pill" title="Back to banknote list">← List</a>
+</div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<div class="coins-map-wrap">
+  <div id="notesDistMap" class="coins-dist-map"></div>
+  <div class="coins-dist-caption" id="notesDistCaption">
+    Loading distribution…
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script id="notesData" type="application/json">{{ notes|tojson }}</script>
+<script>
+(function banknotesDistMap() {
+  if (typeof L === 'undefined') return;
+  const el = document.getElementById('notesDistMap');
+  const caption = document.getElementById('notesDistCaption');
+  if (!el) return;
+
+  const notes = JSON.parse(document.getElementById('notesData').textContent || '[]');
+
+  const map = L.map(el, {
+    center: [25.0, 10.0], zoom: 2, minZoom: 2, maxZoom: 12,
+    scrollWheelZoom: false, dragging: true,
+    worldCopyJump: true,
+  });
+  // Same Esri light-gray canvas as the coins map.
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri — Esri, DeLorme, NAVTEQ',
+    maxZoom: 16,
+  }).addTo(map);
+
+  // Same localStorage + same-origin geocode fallback the coin origin
+  // map uses — only notes with an issuing municipality (or an unknown
+  // country) ever hit it; era capitals resolve entirely server-side.
+  async function fetchGeocode(query) {
+    const cacheKey = 'banknote-geocode:' + query.toLowerCase();
+    try {
+      const cached = window.localStorage && window.localStorage.getItem(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (_) {}
+    const res = await fetch('/api/geocode-city?q=' + encodeURIComponent(query),
+                            {headers: {'Accept': 'application/json'}});
+    if (!res.ok) return null;
+    const hit = await res.json();
+    if (!hit || !hit.latlng ||
+        !Number.isFinite(Number(hit.latlng[0])) ||
+        !Number.isFinite(Number(hit.latlng[1]))) return null;
+    hit.latlng = [Number(hit.latlng[0]), Number(hit.latlng[1])];
+    try {
+      if (window.localStorage) window.localStorage.setItem(cacheKey, JSON.stringify(hit));
+    } catch (_) {}
+    return hit;
+  }
+
+  async function resolveNote(n) {
+    if (n.geo_query) {
+      try {
+        const hit = await fetchGeocode(n.geo_query);
+        if (hit) return {name: hit.name, latlng: hit.latlng};
+      } catch (_) {}
+    }
+    if (n.pin) return {name: n.pin.city, latlng: n.pin.latlng};
+    return null;
+  }
+
+  // Bounded-concurrency resolve: municipality lookups go through the
+  // geocoder one page load at a time, everything else is instant.
+  async function resolveAll() {
+    const out = new Array(notes.length);
+    let i = 0;
+    await Promise.all(Array.from({length: 4}, async () => {
+      while (i < notes.length) {
+        const idx = i++;
+        out[idx] = await resolveNote(notes[idx]);
+      }
+    }));
+    return out;
+  }
+
+  resolveAll().then(hits => {
+    const buckets = {}; // city -> {name, latlng, notes: []}
+    let unresolved = 0;
+    notes.forEach((n, idx) => {
+      const hit = hits[idx];
+      if (!hit) { unresolved++; return; }
+      if (!buckets[hit.name]) buckets[hit.name] = {name: hit.name, latlng: hit.latlng, notes: []};
+      buckets[hit.name].notes.push(n);
+    });
+    const entries = Object.values(buckets).sort((a, b) => b.notes.length - a.notes.length);
+
+    entries.forEach(({name, latlng, notes}) => {
+      const n = notes.length;
+      const r = Math.min(40, 8 + 4 * Math.sqrt(n));
+      const circle = L.circleMarker(latlng, {
+        radius: r,
+        color: '#1e8449', weight: 1.5,
+        fillColor: '#27ae60', fillOpacity: 0.55,
+        className: 'coins-dist-bubble',
+      }).addTo(map);
+      L.marker(latlng, {
+        icon: L.divIcon({
+          className: 'coins-dist-count',
+          html: '<span>' + n + '</span>',
+          iconSize: [r * 2, r * 2], iconAnchor: [r, r],
+        }),
+        interactive: false,
+      }).addTo(map);
+      const sample = notes.slice(0, 6).map(b =>
+        (b.banknote_id || '(no id)')
+          + (b.denomination ? ' · ' + b.denomination : '')
+          + (b.date_1_text || b.date_1 ? ' (' + (b.date_1_text || b.date_1) + ')' : '')
+      ).join('<br>');
+      const more = notes.length > 6 ? '<br><em>…and ' + (notes.length - 6) + ' more</em>' : '';
+      circle.bindPopup('<strong>' + name + '</strong> — ' + n + ' note' +
+                       (n === 1 ? '' : 's') + '<br>' + sample + more);
+      circle.bindTooltip(name, {
+        permanent: true, direction: 'right', offset: [r + 2, 0],
+        className: 'coin-city-label',
+      });
+    });
+
+    if (entries.length > 1) {
+      const bounds = L.latLngBounds(entries.map(e => e.latlng));
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 6 });
+    } else if (entries.length === 1) {
+      map.setView(entries[0].latlng, 6);
+    }
+
+    const placed = notes.length - unresolved;
+    if (caption) {
+      caption.innerHTML = '<strong>' + placed + '</strong> banknotes placed across <strong>' +
+        entries.length + '</strong> cities' +
+        (unresolved ? ' · <em>' + unresolved + ' unresolved</em>' : '') +
+        ' · scroll to zoom, drag to reposition';
+    }
+  });
+})();
+</script>
+{% endblock %}

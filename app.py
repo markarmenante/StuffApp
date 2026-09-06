@@ -15705,6 +15705,265 @@ def coins_map_view():
                            cat_info=CATEGORIES['coins'])
 
 
+# ── Banknote map geography ──────────────────────────────────────────
+# Modern capital per country key (COUNTRY_KEYS keys plus 'us' /
+# 'colonial-america'). The map pins a note here unless an era override
+# below or the note's own municipality says otherwise.
+BANKNOTE_CAPITALS = {
+    'germany': ('Berlin', 52.52, 13.40),
+    'austria': ('Vienna', 48.21, 16.37),
+    'hungary': ('Budapest', 47.50, 19.04),
+    'great-britain': ('London', 51.51, -0.13),
+    'france': ('Paris', 48.86, 2.35),
+    'italy': ('Rome', 41.90, 12.49),
+    'russia': ('Moscow', 55.76, 37.62),
+    'poland': ('Warsaw', 52.23, 21.01),
+    'greece': ('Athens', 37.98, 23.73),
+    'yugoslavia': ('Belgrade', 44.79, 20.45),
+    'china': ('Beijing', 39.90, 116.40),
+    'japan': ('Tokyo', 35.68, 139.69),
+    'india': ('New Delhi', 28.61, 77.21),
+    'turkey': ('Ankara', 39.93, 32.86),
+    'zimbabwe': ('Harare', -17.83, 31.05),
+    'venezuela': ('Caracas', 10.48, -66.90),
+    'afghanistan': ('Kabul', 34.53, 69.17),
+    'algeria': ('Algiers', 36.75, 3.06),
+    'andorra': ('Andorra la Vella', 42.51, 1.52),
+    'israel': ('Jerusalem', 31.77, 35.21),
+    'belgian-congo': ('Kinshasa', -4.32, 15.31),
+    'jamaica': ('Kingston', 17.97, -76.79),
+    'fiji': ('Suva', -18.14, 178.44),
+    'bermuda': ('Hamilton', 32.29, -64.78),
+    'guyana': ('Georgetown', 6.80, -58.16),
+    'kenya': ('Nairobi', -1.29, 36.82),
+    'somalia': ('Mogadishu', 2.05, 45.32),
+    'djibouti': ('Djibouti City', 11.59, 43.15),
+    'guinea-bissau': ('Bissau', 11.86, -15.60),
+    'mali': ('Bamako', 12.64, -8.00),
+    'egypt': ('Cairo', 30.04, 31.24),
+    'south-africa': ('Pretoria', -25.75, 28.19),
+    'canada': ('Ottawa', 45.42, -75.70),
+    'mexico': ('Mexico City', 19.43, -99.13),
+    'brazil': ('Brasília', -15.79, -47.88),
+    'spain': ('Madrid', 40.42, -3.70),
+    'portugal': ('Lisbon', 38.72, -9.14),
+    'netherlands': ('Amsterdam', 52.37, 4.90),
+    'netherlands-indies': ('Batavia (Jakarta)', -6.18, 106.83),
+    'belgium': ('Brussels', 50.85, 4.35),
+    'czechoslovakia': ('Prague', 50.08, 14.44),
+    'romania': ('Bucharest', 44.43, 26.10),
+    'bulgaria': ('Sofia', 42.70, 23.32),
+    'philippines': ('Manila', 14.60, 120.98),
+    'indochina': ('Hanoi', 21.03, 105.85),
+    'vietnam': ('Hanoi', 21.03, 105.85),
+    'ceylon': ('Colombo', 6.93, 79.86),
+    'malaya': ('Kuala Lumpur', 3.14, 101.69),
+    'maldives': ('Malé', 4.18, 73.51),
+    'morocco': ('Rabat', 34.02, -6.84),
+    'tunisia': ('Tunis', 36.81, 10.18),
+    'iran': ('Tehran', 35.69, 51.39),
+    'iraq': ('Baghdad', 33.31, 44.37),
+    'thailand': ('Bangkok', 13.76, 100.50),
+    'burma': ('Naypyidaw', 19.75, 96.10),
+    'pakistan': ('Islamabad', 33.69, 73.04),
+    'ireland': ('Dublin', 53.35, -6.26),
+    'switzerland': ('Bern', 46.95, 7.45),
+    'sweden': ('Stockholm', 59.33, 18.07),
+    'denmark': ('Copenhagen', 55.68, 12.57),
+    'norway': ('Oslo', 59.91, 10.75),
+    'finland': ('Helsinki', 60.17, 24.94),
+    'australia': ('Canberra', -35.28, 149.13),
+    'new-zealand': ('Wellington', -41.29, 174.78),
+    'cuba': ('Havana', 23.11, -82.37),
+    'argentina': ('Buenos Aires', -34.60, -58.38),
+    'macau': ('Macau', 22.20, 113.55),
+    'laos': ('Vientiane', 17.97, 102.60),
+    'malawi': ('Lilongwe', -13.96, 33.77),
+    'nigeria': ('Abuja', 9.06, 7.49),
+    'ghana': ('Accra', 5.56, -0.19),
+    'zambia': ('Lusaka', -15.39, 28.32),
+    'uganda': ('Kampala', 0.35, 32.58),
+    'tanzania': ('Dodoma', -6.16, 35.75),
+    'ethiopia': ('Addis Ababa', 9.01, 38.75),
+    'mozambique': ('Maputo', -25.97, 32.57),
+    'angola': ('Luanda', -8.84, 13.23),
+    'indonesia': ('Jakarta', -6.18, 106.83),
+    'cambodia': ('Phnom Penh', 11.56, 104.92),
+    'south-korea': ('Seoul', 37.57, 126.98),
+    'taiwan': ('Taipei', 25.03, 121.57),
+    'hong-kong': ('Hong Kong', 22.32, 114.17),
+    'lebanon': ('Beirut', 33.89, 35.50),
+    'syria': ('Damascus', 33.51, 36.29),
+    'jordan': ('Amman', 31.95, 35.93),
+    'saudi-arabia': ('Riyadh', 24.71, 46.68),
+    'kuwait': ('Kuwait City', 29.38, 47.99),
+    'libya': ('Tripoli', 32.89, 13.19),
+    'sudan': ('Khartoum', 15.50, 32.56),
+    'nepal': ('Kathmandu', 27.72, 85.32),
+    'bangladesh': ('Dhaka', 23.81, 90.41),
+    'mongolia': ('Ulaanbaatar', 47.89, 106.91),
+    'colombia': ('Bogotá', 4.71, -74.07),
+    'peru': ('Lima', -12.05, -77.04),
+    'chile': ('Santiago', -33.45, -70.67),
+    'uruguay': ('Montevideo', -34.90, -56.16),
+    'bolivia': ('La Paz', -16.49, -68.13),
+    'paraguay': ('Asunción', -25.26, -57.58),
+    'ecuador': ('Quito', -0.18, -78.47),
+    'guatemala': ('Guatemala City', 14.63, -90.51),
+    'nicaragua': ('Managua', 12.11, -86.24),
+    'el-salvador': ('San Salvador', 13.69, -89.22),
+    'panama': ('Panama City', 8.98, -79.52),
+    'croatia': ('Zagreb', 45.81, 15.98),
+    'slovenia': ('Ljubljana', 46.06, 14.51),
+    'ukraine': ('Kyiv', 50.45, 30.52),
+    'estonia': ('Tallinn', 59.44, 24.75),
+    'latvia': ('Riga', 56.95, 24.11),
+    'lithuania': ('Vilnius', 54.69, 25.28),
+    'iceland': ('Reykjavík', 64.15, -21.94),
+    'malta': ('Valletta', 35.90, 14.51),
+    'cyprus': ('Nicosia', 35.19, 33.38),
+    'luxembourg': ('Luxembourg City', 49.61, 6.13),
+    'colonial-america': ('Philadelphia', 39.95, -75.17),
+    'us': ('Washington, D.C.', 38.91, -77.04),
+    'belize': ('Belmopan', 17.25, -88.77),
+    'cameroon': ('Yaoundé', 3.87, 11.52),
+    'faroe-islands': ('Tórshavn', 62.01, -6.77),
+    'french-west-africa': ('Dakar', 14.69, -17.44),
+    'west-african-states': ('Dakar', 14.69, -17.44),
+    'gibraltar': ('Gibraltar', 36.14, -5.35),
+    'guernsey': ('Saint Peter Port', 49.46, -2.54),
+    'saint-helena': ('Jamestown', -15.93, -5.72),
+    'sao-tome': ('São Tomé', 0.34, 6.73),
+    'sarawak': ('Kuching', 1.55, 110.34),
+    'togo': ('Lomé', 6.13, 1.22),
+    'uzbekistan': ('Tashkent', 41.30, 69.24),
+    'yemen': ('Sanaa', 15.35, 44.21),
+}
+
+# Principal city as of the note's date, where the capital moved.
+# (start, end, city, lat, lng) — first band containing the note's
+# year wins; no year or no band falls through to the modern capital.
+BANKNOTE_CAPITAL_ERAS = {
+    'russia':   ((0, 1917, 'Saint Petersburg', 59.94, 30.31),),
+    'turkey':   ((0, 1922, 'Constantinople (Istanbul)', 41.01, 28.97),),
+    'china':    ((1928, 1949, 'Nanking (Nanjing)', 32.06, 118.80),),
+    'india':    ((0, 1911, 'Calcutta', 22.57, 88.36),),
+    'brazil':   ((0, 1960, 'Rio de Janeiro', -22.91, -43.17),),
+    'burma':    ((0, 2005, 'Rangoon (Yangon)', 16.85, 96.18),),
+    'pakistan': ((0, 1966, 'Karachi', 24.86, 67.01),),
+    'nigeria':  ((0, 1991, 'Lagos', 6.52, 3.38),),
+    'tanzania': ((0, 1995, 'Dar es Salaam', -6.79, 39.21),),
+    'malawi':   ((0, 1974, 'Zomba', -15.39, 35.32),),
+    'belize':   ((0, 1970, 'Belize City', 17.50, -88.19),),
+    'zimbabwe': ((0, 1979, 'Salisbury (Harare)', -17.83, 31.05),),
+    'belgian-congo': ((0, 1966, 'Léopoldville (Kinshasa)', -4.32, 15.31),),
+    'mozambique': ((0, 1975, 'Lourenço Marques (Maputo)', -25.97, 32.57),),
+    'australia': ((0, 1926, 'Melbourne', -37.81, 144.96),),
+}
+
+# Stored country spellings whose seat differs from the country key's —
+# checked before the key lookup so Danzig paper pins at Danzig, not
+# Berlin. Keys are lowercased spellings as they appear in COUNTRY_KEYS.
+BANKNOTE_SPELLING_PINS = {
+    'danzig': ('Danzig (Gdańsk)', 54.35, 18.65),
+    'west germany': ('Bonn', 50.73, 7.10),
+    'federal republic of germany': ('Bonn', 50.73, 7.10),
+    'east germany': ('East Berlin', 52.52, 13.40),
+    'german democratic republic': ('East Berlin', 52.52, 13.40),
+    'south vietnam': ('Saigon (Ho Chi Minh City)', 10.78, 106.70),
+    'straits settlements': ('Singapore', 1.29, 103.85),
+    'scotland': ('Edinburgh', 55.95, -3.19),
+    'northern ireland': ('Belfast', 54.60, -5.93),
+}
+
+
+def _banknote_map_year(series, date_1):
+    """The note's own year, for picking the era's principal city — the
+    first half of _banknote_era_start without the era-band resolution."""
+    year = _series_year(series)
+    if not year:
+        try:
+            year = int(date_1) if date_1 else None
+        except (TypeError, ValueError):
+            year = None
+    return year
+
+
+def _banknote_pin(country, year):
+    """{'city', 'latlng'} for the nation's principal city as of `year`
+    (spelling overrides first, then era bands, then the modern
+    capital), or None when the country resolves to nothing."""
+    raw = (country or '').strip().lower()
+    if not raw:
+        return None
+    base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
+    for candidate in (raw, base):
+        if candidate in BANKNOTE_SPELLING_PINS:
+            city, lat, lng = BANKNOTE_SPELLING_PINS[candidate]
+            return {'city': city, 'latlng': [lat, lng]}
+    key = _country_key(country)
+    if not key or key not in BANKNOTE_CAPITALS:
+        # Generated-history countries: the slug of a modern name often
+        # IS a capitals key ('maldives'); anything else stays None and
+        # the client falls back to geocoding the country string.
+        slug = _country_slug(base)
+        key = slug if slug in BANKNOTE_CAPITALS else None
+    if not key:
+        return None
+    if year:
+        for start, end, city, lat, lng in BANKNOTE_CAPITAL_ERAS.get(key, ()):
+            if start <= year <= end:
+                return {'city': city, 'latlng': [lat, lng]}
+    city, lat, lng = BANKNOTE_CAPITALS[key]
+    return {'city': city, 'latlng': [lat, lng]}
+
+
+@app.route('/banknotes/map')
+def banknotes_map_view():
+    """Distribution map of banknotes, like the coins map.
+
+    Pin priority per note: its own issuing city (the municipality
+    column — notgeld towns), geocoded client-side through
+    /api/geocode-city; else the nation's principal city as of the
+    note's date; else a geocode of the raw country string. Honours the
+    same filter pills the list view uses; no filter falls back to the
+    list's owned-only default.
+    """
+    db = get_db()
+    coin_filter = (request.args.get('filter') or '').strip() or None
+    filters = CATEGORY_FILTERS.get('banknotes', {})
+    if coin_filter and coin_filter in filters:
+        where, params = filters[coin_filter]
+        label = {'us': 'US', 'notgeld': 'Notgeld', 'military': 'Military',
+                 'national': 'National'}.get(
+            coin_filter, coin_filter.replace('_', ' ').title())
+    else:
+        where = f"({_own_status_predicate()} OR TRIM(COALESCE(status,'')) = '')"
+        params = []
+        label = 'Own'
+    rows = db.execute(
+        "SELECT id, banknote_id, country, municipality, denomination, "
+        "series, date_1, date_1_text, issuer "
+        f"FROM banknotes WHERE {where}", params).fetchall()
+    notes = []
+    for r in rows:
+        d = dict(r)
+        d['pin'] = _banknote_pin(
+            d['country'], _banknote_map_year(d['series'], d['date_1']))
+        muni = (d.get('municipality') or '').strip()
+        country = (d.get('country') or '').strip()
+        if muni:
+            d['geo_query'] = ', '.join(p for p in (muni, country) if p)
+        elif not d['pin'] and country:
+            d['geo_query'] = country
+        notes.append(d)
+    return render_template('banknotes_map.html', notes=notes,
+                           filter_label=label,
+                           coin_filter=coin_filter,
+                           current_category='banknotes',
+                           cat_info=CATEGORIES['banknotes'])
+
+
 def _merge_recording_genres(existing_genre, existing_genre_2,
                             new_genre, new_genre_2):
     """Merge lookup-derived genre + sub-genre into the DB values without
