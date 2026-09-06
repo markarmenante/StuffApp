@@ -634,7 +634,7 @@ window.resolveCoinOriginAsync = async function(coin) {
   ].filter(Boolean).filter((q, idx, arr) => arr.indexOf(q) === idx);
 
   const fetchGeocode = async (query) => {
-    const cacheKey = 'coin-origin-geocode:' + query.toLowerCase();
+    const cacheKey = 'coin-origin-geocode:v2:' + query.toLowerCase();
     try {
       const cached = window.localStorage && window.localStorage.getItem(cacheKey);
       if (cached) return JSON.parse(cached);

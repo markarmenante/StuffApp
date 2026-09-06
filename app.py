@@ -17873,10 +17873,15 @@ def geocode_city():
     import urllib.request
     import urllib.error
 
+    # English names throughout (accept-language) plus namedetails, so a
+    # Shanghai note labels its pin "Shanghai", not 上海市; the local name
+    # rides along for the label's tooltip.
     params = urllib.parse.urlencode({
         'format': 'jsonv2',
         'limit': '1',
         'addressdetails': '1',
+        'namedetails': '1',
+        'accept-language': 'en',
         'q': q,
     })
     req = urllib.request.Request(
@@ -17897,10 +17902,20 @@ def geocode_city():
         return jsonify({'error': 'No match'}), 404
 
     address = best.get('address') or {}
-    name = (address.get('city') or address.get('town') or address.get('village')
+    details = best.get('namedetails') or {}
+    name = (details.get('name:en')
+            or address.get('city') or address.get('town') or address.get('village')
             or address.get('municipality') or address.get('county')
             or best.get('name') or q)
+    # A name still in a non-Latin script (accept-language honoured only
+    # partly) falls back to the English name from the details or the query.
+    if not re.search(r'[A-Za-z]', name):
+        q_head = q.split(',')[0].strip()
+        name = details.get('name:en') or (q_head if re.search(r'[A-Za-z]', q_head) else name)
     data = {'name': name, 'latlng': [float(best['lat']), float(best['lon'])]}
+    local = details.get('name')
+    if local and local != name:
+        data['local_name'] = local
     _GEOCODE_CITY_CACHE[key] = data
     return jsonify(data)
 

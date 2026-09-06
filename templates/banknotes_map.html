@@ -43,7 +43,7 @@
   // map uses — only notes with an issuing municipality (or an unknown
   // country) ever hit it; era capitals resolve entirely server-side.
   async function fetchGeocode(query) {
-    const cacheKey = 'banknote-geocode:' + query.toLowerCase();
+    const cacheKey = 'banknote-geocode:v2:' + query.toLowerCase();
     try {
       const cached = window.localStorage && window.localStorage.getItem(cacheKey);
       if (cached) return JSON.parse(cached);

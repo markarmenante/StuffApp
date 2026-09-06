@@ -1787,7 +1787,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Issuing municipality first (localStorage + same-origin geocoder,
     // the same fallback the coin origin map uses), then the era pin.
     if (origin.geo_query) {
-      const cacheKey = 'banknote-geocode:' + origin.geo_query.toLowerCase();
+      const cacheKey = 'banknote-geocode:v2:' + origin.geo_query.toLowerCase();
       let cached = null;
       try {
         const raw = window.localStorage && window.localStorage.getItem(cacheKey);
