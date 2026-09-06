@@ -1880,13 +1880,16 @@ _SERIES_YEAR_RE = re.compile(r'\b(1[6-9]\d\d|20\d\d)\b')
 _SERIES_RANGE_RE = re.compile(r'\s*[-–—]\s*(?:1[6-9]\d\d|20\d\d|\d\d)\b')
 
 
-def _series_year(text):
+def _series_year(text, country=None):
     """Year embedded in a series label, for sorting: 'Series of 1896
-    (Educational Series)' and '1896' both -> 1896. Fractional Currency
-    issue labels ('Fourth Issue') map to the issue's actual start year
-    (1869) — such notes carry the authorizing Act's date (1863), which
-    would file them out of order. Returns None when the series carries
-    no year, so the caller falls back to the note's own date."""
+    (Educational Series)' and '1896' both -> 1896. For US notes only,
+    Fractional Currency issue labels ('Fourth Issue') map to the
+    issue's actual start year (1869) — such notes carry the authorizing
+    Act's date (1863), which would file them out of order. The ordinal
+    mapping is US-only because other issuers number their series the
+    same way: a Greek 'Third Issue (ΕΚΔΟΣΙΣ ΤΡΙΤΗ)' of 1941 is not the
+    1864 fractional issue. Returns None when the series carries no
+    year, so the caller falls back to the note's own date."""
     if not text:
         return None
     s = str(text)
@@ -1899,8 +1902,20 @@ def _series_year(text):
         if _SERIES_RANGE_RE.match(s, m.end()):
             return None
         return int(m.group(1))
+    if country is not None and not _is_us_country(country):
+        return None
     issue = _fractional_issue(text)
     return issue[0] if issue else None
+
+
+def _is_us_country(country):
+    value = (country or '').strip().lower().rstrip('.')
+    return bool(value) and (value in US_COUNTRY_NAMES
+                            or value.startswith('united states'))
+
+
+def _series_year_sql(text, country=None):
+    return _series_year(text, country)
 
 
 # ── US series panels ────────────────────────────────────────────────────
@@ -2385,7 +2400,7 @@ def _series_denoms(note_class, series, year):
     if note_class['name'] == 'Fractional Currency':
         issue = _fractional_issue_for_note(series, year)[1]
         return ', '.join(f'{d}¢' for d in issue[1]) if issue else None
-    base_year = _series_year(series) or year
+    base_year = _series_year(series, 'United States') or year
     denoms = US_SERIES_DENOMS.get((note_class['name'], base_year))
     if not denoms:
         return None
@@ -4766,7 +4781,8 @@ def _note_year(row):
     and the decimalisation boundary rule in _country_era keeps
     old-currency notes out of the new-currency era when that end year
     lands exactly on the changeover."""
-    year = _series_year(_row_get(row, 'series')) or _row_get(row, 'date_1')
+    year = (_series_year(_row_get(row, 'series'), _row_get(row, 'country'))
+            or _row_get(row, 'date_1'))
     if year:
         return year
     for field in ('series', 'date_1_text'):
@@ -4863,7 +4879,7 @@ def _banknote_era_start(country, issuer, series, date_1,
     the note's own year (blanks last) when no era resolves — including
     the US, whose panels are series-based, keeping its ordering
     untouched."""
-    year = _series_year(series)
+    year = _series_year(series, country)
     if not year:
         try:
             year = int(date_1) if date_1 else None
@@ -5111,7 +5127,7 @@ def _configure_db_connection(db):
                        deterministic=True)
     # SERIES_YEAR(series) — the issue-year pulled from a series label, so
     # the note list groups by year regardless of label wording.
-    db.create_function('SERIES_YEAR', 1, _series_year,
+    db.create_function('SERIES_YEAR', -1, _series_year_sql,
                        deterministic=True)
     # US_NOTE_GROUP — within the US, Colonial American issues run first
     # (-1), then federal issues (0), then state and obsolete issues (no
@@ -11714,7 +11730,7 @@ CATEGORY_ORDER_BY = {
                   f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "
                   "COUNTRY_ERA_START(country, issuer, series, date_1, denomination) END ASC, "
                   f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "
-                  "COALESCE(SERIES_YEAR(series), date_1, 99999) END ASC, "
+                  "COALESCE(SERIES_YEAR(series, country), date_1, 99999) END ASC, "
                   f"{_US_EMERGENCY_SQL_CALL} ASC, "
                   "COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
                   f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 'zzz' ELSE "
@@ -14633,7 +14649,8 @@ def detail_view(category, record_id):
             if 'country' in record.keys() else ''
         year = _banknote_map_year(
             record['series'] if 'series' in record.keys() else None,
-            record['date_1'] if 'date_1' in record.keys() else None)
+            record['date_1'] if 'date_1' in record.keys() else None,
+            country)
         pin = _banknote_pin(country, year)
         geo_query = None
         if muni:
@@ -17026,10 +17043,10 @@ def _banknote_state_name(country, year):
     return None
 
 
-def _banknote_map_year(series, date_1):
+def _banknote_map_year(series, date_1, country=None):
     """The note's own year, for picking the era's principal city — the
     first half of _banknote_era_start without the era-band resolution."""
-    year = _series_year(series)
+    year = _series_year(series, country)
     if not year:
         try:
             year = int(date_1) if date_1 else None
@@ -17244,7 +17261,7 @@ def banknotes_map_view():
     for r in rows:
         d = dict(r)
         d['pin'] = _banknote_pin(
-            d['country'], _banknote_map_year(d['series'], d['date_1']))
+            d['country'], _banknote_map_year(d['series'], d['date_1'], d['country']))
         muni = (d.get('municipality') or '').strip()
         country = (d.get('country') or '').strip()
         if muni:
@@ -17653,6 +17670,7 @@ Rules:
 - "from"/"to": the span of years (Gregorian; negative for BC) over which this map holds without a major boundary change. It must include {year}.
 - "features": 4 to 16 GeoJSON Feature objects, each {{"type":"Feature","properties":{{"NAME":"<the polity's name as of {year_label}>"}},"geometry":{{"type":"Polygon","coordinates":[[[lng,lat], ... ]]}}}}. Coordinates are WGS84 [longitude, latitude] decimal degrees; each ring has 12 to 60 vertices and is closed (first point repeated last). Polygons must not overlap and the state at the pin must contain the pin.
 - Name polities as they were called at the time (Kingdom of Sardinia, Province of Quebec, Kingdom of Kongo), not by modern countries. Colonies, protectorates and native polities that held territory each get a polygon; skip areas nobody controlled.
+- If the state at the pin was under occupation or partition in {year_label}, draw the zones as separate polygons named for the occupying power and zone (e.g. "German occupation zone", "Bulgarian-annexed Eastern Macedonia and Thrace", "Italian occupation zone"), and the puppet or rump state where one existed.
 - Draw real boundaries from the historical record — rivers, mountain crests, treaty lines — as closely as a 1:20,000,000 atlas would. Do not simplify a country to a rectangle.
 - No prose outside the JSON."""
 
@@ -17836,7 +17854,11 @@ def era_supplements_for_pin():
     matches = _era_static_matches(year, lat, lng) + _era_db_matches(db, year, lat, lng)
     pending = False
     gap = _era_gap(year)
-    if not matches and gap is not None and gap > ERA_SUPPLEMENT_GAP_YEARS:
+    # An occupation or annexation is a map change the snapshots never
+    # show however fresh they are (1938's Greece for a 1941 note): draw
+    # it regardless of the gap.
+    forced = bool(re.search(r'occup|annex', polity, re.IGNORECASE))
+    if not matches and gap is not None and (gap > ERA_SUPPLEMENT_GAP_YEARS or forced):
         pending = ensure_era_supplement(year, polity, place, lat, lng)
     return jsonify({'supplements': matches, 'snapshot': _era_snapshot(year),
                     'gap': gap, 'pending': pending})
