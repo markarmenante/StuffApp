@@ -17744,8 +17744,12 @@ def generate_era_supplement(year, polity, place, lat, lng):
         year=int(year), year_label=_era_year_label(year),
         place=place or polity or 'the pin', polity=polity or 'unknown',
         lat=lat, lng=lng)
+    # A 12k-token budget trips the SDK's "streaming is required for
+    # operations that may take longer than 10 minutes" guard on a
+    # non-streaming call; an explicit request timeout waives it (this
+    # runs in a background thread, so a long wait costs nobody).
     resp = _anthropic_create(
-        client, model=model, max_tokens=12000,
+        client, model=model, max_tokens=12000, timeout=1500.0,
         tools=[anthropic_web_search_tool(3)],
         messages=[{'role': 'user', 'content': prompt}])
     text = _message_text(resp)
