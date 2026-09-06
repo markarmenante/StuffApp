@@ -5338,6 +5338,16 @@ def init_db():
          'eras TEXT NOT NULL, '
          'source_country TEXT, '
          "created_at TEXT DEFAULT (datetime('now')))"),
+        ('CREATE TABLE IF NOT EXISTS era_supplements ('
+         'id TEXT PRIMARY KEY, '
+         'year_from INTEGER NOT NULL, '
+         'year_to INTEGER NOT NULL, '
+         'south REAL NOT NULL, west REAL NOT NULL, '
+         'north REAL NOT NULL, east REAL NOT NULL, '
+         'polity TEXT, '
+         'geojson TEXT NOT NULL, '
+         'source_note TEXT, '
+         "created_at TEXT DEFAULT (datetime('now')))"),
         ('CREATE TABLE IF NOT EXISTS record_documents ('
          'id TEXT PRIMARY KEY, '
          'category TEXT NOT NULL, '
@@ -14632,6 +14642,7 @@ def detail_view(category, record_id):
             geo_query = country
         banknote_origin = {'pin': pin, 'geo_query': geo_query,
                            'year': year,
+                           'country': country,
                            'state': _banknote_state_name(country, year)}
 
     return render_template('detail.html',
@@ -17598,6 +17609,248 @@ def recording_fetch_notes(record_id):
 
 
 _GEOCODE_CITY_CACHE = {}
+
+
+# ── Era-border supplements ──────────────────────────────────────────────
+#
+# The origin maps draw the world of a coin's or note's year from the
+# historical-basemaps snapshots (coin-geo.js). Those snapshots are a
+# century apart before 1500 and jump 1715 -> 1783 -> 1800 -> 1815 ->
+# 1880 after, so a record can land on a map decades stale. Where the
+# gap is wide and no drawing covers the place, a supplement is drawn
+# once — by hand (static/geo, ERA_STATIC_SUPPLEMENTS) or by Claude on
+# demand (the era_supplements table) — and served over the snapshot
+# from then on. The client asks /api/era-supplements for whatever
+# applies to its pin and year; that call is what triggers a drawing
+# for a newly added record.
+
+ERA_BORDER_YEARS = (
+    -1000, -700, -500, -400, -323, -300, -200, -100, -1,
+    100, 200, 300, 400, 500, 600, 700, 800, 900,
+    1000, 1100, 1200, 1279, 1300, 1400, 1492, 1500, 1530, 1600, 1650,
+    1700, 1715, 1783, 1800, 1815, 1880, 1900, 1914, 1920, 1930, 1938,
+    1945, 1960, 1994, 2000, 2010,
+)
+
+# A snapshot older than this many years is stale enough to draw over.
+ERA_SUPPLEMENT_GAP_YEARS = 40
+
+# Hand-drawn supplements shipped with the app: (year_from, year_to,
+# static path, bbox (south, west, north, east), snapshot names the
+# drawing supersedes).
+ERA_STATIC_SUPPLEMENTS = (
+    (1763, 1775, 'geo/british-america-1763.geojson',
+     (24.0, -95.0, 51.0, -60.0),
+     ('British American colonies', 'Florida (Spain)')),
+)
+
+_ERA_SUPPLEMENT_INFLIGHT = set()
+
+_ERA_SUPPLEMENT_PROMPT = """You are drawing a small historical political map for a coin and banknote collection app. Draw the political boundaries in force in {year_label} around {place} ({lat:.2f}, {lng:.2f}) — the state that issued a coin or note there ({polity}) and its neighbours, out to roughly 1,500 km.
+
+Rules:
+- Reply with ONLY a JSON object: {{"from": <year>, "to": <year>, "precision": "<one sentence on how approximate the drawing is>", "features": [...]}}.
+- "from"/"to": the span of years (Gregorian; negative for BC) over which this map holds without a major boundary change. It must include {year}.
+- "features": 4 to 16 GeoJSON Feature objects, each {{"type":"Feature","properties":{{"NAME":"<the polity's name as of {year_label}>"}},"geometry":{{"type":"Polygon","coordinates":[[[lng,lat], ... ]]}}}}. Coordinates are WGS84 [longitude, latitude] decimal degrees; each ring has 12 to 60 vertices and is closed (first point repeated last). Polygons must not overlap and the state at the pin must contain the pin.
+- Name polities as they were called at the time (Kingdom of Sardinia, Province of Quebec, Kingdom of Kongo), not by modern countries. Colonies, protectorates and native polities that held territory each get a polygon; skip areas nobody controlled.
+- Draw real boundaries from the historical record — rivers, mountain crests, treaty lines — as closely as a 1:20,000,000 atlas would. Do not simplify a country to a rectangle.
+- No prose outside the JSON."""
+
+
+def _era_snapshot(year):
+    """The snapshot year the client will draw for `year` (latest at or
+    before), or None before the first snapshot."""
+    try:
+        y = int(year)
+    except (TypeError, ValueError):
+        return None
+    at_or_before = [s for s in ERA_BORDER_YEARS if s <= y]
+    return max(at_or_before) if at_or_before else None
+
+
+def _era_year_label(year):
+    y = int(year)
+    return f'{abs(y)} BC' if y < 0 else str(y)
+
+
+def _era_supplement_key(year, polity, lat, lng):
+    """One drawing per (snapshot, polity) — a 1870 US dollar and a 1875
+    US cent share the same map. Records with no resolvable polity
+    fall back to a coarse cell around the pin."""
+    snap = _era_snapshot(year)
+    slug = _country_slug(polity) if polity else ''
+    if not slug:
+        slug = f'cell-{round(lat / 5) * 5:+d}-{round(lng / 5) * 5:+d}'
+    return f'{snap}:{slug}'
+
+
+def _era_static_matches(year, lat, lng):
+    out = []
+    for y0, y1, path, (s, w, n, e), replaces in ERA_STATIC_SUPPLEMENTS:
+        if y0 <= year <= y1 and s <= lat <= n and w <= lng <= e:
+            out.append({'url': url_for('static', filename=path),
+                        'from': y0, 'to': y1, 'replaces': list(replaces),
+                        'generated': False})
+    return out
+
+
+def _era_db_matches(db, year, lat, lng):
+    rows = db.execute(
+        "SELECT id, year_from, year_to, south, west, north, east, "
+        "source_note FROM era_supplements "
+        "WHERE year_from <= ? AND year_to >= ? "
+        "AND south <= ? AND north >= ? AND west <= ? AND east >= ?",
+        (year, year, lat, lat, lng, lng)).fetchall()
+    return [{'url': url_for('era_supplement_geojson', supp_id=r['id']),
+             'from': r['year_from'], 'to': r['year_to'], 'replaces': [],
+             'generated': True, 'note': r['source_note']} for r in rows]
+
+
+def _era_gap(year):
+    snap = _era_snapshot(year)
+    return None if snap is None else int(year) - snap
+
+
+def generate_era_supplement(year, polity, place, lat, lng):
+    """One Anthropic call drawing the map around a pin for a year.
+    Returns {'from', 'to', 'precision', 'geojson', 'bbox'}; raises
+    RuntimeError on any failure."""
+    api_key = _require_anthropic_key()
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError('anthropic package not installed.')
+    client = anthropic.Anthropic(api_key=api_key)
+    model = anthropic_lookup_model(api_key, 'ANTHROPIC_ERA_MAP_MODEL')
+    prompt = _ERA_SUPPLEMENT_PROMPT.format(
+        year=int(year), year_label=_era_year_label(year),
+        place=place or polity or 'the pin', polity=polity or 'unknown',
+        lat=lat, lng=lng)
+    resp = _anthropic_create(
+        client, model=model, max_tokens=12000,
+        tools=[anthropic_web_search_tool(3)],
+        messages=[{'role': 'user', 'content': prompt}])
+    text = _message_text(resp)
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if not m:
+        raise RuntimeError(
+            f'no JSON in response (stop={getattr(resp, "stop_reason", "?")}): '
+            f'{text[:120]}')
+    data = json.loads(m.group(0))
+    y0, y1 = int(data['from']), int(data['to'])
+    if not (y0 <= int(year) <= y1) or y1 - y0 > 150:
+        raise RuntimeError(f'bad span {y0}..{y1} for {year}')
+    feats = []
+    south, west, north, east = 90.0, 180.0, -90.0, -180.0
+    for f in data.get('features') or []:
+        g = (f or {}).get('geometry') or {}
+        name = str(((f or {}).get('properties') or {}).get('NAME') or '').strip()
+        if g.get('type') != 'Polygon' or not name:
+            continue
+        rings = []
+        for ring in g.get('coordinates') or []:
+            pts = []
+            for pt in ring:
+                x, y = float(pt[0]), float(pt[1])
+                if not (-180 <= x <= 180 and -90 <= y <= 90):
+                    raise RuntimeError(f'coordinate out of range in {name}')
+                pts.append([round(x, 3), round(y, 3)])
+                south, north = min(south, y), max(north, y)
+                west, east = min(west, x), max(east, x)
+            if len(pts) < 4:
+                continue
+            if pts[0] != pts[-1]:
+                pts.append(pts[0])
+            rings.append(pts)
+        if rings:
+            feats.append({'type': 'Feature',
+                          'properties': {'NAME': name, 'GENERATED': True},
+                          'geometry': {'type': 'Polygon', 'coordinates': rings}})
+    if not (3 <= len(feats) <= 24):
+        raise RuntimeError(f'unusable drawing: {len(feats)} polygons')
+    if not (south <= lat <= north and west <= lng <= east):
+        raise RuntimeError('drawing does not cover the pin')
+    return {'from': y0, 'to': y1,
+            'precision': str(data.get('precision') or '').strip(),
+            'geojson': {'type': 'FeatureCollection', 'features': feats},
+            'bbox': (south, west, north, east)}
+
+
+def _run_era_supplement_job(key, year, polity, place, lat, lng):
+    try:
+        d = generate_era_supplement(year, polity, place, lat, lng)
+        db = open_db_connection()
+        try:
+            db.execute(
+                "INSERT OR REPLACE INTO era_supplements "
+                "(id, year_from, year_to, south, west, north, east, polity, "
+                "geojson, source_note, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (key, d['from'], d['to'], *d['bbox'], polity,
+                 json.dumps(d['geojson'], separators=(',', ':')),
+                 'AI-drawn approximation'
+                 + (f' — {d["precision"]}' if d['precision'] else ''),
+                 datetime.utcnow().isoformat()))
+            db.commit()
+        finally:
+            db.close()
+        print(f'era supplement drawn: {key} ({d["from"]}–{d["to"]}, '
+              f'{len(d["geojson"]["features"])} polities)', flush=True)
+    except Exception as e:
+        print(f'era supplement failed for {key}: {e}', flush=True)
+    finally:
+        with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+            _ERA_SUPPLEMENT_INFLIGHT.discard(key)
+
+
+def ensure_era_supplement(year, polity, place, lat, lng):
+    """Fire-and-forget: draw a supplement for a pin whose nearest
+    snapshot is stale and which no drawing yet covers."""
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        return False
+    key = _era_supplement_key(year, polity, lat, lng)
+    with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+        if key in _ERA_SUPPLEMENT_INFLIGHT:
+            return True
+        _ERA_SUPPLEMENT_INFLIGHT.add(key)
+    threading.Thread(
+        target=_run_era_supplement_job,
+        args=(key, int(year), polity, place, lat, lng), daemon=True).start()
+    return True
+
+
+@app.route('/api/era-supplements')
+def era_supplements_for_pin():
+    """The supplements that apply to a pin and year, static and drawn.
+    When none applies and the nearest snapshot is stale, this is also
+    what commissions a drawing (the first view of a new record)."""
+    try:
+        year = int(request.args.get('year'))
+        lat = float(request.args.get('lat'))
+        lng = float(request.args.get('lng'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'year, lat and lng are required'}), 400
+    polity = (request.args.get('polity') or '').strip()[:160]
+    place = (request.args.get('place') or '').strip()[:160]
+    db = get_db()
+    matches = _era_static_matches(year, lat, lng) + _era_db_matches(db, year, lat, lng)
+    pending = False
+    gap = _era_gap(year)
+    if not matches and gap is not None and gap > ERA_SUPPLEMENT_GAP_YEARS:
+        pending = ensure_era_supplement(year, polity, place, lat, lng)
+    return jsonify({'supplements': matches, 'snapshot': _era_snapshot(year),
+                    'gap': gap, 'pending': pending})
+
+
+@app.route('/geo/era-supplements/<supp_id>.geojson')
+def era_supplement_geojson(supp_id):
+    row = get_db().execute(
+        "SELECT geojson FROM era_supplements WHERE id = ?", (supp_id,)).fetchone()
+    if not row:
+        abort(404)
+    resp = app.response_class(row['geojson'], mimetype='application/geo+json')
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
 
 
 @app.route('/api/geocode-city')

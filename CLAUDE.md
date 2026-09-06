@@ -84,6 +84,29 @@ poetic-peace were fully deleted 2026-08-17. Every push to `main`
 deploys BOTH instances — so batch doc-only commits, and check nobody
 is mid-Check on either before pushing.
 
+## Origin maps and era borders (coins, banknotes)
+
+Both detail pages carry an Origin map (Leaflet; `static/js/coin-geo.js`
+holds the shared geography). Pin rules, per Mark (2026-09-06): coins
+before 1500 pin at the mint, or the region's principal city when the
+mint is uncertain; coins from 1500 on and all banknotes pin at the seat
+of the issuing state as of the year (`_coin_capital`, `_banknote_pin`,
+era-aware). The banknote map also names the issuing state as of the
+year in its own language and English (`BANKNOTE_STATE_NAMES`;
+`country_state_names` for generated ones).
+
+The borders of the record's own year come from the historical-basemaps
+snapshots (jsDelivr, BC included). Where the nearest snapshot is more
+than `ERA_SUPPLEMENT_GAP_YEARS` stale and nothing covers the pin, a
+supplement is drawn once and served over the snapshot from then on:
+hand-drawn ones live in `static/geo/` and are listed in
+`ERA_STATIC_SUPPLEMENTS`; the rest Claude draws on demand into the
+`era_supplements` table, keyed `<snapshot>:<polity slug>`, commissioned
+by the first `/api/era-supplements` call for that pin (i.e. the first
+view of a new record). Generated maps are labelled "AI-drawn
+approximation" in the caption. Generation needs `ANTHROPIC_API_KEY`
+(production has it; the sandbox usually does not).
+
 ## Dev setup
 
 ```bash

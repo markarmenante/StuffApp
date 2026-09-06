@@ -1739,9 +1739,13 @@ document.addEventListener('DOMContentLoaded', function () {
     function loadBorders(latlng) {
       if (bordersLoaded || !origin.year || !window.loadEraBorders) return;
       bordersLoaded = true;
-      window.loadEraBorders(map, origin.year, latlng).then(info => {
+      window.loadEraBorders(map, origin.year, latlng, {
+        polity: origin.state && origin.state.english ? origin.state.english : (origin.country || ''),
+        place: origin.pin ? origin.pin.city : '',
+      }).then(info => {
         if (!info) return;
-        borderNote = ' · borders as of ' + window.eraYearLabel(info.year);
+        borderNote = ' · borders as of ' + window.eraYearLabel(info.year)
+          + (info.generated ? ' (AI-drawn approximation)' : '');
         renderCaption();
       });
     }
@@ -7811,9 +7815,12 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   function loadBorders(latlng) {
     if (bordersLoaded || !hasYear || !window.loadEraBorders) return;
     bordersLoaded = true;
-    window.loadEraBorders(map, coinYear, latlng).then(info => {
+    window.loadEraBorders(map, coinYear, latlng, {
+      polity: polityText, place: originPin ? originPin.getTooltip().getContent() : '',
+    }).then(info => {
       if (!info) return;
-      borderNote = ' · borders as of ' + window.eraYearLabel(info.year);
+      borderNote = ' · borders as of ' + window.eraYearLabel(info.year)
+        + (info.generated ? ' (AI-drawn approximation)' : '');
       renderCaption();
       showPolity(info.name, info.year);
       // Zoom out far enough to show the whole issuing polity and its

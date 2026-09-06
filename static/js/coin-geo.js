@@ -706,39 +706,72 @@ window.geoJsonContains = function(geometry, latlng) {
   if (geometry.type === 'MultiPolygon') return geometry.coordinates.some(inPolygon);
   return false;
 };
+// Rough centre of a Polygon/MultiPolygon: the vertex mean of its
+// largest outer ring (plenty for "is this polity inside that one").
+window.geoJsonCentroid = function(geometry) {
+  if (!geometry) return null;
+  let rings = [];
+  if (geometry.type === 'Polygon') rings = [geometry.coordinates[0]];
+  else if (geometry.type === 'MultiPolygon') rings = geometry.coordinates.map(p => p[0]);
+  rings = rings.filter(r => r && r.length);
+  if (!rings.length) return null;
+  const ring = rings.reduce((a, b) => (b.length > a.length ? b : a));
+  let sx = 0, sy = 0;
+  ring.forEach(([x, y]) => { sx += x; sy += y; });
+  return [sy / ring.length, sx / ring.length];
+};
 // Draw the era's borders on `map`; fill the polity at `latlng` (when
 // given). Resolves to {year, name} or null. Fails silently — the pin is
 // the point of the map.
-// Hand-drawn supplements for spans the world snapshots serve badly:
-// drawn over the snapshot, and their polities replace the snapshot's
-// named ones. British America between the Proclamation of 1763 and
-// Lexington: the thirteen colonies drawn individually, clipped at the
-// Proclamation Line, with the Floridas, Quebec and the Indian Reserve
-// (the world set jumps from 1715 straight to 1783).
-window.ERA_BORDER_SUPPLEMENTS = [
-  {from: 1763, to: 1775, url: '/static/geo/british-america-1763.geojson',
-   replaces: ['British American colonies', 'Florida (Spain)']},
-];
-window.loadEraBorders = function(map, year, latlng) {
+// Supplements for spans the world snapshots serve badly — hand-drawn
+// files shipped with the app (British America 1763–1775) and maps
+// Claude draws on demand when a record's nearest snapshot is decades
+// stale. /api/era-supplements says which apply to this pin and year
+// (and commissions a drawing when none does); their polities are drawn
+// over the snapshot, whose own polities they cover are dropped.
+window.loadEraBorders = function(map, year, latlng, meta) {
   const snap = window.eraBorderSnapshot(year);
   if (snap === null) return Promise.resolve(null);
   const file = snap < 0 ? 'bc' + Math.abs(snap) : String(snap);
   const y = Number(year);
-  const supp = window.ERA_BORDER_SUPPLEMENTS.find(s => y >= s.from && y <= s.to) || null;
   const getJson = (url) => fetch(url).then(res => res.ok ? res.json() : null).catch(() => null);
+  const suppList = latlng
+    ? getJson('/api/era-supplements?year=' + encodeURIComponent(y)
+              + '&lat=' + encodeURIComponent(latlng[0]) + '&lng=' + encodeURIComponent(latlng[1])
+              + '&polity=' + encodeURIComponent((meta && meta.polity) || '')
+              + '&place=' + encodeURIComponent((meta && meta.place) || ''))
+        .then(r => (r && r.supplements) || [])
+    : Promise.resolve([]);
   return Promise.all([
     getJson('https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/world_'
             + file + '.geojson'),
-    supp ? getJson(supp.url) : Promise.resolve(null),
+    suppList.then(list => Promise.all(list.map(sp =>
+      getJson(sp.url).then(gj => gj && gj.features ? Object.assign({}, sp, {gj}) : null)))),
   ])
-    .then(([world, extra]) => {
+    .then(([world, supps]) => {
+      supps = (supps || []).filter(Boolean);
       let gj = world;
-      const fromSupplement = new Set(extra && extra.features ? extra.features : []);
-      if (extra && extra.features) {
-        const drop = new Set((supp.replaces || []).map(n => n.toLowerCase()));
+      const fromSupplement = new Set();
+      let suppFrom = null, generated = false, note = null;
+      if (supps.length) {
+        const extraFeatures = [];
+        const drop = new Set();
+        supps.forEach(sp => {
+          (sp.replaces || []).forEach(n => drop.add(String(n).toLowerCase()));
+          sp.gj.features.forEach(f => { extraFeatures.push(f); fromSupplement.add(f); });
+          suppFrom = suppFrom === null ? sp.from : Math.max(suppFrom, sp.from);
+          if (sp.generated) { generated = true; note = sp.note || note; }
+        });
+        // A snapshot polity whose centre falls inside a supplement
+        // polygon is what the drawing supersedes.
+        const covered = (f) => {
+          const c = window.geoJsonCentroid(f.geometry);
+          return c && extraFeatures.some(e => !(e.properties && e.properties.LINE)
+                                             && window.geoJsonContains(e.geometry, c));
+        };
         const kept = (world && world.features || []).filter(f =>
-          !drop.has(((f.properties || {}).NAME || '').trim().toLowerCase()));
-        gj = {type: 'FeatureCollection', features: extra.features.concat(kept)};
+          !drop.has(((f.properties || {}).NAME || '').trim().toLowerCase()) && !covered(f));
+        gj = {type: 'FeatureCollection', features: extraFeatures.concat(kept)};
       }
       if (!gj) return null;
       let home = null;
@@ -821,8 +854,9 @@ window.loadEraBorders = function(map, year, latlng) {
       }
       // A supplement is drawn for its own span: report its start year,
       // not the older world snapshot underneath it.
-      const shownYear = (extra && extra.features) ? Math.max(snap, supp.from) : snap;
-      return {year: shownYear, name: name || null, bounds: bounds && bounds.isValid() ? bounds : null};
+      const shownYear = suppFrom !== null ? Math.max(snap, suppFrom) : snap;
+      return {year: shownYear, name: name || null, generated, note,
+              bounds: bounds && bounds.isValid() ? bounds : null};
     })
     .catch(() => null);
 };
