@@ -14418,15 +14418,18 @@ def detail_view(category, record_id):
             if 'municipality' in record.keys() else ''
         country = (record['country'] or '').strip() \
             if 'country' in record.keys() else ''
-        pin = _banknote_pin(country, _banknote_map_year(
+        year = _banknote_map_year(
             record['series'] if 'series' in record.keys() else None,
-            record['date_1'] if 'date_1' in record.keys() else None))
+            record['date_1'] if 'date_1' in record.keys() else None)
+        pin = _banknote_pin(country, year)
         geo_query = None
         if muni:
             geo_query = ', '.join(p for p in (muni, country) if p)
         elif not pin and country:
             geo_query = country
-        banknote_origin = {'pin': pin, 'geo_query': geo_query}
+        banknote_origin = {'pin': pin, 'geo_query': geo_query,
+                           'year': year,
+                           'boundary_year': _nearest_boundary_year(year)}
 
     return render_template('detail.html',
                            category=category,
@@ -15872,7 +15875,11 @@ BANKNOTE_CAPITAL_ERAS = {
     'burma':    ((0, 2005, 'Rangoon (Yangon)', 16.85, 96.18),),
     'pakistan': ((0, 1966, 'Karachi', 24.86, 67.01),),
     'nigeria':  ((0, 1991, 'Lagos', 6.52, 3.38),),
-    'tanzania': ((0, 1995, 'Dar es Salaam', -6.79, 39.21),),
+    # German East Africa's seat moved to Tabora for 1916 as the British
+    # advanced on Dar es Salaam — the famous Tabora emergency issues
+    # were printed there that year.
+    'tanzania': ((1916, 1916, 'Tabora', -5.02, 32.83),
+                 (0, 1995, 'Dar es Salaam', -6.79, 39.21)),
     'malawi':   ((0, 1974, 'Zomba', -15.39, 35.32),),
     'belize':   ((0, 1970, 'Belize City', 17.50, -88.19),),
     'zimbabwe': ((0, 1979, 'Salisbury (Harare)', -17.83, 31.05),),
@@ -15884,6 +15891,16 @@ BANKNOTE_CAPITAL_ERAS = {
 # Stored country spellings whose seat differs from the country key's —
 # checked before the key lookup so Danzig paper pins at Danzig, not
 # Berlin. Keys are lowercased spellings as they appear in COUNTRY_KEYS.
+# Map-only country aliases: historical territories COUNTRY_KEYS does
+# not fold (folding there would change NATION_NAME and reorder the
+# banknote list, which needs a display-number migration). Only the map
+# pin resolution consults these.
+BANKNOTE_MAP_COUNTRY_ALIASES = {
+    'german east africa': 'tanzania',
+    'deutsch-ostafrika': 'tanzania',
+    'deutsch ostafrika': 'tanzania',
+}
+
 BANKNOTE_SPELLING_PINS = {
     'danzig': ('Danzig (Gdańsk)', 54.35, 18.65),
     'west germany': ('Bonn', 50.73, 7.10),
@@ -15895,6 +15912,28 @@ BANKNOTE_SPELLING_PINS = {
     'scotland': ('Edinburgh', 55.95, -3.19),
     'northern ireland': ('Belfast', 54.60, -5.93),
 }
+
+
+# Border-snapshot years available in the historical-basemaps dataset
+# (github.com/aourednik/historical-basemaps, served via jsDelivr with
+# open CORS). The detail origin map overlays the snapshot nearest the
+# note's year so the note sits inside the borders of its own time.
+BANKNOTE_BOUNDARY_YEARS = (1000, 1100, 1200, 1279, 1300, 1400, 1492,
+                           1500, 1530, 1600, 1650, 1700, 1715, 1783,
+                           1800, 1815, 1880, 1900, 1914, 1920, 1930,
+                           1938, 1945, 1960, 1994, 2000, 2010)
+
+
+def _nearest_boundary_year(year):
+    """The latest border snapshot at or before the note's year — the
+    world as it stood when the note was issued. A 1916 note gets 1914's
+    borders, a 1978 note 1960's (not 1994's, which would show
+    Yugoslavia already broken up). Years before the earliest snapshot
+    get no overlay."""
+    if not year:
+        return None
+    at_or_before = [y for y in BANKNOTE_BOUNDARY_YEARS if y <= year]
+    return max(at_or_before) if at_or_before else None
 
 
 def _banknote_map_year(series, date_1):
@@ -15917,11 +15956,14 @@ def _banknote_pin(country, year):
     if not raw:
         return None
     base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
+    key = None
     for candidate in (raw, base):
         if candidate in BANKNOTE_SPELLING_PINS:
             city, lat, lng = BANKNOTE_SPELLING_PINS[candidate]
             return {'city': city, 'latlng': [lat, lng]}
-    key = _country_key(country)
+        if key is None and candidate in BANKNOTE_MAP_COUNTRY_ALIASES:
+            key = BANKNOTE_MAP_COUNTRY_ALIASES[candidate]
+    key = key or _country_key(country)
     if not key or key not in BANKNOTE_CAPITALS:
         # Generated-history countries: the slug of a modern name often
         # IS a capitals key ('maldives'); anything else stays None and

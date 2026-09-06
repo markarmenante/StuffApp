@@ -1689,6 +1689,34 @@ document.addEventListener('DOMContentLoaded', function () {
       maxZoom: 16,
     }).addTo(map);
 
+    // The border note rides along on whatever the caption says, so an
+    // async borders load can't be clobbered by a later pin caption.
+    let captionBase = caption ? caption.textContent : '';
+    let borderNote = '';
+    function renderCaption() { if (caption) caption.textContent = captionBase + borderNote; }
+    function setCaption(text) { captionBase = text; renderCaption(); }
+
+    // Historical borders: overlay the snapshot nearest the note's year
+    // (aourednik/historical-basemaps via jsDelivr, open CORS) so the
+    // note sits inside the boundaries of its own time — a 1916 German
+    // East Africa note gets the 1914 map. Fails silently; the pin is
+    // the point of the map.
+    if (origin.boundary_year) {
+      fetch('https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/world_'
+            + origin.boundary_year + '.geojson')
+        .then(res => res.ok ? res.json() : null)
+        .then(gj => {
+          if (!gj) return;
+          L.geoJSON(gj, {
+            style: {color: '#8a6d3b', weight: 1, opacity: 0.6, fill: false},
+            interactive: false,
+          }).addTo(map);
+          borderNote = ' · borders as of ' + origin.boundary_year;
+          renderCaption();
+        })
+        .catch(() => {});
+    }
+
     let originView = null;
     function settleView() {
       if (!originView) return;
@@ -1709,15 +1737,15 @@ document.addEventListener('DOMContentLoaded', function () {
       requestAnimationFrame(settleView);
       setTimeout(settleView, 80);
       setTimeout(settleView, 300);
-      if (caption) caption.textContent = 'Origin pinpointed: ' + name + ' (drag to reposition; use + / − to zoom)';
+      setCaption('Origin pinpointed: ' + name + ' (drag to reposition; use + / − to zoom)');
     }
     window.addEventListener('load', settleView, {once: true});
     window.addEventListener('pageshow', settleView);
 
     function fallbackToPin() {
       if (origin.pin) place(origin.pin.city, origin.pin.latlng);
-      else if (caption) caption.textContent =
-        'World origin map — add a country (or issuing town) to pinpoint this note.';
+      else setCaption(
+        'World origin map — add a country (or issuing town) to pinpoint this note.');
     }
 
     // Issuing municipality first (localStorage + same-origin geocoder,
@@ -1732,7 +1760,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (cached && cached.latlng) {
         place(cached.name, cached.latlng);
       } else {
-        if (caption) caption.textContent = 'Locating issuing city: ' + origin.geo_query + '…';
+        setCaption('Locating issuing city: ' + origin.geo_query + '…');
         fetch('/api/geocode-city?q=' + encodeURIComponent(origin.geo_query),
               {headers: {'Accept': 'application/json'}})
           .then(res => res.ok ? res.json() : null)
