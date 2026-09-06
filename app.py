@@ -17655,10 +17655,23 @@ ERA_SUPPLEMENT_GAP_YEARS = 40
 # Hand-drawn supplements shipped with the app: (year_from, year_to,
 # static path, bbox (south, west, north, east), snapshot names the
 # drawing supersedes).
+_NA_BOX = (14.0, -170.0, 84.0, -50.0)
 ERA_STATIC_SUPPLEMENTS = (
     (1763, 1775, 'geo/british-america-1763.geojson',
      (24.0, -95.0, 51.0, -60.0),
      ('British American colonies', 'Florida (Spain)')),
+    # North America 1783–1879 by acquisition: the republic east of the
+    # Mississippi, then the Louisiana Purchase, Florida, Texas, Oregon,
+    # the Mexican Cession, the Confederacy, Alaska and the Dominion —
+    # the world snapshots jump 1783 -> 1800 -> 1815 -> 1880 here.
+    (1783, 1802, 'geo/north-america-1783.geojson', _NA_BOX, ()),
+    (1803, 1818, 'geo/north-america-1803.geojson', _NA_BOX, ()),
+    (1819, 1835, 'geo/north-america-1819.geojson', _NA_BOX, ()),
+    (1836, 1844, 'geo/north-america-1836.geojson', _NA_BOX, ()),
+    (1845, 1847, 'geo/north-america-1845.geojson', _NA_BOX, ()),
+    (1848, 1860, 'geo/north-america-1848.geojson', _NA_BOX, ()),
+    (1861, 1865, 'geo/north-america-1861.geojson', _NA_BOX, ()),
+    (1866, 1879, 'geo/north-america-1866.geojson', _NA_BOX, ()),
 )
 
 _ERA_SUPPLEMENT_INFLIGHT = set()

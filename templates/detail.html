@@ -1747,14 +1747,21 @@ document.addEventListener('DOMContentLoaded', function () {
         borderNote = ' · borders as of ' + window.eraYearLabel(info.year)
           + (info.generated ? ' (AI-drawn approximation)' : '');
         renderCaption();
+        // Zoom out to take the whole issuing state in (never below 3,
+        // never tighter than the pin zoom), pin kept centred.
+        if (info.bounds && originView) {
+          const fit = map.getBoundsZoom(info.bounds, false, L.point(40, 40));
+          const z = Math.max(3, Math.min(viewZoom, fit));
+          if (z !== viewZoom) { viewZoom = z; settleView(); }
+        }
       });
     }
 
-    let originView = null;
+    let originView = null, viewZoom = 5;
     function settleView() {
       if (!originView) return;
       map.invalidateSize({pan: false});
-      map.setView(originView, 5, {animate: false});
+      map.setView(originView, viewZoom, {animate: false});
     }
     function place(name, latlng) {
       const pin = L.marker(latlng, {
