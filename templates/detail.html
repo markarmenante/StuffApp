@@ -1656,6 +1656,108 @@ document.addEventListener('DOMContentLoaded', function () {
   {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
 
+  {# Origin map, like the coin detail page: pinned at the note's
+     issuing city when it names one (municipality — notgeld towns),
+     otherwise at the nation's principal city as of the note's date
+     (see _banknote_pin in app.py). #}
+  {% if not is_new and banknote_origin %}
+  <!-- Origin map -->
+  <div class="section-bar">Origin</div>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <div class="coin-map-panel">
+    <div id="banknoteMap" class="coin-map"></div>
+    <div class="coin-map-caption" id="banknoteMapCaption">
+      World origin map — locating this note's origin…
+    </div>
+  </div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script id="banknoteOriginData" type="application/json">{{ banknote_origin|tojson }}</script>
+  <script>
+  (function banknoteOriginMap() {
+    if (typeof L === 'undefined') return;
+    const mapEl = document.getElementById('banknoteMap');
+    if (!mapEl) return;
+    const caption = document.getElementById('banknoteMapCaption');
+    const origin = JSON.parse(document.getElementById('banknoteOriginData').textContent || '{}');
+
+    const map = L.map(mapEl, {
+      center: [25.0, 10.0], zoom: 2, minZoom: 2, maxZoom: 12,
+      scrollWheelZoom: false, dragging: true, worldCopyJump: true,
+    });
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles © Esri — Esri, DeLorme, NAVTEQ',
+      maxZoom: 16,
+    }).addTo(map);
+
+    let originView = null;
+    function settleView() {
+      if (!originView) return;
+      map.invalidateSize({pan: false});
+      map.setView(originView, 5, {animate: false});
+    }
+    function place(name, latlng) {
+      const pin = L.marker(latlng, {
+        icon: L.divIcon({className: 'coin-origin-pin', iconSize: [14,14], iconAnchor: [7,7]}),
+        zIndexOffset: 1000,
+      }).addTo(map);
+      pin.bindTooltip(name, {
+        permanent: true, direction: 'right', offset: [8,0],
+        className: 'coin-city-label coin-origin-label',
+      });
+      originView = latlng;
+      settleView();
+      requestAnimationFrame(settleView);
+      setTimeout(settleView, 80);
+      setTimeout(settleView, 300);
+      if (caption) caption.textContent = 'Origin pinpointed: ' + name + ' (drag to reposition; use + / − to zoom)';
+    }
+    window.addEventListener('load', settleView, {once: true});
+    window.addEventListener('pageshow', settleView);
+
+    function fallbackToPin() {
+      if (origin.pin) place(origin.pin.city, origin.pin.latlng);
+      else if (caption) caption.textContent =
+        'World origin map — add a country (or issuing town) to pinpoint this note.';
+    }
+
+    // Issuing municipality first (localStorage + same-origin geocoder,
+    // the same fallback the coin origin map uses), then the era pin.
+    if (origin.geo_query) {
+      const cacheKey = 'banknote-geocode:' + origin.geo_query.toLowerCase();
+      let cached = null;
+      try {
+        const raw = window.localStorage && window.localStorage.getItem(cacheKey);
+        if (raw) cached = JSON.parse(raw);
+      } catch (_) {}
+      if (cached && cached.latlng) {
+        place(cached.name, cached.latlng);
+      } else {
+        if (caption) caption.textContent = 'Locating issuing city: ' + origin.geo_query + '…';
+        fetch('/api/geocode-city?q=' + encodeURIComponent(origin.geo_query),
+              {headers: {'Accept': 'application/json'}})
+          .then(res => res.ok ? res.json() : null)
+          .then(hit => {
+            if (hit && hit.latlng &&
+                Number.isFinite(Number(hit.latlng[0])) &&
+                Number.isFinite(Number(hit.latlng[1]))) {
+              hit.latlng = [Number(hit.latlng[0]), Number(hit.latlng[1])];
+              try {
+                if (window.localStorage) window.localStorage.setItem(cacheKey, JSON.stringify(hit));
+              } catch (_) {}
+              place(hit.name, hit.latlng);
+            } else {
+              fallbackToPin();
+            }
+          })
+          .catch(fallbackToPin);
+      }
+    } else {
+      fallbackToPin();
+    }
+  })();
+  </script>
+  {% endif %}
+
   <!-- Bottom -->
   <div class="detail-bottom">
     <div class="bottom-cell">

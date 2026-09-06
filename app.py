@@ -14408,6 +14408,25 @@ def detail_view(category, record_id):
         person_medications_by_position = _person_medications_by_position(
             db, record_id,
         )
+    # Banknote origin map (detail page, like the coin origin map):
+    # the era-aware capital pin resolves server-side; a note with its
+    # own issuing municipality gets a geocode query the client tries
+    # first, falling back to the pin.
+    banknote_origin = None
+    if category == 'banknotes':
+        muni = (record['municipality'] or '').strip() \
+            if 'municipality' in record.keys() else ''
+        country = (record['country'] or '').strip() \
+            if 'country' in record.keys() else ''
+        pin = _banknote_pin(country, _banknote_map_year(
+            record['series'] if 'series' in record.keys() else None,
+            record['date_1'] if 'date_1' in record.keys() else None))
+        geo_query = None
+        if muni:
+            geo_query = ', '.join(p for p in (muni, country) if p)
+        elif not pin and country:
+            geo_query = country
+        banknote_origin = {'pin': pin, 'geo_query': geo_query}
 
     return render_template('detail.html',
                            category=category,
@@ -14433,6 +14452,7 @@ def detail_view(category, record_id):
                            watch_service_has_open_return=watch_service_has_open_return,
                            record_documents_by_set=record_documents_by_set,
                            person_medications_by_position=person_medications_by_position,
+                           banknote_origin=banknote_origin,
                            today_iso=None,
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=current_vlists(category),
