@@ -3670,6 +3670,18 @@ input[type="date"] { -webkit-appearance: none; }
   font-size: 10.5px; color: var(--text-secondary, #666);
   margin-top: 3px; letter-spacing: 0.02em;
 }
+/* Era-border overlay: names of the neighbouring polities. */
+.leaflet-tooltip.coin-era-label {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: #8a6d3b; opacity: 0.85;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff;
+  white-space: nowrap; pointer-events: none;
+}
+.leaflet-tooltip.coin-era-label::before { display: none !important; }
 
 /* ── Coins distribution map page ── */
 .coins-map-wrap {

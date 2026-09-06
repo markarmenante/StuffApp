@@ -14433,6 +14433,21 @@ def detail_view(category, record_id):
     if category in ('coins', 'banknotes') and record['date_1'] is not None:
         coin_age_val = coin_age(record['date_1'])
 
+    # Coin origin map: issues from 1500 on pin at the issuing state's
+    # capital as of the coin's year (see _coin_capital); earlier issues
+    # pin at the mint and use this only when the mint won't resolve.
+    coin_capital = None
+    if category == 'coins':
+        try:
+            coin_year = int(record['date_1']) if record['date_1'] not in (None, '') else None
+        except (TypeError, ValueError):
+            coin_year = None
+        if coin_year is not None:
+            coin_capital = _coin_capital(
+                record['region'] if 'region' in record.keys() else None,
+                record['authority'] if 'authority' in record.keys() else None,
+                coin_year)
+
     property_topics = None
     if category == 'properties':
         property_topics = db.execute(
@@ -14617,7 +14632,6 @@ def detail_view(category, record_id):
             geo_query = country
         banknote_origin = {'pin': pin, 'geo_query': geo_query,
                            'year': year,
-                           'boundary_year': _nearest_boundary_year(year),
                            'state': _banknote_state_name(country, year)}
 
     return render_template('detail.html',
@@ -14633,6 +14647,7 @@ def detail_view(category, record_id):
                            next_id=next_id,
                            hertz=hertz,
                            coin_age_val=coin_age_val,
+                           coin_capital=coin_capital,
                            property_topics=property_topics,
                            camera_compatible_lenses=camera_compatible_lenses,
                            property_pill_categories=property_pill_categories,
@@ -16056,6 +16071,13 @@ BANKNOTE_CAPITALS = {
 # (start, end, city, lat, lng) — first band containing the note's
 # year wins; no year or no band falls through to the modern capital.
 BANKNOTE_CAPITAL_ERAS = {
+    # Federal seat before Washington: New York under the Confederation
+    # Congress and the first federal Congress, Philadelphia in between
+    # and until 1800 — where the early US Mint coins were struck too.
+    'us':       ((1785, 1790, 'New York', 40.71, -74.01),
+                 (0, 1800, 'Philadelphia', 39.95, -75.17)),
+    'japan':    ((0, 1867, 'Edo (Tokyo)', 35.68, 139.69),),
+    'germany':  ((1949, 1990, 'Bonn', 50.73, 7.10),),
     'russia':   ((0, 1917, 'Saint Petersburg', 59.94, 30.31),),
     'turkey':   ((0, 1922, 'Constantinople (Istanbul)', 41.01, 28.97),),
     'china':    ((1928, 1949, 'Nanking (Nanjing)', 32.06, 118.80),),
@@ -16101,17 +16123,6 @@ BANKNOTE_SPELLING_PINS = {
     'scotland': ('Edinburgh', 55.95, -3.19),
     'northern ireland': ('Belfast', 54.60, -5.93),
 }
-
-
-# Border-snapshot years available in the historical-basemaps dataset
-# (github.com/aourednik/historical-basemaps, served via jsDelivr with
-# open CORS). The detail origin map overlays the snapshot nearest the
-# note's year so the note sits inside the borders of its own time.
-BANKNOTE_BOUNDARY_YEARS = (1000, 1100, 1200, 1279, 1300, 1400, 1492,
-                           1500, 1530, 1600, 1650, 1700, 1715, 1783,
-                           1800, 1815, 1880, 1900, 1914, 1920, 1930,
-                           1938, 1945, 1960, 1994, 2000, 2010)
-
 
 # ── Banknote state names ────────────────────────────────────────────
 # The polity a note was issued under, as of its year: (start, end,
@@ -17004,18 +17015,6 @@ def _banknote_state_name(country, year):
     return None
 
 
-def _nearest_boundary_year(year):
-    """The latest border snapshot at or before the note's year — the
-    world as it stood when the note was issued. A 1916 note gets 1914's
-    borders, a 1978 note 1960's (not 1994's, which would show
-    Yugoslavia already broken up). Years before the earliest snapshot
-    get no overlay."""
-    if not year:
-        return None
-    at_or_before = [y for y in BANKNOTE_BOUNDARY_YEARS if y <= year]
-    return max(at_or_before) if at_or_before else None
-
-
 def _banknote_map_year(series, date_1):
     """The note's own year, for picking the era's principal city — the
     first half of _banknote_era_start without the era-band resolution."""
@@ -17058,6 +17057,149 @@ def _banknote_pin(country, year):
                 return {'city': city, 'latlng': [lat, lng]}
     city, lat, lng = BANKNOTE_CAPITALS[key]
     return {'city': city, 'latlng': [lat, lng]}
+
+
+# ── Coin origin: capital of the issuing polity (post-1500 issues) ─────
+# Coins struck after 1500 pin at the seat of the state that issued
+# them, not at the mint — a 1936 East African shilling struck at
+# Heaton's in Birmingham belongs on the map at Nairobi. Region
+# spellings the banknote tables don't know (colonies, dependencies,
+# German and Italian states) resolve here first; bands are
+# (start, end, city, lat, lng), end 0 = open, first match wins.
+COIN_CAPITAL_OVERRIDES = {
+    'virginia': ((0, 1779, 'Williamsburg', 37.27, -76.71),
+                 (1780, 0, 'Richmond', 37.54, -77.44)),
+    'massachusetts': ((0, 0, 'Boston', 42.36, -71.06),),
+    'demerara and essequibo': ((0, 0, 'Stabroek (Georgetown)', 6.80, -58.16),),
+    'hawaii': ((0, 0, 'Honolulu', 21.31, -157.86),),
+    'kingdom of hawaii': ((0, 0, 'Honolulu', 21.31, -157.86),),
+    'newfoundland': ((0, 0, "St. John's", 47.56, -52.71),),
+    'british north borneo': ((0, 1946, 'Sandakan', 5.84, 118.12),
+                             (1947, 0, 'Jesselton (Kota Kinabalu)', 5.98, 116.07)),
+    'north borneo': ((0, 1946, 'Sandakan', 5.84, 118.12),
+                     (1947, 0, 'Jesselton (Kota Kinabalu)', 5.98, 116.07)),
+    'eritrea': ((0, 1896, 'Massawa', 15.61, 39.45),
+                (1897, 0, 'Asmara', 15.34, 38.93)),
+    'san marino': ((0, 0, 'San Marino', 43.94, 12.45),),
+    'liechtenstein': ((0, 0, 'Vaduz', 47.14, 9.52),),
+    'reunion': ((0, 0, 'Saint-Denis', -20.88, 55.45),),
+    'réunion': ((0, 0, 'Saint-Denis', -20.88, 55.45),),
+    'new caledonia': ((0, 0, 'Nouméa', -22.28, 166.46),),
+    'french new caledonia': ((0, 0, 'Nouméa', -22.28, 166.46),),
+    'netherlands antilles': ((0, 0, 'Willemstad', 12.11, -68.93),),
+    'new hebrides': ((0, 0, 'Port Vila', -17.73, 168.32),),
+    'french polynesia': ((0, 0, 'Papeete', -17.54, -149.57),),
+    'singapore': ((0, 0, 'Singapore', 1.29, 103.85),),
+    'british west africa': ((0, 0, 'Lagos', 6.52, 3.38),),
+    'rhodesia and nyasaland': ((0, 0, 'Salisbury (Harare)', -17.83, 31.05),),
+    'brunswick-wolfenbuttel': ((0, 0, 'Wolfenbüttel', 52.16, 10.54),),
+    'brunswick-wolfenbüttel': ((0, 0, 'Wolfenbüttel', 52.16, 10.54),),
+    'brunswick': ((0, 0, 'Braunschweig', 52.27, 10.52),),
+    'saxony': ((0, 0, 'Dresden', 51.05, 13.74),),
+    'electorate of saxony': ((0, 0, 'Dresden', 51.05, 13.74),),
+    'bavaria': ((0, 0, 'Munich', 48.14, 11.58),),
+    'prussia': ((0, 0, 'Berlin', 52.52, 13.40),),
+    'kingdom of bohemia': ((0, 0, 'Prague', 50.08, 14.44),),
+    'bohemia': ((0, 0, 'Prague', 50.08, 14.44),),
+    'mughal empire': ((0, 1647, 'Agra', 27.18, 78.01),
+                      (1648, 0, 'Shahjahanabad (Delhi)', 28.66, 77.23)),
+    'india, mughal empire': ((0, 1647, 'Agra', 27.18, 78.01),
+                             (1648, 0, 'Shahjahanabad (Delhi)', 28.66, 77.23)),
+    'napoleonic kingdom of italy': ((0, 0, 'Milan', 45.46, 9.19),),
+    'kingdom of italy (napoleonic)': ((0, 0, 'Milan', 45.46, 9.19),),
+    'kingdom of naples': ((0, 0, 'Naples', 40.85, 14.27),),
+    'kingdom of the two sicilies': ((0, 0, 'Naples', 40.85, 14.27),),
+    'kingdom of sicily': ((0, 0, 'Palermo', 38.12, 13.36),),
+    'papal states': ((0, 0, 'Rome', 41.90, 12.49),),
+    'sardinia': ((0, 0, 'Turin', 45.07, 7.69),),
+    'kingdom of sardinia': ((0, 0, 'Turin', 45.07, 7.69),),
+    'duchy of parma': ((0, 0, 'Parma', 44.80, 10.33),),
+    'parma': ((0, 0, 'Parma', 44.80, 10.33),),
+    'duchy of modena': ((0, 0, 'Modena', 44.65, 10.93),),
+    'grand duchy of tuscany': ((0, 0, 'Florence', 43.77, 11.26),),
+    'tuscany': ((0, 0, 'Florence', 43.77, 11.26),),
+    'republic of venice': ((0, 0, 'Venice', 45.44, 12.33),),
+    'venice': ((0, 0, 'Venice', 45.44, 12.33),),
+    'republic of genoa': ((0, 0, 'Genoa', 44.41, 8.93),),
+    'duchy of milan': ((0, 0, 'Milan', 45.46, 9.19),),
+    'duchy of savoy': ((0, 0, 'Turin', 45.07, 7.69),),
+    'austria hungary': ((0, 0, 'Vienna', 48.21, 16.37),),
+    'holy roman empire': ((0, 0, 'Vienna', 48.21, 16.37),),
+    'ottoman empire': ((0, 0, 'Constantinople (Istanbul)', 41.01, 28.97),),
+    'castile': ((0, 0, 'Toledo', 39.86, -4.02),),
+    'kingdom of castile and leon': ((0, 0, 'Toledo', 39.86, -4.02),),
+    'spain, kingdom of castile and leon': ((0, 0, 'Toledo', 39.86, -4.02),),
+    'scotland': ((0, 0, 'Edinburgh', 55.95, -3.19),),
+    'ireland': ((0, 0, 'Dublin', 53.35, -6.26),),
+    'northern ireland': ((0, 0, 'Belfast', 54.60, -5.93),),
+    'east africa': ((0, 0, 'Nairobi', -1.29, 36.82),),
+    'british east africa': ((0, 0, 'Nairobi', -1.29, 36.82),),
+    'gold coast': ((0, 0, 'Accra', 5.56, -0.19),),
+    'ceylon': ((0, 0, 'Colombo', 6.93, 79.86),),
+    'hong kong': ((0, 0, 'Victoria (Hong Kong)', 22.28, 114.16),),
+    'straits settlements': ((0, 0, 'Singapore', 1.29, 103.85),),
+    'malaya': ((0, 0, 'Kuala Lumpur', 3.14, 101.69),),
+    'french indochina': ((0, 1901, 'Saigon', 10.78, 106.70),
+                         (1902, 0, 'Hanoi', 21.03, 105.85)),
+    'indochina': ((0, 1901, 'Saigon', 10.78, 106.70),
+                  (1902, 0, 'Hanoi', 21.03, 105.85)),
+    'philippines': ((0, 0, 'Manila', 14.60, 120.98),),
+    'china republic': ((0, 1927, 'Peking (Beijing)', 39.90, 116.40),
+                       (1928, 1949, 'Nanking (Nanjing)', 32.06, 118.80),
+                       (1950, 0, 'Beijing', 39.90, 116.40)),
+    'republic of china': ((0, 1927, 'Peking (Beijing)', 39.90, 116.40),
+                          (1928, 1949, 'Nanking (Nanjing)', 32.06, 118.80),
+                          (1950, 0, 'Taipei', 25.03, 121.57)),
+    'canada': ((0, 1865, 'Quebec City', 46.81, -71.21),
+               (1866, 0, 'Ottawa', 45.42, -75.70)),
+}
+
+
+def _coin_capital(region, authority, year):
+    """{'city', 'latlng', 'polity'} — the seat of the state that issued
+    a post-1500 coin, as of `year`: the region spelling through the
+    coin overrides, then the banknote capital tables (era-aware), then
+    the authority the same way. None when nothing resolves; the client
+    then falls back to its own place tables and a geocode."""
+    def lookup(text):
+        raw = (text or '').strip().lower().rstrip('.')
+        if not raw:
+            return None
+        base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
+        for candidate in (raw, base):
+            bands = COIN_CAPITAL_OVERRIDES.get(candidate)
+            if bands:
+                for start, end, city, lat, lng in bands:
+                    if (not year or start <= year) and (not end or not year or year <= end):
+                        return {'city': city, 'latlng': [lat, lng]}
+        # "Spain, Kingdom of Castile and Leon" / "India (British India)":
+        # the qualifier names the polity; try it on its own too.
+        parts = [p.strip() for p in re.split(r'[,(]', raw) if p.strip(' )')]
+        for part in parts[1:] if len(parts) > 1 else ():
+            hit = COIN_CAPITAL_OVERRIDES.get(part.strip(' )'))
+            if hit:
+                for start, end, city, lat, lng in hit:
+                    if (not year or start <= year) and (not end or not year or year <= end):
+                        return {'city': city, 'latlng': [lat, lng]}
+        # "Maria Luigia, Duchess of Parma" / "Elector of Saxony" /
+        # "Spain, Kingdom of Castile": the polity is named inside the
+        # text. Longest override key wins, ahead of the country tables
+        # so Castile's seat beats modern Madrid.
+        words = ' ' + re.sub(r'[^a-z0-9]+', ' ', raw) + ' '
+        for key in sorted(COIN_CAPITAL_OVERRIDES, key=len, reverse=True):
+            if len(key) >= 5 and ' ' + key + ' ' in words:
+                for start, end, city, lat, lng in COIN_CAPITAL_OVERRIDES[key]:
+                    if (not year or start <= year) and (not end or not year or year <= end):
+                        return {'city': city, 'latlng': [lat, lng]}
+        return _banknote_pin(text, year)
+
+    for label, text in (('region', region), ('authority', authority)):
+        hit = lookup(text)
+        if hit:
+            hit['polity'] = (text or '').strip()
+            hit['source'] = label
+            return hit
+    return None
 
 
 @app.route('/banknotes/map')

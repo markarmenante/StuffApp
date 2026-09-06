@@ -60,6 +60,13 @@ window.COIN_CITIES = {
   'Lissus':[41.95,19.65], 'Scodra':[42.07,19.51],
   'Pharos':[43.17,16.45], 'Issa':[43.05,16.17],
   'Byllis':[40.53,19.74],
+  // ── Principal cities the region fallback lands on ──
+  'Ctesiphon':[33.09,44.58], 'Xanthos':[36.36,29.32],
+  'Maroneia':[40.87,25.52], 'Abdera':[40.94,24.98],
+  'Chersonesos':[40.40,26.60], 'Entella':[37.79,13.03],
+  'Aegae':[40.48,22.32], 'Sicyon':[37.98,22.72],
+  'Lampsacus':[40.35,26.70], 'Carystus':[38.02,24.42],
+  'Stobi':[41.55,21.98], 'Segesta':[37.94,12.83],
 };
 
 window.COIN_REGIONS = {
@@ -68,17 +75,17 @@ window.COIN_REGIONS = {
   'Achaia':[38.10,21.95], 'Elis':[37.64,21.63], 'Phocis':[38.48,22.50],
   'Locris':[38.50,22.70], 'Euboea':[38.50,23.80],
   'Macedonia':[40.76,22.52], 'Macedon':[40.76,22.52],
-  'Thessaly':[39.50,22.30], 'Epirus':[39.70,20.85], 'Thrace':[41.50,26.00],
+  'Thessaly':[39.64,22.42], 'Epirus':[39.70,20.85], 'Thrace':[40.87,25.52],
   'Aetolia':[38.50,21.50], 'Acarnania':[38.85,20.90],
   'Mysia':[39.13,27.18], 'Lydia':[38.49,28.04], 'Ionia':[37.94,27.34],
-  'Caria':[37.04,27.43], 'Lycia':[36.30,29.80], 'Pamphylia':[36.94,31.17],
-  'Cilicia':[37.00,35.30], 'Bithynia':[40.40,30.00], 'Pontus':[42.03,35.16],
+  'Caria':[37.04,27.43], 'Lycia':[36.36,29.32], 'Pamphylia':[36.94,31.17],
+  'Cilicia':[36.92,34.90], 'Bithynia':[40.40,30.00], 'Pontus':[42.03,35.16],
   'Cappadocia':[38.70,35.50], 'Phrygia':[39.30,30.50],
   'Troas':[39.80,26.30], 'Aeolis':[39.00,26.80],
   'Phoenicia':[33.27,35.20], 'Syria':[36.20,36.16],
   'Judaea':[31.78,35.22], 'Arabia':[30.32,35.44],
   'Egypt':[31.20,29.92], 'Cyrenaica':[32.82,21.86],
-  'Sicily':[37.60,14.00], 'Magna Graecia':[40.47,17.24],
+  'Sicily':[37.07,15.29], 'Magna Graecia':[40.47,17.24],
   'Crete':[35.30,25.17], 'Cyclades':[37.00,25.00], 'Cyprus':[35.00,33.20],
   'Italy':[41.90,12.49], 'Etruria':[42.50,11.50], 'Latium':[41.90,12.49],
   'Campania':[40.85,14.26], 'Apulia':[41.10,16.50], 'Lucania':[40.21,16.66],
@@ -88,21 +95,21 @@ window.COIN_REGIONS = {
   'Roman Republic':[41.90,12.49], 'Roman Empire':[41.90,12.49],
   'Roman Provincial':[41.90,12.49],
   'Byzantine Empire':[41.01,28.97], 'Byzantine':[41.01,28.97],
-  'Parthian Empire':[33.10,44.40], 'Parthian':[33.10,44.40],
+  'Parthian Empire':[33.09,44.58], 'Parthian':[33.09,44.58],
   'Sasanian Empire':[32.60,51.70], 'Sasanian':[32.60,51.70],
   'Achaemenid Empire':[29.95,52.89], 'Achaemenid':[29.95,52.89],
   'Kingdom of Macedon':[40.76,22.52],
   'Kingdom of Pergamon':[39.13,27.18], 'Attalid':[39.13,27.18],
   'Kingdom of Bactria':[36.76,66.90], 'Bactria':[36.76,66.90],
   'Bactrian Kingdom':[36.76,66.90], 'Greco-Bactrian Kingdom':[36.76,66.90],
-  'Indo-Greek Kingdom':[34.20,71.50], 'Indo-Greek':[34.20,71.50],
-  'Indo-Skythian':[34.20,71.50], 'Indo-Scythian':[34.20,71.50],
-  'Gandhara':[34.20,71.50], 'Arachosia':[32.10,65.50],
+  'Indo-Greek Kingdom':[33.74,72.82], 'Indo-Greek':[33.74,72.82],
+  'Indo-Skythian':[33.74,72.82], 'Indo-Scythian':[33.74,72.82],
+  'Gandhara':[33.74,72.82], 'Arachosia':[32.10,65.50],
   'Sogdiana':[39.50,67.00], 'Margiana':[37.80,62.30],
-  'Parthia':[33.10,44.40], 'Persia':[32.00,53.00],
+  'Parthia':[33.09,44.58], 'Persia':[32.00,53.00],
   'Persis':[29.98,52.92], 'Elymais':[32.19,48.26],
   'Characene':[30.50,47.80], 'Media':[35.70,49.00],
-  'Mesopotamia':[33.00,44.00], 'Commagene':[37.50,38.00],
+  'Mesopotamia':[33.09,44.52], 'Commagene':[37.50,38.00],
   'Osrhoene':[37.15,38.79],
   'Persia, Achamaenid Empire':[29.95,52.89],
   'Pontos':[42.03,35.16],
@@ -111,6 +118,23 @@ window.COIN_REGIONS = {
   'Kingdom of Cappadocia':[38.70,35.50],
   'Illyria':[41.50,20.00], 'Illyricum':[41.50,20.00],
   'Dalmatia':[43.50,16.60],
+  'Macedon (Roman Province)':[40.64,22.94], 'Roman Macedonia':[40.64,22.94],
+  'Macedonia (Roman Province)':[40.64,22.94],
+  'Thraco-Macedonian':[40.78,24.71], 'Thraco-Macedonian Region':[40.78,24.71],
+  'Paeonia':[41.55,21.98], 'Paionia':[41.55,21.98],
+  'Baktrian Kingdom':[36.76,66.90], 'Baktria':[36.76,66.90],
+  'Seleukid Empire':[36.20,36.16], 'Seleukid':[36.20,36.16],
+  'Celtic Gaul':[46.93,4.04], 'Gaul':[46.93,4.04], 'Celtic':[46.93,4.04],
+  'Carpathian Region':[47.00,25.00], 'Dacia':[45.62,23.31],
+  'Siculo-Punic':[37.79,13.03],
+};
+
+// Region -> principal city, for regions whose pin sits on a city that
+// COIN_CITIES doesn't also list under those exact coordinates. (Where
+// the coordinates match a city, resolveCoinOrigin finds it itself.)
+window.COIN_REGION_PRINCIPAL = {
+  'Celtic Gaul': 'Bibracte', 'Gaul': 'Bibracte', 'Celtic': 'Bibracte',
+  'Dacia': 'Sarmizegetusa',
 };
 
 // Greek transliteration → canonical Latinized city name in COIN_CITIES.
@@ -532,7 +556,16 @@ window.resolveCoinOrigin = function(coin) {
   const byRegion = (s) => {
     if (!s) return null;
     const key = Object.keys(regions).find(k => k.toLowerCase() === s.toLowerCase());
-    return key ? {name: key, latlng: regions[key]} : null;
+    if (!key) return null;
+    const latlng = regions[key];
+    // A region pin is a principal city: name it, keep the region.
+    const principal = (window.COIN_REGION_PRINCIPAL || {})[key]
+      || Object.keys(cities).find(c =>
+           cities[c][0] === latlng[0] && cities[c][1] === latlng[1]);
+    if (principal && principal !== key) {
+      return {name: principal, latlng, region: key, principal: true};
+    }
+    return {name: key, latlng, region: key};
   };
   const byFuzzyCity = (s) => {
     if (!s) return null;
@@ -544,6 +577,14 @@ window.resolveCoinOrigin = function(coin) {
     });
     return hit ? {name: hit, latlng: cities[hit]} : null;
   };
+  if (coin.ancientOnly) {
+    // Ancient/medieval tables only — no modern capitals standing in
+    // for a Hellenistic kingdom.
+    return byCity(effectiveMint)
+        || byCity(region) || byCity(authority)
+        || byRegion(region) || byRegion(authority)
+        || byFuzzyCity(effectiveMint) || byFuzzyCity(region) || byFuzzyCity(authority);
+  }
   return byCity(effectiveMint) || byWorldPlace(effectiveMint)
       || byCity(region) || byCity(authority)
       || byRegion(region) || byRegion(authority)
@@ -622,4 +663,107 @@ window.resolveCoinOriginAsync = async function(coin) {
   } catch (_) {
     return local || null;
   }
+};
+
+// ── Era borders: the world as it stood in the coin's or note's year ──
+// Snapshot years available in aourednik/historical-basemaps (served via
+// jsDelivr, open CORS); negative = BC. The latest snapshot at or before
+// the year is drawn, the polity containing the pin is filled and named.
+window.ERA_BORDER_YEARS = [
+  -1000, -700, -500, -400, -323, -300, -200, -100, -1,
+  100, 200, 300, 400, 500, 600, 700, 800, 900,
+  1000, 1100, 1200, 1279, 1300, 1400, 1492, 1500, 1530, 1600, 1650,
+  1700, 1715, 1783, 1800, 1815, 1880, 1900, 1914, 1920, 1930, 1938,
+  1945, 1960, 1994, 2000, 2010,
+];
+window.eraBorderSnapshot = function(year) {
+  const y = Number(year);
+  if (!Number.isFinite(y)) return null;
+  let best = null;
+  for (const s of window.ERA_BORDER_YEARS) if (s <= y) best = s;
+  return best;
+};
+window.eraYearLabel = function(y) {
+  return y < 0 ? Math.abs(y) + ' BC' : String(y);
+};
+// Ray-casting point-in-polygon over a GeoJSON Polygon/MultiPolygon.
+window.geoJsonContains = function(geometry, latlng) {
+  const [lat, lng] = latlng;
+  const inRing = (ring) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      const hit = ((yi > lat) !== (yj > lat))
+        && (lng < (xj - xi) * (lat - yi) / ((yj - yi) || 1e-12) + xi);
+      if (hit) inside = !inside;
+    }
+    return inside;
+  };
+  const inPolygon = (poly) => poly.length > 0 && inRing(poly[0])
+    && !poly.slice(1).some(inRing);
+  if (!geometry) return false;
+  if (geometry.type === 'Polygon') return inPolygon(geometry.coordinates);
+  if (geometry.type === 'MultiPolygon') return geometry.coordinates.some(inPolygon);
+  return false;
+};
+// Draw the era's borders on `map`; fill the polity at `latlng` (when
+// given). Resolves to {year, name} or null. Fails silently — the pin is
+// the point of the map.
+window.loadEraBorders = function(map, year, latlng) {
+  const snap = window.eraBorderSnapshot(year);
+  if (snap === null) return Promise.resolve(null);
+  const file = snap < 0 ? 'bc' + Math.abs(snap) : String(snap);
+  return fetch('https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/world_'
+               + file + '.geojson')
+    .then(res => res.ok ? res.json() : null)
+    .then(gj => {
+      if (!gj) return null;
+      let home = null;
+      if (latlng) {
+        home = (gj.features || []).find(f => window.geoJsonContains(f.geometry, latlng)) || null;
+      }
+      const layer = L.geoJSON(gj, {
+        style: (f) => f === home
+          ? {color: '#8a6d3b', weight: 1.6, opacity: 0.85, fillColor: '#8a6d3b', fillOpacity: 0.14}
+          : {color: '#8a6d3b', weight: 1, opacity: 0.6, fill: false},
+        interactive: false,
+      }).addTo(map);
+      // Name the neighbours: the polities nearest the pin get a label
+      // at their centre, so an Alexander tetradrachm shows Macedon
+      // beside Thrace, Epirus and the Persian satrapies of its day.
+      if (latlng) {
+        const pin = L.latLng(latlng[0], latlng[1]);
+        const near = [];
+        layer.eachLayer(l => {
+          const f = l.feature;
+          const nm = f && f.properties && (f.properties.NAME || '').trim();
+          if (!nm || f === home || !l.getBounds) return;
+          const b = l.getBounds();
+          if (!b.isValid()) return;
+          let c;
+          try { c = l.getCenter(); } catch (_) { c = b.getCenter(); }
+          if (!c) return;
+          if (Math.abs(c.lat - pin.lat) > 14 || Math.abs(c.lng - pin.lng) > 22) return;
+          // Archaeological-culture and hunter-gatherer areas aren't
+          // neighbouring states; skip them.
+          if (/culture|hunter|gatherer|nomad|peoples|uninhabited|unclaimed/i.test(nm)) return;
+          near.push({name: nm, center: c, d: pin.distanceTo(c)});
+        });
+        near.sort((a, b) => a.d - b.d);
+        const seen = new Set();
+        near.filter(n => !seen.has(n.name) && seen.add(n.name)).slice(0, 14).forEach(n => {
+          L.tooltip({
+            permanent: true, direction: 'center', className: 'coin-era-label',
+            interactive: false, opacity: 1,
+          }).setLatLng(n.center).setContent(n.name).addTo(map);
+        });
+      }
+      const name = home && home.properties && (home.properties.NAME || '').trim();
+      let bounds = null;
+      if (home) {
+        layer.eachLayer(l => { if (l.feature === home && l.getBounds) bounds = l.getBounds(); });
+      }
+      return {year: snap, name: name || null, bounds: bounds && bounds.isValid() ? bounds : null};
+    })
+    .catch(() => null);
 };

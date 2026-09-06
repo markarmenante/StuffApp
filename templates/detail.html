@@ -1226,6 +1226,8 @@ document.addEventListener('DOMContentLoaded', function () {
        data-region="{{ val('region') }}"
        data-authority="{{ val('authority') }}"
        data-mint="{{ val('mint') }}"
+       data-year="{{ _d1 if _d1 not in (None, '') else '' }}"
+       data-capital='{{ (coin_capital|tojson) if coin_capital else "" }}'
        data-ancient="{{ '1' if _is_ancient_coin else '0' }}">
     <div id="coinMap" class="coin-map"></div>
     <div class="coin-map-caption" id="coinMapCaption">
@@ -1671,6 +1673,8 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  {# loadEraBorders (the era-border overlay) lives with the coin geography. #}
+  <script src="{{ url_for('static', filename='js/coin-geo.js') }}?v={{ asset_v('js/coin-geo.js') }}"></script>
   <script id="banknoteOriginData" type="application/json">{{ banknote_origin|tojson }}</script>
   <script>
   (function banknoteOriginMap() {
@@ -1727,25 +1731,19 @@ document.addEventListener('DOMContentLoaded', function () {
     function renderCaption() { if (caption) caption.textContent = captionBase + borderNote; }
     function setCaption(text) { captionBase = text; renderCaption(); }
 
-    // Historical borders: overlay the snapshot nearest the note's year
-    // (aourednik/historical-basemaps via jsDelivr, open CORS) so the
-    // note sits inside the boundaries of its own time — a 1916 German
-    // East Africa note gets the 1914 map. Fails silently; the pin is
-    // the point of the map.
-    if (origin.boundary_year) {
-      fetch('https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/world_'
-            + origin.boundary_year + '.geojson')
-        .then(res => res.ok ? res.json() : null)
-        .then(gj => {
-          if (!gj) return;
-          L.geoJSON(gj, {
-            style: {color: '#8a6d3b', weight: 1, opacity: 0.6, fill: false},
-            interactive: false,
-          }).addTo(map);
-          borderNote = ' · borders as of ' + origin.boundary_year;
-          renderCaption();
-        })
-        .catch(() => {});
+    // Historical borders: the snapshot nearest the note's year (shared
+    // loadEraBorders in coin-geo.js), with the issuing state's own
+    // polygon filled — a 1916 German East Africa note sits inside the
+    // 1914 colony. Loads once the pin is placed; fails silently.
+    let bordersLoaded = false;
+    function loadBorders(latlng) {
+      if (bordersLoaded || !origin.year || !window.loadEraBorders) return;
+      bordersLoaded = true;
+      window.loadEraBorders(map, origin.year, latlng).then(info => {
+        if (!info) return;
+        borderNote = ' · borders as of ' + window.eraYearLabel(info.year);
+        renderCaption();
+      });
     }
 
     let originView = null;
@@ -1769,14 +1767,17 @@ document.addEventListener('DOMContentLoaded', function () {
       setTimeout(settleView, 80);
       setTimeout(settleView, 300);
       setCaption('Origin pinpointed: ' + name + ' (drag to reposition; use + / − to zoom)');
+      loadBorders(latlng);
     }
     window.addEventListener('load', settleView, {once: true});
     window.addEventListener('pageshow', settleView);
 
     function fallbackToPin() {
       if (origin.pin) place(origin.pin.city, origin.pin.latlng);
-      else setCaption(
-        'World origin map — add a country (or issuing town) to pinpoint this note.');
+      else {
+        setCaption('World origin map — add a country (or issuing town) to pinpoint this note.');
+        loadBorders(null);
+      }
     }
 
     // Issuing municipality first (localStorage + same-origin geocoder,
@@ -7216,8 +7217,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 </script>
 
 {% if category in ('coins', 'banknotes') %}
-{# Banknotes reuse the coin Check/lookup JS below; the Leaflet map and
-   geo layer stay coins-only (the map init guards on the elements). #}
+{# Banknotes reuse the coin Check/lookup JS below; the coin map init
+   guards on its elements. (The banknote map loads Leaflet and
+   coin-geo.js itself, up in its Origin section.) #}
 {% if category == 'coins' %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="{{ url_for('static', filename='js/coin-geo.js') }}?v={{ asset_v('js/coin-geo.js') }}"></script>
@@ -7776,7 +7778,59 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     setTimeout(settleOriginView, 300);
   }
 
-  function placeOrigin(origin, zoomOverride) {
+  // The caption carries the pin's story; the era-border note (loaded
+  // async) rides along so neither clobbers the other.
+  let captionBase = '';
+  let borderNote = '';
+  function renderCaption() { if (caption) caption.textContent = captionBase + borderNote; }
+  function setCaption(text) { captionBase = text; renderCaption(); }
+
+  // Corner box naming the polity the pin sits in, read off the era
+  // borders once they load (the coin's issuing kingdom or empire).
+  let polityBox = null;
+  function showPolity(name, year) {
+    if (!name) return;
+    if (polityBox) map.removeControl(polityBox);
+    const Box = L.Control.extend({
+      onAdd: function () {
+        const el = L.DomUtil.create('div', 'coin-map-state');
+        const head = L.DomUtil.create('div', 'coin-map-state-native', el);
+        head.textContent = name;
+        const yr = L.DomUtil.create('div', 'coin-map-state-year', el);
+        yr.textContent = 'borders as of ' + window.eraYearLabel(year);
+        L.DomEvent.disableClickPropagation(el);
+        return el;
+      },
+    });
+    polityBox = new Box({position: 'topright'}).addTo(map);
+  }
+
+  const coinYear = Number(panel2.dataset.year);
+  const hasYear = Number.isFinite(coinYear) && panel2.dataset.year !== '';
+  let bordersLoaded = false;
+  function loadBorders(latlng) {
+    if (bordersLoaded || !hasYear || !window.loadEraBorders) return;
+    bordersLoaded = true;
+    window.loadEraBorders(map, coinYear, latlng).then(info => {
+      if (!info) return;
+      borderNote = ' · borders as of ' + window.eraYearLabel(info.year);
+      renderCaption();
+      showPolity(info.name, info.year);
+      // Zoom out far enough to show the whole issuing polity and its
+      // neighbours (never below 4, never tighter than the pin zoom),
+      // keeping the pin centred.
+      if (info.bounds && originView) {
+        const fit = map.getBoundsZoom(info.bounds, false, L.point(40, 40));
+        const z = Math.max(4, Math.min(originView.zoom, fit));
+        if (z !== originView.zoom) {
+          originView = {latlng: originView.latlng, zoom: z};
+          settleOriginView();
+        }
+      }
+    });
+  }
+
+  function placeOrigin(origin, zoomOverride, story) {
     if (!origin) return false;
     const [lat, lng] = origin.latlng;
     if (originPin) map.removeLayer(originPin);
@@ -7789,35 +7843,50 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       permanent: true, direction: 'right', offset: [8,0],
       className: 'coin-city-label coin-origin-label',
     });
-    // If this origin city also has a background city-dot, remove its label
-    // (redundant with the origin label) and mark it so zoom-toggle leaves it.
-    const dup = cityMarkers[origin.name.toLowerCase()];
-    if (dup && dup.marker) {
-      dup.marker._isOrigin = true;
-      dup.marker.unbindTooltip();
-    }
+    // If this origin city also has a background city-dot (same name, or
+    // an alias at the same spot — Baktra/Balkh), drop its label
+    // (redundant with the origin label) and mark it so zoom-toggle
+    // leaves it alone.
+    Object.values(cityMarkers).forEach(({name, latlng, marker}) => {
+      const same = name.toLowerCase() === origin.name.toLowerCase()
+        || (Math.abs(latlng[0] - lat) < 0.02 && Math.abs(latlng[1] - lng) < 0.02);
+      if (same && marker) {
+        marker._isOrigin = true;
+        marker.unbindTooltip();
+      }
+    });
     originView = {latlng: [lat, lng], zoom: zoomOverride || (isAncientMap ? 7 : 5)};
     settleOriginView();
     scheduleOriginSettle();
-    if (caption) caption.textContent = 'Origin pinpointed: ' + origin.name + ' (drag to reposition; use + / − to zoom)';
+    setCaption((story || ('Origin pinpointed: ' + origin.name))
+               + ' (drag to reposition; use + / − to zoom)');
     applyLabelZoom();
+    loadBorders([lat, lng]);
     return true;
   }
 
   window.addEventListener('load', scheduleOriginSettle, {once: true});
   window.addEventListener('pageshow', scheduleOriginSettle);
 
-  // Pinpoint origin: prefer Mint, then Region, then Authority
   const originInput = {
     mint: panel2.dataset.mint, region: panel2.dataset.region,
     authority: panel2.dataset.authority,
     ancient: isAncientMap,
   };
+  const mintText = (originInput.mint || '').trim();
+  const polityText = (originInput.region || originInput.authority || '').trim();
   const fallbackOrigin = () => window.resolveCoinOrigin({
     mint: '',
     region: originInput.region,
     authority: originInput.authority,
     ancient: originInput.ancient,
+  });
+  // Pre-1500 fallback when the mint won't resolve: the ancient tables'
+  // principal city, then the issuing state's seat (server), then the
+  // modern place tables as a last resort.
+  const ancientFallback = () => window.resolveCoinOrigin({
+    mint: '', region: originInput.region, authority: originInput.authority,
+    ancient: originInput.ancient, ancientOnly: true,
   });
   const mintOrigin = window.resolveCoinOrigin({
     mint: originInput.mint,
@@ -7825,21 +7894,84 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     authority: '',
     ancient: originInput.ancient,
   });
+  // A region/authority hit is a principal city standing in for an
+  // uncertain mint — say so.
+  const regionStory = (hit) => {
+    if (!hit) return null;
+    if (hit.principal) {
+      return 'Mint uncertain — ' + hit.name + ', principal city of ' + hit.region;
+    }
+    if (hit.region) return 'Mint uncertain — ' + hit.region;
+    return 'Origin pinpointed: ' + hit.name;
+  };
+  const mintedAt = mintText ? ' · minted at ' + mintText : '';
 
-  if (placeOrigin(mintOrigin)) {
-    // Mint hit: done. This keeps modern mint cities ahead of country fallbacks.
-  } else if (!isAncientMap && originInput.mint && window.resolveCoinOriginAsync) {
-    if (caption) caption.textContent = 'Locating mint city: ' + originInput.mint + '…';
-    window.resolveCoinOriginAsync(originInput).then(hit => {
-      if (!placeOrigin(hit)) placeOrigin(fallbackOrigin());
-    }).catch(() => {
-      placeOrigin(fallbackOrigin());
-    });
-  } else if (!placeOrigin(window.resolveCoinOrigin(originInput))) {
-    if (caption) {
-      caption.textContent = isAncientMap
-        ? 'Ancient Greek & Mediterranean cities — drag to reposition; use + / − to zoom.'
-        : 'World origin map — add a recognizable mint, region, or authority to pinpoint this issue.';
+  // Issues from 1500 on pin at the issuing state's capital as of the
+  // coin's year (a 1936 East African shilling struck at Heaton's sits
+  // at Nairobi, not Birmingham); everything earlier pins at the mint,
+  // or at the region's principal city when the mint is uncertain.
+  let capital = null;
+  try { capital = panel2.dataset.capital ? JSON.parse(panel2.dataset.capital) : null; } catch (_) {}
+  const capitalStory = (city) =>
+    'Capital of ' + (polityText || 'the issuing state')
+    + (hasYear ? ' as of ' + window.eraYearLabel(coinYear) : '')
+    + ': ' + city + mintedAt;
+
+  if (hasYear && coinYear >= 1500) {
+    if (capital && capital.latlng) {
+      placeOrigin({name: capital.city, latlng: capital.latlng}, null,
+                  capitalStory(capital.city));
+    } else {
+      // No server-side capital: the client's own place tables know
+      // most countries' seats; failing that, geocode the polity.
+      const local = fallbackOrigin();
+      if (local) {
+        placeOrigin(local, null, capitalStory(local.name));
+      } else if (polityText && window.resolveCoinOriginAsync) {
+        setCaption('Locating capital of ' + polityText + '…');
+        window.resolveCoinOriginAsync({mint: polityText, region: '', authority: '', ancient: false})
+          .then(hit => {
+            if (!placeOrigin(hit, null, hit && capitalStory(hit.name))) {
+              placeOrigin(mintOrigin, null, mintOrigin && 'Minted at ' + mintOrigin.name);
+            }
+          })
+          .catch(() => placeOrigin(mintOrigin, null, mintOrigin && 'Minted at ' + mintOrigin.name));
+      } else if (!placeOrigin(mintOrigin, null, mintOrigin && 'Minted at ' + mintOrigin.name)) {
+        setCaption('World origin map — add a region or authority to pinpoint this issue.');
+      }
+    }
+  } else if (placeOrigin(mintOrigin, null, mintOrigin && 'Minted at ' + mintOrigin.name)) {
+    // Mint hit: done.
+  } else {
+    const seatStory = (city) => 'Mint ' + (mintText ? 'unresolved' : 'uncertain')
+      + ' — ' + city + ', seat of ' + (polityText || 'the issuing state')
+      + (hasYear ? ' as of ' + window.eraYearLabel(coinYear) : '');
+    const placeFallback = () => {
+      const anc = ancientFallback();
+      if (placeOrigin(anc, null, regionStory(anc))) return;
+      if (capital && capital.latlng
+          && placeOrigin({name: capital.city, latlng: capital.latlng}, null,
+                         seatStory(capital.city))) return;
+      const fb = fallbackOrigin();
+      if (!placeOrigin(fb, null, regionStory(fb))) {
+        setCaption(isAncientMap
+          ? 'Ancient Greek & Mediterranean cities — drag to reposition; use + / − to zoom.'
+          : 'World origin map — add a recognizable mint, region, or authority to pinpoint this issue.');
+        loadBorders(null);
+      }
+    };
+    if (!isAncientMap && mintText && window.resolveCoinOriginAsync) {
+      // Medieval/early-modern mint the tables don't know: geocode it
+      // alone (the region-aware helper would hand back a modern
+      // capital labelled as the mint).
+      setCaption('Locating mint city: ' + mintText + '…');
+      window.resolveCoinOriginAsync({mint: mintText, region: '', authority: '', ancient: false})
+        .then(hit => {
+          if (!placeOrigin(hit, null, hit && 'Minted at ' + hit.name)) placeFallback();
+        })
+        .catch(placeFallback);
+    } else {
+      placeFallback();
     }
   }
   applyLabelZoom();
