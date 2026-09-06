@@ -721,6 +721,25 @@ window.loadEraBorders = function(map, year, latlng) {
       let home = null;
       if (latlng) {
         home = (gj.features || []).find(f => window.geoJsonContains(f.geometry, latlng)) || null;
+        // Coastal seats (Williamsburg, Tabora's Dar es Salaam neighbours)
+        // fall just outside a coarsely drawn shoreline: take the nearest
+        // polity within ~120 km instead of leaving the pin stateless.
+        if (!home) {
+          const pin = L.latLng(latlng[0], latlng[1]);
+          let best = null, bestD = 120000;
+          (gj.features || []).forEach(f => {
+            const g = f.geometry;
+            if (!g || !f.properties || !(f.properties.NAME || '').trim()) return;
+            const polys = g.type === 'Polygon' ? [g.coordinates]
+              : g.type === 'MultiPolygon' ? g.coordinates : [];
+            polys.forEach(poly => (poly[0] || []).forEach(([x, y]) => {
+              if (Math.abs(y - pin.lat) > 2 || Math.abs(x - pin.lng) > 2) return;
+              const d = pin.distanceTo(L.latLng(y, x));
+              if (d < bestD) { bestD = d; best = f; }
+            }));
+          });
+          home = best;
+        }
       }
       const layer = L.geoJSON(gj, {
         style: (f) => f === home
