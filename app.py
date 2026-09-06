@@ -4480,6 +4480,7 @@ def ensure_country_history(country_name):
     key."""
     if not os.environ.get('ANTHROPIC_API_KEY'):
         return
+    ensure_state_names(country_name)
     slug = _country_history_slug(country_name)
     if not slug:
         return
@@ -4513,6 +4514,14 @@ def _backfill_country_histories():
         return
     for row in rows:
         name = (row['country'] or '').strip()
+        state_key = _state_names_key(name)
+        if state_key:
+            with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+                fresh = state_key not in _STATE_NAMES_INFLIGHT
+                if fresh:
+                    _STATE_NAMES_INFLIGHT.add(state_key)
+            if fresh:
+                _run_state_names_job(name, state_key)
         slug = _country_history_slug(name)
         if not slug:
             continue
@@ -4521,6 +4530,180 @@ def _backfill_country_histories():
                 continue
             _COUNTRY_HISTORY_INFLIGHT.add(slug)
         _run_country_history_job(name, slug)
+
+
+# ── Generated state names ───────────────────────────────────────────────
+#
+# BANKNOTE_STATE_NAMES (below, beside the map geography) names the
+# polity per era for the built-in countries. A country outside that
+# table gets its bands generated once by Claude, stored in the
+# country_state_names table, and served by the origin map from then on
+# — the same shape as the generated histories above.
+
+_STATE_NAMES_CACHE = {'loaded_at': 0.0, 'entries': {}}
+_STATE_NAMES_CACHE_LOCK = threading.Lock()
+_STATE_NAMES_INFLIGHT = set()
+
+_STATE_NAMES_PROMPT = """You are filling the state-name table for a banknote collection app. For the territory known to catalogues as {name}, list the sovereign states or colonial polities it belonged to, era by era, over the whole span its paper money could date from — so a note can be labelled with the state that issued it, as of its year.
+
+Rules:
+- Consecutive, non-overlapping eras; start/end are Gregorian years; the final era's end is {current_year}.
+- Each era gives the polity's OFFICIAL name of the time in its own language(s) ("native": the state's own language, or the colonizing power's for a colony — e.g. "Deutsch-Ostafrika", "Congo belge / Belgisch-Congo", "Российская империя"; use the native script, not a transliteration) and its usual English name ("english", e.g. "German East Africa", "Belgian Congo", "Russian Empire"). When the official name IS English, set native to null.
+- Name the polity, not the currency or the government of the day: "Kingdom of Italy", not "Fascist Italy". Occupations that issued their own paper get an era.
+- 2 to 10 eras.
+
+Reply with ONLY a JSON object, no prose:
+{{"eras": [{{"start": 1885, "end": 1918, "native": "Deutsch-Ostafrika", "english": "German East Africa"}}, ...]}}"""
+
+
+def _generated_state_names(force=False):
+    """{key: ((start, end, native, english), ...)} from the
+    country_state_names table, cached like the generated eras."""
+    now = time.time()
+    with _STATE_NAMES_CACHE_LOCK:
+        if not force and now - _STATE_NAMES_CACHE['loaded_at'] < _COUNTRY_ERAS_CACHE_TTL:
+            return _STATE_NAMES_CACHE['entries']
+        entries = {}
+        try:
+            db = open_db_connection()
+            try:
+                rows = db.execute(
+                    "SELECT country_key, eras FROM country_state_names"
+                ).fetchall()
+            finally:
+                db.close()
+            for row in rows:
+                try:
+                    bands = tuple(
+                        (int(e[0]), int(e[1]),
+                         (str(e[2]).strip() or None) if e[2] else None,
+                         str(e[3]))
+                        for e in json.loads(row['eras'])
+                    )
+                except (ValueError, TypeError, IndexError):
+                    continue
+                if bands:
+                    entries[row['country_key']] = bands
+        except sqlite3.Error:
+            pass
+        _STATE_NAMES_CACHE['entries'] = entries
+        _STATE_NAMES_CACHE['loaded_at'] = now
+        return entries
+
+
+def generate_state_names(country_name):
+    """One Anthropic call producing the (start, end, native, english)
+    bands for a country. Raises RuntimeError on any failure."""
+    api_key = _require_anthropic_key()
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+    client = anthropic.Anthropic(api_key=api_key)
+    model = anthropic_lookup_model(api_key, 'ANTHROPIC_COUNTRY_ERAS_MODEL')
+    prompt = _STATE_NAMES_PROMPT.format(
+        name=country_name, current_year=datetime.utcnow().year)
+    resp = _anthropic_create(
+        client,
+        model=model,
+        max_tokens=2000,
+        tools=[anthropic_web_search_tool(2)],
+        messages=[{'role': 'user', 'content': prompt}],
+    )
+    text = _message_text(resp)
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if not m:
+        raise RuntimeError(
+            f'no JSON in response (stop={getattr(resp, "stop_reason", "?")}): '
+            f'{text[:120]}')
+    data = json.loads(m.group(0))
+    eras = []
+    for e in (data.get('eras') or []):
+        start, end = int(e['start']), int(e['end'])
+        native = str(e.get('native') or '').strip() or None
+        english = str(e.get('english') or '').strip()
+        if not english or start > end:
+            raise RuntimeError(f'bad era in response: {e!r}')
+        eras.append([start, end, native, english])
+    eras.sort(key=lambda e: e[0])
+    if not (1 <= len(eras) <= 12):
+        raise RuntimeError(f'unusable response: {len(eras)} eras')
+    # The last band stays open so next year's notes still resolve.
+    eras[-1][1] = _OPEN
+    return eras
+
+
+def _state_names_key(country_name):
+    """The key state-name bands for this country would store under, or
+    None when the built-in table (or a stored generation) already covers
+    it. US and colonial issues resolve without bands."""
+    name = (country_name or '').strip()
+    if not name:
+        return None
+    raw = name.lower().rstrip('.')
+    base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
+    for candidate in (raw, base):
+        if candidate in BANKNOTE_STATE_SPELLINGS:
+            return None
+        if candidate in BANKNOTE_MAP_COUNTRY_ALIASES:
+            return None
+    key = _country_key(name)
+    if key in ('us', 'colonial-america') or key in BANKNOTE_STATE_NAMES:
+        return None
+    slug = _country_slug(base)
+    if slug in BANKNOTE_STATE_NAMES:
+        return None
+    key = key or slug
+    if key in _generated_state_names():
+        return None
+    return key
+
+
+def _run_state_names_job(country_name, key):
+    try:
+        eras = generate_state_names(country_name)
+        db = open_db_connection()
+        try:
+            db.execute(
+                "INSERT OR REPLACE INTO country_state_names "
+                "(country_key, eras, source_country, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (key, json.dumps(eras, ensure_ascii=False), country_name,
+                 datetime.utcnow().isoformat()),
+            )
+            db.commit()
+        finally:
+            db.close()
+        _generated_state_names(force=True)
+        print(f'state names generated: {country_name} ({key}), '
+              f'{len(eras)} eras', flush=True)
+    except Exception as e:
+        print(f'state name generation failed for {country_name}: {e}',
+              flush=True)
+    finally:
+        with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+            _STATE_NAMES_INFLIGHT.discard(key)
+
+
+def ensure_state_names(country_name):
+    """Fire-and-forget: generate and store state-name bands for a
+    country the built-in table doesn't cover. Rides along with
+    ensure_country_history, so every banknote write and the startup
+    backfill reach it."""
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        return
+    key = _state_names_key(country_name)
+    if not key:
+        return
+    with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+        if key in _STATE_NAMES_INFLIGHT:
+            return
+        _STATE_NAMES_INFLIGHT.add(key)
+    threading.Thread(
+        target=_run_state_names_job,
+        args=((country_name or '').strip(), key),
+        daemon=True,
+    ).start()
 
 
 @app.route('/admin/banknote-countries-without-history', methods=['GET'])
@@ -5148,6 +5331,11 @@ def init_db():
          'title TEXT NOT NULL, '
          'eras TEXT NOT NULL, '
          'spellings TEXT, '
+         'source_country TEXT, '
+         "created_at TEXT DEFAULT (datetime('now')))"),
+        ('CREATE TABLE IF NOT EXISTS country_state_names ('
+         'country_key TEXT PRIMARY KEY, '
+         'eras TEXT NOT NULL, '
          'source_country TEXT, '
          "created_at TEXT DEFAULT (datetime('now')))"),
         ('CREATE TABLE IF NOT EXISTS record_documents ('
@@ -14429,7 +14617,8 @@ def detail_view(category, record_id):
             geo_query = country
         banknote_origin = {'pin': pin, 'geo_query': geo_query,
                            'year': year,
-                           'boundary_year': _nearest_boundary_year(year)}
+                           'boundary_year': _nearest_boundary_year(year),
+                           'state': _banknote_state_name(country, year)}
 
     return render_template('detail.html',
                            category=category,
@@ -15922,6 +16111,897 @@ BANKNOTE_BOUNDARY_YEARS = (1000, 1100, 1200, 1279, 1300, 1400, 1492,
                            1500, 1530, 1600, 1650, 1700, 1715, 1783,
                            1800, 1815, 1880, 1900, 1914, 1920, 1930,
                            1938, 1945, 1960, 1994, 2000, 2010)
+
+
+# ── Banknote state names ────────────────────────────────────────────
+# The polity a note was issued under, as of its year: (start, end,
+# native, english) bands per country key (BANKNOTE_CAPITALS keys), the
+# first band containing the note's year winning; end 9999 = open. The
+# native name is the state's own-language form (the colonial power's
+# language for a colony); None where the original IS English. The
+# origin map labels each note with the pair, so a 1916 German East
+# Africa note reads "Deutsch-Ostafrika — German East Africa" and a
+# 1978 Yugoslav note names the SFRY, not today's map.
+_OPEN = 9999
+BANKNOTE_STATE_NAMES = {
+    'germany': (
+        (1815, 1866, 'Deutscher Bund', 'German Confederation'),
+        (1867, 1870, 'Norddeutscher Bund', 'North German Confederation'),
+        (1871, 1918, 'Deutsches Reich (Kaiserreich)', 'German Empire'),
+        (1919, 1933, 'Deutsches Reich (Weimarer Republik)',
+         'German Reich (Weimar Republic)'),
+        (1934, 1942, 'Deutsches Reich', 'German Reich'),
+        (1943, 1945, 'Großdeutsches Reich', 'Greater German Reich'),
+        (1946, 1948, 'Deutschland (Alliierte Besatzungszonen)',
+         'Allied-occupied Germany'),
+        (1949, 1990, 'Bundesrepublik Deutschland',
+         'Federal Republic of Germany (West Germany)'),
+        (1991, _OPEN, 'Bundesrepublik Deutschland',
+         'Federal Republic of Germany'),
+    ),
+    'austria': (
+        (1804, 1866, 'Kaisertum Österreich', 'Austrian Empire'),
+        (1867, 1918, 'Österreich-Ungarn', 'Austria-Hungary'),
+        (1919, 1919, 'Republik Deutschösterreich',
+         'Republic of German-Austria'),
+        (1920, 1933, 'Republik Österreich',
+         'Republic of Austria (First Republic)'),
+        (1934, 1937, 'Bundesstaat Österreich', 'Federal State of Austria'),
+        (1938, 1945, 'Deutsches Reich (Ostmark)',
+         'German Reich (annexed Austria)'),
+        (1946, _OPEN, 'Republik Österreich', 'Republic of Austria'),
+    ),
+    'hungary': (
+        (1867, 1918, 'Magyar Királyság (Osztrák–Magyar Monarchia)',
+         'Kingdom of Hungary (Austria-Hungary)'),
+        (1919, 1919, 'Magyar Népköztársaság / Tanácsköztársaság',
+         "Hungarian People's Republic / Soviet Republic"),
+        (1920, 1945, 'Magyar Királyság', 'Kingdom of Hungary'),
+        (1946, 1949, 'Magyar Köztársaság', 'Republic of Hungary'),
+        (1950, 1989, 'Magyar Népköztársaság', "Hungarian People's Republic"),
+        (1990, _OPEN, 'Magyarország', 'Hungary'),
+    ),
+    'great-britain': (
+        (1707, 1800, None, 'Kingdom of Great Britain'),
+        (1801, 1921, None, 'United Kingdom of Great Britain and Ireland'),
+        (1922, _OPEN, None,
+         'United Kingdom of Great Britain and Northern Ireland'),
+    ),
+    'france': (
+        (1804, 1814, 'Empire français', 'French Empire'),
+        (1815, 1847, 'Royaume de France', 'Kingdom of France'),
+        (1848, 1851, 'République française (Deuxième République)',
+         'French Second Republic'),
+        (1852, 1869, 'Empire français (Second Empire)',
+         'French Second Empire'),
+        (1870, 1939, 'République française (Troisième République)',
+         'French Third Republic'),
+        (1940, 1943, 'État français', 'French State (Vichy)'),
+        (1944, 1945, 'Gouvernement provisoire de la République française',
+         'Provisional Government of the French Republic'),
+        (1946, 1957, 'République française (Quatrième République)',
+         'French Fourth Republic'),
+        (1958, _OPEN, 'République française (Cinquième République)',
+         'French Fifth Republic'),
+    ),
+    'italy': (
+        (1861, 1945, "Regno d'Italia", 'Kingdom of Italy'),
+        (1946, _OPEN, 'Repubblica Italiana', 'Italian Republic'),
+    ),
+    'russia': (
+        (1721, 1916, 'Российская империя', 'Russian Empire'),
+        (1917, 1917, 'Российская республика (Временное правительство)',
+         'Russian Republic (Provisional Government)'),
+        (1918, 1922, 'РСФСР', 'Russian Soviet Federative Socialist Republic'),
+        (1923, 1991, 'СССР — Союз Советских Социалистических Республик',
+         'Union of Soviet Socialist Republics (Soviet Union)'),
+        (1992, _OPEN, 'Российская Федерация', 'Russian Federation'),
+    ),
+    'poland': (
+        (1815, 1915, 'Królestwo Polskie (Kongresówka)',
+         'Kingdom of Poland (Congress Poland, Russian Empire)'),
+        (1916, 1917, 'Królestwo Polskie (Rada Regencyjna)',
+         'Kingdom of Poland (Regency)'),
+        (1918, 1938, 'Rzeczpospolita Polska (II Rzeczpospolita)',
+         'Republic of Poland (Second Republic)'),
+        (1939, 1944, 'Generalne Gubernatorstwo (Generalgouvernement)',
+         'General Government (German occupation)'),
+        (1945, 1951, 'Rzeczpospolita Polska', 'Republic of Poland'),
+        (1952, 1989, 'Polska Rzeczpospolita Ludowa',
+         "Polish People's Republic"),
+        (1990, _OPEN, 'Rzeczpospolita Polska', 'Republic of Poland'),
+    ),
+    'greece': (
+        (1832, 1923, 'Βασίλειον της Ελλάδος', 'Kingdom of Greece'),
+        (1924, 1934, 'Ελληνική Δημοκρατία',
+         'Hellenic Republic (Second Republic)'),
+        (1935, 1940, 'Βασίλειον της Ελλάδος', 'Kingdom of Greece'),
+        (1941, 1944, 'Ελληνική Πολιτεία', 'Hellenic State (Axis occupation)'),
+        (1945, 1973, 'Βασίλειον της Ελλάδος', 'Kingdom of Greece'),
+        (1974, _OPEN, 'Ελληνική Δημοκρατία', 'Hellenic Republic'),
+    ),
+    'yugoslavia': (
+        (1918, 1928, 'Kraljevina Srba, Hrvata i Slovenaca',
+         'Kingdom of Serbs, Croats and Slovenes'),
+        (1929, 1944, 'Kraljevina Jugoslavija', 'Kingdom of Yugoslavia'),
+        (1945, 1962, 'Federativna Narodna Republika Jugoslavija',
+         "Federal People's Republic of Yugoslavia"),
+        (1963, 1991, 'Socijalistička Federativna Republika Jugoslavija',
+         'Socialist Federal Republic of Yugoslavia'),
+        (1992, 2002, 'Savezna Republika Jugoslavija',
+         'Federal Republic of Yugoslavia'),
+        (2003, 2006, 'Srbija i Crna Gora', 'Serbia and Montenegro'),
+    ),
+    'china': (
+        (1644, 1911, '大清', 'Qing Empire'),
+        (1912, 1948, '中華民國', 'Republic of China'),
+        (1949, _OPEN, '中华人民共和国', "People's Republic of China"),
+    ),
+    'japan': (
+        (1868, 1946, '大日本帝國', 'Empire of Japan'),
+        (1947, _OPEN, '日本国', 'Japan'),
+    ),
+    'india': (
+        (1858, 1946, None, 'British India (Indian Empire)'),
+        (1947, 1949, None, 'Dominion of India'),
+        (1950, _OPEN, 'भारत गणराज्य', 'Republic of India'),
+    ),
+    'turkey': (
+        (1299, 1922, 'دولت عليه عثمانیه', 'Ottoman Empire'),
+        (1923, _OPEN, 'Türkiye Cumhuriyeti', 'Republic of Turkey'),
+    ),
+    'zimbabwe': (
+        (1953, 1963, None, 'Federation of Rhodesia and Nyasaland'),
+        (1923, 1964, None, 'Southern Rhodesia (British colony)'),
+        (1965, 1978, None, 'Rhodesia'),
+        (1979, 1979, None, 'Zimbabwe Rhodesia'),
+        (1980, _OPEN, None, 'Republic of Zimbabwe'),
+    ),
+    'venezuela': (
+        (1864, 1952, 'Estados Unidos de Venezuela',
+         'United States of Venezuela'),
+        (1953, 1998, 'República de Venezuela', 'Republic of Venezuela'),
+        (1999, _OPEN, 'República Bolivariana de Venezuela',
+         'Bolivarian Republic of Venezuela'),
+    ),
+    'afghanistan': (
+        (1926, 1972, 'د افغانستان شاهي دولت', 'Kingdom of Afghanistan'),
+        (1973, 1977, 'جمهوری افغانستان', 'Republic of Afghanistan'),
+        (1978, 1991, 'جمهوری دموکراتیک افغانستان',
+         'Democratic Republic of Afghanistan'),
+        (1992, 2001, 'دولت اسلامی افغانستان', 'Islamic State of Afghanistan'),
+        (2002, 2003, 'دولت انتقالی اسلامی افغانستان',
+         'Transitional Islamic State of Afghanistan'),
+        (2004, 2021, 'جمهوری اسلامی افغانستان',
+         'Islamic Republic of Afghanistan'),
+        (2022, _OPEN, 'د افغانستان اسلامي امارت',
+         'Islamic Emirate of Afghanistan'),
+    ),
+    'algeria': (
+        (1830, 1961, 'Algérie française', 'French Algeria'),
+        (1962, _OPEN, 'الجمهورية الجزائرية الديمقراطية الشعبية',
+         "People's Democratic Republic of Algeria"),
+    ),
+    'andorra': (
+        (1278, _OPEN, "Principat d'Andorra", 'Principality of Andorra'),
+    ),
+    'israel': (
+        (1920, 1947, 'פלשתינה (א״י)', 'Mandatory Palestine (British Mandate)'),
+        (1948, _OPEN, 'מדינת ישראל', 'State of Israel'),
+    ),
+    'belgian-congo': (
+        (1885, 1907, 'État indépendant du Congo', 'Congo Free State'),
+        (1908, 1959, 'Congo belge / Belgisch-Congo', 'Belgian Congo'),
+        (1960, 1963, 'République du Congo (Léopoldville)',
+         'Republic of the Congo (Léopoldville)'),
+        (1964, 1970, 'République démocratique du Congo',
+         'Democratic Republic of the Congo'),
+        (1971, 1996, 'République du Zaïre', 'Republic of Zaire'),
+        (1997, _OPEN, 'République démocratique du Congo',
+         'Democratic Republic of the Congo'),
+    ),
+    'jamaica': (
+        (1655, 1961, None, 'Colony of Jamaica'),
+        (1962, _OPEN, None, 'Jamaica'),
+    ),
+    'fiji': (
+        (1874, 1969, None, 'Colony of Fiji'),
+        (1970, 1986, None, 'Dominion of Fiji'),
+        (1987, _OPEN, None, 'Republic of Fiji'),
+    ),
+    'bermuda': (
+        (1612, 2001, None, 'Colony of Bermuda'),
+        (2002, _OPEN, None, 'Bermuda (British Overseas Territory)'),
+    ),
+    'guyana': (
+        (1831, 1965, None, 'British Guiana'),
+        (1966, 1969, None, 'Guyana'),
+        (1970, _OPEN, None, 'Co-operative Republic of Guyana'),
+    ),
+    'kenya': (
+        (1895, 1919, None, 'East Africa Protectorate'),
+        (1920, 1962, None, 'Colony and Protectorate of Kenya'),
+        (1963, 1963, None, 'Kenya (Dominion)'),
+        (1964, _OPEN, 'Jamhuri ya Kenya', 'Republic of Kenya'),
+    ),
+    'somalia': (
+        (1889, 1935, 'Somalia Italiana', 'Italian Somaliland'),
+        (1936, 1940, 'Africa Orientale Italiana', 'Italian East Africa'),
+        (1941, 1949, None, 'British Military Administration of Somalia'),
+        (1950, 1959, 'Amministrazione Fiduciaria Italiana della Somalia',
+         'Trust Territory of Somaliland (Italian administration)'),
+        (1960, 1968, 'Jamhuuriyadda Soomaaliya', 'Somali Republic'),
+        (1969, 1990, 'Jamhuuriyadda Dimuqraadiga Soomaaliya',
+         'Somali Democratic Republic'),
+        (1991, _OPEN, 'Jamhuuriyadda Federaalka Soomaaliya',
+         'Federal Republic of Somalia'),
+    ),
+    'djibouti': (
+        (1896, 1966, 'Côte française des Somalis', 'French Somaliland'),
+        (1967, 1976, 'Territoire français des Afars et des Issas',
+         'French Territory of the Afars and the Issas'),
+        (1977, _OPEN, 'République de Djibouti', 'Republic of Djibouti'),
+    ),
+    'guinea-bissau': (
+        (1879, 1973, 'Guiné Portuguesa', 'Portuguese Guinea'),
+        (1974, _OPEN, 'República da Guiné-Bissau', 'Republic of Guinea-Bissau'),
+    ),
+    'mali': (
+        (1880, 1957, 'Soudan français', 'French Sudan'),
+        (1958, 1958, 'République soudanaise', 'Sudanese Republic'),
+        (1959, 1960, 'Fédération du Mali', 'Mali Federation'),
+        (1961, _OPEN, 'République du Mali', 'Republic of Mali'),
+    ),
+    'egypt': (
+        (1867, 1913, 'الخديوية المصرية', 'Khedivate of Egypt'),
+        (1914, 1921, 'السلطنة المصرية', 'Sultanate of Egypt'),
+        (1922, 1952, 'المملكة المصرية', 'Kingdom of Egypt'),
+        (1953, 1957, 'جمهورية مصر', 'Republic of Egypt'),
+        (1958, 1970, 'الجمهورية العربية المتحدة', 'United Arab Republic'),
+        (1971, _OPEN, 'جمهورية مصر العربية', 'Arab Republic of Egypt'),
+    ),
+    'south-africa': (
+        (1910, 1960, 'Unie van Suid-Afrika', 'Union of South Africa'),
+        (1961, _OPEN, 'Republiek van Suid-Afrika', 'Republic of South Africa'),
+    ),
+    'canada': (
+        (1867, 1981, 'Dominion du Canada', 'Dominion of Canada'),
+        (1982, _OPEN, None, 'Canada'),
+    ),
+    'mexico': (
+        (1824, 1863, 'República Mexicana', 'Mexican Republic'),
+        (1864, 1866, 'Imperio Mexicano', 'Mexican Empire'),
+        (1867, 1916, 'República Mexicana', 'Mexican Republic'),
+        (1917, _OPEN, 'Estados Unidos Mexicanos', 'United Mexican States'),
+    ),
+    'brazil': (
+        (1822, 1888, 'Império do Brasil', 'Empire of Brazil'),
+        (1889, 1966, 'República dos Estados Unidos do Brasil',
+         'Republic of the United States of Brazil'),
+        (1967, _OPEN, 'República Federativa do Brasil',
+         'Federative Republic of Brazil'),
+    ),
+    'spain': (
+        (1874, 1930, 'Reino de España', 'Kingdom of Spain'),
+        (1931, 1938, 'República Española', 'Spanish Republic (Second Republic)'),
+        (1939, 1974, 'Estado Español', 'Spanish State'),
+        (1975, _OPEN, 'Reino de España', 'Kingdom of Spain'),
+    ),
+    'portugal': (
+        (1139, 1909, 'Reino de Portugal', 'Kingdom of Portugal'),
+        (1910, _OPEN, 'República Portuguesa', 'Portuguese Republic'),
+    ),
+    'netherlands': (
+        (1815, _OPEN, 'Koninkrijk der Nederlanden',
+         'Kingdom of the Netherlands'),
+    ),
+    'netherlands-indies': (
+        (1800, 1948, 'Nederlandsch-Indië', 'Dutch East Indies'),
+        (1949, _OPEN, 'Republik Indonesia', 'Republic of Indonesia'),
+    ),
+    'belgium': (
+        (1830, _OPEN, 'Royaume de Belgique / Koninkrijk België',
+         'Kingdom of Belgium'),
+    ),
+    'czechoslovakia': (
+        (1918, 1938, 'Československá republika', 'Czechoslovak Republic'),
+        (1939, 1944, 'Protektorát Čechy a Morava',
+         'Protectorate of Bohemia and Moravia'),
+        (1945, 1959, 'Československá republika', 'Czechoslovak Republic'),
+        (1960, 1989, 'Československá socialistická republika',
+         'Czechoslovak Socialist Republic'),
+        (1990, 1992, 'Česká a Slovenská Federativní Republika',
+         'Czech and Slovak Federative Republic'),
+        (1993, _OPEN, 'Česká republika', 'Czech Republic'),
+    ),
+    'romania': (
+        (1862, 1880, 'Principatele Unite Române',
+         'United Principalities of Romania'),
+        (1881, 1946, 'Regatul României', 'Kingdom of Romania'),
+        (1947, 1964, 'Republica Populară Română', "Romanian People's Republic"),
+        (1965, 1989, 'Republica Socialistă România',
+         'Socialist Republic of Romania'),
+        (1990, _OPEN, 'România', 'Romania'),
+    ),
+    'bulgaria': (
+        (1878, 1907, 'Княжество България', 'Principality of Bulgaria'),
+        (1908, 1945, 'Царство България', 'Kingdom (Tsardom) of Bulgaria'),
+        (1946, 1989, 'Народна република България',
+         "People's Republic of Bulgaria"),
+        (1990, _OPEN, 'Република България', 'Republic of Bulgaria'),
+    ),
+    'philippines': (
+        (1565, 1897, 'Islas Filipinas', 'Spanish Philippines'),
+        (1898, 1934, None, 'Philippine Islands (United States insular government)'),
+        (1942, 1944, 'Republika ng Pilipinas (Japanese occupation)',
+         'Japanese-occupied Philippines'),
+        (1935, 1945, 'Komonwelt ng Pilipinas', 'Commonwealth of the Philippines'),
+        (1946, _OPEN, 'Republika ng Pilipinas', 'Republic of the Philippines'),
+    ),
+    'indochina': (
+        (1887, 1954, 'Indochine française', 'French Indochina'),
+    ),
+    'vietnam': (
+        (1887, 1944, 'Indochine française', 'French Indochina'),
+        (1945, 1975, 'Việt Nam Dân chủ Cộng hòa',
+         'Democratic Republic of Vietnam (North Vietnam)'),
+        (1976, _OPEN, 'Cộng hòa Xã hội chủ nghĩa Việt Nam',
+         'Socialist Republic of Vietnam'),
+    ),
+    'ceylon': (
+        (1815, 1947, None, 'British Ceylon'),
+        (1948, 1971, None, 'Dominion of Ceylon'),
+        (1972, _OPEN, 'ශ්‍රී ලංකා ප්‍රජාතාන්ත්‍රික සමාජවාදී ජනරජය',
+         'Democratic Socialist Republic of Sri Lanka'),
+    ),
+    'malaya': (
+        (1867, 1941, None,
+         'British Malaya (Straits Settlements and Malay States)'),
+        (1942, 1945, None, 'Japanese-occupied Malaya'),
+        (1946, 1947, None, 'Malayan Union'),
+        (1948, 1962, 'Persekutuan Tanah Melayu', 'Federation of Malaya'),
+        (1963, _OPEN, 'Malaysia', 'Malaysia'),
+    ),
+    'maldives': (
+        (1887, 1964, 'ދިވެހިރާއްޖެ', 'Maldive Islands (British protectorate)'),
+        (1965, 1967, 'ދިވެހިރާއްޖެ', 'Sultanate of the Maldives'),
+        (1968, _OPEN, 'ދިވެހިރާއްޖެ', 'Republic of Maldives'),
+    ),
+    'morocco': (
+        (1912, 1955, 'Protectorat français au Maroc',
+         'French Protectorate in Morocco'),
+        (1956, _OPEN, 'المملكة المغربية', 'Kingdom of Morocco'),
+    ),
+    'tunisia': (
+        (1881, 1955, 'Protectorat français de Tunisie',
+         'French Protectorate of Tunisia'),
+        (1956, 1956, 'المملكة التونسية', 'Kingdom of Tunisia'),
+        (1957, _OPEN, 'الجمهورية التونسية', 'Republic of Tunisia'),
+    ),
+    'iran': (
+        (1789, 1924, 'ممالک محروسه ایران', 'Qajar Persia (Sublime State of Iran)'),
+        (1925, 1978, 'کشور شاهنشاهی ایران', 'Imperial State of Iran'),
+        (1979, _OPEN, 'جمهوری اسلامی ایران', 'Islamic Republic of Iran'),
+    ),
+    'iraq': (
+        (1921, 1931, 'المملكة العراقية', 'Kingdom of Iraq (British Mandate)'),
+        (1932, 1957, 'المملكة العراقية', 'Kingdom of Iraq'),
+        (1958, _OPEN, 'الجمهورية العراقية', 'Republic of Iraq'),
+    ),
+    'thailand': (
+        (1782, 1938, 'สยาม', 'Kingdom of Siam'),
+        (1939, 1944, 'ประเทศไทย', 'Thailand'),
+        (1945, 1948, 'สยาม', 'Siam'),
+        (1949, _OPEN, 'ราชอาณาจักรไทย', 'Kingdom of Thailand'),
+    ),
+    'burma': (
+        (1942, 1944, None, 'Japanese-occupied Burma (State of Burma)'),
+        (1886, 1936, None, 'British Burma (Province of British India)'),
+        (1937, 1947, None, 'British Burma (Crown colony)'),
+        (1948, 1973, 'ပြည်ထောင်စု မြန်မာနိုင်ငံတော်', 'Union of Burma'),
+        (1974, 1988, 'ပြည်ထောင်စု ဆိုရှယ်လစ် သမ္မတ မြန်မာနိုင်ငံတော်',
+         'Socialist Republic of the Union of Burma'),
+        (1989, 2010, 'ပြည်ထောင်စု မြန်မာနိုင်ငံတော်', 'Union of Myanmar'),
+        (2011, _OPEN, 'ပြည်ထောင်စုသမ္မတ မြန်မာနိုင်ငံတော်',
+         'Republic of the Union of Myanmar'),
+    ),
+    'pakistan': (
+        (1947, 1955, None, 'Dominion of Pakistan'),
+        (1956, _OPEN, 'اسلامی جمہوریہ پاکستان', 'Islamic Republic of Pakistan'),
+    ),
+    'ireland': (
+        (1922, 1936, 'Saorstát Éireann', 'Irish Free State'),
+        (1937, _OPEN, 'Éire', 'Ireland'),
+    ),
+    'switzerland': (
+        (1848, _OPEN, 'Schweizerische Eidgenossenschaft / Confédération suisse',
+         'Swiss Confederation'),
+    ),
+    'sweden': ((1523, _OPEN, 'Konungariket Sverige', 'Kingdom of Sweden'),),
+    'denmark': ((1849, _OPEN, 'Kongeriget Danmark', 'Kingdom of Denmark'),),
+    'norway': (
+        (1814, 1904, 'Kongeriket Norge (union med Sverige)',
+         'Kingdom of Norway (union with Sweden)'),
+        (1905, _OPEN, 'Kongeriket Norge', 'Kingdom of Norway'),
+    ),
+    'finland': (
+        (1809, 1916, 'Suomen suuriruhtinaskunta', 'Grand Duchy of Finland'),
+        (1917, _OPEN, 'Suomen tasavalta', 'Republic of Finland'),
+    ),
+    'australia': ((1901, _OPEN, None, 'Commonwealth of Australia'),),
+    'new-zealand': (
+        (1841, 1906, None, 'Colony of New Zealand'),
+        (1907, 1946, None, 'Dominion of New Zealand'),
+        (1947, _OPEN, 'Aotearoa', 'New Zealand'),
+    ),
+    'cuba': (
+        (1492, 1898, 'Isla de Cuba (España)', 'Spanish Cuba'),
+        (1899, 1901, None, 'United States Military Government of Cuba'),
+        (1902, _OPEN, 'República de Cuba', 'Republic of Cuba'),
+    ),
+    'argentina': ((1861, _OPEN, 'República Argentina', 'Argentine Republic'),),
+    'macau': (
+        (1557, 1998, 'Macau Português', 'Portuguese Macau'),
+        (1999, _OPEN, '中華人民共和國澳門特別行政區 / Região Administrativa Especial de Macau',
+         'Macau Special Administrative Region, China'),
+    ),
+    'laos': (
+        (1893, 1952, 'Laos (Indochine française)',
+         'French Laos (French Indochina)'),
+        (1953, 1975, 'ພຣະຣາຊອານາຈັກລາວ', 'Kingdom of Laos'),
+        (1976, _OPEN, 'ສາທາລະນະລັດ ປະຊາທິປະໄຕ ປະຊາຊົນລາວ',
+         "Lao People's Democratic Republic"),
+    ),
+    'malawi': (
+        (1891, 1906, None, 'British Central Africa Protectorate'),
+        (1953, 1963, None, 'Federation of Rhodesia and Nyasaland'),
+        (1907, 1963, None, 'Nyasaland Protectorate'),
+        (1964, 1965, None, 'Malawi (Dominion)'),
+        (1966, _OPEN, 'Dziko la Malaŵi', 'Republic of Malawi'),
+    ),
+    'nigeria': (
+        (1914, 1959, None, 'Colony and Protectorate of Nigeria'),
+        (1960, 1962, None, 'Federation of Nigeria'),
+        (1963, _OPEN, None, 'Federal Republic of Nigeria'),
+    ),
+    'ghana': (
+        (1821, 1956, None, 'Gold Coast (British colony)'),
+        (1957, 1959, None, 'Ghana (Dominion)'),
+        (1960, _OPEN, None, 'Republic of Ghana'),
+    ),
+    'zambia': (
+        (1911, 1952, None, 'Northern Rhodesia'),
+        (1953, 1963, None, 'Federation of Rhodesia and Nyasaland'),
+        (1964, _OPEN, None, 'Republic of Zambia'),
+    ),
+    'uganda': (
+        (1894, 1961, None, 'Uganda Protectorate'),
+        (1962, 1962, None, 'Uganda (Dominion)'),
+        (1963, _OPEN, None, 'Republic of Uganda'),
+    ),
+    'tanzania': (
+        (1885, 1918, 'Deutsch-Ostafrika', 'German East Africa'),
+        (1919, 1960, None, 'Tanganyika Territory (British mandate, then trust territory)'),
+        (1961, 1963, None, 'Tanganyika'),
+        (1964, _OPEN, 'Jamhuri ya Muungano wa Tanzania',
+         'United Republic of Tanzania'),
+    ),
+    'ethiopia': (
+        (1270, 1935, 'መንግሥተ ኢትዮጵያ', 'Ethiopian Empire'),
+        (1936, 1940, 'Africa Orientale Italiana', 'Italian East Africa'),
+        (1941, 1973, 'መንግሥተ ኢትዮጵያ', 'Ethiopian Empire'),
+        (1974, 1986, None, 'Provisional Military Government of Socialist Ethiopia (Derg)'),
+        (1987, 1990, None, "People's Democratic Republic of Ethiopia"),
+        (1991, _OPEN, 'የኢትዮጵያ ፌዴራላዊ ዲሞክራሲያዊ ሪፐብሊክ',
+         'Federal Democratic Republic of Ethiopia'),
+    ),
+    'mozambique': (
+        (1505, 1974, 'Moçambique (Província Ultramarina de Portugal)',
+         'Portuguese Mozambique'),
+        (1975, 1989, 'República Popular de Moçambique',
+         "People's Republic of Mozambique"),
+        (1990, _OPEN, 'República de Moçambique', 'Republic of Mozambique'),
+    ),
+    'angola': (
+        (1575, 1974, 'Angola (Província Ultramarina de Portugal)',
+         'Portuguese Angola'),
+        (1975, 1991, 'República Popular de Angola', "People's Republic of Angola"),
+        (1992, _OPEN, 'República de Angola', 'Republic of Angola'),
+    ),
+    'indonesia': (
+        (1800, 1944, 'Nederlandsch-Indië', 'Dutch East Indies'),
+        (1945, _OPEN, 'Republik Indonesia', 'Republic of Indonesia'),
+    ),
+    'cambodia': (
+        (1863, 1952, 'Protectorat français du Cambodge',
+         'French Protectorate of Cambodia'),
+        (1953, 1969, 'ព្រះរាជាណាចក្រកម្ពុជា', 'Kingdom of Cambodia'),
+        (1970, 1974, 'សាធារណរដ្ឋខ្មែរ', 'Khmer Republic'),
+        (1975, 1978, 'កម្ពុជាប្រជាធិបតេយ្យ', 'Democratic Kampuchea'),
+        (1979, 1988, None, "People's Republic of Kampuchea"),
+        (1989, 1992, None, 'State of Cambodia'),
+        (1993, _OPEN, 'ព្រះរាជាណាចក្រកម្ពុជា', 'Kingdom of Cambodia'),
+    ),
+    'south-korea': ((1948, _OPEN, '대한민국', 'Republic of Korea'),),
+    'taiwan': (
+        (1895, 1944, '臺灣 (大日本帝國)', 'Taiwan under Japanese rule'),
+        (1945, _OPEN, '中華民國', 'Republic of China (Taiwan)'),
+    ),
+    'hong-kong': (
+        (1942, 1944, '香港占領地', 'Japanese-occupied Hong Kong'),
+        (1841, 1996, '香港', 'British Hong Kong (Crown colony)'),
+        (1997, _OPEN, '中華人民共和國香港特別行政區',
+         'Hong Kong Special Administrative Region, China'),
+    ),
+    'lebanon': (
+        (1920, 1942, 'État du Grand Liban', 'Greater Lebanon (French Mandate)'),
+        (1943, _OPEN, 'الجمهورية اللبنانية', 'Lebanese Republic'),
+    ),
+    'syria': (
+        (1920, 1945, 'État de Syrie', 'State of Syria (French Mandate)'),
+        (1946, 1957, 'الجمهورية السورية', 'Syrian Republic'),
+        (1958, 1960, 'الجمهورية العربية المتحدة', 'United Arab Republic'),
+        (1961, _OPEN, 'الجمهورية العربية السورية', 'Syrian Arab Republic'),
+    ),
+    'jordan': (
+        (1921, 1945, 'إمارة شرق الأردن', 'Emirate of Transjordan'),
+        (1946, 1948, 'المملكة الأردنية الهاشمية',
+         'Hashemite Kingdom of Transjordan'),
+        (1949, _OPEN, 'المملكة الأردنية الهاشمية', 'Hashemite Kingdom of Jordan'),
+    ),
+    'saudi-arabia': (
+        (1932, _OPEN, 'المملكة العربية السعودية', 'Kingdom of Saudi Arabia'),
+    ),
+    'kuwait': (
+        (1899, 1960, 'مشيخة الكويت', 'Sheikhdom of Kuwait (British protectorate)'),
+        (1961, _OPEN, 'دولة الكويت', 'State of Kuwait'),
+    ),
+    'libya': (
+        (1911, 1942, 'Libia Italiana', 'Italian Libya'),
+        (1943, 1950, None, 'Libya under British and French military administration'),
+        (1951, 1968, 'المملكة الليبية', 'Kingdom of Libya'),
+        (1969, 1976, 'الجمهورية العربية الليبية', 'Libyan Arab Republic'),
+        (1977, 2010, 'الجماهيرية العربية الليبية الشعبية الاشتراكية',
+         "Great Socialist People's Libyan Arab Jamahiriya"),
+        (2011, _OPEN, 'دولة ليبيا', 'State of Libya'),
+    ),
+    'sudan': (
+        (1899, 1955, None, 'Anglo-Egyptian Sudan'),
+        (1956, _OPEN, 'جمهورية السودان', 'Republic of the Sudan'),
+    ),
+    'nepal': (
+        (1768, 2007, 'नेपाल अधिराज्य', 'Kingdom of Nepal'),
+        (2008, _OPEN, 'सङ्घीय लोकतान्त्रिक गणतन्त्र नेपाल',
+         'Federal Democratic Republic of Nepal'),
+    ),
+    'bangladesh': (
+        (1947, 1970, 'পূর্ব পাকিস্তান', 'East Pakistan'),
+        (1971, _OPEN, 'গণপ্রজাতন্ত্রী বাংলাদেশ', "People's Republic of Bangladesh"),
+    ),
+    'mongolia': (
+        (1924, 1991, 'Бүгд Найрамдах Монгол Ард Улс', "Mongolian People's Republic"),
+        (1992, _OPEN, 'Монгол Улс', 'Mongolia'),
+    ),
+    'colombia': ((1886, _OPEN, 'República de Colombia', 'Republic of Colombia'),),
+    'peru': ((1821, _OPEN, 'República del Perú', 'Republic of Peru'),),
+    'chile': ((1818, _OPEN, 'República de Chile', 'Republic of Chile'),),
+    'uruguay': (
+        (1830, _OPEN, 'República Oriental del Uruguay',
+         'Oriental Republic of Uruguay'),
+    ),
+    'bolivia': (
+        (1825, 2008, 'República de Bolivia', 'Republic of Bolivia'),
+        (2009, _OPEN, 'Estado Plurinacional de Bolivia',
+         'Plurinational State of Bolivia'),
+    ),
+    'paraguay': ((1811, _OPEN, 'República del Paraguay', 'Republic of Paraguay'),),
+    'ecuador': ((1830, _OPEN, 'República del Ecuador', 'Republic of Ecuador'),),
+    'guatemala': ((1847, _OPEN, 'República de Guatemala', 'Republic of Guatemala'),),
+    'nicaragua': ((1838, _OPEN, 'República de Nicaragua', 'Republic of Nicaragua'),),
+    'el-salvador': ((1841, _OPEN, 'República de El Salvador', 'Republic of El Salvador'),),
+    'panama': ((1903, _OPEN, 'República de Panamá', 'Republic of Panama'),),
+    'croatia': (
+        (1941, 1944, 'Nezavisna Država Hrvatska', 'Independent State of Croatia'),
+        (1945, 1990, 'Socijalistička Republika Hrvatska (SFRJ)',
+         'Socialist Republic of Croatia (Yugoslavia)'),
+        (1991, _OPEN, 'Republika Hrvatska', 'Republic of Croatia'),
+    ),
+    'slovenia': (
+        (1945, 1990, 'Socialistična republika Slovenija (SFRJ)',
+         'Socialist Republic of Slovenia (Yugoslavia)'),
+        (1991, _OPEN, 'Republika Slovenija', 'Republic of Slovenia'),
+    ),
+    'ukraine': (
+        (1917, 1920, 'Українська Народна Республіка', "Ukrainian People's Republic"),
+        (1921, 1990, 'Українська РСР', 'Ukrainian Soviet Socialist Republic'),
+        (1991, _OPEN, 'Україна', 'Ukraine'),
+    ),
+    'estonia': (
+        (1918, 1939, 'Eesti Vabariik', 'Republic of Estonia'),
+        (1940, 1990, 'Eesti NSV', 'Estonian Soviet Socialist Republic'),
+        (1991, _OPEN, 'Eesti Vabariik', 'Republic of Estonia'),
+    ),
+    'latvia': (
+        (1918, 1939, 'Latvijas Republika', 'Republic of Latvia'),
+        (1940, 1990, 'Latvijas PSR', 'Latvian Soviet Socialist Republic'),
+        (1991, _OPEN, 'Latvijas Republika', 'Republic of Latvia'),
+    ),
+    'lithuania': (
+        (1918, 1939, 'Lietuvos Respublika', 'Republic of Lithuania'),
+        (1940, 1989, 'Lietuvos TSR', 'Lithuanian Soviet Socialist Republic'),
+        (1990, _OPEN, 'Lietuvos Respublika', 'Republic of Lithuania'),
+    ),
+    'iceland': (
+        (1918, 1943, 'Konungsríkið Ísland', 'Kingdom of Iceland'),
+        (1944, _OPEN, 'Lýðveldið Ísland', 'Republic of Iceland'),
+    ),
+    'malta': (
+        (1813, 1963, None, 'Crown Colony of Malta'),
+        (1964, 1973, 'Stat ta’ Malta', 'State of Malta'),
+        (1974, _OPEN, 'Repubblika ta’ Malta', 'Republic of Malta'),
+    ),
+    'cyprus': (
+        (1878, 1913, None, 'Cyprus (British administration under Ottoman sovereignty)'),
+        (1914, 1959, None, 'Crown Colony of Cyprus'),
+        (1960, _OPEN, 'Κυπριακή Δημοκρατία / Kıbrıs Cumhuriyeti',
+         'Republic of Cyprus'),
+    ),
+    'luxembourg': (
+        (1815, _OPEN, 'Grand-Duché de Luxembourg / Groussherzogtum Lëtzebuerg',
+         'Grand Duchy of Luxembourg'),
+    ),
+    'us': (
+        (1776, 1788, None, 'United States of America (Articles of Confederation)'),
+        (1789, _OPEN, None, 'United States of America'),
+    ),
+    'belize': (
+        (1862, 1972, None, 'British Honduras'),
+        (1973, 1980, None, 'Belize (British colony)'),
+        (1981, _OPEN, None, 'Belize'),
+    ),
+    'cameroon': (
+        (1884, 1915, 'Kamerun (Schutzgebiet)', 'German Kamerun'),
+        (1916, 1959, 'Cameroun français', 'French Cameroons'),
+        (1960, 1960, 'République du Cameroun', 'Republic of Cameroon'),
+        (1961, 1971, 'République fédérale du Cameroun',
+         'Federal Republic of Cameroon'),
+        (1972, 1983, 'République unie du Cameroun', 'United Republic of Cameroon'),
+        (1984, _OPEN, 'République du Cameroun', 'Republic of Cameroon'),
+    ),
+    'faroe-islands': (
+        (1948, _OPEN, 'Føroyar', 'Faroe Islands (Kingdom of Denmark)'),
+        (1814, 1947, 'Færøerne (amt)', 'Faroe Islands (Danish county)'),
+    ),
+    'french-west-africa': (
+        (1895, 1958, 'Afrique-Occidentale française', 'French West Africa'),
+    ),
+    'west-african-states': (
+        (1959, _OPEN, "États de l'Afrique de l'Ouest (UMOA / BCEAO)",
+         'West African States (BCEAO monetary union)'),
+    ),
+    'gibraltar': (
+        (1713, 2001, None, 'Gibraltar (British colony)'),
+        (2002, _OPEN, None, 'Gibraltar (British Overseas Territory)'),
+    ),
+    'guernsey': (
+        (1204, _OPEN, 'Bailliage de Guernesey',
+         'Bailiwick of Guernsey (British Crown Dependency)'),
+    ),
+    'saint-helena': (
+        (1834, 2008, None, 'Saint Helena and Dependencies (British colony)'),
+        (2009, _OPEN, None, 'Saint Helena, Ascension and Tristan da Cunha'),
+    ),
+    'sao-tome': (
+        (1470, 1974, 'São Tomé e Príncipe (Província Ultramarina de Portugal)',
+         'Portuguese São Tomé and Príncipe'),
+        (1975, _OPEN, 'República Democrática de São Tomé e Príncipe',
+         'Democratic Republic of São Tomé and Príncipe'),
+    ),
+    'sarawak': (
+        (1942, 1945, None, 'Japanese-occupied Sarawak'),
+        (1841, 1945, None, 'Kingdom of Sarawak (Raj of the Brooke Rajahs)'),
+        (1946, 1962, None, 'Crown Colony of Sarawak'),
+        (1963, _OPEN, 'Sarawak, Malaysia', 'Sarawak (state of Malaysia)'),
+    ),
+    'togo': (
+        (1884, 1915, 'Togoland (Schutzgebiet)', 'German Togoland'),
+        (1916, 1955, 'Togo français', 'French Togoland'),
+        (1956, 1959, 'République autonome du Togo', 'Autonomous Republic of Togo'),
+        (1960, _OPEN, 'République togolaise', 'Togolese Republic'),
+    ),
+    'uzbekistan': (
+        (1924, 1990, 'Ўзбекистон ССР', 'Uzbek Soviet Socialist Republic'),
+        (1991, _OPEN, 'Oʻzbekiston Respublikasi', 'Republic of Uzbekistan'),
+    ),
+    'serbia': (
+        (1815, 1881, 'Кнежевина Србија', 'Principality of Serbia'),
+        (1882, 1918, 'Краљевина Србија', 'Kingdom of Serbia'),
+        (1919, 1928, 'Краљевина Срба, Хрвата и Словенаца',
+         'Kingdom of Serbs, Croats and Slovenes'),
+        (1929, 1940, 'Краљевина Југославија', 'Kingdom of Yugoslavia'),
+        (1941, 1944, 'Србија (Влада народног спаса)',
+         'Serbia under German occupation'),
+        (1945, 1991, 'Социјалистичка Република Србија (СФРЈ)',
+         'Socialist Republic of Serbia (Yugoslavia)'),
+        (1992, 2002, 'Савезна Република Југославија',
+         'Federal Republic of Yugoslavia'),
+        (2003, 2005, 'Србија и Црна Гора', 'Serbia and Montenegro'),
+        (2006, _OPEN, 'Република Србија', 'Republic of Serbia'),
+    ),
+    'yemen': (
+        (1918, 1961, 'المملكة المتوكلية اليمنية', 'Mutawakkilite Kingdom of Yemen'),
+        (1962, 1989, 'الجمهورية العربية اليمنية', 'Yemen Arab Republic (North Yemen)'),
+        (1990, _OPEN, 'الجمهورية اليمنية', 'Republic of Yemen'),
+    ),
+}
+
+# Stored spellings that name a polity outright — the note says which
+# state it is, so its year need not decide. Checked before the key
+# bands, like BANKNOTE_SPELLING_PINS. (native, english) pairs.
+BANKNOTE_STATE_SPELLINGS = {
+    'danzig': ('Freie Stadt Danzig', 'Free City of Danzig'),
+    'free city of danzig': ('Freie Stadt Danzig', 'Free City of Danzig'),
+    'west germany': ('Bundesrepublik Deutschland',
+                     'Federal Republic of Germany (West Germany)'),
+    'federal republic of germany': ('Bundesrepublik Deutschland',
+                                    'Federal Republic of Germany'),
+    'east germany': ('Deutsche Demokratische Republik',
+                     'German Democratic Republic (East Germany)'),
+    'german democratic republic': ('Deutsche Demokratische Republik',
+                                   'German Democratic Republic (East Germany)'),
+    'german empire': ('Deutsches Reich (Kaiserreich)', 'German Empire'),
+    'weimar republic': ('Deutsches Reich (Weimarer Republik)',
+                        'German Reich (Weimar Republic)'),
+    'weimar germany': ('Deutsches Reich (Weimarer Republik)',
+                       'German Reich (Weimar Republic)'),
+    'austria-hungary': ('Österreich-Ungarn', 'Austria-Hungary'),
+    'austro-hungary': ('Österreich-Ungarn', 'Austria-Hungary'),
+    'austro hungary': ('Österreich-Ungarn', 'Austria-Hungary'),
+    'austro-hungarian empire': ('Österreich-Ungarn', 'Austria-Hungary'),
+    'austrian empire': ('Kaisertum Österreich', 'Austrian Empire'),
+    'russian empire': ('Российская империя', 'Russian Empire'),
+    'soviet union': ('СССР — Союз Советских Социалистических Республик',
+                     'Union of Soviet Socialist Republics (Soviet Union)'),
+    'ussr': ('СССР — Союз Советских Социалистических Республик',
+             'Union of Soviet Socialist Republics (Soviet Union)'),
+    'rsfsr': ('РСФСР', 'Russian Soviet Federative Socialist Republic'),
+    'soviet russia': ('РСФСР', 'Russian Soviet Federative Socialist Republic'),
+    'ottoman empire': ('دولت عليه عثمانیه', 'Ottoman Empire'),
+    'south vietnam': ('Việt Nam Cộng hòa', 'Republic of Vietnam (South Vietnam)'),
+    'state of vietnam': ('Quốc gia Việt Nam', 'State of Vietnam'),
+    'straits settlements': (None, 'Straits Settlements (British Crown colony)'),
+    'scotland': (None, 'Scotland (United Kingdom)'),
+    'northern ireland': (None, 'Northern Ireland (United Kingdom)'),
+    'british east africa': (None, 'British East Africa (East African Currency Board)'),
+    'east africa': (None, 'British East Africa (East African Currency Board)'),
+    'british somaliland': (None, 'British Somaliland Protectorate'),
+    'italian somaliland': ('Somalia Italiana', 'Italian Somaliland'),
+    'french somaliland': ('Côte française des Somalis', 'French Somaliland'),
+    'rhodesia': (None, 'Rhodesia'),
+    'southern rhodesia': (None, 'Southern Rhodesia'),
+    'british honduras': (None, 'British Honduras'),
+    'british guiana': (None, 'British Guiana'),
+    'british ceylon': (None, 'British Ceylon'),
+    'ceylon': (None, 'Ceylon'),
+    'british india': (None, 'British India (Indian Empire)'),
+    'french indochina': ('Indochine française', 'French Indochina'),
+    'french west africa': ('Afrique-Occidentale française', 'French West Africa'),
+    'french sudan': ('Soudan français', 'French Sudan'),
+    'portuguese guinea': ('Guiné Portuguesa', 'Portuguese Guinea'),
+    'belgian congo': ('Congo belge / Belgisch-Congo', 'Belgian Congo'),
+    'congo free state': ('État indépendant du Congo', 'Congo Free State'),
+    'zaire': ('République du Zaïre', 'Republic of Zaire'),
+    'zaïre': ('République du Zaïre', 'Republic of Zaire'),
+    'german east africa': ('Deutsch-Ostafrika', 'German East Africa'),
+    'deutsch-ostafrika': ('Deutsch-Ostafrika', 'German East Africa'),
+    'deutsch ostafrika': ('Deutsch-Ostafrika', 'German East Africa'),
+    'united arab republic': ('الجمهورية العربية المتحدة', 'United Arab Republic'),
+    'palestine': ('פלשתינה (א״י)', 'Mandatory Palestine (British Mandate)'),
+    'british palestine': ('פלשתינה (א״י)', 'Mandatory Palestine (British Mandate)'),
+    'palestine mandate': ('פלשתינה (א״י)', 'Mandatory Palestine (British Mandate)'),
+    'union of south africa': ('Unie van Suid-Afrika', 'Union of South Africa'),
+    'french algeria': ('Algérie française', 'French Algeria'),
+    'sfr yugoslavia': ('Socijalistička Federativna Republika Jugoslavija',
+                       'Socialist Federal Republic of Yugoslavia'),
+    'kingdom of yugoslavia': ('Kraljevina Jugoslavija', 'Kingdom of Yugoslavia'),
+}
+
+# Colonial American issues: the colony (pre-1776) or state named on the
+# note, with the polity it sat inside.
+BANKNOTE_COLONY_NAMES = {
+    'pennsylvania': ('Province of Pennsylvania', 'Commonwealth of Pennsylvania'),
+    'new jersey': ('Province of New Jersey', 'State of New Jersey'),
+    'rhode island': ('Colony of Rhode Island and Providence Plantations',
+                     'State of Rhode Island and Providence Plantations'),
+    'massachusetts': ('Province of Massachusetts Bay',
+                      'Commonwealth of Massachusetts'),
+    'connecticut': ('Colony of Connecticut', 'State of Connecticut'),
+    'new york': ('Province of New York', 'State of New York'),
+    'virginia': ('Colony of Virginia', 'Commonwealth of Virginia'),
+    'maryland': ('Province of Maryland', 'State of Maryland'),
+    'delaware': ('Delaware Colony (Lower Counties)', 'Delaware State'),
+    'north carolina': ('Province of North Carolina', 'State of North Carolina'),
+    'south carolina': ('Province of South Carolina', 'State of South Carolina'),
+    'georgia': ('Province of Georgia', 'State of Georgia'),
+    'new hampshire': ('Province of New Hampshire', 'State of New Hampshire'),
+    'continental': ('United Colonies (Continental Congress)',
+                    'United States of America (Continental Congress)'),
+    'united colonies': ('United Colonies (Continental Congress)',
+                        'United States of America (Continental Congress)'),
+}
+
+
+def _colonial_state_name(country, year):
+    """State name for a colonial-america note: the named colony or
+    state, inside British America before 1776 and the United States
+    from the Declaration on."""
+    raw = (country or '').strip().lower()
+    base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
+    # "United States (Colonial - Pennsylvania)" keeps the colony inside
+    # the parenthetical; search the whole string.
+    for token, (colony, state) in BANKNOTE_COLONY_NAMES.items():
+        if token in raw or token in base:
+            if year and year >= 1776:
+                return {'native': None,
+                        'english': state + ' — United States of America'}
+            return {'native': None, 'english': colony + ' — British America'}
+    if year and year >= 1776:
+        return {'native': None, 'english': 'United States of America'}
+    return {'native': None, 'english': 'British America (Thirteen Colonies)'}
+
+
+def _state_span(country, english):
+    """The years a spelling-named state stood, read off its nation's
+    bands when one of them carries the same English name (German East
+    Africa -> the tanzania key's 1885–1918 band); None otherwise."""
+    raw = (country or '').strip().lower().rstrip('.')
+    base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
+    key = None
+    for candidate in (raw, base):
+        if candidate in BANKNOTE_MAP_COUNTRY_ALIASES:
+            key = BANKNOTE_MAP_COUNTRY_ALIASES[candidate]
+            break
+    key = key or _country_key(country)
+    for start, end, _native, band_english in BANKNOTE_STATE_NAMES.get(key, ()):
+        if band_english == english:
+            return f'{start}–{end}' if end != _OPEN else f'{start}–'
+    return None
+
+
+def _banknote_state_name(country, year):
+    """{'native', 'english', 'span'} for the state a note was issued
+    under as of `year`: a stored spelling that names the polity wins,
+    then the country key's era bands (built-in, else generated), then
+    None. `native` is None when the original name is English."""
+    raw = (country or '').strip().lower().rstrip('.')
+    if not raw:
+        return None
+    base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
+    key = None
+    for candidate in (raw, base):
+        if candidate in BANKNOTE_STATE_SPELLINGS:
+            native, english = BANKNOTE_STATE_SPELLINGS[candidate]
+            return {'native': native, 'english': english,
+                    'span': _state_span(country, english)}
+        if key is None and candidate in BANKNOTE_MAP_COUNTRY_ALIASES:
+            key = BANKNOTE_MAP_COUNTRY_ALIASES[candidate]
+    key = key or _country_key(country)
+    if key == 'colonial-america':
+        return _colonial_state_name(country, year)
+    if not key or key not in BANKNOTE_STATE_NAMES:
+        slug = _country_slug(base)
+        key = slug if slug in BANKNOTE_STATE_NAMES else (key or slug)
+    bands = BANKNOTE_STATE_NAMES.get(key)
+    if bands is None:
+        bands = _generated_state_names().get(key)
+    if not bands or not year:
+        return None
+    for start, end, native, english in bands:
+        if start <= year <= end:
+            span = (f'{start}–{end}' if end != _OPEN else f'{start}–')
+            return {'native': native or None, 'english': english,
+                    'span': span}
+    return None
 
 
 def _nearest_boundary_year(year):

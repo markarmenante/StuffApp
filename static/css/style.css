@@ -3645,6 +3645,31 @@ input[type="date"] { -webkit-appearance: none; }
   font-weight: 700;
   font-size: 12px;
 }
+/* Banknote origin map: the issuing state as of the note's year,
+   native name over the English one, top-right corner. */
+.leaflet-control.coin-map-state {
+  background: rgba(255,255,255,0.92);
+  border: 1px solid var(--border, #d9d9e0);
+  border-radius: 3px;
+  padding: 6px 10px;
+  max-width: 260px;
+  color: #333;
+  text-align: right;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  pointer-events: auto;
+}
+.coin-map-state-native {
+  font-size: 14px; font-weight: 700; line-height: 1.25;
+  color: #8a6d3b;
+}
+.coin-map-state-english {
+  font-size: 12px; font-weight: 500; line-height: 1.3;
+  margin-top: 1px;
+}
+.coin-map-state-year {
+  font-size: 10.5px; color: var(--text-secondary, #666);
+  margin-top: 3px; letter-spacing: 0.02em;
+}
 
 /* ── Coins distribution map page ── */
 .coins-map-wrap {

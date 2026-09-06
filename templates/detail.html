@@ -1689,6 +1689,37 @@ document.addEventListener('DOMContentLoaded', function () {
       maxZoom: 16,
     }).addTo(map);
 
+    // The state the note was issued under, as of its year (see
+    // _banknote_state_name in app.py): its own-language name over the
+    // English one, in the map's corner — so a 1916 Tabora note reads
+    // Deutsch-Ostafrika / German East Africa, not Tanzania.
+    if (origin.state && origin.state.english) {
+      const st = origin.state;
+      const native = (st.native && st.native !== st.english) ? st.native : null;
+      const StateBox = L.Control.extend({
+        onAdd: function () {
+          const el = L.DomUtil.create('div', 'coin-map-state');
+          const head = L.DomUtil.create('div', 'coin-map-state-native', el);
+          head.textContent = native || st.english;
+          if (native) {
+            const en = L.DomUtil.create('div', 'coin-map-state-english', el);
+            en.textContent = st.english;
+          }
+          const bits = [];
+          if (origin.year) bits.push('as of ' + origin.year);
+          if (st.span) bits.push(st.span);
+          if (bits.length) {
+            const yr = L.DomUtil.create('div', 'coin-map-state-year', el);
+            yr.textContent = bits.join(' · ');
+            if (st.span) yr.title = 'Years this state stood: ' + st.span;
+          }
+          L.DomEvent.disableClickPropagation(el);
+          return el;
+        },
+      });
+      new StateBox({position: 'topright'}).addTo(map);
+    }
+
     // The border note rides along on whatever the caption says, so an
     // async borders load can't be clobbered by a later pin caption.
     let captionBase = caption ? caption.textContent : '';
