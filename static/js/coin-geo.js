@@ -709,18 +709,42 @@ window.geoJsonContains = function(geometry, latlng) {
 // Draw the era's borders on `map`; fill the polity at `latlng` (when
 // given). Resolves to {year, name} or null. Fails silently — the pin is
 // the point of the map.
+// Hand-drawn supplements for spans the world snapshots serve badly:
+// drawn over the snapshot, and their polities replace the snapshot's
+// named ones. British America between the Proclamation of 1763 and
+// Lexington: the thirteen colonies drawn individually, clipped at the
+// Proclamation Line, with the Floridas, Quebec and the Indian Reserve
+// (the world set jumps from 1715 straight to 1783).
+window.ERA_BORDER_SUPPLEMENTS = [
+  {from: 1763, to: 1775, url: '/static/geo/british-america-1763.geojson',
+   replaces: ['British American colonies', 'Florida (Spain)']},
+];
 window.loadEraBorders = function(map, year, latlng) {
   const snap = window.eraBorderSnapshot(year);
   if (snap === null) return Promise.resolve(null);
   const file = snap < 0 ? 'bc' + Math.abs(snap) : String(snap);
-  return fetch('https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/world_'
-               + file + '.geojson')
-    .then(res => res.ok ? res.json() : null)
-    .then(gj => {
+  const y = Number(year);
+  const supp = window.ERA_BORDER_SUPPLEMENTS.find(s => y >= s.from && y <= s.to) || null;
+  const getJson = (url) => fetch(url).then(res => res.ok ? res.json() : null).catch(() => null);
+  return Promise.all([
+    getJson('https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/world_'
+            + file + '.geojson'),
+    supp ? getJson(supp.url) : Promise.resolve(null),
+  ])
+    .then(([world, extra]) => {
+      let gj = world;
+      const fromSupplement = new Set(extra && extra.features ? extra.features : []);
+      if (extra && extra.features) {
+        const drop = new Set((supp.replaces || []).map(n => n.toLowerCase()));
+        const kept = (world && world.features || []).filter(f =>
+          !drop.has(((f.properties || {}).NAME || '').trim().toLowerCase()));
+        gj = {type: 'FeatureCollection', features: extra.features.concat(kept)};
+      }
       if (!gj) return null;
       let home = null;
       if (latlng) {
-        home = (gj.features || []).find(f => window.geoJsonContains(f.geometry, latlng)) || null;
+        home = (gj.features || []).find(f => !(f.properties && f.properties.LINE)
+                                              && window.geoJsonContains(f.geometry, latlng)) || null;
         // Coastal seats (Williamsburg, Tabora's Dar es Salaam neighbours)
         // fall just outside a coarsely drawn shoreline: take the nearest
         // polity within ~120 km instead of leaving the pin stateless.
@@ -729,7 +753,7 @@ window.loadEraBorders = function(map, year, latlng) {
           let best = null, bestD = 120000;
           (gj.features || []).forEach(f => {
             const g = f.geometry;
-            if (!g || !f.properties || !(f.properties.NAME || '').trim()) return;
+            if (!g || !f.properties || !(f.properties.NAME || '').trim() || f.properties.LINE) return;
             const polys = g.type === 'Polygon' ? [g.coordinates]
               : g.type === 'MultiPolygon' ? g.coordinates : [];
             polys.forEach(poly => (poly[0] || []).forEach(([x, y]) => {
@@ -742,9 +766,11 @@ window.loadEraBorders = function(map, year, latlng) {
         }
       }
       const layer = L.geoJSON(gj, {
-        style: (f) => f === home
-          ? {color: '#8a6d3b', weight: 1.6, opacity: 0.85, fillColor: '#8a6d3b', fillOpacity: 0.14}
-          : {color: '#8a6d3b', weight: 1, opacity: 0.6, fill: false},
+        style: (f) => (f.properties && f.properties.LINE)
+          ? {color: '#c0392b', weight: 1.4, opacity: 0.7, dashArray: '5 4', fill: false}
+          : f === home
+            ? {color: '#8a6d3b', weight: 1.6, opacity: 0.85, fillColor: '#8a6d3b', fillOpacity: 0.14}
+            : {color: '#8a6d3b', weight: 1, opacity: 0.6, fill: false},
         interactive: false,
       }).addTo(map);
       // Name the neighbours: the polities nearest the pin get a label
@@ -756,21 +782,32 @@ window.loadEraBorders = function(map, year, latlng) {
         layer.eachLayer(l => {
           const f = l.feature;
           const nm = f && f.properties && (f.properties.NAME || '').trim();
-          if (!nm || f === home || !l.getBounds) return;
+          if (!nm || f === home || !l.getBounds || (f.properties && f.properties.LINE)) return;
           const b = l.getBounds();
           if (!b.isValid()) return;
           let c;
-          try { c = l.getCenter(); } catch (_) { c = b.getCenter(); }
+          const at = f.properties.LABEL_AT;
+          if (at && at.length === 2) c = L.latLng(at[0], at[1]);
+          else { try { c = l.getCenter(); } catch (_) { c = b.getCenter(); } }
           if (!c) return;
           if (Math.abs(c.lat - pin.lat) > 14 || Math.abs(c.lng - pin.lng) > 22) return;
           // Archaeological-culture and hunter-gatherer areas aren't
           // neighbouring states; skip them.
           if (/culture|hunter|gatherer|nomad|peoples|uninhabited|unclaimed/i.test(nm)) return;
-          near.push({name: nm, center: c, d: pin.distanceTo(c)});
+          // Hand-drawn supplement polities label ahead of the snapshot's.
+          near.push({name: nm, center: c,
+                     d: pin.distanceTo(c) - (fromSupplement.has(f) ? 1e8 : 0)});
         });
         near.sort((a, b) => a.d - b.d);
-        const seen = new Set();
-        near.filter(n => !seen.has(n.name) && seen.add(n.name)).slice(0, 14).forEach(n => {
+        // One label per name, nearest first, and none closer than
+        // ~110 km to a label already placed — the New England colonies
+        // would otherwise print on top of each other.
+        const seen = new Set(), placed = [];
+        near.filter(n => {
+          if (seen.has(n.name)) return false;
+          if (placed.some(c => c.distanceTo(n.center) < 110000)) return false;
+          seen.add(n.name); placed.push(n.center); return true;
+        }).slice(0, 12).forEach(n => {
           L.tooltip({
             permanent: true, direction: 'center', className: 'coin-era-label',
             interactive: false, opacity: 1,
@@ -782,7 +819,10 @@ window.loadEraBorders = function(map, year, latlng) {
       if (home) {
         layer.eachLayer(l => { if (l.feature === home && l.getBounds) bounds = l.getBounds(); });
       }
-      return {year: snap, name: name || null, bounds: bounds && bounds.isValid() ? bounds : null};
+      // A supplement is drawn for its own span: report its start year,
+      // not the older world snapshot underneath it.
+      const shownYear = (extra && extra.features) ? Math.max(snap, supp.from) : snap;
+      return {year: shownYear, name: name || null, bounds: bounds && bounds.isValid() ? bounds : null};
     })
     .catch(() => null);
 };
