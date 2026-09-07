@@ -3682,6 +3682,12 @@ input[type="date"] { -webkit-appearance: none; }
   white-space: nowrap; pointer-events: none;
 }
 .leaflet-tooltip.coin-era-label::before { display: none !important; }
+/* A constituent of the issuing federation (Laos inside French
+   Indochina): lighter, so the federation reads as one state. */
+.leaflet-tooltip.coin-era-label.coin-era-part {
+  font-weight: 500; font-size: 10px; letter-spacing: 0.05em;
+  color: #8a6d3b; opacity: 0.8; text-transform: none;
+}
 
 /* ── Coins distribution map page ── */
 .coins-map-wrap {

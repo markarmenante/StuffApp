@@ -784,6 +784,42 @@ window.ERA_PERIOD_NAMES = {
   'iraq': [[1920, 1931, 'Iraq (British Mandate)']],
   'madagascar': [[1897, 1959, 'French Madagascar']],
 };
+// Colonial federations the snapshots draw piecemeal: a 1938 map has
+// French Indo-China, Laos, Cambodia and Cochin China as four polygons,
+// though all were French Indochina. Within its span, a federation's
+// parts are shaded together as the issuing state and labelled as its
+// parts. Part names are matched lower-cased, before and after the
+// period rename, trailing parenthetical dropped.
+window.ERA_FEDERATIONS = [
+  {name: 'French Indochina', from: 1887, to: 1954,
+   parts: ['french indochina', 'french indo-china', 'tonkin', 'annam', 'cochin china',
+           'cochinchina', 'laos', 'cambodia', 'kwangchowan', 'vietnam']},
+  {name: 'French West Africa', from: 1895, to: 1958,
+   parts: ['french west africa', 'senegal', 'french sudan', 'mali', 'french guinea', 'guinea',
+           'ivory coast', 'dahomey', 'benin', 'upper volta', 'burkina faso', 'niger', 'mauritania']},
+  {name: 'French Equatorial Africa', from: 1910, to: 1958,
+   parts: ['french equatorial africa', 'gabon', 'middle congo', 'congo (france)', 'ubangi-shari',
+           'central african republic', 'chad']},
+  {name: 'Italian East Africa', from: 1936, to: 1941,
+   parts: ['italian east africa', 'ethiopia', 'italian eritrea', 'eritrea', 'italian somaliland', 'somalia']},
+  {name: 'Federation of Rhodesia and Nyasaland', from: 1953, to: 1963,
+   parts: ['southern rhodesia', 'northern rhodesia', 'nyasaland', 'rhodesia', 'zambia', 'malawi', 'zimbabwe']},
+  {name: 'British Malaya', from: 1896, to: 1941,
+   parts: ['british malaya', 'malaya', 'malaysia', 'straits settlements', 'federated malay states',
+           'unfederated malay states']},
+  {name: 'British India', from: 1858, to: 1946,
+   parts: ['british india', 'india']},
+];
+window.eraFederationFor = function(name, year) {
+  const raw = String(name || '').trim().toLowerCase();
+  const base = raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
+  const y = Number(year);
+  for (const fed of window.ERA_FEDERATIONS) {
+    if (y < fed.from || y > fed.to) continue;
+    if (fed.parts.includes(raw) || fed.parts.includes(base)) return fed.name;
+  }
+  return null;
+};
 window.eraPeriodName = function(name, year) {
   const raw = String(name || '').trim();
   const base = raw.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
@@ -839,10 +875,14 @@ window.loadEraBorders = function(map, year, latlng, meta) {
         gj = {type: 'FeatureCollection', features: extraFeatures.concat(kept)};
       }
       if (!gj) return null;
-      // Period names on the snapshot's own features.
+      // Period names on the snapshot's own features, and the colonial
+      // federation each belongs to (Laos -> French Indochina).
       (gj.features || []).forEach(f => {
         if (!fromSupplement.has(f) && f.properties && f.properties.NAME) {
-          f.properties.NAME = window.eraPeriodName(f.properties.NAME, y);
+          const original = f.properties.NAME;
+          f.properties.NAME = window.eraPeriodName(original, y);
+          f.properties.FED = window.eraFederationFor(original, y)
+            || window.eraFederationFor(f.properties.NAME, y) || null;
         }
       });
       let home = null;
@@ -869,11 +909,14 @@ window.loadEraBorders = function(map, year, latlng, meta) {
           home = best;
         }
       }
+      const homeFed = home && home.properties && home.properties.FED || null;
+      const inHome = (f) => f === home || (homeFed && f.properties && f.properties.FED === homeFed);
       const layer = L.geoJSON(gj, {
         style: (f) => (f.properties && f.properties.LINE)
           ? {color: '#c0392b', weight: 1.4, opacity: 0.7, dashArray: '5 4', fill: false}
-          : f === home
-            ? {color: '#8a6d3b', weight: 1.6, opacity: 0.85, fillColor: '#8a6d3b', fillOpacity: 0.14}
+          : inHome(f)
+            ? {color: '#8a6d3b', weight: f === home ? 1.6 : 1.1, opacity: 0.85,
+               fillColor: '#8a6d3b', fillOpacity: 0.14}
             : {color: '#8a6d3b', weight: 1, opacity: 0.6, fill: false},
         interactive: false,
       }).addTo(map);
@@ -887,6 +930,7 @@ window.loadEraBorders = function(map, year, latlng, meta) {
           const f = l.feature;
           const nm = f && f.properties && (f.properties.NAME || '').trim();
           if (!nm || f === home || !l.getBounds || (f.properties && f.properties.LINE)) return;
+          const part = !!(homeFed && f.properties.FED === homeFed);
           const b = l.getBounds();
           if (!b.isValid()) return;
           let c;
@@ -899,7 +943,7 @@ window.loadEraBorders = function(map, year, latlng, meta) {
           // neighbouring states; skip them.
           if (/culture|hunter|gatherer|nomad|peoples|uninhabited|unclaimed/i.test(nm)) return;
           // Hand-drawn supplement polities label ahead of the snapshot's.
-          near.push({name: nm, center: c, bounds: b,
+          near.push({name: nm, center: c, bounds: b, part,
                      d: pin.distanceTo(c) - (fromSupplement.has(f) ? 1e8 : 0)});
         });
         near.sort((a, b) => a.d - b.d);
@@ -934,7 +978,8 @@ window.loadEraBorders = function(map, year, latlng, meta) {
             if (boxes.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) return;
             boxes.push(box);
             labels.push(L.tooltip({
-              permanent: true, direction: 'center', className: 'coin-era-label',
+              permanent: true, direction: 'center',
+              className: 'coin-era-label' + (n.part ? ' coin-era-part' : ''),
               interactive: false, opacity: 1,
             }).setLatLng(n.center).setContent(n.name).addTo(map));
           });
@@ -942,10 +987,15 @@ window.loadEraBorders = function(map, year, latlng, meta) {
         layout();
         map.on('zoomend moveend', layout);
       }
-      const name = home && home.properties && (home.properties.NAME || '').trim();
+      const name = homeFed || (home && home.properties && (home.properties.NAME || '').trim());
       let bounds = null;
       if (home) {
-        layer.eachLayer(l => { if (l.feature === home && l.getBounds) bounds = l.getBounds(); });
+        layer.eachLayer(l => {
+          if (!l.getBounds || !inHome(l.feature)) return;
+          const b = l.getBounds();
+          if (!b.isValid()) return;
+          bounds = bounds ? bounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast());
+        });
       }
       // A supplement is drawn for its own span: report its start year,
       // not the older world snapshot underneath it.
