@@ -17893,6 +17893,39 @@ def ensure_era_supplement(year, polity, place, lat, lng):
     return True
 
 
+def _prune_superseded_era_supplements():
+    """Drop generated drawings whose span and area a hand-drawn overlay
+    now covers (a drawing commissioned before the overlay shipped —
+    the 1776 British America one drawn while the overlay still stopped
+    at 1775). Runs at boot; a no-op once clean."""
+    try:
+        db = open_db_connection()
+        try:
+            rows = db.execute(
+                "SELECT id, year_from, year_to, south, west, north, east "
+                "FROM era_supplements").fetchall()
+            gone = []
+            for r in rows:
+                clat = (r['south'] + r['north']) / 2.0
+                clng = (r['west'] + r['east']) / 2.0
+                for y0, y1, _path, (s, w, n, e), _rep in ERA_STATIC_SUPPLEMENTS:
+                    overlaps = r['year_from'] <= y1 and r['year_to'] >= y0
+                    inside = s <= clat <= n and w <= clng <= e
+                    if overlaps and inside:
+                        gone.append(r['id'])
+                        break
+            for supp_id in gone:
+                db.execute("DELETE FROM era_supplements WHERE id = ?", (supp_id,))
+            db.commit()
+            if gone:
+                print(f'era supplements pruned (hand-drawn overlay covers them): '
+                      f'{", ".join(gone)}', flush=True)
+        finally:
+            db.close()
+    except sqlite3.Error as e:
+        print(f'era supplement prune skipped: {e}', flush=True)
+
+
 @app.route('/api/era-supplements')
 def era_supplements_for_pin():
     """The supplements that apply to a pin and year, static and drawn.
@@ -17907,7 +17940,11 @@ def era_supplements_for_pin():
     polity = (request.args.get('polity') or '').strip()[:160]
     place = (request.args.get('place') or '').strip()[:160]
     db = get_db()
-    matches = _era_static_matches(year, lat, lng) + _era_db_matches(db, year, lat, lng)
+    # A hand-drawn overlay wins outright; a generated drawing is only
+    # for places and spans nothing was built for. Merging the two put a
+    # model's "State of Pennsylvania" beside the overlay's "Province of
+    # Pennsylvania" on one 1776 map.
+    matches = _era_static_matches(year, lat, lng) or _era_db_matches(db, year, lat, lng)
     pending = False
     gap = _era_gap(year)
     # An occupation or annexation is a map change the snapshots never
@@ -31448,6 +31485,9 @@ with app.app_context():
 # covered.
 if os.environ.get('ANTHROPIC_API_KEY'):
     threading.Thread(target=_backfill_country_histories, daemon=True).start()
+# Generated era drawings that a hand-drawn overlay has since covered
+# are dropped, so the two never draw over each other.
+_prune_superseded_era_supplements()
 # Load the U2-Net weights before the first trim needs them (rembg is
 # optional; the warm-up logs and moves on when it is not installed).
 threading.Thread(target=_warm_rembg, daemon=True).start()
