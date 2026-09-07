@@ -17711,6 +17711,15 @@ ERA_STATIC_SUPPLEMENTS = (
     (1848, 1860, 'geo/north-america-1848.geojson', _NA_BOX, ()),
     (1861, 1865, 'geo/north-america-1861.geojson', _NA_BOX, ()),
     (1866, 1879, 'geo/north-america-1866.geojson', _NA_BOX, ()),
+    # The German colonies, 1885–1918 — the 1900 snapshot leaves them
+    # unnamed and puts Dar es Salaam under Zanzibar. One file, listed
+    # for its African and its Pacific boxes.
+    (1885, 1918, 'geo/german-colonies-1885.geojson',
+     (-30.0, -20.0, 15.0, 55.0), ('Sultinate of Zanzibar',)),
+    (1885, 1918, 'geo/german-colonies-1885.geojson',
+     (-15.0, 140.0, 5.0, 160.0), ()),
+    (1885, 1918, 'geo/german-colonies-1885.geojson',
+     (-15.0, -175.0, -12.0, -170.0), ()),
 )
 
 _ERA_SUPPLEMENT_INFLIGHT = set()

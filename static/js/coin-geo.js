@@ -738,7 +738,6 @@ window.ERA_PERIOD_NAMES = {
   'malawi': [[1891, 1906, 'British Central Africa'], [1907, 1963, 'Nyasaland']],
   'zambia': [[1911, 1963, 'Northern Rhodesia']],
   'zimbabwe': [[1923, 1964, 'Southern Rhodesia'], [1965, 1979, 'Rhodesia']],
-  'rhodesia': [[1923, 1964, 'Southern Rhodesia']],
   'botswana': [[1885, 1965, 'Bechuanaland Protectorate']],
   'lesotho': [[1868, 1965, 'Basutoland']],
   'namibia': [[1884, 1914, 'German South West Africa'], [1915, 1989, 'South West Africa']],
@@ -783,6 +782,37 @@ window.ERA_PERIOD_NAMES = {
   'lebanon': [[1920, 1942, 'Lebanon (French Mandate)']],
   'iraq': [[1920, 1931, 'Iraq (British Mandate)']],
   'madagascar': [[1897, 1959, 'French Madagascar']],
+  // German empire
+  'german e. africa': [[0, 9999, 'German East Africa']],
+  'rhodesia': [[1895, 1922, 'Rhodesia (British South Africa Company)'], [1923, 1964, 'Southern Rhodesia']],
+  'samoa': [[1900, 1913, 'German Samoa'], [1914, 1961, 'Western Samoa (New Zealand mandate)']],
+  'papua new guinea': [[1884, 1913, 'German New Guinea and British Papua'],
+                       [1914, 1974, 'Territory of Papua and New Guinea (Australia)']],
+  // Belgian empire
+  'congo': [[1885, 1907, 'Congo Free State'], [1908, 1959, 'Belgian Congo']],
+  'rwanda': [[1919, 1961, 'Ruanda (Belgian Ruanda-Urundi)']],
+  'burundi': [[1919, 1961, 'Urundi (Belgian Ruanda-Urundi)']],
+  // Italian empire
+  'tripolitania': [[1911, 1933, 'Italian Tripolitania']],
+  'cyrenaica': [[1911, 1933, 'Italian Cyrenaica']],
+  'dodecanese': [[1912, 1946, 'Italian Islands of the Aegean']],
+  // Portuguese empire
+  'portuguese east africa': [[0, 9999, 'Portuguese Mozambique']],
+  'cape verde': [[0, 1974, 'Portuguese Cape Verde']],
+  'sao tome and principe': [[0, 1974, 'Portuguese São Tomé and Príncipe']],
+  'timor-leste': [[0, 1974, 'Portuguese Timor']],
+  'east timor': [[0, 1974, 'Portuguese Timor']],
+  'goa': [[0, 1961, 'Portuguese India (Estado da Índia)']],
+  'macau': [[0, 1998, 'Portuguese Macau']],
+  'macao': [[0, 1998, 'Portuguese Macau']],
+  // Spanish empire
+  'philippines': [[1565, 1898, 'Spanish Philippines'], [1899, 1934, 'Philippine Islands (United States)'],
+                  [1935, 1945, 'Commonwealth of the Philippines']],
+  'cuba': [[0, 1898, 'Spanish Cuba']],
+  'puerto rico': [[0, 1898, 'Spanish Puerto Rico'], [1899, 9999, 'Puerto Rico (United States)']],
+  'rio de oro': [[0, 1975, 'Spanish Sahara (Río de Oro)']],
+  'western sahara': [[1884, 1975, 'Spanish Sahara']],
+  'spanish morocco': [[0, 9999, 'Spanish Morocco']],
 };
 // Colonial federations the snapshots draw piecemeal: a 1938 map has
 // French Indo-China, Laos, Cambodia and Cochin China as four polygons,
@@ -809,6 +839,14 @@ window.ERA_FEDERATIONS = [
            'unfederated malay states']},
   {name: 'British India', from: 1858, to: 1946,
    parts: ['british india', 'india']},
+  {name: 'German East Africa', from: 1885, to: 1918,
+   parts: ['german east africa', 'german e. africa', 'tanzania', 'tanzania, united republic of', 'rwanda', 'burundi']},
+  {name: 'Ruanda-Urundi (Belgian mandate)', from: 1919, to: 1961,
+   parts: ['rwanda', 'burundi', 'ruanda-urundi', 'ruanda', 'urundi']},
+  {name: 'Italian Libya', from: 1934, to: 1942,
+   parts: ['libya', 'tripolitania', 'cyrenaica', 'fezzan']},
+  {name: 'Spanish Sahara', from: 1884, to: 1975,
+   parts: ['spanish sahara', 'rio de oro', 'western sahara', 'saguia el hamra']},
 ];
 window.eraFederationFor = function(name, year) {
   const raw = String(name || '').trim().toLowerCase();
