@@ -1688,10 +1688,10 @@ document.addEventListener('DOMContentLoaded', function () {
       center: [25.0, 10.0], zoom: 2, minZoom: 2, maxZoom: 12,
       scrollWheelZoom: false, dragging: true, worldCopyJump: true,
     });
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles © Esri — Esri, DeLorme, NAVTEQ',
-      maxZoom: 16,
-    }).addTo(map);
+    // Esri terrain base: shaded relief with no place names at all, so
+    // the era's own labels (Portuguese Mozambique, Northern Rhodesia)
+    // aren't printed over today's (Mozambique, Zambia).
+    window.addUnlabelledBasemap(map);
 
     // The state the note was issued under, as of its year (see
     // _banknote_state_name in app.py): its own-language name over the
@@ -7738,13 +7738,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     dragging: true,
     worldCopyJump: !isAncientMap,
   });
-  // Esri light-gray canvas — clean, nearly label-free base, no API key.
-  // (CARTO's basemap CDN now watermarks "API KEY REQUIRED" on anonymous
-  // use, so the old cartocdn tiles are gone — same swap as n552ym.)
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Tiles © Esri — Esri, DeLorme, NAVTEQ',
-    maxZoom: 16,
-  }).addTo(map);
+  // Esri terrain base — shaded relief with no place names at all, so
+  // the era's own labels aren't printed over today's country names.
+  // (CARTO's basemap CDN watermarks anonymous use; the light-gray
+  // canvas carried modern country and ocean names.)
+  window.addUnlabelledBasemap(map);
 
   // Plot all city markers. Tooltip only shows on hover by default; the
   // origin city gets a permanent label. Zooming past LABEL_ZOOM pins all

@@ -860,3 +860,24 @@ window.loadEraBorders = function(map, year, latlng, meta) {
     })
     .catch(() => null);
 };
+
+// Basemap for the origin maps: Esri's terrain base carries no place
+// names, so the era's own labels aren't printed over today's country
+// names. Should that legacy service ever go away, the first failed
+// tile swaps in the light-gray canvas (labelled, but never blank).
+window.addUnlabelledBasemap = function(map) {
+  const terrain = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}',
+    {attribution: 'Tiles © Esri — USGS, NOAA', maxZoom: 13});
+  let swapped = false;
+  terrain.on('tileerror', () => {
+    if (swapped) return;
+    swapped = true;
+    map.removeLayer(terrain);
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      {attribution: 'Tiles © Esri — Esri, DeLorme, NAVTEQ', maxZoom: 16}).addTo(map);
+  });
+  terrain.addTo(map);
+  return terrain;
+};
