@@ -124,10 +124,9 @@
      class="toolbar-btn pill active"
      title="Toggle: Own ↔ Sold">{{ 'Own' if prop_status == 'own' else 'Sold' }}</a>
   {% endif %}
-  {# Status-cycle pill, every status-bearing category alike: shows the
-     current status view (default Own — the list hides everything else
-     unless a search is active) and each click advances to the next
-     status actually present in the data, wrapping back to Own.
+  {# Status pill, every status-bearing category alike: rotates
+     All → Own → Ordered → All. All is the default (no filter) and
+     shows every status; Own and Ordered narrow to that status.
      Watches label the Ordered stop "Commissioned", matching the
      detail page. Banknotes carry the history toggle along so cycling
      doesn't silently flip the panels back on. #}
@@ -139,9 +138,9 @@
   {%- for _s in status_cycle -%}
     {%- set _ = _st_labels.append('Commissioned' if category == 'watches' and _s == 'ordered' else _s|capitalize) -%}
   {%- endfor -%}
-  <a href="{{ url_for('list_view', category=category, q=q or None, filter=None if _st_next == 'own' else _st_next, history=_st_hist) }}"
-     class="toolbar-btn pill active"
-     title="Cycle status: {{ _st_labels | join(' → ') }}">{{ 'Commissioned' if category == 'watches' and status_current == 'ordered' else status_current | capitalize }}</a>
+  <a href="{{ url_for('list_view', category=category, q=q or None, filter=None if _st_next == 'all' else _st_next, history=_st_hist) }}"
+     class="toolbar-btn pill {% if status_current != 'all' %}active{% endif %}"
+     title="Cycle status: {{ _st_labels | join(' → ') }}">{{ 'Status: All' if status_current == 'all' else ('Commissioned' if category == 'watches' and status_current == 'ordered' else status_current | capitalize) }}</a>
   {% endif %}
   {# Every list carries the search bar in its sticky toolbar — even the
      short ones — so the subheading reads the same across categories. #}

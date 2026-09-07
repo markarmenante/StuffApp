@@ -11404,23 +11404,26 @@ CATEGORY_FILTERS = {
 
 # Lifecycle-status axis, every status-bearing item category alike
 # (properties keep their own compound status+type filter above). Each
-# canonical status becomes a filter key, the default list (no filter,
-# no search) shows only owned items, and the toolbar renders one pill
-# that cycles through the statuses actually present in the table —
-# see build_search_query, list_view, and list.html.
+# canonical status becomes a filter key. The default list (no filter)
+# shows every status, and the toolbar renders one pill that rotates
+# All -> Own -> Ordered -> All (STATUS_PILL_CYCLE; 'all' is the
+# no-filter stop) — see list_view and list.html. The remaining status
+# keys stay reachable by URL.
 STATUS_CYCLE_ORDER = ('own', 'ordered', 'sold', 'loaned', 'gifted',
                       'consigned', 'lost')
+STATUS_PILL_CYCLE = ('all', 'own', 'ordered')
 STATUS_CYCLE_CATEGORIES = ('watches', 'coins', 'banknotes', 'cameras',
                            'lenses', 'pens', 'art', 'items', 'vehicles',
                            'recordings', 'audio', 'rifles')
-# Filter keys that already pick a status; while one is active the
-# default owned-only clause must stay out of the query (the two would
-# contradict and match nothing).
+# Filter keys that pick a status (kept for callers that need to tell a
+# status filter from a type/location one).
 STATUS_FILTER_KEYS = set(STATUS_CYCLE_ORDER) | {'no_longer_owned'}
 for _cat in STATUS_CYCLE_CATEGORIES:
     _cat_filters = CATEGORY_FILTERS.setdefault(_cat, {})
     for _status in STATUS_CYCLE_ORDER:
-        _pred = _own_status_predicate() if _status == 'own' \
+        # Own also takes blank statuses (boot backfills them to Own).
+        _pred = f"({_own_status_predicate()} OR TRIM(COALESCE(status,'')) = '')" \
+            if _status == 'own' \
             else f"LOWER(TRIM(COALESCE(status,''))) = '{_status}'"
         _cat_filters.setdefault(_status, (_pred, []))
 del _cat, _cat_filters, _status, _pred
@@ -11631,18 +11634,10 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
         wheres.append(f"({clause})")
         params += list(extra_params)
 
-    # Every status-bearing list defaults to owned items only — Sold /
-    # Gifted / Lost etc. have left the collection (or, like Ordered,
-    # not yet arrived) and clutter the working view. The status-cycle
-    # pill in the toolbar reaches every other status, an explicit
-    # status filter shows exactly that status, and an active text
-    # search (or the dot filter) still finds any item by name without
-    # clicking anything. Blank statuses count as owned (boot backfills
-    # them to Own anyway).
-    if (category in STATUS_CYCLE_CATEGORIES and not q and not dot
-            and coin_filter not in STATUS_FILTER_KEYS):
-        wheres.append(f"({_own_status_predicate()} "
-                      "OR TRIM(COALESCE(status,'')) = '')")
+    # Status-bearing lists default to every status (the pill's All
+    # stop); filter=own / filter=ordered narrow via CATEGORY_FILTERS
+    # above. Blank statuses count as owned there (boot backfills them
+    # to Own anyway).
 
     # "?at=<property name>" — narrow to items physically located at
     # that property. Only meaningful for categories that store a
@@ -13943,22 +13938,12 @@ def list_view(category):
             f"SELECT EXISTS(SELECT 1 FROM {table} "
             f"WHERE LOWER(TRIM(COALESCE(status,''))) = 'ordered')"
         ).fetchone()[0] == 1
-    # Status-cycle pill: the canonical statuses actually present in
-    # this category's table, in cycle order. Only stops with data
-    # (plus Own, the default view) appear, so the cycle never lands
-    # on an empty list.
-    status_cycle, status_current = [], 'own'
+    # Status pill: a fixed All -> Own -> Ordered rotation. All (the
+    # default, no filter) shows every status; Own and Ordered narrow
+    # to that status.
+    status_cycle, status_current = [], 'all'
     if category in STATUS_CYCLE_CATEGORIES:
-        table = CATEGORIES[category]['table']
-        present = {
-            row[0] for row in db.execute(
-                f"SELECT DISTINCT LOWER(TRIM(COALESCE(status,''))) "
-                f"FROM {table}"
-            ).fetchall()
-        }
-        present = {'own' if s in ('', 'owned') else s for s in present}
-        present.add('own')
-        status_cycle = [s for s in STATUS_CYCLE_ORDER if s in present]
+        status_cycle = list(STATUS_PILL_CYCLE)
         if coin_filter in status_cycle:
             status_current = coin_filter
     has_in_service = False
@@ -17271,8 +17256,8 @@ def banknotes_map_view():
     column — notgeld towns), geocoded client-side through
     /api/geocode-city; else the nation's principal city as of the
     note's date; else a geocode of the raw country string. Honours the
-    same filter pills the list view uses; no filter falls back to the
-    list's owned-only default.
+    same filter pills the list view uses; no filter shows every note,
+    matching the list's All default.
     """
     db = get_db()
     coin_filter = (request.args.get('filter') or '').strip() or None
@@ -17283,9 +17268,9 @@ def banknotes_map_view():
                  'national': 'National'}.get(
             coin_filter, coin_filter.replace('_', ' ').title())
     else:
-        where = f"({_own_status_predicate()} OR TRIM(COALESCE(status,'')) = '')"
+        where = '1=1'
         params = []
-        label = 'Own'
+        label = 'All'
     rows = db.execute(
         "SELECT id, banknote_id, country, municipality, denomination, "
         "series, date_1, date_1_text, issuer "
