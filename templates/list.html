@@ -50,12 +50,6 @@
   <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_era_filter) }}"
      class="toolbar-btn pill {% if _coin_era %}active{% endif %}"
      title="Cycle period: Ancient → Modern → All">{{ 'Ancient' if _coin_era == 'ancient' else ('Modern' if _coin_era == 'modern' else 'Era: All') }}</a>
-  {% if has_ordered or coin_filter == 'ordered' %}
-  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered') }}"
-     class="toolbar-btn pill ordered-filter-pill {% if coin_filter == 'ordered' %}active{% endif %}"
-     title="Coins with status Ordered"
-     aria-label="Coins with status Ordered"><span class="ordered-filter-dot"></span></a>
-  {% endif %}
   <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
      title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
   {% endif %}
@@ -81,12 +75,6 @@
      title="Show or hide the historical context panels">History</a>
   <a href="{{ url_for('banknotes_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
      title="World distribution for the current filter — pins at the issuing city, or the era's principal city">Map</a>
-  {% if has_ordered or coin_filter == 'ordered' %}
-  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=None if coin_filter == 'ordered' else 'ordered', history=_hist) }}"
-     class="toolbar-btn pill ordered-filter-pill {% if coin_filter == 'ordered' %}active{% endif %}"
-     title="Banknotes with status Ordered"
-     aria-label="Banknotes with status Ordered"><span class="ordered-filter-dot"></span></a>
-  {% endif %}
   {% endif %}
   {% if category == 'watches' and not at_property %}
   {% if has_in_service or coin_filter == 'in_service' %}

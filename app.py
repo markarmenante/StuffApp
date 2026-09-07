@@ -13928,16 +13928,6 @@ def list_view(category):
     # Split the compound properties filter into its two axes for the template.
     prop_status, prop_type = _split_property_filter(coin_filter) \
         if category == 'properties' else (None, None)
-    # The Ordered pill only makes sense if there's at least one such
-    # row (or the user is already viewing filter=ordered and wants a
-    # way to toggle back off).
-    has_ordered = False
-    if category in ('coins', 'banknotes'):
-        table = CATEGORIES[category]['table']
-        has_ordered = db.execute(
-            f"SELECT EXISTS(SELECT 1 FROM {table} "
-            f"WHERE LOWER(TRIM(COALESCE(status,''))) = 'ordered')"
-        ).fetchone()[0] == 1
     # Status pill: a fixed All -> Own -> Ordered rotation. All (the
     # default, no filter) shows every status; Own and Ordered narrow
     # to that status.
@@ -13986,7 +13976,6 @@ def list_view(category):
                            today_iso=date.today().isoformat(),
                            result_count=len(rows),
                            art_price_total=art_price_total,
-                           has_ordered=has_ordered,
                            status_cycle=status_cycle,
                            status_current=status_current,
                            has_in_service=has_in_service,
