@@ -16140,6 +16140,30 @@ BANKNOTE_MAP_COUNTRY_ALIASES = {
     'deutsch ostafrika': 'tanzania',
 }
 
+# Colonial American issues pin at the colony's own seat, not at
+# Philadelphia: (start, end, city, lat, lng) bands per colony token
+# (matched inside the stored country text), first band containing
+# the year wins, end 0 = open.
+BANKNOTE_COLONY_PINS = {
+    'pennsylvania': ((0, 0, 'Philadelphia', 39.95, -75.17),),
+    'new jersey': ((0, 1789, 'Burlington', 40.07, -74.86),
+                   (1790, 0, 'Trenton', 40.22, -74.76)),
+    'rhode island': ((0, 0, 'Providence', 41.82, -71.41),),
+    'massachusetts': ((0, 0, 'Boston', 42.36, -71.06),),
+    'connecticut': ((0, 0, 'Hartford', 41.76, -72.67),),
+    'new york': ((0, 0, 'New York', 40.71, -74.01),),
+    'virginia': ((0, 1779, 'Williamsburg', 37.27, -76.71),
+                 (1780, 0, 'Richmond', 37.54, -77.44)),
+    'maryland': ((0, 0, 'Annapolis', 38.98, -76.49),),
+    'delaware': ((0, 1776, 'New Castle', 39.66, -75.57),
+                 (1777, 0, 'Dover', 39.16, -75.52)),
+    'north carolina': ((0, 0, 'New Bern', 35.11, -77.04),),
+    'south carolina': ((0, 0, 'Charleston', 32.78, -79.93),),
+    'georgia': ((0, 0, 'Savannah', 32.08, -81.09),),
+    'new hampshire': ((0, 1774, 'Portsmouth', 43.07, -70.76),
+                      (1775, 0, 'Exeter', 42.98, -70.95)),
+}
+
 BANKNOTE_SPELLING_PINS = {
     'danzig': ('Danzig (Gdańsk)', 54.35, 18.65),
     'west germany': ('Bonn', 50.73, 7.10),
@@ -16978,13 +17002,16 @@ def _colonial_state_name(country, year):
     base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
     # "United States (Colonial - Pennsylvania)" keeps the colony inside
     # the parenthetical; search the whole string.
+    # A bare year can't tell March 1776 from August; most 1776 paper
+    # predates the Declaration, so 1776 files as colonial and the
+    # states begin in 1777.
     for token, (colony, state) in BANKNOTE_COLONY_NAMES.items():
         if token in raw or token in base:
-            if year and year >= 1776:
+            if year and year >= 1777:
                 return {'native': None,
                         'english': state + ' — United States of America'}
             return {'native': None, 'english': colony + ' — British America'}
-    if year and year >= 1776:
+    if year and year >= 1777:
         return {'native': None, 'english': 'United States of America'}
     return {'native': None, 'english': 'British America (Thirteen Colonies)'}
 
@@ -17071,6 +17098,12 @@ def _banknote_pin(country, year):
         if key is None and candidate in BANKNOTE_MAP_COUNTRY_ALIASES:
             key = BANKNOTE_MAP_COUNTRY_ALIASES[candidate]
     key = key or _country_key(country)
+    if key == 'colonial-america':
+        for token, bands in BANKNOTE_COLONY_PINS.items():
+            if token in raw:
+                for start, end, city, lat, lng in bands:
+                    if (not year or start <= year) and (not end or not year or year <= end):
+                        return {'city': city, 'latlng': [lat, lng]}
     if not key or key not in BANKNOTE_CAPITALS:
         # Generated-history countries: the slug of a modern name often
         # IS a capitals key ('maldives'); anything else stays None and
@@ -17657,7 +17690,13 @@ ERA_SUPPLEMENT_GAP_YEARS = 40
 # drawing supersedes).
 _NA_BOX = (14.0, -170.0, 84.0, -50.0)
 ERA_STATIC_SUPPLEMENTS = (
-    (1763, 1775, 'geo/british-america-1763.geojson',
+    (1763, 1776, 'geo/british-america-1763.geojson',
+     (24.0, -95.0, 51.0, -60.0),
+     ('British American colonies', 'Florida (Spain)')),
+    # The war years: the same thirteen outlines as states in rebellion
+    # (a year-dated 1776 record stays colonial — most 1776 paper was
+    # issued before July).
+    (1777, 1782, 'geo/united-states-1776.geojson',
      (24.0, -95.0, 51.0, -60.0),
      ('British American colonies', 'Florida (Spain)')),
     # North America 1783–1879 by acquisition: the republic east of the
@@ -17915,24 +17954,29 @@ def geocode_city():
     # English names throughout (accept-language) plus namedetails, so a
     # Shanghai note labels its pin "Shanghai", not 上海市; the local name
     # rides along for the label's tooltip.
-    params = urllib.parse.urlencode({
-        'format': 'jsonv2',
-        'limit': '1',
-        'addressdetails': '1',
-        'namedetails': '1',
-        'accept-language': 'en',
-        'q': q,
-    })
-    req = urllib.request.Request(
-        f'https://nominatim.openstreetmap.org/search?{params}',
-        headers={
-            'Accept': 'application/json',
-            'User-Agent': 'StuffApp/1.0 coin-origin-geocoder',
-        },
-    )
-    try:
+    def lookup(extra):
+        params = urllib.parse.urlencode(dict({
+            'format': 'jsonv2',
+            'limit': '1',
+            'addressdetails': '1',
+            'namedetails': '1',
+            'accept-language': 'en',
+            'q': q,
+        }, **extra))
+        req = urllib.request.Request(
+            f'https://nominatim.openstreetmap.org/search?{params}',
+            headers={
+                'Accept': 'application/json',
+                'User-Agent': 'StuffApp/1.0 coin-origin-geocoder',
+            },
+        )
         with urllib.request.urlopen(req, timeout=6) as resp:
-            rows = json.loads(resp.read().decode('utf-8') or '[]')
+            return json.loads(resp.read().decode('utf-8') or '[]')
+
+    # Settlements first — "Burlington, New Jersey" is the town, not
+    # Burlington County — then anything, for regions and mints.
+    try:
+        rows = lookup({'featuretype': 'settlement'}) or lookup({})
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
         return jsonify({'error': 'Geocoder unavailable'}), 503
 
