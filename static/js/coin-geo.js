@@ -729,6 +729,71 @@ window.geoJsonCentroid = function(geometry) {
 // stale. /api/era-supplements says which apply to this pin and year
 // (and commissions a drawing when none does); their polities are drawn
 // over the snapshot, whose own polities they cover are dropped.
+// The world snapshots name some territories by their modern names
+// whatever the year (Malawi, Lesotho, Botswana on a 1938 map). Period
+// names by span, applied to snapshot features (never to supplements,
+// which are drawn with their own names). Keyed by the dataset's name,
+// lower-cased, trailing parenthetical dropped.
+window.ERA_PERIOD_NAMES = {
+  'malawi': [[1891, 1906, 'British Central Africa'], [1907, 1963, 'Nyasaland']],
+  'zambia': [[1911, 1963, 'Northern Rhodesia']],
+  'zimbabwe': [[1923, 1964, 'Southern Rhodesia'], [1965, 1979, 'Rhodesia']],
+  'rhodesia': [[1923, 1964, 'Southern Rhodesia']],
+  'botswana': [[1885, 1965, 'Bechuanaland Protectorate']],
+  'lesotho': [[1868, 1965, 'Basutoland']],
+  'namibia': [[1884, 1914, 'German South West Africa'], [1915, 1989, 'South West Africa']],
+  'tanzania, united republic of': [[1885, 1918, 'German East Africa'], [1919, 1960, 'Tanganyika Territory'], [1961, 1963, 'Tanganyika']],
+  'tanzania': [[1885, 1918, 'German East Africa'], [1919, 1960, 'Tanganyika Territory'], [1961, 1963, 'Tanganyika']],
+  'walbis bay': [[0, 9999, 'Walvis Bay']],
+  'ghana': [[1821, 1956, 'Gold Coast']],
+  'burkina faso': [[0, 1983, 'Upper Volta']],
+  'benin': [[0, 1974, 'Dahomey']],
+  'zaire': [[1908, 1959, 'Belgian Congo'], [1960, 1970, 'Republic of the Congo (Léopoldville)']],
+  'djibouti': [[1896, 1966, 'French Somaliland'], [1967, 1976, 'French Afars and Issas']],
+  'sri lanka': [[0, 1971, 'Ceylon']],
+  'myanmar': [[0, 1988, 'Burma']],
+  'thailand': [[0, 1938, 'Siam']],
+  'iran': [[0, 1934, 'Persia']],
+  'indonesia': [[0, 1944, 'Dutch East Indies']],
+  'malaysia': [[0, 1945, 'British Malaya'], [1946, 1947, 'Malayan Union'], [1948, 1962, 'Federation of Malaya']],
+  'uganda': [[0, 1961, 'Uganda Protectorate']],
+  'kenya': [[1895, 1919, 'East Africa Protectorate'], [1920, 1962, 'Kenya Colony']],
+  'sudan': [[1899, 1955, 'Anglo-Egyptian Sudan']],
+  'mali': [[0, 1958, 'French Sudan']],
+  'guinea': [[0, 1957, 'French Guinea']],
+  'guinea-bissau': [[0, 1973, 'Portuguese Guinea']],
+  'equatorial guinea': [[0, 1967, 'Spanish Guinea']],
+  'cameroon': [[1884, 1915, 'Kamerun'], [1916, 1959, 'French Cameroons']],
+  'togo': [[1884, 1915, 'Togoland'], [1916, 1959, 'French Togoland']],
+  'somalia': [[1889, 1940, 'Italian Somaliland'], [1950, 1959, 'Trust Territory of Somaliland']],
+  'israel': [[1920, 1947, 'Mandatory Palestine']],
+  'jordan': [[1921, 1945, 'Transjordan']],
+  'korea': [[1910, 1944, 'Korea (Japanese rule)']],
+  'taiwan': [[1895, 1944, 'Taiwan (Japanese rule)']],
+  'vietnam': [[0, 1944, 'French Indochina']],
+  'india': [[1858, 1946, 'British India']],
+  'eritrea': [[1890, 1940, 'Italian Eritrea']],
+  'libya': [[1911, 1942, 'Italian Libya']],
+  'mozambique': [[0, 1974, 'Portuguese Mozambique']],
+  'angola': [[0, 1974, 'Portuguese Angola']],
+  'algeria': [[1830, 1961, 'French Algeria']],
+  'tunisia': [[1881, 1955, 'French Tunisia']],
+  'morocco': [[1912, 1955, 'French Morocco']],
+  'syria': [[1920, 1945, 'Syria (French Mandate)']],
+  'lebanon': [[1920, 1942, 'Lebanon (French Mandate)']],
+  'iraq': [[1920, 1931, 'Iraq (British Mandate)']],
+  'madagascar': [[1897, 1959, 'French Madagascar']],
+};
+window.eraPeriodName = function(name, year) {
+  const raw = String(name || '').trim();
+  const base = raw.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+  const bands = window.ERA_PERIOD_NAMES[raw.toLowerCase()] || window.ERA_PERIOD_NAMES[base];
+  if (!bands) return raw;
+  const y = Number(year);
+  for (const [a, b, period] of bands) if (y >= a && y <= b) return period;
+  return raw;
+};
+
 window.loadEraBorders = function(map, year, latlng, meta) {
   const snap = window.eraBorderSnapshot(year);
   if (snap === null) return Promise.resolve(null);
@@ -774,6 +839,12 @@ window.loadEraBorders = function(map, year, latlng, meta) {
         gj = {type: 'FeatureCollection', features: extraFeatures.concat(kept)};
       }
       if (!gj) return null;
+      // Period names on the snapshot's own features.
+      (gj.features || []).forEach(f => {
+        if (!fromSupplement.has(f) && f.properties && f.properties.NAME) {
+          f.properties.NAME = window.eraPeriodName(f.properties.NAME, y);
+        }
+      });
       let home = null;
       if (latlng) {
         home = (gj.features || []).find(f => !(f.properties && f.properties.LINE)
@@ -828,24 +899,48 @@ window.loadEraBorders = function(map, year, latlng, meta) {
           // neighbouring states; skip them.
           if (/culture|hunter|gatherer|nomad|peoples|uninhabited|unclaimed/i.test(nm)) return;
           // Hand-drawn supplement polities label ahead of the snapshot's.
-          near.push({name: nm, center: c,
+          near.push({name: nm, center: c, bounds: b,
                      d: pin.distanceTo(c) - (fromSupplement.has(f) ? 1e8 : 0)});
         });
         near.sort((a, b) => a.d - b.d);
-        // One label per name, nearest first, and none closer than
-        // ~110 km to a label already placed — the New England colonies
-        // would otherwise print on top of each other.
-        const seen = new Set(), placed = [];
-        near.filter(n => {
-          if (seen.has(n.name)) return false;
-          if (placed.some(c => c.distanceTo(n.center) < 110000)) return false;
-          seen.add(n.name); placed.push(n.center); return true;
-        }).slice(0, 12).forEach(n => {
-          L.tooltip({
-            permanent: true, direction: 'center', className: 'coin-era-label',
-            interactive: false, opacity: 1,
-          }).setLatLng(n.center).setContent(n.name).addTo(map);
-        });
+        // One label per name, nearest first, laid out in screen space
+        // so a long name (NORTHERN RHODESIA) never runs into its
+        // neighbour (NYASALAND); re-laid on every zoom.
+        const seen = new Set();
+        const candidates = near.filter(n => !seen.has(n.name) && seen.add(n.name));
+        const labels = [];
+        const layout = () => {
+          labels.splice(0).forEach(t => map.removeLayer(t));
+          const boxes = [];
+          const pad = 6;
+          // The pin's own label is an obstacle too (it sits to the
+          // right of the marker).
+          if (meta && meta.place) {
+            const pp = map.latLngToContainerPoint(pin);
+            boxes.push([pp.x - 10, pp.y - 10, pp.x + 12 + meta.place.length * 7.5, pp.y + 10]);
+          }
+          // Big polities first, so a small neighbour (Swaziland) yields
+          // to a large one (Union of South Africa), not the reverse.
+          const ordered = candidates.slice(0, 20).map(n => {
+            const sw = map.latLngToContainerPoint(n.bounds.getSouthWest());
+            const ne = map.latLngToContainerPoint(n.bounds.getNorthEast());
+            return Object.assign({area: Math.abs((ne.x - sw.x) * (ne.y - sw.y))}, n);
+          }).sort((a, b) => b.area - a.area);
+          ordered.forEach(n => {
+            if (labels.length >= 14) return;
+            const pt = map.latLngToContainerPoint(n.center);
+            const w = n.name.length * 7.2 + pad, h = 14 + pad;
+            const box = [pt.x - w / 2, pt.y - h / 2, pt.x + w / 2, pt.y + h / 2];
+            if (boxes.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) return;
+            boxes.push(box);
+            labels.push(L.tooltip({
+              permanent: true, direction: 'center', className: 'coin-era-label',
+              interactive: false, opacity: 1,
+            }).setLatLng(n.center).setContent(n.name).addTo(map));
+          });
+        };
+        layout();
+        map.on('zoomend moveend', layout);
       }
       const name = home && home.properties && (home.properties.NAME || '').trim();
       let bounds = null;
