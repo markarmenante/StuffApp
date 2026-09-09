@@ -4060,6 +4060,47 @@ document.querySelectorAll('.comp-item').forEach(item => {
     toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 1400);
   }
 
+  // Banknotes: after country / catalogue number / denomination saves,
+  // the server reports notes already in the collection that look like
+  // this one. A persistent card (not the 1.4s toast) lists them with
+  // links; it clears when a later save reports no match.
+  function showSimilarBanknotes(matches) {
+    const existing = document.getElementById('similarNotes');
+    if (existing) existing.remove();
+    if (!matches || !matches.length) return;
+    const card = document.createElement('div');
+    card.id = 'similarNotes';
+    card.className = 'similar-notes';
+    card.setAttribute('role', 'alert');
+    const title = document.createElement('div');
+    title.className = 'similar-notes-title';
+    title.textContent = matches.length === 1
+      ? 'You already have a similar banknote'
+      : `You already have ${matches.length} similar banknotes`;
+    card.appendChild(title);
+    const list = document.createElement('ul');
+    matches.forEach(m => {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = m.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = m.label;
+      li.appendChild(a);
+      li.appendChild(document.createTextNode(' — ' + m.reason));
+      list.appendChild(li);
+    });
+    card.appendChild(list);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'similar-notes-close';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.textContent = '×';
+    close.addEventListener('click', () => card.remove());
+    card.appendChild(close);
+    document.body.appendChild(card);
+  }
+
   const form = document.getElementById('mainForm');
   const formCategory = form.dataset.category || '';
   const isNewRecord = form.dataset.isNew === 'true';
@@ -4762,6 +4803,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
         }
         // URL bar swaps to the detail URL — back button still goes home.
         window.history.replaceState({}, '', d.detail_url);
+        if (d.similar) showSimilarBanknotes(d.similar);
         // ← Back now has a real record to land on: anchor the list at
         // it so it scrolls to + highlights the just-created row, same
         // as Back from an existing record's detail page.
@@ -4821,6 +4863,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
             if (d.service_date !== undefined) {
               updateServiceSummary(d.service_date);
             }
+            if (d.similar !== undefined) showSimilarBanknotes(d.similar);
             showToast();
           }
           return d;

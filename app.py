@@ -722,6 +722,93 @@ def canonicalize_banknote_fields(fields, existing=None):
     return fields
 
 
+BANKNOTE_SIMILARITY_FIELDS = ('country', 'pick_number', 'denomination',
+                              'date_1', 'series')
+
+
+def _banknote_country_fold(value):
+    """Country comparison key for the similar-note check: the canonical
+    spelling, lower-cased, letters and digits only, with a trailing
+    parenthetical qualifier dropped."""
+    value = _canonical_banknote_country(value or '')
+    value = re.sub(r'\s*\([^)]*\)\s*$', '', str(value).strip().lower())
+    return re.sub(r'[^a-z0-9]', '', value)
+
+
+def _banknote_catalog_tokens(value):
+    """Catalogue numbers in a pick_number field, as comparable tokens.
+    'P-64', 'Pick 64a', 'Fr. 1234; TBB B123' -> {'64', '64a', '1234',
+    'b123'}. A leading 'p' on a Pick number is dropped ('P64' == '64');
+    the catalogue-name words themselves (Pick, Fr, TBB) carry no digit
+    and are never tokens."""
+    tokens = set()
+    for tok in re.findall(r'[A-Za-z]*\d+[A-Za-z]*', str(value or '')):
+        tok = tok.lower()
+        if tok.startswith('p') and tok[1:2].isdigit():
+            tok = tok[1:]
+        tokens.add(tok)
+    return tokens
+
+
+def _banknote_text_fold(value):
+    return re.sub(r'[^a-z0-9]', '', str(value or '').lower())
+
+
+def _similar_banknotes(db, record_id, note):
+    """Notes already in the collection that look like `note` (a row or
+    dict with country, pick_number, denomination, date_1, series):
+    same country and a shared catalogue number, or same country,
+    denomination and year or series. `record_id` is excluded. Returns
+    dicts ready for the client: id, label, reason, url."""
+    country_key = _banknote_country_fold(note['country'])
+    if not country_key:
+        return []
+    my_tokens = _banknote_catalog_tokens(note['pick_number'])
+    my_denom = _banknote_text_fold(note['denomination'])
+    my_series = _banknote_text_fold(note['series'])
+    try:
+        # The create form hands over the normalized string; rows hold ints.
+        my_year = int(note['date_1']) if note['date_1'] not in (None, '') else None
+    except (TypeError, ValueError):
+        my_year = None
+    rows = db.execute(
+        "SELECT id, banknote_id, cat_id, country, denomination, series, "
+        "pick_number, date_1, date_1_text, grade, grading_authority "
+        "FROM banknotes WHERE id != ? AND country IS NOT NULL",
+        [record_id]).fetchall()
+    found = []
+    for row in rows:
+        if _banknote_country_fold(row['country']) != country_key:
+            continue
+        shared = my_tokens & _banknote_catalog_tokens(row['pick_number'])
+        reason = None
+        if shared:
+            reason = 'same catalogue number ' + ', '.join(sorted(shared))
+        elif my_denom and my_denom == _banknote_text_fold(row['denomination']):
+            if my_year is not None and row['date_1'] == my_year:
+                reason = 'same denomination and year'
+            elif my_series and my_series == _banknote_text_fold(row['series']):
+                reason = 'same denomination and series'
+        if not reason:
+            continue
+        bits = [row['banknote_id'] or row['cat_id'] or '',
+                row['denomination'] or '',
+                row['date_1_text'] or (str(row['date_1']) if row['date_1'] is not None else ''),
+                f"({row['pick_number']})" if row['pick_number'] else '',
+                ' '.join(x for x in (row['grading_authority'], row['grade']) if x)]
+        found.append({
+            'id': row['id'],
+            'label': ' '.join(b for b in bits if b).strip(),
+            'reason': reason,
+            'url': url_for('detail_view', category='banknotes',
+                           record_id=row['id']),
+        })
+    # Catalogue-number matches first, then by display number.
+    found.sort(key=lambda f: (not f['reason'].startswith('same catalogue'),
+                              f['label']))
+    return found
+
+
 def _migrate_canonicalize_us_banknotes(db):
     """One-shot + idempotent backfill: apply canonicalize_banknote_fields to
     every existing note and resequence Display Numbers if anything changed.
@@ -14280,8 +14367,11 @@ def new_record(category):
 
         # First note from a new country: generate its history panel in
         # the background.
+        similar = []
         if category == 'banknotes' and data.get('country'):
             ensure_country_history(data['country'])
+            similar = _similar_banknotes(db, record_id, {
+                k: data.get(k) for k in BANKNOTE_SIMILARITY_FIELDS})
         detail_url = url_for('detail_view', category=category, record_id=record_id)
         save_url = url_for('save_field', category=category, record_id=record_id)
         # AJAX path (used by autosave-on-/new flow): return JSON so the
@@ -14294,8 +14384,12 @@ def new_record(category):
             }
             return jsonify({'ok': True, 'id': record_id,
                             'detail_url': detail_url, 'save_url': save_url,
-                            'generated': generated})
+                            'generated': generated, 'similar': similar})
         flash(f"Record created successfully.", 'success')
+        if similar:
+            flash('Similar banknote already in the collection: '
+                  + '; '.join(f"{m['label']} — {m['reason']}" for m in similar),
+                  'warning')
         return redirect(detail_url)
 
     # GET - blank form
@@ -15068,6 +15162,12 @@ def save_field(category, record_id):
     if category == 'banknotes' and field_name == 'country' and value:
         ensure_country_history(value)
     response = {'ok': True}
+    if category == 'banknotes' and field_name in BANKNOTE_SIMILARITY_FIELDS:
+        # Country / catalogue number / denomination just changed: tell
+        # the client if a note like this is already in the collection.
+        updated = db.execute(
+            "SELECT * FROM banknotes WHERE id = ?", [record_id]).fetchone()
+        response['similar'] = _similar_banknotes(db, record_id, updated)
     if synced_watch_actual_delivery:
         response['actual_delivery_date'] = synced_watch_actual_delivery
     if synced_watch_service_date:
