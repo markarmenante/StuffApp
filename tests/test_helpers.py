@@ -84,7 +84,7 @@ print('ALL HELPER TESTS PASSED')
 _ppq_note = {'description': 'Iran 100 Rials 1971 P-86b PCGS Currency 64 PPQ Very Choice New'}
 _ppq = stuffapp._banknote_description_fields(_ppq_note)
 assert _ppq.get('grade_modifier') == 'PPQ', _ppq
-assert _ppq.get('grading_authority') == 'PCGS', _ppq
+assert _ppq.get('grading_authority') == 'PCGS Currency', _ppq
 assert _ppq.get('grade_numeric') == 64, _ppq
 _epq = stuffapp._banknote_description_fields({'description': 'PMG 66 EPQ ★ Gem Uncirculated'})
 assert _epq.get('grade_modifier') == 'EPQ★', _epq
@@ -95,3 +95,48 @@ for raw, want in (('PPQ', 'PPQ'), ('ppq star', 'PPQ★'), ('64 PPQ★', 'PPQ★'
     got = stuffapp._coerce_banknote_spec('grade_modifier', raw)
     assert got == want, (raw, got, want)
 print('banknote EPQ/PPQ OK')
+
+
+# Every paper-money grading service: authority spelling, numeric grade,
+# paper-quality designation, problem-note wording, and the "New" scale.
+_svc = stuffapp._banknote_description_fields
+cases = [
+    ('PMG 66 EPQ Gem Uncirculated',                 'PMG',           66, 'EPQ',  None,       'Gem UNC'),
+    ('Paper Money Guaranty 30 NET pinholes',        'PMG',           30, None,   'Net',      None),
+    ('PCGS Banknote 58 PPQ Choice About Unc',       'PCGS Banknote', 58, 'PPQ',  None,       'cAU'),
+    ('PCGS Currency Apparent Very Fine 30, tear',   'PCGS Currency', 30, None,   'Apparent', 'VF'),
+    ('PCGS Currency Very Choice New 64 PPQ',        'PCGS Currency', 64, 'PPQ',  None,       'Choice UNC'),
+    ('Legacy Currency Grading 67 PPQ Superb Gem New', 'Legacy',      67, 'PPQ',  None,       'Superb Gem UNC'),
+    ('CGA Gem Uncirculated 66',                     'CGA',           66, None,   None,       'Gem UNC'),
+    ('P-86b PMG Gem Unc 65 Exceptional Paper Quality', 'PMG',        65, 'EPQ',  None,       'Gem UNC'),
+    ('PCGS Banknote Details 20 Very Good, ink',     'PCGS Banknote', 20, None,   'Details',  'VG'),
+]
+for text, auth, num, mod, cond, grade in cases:
+    got = _svc({'description': text})
+    assert got.get('grading_authority') == auth, (text, got)
+    assert got.get('grade_numeric') == num, (text, got)
+    assert got.get('grade_modifier') == mod, (text, got)
+    if cond:
+        assert str(got.get('grade_condition', '')).startswith(cond), (text, got)
+    else:
+        assert not got.get('grade_condition'), (text, got)
+    if grade:
+        assert got.get('grade') == grade, (text, got)
+# The Pick number never becomes the grade: "P-64 PMG" is Pick 64.
+got = _svc({'description': 'Iran P-64 PMG Choice Unc 63 EPQ'})
+assert got.get('grade_numeric') == 63 and got.get('pick_number') == 'P-64', got
+for raw, want in (('pcgs currency', 'PCGS Currency'), ('PCGS Bank Note', 'PCGS Banknote'),
+                  ('LCG', 'Legacy'), ('Legacy Currency Grading', 'Legacy'),
+                  ('paper money guaranty', 'PMG'), ('pcgs', 'PCGS'), ('ngc', 'NGC'), ('', None)):
+    got = stuffapp.normalize_banknote_grading_authority(raw)
+    assert got == want, (raw, got, want)
+assert stuffapp._coerce_banknote_spec('grading_authority', 'PCGS Currency') == 'PCGS Currency'
+assert stuffapp._coerce_banknote_spec('grade_modifier', 'Premium Paper Quality') == 'PPQ'
+assert stuffapp.banknote_grader_profile('pmg')['paper_quality'] == 'EPQ'
+assert stuffapp.banknote_grader_profile('Legacy')['paper_quality'] == 'PPQ'
+for phrase, want in (('Very Choice New 64', 'Choice UNC'), ('Superb Gem New 67', 'Superb Gem UNC'),
+                     ('About New 55', 'aAU'), ('Choice About New 58', 'cAU'), ('New 62', 'UNC'),
+                     ('Gem New', 'Gem UNC')):
+    got = stuffapp.banknote_grade_value_list_match(phrase)
+    assert got == want, (phrase, got, want)
+print('banknote grading services OK')
