@@ -6,7 +6,8 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_banknote_sort.py',
          'test_person_medications.py', 'test_note_trim.py',
          'test_trim_quad.py', 'test_sale_plans.py',
          'test_banknote_similar.py',
-         'test_banknote_price_currency.py']
+         'test_banknote_price_currency.py',
+         'test_market_scan.py']
 
 failed = []
 for t in TESTS:

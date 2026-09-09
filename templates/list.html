@@ -14,17 +14,44 @@
      the back-pill + search. The Add button and category-specific
      filter pills (Own / Sold / Carp / etc.) all build URLs without
      the ?at= param and would silently break the navigation chain. #}
-  {% if not at_property %}
+  {%- set _market = market_mode|default(false) -%}
+  {# Market Scan — coins and banknotes only. The pill swaps the list for
+     live buy candidates and reads "Collection" while it is showing them;
+     pressing Collection returns to the normal list. #}
+  {% if category in ('coins', 'banknotes') and not at_property %}
+    {% if _market %}
+    <a href="{{ url_for('list_view', category=category) }}"
+       class="toolbar-btn pill active market-pill"
+       title="Back to the collection">Collection</a>
+    {% else %}
+    <a href="{{ url_for('market_view', category=category) }}"
+       class="toolbar-btn pill market-pill"
+       title="Live buy candidates from eBay, Stack's Bowers, Heritage, dealers and auction houses">Market Scan</a>
+    {% endif %}
+  {% endif %}
+  {% if not at_property and not _market %}
   <a href="{{ url_for('new_record', category=category) }}"
      class="toolbar-btn add"
      title="Add {{ cat_info.singular }}"
      aria-label="Add {{ cat_info.singular }}">+</a>
   {% endif %}
+  {% if _market %}
+  <button type="button" class="toolbar-btn pill" id="marketRescan"
+          title="Run the scan again now">Rescan</button>
+  <span class="market-status" id="marketStatus">
+    {%- if market_running -%}Scanning…
+    {%- elif market_scan and market_scan['finished_at'] -%}
+      Scanned {{ market_scan['finished_at'][:16]|replace('T', ' ') }} UTC
+      {%- if market_scan['status'] == 'failed' %} · failed: {{ market_scan['error'] }}{% endif -%}
+    {%- else -%}Not scanned yet
+    {%- endif -%}
+  </span>
+  {% endif %}
   {# Drilled in from a Property — give a one-tap way back. #}
   {% if at_property and at_property_url %}
   <a class="list-at-back" href="{{ at_property_url }}" title="Back to {{ at_property }}">&larr; {{ at_property }}</a>
   {% endif %}
-  {% if category == 'coins' and not at_property %}
+  {% if category == 'coins' and not at_property and not _market %}
   {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
   <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}"
      class="toolbar-btn pill"
@@ -59,7 +86,7 @@
      title="Collection report grouped by artist, with biographies and object notes (PDF)"
      target="_blank">Report</a>
   {% endif %}
-  {% if category == 'banknotes' and not at_property %}
+  {% if category == 'banknotes' and not at_property and not _market %}
   {# History state rides along on every banknote pill so toggling a filter
      doesn't silently switch the panels back on. Default (on) keeps URLs
      clean by passing None. #}
@@ -118,7 +145,7 @@
      Watches label the Ordered stop "Commissioned", matching the
      detail page. Banknotes carry the history toggle along so cycling
      doesn't silently flip the panels back on. #}
-  {% if status_cycle and status_cycle|length > 1 and not at_property %}
+  {% if status_cycle and status_cycle|length > 1 and not at_property and not _market %}
   {%- set _st_idx = status_cycle.index(status_current) if status_current in status_cycle else 0 -%}
   {%- set _st_next = status_cycle[(_st_idx + 1) % (status_cycle|length)] -%}
   {%- set _st_hist = (None if show_history else '0') if category == 'banknotes' else None -%}
@@ -132,6 +159,7 @@
   {% endif %}
   {# Every list carries the search bar in its sticky toolbar — even the
      short ones — so the subheading reads the same across categories. #}
+  {% if not _market %}
   <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
     <div class="search-wrap">
       <button type="submit" title="Search">🔍</button>
@@ -146,6 +174,7 @@
       {% if q %}<a class="search-clear" href="{{ url_for('list_view', category=category) }}">×</a>{% endif %}
     </div>
   </form>
+  {% endif %}
 </div>
 
 <!-- List -->
@@ -170,10 +199,24 @@
     {% set _panel = _placement.panel %}
     {% include 'partials/series_panel.html' %}
   {% endif %}
+  {% if _market %}
+  {# A market row opens the listing in a new tab; its thumbnail is the
+     seller's photo (no upload targets here). #}
+  <div class="item-row market-row" id="item-{{ row['id'] }}" data-href="{{ row['listing_url'] }}" data-external="1">
+    <div class="item-thumb market-thumb" title="Open the listing">
+      {% if row['image_url'] %}
+        <img src="{{ row['image_url'] }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+             onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'no-img', textContent: '{{ cat_info.icon }}'}))">
+      {% else %}
+        <span class="no-img">{{ cat_info.icon }}</span>
+      {% endif %}
+    </div>
+  {% else %}
   <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None, dot='1' if dot else None, history=None if show_history else '0') }}">
+  {% endif %}
 
     <!-- Thumbnail -->
-    {% if category != 'persons' %}
+    {% if category != 'persons' and not _market %}
     <div class="item-thumb"
          data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
          title="Drop an image here to upload">
@@ -189,7 +232,7 @@
     {# Reverse thumbnail — coins and banknotes. Hidden on mobile to keep the
        row tight. Has its own upload-url + data-field so dropping on it goes
        to image_2, not image_1. #}
-    {% if category in ('coins', 'banknotes') %}
+    {% if category in ('coins', 'banknotes') and not _market %}
     <div class="item-thumb item-thumb-rev"
          data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
          data-field="image_2"
@@ -591,6 +634,33 @@
         </div>
       {% endif %}
 
+      {% if _market %}
+      <div class="market-meta">
+        {% if row['title'] %}<div class="idr market-title"><span>{{ row['title'] }}</span></div>{% endif %}
+        <div class="idr market-line">
+          <span class="market-price">{{ row['price'] }}{% if row['price_usd'] and not (row['price'] or '').startswith('$') %} / ${{ '{:,.0f}'.format(row['price_usd']) }}{% endif %}</span>
+          {% if row['grade'] or row['grade_numeric'] %}<span class="market-grade">{{ row['grading_authority'] or '' }} {{ row['grade_numeric']|int if row['grade_numeric'] else row['grade'] }}{% if row['designation'] %} {{ row['designation'] }}{% endif %}</span>{% endif %}
+          <span class="market-venue">{{ row['venue'] }}{% if row['seller'] and row['seller'] != row['venue'] %} · {{ row['seller'] }}{% endif %}</span>
+          {% if row['closes'] %}<span class="market-closes">closes {{ row['closes'] }}</span>{% elif row['sale_type'] == 'auction' %}<span class="market-closes">auction</span>{% endif %}
+        </div>
+        {% if row['why'] %}<div class="idr market-why"><span>{{ row['why'] }}</span></div>{% endif %}
+        <div class="idr market-tags">
+          {% if row['empire'] %}<span class="market-tag market-tag-colonial">{{ row['empire'] }} colonial</span>{% endif %}
+          {% if row['fills'] %}<span class="market-tag market-tag-fills">Fills: {{ row['fills'] }}</span>{% endif %}
+          {% if row['rarity'] and (row['grade_numeric'] or 0) < 64 %}<span class="market-tag market-tag-rare">Rarity: {{ row['rarity'] }}</span>{% endif %}
+          {% if row['new_source'] %}<span class="market-tag market-tag-new">New source</span>{% endif %}
+          {% if row['owned'] %}<span class="market-tag market-tag-owned">You have {{ row['owned'] }}</span>{% endif %}
+          {% if row['fair'] %}<span class="market-fair">{{ row['fair'] }}</span>{% endif %}
+        </div>
+        <div class="market-actions">
+          <a class="market-btn market-view" href="{{ row['listing_url'] }}" target="_blank" rel="noopener">View listing</a>
+          <button type="button" class="market-btn market-buy" data-id="{{ row['id'] }}"
+                  title="Open the listing to pay there and file this as an Ordered {{ cat_info.singular|lower }}">Buy</button>
+          <button type="button" class="market-btn market-dismiss" data-id="{{ row['id'] }}" title="Hide this candidate">✕</button>
+        </div>
+      </div>
+      {% endif %}
+
     </div><!-- /item-body -->
   </div>
   {# Closing rule under the last note of a history-panel group — the
@@ -602,6 +672,17 @@
   {% endfor %}
 </div>
 
+{% elif _market %}
+<div class="empty-state" id="marketEmpty">
+  <div class="eicon">{{ cat_info.icon }}</div>
+  {% if market_running or market_autoscan %}
+  <h3>Scanning the market…</h3>
+  <p>Searching eBay, Stack's Bowers, Heritage, dealers and auction houses against your holdings. Two to four minutes.</p>
+  {% else %}
+  <h3>No live candidates{% if market_scan and market_scan['status'] == 'failed' %} — the scan failed{% endif %}</h3>
+  <p>{% if market_scan and market_scan['summary'] %}{{ market_scan['summary'] }}{% elif market_scan and market_scan['error'] %}{{ market_scan['error'] }}{% else %}Press Rescan to run one.{% endif %}</p>
+  {% endif %}
+</div>
 {% else %}
 <div class="empty-state">
   <div class="eicon">{{ cat_info.icon }}</div>
@@ -612,6 +693,78 @@
     <p><a href="{{ url_for('new_record', category=category) }}">Add your first record</a></p>
   {% endif %}
 </div>
+{% endif %}
+
+{% if _market %}
+<script>
+(function () {
+  const CAT = {{ category|tojson }};
+  const scanUrl = {{ url_for('market_scan_start', category=category)|tojson }};
+  const statusUrl = {{ url_for('market_scan_status', category=category)|tojson }};
+  const statusEl = document.getElementById('marketStatus');
+  const rescan = document.getElementById('marketRescan');
+  let polling = null;
+
+  function setStatus(text) { if (statusEl) statusEl.textContent = text; }
+
+  // Poll until the background scan lands, then reload with the results.
+  function poll() {
+    fetch(statusUrl).then(r => r.json()).then(d => {
+      if (!d.ok) return;
+      if (d.status === 'running') {
+        const started = polling || Date.now();
+        polling = started;
+        const secs = Math.round((Date.now() - started) / 1000);
+        setStatus('Scanning… ' + secs + 's');
+        setTimeout(poll, 5000);
+        return;
+      }
+      window.location.reload();
+    }).catch(() => setTimeout(poll, 8000));
+  }
+  function startScan() {
+    setStatus('Starting scan…');
+    if (rescan) rescan.disabled = true;
+    fetch(scanUrl, { method: 'POST' }).then(r => r.json()).then(d => {
+      if (d && d.ok) { polling = Date.now(); poll(); }
+      else setStatus('Scan could not start');
+    }).catch(() => setStatus('Scan could not start'));
+  }
+  if (rescan) rescan.addEventListener('click', startScan);
+  {% if market_running %}polling = Date.now(); poll();{% elif market_autoscan %}startScan();{% endif %}
+
+  // Buy: file the item as Ordered, open the listing to pay there, then
+  // land on the new record.
+  document.querySelectorAll('.market-buy').forEach(btn => {
+    btn.addEventListener('click', ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      const row = btn.closest('.item-row');
+      const title = row ? (row.querySelector('.item-brand')?.textContent || '').trim() : '';
+      if (!confirm('Buy ' + (title || 'this item') + '?\n\nThe listing opens in a new tab to pay there (PayPal or the seller\'s checkout), and it is filed here now as Ordered.')) return;
+      // Open the tab synchronously on the click so popup blockers allow it.
+      const tab = window.open('', '_blank');
+      btn.disabled = true;
+      fetch({{ url_for('market_item_buy', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+          if (!d || !d.ok) throw new Error((d && d.error) || 'Could not file the record');
+          if (tab) tab.location = d.listing_url;
+          window.location = d.detail_url;
+        })
+        .catch(err => { if (tab) tab.close(); btn.disabled = false; alert(err.message || String(err)); });
+    });
+  });
+  document.querySelectorAll('.market-dismiss').forEach(btn => {
+    btn.addEventListener('click', ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      const row = btn.closest('.item-row');
+      fetch({{ url_for('market_item_dismiss', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), { method: 'POST' })
+        .then(r => r.json())
+        .then(d => { if (d && d.ok && row) row.remove(); });
+    });
+  });
+})();
+</script>
 {% endif %}
 
 <script>
@@ -829,7 +982,11 @@ window.shareCardRow = async function (ev, btn) {
     // so click still bubbles up here). Wired unconditionally — categories
     // without a thumbnail (e.g. persons) still need this to work.
     row.addEventListener('click', function(e) {
-      if (e.target.closest('.row-upload-btn, .coin-tray-toggle')) return;
+      if (e.target.closest('.row-upload-btn, .coin-tray-toggle, .market-actions')) return;
+      if (row.dataset.external) {
+        window.open(row.dataset.href, '_blank', 'noopener');
+        return;
+      }
       window.location = row.dataset.href;
     });
 

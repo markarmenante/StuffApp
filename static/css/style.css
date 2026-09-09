@@ -3910,3 +3910,39 @@ input[type="date"] { -webkit-appearance: none; }
 .us-series-panel p.usp-note-type {
   font-weight: 600; color: var(--text); font-size: 13.5px;
 }
+
+/* ── MARKET SCAN ── */
+.market-pill { margin-right: 2px; }
+.market-status { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.market-row { cursor: pointer; }
+.market-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.market-meta { margin-top: 4px; }
+.market-title { font-size: 12px; color: var(--text-secondary); }
+.market-line { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; }
+.market-price { font-weight: 600; }
+.market-grade { font-weight: 500; }
+.market-venue, .market-closes { color: var(--text-secondary); }
+.market-why { color: var(--text-secondary); font-size: 12px; }
+.market-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.market-tag {
+  display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+  background: rgba(0,0,0,.06); color: var(--text-secondary); white-space: nowrap;
+}
+.market-tag-colonial { background: #e7efe1; color: #2f5d1f; }
+.market-tag-fills { background: #e3ecfa; color: #1b4a9c; }
+.market-tag-rare { background: #f5e8d3; color: #7a4d0b; white-space: normal; }
+.market-tag-new { background: #efe3f7; color: #5b2d84; }
+.market-tag-owned { background: #f7e0e0; color: #8a1f1f; white-space: normal; }
+.market-fair { font-size: 11px; color: var(--text-hint); }
+.market-actions { display: flex; gap: 8px; margin-top: 6px; }
+.market-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 26px; padding: 0 12px; border-radius: 13px; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--border); background: none; color: var(--text-secondary);
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+}
+.market-btn:hover { background: rgba(0,0,0,.06); text-decoration: none; }
+.market-buy { background: var(--blue); border-color: var(--blue); color: #fff; }
+.market-buy:hover { background: #0050c0; }
+.market-buy:disabled { opacity: .5; cursor: default; }
+.market-dismiss { width: 26px; padding: 0; }

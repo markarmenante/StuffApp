@@ -107,6 +107,29 @@ view of a new record). Generated maps are labelled "AI-drawn
 approximation" in the caption. Generation needs `ANTHROPIC_API_KEY`
 (production has it; the sandbox usually does not).
 
+## Market Scan (coins, banknotes)
+
+The Market Scan pill (left of "+" on the Coins and Banknotes lists)
+swaps the list for live buy candidates and reads "Collection" while
+showing them. A scan runs in a background thread (`_run_market_scan`;
+Cloudflare caps a request at 100 s) as several parallel web-search
+Claude calls, one per theme in `_MARKET_THEMES`: banknotes lead with
+colonial issues before independence (British, French, Italian,
+Portuguese, German), then denomination gaps in series held, the pattern
+of recent purchases, and a "new sources" theme that hunts venues Mark
+does not use yet; coins are ancient Greek only. Every call sees the
+fair-price profile, the holdings summary, denomination coverage and
+recent purchases, and its venue rule REPLACES the profile's
+"major auction houses only" rule (Mark, 2026-09-09: eBay, Stack's,
+Numista, dealers are buy candidates here). Results are filtered to live
+lots with a URL and a grade that clears the bar (notes 64+ with EPQ/PPQ
+preferred, 50+ only for stated rarity; coins XF40+), de-duplicated,
+checked against the collection (`_similar_banknotes`) and ranked.
+Tables: `market_scans`, `market_scan_items` (payload JSON). Buy cannot
+check out on a seller's site: it opens the listing (pay there) and files
+the item as an Ordered record with the price's USD tail and the listing
+URL. Model env: `ANTHROPIC_MARKET_SCAN_MODEL`.
+
 ## Dev setup
 
 ```bash

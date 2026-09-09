@@ -800,8 +800,9 @@ def _similar_banknotes(db, record_id, note):
             'id': row['id'],
             'label': ' '.join(b for b in bits if b).strip(),
             'reason': reason,
-            'url': url_for('detail_view', category='banknotes',
-                           record_id=row['id']),
+            # A plain path, not url_for: this also runs inside the Market
+            # Scan's background thread, where there is no request context.
+            'url': f"/banknotes/{row['id']}",
         })
     # Catalogue-number matches first, then by display number.
     found.sort(key=lambda f: (not f['reason'].startswith('same catalogue'),
@@ -5464,6 +5465,39 @@ def init_db():
          'usd_rate REAL NOT NULL, '
          'fetched_at TEXT NOT NULL, '
          'PRIMARY KEY (currency, date))'),
+        # Market Scan: one row per scan run and one per candidate listing
+        # it produced. Items keep their scan for the record; a new scan
+        # replaces only the previous run's undecided ('new') items.
+        ('CREATE TABLE IF NOT EXISTS market_scans ('
+         'id TEXT PRIMARY KEY, '
+         'category TEXT NOT NULL, '
+         'started_at TEXT NOT NULL, '
+         'finished_at TEXT, '
+         'status TEXT NOT NULL, '
+         'summary TEXT, '
+         'item_count INTEGER NOT NULL DEFAULT 0, '
+         'error TEXT)'),
+        ('CREATE TABLE IF NOT EXISTS market_scan_items ('
+         'id TEXT PRIMARY KEY, '
+         'scan_id TEXT NOT NULL REFERENCES market_scans(id), '
+         'category TEXT NOT NULL, '
+         'rank INTEGER, '
+         'score REAL, '
+         "status TEXT NOT NULL DEFAULT 'new', "
+         'record_id TEXT, '
+         'title TEXT, '
+         'listing_url TEXT, '
+         'venue TEXT, '
+         'price TEXT, '
+         'price_usd REAL, '
+         'grade_numeric REAL, '
+         'designation TEXT, '
+         'closes TEXT, '
+         'theme TEXT, '
+         'payload TEXT NOT NULL, '
+         'created_at TEXT NOT NULL)'),
+        'CREATE INDEX IF NOT EXISTS idx_market_scan_items_scan ON market_scan_items(scan_id)',
+        'CREATE INDEX IF NOT EXISTS idx_market_scan_items_cat_status ON market_scan_items(category, status)',
         # Trimmed note image -> the untrimmed photo it was cut from.
         # The trimmer keeps the original on disk but used to drop the
         # reference, so a bad crop could never be redone (a shaved note
@@ -14146,6 +14180,854 @@ def list_view(category):
                            watch_open_service_event_ids=watch_open_service_event_ids,
                            extra_fields=extra_fields,
                            fields=visible_fields(category))
+
+
+# ---------------------------------------------------------------------------
+# Market Scan — live buy candidates for coins and banknotes
+# ---------------------------------------------------------------------------
+#
+# The Market Scan pill on the Coins and Banknotes lists swaps the
+# collection for a list of things worth buying right now: live listings
+# at eBay, Stack's Bowers, Heritage, MA-Shops, Banknote World, VCoins,
+# Numista's marketplace and the biddr/sixbid houses, chosen against the
+# collection's actual holdings and the wanted-list in the fair-price
+# profile. Each scan runs several focused themes in parallel — colonial
+# issues before independence first (British, French, Italian,
+# Portuguese, German), denomination gaps in series already held, the
+# pattern of recent purchases, and venues Mark does not use yet; coins
+# are ancient Greek only — each a web-search Claude call returning JSON; the
+# results are filtered to live lots with a URL and a grade that clears
+# the bar (64+ with EPQ/PPQ preferred; 50+ only for genuine rarity),
+# de-duplicated, checked against what is already owned, and ranked.
+#
+# Buying: the app cannot check out on a seller's site, so Buy opens the
+# listing (where PayPal or the house's own checkout completes the
+# purchase) and at the same moment files the item as a new record with
+# status Ordered, every field the listing gave, the price with its USD
+# conversion, and the listing URL — the same record the Own/Ordered pill
+# already tracks. The scan itself runs in a background thread (Cloudflare
+# caps a request at 100 seconds; a scan takes two to four minutes) and the
+# page polls until it lands.
+
+MARKET_SCAN_CATEGORIES = ('coins', 'banknotes')
+MARKET_SCAN_PROFILE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    '.claude', 'skills', 'fair-price', 'references', 'collection-profile.md')
+_MARKET_SCAN_INFLIGHT = set()
+_MARKET_SCAN_LOCK = threading.Lock()
+
+MARKET_VENUES_TEXT = (
+    "eBay (Buy It Now and auctions, ebay.com), Stack's Bowers "
+    "(stacksbowers.com — auction lots and the fixed-price store), Heritage "
+    "Auctions (ha.com, currency and coin sales), Numista marketplace "
+    "(numista.com), MA-Shops (ma-shops.com), Banknote World "
+    "(banknoteworld.com), VCoins (vcoins.com), GreatCollections, "
+    "biddr.com / sixbid.com houses (Leu, Nomos, NAC, Roma), CNG "
+    "(cngcoins.com), Lyn Knight, Spink, Noonans, Katz, Sincona, Künker, "
+    "Gorny & Mosch, Naumann, Savoca, Roma, Delcampe, Catawiki and any "
+    "specialist dealer or house with live stock"
+)
+
+
+def _market_profile_text():
+    try:
+        with open(MARKET_SCAN_PROFILE_PATH, encoding='utf-8') as fh:
+            return fh.read()[:7000]
+    except OSError:
+        return ''
+
+
+def _market_holdings_summary(db, category, limit_chars=6000):
+    """What the collection already holds, compact enough for a prompt:
+    banknotes by country with their catalogue numbers (or denomination
+    and year when uncatalogued); coins by region with authority,
+    denomination and year. Sold/gifted pieces are left out so a note
+    sold on is a gap again."""
+    lines = []
+    if category == 'banknotes':
+        rows = db.execute(
+            "SELECT country, denomination, series, date_1_text, date_1, "
+            "pick_number, grade_numeric, grade_modifier FROM banknotes "
+            "WHERE status IS NULL OR status IN ('Own', 'Ordered') "
+            "ORDER BY NATION_NAME(country) COLLATE NODIACRITIC, date_1").fetchall()
+        groups = {}
+        for r in rows:
+            country = (r['country'] or 'Unknown').strip()
+            label = (r['pick_number'] or '').strip()
+            if not label:
+                label = ' '.join(x for x in (
+                    (r['denomination'] or '').strip(),
+                    (r['date_1_text'] or r['series'] or
+                     (str(r['date_1']) if r['date_1'] else '')).strip()) if x)
+            if r['grade_numeric']:
+                label += f" ({int(r['grade_numeric'])}{' ' + r['grade_modifier'] if r['grade_modifier'] else ''})"
+            groups.setdefault(country, []).append(label or '?')
+        for country, labels in groups.items():
+            shown = labels[:40]
+            more = f" … +{len(labels) - 40} more" if len(labels) > 40 else ''
+            lines.append(f"- {country} ({len(labels)}): {'; '.join(shown)}{more}")
+    else:
+        rows = db.execute(
+            "SELECT region, authority, denomination, mint, date_1_text, date_1, "
+            "grade FROM coins WHERE status IS NULL OR status IN ('Own', 'Ordered') "
+            "ORDER BY region, date_1").fetchall()
+        groups = {}
+        for r in rows:
+            region = (r['region'] or r['authority'] or 'Unknown').strip()
+            label = ' '.join(x for x in (
+                (r['authority'] or '').strip() if r['authority'] != r['region'] else '',
+                (r['denomination'] or '').strip(),
+                (r['date_1_text'] or (str(r['date_1']) if r['date_1'] else '')).strip()) if x)
+            groups.setdefault(region, []).append(label or '?')
+        for region, labels in groups.items():
+            shown = labels[:25]
+            more = f" … +{len(labels) - 25} more" if len(labels) > 25 else ''
+            lines.append(f"- {region} ({len(labels)}): {'; '.join(shown)}{more}")
+    text = '\n'.join(lines)
+    return text[:limit_chars]
+
+
+def _market_denomination_coverage(db, category, limit_chars=3000):
+    """Denominations held per series, so the scan can name the ones
+    missing: 'Philippines · Series 66 Victory: 20, 100 held'. Coins group
+    by city/region: 'Athens: tetradrachm, drachm held'."""
+    groups = {}
+    if category == 'banknotes':
+        rows = db.execute(
+            "SELECT country, series, issuer, date_1, denomination FROM banknotes "
+            "WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall()
+        for r in rows:
+            series = (r['series'] or '').strip() or (r['issuer'] or '').strip() \
+                or (f"{(r['date_1'] // 10) * 10}s" if r['date_1'] else '')
+            key = f"{(r['country'] or 'Unknown').strip()} · {series}".strip(' ·')
+            denom = (r['denomination'] or '').strip()
+            if denom:
+                groups.setdefault(key, set()).add(denom)
+    else:
+        rows = db.execute(
+            "SELECT region, authority, denomination FROM coins "
+            "WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall()
+        for r in rows:
+            key = (r['region'] or r['authority'] or 'Unknown').strip()
+            denom = (r['denomination'] or '').strip()
+            if denom:
+                groups.setdefault(key, set()).add(denom)
+    lines = [f"- {key}: {', '.join(sorted(d))} held"
+             for key, d in sorted(groups.items())]
+    return '\n'.join(lines)[:limit_chars]
+
+
+def _market_recent_purchases(db, category, limit=25):
+    """The last purchases by date — what Mark is buying now — one line
+    each, newest first."""
+    if category == 'banknotes':
+        rows = db.execute(
+            "SELECT purchase_date, country, denomination, series, date_1_text, "
+            "pick_number, grade_numeric, grade_modifier, grading_authority, price, vendor "
+            "FROM banknotes WHERE purchase_date IS NOT NULL AND purchase_date != '' "
+            "ORDER BY purchase_date DESC LIMIT ?", [limit]).fetchall()
+        lines = []
+        for r in rows:
+            grade = ''
+            if r['grade_numeric']:
+                grade = f" {r['grading_authority'] or ''} {int(r['grade_numeric'])} {r['grade_modifier'] or ''}".strip()
+            lines.append(f"- {r['purchase_date'][:7]}: {r['country'] or ''} {r['denomination'] or ''} "
+                         f"{r['date_1_text'] or r['series'] or ''} {r['pick_number'] or ''}{grade}"
+                         f"{' — ' + str(r['price']) if r['price'] else ''}"
+                         f"{' (' + r['vendor'] + ')' if r['vendor'] else ''}")
+    else:
+        rows = db.execute(
+            "SELECT purchase_date, region, authority, denomination, date_1_text, grade, "
+            "price, vendor FROM coins WHERE purchase_date IS NOT NULL AND purchase_date != '' "
+            "ORDER BY purchase_date DESC LIMIT ?", [limit]).fetchall()
+        lines = [f"- {r['purchase_date'][:7]}: {r['region'] or ''} {r['authority'] or ''} "
+                 f"{r['denomination'] or ''} {r['date_1_text'] or ''} {r['grade'] or ''}"
+                 f"{' — $' + format(r['price'], ',.0f') if r['price'] else ''}"
+                 f"{' (' + r['vendor'] + ')' if r['vendor'] else ''}" for r in rows]
+    return '\n'.join(re.sub(r'\s+', ' ', ln).strip() for ln in lines)
+
+
+# Each theme is one focused web-search call. Several run at once and
+# their candidates are merged, so a scan looks in every corner of the
+# collection's interests instead of one broad sweep.
+_MARKET_THEMES = {
+    'banknotes': [
+        ('colonial-british', "TOP PRIORITY — British colonial issues before independence: "
+                             "India, Ceylon, Burma, Malaya and the Straits Settlements, "
+                             "Sarawak, British North Borneo, Hong Kong, Palestine, Cyprus, "
+                             "Malta, East Africa, West Africa, Southern Rhodesia, British "
+                             "Guiana, British Honduras, the Caribbean currency boards, "
+                             "Fiji, Mauritius and the other crown colonies and boards."),
+        ('colonial-continental', "TOP PRIORITY — French, Italian, Portuguese and German "
+                                 "colonial issues before independence: French Indochina, "
+                                 "AOF/AEF, Madagascar, Morocco, Tunisia, Algeria, French "
+                                 "Somaliland, the Antilles; Italian East Africa, Somaliland, "
+                                 "Tripolitania/Libya; Banco Nacional Ultramarino issues for "
+                                 "Angola, Mozambique, Guiné, Cabo Verde, São Tomé, Macau, "
+                                 "Timor, Portuguese India; German East Africa (incl. the "
+                                 "WWI Tabora issues), Kamerun, New Guinea, South-West Africa. "
+                                 "Dutch (Netherlands Indies), Belgian Congo and Spanish "
+                                 "colonial issues come next."),
+        ('denominations', "DENOMINATION GAPS: for the series and issuers listed under "
+                          "DENOMINATION COVERAGE, find the denominations NOT yet held — "
+                          "the missing 1, 2, 10, 50 of a series where 5 and 20 are held, "
+                          "and so on — in the same or better grade. Name the series and "
+                          "the missing denomination in `fills`."),
+        ('pattern', "WHAT MARK IS BUYING NOW: read RECENT PURCHASES and continue the "
+                    "pattern — the same countries, issuers, eras and grade level, "
+                    "the next logical notes a collector on that path would want. "
+                    "Philippine paper money under Spanish and US administration "
+                    "(PNB, BPI, Treasury certificates, JIM, Victory Series) stays in "
+                    "scope here as US-administered colonial paper."),
+        ('sources', "NEW SOURCES: find dealers, auction houses and marketplaces Mark "
+                    "is NOT already using — anything beyond eBay, Heritage, Stack's "
+                    "Bowers, Numista, MA-Shops, Banknote World, VCoins — that stock "
+                    "colonial and world paper money (specialist banknote dealers in "
+                    "the UK, Europe, Singapore, Hong Kong, Australia; houses like "
+                    "Spink, Noonans, Lyn Knight, Mowbray, Stephen Album, Katz, "
+                    "Champion, Sincona; collector marketplaces such as Delcampe, "
+                    "Catawiki, numisbids listings). Return live listings from those "
+                    "venues, and set `new_source` to true on each."),
+    ],
+    'coins': [
+        ('ancients-gaps', "Ancient Greek coins on the gap list in the profile (Crete "
+                          "Gortyna/Knossos, Poseidonia, Velia, Rhegion, Naxos, Eretria, "
+                          "Samos, Chios, Knidos, Cyprus royal issues, a finer Persian "
+                          "daric) — at CNG, Leu, Nomos, NAC, Roma, Heritage, VCoins, "
+                          "NGC Ancients on eBay. EF or better; provenance noted."),
+        ('ancients-denominations', "DENOMINATION GAPS among the Greek cities and rulers "
+                                   "already held (DENOMINATION COVERAGE below): the "
+                                   "fractions and multiples missing — a drachm or obol "
+                                   "where only the tetradrachm is held, a stater's "
+                                   "hemidrachm, an electrum hekte's fractions — in EF or "
+                                   "better. Name the city and denomination in `fills`."),
+        ('ancients-pattern', "WHAT MARK IS BUYING NOW: read RECENT PURCHASES and continue "
+                             "the pattern — the same regions, periods and quality; the "
+                             "next pieces a collector on that path would want."),
+        ('ancients-auctions', "Lots in UPCOMING or LIVE auctions at CNG, Leu, Nomos, NAC, "
+                              "Roma, Heritage and the biddr/sixbid houses matching the "
+                              "gap list, with the sale name and closing date."),
+        ('ancients-sources', "NEW SOURCES: dealers and houses Mark is NOT already using "
+                             "for ancient Greek coins — beyond CNG, Heritage, VCoins, eBay, "
+                             "Leu, Nomos, NAC — such as Künker, Gorny & Mosch, Naumann, "
+                             "Savoca, Bertolami, Nomisma, Solidus, Pecunem, Numismatica "
+                             "Genevensis, Hess-Divo, Stack's Bowers ancients, Harlan Berk, "
+                             "Forum Ancient Coins. Return live listings from them and set "
+                             "`new_source` to true."),
+    ],
+}
+
+
+def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
+                        coverage='', recent=''):
+    today = date.today().isoformat()
+    if category == 'banknotes':
+        grade_rules = (
+            "GRADE RULES: prioritise notes graded 64 or higher by PMG or PCGS "
+            "Banknote WITH the EPQ designation (PCGS 'PPQ' and a PMG star ★ are "
+            "equivalents) — a 64 EPQ outranks a plain 65. A note graded 50–63 is "
+            "acceptable ONLY when it is genuinely rare (state the population or "
+            "census evidence in `rarity`). Raw (ungraded) notes only when "
+            "described as UNC/Gem and clearly photographed. Never below 50."
+        )
+        schema = (
+            '{"items": [{"title": str, "country": str, "denomination": str, '
+            '"series": str|null, "year": int|null, "pick_number": str|null, '
+            '"grading_authority": "PMG"|"PCGS"|"PCGS Currency"|"Legacy"|null, '
+            '"grade_numeric": int|null, "grade": str, "designation": "EPQ"|"PPQ"|"★"|"", '
+            '"price": str (as listed, with its currency, e.g. "$450" or "€1,200"), '
+            '"venue": str, "seller": str|null, "sale_type": "fixed"|"auction", '
+            '"closes": "YYYY-MM-DD"|"", "listing_url": str, "image_url": str|null, '
+            '"rarity": str, "fills": str (the gap it fills, or ""), '
+            '"empire": "British"|"French"|"Italian"|"Portuguese"|"German"|"Dutch"|"Belgian"|"Spanish"|"Japanese"|"US"|"" '
+            '(the colonial administration the note was issued under, if any), '
+            '"new_source": bool (a venue Mark is not already using), '
+            '"why": str (one line), "fair": str (one line of fair-value evidence)}]}'
+        )
+    else:
+        grade_rules = (
+            "GRADE RULES: only XF/EF, AU or MS coins (Sheldon XF40 the floor; "
+            "prefer AU and MS; ancients EF or better). PCGS/NGC slabs preferred "
+            "for US and world coins; raw ancients with provenance are fine. A "
+            "lower grade is acceptable ONLY for genuine rarity, with the "
+            "evidence in `rarity`."
+        )
+        schema = (
+            '{"items": [{"title": str, "region": str, "authority": str|null, '
+            '"denomination": str, "mint": str|null, "metal": str|null, '
+            '"year": int|null (negative for BC), "grading_authority": "PCGS"|"NGC"|null, '
+            '"grade_numeric": int|null, "grade": str, "designation": str, '
+            '"price": str (as listed, with its currency), "venue": str, "seller": str|null, '
+            '"sale_type": "fixed"|"auction", "closes": "YYYY-MM-DD"|"", '
+            '"listing_url": str, "image_url": str|null, "rarity": str, '
+            '"fills": str, "empire": "", "new_source": bool, "why": str, "fair": str}]}'
+        )
+    scope = ('paper money — colonial issues before independence first (British, French, '
+             'Italian, Portuguese, German), then the rest of the wanted list'
+             if category == 'banknotes' else
+             'ANCIENT GREEK coins only — archaic through Hellenistic, including the '
+             'Greek world of Sicily, Magna Graecia, Asia Minor, Thrace, Macedon, the '
+             'Ptolemies and Seleucids; no Roman, medieval or modern coins')
+    return f"""You are the Market Scan for Mark Armenante's {category} collection (stuff.armenante.com). Today is {today}.
+Scope: {scope}.
+
+Find LIVE listings he could buy right now, in this theme:
+THEME ({theme_key}): {theme_text}
+
+VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VENUES_TEXT}. This REPLACES any "major auction houses only" rule in the profile below: eBay Buy It Now, eBay auctions and dealer fixed-price stock ARE buy candidates here.
+
+{grade_rules}
+
+LIVENESS: every item must be purchasable now — a fixed-price listing currently in stock, or an auction lot whose close date is in the future (put it in `closes`). Sold listings, prices realized, archives and price guides are evidence for `fair`, never items. Give the direct listing URL (the item page, not a search page). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
+
+Use up to 8 web searches, specific ones ("PMG 64 EPQ Philippines 5 pesos Victory ebay", "site:stacksbowers.com Sarawak dollar"). Return 4–8 items, best first. If the theme yields nothing live, return an empty list rather than a weak item.
+
+COLLECTION PROFILE:
+{profile}
+
+CURRENT HOLDINGS ({category}):
+{holdings or '(none recorded)'}
+
+DENOMINATION COVERAGE (per series / city — anything not listed is a gap):
+{coverage or '(none recorded)'}
+
+RECENT PURCHASES (newest first — what Mark is buying now):
+{recent or '(none recorded)'}
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{schema}
+"""
+
+
+def _market_call_theme(api_key, category, theme_key, prompt):
+    """One theme's web-search call. Returns (items, error)."""
+    try:
+        import anthropic
+    except ImportError:
+        return [], 'anthropic package not installed'
+    try:
+        client = anthropic.Anthropic(api_key=api_key, timeout=240)
+        model = anthropic_lookup_model(
+            api_key, 'ANTHROPIC_MARKET_SCAN_MODEL',
+            default='auto-sonnet', fable_fallback='sonnet')
+        resp = _anthropic_create(
+            client,
+            model=model,
+            max_tokens=5000,
+            tools=[anthropic_web_search_tool(8, default_tool='web_search_20260209')],
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+        data = parse_model_json_object(_message_text(resp))
+        items = data.get('items') if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            return [], f'{theme_key}: no items array'
+        out = []
+        for it in items:
+            if isinstance(it, dict):
+                it['theme'] = theme_key
+                out.append(it)
+        return out, None
+    except Exception as e:  # one theme failing must not sink the scan
+        return [], f'{theme_key}: {str(e)[:160]}'
+
+
+_ADJECTIVAL_NOTE_GRADES = (
+    ('gem', 66), ('superb', 67), ('choice unc', 64), ('choice uncirculated', 64),
+    ('unc', 64), ('uncirculated', 64), ('about unc', 58), ('au', 58),
+    ('extremely fine', 45), ('xf', 45), ('ef', 45), ('very fine', 30),
+    ('vf', 30), ('fine', 15),
+)
+_ADJECTIVAL_COIN_GRADES = (
+    ('ms', 65), ('mint state', 65), ('fdc', 65), ('gem', 65), ('choice', 62),
+    ('au', 55), ('about unc', 55), ('ef', 45), ('xf', 45),
+    ('extremely fine', 45), ('good vf', 35), ('vf', 30), ('very fine', 30),
+    ('fine', 15),
+)
+
+
+def _market_grade_number(category, item):
+    """Numeric grade for ranking: the stated number, else read from the
+    adjectival grade ("Choice UNC" → 64, "EF" → 45)."""
+    try:
+        n = float(item.get('grade_numeric'))
+        if 1 <= n <= 70:
+            return n
+    except (TypeError, ValueError):
+        pass
+    text = f"{item.get('grade') or ''} {item.get('title') or ''}".lower()
+    m = re.search(r'\b(?:pmg|pcgs|ngc|ms|au|xf|ef|vf|unc|cu|gem)?\s*(\d{2})\b', text)
+    if m and 1 <= int(m.group(1)) <= 70 and re.search(r'\b(pmg|pcgs|ngc|ms|au|xf|ef|vf|unc|cu|gem)\b', text):
+        return float(m.group(1))
+    table = _ADJECTIVAL_NOTE_GRADES if category == 'banknotes' else _ADJECTIVAL_COIN_GRADES
+    for word, value in table:
+        if re.search(r'\b' + re.escape(word) + r'\b', text):
+            return float(value)
+    return None
+
+
+def _market_designation(item):
+    d = str(item.get('designation') or '').upper()
+    blob = f"{d} {item.get('grade') or ''} {item.get('title') or ''}".upper()
+    if 'EPQ' in blob:
+        return 'EPQ'
+    if 'PPQ' in blob:
+        return 'PPQ'
+    if '★' in blob or ' STAR' in blob:
+        return '★'
+    return ''
+
+
+def _market_price_usd(db, price, closes=None):
+    code, n = _parse_price_amount(price)
+    if n is None:
+        return None
+    if code == 'USD':
+        return n
+    rate = _usd_rate(db, code, date.today().isoformat())
+    return round(n * rate) if rate else None
+
+
+def _market_normalize_item(db, category, raw):
+    """A model item → the stored payload dict, or None when it is not a
+    usable candidate (no URL, no price, grade below the bar)."""
+    url = str(raw.get('listing_url') or '').strip()
+    if not re.match(r'^https?://', url):
+        return None
+    host = re.sub(r'^https?://(www\.)?', '', url).split('/')[0].lower()
+    if any(h in host for h in ('google.', 'bing.', 'duckduckgo')):
+        return None
+    price = _format_purchase_price(raw.get('price')) or ''
+    if not price:
+        return None
+    grade_n = _market_grade_number(category, raw)
+    rarity = str(raw.get('rarity') or '').strip()
+    floor = 64 if category == 'banknotes' else 40
+    rare_floor = 50 if category == 'banknotes' else 30
+    if grade_n is None:
+        if category == 'banknotes':
+            return None  # a note with no readable grade is not a candidate
+        grade_n = 0
+    if grade_n < floor and not (rarity and grade_n >= rare_floor):
+        return None
+    designation = _market_designation(raw)
+    authority = str(raw.get('grading_authority') or '').strip()
+    if category == 'banknotes' and authority:
+        authority = normalize_banknote_grading_authority(authority) or authority
+    year = raw.get('year')
+    try:
+        year = int(year) if year not in (None, '') else None
+    except (TypeError, ValueError):
+        year = None
+    closes = str(raw.get('closes') or '').strip()[:10]
+    if closes and closes < date.today().isoformat():
+        return None  # already closed
+    item = {
+        'title': str(raw.get('title') or '').strip()[:200],
+        'listing_url': url,
+        'image_url': (str(raw.get('image_url') or '').strip() or None),
+        'venue': str(raw.get('venue') or host).strip()[:80],
+        'seller': (str(raw.get('seller') or '').strip()[:80] or None),
+        'sale_type': 'auction' if str(raw.get('sale_type') or '').lower().startswith('auc') else 'fixed',
+        'closes': closes,
+        'price': price,
+        'price_usd': _market_price_usd(db, price),
+        # The adjectival part only ('Choice UNC'); the number lives in
+        # grade_numeric, so the list row reads "Choice UNC 65", not "65 65".
+        'grade': re.sub(r'\b(?:pmg|pcgs|ngc)\b|\b\d{2}\b', '', str(raw.get('grade') or ''),
+                        flags=re.IGNORECASE).strip(' -·')[:60],
+        'grade_numeric': grade_n if grade_n else None,
+        'grading_authority': authority or None,
+        'designation': designation,
+        'rarity': rarity[:300],
+        'fills': str(raw.get('fills') or '').strip()[:200],
+        'why': str(raw.get('why') or '').strip()[:300],
+        'fair': str(raw.get('fair') or '').strip()[:300],
+        'theme': str(raw.get('theme') or '')[:40],
+        'empire': str(raw.get('empire') or '').strip()[:20],
+        'new_source': bool(raw.get('new_source')),
+        'denomination': str(raw.get('denomination') or '').strip()[:80],
+        'date_1': year,
+        'date_1_text': (f'{abs(year)} BC' if year is not None and year < 0 else (str(year) if year else '')),
+    }
+    if category == 'banknotes':
+        item.update({
+            'country': _canonical_banknote_country(str(raw.get('country') or '').strip()[:80]),
+            'series': (str(raw.get('series') or '').strip()[:60] or None),
+            'pick_number': (str(raw.get('pick_number') or '').strip()[:60] or None),
+        })
+        if not item['title']:
+            item['title'] = ' '.join(x for x in (item['country'], item['denomination'], item['date_1_text']) if x)
+    else:
+        item.update({
+            'region': str(raw.get('region') or '').strip()[:80],
+            'authority': (str(raw.get('authority') or '').strip()[:80] or None),
+            'mint': (str(raw.get('mint') or '').strip()[:60] or None),
+            'metal': (str(raw.get('metal') or '').strip()[:30] or None),
+        })
+        if not item['title']:
+            item['title'] = ' '.join(x for x in (item['region'], item['denomination'], item['date_1_text']) if x)
+    return item
+
+
+def _market_owned_match(db, category, item):
+    """'B12 — same catalogue number' when the collection already holds
+    something like this item, else ''."""
+    if category != 'banknotes':
+        return ''
+    found = _similar_banknotes(db, '__market__', {
+        'country': item.get('country'), 'pick_number': item.get('pick_number'),
+        'denomination': item.get('denomination'), 'date_1': item.get('date_1'),
+        'series': item.get('series')})
+    if not found:
+        return ''
+    first = found[0]
+    return f"{first['label']} — {first['reason']}"
+
+
+_MARKET_KNOWN_VENUES = ('ebay', 'stacksbowers', 'ha.com', 'heritage', 'numista',
+                        'ma-shops', 'banknoteworld', 'vcoins', 'greatcollections',
+                        'biddr', 'sixbid', 'cngcoins', 'spink', 'noonans',
+                        'lynknight', 'numisbids')
+
+
+def _market_score(category, item):
+    g = item.get('grade_numeric') or 0
+    score = g
+    if item.get('designation'):
+        score += 12
+    if item.get('grading_authority'):
+        score += 6
+    if item.get('fills'):
+        score += 10
+    empire = (item.get('empire') or '').lower()
+    if empire in ('british', 'french', 'italian', 'portuguese', 'german'):
+        score += 12   # Mark's first priority: pre-independence colonial paper
+    elif empire:
+        score += 6
+    if item.get('new_source'):
+        score += 3
+    if item.get('rarity'):
+        score += 3
+    if item.get('sale_type') == 'fixed':
+        score += 2
+    blob = (item.get('venue') or '').lower() + ' ' + (item.get('listing_url') or '').lower()
+    if any(v in blob for v in _MARKET_KNOWN_VENUES):
+        score += 2
+    if item.get('owned'):
+        score -= 15
+    return score
+
+
+def _market_dedupe(items):
+    seen = set()
+    out = []
+    for it in items:
+        key = re.sub(r'[?#].*$', '', it['listing_url'].lower().rstrip('/'))
+        alt = re.sub(r'[^a-z0-9]', '', (it['title'] or '').lower())[:60]
+        if key in seen or (alt and alt in seen):
+            continue
+        seen.add(key)
+        if alt:
+            seen.add(alt)
+        out.append(it)
+    return out
+
+
+def _run_market_scan(category, scan_id):
+    """Background job: run every theme, merge, rank, store."""
+    db = open_db_connection()
+    try:
+        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        if not api_key:
+            db.execute("UPDATE market_scans SET status = 'failed', finished_at = ?, "
+                       "error = ? WHERE id = ?",
+                       [datetime.utcnow().isoformat(),
+                        'ANTHROPIC_API_KEY is not configured on this instance', scan_id])
+            db.commit()
+            return
+        profile = _market_profile_text()
+        holdings = _market_holdings_summary(db, category)
+        coverage = _market_denomination_coverage(db, category)
+        recent = _market_recent_purchases(db, category)
+        themes = _MARKET_THEMES[category]
+        results, errors = [], []
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=len(themes)) as pool:
+            futures = {
+                pool.submit(_market_call_theme, api_key, category, key,
+                            _market_scan_prompt(category, key, text, profile, holdings,
+                                                coverage, recent)): key
+                for key, text in themes}
+            for fut in futures:
+                items, err = fut.result()
+                results.extend(items)
+                if err:
+                    errors.append(err)
+        normalized = []
+        for raw in results:
+            item = _market_normalize_item(db, category, raw)
+            if item:
+                item['owned'] = _market_owned_match(db, category, item)
+                item['score'] = _market_score(category, item)
+                normalized.append(item)
+        normalized = _market_dedupe(normalized)
+        normalized.sort(key=lambda it: (-it['score'], -(it.get('grade_numeric') or 0)))
+        now = datetime.utcnow().isoformat()
+        # A new scan replaces the previous one's undecided items; ordered
+        # and dismissed ones stay on their old scan for the record.
+        db.execute("DELETE FROM market_scan_items WHERE category = ? AND status = 'new'",
+                   [category])
+        for rank, item in enumerate(normalized, 1):
+            db.execute(
+                "INSERT INTO market_scan_items (id, scan_id, category, rank, score, "
+                "status, title, listing_url, venue, price, price_usd, grade_numeric, "
+                "designation, closes, theme, payload, created_at) "
+                "VALUES (?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [str(uuid.uuid4()), scan_id, category, rank, item['score'],
+                 item['title'], item['listing_url'], item['venue'], item['price'],
+                 item['price_usd'], item['grade_numeric'], item['designation'],
+                 item['closes'], item['theme'], json.dumps(item), now])
+        summary = (f"{len(normalized)} candidate{'s' if len(normalized) != 1 else ''} "
+                   f"from {len(themes)} themes, {len(results)} raw finds")
+        if errors:
+            summary += ' · ' + '; '.join(errors)[:400]
+        db.execute("UPDATE market_scans SET status = 'done', finished_at = ?, "
+                   "summary = ?, item_count = ? WHERE id = ?",
+                   [now, summary, len(normalized), scan_id])
+        db.commit()
+    except Exception as e:
+        try:
+            db.execute("UPDATE market_scans SET status = 'failed', finished_at = ?, "
+                       "error = ? WHERE id = ?",
+                       [datetime.utcnow().isoformat(), str(e)[:400], scan_id])
+            db.commit()
+        except sqlite3.Error:
+            pass
+    finally:
+        db.close()
+        with _MARKET_SCAN_LOCK:
+            _MARKET_SCAN_INFLIGHT.discard(category)
+
+
+def _market_latest_scan(db, category):
+    return db.execute(
+        "SELECT * FROM market_scans WHERE category = ? "
+        "ORDER BY started_at DESC LIMIT 1", [category]).fetchone()
+
+
+def _market_items(db, category):
+    rows = db.execute(
+        "SELECT * FROM market_scan_items WHERE category = ? AND status = 'new' "
+        "ORDER BY rank", [category]).fetchall()
+    out = []
+    for r in rows:
+        item = json.loads(r['payload'])
+        item['id'] = r['id']
+        item['status'] = r['status']
+        out.append(item)
+    return out
+
+
+def _market_require_owner():
+    user = g.get('current_user')
+    if user and user.get('role') != 'owner':
+        abort(403)
+
+
+@app.route('/<category>/market')
+def market_view(category):
+    """The Market Scan list: same page and row layout as the collection,
+    filled with live buy candidates instead."""
+    if category not in MARKET_SCAN_CATEGORIES:
+        abort(404)
+    _market_require_owner()
+    db = get_db()
+    cat_info = CATEGORIES[category]
+    scan = _market_latest_scan(db, category)
+    items = _market_items(db, category)
+    running = bool(scan and scan['status'] == 'running')
+    # First visit (or a stale scan older than 12 hours with nothing left
+    # to act on) starts a scan by itself; the page polls until it lands.
+    stale = True
+    if scan and scan['finished_at']:
+        try:
+            age = datetime.utcnow() - datetime.fromisoformat(scan['finished_at'])
+            stale = age > timedelta(hours=12)
+        except ValueError:
+            stale = True
+    autoscan = (not running) and (scan is None or (stale and not items))
+    return render_template('list.html',
+                           category=category,
+                           cat_info=cat_info,
+                           rows=items,
+                           counts=get_counts(),
+                           current_category=category,
+                           categories=CATEGORIES,
+                           q='',
+                           dot=False,
+                           coin_filter=None,
+                           show_history=False,
+                           at_property=None,
+                           at_property_url=None,
+                           prop_status=None,
+                           prop_type=None,
+                           today_iso=date.today().isoformat(),
+                           result_count=len(items),
+                           art_price_total=None,
+                           status_cycle=None,
+                           status_current='all',
+                           has_in_service=False,
+                           watch_open_service_event_ids=[],
+                           extra_fields=[],
+                           fields=visible_fields(category),
+                           market_mode=True,
+                           market_scan=scan,
+                           market_running=running,
+                           market_autoscan=autoscan)
+
+
+@app.route('/<category>/market/scan', methods=['POST'])
+def market_scan_start(category):
+    if category not in MARKET_SCAN_CATEGORIES:
+        return jsonify({'error': 'Unknown category'}), 400
+    _market_require_owner()
+    db = get_db()
+    with _MARKET_SCAN_LOCK:
+        if category in _MARKET_SCAN_INFLIGHT:
+            scan = _market_latest_scan(db, category)
+            return jsonify({'ok': True, 'running': True,
+                            'scan_id': scan['id'] if scan else None})
+        _MARKET_SCAN_INFLIGHT.add(category)
+    scan_id = str(uuid.uuid4())
+    db.execute("INSERT INTO market_scans (id, category, started_at, status) "
+               "VALUES (?, ?, ?, 'running')",
+               [scan_id, category, datetime.utcnow().isoformat()])
+    db.commit()
+    threading.Thread(target=_run_market_scan, args=(category, scan_id),
+                     daemon=True).start()
+    return jsonify({'ok': True, 'running': True, 'scan_id': scan_id})
+
+
+@app.route('/<category>/market/status')
+def market_scan_status(category):
+    if category not in MARKET_SCAN_CATEGORIES:
+        return jsonify({'error': 'Unknown category'}), 400
+    db = get_db()
+    scan = _market_latest_scan(db, category)
+    if not scan:
+        return jsonify({'ok': True, 'status': 'none'})
+    return jsonify({'ok': True, 'status': scan['status'], 'scan_id': scan['id'],
+                    'summary': scan['summary'], 'error': scan['error'],
+                    'item_count': scan['item_count'],
+                    'finished_at': scan['finished_at']})
+
+
+def _market_item_or_404(db, category, item_id):
+    row = db.execute(
+        "SELECT * FROM market_scan_items WHERE id = ? AND category = ?",
+        [item_id, category]).fetchone()
+    if row is None:
+        abort(404)
+    return row
+
+
+def _market_create_record(db, category, item):
+    """File a scan item as a new Ordered record with everything the
+    listing gave. Returns the new record id."""
+    record_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    today = date.today().isoformat()
+    vendor = item.get('seller') or item.get('venue') or ''
+    listing_line = f"Market Scan {today}: {item.get('venue') or ''} — {item['listing_url']}"
+    description = '\n\n'.join(x for x in (
+        item.get('title'), item.get('why'),
+        f"Fair value: {item['fair']}" if item.get('fair') else '',
+        f"Listing: {item['listing_url']}") if x)
+    data = {
+        'id': record_id, 'created_at': now, 'updated_at': now,
+        'owner': 'Mark', 'status': 'Ordered', 'purchase_date': today,
+        'vendor': vendor[:120], 'description': description,
+        'denomination': item.get('denomination') or None,
+        'date_1': item.get('date_1'), 'date_1_text': item.get('date_1_text') or None,
+        'grade': (' '.join(x for x in (item.get('grade'),
+                                       str(int(item['grade_numeric'])) if item.get('grade_numeric') else '')
+                           if x) or None),
+        'grading_authority': item.get('grading_authority'),
+        'grade_modifier': item.get('designation') or None,
+    }
+    if category == 'banknotes':
+        data.update({
+            'country': item.get('country') or None,
+            'series': item.get('series'),
+            'pick_number': item.get('pick_number'),
+            'grade_numeric': item.get('grade_numeric'),
+            'price': _price_with_usd_tail(db, item.get('price'), today),
+            'note_references': listing_line,
+            'cat_id': next_serial_cat_id(db, 'banknotes', 'B'),
+        })
+        canonicalize_banknote_fields(data)
+    else:
+        data.update({
+            'region': item.get('region') or None,
+            'authority': item.get('authority'),
+            'mint': item.get('mint'),
+            'metal': item.get('metal'),
+            # The coins price column is numeric: the USD figure, else the
+            # bare amount; the listed currency string stays in the description.
+            'price': item.get('price_usd') if item.get('price_usd') is not None
+                     else _parse_price_amount(item.get('price'))[1],
+            'coin_references': listing_line,
+            'coin_id': next_coin_id(db),
+            'cat_id': next_cat_id(db),
+        })
+        if item.get('price') and not str(item['price']).startswith('$'):
+            data['description'] += f"\n\nListed at {item['price']}"
+    table = CATEGORIES[category]['table']
+    real_cols = _table_cols(db, table)
+    data = {k: v for k, v in data.items() if k in real_cols and v not in (None, '')}
+    cols = ', '.join(data)
+    db.execute(f"INSERT INTO {table} ({cols}) VALUES ({', '.join('?' for _ in data)})",
+               list(data.values()))
+    if category == 'banknotes':
+        _renumber_banknotes(db)
+    return record_id
+
+
+@app.route('/<category>/market/<item_id>/buy', methods=['POST'])
+def market_item_buy(category, item_id):
+    """Buy = open the listing to pay there, and file the item as a new
+    Ordered record now. Returns both URLs for the client."""
+    if category not in MARKET_SCAN_CATEGORIES:
+        return jsonify({'error': 'Unknown category'}), 400
+    _market_require_owner()
+    db = get_db()
+    row = _market_item_or_404(db, category, item_id)
+    item = json.loads(row['payload'])
+    if row['status'] == 'ordered' and row['record_id']:
+        record_id = row['record_id']
+    else:
+        record_id = _market_create_record(db, category, item)
+        db.execute("UPDATE market_scan_items SET status = 'ordered', record_id = ? "
+                   "WHERE id = ?", [record_id, item_id])
+    db.commit()
+    if category == 'banknotes' and item.get('country'):
+        ensure_country_history(item['country'])
+    return jsonify({'ok': True, 'record_id': record_id,
+                    'detail_url': url_for('detail_view', category=category, record_id=record_id),
+                    'listing_url': item['listing_url']})
+
+
+@app.route('/<category>/market/<item_id>/dismiss', methods=['POST'])
+def market_item_dismiss(category, item_id):
+    if category not in MARKET_SCAN_CATEGORIES:
+        return jsonify({'error': 'Unknown category'}), 400
+    _market_require_owner()
+    db = get_db()
+    _market_item_or_404(db, category, item_id)
+    db.execute("UPDATE market_scan_items SET status = 'dismissed' WHERE id = ?", [item_id])
+    db.commit()
+    return jsonify({'ok': True})
+
 
 
 @app.route('/<category>/new', methods=['GET', 'POST'])
