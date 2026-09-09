@@ -499,8 +499,8 @@ def banknote_grade_value_list_match(value):
     if alias:
         return alias
 
-    # Ordered: most specific phrasing first. Numeric suffixes ("65 EPQ")
-    # and the EPQ/★ designation are ignored here — they live in
+    # Ordered: most specific phrasing first. Numeric suffixes ("65 EPQ",
+    # "64 PPQ") and the EPQ/PPQ/★ designation are ignored here — they live in
     # grade_numeric / grade_modifier.
     phrase_patterns = [
         (r'\bsuperb?\s+gem\s+(?:unc|uncirculated|cu)\b', 'Superb Gem UNC'),
@@ -1121,7 +1121,7 @@ FIELDS = {
         {'name': 'grading_authority','label': 'Grading Authority', 'type': 'text'},
         {'name': 'slab_number',     'label': 'Cert Number',       'type': 'text'},
         {'name': 'grade_condition', 'label': 'Condition',         'type': 'text'},
-        {'name': 'grade_modifier',  'label': 'EPQ / ★',           'type': 'text'},
+        {'name': 'grade_modifier',  'label': 'EPQ / PPQ / ★',     'type': 'text'},
         {'name': 'size_width',      'label': 'Width (mm)',        'type': 'number'},
         {'name': 'size_height',     'label': 'Height (mm)',       'type': 'number'},
         {'name': 'storage_location','label': 'Storage Location',  'type': 'text'},
@@ -19225,8 +19225,8 @@ def _banknote_description_fields(note):
         out['pick_number'] = f'P-{m.group(1)}'
 
     # Grading service + numeric grade: "PMG-64", "PMG 66 EPQ",
-    # "PCGS Banknote 58".
-    m = re.search(r'\b(PMG|PCGS(?:\s+Banknote)?|CGA|Legacy)\s*[-#]?\s*(\d{1,2})\b',
+    # "PCGS Banknote 58", "PCGS Currency 65 PPQ".
+    m = re.search(r'\b(PMG|PCGS(?:\s+(?:Banknote|Currency))?|CGA|Legacy)\s*[-#]?\s*(\d{1,2})\b',
                   description, re.IGNORECASE)
     if m:
         out['grading_authority'] = normalize_grading_authority(m.group(1).split()[0])
@@ -19237,9 +19237,12 @@ def _banknote_description_fields(note):
         except ValueError:
             pass
 
-    # EPQ / Star designation rides with the grade.
-    if re.search(r'\bEPQ\b', description):
-        out['grade_modifier'] = 'EPQ'
+    # Paper-quality designation rides with the grade: PMG's EPQ
+    # (Exceptional Paper Quality) or PCGS's PPQ (Premium Paper Quality),
+    # then a star.
+    m = re.search(r'\b(EPQ|PPQ)\b', description, re.IGNORECASE)
+    if m:
+        out['grade_modifier'] = m.group(1).upper()
     if '★' in description or re.search(r'\bstar\b', description, re.IGNORECASE):
         star = '★'
         out['grade_modifier'] = (out.get('grade_modifier') or '') + star
@@ -19413,7 +19416,7 @@ Target fields:
 - grading_authority: the grading company if the note is or was slabbed and the text names it — "PMG", "PCGS Banknote", "CGA", "Legacy". Else null.
 - slab_number: the certification number if stated, verbatim; else null.
 - grade_condition: condition qualifier(s) noted alongside the grade — e.g. "minor rust", "pinholes", "annotation", "small tear". Comma-separated, lowercase; else null.
-- grade_modifier: "EPQ" when the text shows EPQ (Exceptional Paper Quality), "★" for a star designation, "EPQ★" for both, "+" for a plus grade. Else null.
+- grade_modifier: "EPQ" when the label or text shows EPQ (PMG's Exceptional Paper Quality), "PPQ" when it shows PPQ (PCGS's Premium Paper Quality), "★" for a star designation, "EPQ★" / "PPQ★" for both, "+" for a plus grade. Else null.
 - sheet_position: THIS note's position on the printing sheet, when identifiable from the images or the dealer's text — an uncut/partial-sheet position stated like "2 of 4", or the plate-position letter/number printed in the note's margin or corner (e.g. "A", "D12", "Position 7"). Direct evidence only — never inferred from a catalogue. Null when not shown or stated.
 - label_comments: EVERYTHING ELSE printed on the grading-service holder label that no other field captures, verbatim, comma-separated in label order — variety/attribution notes ('Narrow "V" in Left Sign.', "Number at Lower L & Upper R"), status designations ("Remainder", "Specimen", "Proof", "Cancelled", "Replacement/Star"), net grades and condition comments ("Net", "Staple Holes", "Rust", "Ink", "Annotations", "Minor Repairs"), pedigree/collection lines, and the watermark line if it was NOT already captured in the watermark field. Nothing human-readable on the label may be lost — but NEVER include the label's barcode / machine-verification string (the long letters-and-digits run that just concatenates the Pick number, grade, and cert number, e.g. "125a64E8038100041G"), nor the serial number, nor any value already returned in another field. Null when the label shows nothing beyond fields already captured, or there is no label.
 - lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text. EXCEPTION — when the note's text is already ENGLISH: no translation is needed, so the two fields become the two sides instead: put ONLY the FRONT inscriptions here (lines prefixed "Front:"), matching the front image on the left.
@@ -19547,12 +19550,14 @@ def _coerce_banknote_spec(field, raw):
     if field == 'grading_authority':
         return normalize_grading_authority(raw)
     if field == 'grade_modifier':
-        # Keep EPQ verbatim; fold star/plus like coins.
+        # Keep the paper-quality designation verbatim (PMG EPQ, PCGS PPQ);
+        # fold star/plus like coins.
         v = (raw if isinstance(raw, str) else str(raw)).strip()
         if not v:
             return None
-        if 'epq' in v.lower():
-            return 'EPQ★' if ('★' in v or 'star' in v.lower()) else 'EPQ'
+        pq = next((tag for tag in ('EPQ', 'PPQ') if tag.lower() in v.lower()), None)
+        if pq:
+            return pq + '★' if ('★' in v or 'star' in v.lower()) else pq
         return normalize_grade_modifier(v)
     if field == 'price':
         return _format_purchase_price(raw)
@@ -19717,8 +19722,9 @@ def banknote_lookup_specs(record_id):
             return bool(words) and all(w in _dealer_text_key for w in words)
         if field == 'grade_modifier':
             v = str(value)
-            if 'EPQ' in v and 'epq' not in dealer_text.lower():
-                return False
+            for tag in ('EPQ', 'PPQ'):
+                if tag in v and tag.lower() not in dealer_text.lower():
+                    return False
             if '★' in v and not ('★' in dealer_text or 'star' in dealer_text.lower()):
                 return False
             if '+' in v and '+' not in dealer_text:

@@ -77,3 +77,21 @@ assert captured[0][1] == [{'title': 'Passport', 'filename': 'a.pdf'},
 print('_restore_docs_from_slots OK')
 
 print('ALL HELPER TESTS PASSED')
+
+
+# Paper-quality designations: PMG's EPQ and PCGS's PPQ both ride with the
+# grade, from dealer text and from the scan (vision) result alike.
+_ppq_note = {'description': 'Iran 100 Rials 1971 P-86b PCGS Currency 64 PPQ Very Choice New'}
+_ppq = stuffapp._banknote_description_fields(_ppq_note)
+assert _ppq.get('grade_modifier') == 'PPQ', _ppq
+assert _ppq.get('grading_authority') == 'PCGS', _ppq
+assert _ppq.get('grade_numeric') == 64, _ppq
+_epq = stuffapp._banknote_description_fields({'description': 'PMG 66 EPQ ★ Gem Uncirculated'})
+assert _epq.get('grade_modifier') == 'EPQ★', _epq
+_plain = stuffapp._banknote_description_fields({'description': 'PMG 58 Choice About Unc'})
+assert _plain.get('grade_modifier') is None, _plain
+for raw, want in (('PPQ', 'PPQ'), ('ppq star', 'PPQ★'), ('64 PPQ★', 'PPQ★'),
+                  ('EPQ', 'EPQ'), ('EPQ★', 'EPQ★'), ('★', '★'), ('plus', '+'), ('', None)):
+    got = stuffapp._coerce_banknote_spec('grade_modifier', raw)
+    assert got == want, (raw, got, want)
+print('banknote EPQ/PPQ OK')
