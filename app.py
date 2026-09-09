@@ -14333,7 +14333,7 @@ def _market_recent_purchases(db, category, limit=25):
                 grade = f" {r['grading_authority'] or ''} {int(r['grade_numeric'])} {r['grade_modifier'] or ''}".strip()
             lines.append(f"- {r['purchase_date'][:7]}: {r['country'] or ''} {r['denomination'] or ''} "
                          f"{r['date_1_text'] or r['series'] or ''} {r['pick_number'] or ''}{grade}"
-                         f"{' — ' + str(r['price']) if r['price'] else ''}"
+                         f"{' — ' + _market_paid_text(r['price']) if r['price'] else ''}"
                          f"{' (' + r['vendor'] + ')' if r['vendor'] else ''}")
     else:
         rows = db.execute(
@@ -14342,9 +14342,18 @@ def _market_recent_purchases(db, category, limit=25):
             "ORDER BY purchase_date DESC LIMIT ?", [limit]).fetchall()
         lines = [f"- {r['purchase_date'][:7]}: {r['region'] or ''} {r['authority'] or ''} "
                  f"{r['denomination'] or ''} {r['date_1_text'] or ''} {r['grade'] or ''}"
-                 f"{' — $' + format(r['price'], ',.0f') if r['price'] else ''}"
+                 f"{' — ' + _market_paid_text(r['price']) if r['price'] else ''}"
                  f"{' (' + r['vendor'] + ')' if r['vendor'] else ''}" for r in rows]
     return '\n'.join(re.sub(r'\s+', ' ', ln).strip() for ln in lines)
+
+
+def _market_paid_text(price):
+    """A stored purchase price as prompt text. Prices are dealer-written
+    strings in their own currency ("$1,250", "CHF 900", "€1.200 / $1,300"),
+    though older rows hold a bare number; a number reads as US dollars."""
+    if isinstance(price, (int, float)):
+        return f"${price:,.0f}"
+    return str(price).strip()
 
 
 # Each theme is one focused web-search call. Several run at once and

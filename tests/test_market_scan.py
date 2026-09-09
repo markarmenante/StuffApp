@@ -42,6 +42,11 @@ client.post('/banknotes/new', data={
 client.post('/coins/new', data={'region': 'Athens', 'authority': 'Attica', 'denomination': 'Tetradrachm',
                                 'date_1': '-440', 'owner': 'Mark', 'purchase_date': '2026-06-01',
                                 'price': '4500'}, headers=hdr)
+# A dealer-written price stays text in the REAL column ("$1,250", "CHF 900");
+# the coin recent-purchases line must render it, not try to format() it.
+client.post('/coins/new', data={'region': 'Syracuse', 'authority': 'Sicily', 'denomination': 'Decadrachm',
+                                'date_1': '-400', 'owner': 'Mark', 'purchase_date': '2026-07-01',
+                                'price': '$1,250', 'vendor': 'CNG'}, headers=hdr)
 
 with stuffapp.app.app_context():
     db = stuffapp.get_db()
@@ -52,6 +57,9 @@ with stuffapp.app.app_context():
     recent = stuffapp._market_recent_purchases(db, 'banknotes')
     assert recent.startswith('- 2026-08: Philippines 20 Pesos'), recent
     assert 'Athens' in stuffapp._market_denomination_coverage(db, 'coins')
+    coin_recent = stuffapp._market_recent_purchases(db, 'coins')
+    assert coin_recent.startswith('- 2026-07: Syracuse Sicily Decadrachm'), coin_recent
+    assert '$1,250 (CNG)' in coin_recent and '$4,500' in coin_recent, coin_recent
     prompt = stuffapp._market_scan_prompt('banknotes', 'denominations', 'theme text',
                                           'PROFILE', holdings, coverage, recent)
     assert 'DENOMINATION COVERAGE' in prompt and 'RECENT PURCHASES' in prompt
