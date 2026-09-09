@@ -641,7 +641,9 @@
           <span class="market-price">{{ row['price'] }}{% if row['price_usd'] and not (row['price'] or '').startswith('$') %} / ${{ '{:,.0f}'.format(row['price_usd']) }}{% endif %}</span>
           {% if row['grade'] or row['grade_numeric'] %}<span class="market-grade">{{ row['grading_authority'] or '' }} {{ row['grade_numeric']|int if row['grade_numeric'] else row['grade'] }}{% if row['designation'] %} {{ row['designation'] }}{% endif %}</span>{% endif %}
           <span class="market-venue">{{ row['venue'] }}{% if row['seller'] and row['seller'] != row['venue'] %} · {{ row['seller'] }}{% endif %}</span>
-          {% if row['closes'] %}<span class="market-closes">closes {{ row['closes'] }}</span>{% elif row['sale_type'] == 'auction' %}<span class="market-closes">auction</span>{% endif %}
+          {% if row['closes'] %}<span class="market-closes">{% if row['sale_type'] == 'auction' %}auction closes{% else %}until{% endif %} {{ row['closes'] }}</span>{% endif %}
+          {% if row['verified'] %}<span class="market-live" title="The listing page itself says it is live">✓ live</span>{% endif %}
+          {% if row['live_evidence'] %}<span class="market-evidence">{{ row['live_evidence'] }}</span>{% endif %}
         </div>
         {% if row['why'] %}<div class="idr market-why"><span>{{ row['why'] }}</span></div>{% endif %}
         <div class="idr market-tags">

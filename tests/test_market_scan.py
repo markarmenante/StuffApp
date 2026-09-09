@@ -11,6 +11,13 @@ os.environ['ANTHROPIC_API_KEY'] = 'test-key'
 import app as stuffapp
 
 stuffapp._fetch_usd_rate = lambda currency, date_str: 1.1 if currency == 'EUR' else None
+PAGES = {
+    'https://www.ebay.com/itm/ended': (200, '<html><body><h1>Note</h1><div>This listing has ended.</div></body></html>'),
+    'https://www.ebay.com/itm/live': (200, '<html><body><h1>Note</h1><span>Buy It Now</span><span>2 available</span></body></html>'),
+    'https://www.stacksbowers.com/lot/closed': (200, '<html><body>Lot 2101 <b>Sold for $1,200</b> Prices Realized</body></html>'),
+    'https://www.noonans.co.uk/lot/blocked': (403, ''),
+}
+stuffapp._market_fetch_page = lambda url, limit=0: PAGES.get(url, (None, ''))
 stuffapp.app.config['TESTING'] = True
 with stuffapp.app.app_context():
     stuffapp.init_db()
@@ -72,6 +79,27 @@ with stuffapp.app.app_context():
     assert rare and rare['grade_numeric'] == 55
     assert norm(dict(base, grade_numeric=45, grade='XF 45', rarity='rare')) is None, 'below 50 never'
     assert norm(dict(base, closes='2020-01-01')) is None, 'closed lot'
+    assert norm(dict(base, sale_type='auction', closes='')) is None, 'auction without a close date'
+    assert norm(dict(base, sale_type='auction', closes='2099-01-01')), 'auction with a future close'
+    assert norm(dict(base, listing_url='https://www.ebay.com/sch/i.html?_nkw=x&LH_Sold=1&LH_Complete=1')) is None, 'sold search'
+    assert norm(dict(base, listing_url='https://currency.ha.com/prices-realized/lot-1')) is None, 'prices realized page'
+    assert norm(dict(base, why='Sold for $900 at Heritage in May')) is None, 'past sale in the text'
+    assert norm(dict(base, live_evidence='listing has ended')) is None
+    lively = norm(dict(base, live_evidence='Buy It Now, 2 available'))
+    assert lively['live_evidence'] == 'Buy It Now, 2 available' and lively['verified'] is False
+    # Page check: the venue's own wording decides; a bot wall never drops.
+    ls = stuffapp._market_listing_state
+    assert ls('https://www.ebay.com/itm/ended') == 'ended'
+    assert ls('https://www.ebay.com/itm/live') == 'live'
+    assert ls('https://www.stacksbowers.com/lot/closed') == 'ended'
+    assert ls('https://www.noonans.co.uk/lot/blocked') == 'unknown'
+    assert ls('https://nowhere.example/x') == 'unknown'
+    kept = stuffapp._market_verify_live([
+        dict(lively, listing_url='https://www.ebay.com/itm/ended'),
+        dict(lively, listing_url='https://www.ebay.com/itm/live'),
+        dict(lively, listing_url='https://www.noonans.co.uk/lot/blocked')])
+    assert [k['listing_url'].rsplit('/', 1)[1] for k in kept] == ['live', 'blocked'], kept
+    assert kept[0]['verified'] is True and kept[1]['verified'] is False
     raw_unc = norm(dict(base, grade_numeric=None, grade='Gem UNC', grading_authority=None, designation=''))
     assert raw_unc and raw_unc['grade_numeric'] == 66 and raw_unc['grading_authority'] is None
     euro = norm(dict(base, price='€1.200,00'))
@@ -114,15 +142,18 @@ CANNED = {
                      listing_url='https://www.noonans.co.uk/lot/ceylon', price='£420')],
     'pattern': [dict(base, title='Philippines 20 Pesos P-98a (duplicate)', pick_number='P-98a',
                      denomination='20 Pesos', listing_url='https://www.ebay.com/itm/999')],
-    'colonial-continental': [],
+    'colonial-continental': [dict(base, title='Malaya 10 Dollars 1941 PMG 64 EPQ', country='Malaya',
+                                  denomination='10 Dollars', year=1941, pick_number='P-13', empire='British',
+                                  listing_url='https://www.ebay.com/itm/ended')],
 }
 calls = []
 
 
 def fake_theme(api_key, category, theme_key, prompt):
     calls.append(theme_key)
-    if theme_key == 'colonial-continental':
-        return [], 'colonial-continental: simulated timeout'
+    if theme_key == 'pattern':
+        items = [dict(it, theme=theme_key) for it in CANNED.get(theme_key, [])]
+        return items, 'pattern: simulated timeout on a second call'
     items = [dict(it, theme=theme_key) for it in CANNED.get(theme_key, [])]
     return items, None
 
@@ -138,11 +169,13 @@ for _ in range(100):
 assert st['status'] == 'done', st
 assert sorted(calls) == sorted(k for k, _ in stuffapp._MARKET_THEMES['banknotes']), calls
 assert st['item_count'] == 4 and 'simulated timeout' in st['summary'], st
+assert '1 dropped as sold/ended on their own pages' in st['summary'], st
 with stuffapp.app.app_context():
     items = stuffapp._market_items(stuffapp.get_db(), 'banknotes')
 titles = [it['title'] for it in items]
 assert {titles[0].split()[0], titles[1].split()[0]} == {'Sarawak', 'Ceylon'}, titles  # colonial first
 assert titles[-1].endswith('(duplicate)'), titles       # owned duplicate last
+assert not any(t.startswith('Malaya') for t in titles), 'ended on its own page'
 ceylon = next(it for it in items if it['title'].startswith('Ceylon'))
 assert ceylon['new_source'] and ceylon['price'] == '£420'
 print('SCAN PIPELINE OK')

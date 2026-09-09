@@ -3922,6 +3922,8 @@ input[type="date"] { -webkit-appearance: none; }
 .market-price { font-weight: 600; }
 .market-grade { font-weight: 500; }
 .market-venue, .market-closes { color: var(--text-secondary); }
+.market-live { color: #2f6f5e; font-weight: 600; font-size: 12px; }
+.market-evidence { color: var(--text-hint); font-size: 11px; }
 .market-why { color: var(--text-secondary); font-size: 12px; }
 .market-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
 .market-tag {

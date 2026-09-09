@@ -14442,6 +14442,7 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"empire": "British"|"French"|"Italian"|"Portuguese"|"German"|"Dutch"|"Belgian"|"Spanish"|"Japanese"|"US"|"" '
             '(the colonial administration the note was issued under, if any), '
             '"new_source": bool (a venue Mark is not already using), '
+            '"live_evidence": str (what on the page proves it is live: "Buy It Now, 2 available", "bidding ends 2026-10-03 14:00 CT"), '
             '"why": str (one line), "fair": str (one line of fair-value evidence)}]}'
         )
     else:
@@ -14460,7 +14461,8 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"price": str (as listed, with its currency), "venue": str, "seller": str|null, '
             '"sale_type": "fixed"|"auction", "closes": "YYYY-MM-DD"|"", '
             '"listing_url": str, "image_url": str|null, "rarity": str, '
-            '"fills": str, "empire": "", "new_source": bool, "why": str, "fair": str}]}'
+            '"fills": str, "empire": "", "new_source": bool, "live_evidence": str, '
+            '"why": str, "fair": str}]}'
         )
     scope = ('paper money — colonial issues before independence first (British, French, '
              'Italian, Portuguese, German), then the rest of the wanted list'
@@ -14478,7 +14480,7 @@ VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VE
 
 {grade_rules}
 
-LIVENESS: every item must be purchasable now — a fixed-price listing currently in stock, or an auction lot whose close date is in the future (put it in `closes`). Sold listings, prices realized, archives and price guides are evidence for `fair`, never items. Give the direct listing URL (the item page, not a search page). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
+LIVENESS — HARD RULE: every item must be purchasable now. A fixed-price listing must be in stock today; an auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. Put in `live_evidence` the words on the page that prove it is live ("Buy It Now", "3 available", "bidding ends …", "Sale closes …"); if you cannot find such words, do not return the item. Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
 
 Use up to 8 web searches, specific ones ("PMG 64 EPQ Philippines 5 pesos Victory ebay", "site:stacksbowers.com Sarawak dollar"). Return 4–8 items, best first. If the theme yields nothing live, return an empty list rather than a weak item.
 
@@ -14587,6 +14589,93 @@ def _market_price_usd(db, price, closes=None):
     return round(n * rate) if rate else None
 
 
+# Stale-listing guards. A candidate is dropped when its URL or the
+# model's own text says it is a sold / ended / archived lot, and again
+# when a fetch of the page finds the venue's own "ended" wording.
+_MARKET_ENDED_URL_RE = re.compile(
+    r'LH_Sold=1|LH_Complete=1|/sold[/?]|prices-?realized|auction-?results|'
+    r'lot-?archive|/archive[s]?/|/results/|/realized|sold-?listings|orderid=',
+    re.IGNORECASE)
+_MARKET_ENDED_TEXT_RE = re.compile(
+    r'\b(sold for|realized|prices? realized|hammer(?:ed)? (?:at|for)|'
+    r'listing (?:has )?ended|auction (?:has )?ended|ended on|closed on|'
+    r'sold on|was sold|has sold|archived|past sale|previous sale)\b',
+    re.IGNORECASE)
+_MARKET_ENDED_PAGE_MARKERS = (
+    'this listing has ended', 'this listing was ended', 'bidding has ended',
+    'this item has ended', 'this listing sold', 'item sold', 'sold for',
+    'prices realized', 'price realized', 'this lot has closed', 'lot closed',
+    'auction has ended', 'auction closed', 'sale has ended', 'sale closed',
+    'no longer available', 'listing is no longer available', 'sold out',
+    'lot is sold', 'winning bid', 'hammer price', 'this item is sold',
+    'ended:', 'sold ',
+)
+_MARKET_LIVE_PAGE_MARKERS = (
+    'buy it now', 'add to cart', 'add to basket', 'place bid', 'bid now',
+    'current bid', 'time left', 'ends in', 'bidding ends', 'lot closes',
+    'closes in', 'in stock', 'available', 'make offer', 'buy now',
+)
+
+
+def _market_fetch_page(url, limit=400_000):
+    """(status, text) for a listing page, browser-style headers, short
+    timeout. (None, '') when unreachable — never raises."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={
+            'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) '
+                           'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'),
+            'Accept': 'text/html,application/xhtml+xml',
+            'Accept-Language': 'en-US,en;q=0.9',
+        })
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            body = resp.read(limit)
+            charset = resp.headers.get_content_charset() or 'utf-8'
+            return resp.status, body.decode(charset, errors='replace')
+    except Exception:
+        return None, ''
+
+
+def _market_listing_state(url):
+    """'ended' when the listing page itself says the lot is sold, ended
+    or archived; 'live' when it carries buy/bid wording and no ended
+    marker; 'unknown' when the page cannot be read (bot wall, timeout)
+    or says neither — unknown never drops an item."""
+    status, html = _market_fetch_page(url)
+    if status != 200 or not html:
+        return 'unknown'
+    text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text).lower()
+    # The head of the page carries the state banner; the tail carries
+    # "similar sold items" blocks that would false-alarm on 'sold '.
+    head = text[:60_000]
+    ended = [m for m in _MARKET_ENDED_PAGE_MARKERS if m in head]
+    live = [m for m in _MARKET_LIVE_PAGE_MARKERS if m in head]
+    if ended and ('sold ' not in ended or len(ended) > 1 or not live):
+        return 'ended'
+    if live:
+        return 'live'
+    return 'unknown'
+
+
+def _market_verify_live(items, workers=6):
+    """Fetch every candidate's page in parallel; drop the ones the venue
+    itself says are over; mark the ones it says are live."""
+    if not items:
+        return items
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
+        states = list(pool.map(lambda it: _market_listing_state(it['listing_url']), items))
+    kept = []
+    for item, state in zip(items, states):
+        if state == 'ended':
+            continue
+        item['verified'] = (state == 'live')
+        kept.append(item)
+    return kept
+
+
 def _market_normalize_item(db, category, raw):
     """A model item → the stored payload dict, or None when it is not a
     usable candidate (no URL, no price, grade below the bar)."""
@@ -14621,14 +14710,24 @@ def _market_normalize_item(db, category, raw):
     closes = str(raw.get('closes') or '').strip()[:10]
     if closes and closes < date.today().isoformat():
         return None  # already closed
+    sale_type = 'auction' if str(raw.get('sale_type') or '').lower().startswith('auc') else 'fixed'
+    if sale_type == 'auction' and not closes:
+        return None  # an auction lot with no future close date is not live
+    if _MARKET_ENDED_URL_RE.search(url):
+        return None  # a sold / completed / archive / results page
+    stale_text = ' '.join(str(raw.get(k) or '') for k in ('title', 'why', 'live_evidence'))
+    if _MARKET_ENDED_TEXT_RE.search(stale_text):
+        return None  # the model itself describes a past sale
     item = {
         'title': str(raw.get('title') or '').strip()[:200],
         'listing_url': url,
         'image_url': (str(raw.get('image_url') or '').strip() or None),
         'venue': str(raw.get('venue') or host).strip()[:80],
         'seller': (str(raw.get('seller') or '').strip()[:80] or None),
-        'sale_type': 'auction' if str(raw.get('sale_type') or '').lower().startswith('auc') else 'fixed',
+        'sale_type': sale_type,
         'closes': closes,
+        'live_evidence': str(raw.get('live_evidence') or '').strip()[:160],
+        'verified': False,
         'price': price,
         'price_usd': _market_price_usd(db, price),
         # The adjectival part only ('Choice UNC'); the number lives in
@@ -14771,6 +14870,9 @@ def _run_market_scan(category, scan_id):
                 item['score'] = _market_score(category, item)
                 normalized.append(item)
         normalized = _market_dedupe(normalized)
+        before_verify = len(normalized)
+        normalized = _market_verify_live(normalized)
+        dropped_ended = before_verify - len(normalized)
         normalized.sort(key=lambda it: (-it['score'], -(it.get('grade_numeric') or 0)))
         now = datetime.utcnow().isoformat()
         # A new scan replaces the previous one's undecided items; ordered
@@ -14789,6 +14891,8 @@ def _run_market_scan(category, scan_id):
                  item['closes'], item['theme'], json.dumps(item), now])
         summary = (f"{len(normalized)} candidate{'s' if len(normalized) != 1 else ''} "
                    f"from {len(themes)} themes, {len(results)} raw finds")
+        if dropped_ended:
+            summary += f", {dropped_ended} dropped as sold/ended on their own pages"
         if errors:
             summary += ' · ' + '; '.join(errors)[:400]
         db.execute("UPDATE market_scans SET status = 'done', finished_at = ?, "
