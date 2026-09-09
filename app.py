@@ -14453,7 +14453,8 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '(the colonial administration the note was issued under, if any), '
             '"new_source": bool (a venue Mark is not already using), '
             '"live_evidence": str (what on the page proves it is live: "Buy It Now, 2 available", "bidding ends 2026-10-03 14:00 CT"), '
-            '"why": str (one line), "fair": str (one line of fair-value evidence)}]}'
+            '"why": str (one line), "fair": str (one line of fair-value evidence)}], '
+            '"notes": str (when items is empty: what you searched and why nothing qualified; else "")}'
         )
     else:
         grade_rules = (
@@ -14472,7 +14473,8 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"sale_type": "fixed"|"auction", "closes": "YYYY-MM-DD"|"", '
             '"listing_url": str, "image_urls": [str] (obverse first, then reverse), "rarity": str, '
             '"fills": str, "empire": "", "new_source": bool, "live_evidence": str, '
-            '"why": str, "fair": str}]}'
+            '"why": str, "fair": str}], '
+            '"notes": str (when items is empty: what you searched and why nothing qualified; else "")}'
         )
     scope = ('paper money — colonial issues before independence first (British, French, '
              'Italian, Portuguese, German), then the rest of the wanted list'
@@ -14492,7 +14494,7 @@ VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VE
 
 LIVENESS — HARD RULE: every item must be purchasable now. A fixed-price listing must be in stock today; an auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. Put in `live_evidence` the words on the page that prove it is live ("Buy It Now", "3 available", "bidding ends …", "Sale closes …"); if you cannot find such words, do not return the item. Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
 
-Use up to 8 web searches, specific ones ("PMG 64 EPQ Philippines 5 pesos Victory ebay", "site:stacksbowers.com Sarawak dollar"). Return 4–8 items, best first. If the theme yields nothing live, return an empty list rather than a weak item.
+Use up to 8 web searches, specific ones ("PMG 64 EPQ Philippines 5 pesos Victory ebay", "site:stacksbowers.com Sarawak dollar"). Return 4–8 items, best first. If the theme yields nothing live, return an empty list rather than a weak item — and say in `notes` what you searched and why nothing qualified.
 
 COLLECTION PROFILE:
 {profile}
@@ -14529,7 +14531,13 @@ def _market_call_theme(api_key, category, theme_key, prompt):
             tools=[anthropic_web_search_tool(8, default_tool='web_search_20260209')],
             messages=[{'role': 'user', 'content': prompt}],
         )
-        data = parse_model_json_object(_message_text(resp))
+        text = _message_text(resp)
+        searches = sum(1 for b in resp.content
+                       if getattr(b, 'type', None) == 'server_tool_use')
+        app.logger.info("market scan %s/%s: stop=%s searches=%d text=%d chars",
+                        category, theme_key, getattr(resp, 'stop_reason', None),
+                        searches, len(text))
+        data = parse_model_json_object(text)
         items = data.get('items') if isinstance(data, dict) else None
         if not isinstance(items, list):
             return [], f'{theme_key}: no items array'
@@ -14538,8 +14546,15 @@ def _market_call_theme(api_key, category, theme_key, prompt):
             if isinstance(it, dict):
                 it['theme'] = theme_key
                 out.append(it)
+        if not out:
+            # An empty theme says why, so a scan that finds nothing is
+            # explained on the page rather than a silent zero.
+            notes = re.sub(r'\s+', ' ', str(data.get('notes') or '')).strip()
+            why = notes[:220] if notes else f'empty after {searches} searches'
+            return [], f'{theme_key}: {why}'
         return out, None
     except Exception as e:  # one theme failing must not sink the scan
+        app.logger.warning("market scan %s/%s failed: %s", category, theme_key, e)
         return [], f'{theme_key}: {str(e)[:160]}'
 
 
