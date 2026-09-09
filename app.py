@@ -14437,7 +14437,8 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"grade_numeric": int|null, "grade": str, "designation": "EPQ"|"PPQ"|"★"|"", '
             '"price": str (as listed, with its currency, e.g. "$450" or "€1,200"), '
             '"venue": str, "seller": str|null, "sale_type": "fixed"|"auction", '
-            '"closes": "YYYY-MM-DD"|"", "listing_url": str, "image_url": str|null, '
+            '"closes": "YYYY-MM-DD"|"", "listing_url": str, '
+            '"image_urls": [str] (the listing\'s own photos as direct image-file URLs, obverse/holder front first, then reverse/holder back; [] if none), '
             '"rarity": str, "fills": str (the gap it fills, or ""), '
             '"empire": "British"|"French"|"Italian"|"Portuguese"|"German"|"Dutch"|"Belgian"|"Spanish"|"Japanese"|"US"|"" '
             '(the colonial administration the note was issued under, if any), '
@@ -14460,7 +14461,7 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"grade_numeric": int|null, "grade": str, "designation": str, '
             '"price": str (as listed, with its currency), "venue": str, "seller": str|null, '
             '"sale_type": "fixed"|"auction", "closes": "YYYY-MM-DD"|"", '
-            '"listing_url": str, "image_url": str|null, "rarity": str, '
+            '"listing_url": str, "image_urls": [str] (obverse first, then reverse), "rarity": str, '
             '"fills": str, "empire": "", "new_source": bool, "live_evidence": str, '
             '"why": str, "fair": str}]}'
         )
@@ -14587,6 +14588,73 @@ def _market_price_usd(db, price, closes=None):
         return n
     rate = _usd_rate(db, code, date.today().isoformat())
     return round(n * rate) if rate else None
+
+
+def _market_image_urls(raw):
+    """Up to two direct image URLs from a model item: obverse (or the
+    holder's front) first, reverse second."""
+    urls = raw.get('image_urls')
+    if not isinstance(urls, list):
+        urls = [raw.get('image_url')]
+    out = []
+    for u in urls:
+        u = str(u or '').strip()
+        if re.match(r'^https?://', u) and u not in out:
+            out.append(u)
+    return out[:2]
+
+
+_MARKET_IMAGE_EXT = {'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
+                     'image/webp': 'webp', 'image/gif': 'gif', 'image/heic': 'heic'}
+
+
+def _market_fetch_image(url, limit=15_000_000):
+    """(bytes, extension) for a listing photo, or (None, None). Browser
+    headers, 10 s, image content types only. Never raises."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={
+            'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) '
+                           'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'),
+            'Accept': 'image/*,*/*;q=0.5', 'Referer': url,
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+            data = resp.read(limit + 1)
+        if len(data) > limit or not data:
+            return None, None
+        ext = _MARKET_IMAGE_EXT.get(ctype)
+        if not ext:
+            # Some CDNs answer with a generic type; sniff the common signatures.
+            if data[:3] == b'\xff\xd8\xff':
+                ext = 'jpg'
+            elif data[:8] == b'\x89PNG\r\n\x1a\n':
+                ext = 'png'
+            elif data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+                ext = 'webp'
+        if not ext or not allowed_file(f'x.{ext}'):
+            return None, None
+        return data, ext
+    except Exception:
+        return None, None
+
+
+def _market_store_images(item):
+    """Download the listing's obverse and reverse photos and store them
+    the way an upload is stored. Returns {'image_1': name, 'image_2':
+    name} for whichever came through."""
+    from io import BytesIO
+    from werkzeug.datastructures import FileStorage
+    stored = {}
+    for field, url in zip(('image_1', 'image_2'), item.get('image_urls') or []):
+        data, ext = _market_fetch_image(url)
+        if not data:
+            continue
+        fs = FileStorage(stream=BytesIO(data), filename=f'{field}.{ext}')
+        name = save_upload(fs, optimize_image=True)
+        if name:
+            stored[field] = name
+    return stored
 
 
 # Stale-listing guards. A candidate is dropped when its URL or the
@@ -14721,7 +14789,8 @@ def _market_normalize_item(db, category, raw):
     item = {
         'title': str(raw.get('title') or '').strip()[:200],
         'listing_url': url,
-        'image_url': (str(raw.get('image_url') or '').strip() or None),
+        'image_urls': _market_image_urls(raw),
+        'image_url': (_market_image_urls(raw) or [None])[0],
         'venue': str(raw.get('venue') or host).strip()[:80],
         'seller': (str(raw.get('seller') or '').strip()[:80] or None),
         'sale_type': sale_type,
@@ -14987,7 +15056,8 @@ def market_view(category):
                            market_mode=True,
                            market_scan=scan,
                            market_running=running,
-                           market_autoscan=autoscan)
+                           market_autoscan=autoscan,
+                           market_locations=property_choices_for_category(category))
 
 
 @app.route('/<category>/market/scan', methods=['POST'])
@@ -15035,9 +15105,11 @@ def _market_item_or_404(db, category, item_id):
     return row
 
 
-def _market_create_record(db, category, item):
+def _market_create_record(db, category, item, location=None, images=None):
     """File a scan item as a new Ordered record with everything the
-    listing gave. Returns the new record id."""
+    listing gave, at `location` (the same required Location the add form
+    collects) and with the listing's photos as the record's images.
+    Returns the new record id."""
     record_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
     today = date.today().isoformat()
@@ -15050,6 +15122,9 @@ def _market_create_record(db, category, item):
     data = {
         'id': record_id, 'created_at': now, 'updated_at': now,
         'owner': 'Mark', 'status': 'Ordered', 'purchase_date': today,
+        'property_name': location,
+        'image_1': (images or {}).get('image_1'),
+        'image_2': (images or {}).get('image_2'),
         'vendor': vendor[:120], 'description': description,
         'denomination': item.get('denomination') or None,
         'date_1': item.get('date_1'), 'date_1_text': item.get('date_1_text') or None,
@@ -15110,7 +15185,16 @@ def market_item_buy(category, item_id):
     if row['status'] == 'ordered' and row['record_id']:
         record_id = row['record_id']
     else:
-        record_id = _market_create_record(db, category, item)
+        # Location is required on every new row, exactly as the add
+        # form's picker enforces it — Buy collects it up front.
+        payload = request.get_json(silent=True) or {}
+        location = str(payload.get('location') or '').strip()
+        choices = property_choices_for_category(category)
+        if not location or (choices and location not in choices):
+            return jsonify({'ok': False, 'error': 'Location is required',
+                            'choices': choices}), 400
+        images = _market_store_images(item)
+        record_id = _market_create_record(db, category, item, location, images)
         db.execute("UPDATE market_scan_items SET status = 'ordered', record_id = ? "
                    "WHERE id = ?", [record_id, item_id])
     db.commit()

@@ -735,25 +735,60 @@
   if (rescan) rescan.addEventListener('click', startScan);
   {% if market_running %}polling = Date.now(); poll();{% elif market_autoscan %}startScan();{% endif %}
 
-  // Buy: file the item as Ordered, open the listing to pay there, then
-  // land on the new record.
+  // Buy: the same Location picker the add form requires, then file the
+  // item as Ordered (with the listing's photos), open the listing to pay
+  // there, and land on the new record.
+  const LOCATIONS = {{ market_locations|default([])|tojson }};
+  const SINGULAR = {{ cat_info.singular|lower|tojson }};
+  function pickLocation(title) {
+    return new Promise(resolve => {
+      const existing = document.querySelector('.location-choice-backdrop');
+      if (existing) existing.remove();
+      const backdrop = document.createElement('div');
+      backdrop.className = 'location-choice-backdrop';
+      backdrop.innerHTML = [
+        '<div class="location-choice-panel" role="dialog" aria-modal="true" aria-label="Choose location">',
+        '  <div class="location-choice-title">Buy ' + (title ? title.replace(/</g, '&lt;') : 'this ' + SINGULAR) + '</div>',
+        '  <div class="location-choice-subtitle">Where will it live? The listing then opens in a new tab to pay there (PayPal or the seller\'s checkout), and it is filed here as Ordered.</div>',
+        '  <div class="location-choice-options"></div>',
+        '  <div class="location-choice-options"><button type="button" class="location-choice-pill location-choice-cancel">Cancel</button></div>',
+        '</div>'
+      ].join('');
+      const wrap = backdrop.querySelector('.location-choice-options');
+      LOCATIONS.forEach(name => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'location-choice-pill'; b.textContent = name;
+        b.addEventListener('click', () => { backdrop.remove(); resolve(name); });
+        wrap.appendChild(b);
+      });
+      backdrop.querySelector('.location-choice-cancel').addEventListener('click', () => { backdrop.remove(); resolve(null); });
+      document.body.appendChild(backdrop);
+      const first = wrap.querySelector('.location-choice-pill');
+      if (first) first.focus();
+    });
+  }
   document.querySelectorAll('.market-buy').forEach(btn => {
     btn.addEventListener('click', ev => {
       ev.preventDefault(); ev.stopPropagation();
       const row = btn.closest('.item-row');
-      const title = row ? (row.querySelector('.item-brand')?.textContent || '').trim() : '';
-      if (!confirm('Buy ' + (title || 'this item') + '?\n\nThe listing opens in a new tab to pay there (PayPal or the seller\'s checkout), and it is filed here now as Ordered.')) return;
-      // Open the tab synchronously on the click so popup blockers allow it.
-      const tab = window.open('', '_blank');
-      btn.disabled = true;
-      fetch({{ url_for('market_item_buy', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), { method: 'POST' })
-        .then(r => r.json())
-        .then(d => {
-          if (!d || !d.ok) throw new Error((d && d.error) || 'Could not file the record');
-          if (tab) tab.location = d.listing_url;
-          window.location = d.detail_url;
+      const title = row ? (row.querySelector('.market-title')?.textContent || row.querySelector('.item-brand')?.textContent || '').trim() : '';
+      pickLocation(title).then(location => {
+        if (!location) return;
+        // Open the tab on the pick (a user gesture) so popup blockers allow it.
+        const tab = window.open('', '_blank');
+        btn.disabled = true;
+        fetch({{ url_for('market_item_buy', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location })
         })
-        .catch(err => { if (tab) tab.close(); btn.disabled = false; alert(err.message || String(err)); });
+          .then(r => r.json())
+          .then(d => {
+            if (!d || !d.ok) throw new Error((d && d.error) || 'Could not file the record');
+            if (tab) tab.location = d.listing_url;
+            window.location = d.detail_url;
+          })
+          .catch(err => { if (tab) tab.close(); btn.disabled = false; alert(err.message || String(err)); });
+      });
     });
   });
   document.querySelectorAll('.market-dismiss').forEach(btn => {

@@ -18,6 +18,10 @@ PAGES = {
     'https://www.noonans.co.uk/lot/blocked': (403, ''),
 }
 stuffapp._market_fetch_page = lambda url, limit=0: PAGES.get(url, (None, ''))
+import base64
+PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
+PHOTOS = {'https://i.ebayimg.com/obv.png': PNG, 'https://i.ebayimg.com/rev.png': PNG}
+stuffapp._market_fetch_image = lambda url, limit=0: ((PHOTOS[url], 'png') if url in PHOTOS else (None, None))
 stuffapp.app.config['TESTING'] = True
 with stuffapp.app.app_context():
     stuffapp.init_db()
@@ -85,6 +89,9 @@ with stuffapp.app.app_context():
     assert norm(dict(base, listing_url='https://currency.ha.com/prices-realized/lot-1')) is None, 'prices realized page'
     assert norm(dict(base, why='Sold for $900 at Heritage in May')) is None, 'past sale in the text'
     assert norm(dict(base, live_evidence='listing has ended')) is None
+    pics = norm(dict(base, image_urls=['https://a/1.jpg', 'not-a-url', 'https://a/2.jpg', 'https://a/3.jpg']))
+    assert pics['image_urls'] == ['https://a/1.jpg', 'https://a/2.jpg'] and pics['image_url'] == 'https://a/1.jpg'
+    assert norm(dict(base, image_url='https://a/only.jpg'))['image_urls'] == ['https://a/only.jpg']
     lively = norm(dict(base, live_evidence='Buy It Now, 2 available'))
     assert lively['live_evidence'] == 'Buy It Now, 2 available' and lively['verified'] is False
     # Page check: the venue's own wording decides; a bot wall never drops.
@@ -135,6 +142,7 @@ CANNED = {
     'colonial-british': [dict(base, title='Sarawak 1 Dollar 1935 PMG 65 EPQ', country='Sarawak',
                               denomination='1 Dollar', year=1935, pick_number='P-20', grade_numeric=65,
                               empire='British', fills='Sarawak — none held',
+                              image_urls=['https://i.ebayimg.com/obv.png', 'https://i.ebayimg.com/rev.png'],
                               listing_url='https://www.stacksbowers.com/lot/sarawak')],
     'denominations': [dict(base)],
     'sources': [dict(base, title='Ceylon 5 Rupees 1942 PMG 64 EPQ', country='Ceylon', denomination='5 Rupees',
@@ -198,6 +206,11 @@ print('PAGE OK')
 # --- buy files an Ordered record; dismiss hides ---
 sarawak = next(it for it in items if it['title'].startswith('Sarawak'))
 r = client.post(f"/banknotes/market/{sarawak['id']}/buy")
+assert r.status_code == 400 and r.get_json()['error'] == 'Location is required', r.get_json()
+assert r.get_json()['choices'] == ['Carpinteria', 'NYC']
+r = client.post(f"/banknotes/market/{sarawak['id']}/buy", json={'location': 'Paris'})
+assert r.status_code == 400, 'not one of the choices'
+r = client.post(f"/banknotes/market/{sarawak['id']}/buy", json={'location': 'NYC'})
 d = r.get_json(); assert d['ok'] and d['listing_url'].startswith('https://www.stacksbowers.com'), d
 with stuffapp.app.app_context():
     rec = stuffapp.get_db().execute("SELECT * FROM banknotes WHERE id = ?", [d['record_id']]).fetchone()
@@ -207,8 +220,14 @@ assert rec['grade_numeric'] == 65 and '65' in (rec['grade'] or ''), (rec['grade'
 assert rec['vendor'] == 'notesRus' and 'Listing: https://www.stacksbowers.com' in rec['description']
 assert rec['note_references'].startswith('Market Scan') and rec['cat_id'].startswith('B')
 assert rec['banknote_id'], 'display number assigned'
+assert rec['property_name'] == 'NYC', 'location required rule honoured'
+assert rec['image_1'] and rec['image_2'] and rec['image_1'] != rec['image_2'], (rec['image_1'], rec['image_2'])
+for name in (rec['image_1'], rec['image_2']):
+    assert os.path.exists(os.path.join(stuffapp.UPLOAD_FOLDER, name)), name
+html = client.get(d['detail_url']).get_data(as_text=True)
+assert rec['image_1'] in html and 'NYC' in html
 # A second Buy on the same item reuses the record.
-assert client.post(f"/banknotes/market/{sarawak['id']}/buy").get_json()['record_id'] == d['record_id']
+assert client.post(f"/banknotes/market/{sarawak['id']}/buy", json={'location': 'NYC'}).get_json()['record_id'] == d['record_id']
 r = client.post(f"/banknotes/market/{ceylon['id']}/dismiss"); assert r.get_json()['ok']
 with stuffapp.app.app_context():
     left = [it['title'] for it in stuffapp._market_items(stuffapp.get_db(), 'banknotes')]
@@ -217,10 +236,13 @@ assert not any(t.startswith(('Sarawak', 'Ceylon')) for t in left), left
 with stuffapp.app.app_context():
     db = stuffapp.get_db()
     coin_item = stuffapp._market_normalize_item(db, 'coins', dict(cbase, price='€2,000', grade='EF'))
-    rid = stuffapp._market_create_record(db, 'coins', coin_item)
+    rid = stuffapp._market_create_record(db, 'coins', coin_item, 'Carpinteria')
     db.commit()
     coin = db.execute("SELECT * FROM coins WHERE id = ?", [rid]).fetchone()
 assert coin['status'] == 'Ordered' and coin['price'] == 2200 and 'Listed at €2,000' in coin['description'], dict(coin)
 assert coin['coin_id'] and coin['cat_id'] and coin['region'] == 'Sicily' and coin['date_1'] == -460
+assert coin['property_name'] == 'Carpinteria'
+# The market page carries the location choices for the picker.
+assert "['Carpinteria', 'NYC']".replace("'", '"') in client.get('/banknotes/market').get_data(as_text=True)
 print('BUY + DISMISS OK')
 print('ALL MARKET-SCAN ASSERTIONS PASSED')
