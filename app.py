@@ -282,6 +282,14 @@ FIELD_ALIASES = {
         'crisp uncirculated':        'UNC',
         'uncirculated':              'UNC',
         'cu':                        'UNC',
+        'superb gem new':            'Superb Gem UNC',
+        'super gem new':             'Superb Gem UNC',
+        'gem new':                   'Gem UNC',
+        'very choice new':           'Choice UNC',
+        'choice new':                'Choice UNC',
+        'new':                       'UNC',
+        'choice about new':          'cAU',
+        'about new':                 'aAU',
         'about unc':                 'aAU',
         'almost unc':                'aAU',
         'about au':                  'aAU',
@@ -348,6 +356,73 @@ def normalize_grading_authority(value):
     if not v:
         return None
     return _GRADING_AUTHORITY_CANON.get(v.lower(), v)
+
+
+# Paper-money grading services. Each entry: the name stored in
+# grading_authority, the spellings seen on holder labels and in dealer
+# text, the paper-quality designation the service awards (PMG "EPQ",
+# PCGS/Legacy "PPQ"), whether it uses a star, and the wording it prints
+# on problem (net-graded) notes. Bare "PCGS" on a note is left as "PCGS":
+# the holder says "PCGS Currency" (pre-2019) or "PCGS Banknote" (since).
+BANKNOTE_GRADERS = (
+    {'name': 'PMG', 'aliases': ('pmg', 'paper money guaranty', 'paper money guarantee'),
+     'paper_quality': 'EPQ', 'star': True, 'problem': ('net',)},
+    {'name': 'PCGS Banknote', 'aliases': ('pcgs banknote', 'pcgs bank note', 'pcgs banknotes', 'pcgs gold shield'),
+     'paper_quality': 'PPQ', 'star': False, 'problem': ('details',)},
+    {'name': 'PCGS Currency', 'aliases': ('pcgs currency',),
+     'paper_quality': 'PPQ', 'star': False, 'problem': ('apparent',)},
+    {'name': 'PCGS', 'aliases': ('pcgs',),
+     'paper_quality': 'PPQ', 'star': False, 'problem': ('apparent', 'details')},
+    {'name': 'Legacy', 'aliases': ('legacy currency grading', 'legacy currency', 'legacy', 'lcg'),
+     'paper_quality': 'PPQ', 'star': False, 'problem': ('apparent',)},
+    {'name': 'CGA', 'aliases': ('cga', 'currency grading & authentication', 'currency grading and authentication'),
+     'paper_quality': None, 'star': False, 'problem': ('apparent',)},
+    {'name': 'ACG', 'aliases': ('acg', 'accugrade'),
+     'paper_quality': None, 'star': False, 'problem': ()},
+    {'name': 'CGC', 'aliases': ('cgc', 'currency grading company'),
+     'paper_quality': None, 'star': False, 'problem': ()},
+)
+_BANKNOTE_GRADER_BY_ALIAS = {a: g for g in BANKNOTE_GRADERS for a in g['aliases']}
+_BANKNOTE_GRADER_ALIAS_RE = '|'.join(
+    re.escape(a) for a in sorted(_BANKNOTE_GRADER_BY_ALIAS, key=len, reverse=True))
+# "Exceptional Paper Quality" / "Premium Paper Quality" spelled out, or the tag.
+_PAPER_QUALITY_RE = re.compile(
+    r'\b(EPQ|PPQ|exceptional\s+paper\s+quality|premium\s+paper\s+quality)\b', re.IGNORECASE)
+_PROBLEM_GRADE_WORDS = ('apparent', 'details', 'net')
+
+
+def normalize_banknote_grading_authority(value):
+    """Fold a paper-money grading service to its BANKNOTE_GRADERS name.
+
+    "pcgs currency" → "PCGS Currency", "Legacy Currency Grading" →
+    "Legacy", "Paper Money Guaranty" → "PMG". Anything else goes through
+    the coin normaliser so an unknown service is kept as typed."""
+    v = value.strip() if isinstance(value, str) else (str(value).strip() if value is not None else '')
+    if not v:
+        return None
+    key = re.sub(r'\s+', ' ', v.lower().replace('-', ' ')).strip()
+    g = _BANKNOTE_GRADER_BY_ALIAS.get(key)
+    if g:
+        return g['name']
+    m = re.search(r'\b(' + _BANKNOTE_GRADER_ALIAS_RE + r')\b', key)
+    if m:
+        return _BANKNOTE_GRADER_BY_ALIAS[m.group(1)]['name']
+    return normalize_grading_authority(v)
+
+
+def banknote_grader_profile(name):
+    """The BANKNOTE_GRADERS entry for a stored grading_authority, or None."""
+    canon = normalize_banknote_grading_authority(name)
+    return next((g for g in BANKNOTE_GRADERS if g['name'] == canon), None)
+
+
+def paper_quality_tag(text):
+    """EPQ or PPQ named in text (tag or spelled out), else None."""
+    m = _PAPER_QUALITY_RE.search(text or '')
+    if not m:
+        return None
+    w = m.group(1).lower()
+    return 'EPQ' if w.startswith('e') else 'PPQ'
 
 
 def coin_grade_value_list_match(value):
@@ -503,12 +578,14 @@ def banknote_grade_value_list_match(value):
     # "64 PPQ") and the EPQ/PPQ/★ designation are ignored here — they live in
     # grade_numeric / grade_modifier.
     phrase_patterns = [
-        (r'\bsuperb?\s+gem\s+(?:unc|uncirculated|cu)\b', 'Superb Gem UNC'),
-        (r'\bgem\s+(?:crisp\s+)?(?:unc|uncirculated|cu)\b', 'Gem UNC'),
-        (r'\b(?:choice|ch)\s+(?:crisp\s+)?(?:unc|uncirculated|cu)\b', 'Choice UNC'),
-        (r'\b(?:crisp\s+)?(?:unc|uncirculated)\b|\bcu\s*\d{0,2}\b', 'UNC'),
-        (r'\b(?:choice|ch)\s+(?:au|about\s+unc(?:irculated)?)\b', 'cAU'),
-        (r'\b(?:about|almost|near|nearly)\s+(?:au|unc(?:irculated)?)\b', 'aAU'),
+        # PMG wording first, then the "New" scale PCGS Currency, Legacy
+        # and CGA print ("Very Choice New 64", "Superb Gem New 67").
+        (r'\bsuperb?\s+gem\s+(?:unc|uncirculated|cu|new)\b', 'Superb Gem UNC'),
+        (r'\bgem\s+(?:crisp\s+)?(?:unc|uncirculated|cu|new)\b', 'Gem UNC'),
+        (r'\b(?:very\s+)?(?:choice|ch)\s+(?:crisp\s+)?(?:unc|uncirculated|cu|new)\b', 'Choice UNC'),
+        (r'\b(?:choice|ch)\s+(?:au|about\s+(?:unc(?:irculated)?|new))\b', 'cAU'),
+        (r'\b(?:about|almost|near|nearly)\s+(?:au|unc(?:irculated)?|new)\b', 'aAU'),
+        (r'\b(?:crisp\s+)?(?:unc|uncirculated)\b|\bcu\s*\d{0,2}\b|\bnew\s*\d{0,2}\b', 'UNC'),
         (r'\bau\s*\d{0,2}\b', 'AU'),
         (r'\b(?:choice|ch)\s+(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'cEF'),
         (r'\b(?:about|almost|near|nearly)\s+(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'aEF'),
@@ -19224,25 +19301,40 @@ def _banknote_description_fields(note):
     if m:
         out['pick_number'] = f'P-{m.group(1)}'
 
-    # Grading service + numeric grade: "PMG-64", "PMG 66 EPQ",
-    # "PCGS Banknote 58", "PCGS Currency 65 PPQ".
-    m = re.search(r'\b(PMG|PCGS(?:\s+(?:Banknote|Currency))?|CGA|Legacy)\s*[-#]?\s*(\d{1,2})\b',
-                  description, re.IGNORECASE)
+    # Grading service (any in BANKNOTE_GRADERS, longest spelling first)
+    # + its numeric grade: "PMG-64", "PMG 66 EPQ", "PCGS Banknote 58",
+    # "PCGS Currency Apparent Very Fine 30", "Legacy Currency Grading 64
+    # PPQ", "CGA Gem Uncirculated 66", "PMG 30 NET". The number is the
+    # first 1-70 in the 60 characters after the service name that is not
+    # a Pick number.
+    m = re.search(r'\b(' + _BANKNOTE_GRADER_ALIAS_RE + r')\b', description, re.IGNORECASE)
     if m:
-        out['grading_authority'] = normalize_grading_authority(m.group(1).split()[0])
-        try:
-            n = float(m.group(2))
+        out['grading_authority'] = normalize_banknote_grading_authority(m.group(1))
+        tail = description[m.end():m.end() + 60]
+        for nm in re.finditer(r'(?<![\w#-])(\d{1,2})(?![\d,.]*\d)\b', tail):
+            before = tail[:nm.start()].lower()
+            if re.search(r'\b(?:pick|p)\s*[-#]?\s*$', before):
+                continue
+            n = float(nm.group(1))
             if 1 <= n <= 70:
                 out['grade_numeric'] = n
-        except ValueError:
-            pass
+                break
+        # Problem-note wording (PMG "Net", PCGS Banknote "Details",
+        # PCGS Currency / Legacy / CGA "Apparent") goes to the condition
+        # field, ahead of whatever else the dealer listed.
+        window = description[max(0, m.start() - 20):m.end() + 60].lower()
+        problem = next((w for w in _PROBLEM_GRADE_WORDS if re.search(r'\b' + w + r'\b', window)), None)
+        if problem:
+            existing = str(out.get('grade_condition') or '')
+            if problem not in existing.lower():
+                out['grade_condition'] = (problem.capitalize() + (', ' + existing if existing else ''))
 
     # Paper-quality designation rides with the grade: PMG's EPQ
-    # (Exceptional Paper Quality) or PCGS's PPQ (Premium Paper Quality),
-    # then a star.
-    m = re.search(r'\b(EPQ|PPQ)\b', description, re.IGNORECASE)
-    if m:
-        out['grade_modifier'] = m.group(1).upper()
+    # (Exceptional Paper Quality) or PCGS's / Legacy's PPQ (Premium Paper
+    # Quality), spelled out or as the tag; then a star.
+    pq = paper_quality_tag(description)
+    if pq:
+        out['grade_modifier'] = pq
     if '★' in description or re.search(r'\bstar\b', description, re.IGNORECASE):
         star = '★'
         out['grade_modifier'] = (out.get('grade_modifier') or '') + star
@@ -19251,10 +19343,12 @@ def _banknote_description_fields(note):
     # "Extremely Fine") — only match explicit grade wording, then fold
     # through the canonical value-list matcher.
     m = re.search(
-        r'\b((?:superb?\s+)?gem\s+(?:crisp\s+)?unc\w*'
-        r'|choice\s+(?:crisp\s+)?unc\w*'
+        r'\b((?:superb?\s+)?gem\s+(?:crisp\s+)?(?:unc\w*|new)'
+        r'|(?:very\s+)?choice\s+(?:crisp\s+)?(?:unc\w*|new)'
+        r'|choice\s+about\s+(?:unc\w*|new)'
         r'|crisp\s+uncirculated|uncirculated'
-        r'|(?:about|almost)\s+unc\w*'
+        r'|(?:about|almost)\s+(?:unc\w*|new)'
+        r'|new\s+\d{2}'
         r'|extremely\s+fine|very\s+fine|very\s+good)\b',
         description, re.IGNORECASE)
     if m:
@@ -19413,10 +19507,10 @@ Target fields:
 - size_width: printed note width in mm (float); size_height: height in mm (float).
 - grade: map the dealer's stated grade to EXACTLY one of [{grades}] (c = choice, a = about; "Super Gem UNC" → "Superb Gem UNC"; XF → EF). Null if outside the list.
 - grade_numeric: the numeric grade 1-70 if a grading service number is stated (e.g. "PMG-64" → 64); else null.
-- grading_authority: the grading company if the note is or was slabbed and the text names it — "PMG", "PCGS Banknote", "CGA", "Legacy". Else null.
+- grading_authority: the grading company if the note is or was slabbed and the label or text names it — one of "PMG", "PCGS Banknote" (Gold Shield holders, since 2019), "PCGS Currency" (the older PCGS holders), "Legacy" (Legacy Currency Grading), "CGA", "ACG", "CGC". Read it off the holder exactly: "PCGS CURRENCY" and "PCGS Banknote" are different companies. Else null.
 - slab_number: the certification number if stated, verbatim; else null.
-- grade_condition: condition qualifier(s) noted alongside the grade — e.g. "minor rust", "pinholes", "annotation", "small tear". Comma-separated, lowercase; else null.
-- grade_modifier: "EPQ" when the label or text shows EPQ (PMG's Exceptional Paper Quality), "PPQ" when it shows PPQ (PCGS's Premium Paper Quality), "★" for a star designation, "EPQ★" / "PPQ★" for both, "+" for a plus grade. Else null.
+- grade_condition: condition qualifier(s) noted alongside the grade — e.g. "minor rust", "pinholes", "annotation", "small tear" — and, first, the service's problem-note wording when the holder shows it: "Net" (PMG), "Details" (PCGS Banknote), "Apparent" (PCGS Currency, Legacy, CGA). Comma-separated, lowercase apart from that word; else null.
+- grade_modifier: "EPQ" when the label or text shows EPQ (PMG's Exceptional Paper Quality), "PPQ" when it shows PPQ (Premium Paper Quality — PCGS Banknote, PCGS Currency, Legacy), "★" for a PMG star designation, "EPQ★" / "PPQ★" for both, "+" for a plus grade. Else null.
 - sheet_position: THIS note's position on the printing sheet, when identifiable from the images or the dealer's text — an uncut/partial-sheet position stated like "2 of 4", or the plate-position letter/number printed in the note's margin or corner (e.g. "A", "D12", "Position 7"). Direct evidence only — never inferred from a catalogue. Null when not shown or stated.
 - label_comments: EVERYTHING ELSE printed on the grading-service holder label that no other field captures, verbatim, comma-separated in label order — variety/attribution notes ('Narrow "V" in Left Sign.', "Number at Lower L & Upper R"), status designations ("Remainder", "Specimen", "Proof", "Cancelled", "Replacement/Star"), net grades and condition comments ("Net", "Staple Holes", "Rust", "Ink", "Annotations", "Minor Repairs"), pedigree/collection lines, and the watermark line if it was NOT already captured in the watermark field. Nothing human-readable on the label may be lost — but NEVER include the label's barcode / machine-verification string (the long letters-and-digits run that just concatenates the Pick number, grade, and cert number, e.g. "125a64E8038100041G"), nor the serial number, nor any value already returned in another field. Null when the label shows nothing beyond fields already captured, or there is no label.
 - lettering: the significant text printed ON the note, read from the images (and the dealer's text where it quotes the note). Original script/language, one inscription per line, prefixed "Front:" / "Back:". Cover the issuer line, denomination line, date line, and any slogan/verse/decree; skip serial numbers and plate letters. Null only if no images and no quoted text. EXCEPTION — when the note's text is already ENGLISH: no translation is needed, so the two fields become the two sides instead: put ONLY the FRONT inscriptions here (lines prefixed "Front:"), matching the front image on the left.
@@ -19548,14 +19642,14 @@ def _coerce_banknote_spec(field, raw):
     if field == 'grade':
         return banknote_grade_value_list_match(raw)
     if field == 'grading_authority':
-        return normalize_grading_authority(raw)
+        return normalize_banknote_grading_authority(raw)
     if field == 'grade_modifier':
-        # Keep the paper-quality designation verbatim (PMG EPQ, PCGS PPQ);
-        # fold star/plus like coins.
+        # Keep the paper-quality designation verbatim (PMG EPQ, PCGS /
+        # Legacy PPQ, spelled out or tagged); fold star/plus like coins.
         v = (raw if isinstance(raw, str) else str(raw)).strip()
         if not v:
             return None
-        pq = next((tag for tag in ('EPQ', 'PPQ') if tag.lower() in v.lower()), None)
+        pq = paper_quality_tag(v)
         if pq:
             return pq + '★' if ('★' in v or 'star' in v.lower()) else pq
         return normalize_grade_modifier(v)
@@ -19723,7 +19817,7 @@ def banknote_lookup_specs(record_id):
         if field == 'grade_modifier':
             v = str(value)
             for tag in ('EPQ', 'PPQ'):
-                if tag in v and tag.lower() not in dealer_text.lower():
+                if tag in v and paper_quality_tag(dealer_text) != tag:
                     return False
             if '★' in v and not ('★' in dealer_text or 'star' in dealer_text.lower()):
                 return False
