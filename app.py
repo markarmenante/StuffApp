@@ -19296,22 +19296,29 @@ def compact_banknote_description(text):
 # prefixes the detail page's blur formatter writes ("€1,200", "A$200");
 # other ISO codes are written code-first with a space ("CHF 1,200",
 # "CAD 140") — exactly what _CURRENCY_PREFIX_RE round-trips.
+# Multi-character dollar signs come before the bare '$' so "C$80" is
+# read as Canadian, not as "C" + "$80".
 _PRICE_SYMBOL_PREFIXES = (
-    ('A$', 'AUD'), ('US$', 'USD'), ('$', 'USD'), ('€', 'EUR'), ('£', 'GBP'),
-    ('¥', 'JPY'),
+    ('US$', 'USD'), ('CA$', 'CAD'), ('C$', 'CAD'), ('A$', 'AUD'), ('NZ$', 'NZD'),
+    ('HK$', 'HKD'), ('S$', 'SGD'), ('MX$', 'MXN'), ('R$', 'BRL'), ('$', 'USD'),
+    ('€', 'EUR'), ('£', 'GBP'), ('¥', 'JPY'),
 )
-_PRICE_CODE_PREFIX = {'USD': '$', 'AUD': 'A$', 'EUR': '€', 'GBP': '£', 'JPY': '¥'}
+_PRICE_CODE_PREFIX = {'USD': '$', 'CAD': 'C$', 'AUD': 'A$', 'NZD': 'NZ$',
+                      'HKD': 'HK$', 'SGD': 'S$', 'MXN': 'MX$', 'BRL': 'R$',
+                      'EUR': '€', 'GBP': '£', 'JPY': '¥'}
 _PRICE_CURRENCY_CODES = (
     'USD', 'EUR', 'GBP', 'CHF', 'JPY', 'AUD', 'CAD', 'NZD', 'SEK', 'NOK',
     'DKK', 'HKD', 'SGD', 'CNY', 'ZAR', 'MXN', 'INR', 'PLN', 'CZK', 'HUF',
     'BGN', 'BRL', 'IDR', 'ILS', 'ISK', 'KRW', 'MYR', 'PHP', 'RON', 'THB',
     'TRY',
 )
-_PRICE_CODE_ALIASES = {'AUS': 'AUD', 'YEN': 'JPY'}
+# Non-ISO spellings people actually type: "cdn 80", "can 80", "yen".
+_PRICE_CODE_ALIASES = {'AUS': 'AUD', 'YEN': 'JPY', 'CDN': 'CAD', 'CAN': 'CAD'}
 # A price amount as dealers write it, with an optional currency mark on
-# either side: "$450", "€1.200,00", "CHF 1,200", "850 GBP", "1200".
+# either side: "$450", "C$80", "€1.200,00", "CHF 1,200", "850 GBP".
 _PRICE_AMOUNT_RE = (
-    r'(?:(?:US\$|A\$|\$|€|£|¥|' + '|'.join(_PRICE_CURRENCY_CODES + ('AUS', 'YEN'))
+    r'(?:(?:US\$|CA\$|C\$|A\$|NZ\$|HK\$|S\$|MX\$|R\$|\$|€|£|¥|'
+    + '|'.join(_PRICE_CURRENCY_CODES + tuple(_PRICE_CODE_ALIASES))
     + r')\s?)?\d(?:[\d.,]*\d)?(?:\s?(?:' + '|'.join(_PRICE_CURRENCY_CODES) + r'))?'
 )
 
@@ -19330,8 +19337,10 @@ def _parse_price_amount(raw):
     if not text:
         return None, None
     code = None
+    upper = text.upper()
     for symbol, sym_code in _PRICE_SYMBOL_PREFIXES:
-        if text.startswith(symbol):
+        # Case-insensitive, as typed: "c$ 80" is Canadian too.
+        if upper.startswith(symbol):
             code, text = sym_code, text[len(symbol):]
             break
     if code is None:
@@ -20689,7 +20698,7 @@ def delete_file_field(category, record_id):
 # writes any Frankfurter-supported ISO code as "CAD 140 / $102" — so a
 # generic 3-letter-code prefix counts as pre-formatted too.
 _CURRENCY_PREFIX_RE = re.compile(
-    r'^\s*(A\$|US\$|\$|€|£|¥|[A-Za-z]{3}(?=[\s\d]|$))',
+    r'^\s*(US\$|CA\$|C\$|A\$|NZ\$|HK\$|S\$|MX\$|R\$|\$|€|£|¥|[A-Za-z]{3}(?=[\s\d]|$))',
     re.IGNORECASE)
 
 

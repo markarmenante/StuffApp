@@ -4127,8 +4127,16 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // transaction date. Default currency is USD when no prefix is
   // detected. The formatted string round-trips through autosave +
   // server (_normalize_price_input preserves it verbatim).
+  // Multi-character dollar signs sit above the bare '$' entry so
+  // "C$80" reads as Canadian rather than "C" + "$80".
   const PRICE_PREFIXES = [
+    { rx: /^\s*(CA\$|C\$|CAD|CDN|CAN\b)/i, prefix: 'C$',   code: 'CAD' },
     { rx: /^\s*(A\$|AUD|AUS)/i,        prefix: 'A$',   code: 'AUD' },
+    { rx: /^\s*(NZ\$|NZD)/i,           prefix: 'NZ$',  code: 'NZD' },
+    { rx: /^\s*(HK\$|HKD)/i,           prefix: 'HK$',  code: 'HKD' },
+    { rx: /^\s*(S\$|SGD)/i,            prefix: 'S$',   code: 'SGD' },
+    { rx: /^\s*(MX\$|MXN)/i,           prefix: 'MX$',  code: 'MXN' },
+    { rx: /^\s*(R\$|BRL)/i,            prefix: 'R$',   code: 'BRL' },
     { rx: /^\s*(€|EUR)/i,              prefix: '€',    code: 'EUR' },
     { rx: /^\s*(£|GBP)/i,              prefix: '£',    code: 'GBP' },
     { rx: /^\s*(¥|JPY|YEN)/i,          prefix: '¥',    code: 'JPY' },
@@ -4144,7 +4152,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
     'ILS', 'INR', 'ISK', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP',
     'PLN', 'RON', 'SEK', 'SGD', 'THB', 'TRY', 'ZAR',
   ];
-  const FX_CODE_ALIASES = { AUS: 'AUD', YEN: 'JPY' };
+  const FX_CODE_ALIASES = { AUS: 'AUD', YEN: 'JPY', CDN: 'CAD', CAN: 'CAD' };
   function stripUsdConversion(s) {
     // Drop any " / $X,XXX" tail so the user edits just the original.
     return s.replace(/\s*\/\s*\$[\d,]+\s*$/, '');
