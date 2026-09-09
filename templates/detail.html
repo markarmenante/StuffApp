@@ -4276,6 +4276,9 @@ document.querySelectorAll('.comp-item').forEach(item => {
     });
     el.addEventListener('blur', () => formatPriceField(el));
   });
+  // Check fills the price without a blur; it reuses this formatter so
+  // a filled "€1,200" gets the same prefix + " / $" tail as a typed one.
+  window.formatPriceField = formatPriceField;
 
   // When the row's transaction date changes, recompute every non-USD
   // price field's " / $..." conversion against the new rate.
@@ -7394,6 +7397,14 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       if (field === 'date_1_text') setCoinFormValue('date_1', value);
       if (field === 'date_2_text') setCoinFormValue('date_2', value);
     });
+    // A Check-filled price runs through the blur formatter: the server
+    // already appended the USD tail when it could reach a rate; this
+    // covers the miss (and mirrors the sell panel's purchase price).
+    if (values.price && typeof window.formatPriceField === 'function') {
+      document.getElementsByName('price').forEach(el => {
+        if (el.classList.contains('price-input')) window.formatPriceField(el);
+      });
+    }
   }
 
   async function ensureCoinRecordPath() {

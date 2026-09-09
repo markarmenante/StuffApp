@@ -19292,21 +19292,149 @@ def compact_banknote_description(text):
     return compacted if compacted != text.strip() else None
 
 
-def _format_purchase_price(raw):
-    """Normalize a matched dollar amount to the app's manual-entry style
-    ("$2,000", "$175", "$449.50"). Returns None when unparseable."""
-    digits = re.sub(r'[^\d.]', '', str(raw or ''))
-    if not digits or digits == '.':
-        return None
+# Currencies a dealer price can be stated in. Symbols map to the same
+# prefixes the detail page's blur formatter writes ("€1,200", "A$200");
+# other ISO codes are written code-first with a space ("CHF 1,200",
+# "CAD 140") — exactly what _CURRENCY_PREFIX_RE round-trips.
+_PRICE_SYMBOL_PREFIXES = (
+    ('A$', 'AUD'), ('US$', 'USD'), ('$', 'USD'), ('€', 'EUR'), ('£', 'GBP'),
+    ('¥', 'JPY'),
+)
+_PRICE_CODE_PREFIX = {'USD': '$', 'AUD': 'A$', 'EUR': '€', 'GBP': '£', 'JPY': '¥'}
+_PRICE_CURRENCY_CODES = (
+    'USD', 'EUR', 'GBP', 'CHF', 'JPY', 'AUD', 'CAD', 'NZD', 'SEK', 'NOK',
+    'DKK', 'HKD', 'SGD', 'CNY', 'ZAR', 'MXN', 'INR', 'PLN', 'CZK', 'HUF',
+    'BGN', 'BRL', 'IDR', 'ILS', 'ISK', 'KRW', 'MYR', 'PHP', 'RON', 'THB',
+    'TRY',
+)
+_PRICE_CODE_ALIASES = {'AUS': 'AUD', 'YEN': 'JPY'}
+# A price amount as dealers write it, with an optional currency mark on
+# either side: "$450", "€1.200,00", "CHF 1,200", "850 GBP", "1200".
+_PRICE_AMOUNT_RE = (
+    r'(?:(?:US\$|A\$|\$|€|£|¥|' + '|'.join(_PRICE_CURRENCY_CODES + ('AUS', 'YEN'))
+    + r')\s?)?\d(?:[\d.,]*\d)?(?:\s?(?:' + '|'.join(_PRICE_CURRENCY_CODES) + r'))?'
+)
+
+
+def _strip_usd_tail(s):
+    """Drop a " / $X,XXX" conversion suffix so the native amount is what
+    gets parsed."""
+    return re.sub(r'\s*/\s*(?:US\$|USD|\$)\s*[\d,]+(?:\.\d+)?\s*$', '', str(s or '')).strip()
+
+
+def _parse_price_amount(raw):
+    """(currency code, amount) from a dealer-written price. Currency
+    defaults to USD. Handles the European thousands style ("1.200,00")
+    alongside "1,200.00". Returns (None, None) when unparseable."""
+    text = _strip_usd_tail(raw)
+    if not text:
+        return None, None
+    code = None
+    for symbol, sym_code in _PRICE_SYMBOL_PREFIXES:
+        if text.startswith(symbol):
+            code, text = sym_code, text[len(symbol):]
+            break
+    if code is None:
+        m = re.match(r'^([A-Za-z]{3})\b\s*', text)
+        if m:
+            cand = _PRICE_CODE_ALIASES.get(m.group(1).upper(), m.group(1).upper())
+            if cand in _PRICE_CURRENCY_CODES:
+                code, text = cand, text[m.end():]
+    if code is None:
+        m = re.search(r'\s*([A-Za-z]{3})\s*$', text)
+        if m:
+            cand = _PRICE_CODE_ALIASES.get(m.group(1).upper(), m.group(1).upper())
+            if cand in _PRICE_CURRENCY_CODES:
+                code, text = cand, text[:m.start()]
+    number = re.sub(r'[^\d.,]', '', text).strip('.,')
+    if not number:
+        return None, None
+    # "1.200,00" / "1.200" (European) vs "1,200.00" / "1,200" (US).
+    if ',' in number and '.' in number:
+        if number.rfind(',') > number.rfind('.'):
+            number = number.replace('.', '').replace(',', '.')
+        else:
+            number = number.replace(',', '')
+    elif ',' in number:
+        tail = number.rsplit(',', 1)[1]
+        number = number.replace(',', '.') if len(tail) == 2 else number.replace(',', '')
+    elif number.count('.') > 1 or re.fullmatch(r'\d{1,3}\.\d{3}', number):
+        number = number.replace('.', '')
     try:
-        n = float(digits)
+        n = float(number)
     except ValueError:
+        return None, None
+    return code or 'USD', n
+
+
+def _format_purchase_price(raw):
+    """Normalize a dealer-written paid amount to the app's manual-entry
+    style, keeping the currency it was stated in: "$2,000", "€1,200",
+    "£449.50", "CHF 1,200", "A$200". A " / $X" conversion tail on the
+    input is dropped (the apply step re-adds a fresh one). Returns None
+    when unparseable or implausible."""
+    code, n = _parse_price_amount(raw)
+    if n is None or n <= 0 or n >= 10_000_000:
         return None
-    if n <= 0 or n >= 10_000_000:
-        return None
+    prefix = _PRICE_CODE_PREFIX.get(code, code + ' ')
     if n == int(n):
-        return f'${int(n):,}'
-    return f'${n:,.2f}'
+        return f'{prefix}{int(n):,}'
+    return f'{prefix}{n:,.2f}'
+
+
+def _fetch_usd_rate(currency, date_str):
+    """One currency's USD rate on a date from the ECB reference set
+    (Frankfurter), or None on any failure. A date the provider has no
+    fixing for (weekend, holiday) resolves to the last fixing before
+    it; a future date falls back to the latest."""
+    import urllib.request
+    for when in (date_str, 'latest'):
+        url = (f'https://api.frankfurter.dev/v1/{when}'
+               f'?from={currency}&to=USD')
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'StuffApp/1.0'})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                payload = json.loads(resp.read().decode('utf-8'))
+            rate = (payload.get('rates') or {}).get('USD')
+            if rate:
+                return float(rate)
+        except Exception:
+            continue
+    return None
+
+
+def _usd_rate(db, currency, date_str):
+    """USD rate for (currency, date): the fx_rates cache first, then one
+    provider fetch that is cached for good. None when unavailable."""
+    currency = (currency or '').upper()
+    if not currency or currency == 'USD':
+        return 1.0
+    row = db.execute(
+        'SELECT usd_rate FROM fx_rates WHERE currency = ? AND date = ?',
+        [currency, date_str]).fetchone()
+    if row is not None:
+        return float(row['usd_rate'])
+    rate = _fetch_usd_rate(currency, date_str)
+    if rate:
+        db.execute(
+            'INSERT OR REPLACE INTO fx_rates '
+            '(currency, date, usd_rate, fetched_at) VALUES (?, ?, ?, ?)',
+            [currency, date_str, rate, datetime.utcnow().isoformat()])
+    return rate
+
+
+def _price_with_usd_tail(db, price, date_str=None):
+    """"€1,200" -> "€1,200 / $1,300" at the date's rate, the same form
+    the detail page's blur formatter writes. USD and unparseable prices
+    come back unchanged; so does a price when no rate can be had."""
+    text = str(price or '').strip()
+    code, n = _parse_price_amount(text)
+    if n is None or code == 'USD':
+        return text
+    rate = _usd_rate(db, code, date_str or date.today().isoformat())
+    if not rate:
+        return text
+    return f'{_strip_usd_tail(text)} / ${round(n * rate):,}'
 
 
 def _parse_purchase_date(raw):
@@ -19348,14 +19476,17 @@ def _banknote_description_fields(note):
     # pages), invoices say "purchase price" / "paid"; prose says
     # "purchased ... for $450". Only labelled or purchase-verb-tied
     # amounts count — a bare $ figure could be a catalog value.
+    # The amount keeps whatever currency the dealer wrote it in
+    # ("My Cost €1.200,00", "paid CHF 1,200", "purchased for £850").
     m = re.search(
         r'\b(?:my\s+cost|purchase\s+price|price\s+paid|total\s+paid|paid)\b'
-        r'[:\s]*\$?\s*([\d][\d,]*(?:\.\d{1,2})?)',
+        r'[:\s]*(' + _PRICE_AMOUNT_RE + r')',
         purchase_text, re.IGNORECASE)
     if not m:
         m = re.search(
             r'\b(?:purchased|bought|acquired)\b[^.;\n]{0,60}?'
-            r'\bfor\s+\$\s*([\d][\d,]*(?:\.\d{1,2})?)',
+            r'\bfor\s+((?:US\$|A\$|\$|€|£|¥|[A-Z]{3}\s?)\d(?:[\d.,]*\d)?'
+            r'(?:\s?[A-Z]{3})?|\d(?:[\d.,]*\d)?\s?[A-Z]{3})',
             purchase_text, re.IGNORECASE)
     if m:
         price = _format_purchase_price(m.group(1))
@@ -19617,7 +19748,7 @@ Target fields:
 - lettering_translation: English translation of each lettering line, same order and same Front:/Back: prefixes. Transliterate non-Latin scripts in parentheses where helpful. EXCEPTION — when the note's text is already ENGLISH: put ONLY the BACK inscriptions here (lines prefixed "Back:"), matching the back image on the right, with the front inscriptions in lettering. Null only when there is nothing to report.
 - history_context: a VERY SHORT historical-context narrative — 2-3 sentences, under 70 words. Why this note existed: who issued it, what was happening then and there (hyperinflation, war, occupation, nationalization, currency reform), and anything notable about this type. Plain prose, no headings, no citations inline. Web searches allowed. Null if you cannot say anything reliable.
 - vendor: the dealer or auction house THIS note was purchased from, only when the material on file identifies it — an explicit "purchased from X" / vendor / seller line, an invoice, or the pasted listing's own branding or letterhead (a Stack's Bowers inventory page means vendor "Stack's Bowers"; a Heritage lot page means "Heritage Auctions"). A firm merely mentioned in the pedigree ("ex Spink sale") is prior provenance, not the vendor — when in doubt, null.
-- price: the price PAID for this note, only when the material on file states it ("My Cost", "purchase price", "paid", an invoice total, "purchased for $X"). Format "$1,234" or "$1,234.56". This is never a catalog value, estimate, or price guide figure.
+- price: the price PAID for this note, only when the material on file states it ("My Cost", "purchase price", "paid", an invoice total, "purchased for $X"). Keep the currency exactly as stated — "$1,234", "€1,234.56", "£850", "CHF 1,200", "A$2,000" — never convert it or assume dollars. This is never a catalog value, estimate, or price guide figure.
 - purchase_date: the date THIS note was purchased, as "YYYY-MM-DD", only when the material on file states it ("Purchase Date July 11th, 2026" → "2026-07-11"). Null otherwise.
 - obv_rev: one very short line naming the main obverse and reverse designs, format "Obv: ... / Rev: ..." (e.g. "Obv: young Shah portrait / Rev: Abadan Refinery"), under 90 characters, from the note images or the dealer text. Null if you cannot tell.
 
@@ -19935,9 +20066,11 @@ def banknote_lookup_specs(record_id):
                 n = None
             if n is None:
                 return False
-            forms = {f'{int(n):,}', str(int(n))}
+            forms = {f'{int(n):,}', str(int(n)),
+                     f'{int(n):,}'.replace(',', '.')}
             if n != int(n):
-                forms |= {f'{n:,.2f}', f'{n:.2f}'}
+                forms |= {f'{n:,.2f}', f'{n:.2f}',
+                          f'{n:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')}
             return any(f in dealer_text for f in forms)
         if field == 'vendor':
             # The named firm must actually appear in the dealer text:
@@ -20225,6 +20358,14 @@ def banknote_apply_lookup_specs(record_id):
     # the forms — the model returns 'United States', the collection
     # spells it 'United States of America'.
     canonicalize_banknote_fields(updates, existing=note)
+
+    # A non-dollar price gets its " / $X,XXX" conversion here, at the
+    # purchase date's rate — the same tail the detail page writes on
+    # blur, so a Check-filled "€1,200" reads like a typed one.
+    if updates.get('price'):
+        fx_date = (updates.get('purchase_date') or note['purchase_date']
+                   or date.today().isoformat())
+        updates['price'] = _price_with_usd_tail(db, updates['price'], fx_date)
 
     set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
     now = datetime.utcnow().isoformat()
@@ -20604,6 +20745,12 @@ def fx_rate():
         [currency, date_str]
     ).fetchone()
     if row is None:
+        # Try the provider from here before telling the browser to: a
+        # rate fetched once server-side is cached for every later view.
+        rate = _usd_rate(db, currency, date_str)
+        if rate:
+            db.commit()
+            return jsonify({'ok': True, 'rate': rate, 'cached': False})
         return jsonify({'ok': False, 'error': 'not cached'}), 404
     return jsonify({'ok': True, 'rate': float(row['usd_rate']), 'cached': True})
 
