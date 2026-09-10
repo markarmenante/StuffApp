@@ -10825,6 +10825,13 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
 
     vetoes = 0
     for cand in candidates:
+        # A note in a slab scan is a large part of the frame; a crop
+        # under 15% of the source area locked onto a detail — the
+        # Mauritius 5 rupees' blank watermark window (2026-09-10).
+        if cand.size[0] * cand.size[1] < 0.15 * w * h:
+            app.logger.info('trim: candidate %dx%d is under 15%% of the frame — skipped',
+                            *cand.size)
+            continue
         if expect_aspect and _aspect_off(cand.size, expect_aspect) > 0.08:
             app.logger.info(
                 'trim: candidate %dx%d is %.0f%% off the catalog ratio '
@@ -22021,6 +22028,57 @@ COIN_SPECS_RESPONSE_SCHEMA = {
 }
 
 
+def _trim_banknote_image(db, record_id, note, field, expect_aspect=None):
+    """Trim one stored banknote slab photo down to the note, levelled;
+    record the source so a re-run can redo the crop. Returns the new
+    file name, or None when nothing was trimmed. Shared by Check (which
+    trims after reading the holder label) and the image upload (an image
+    added AFTER Check — the Mauritius 5 rupees of 2026-09-10 — used to
+    stay untrimmed until the next Check)."""
+    fname = _coin_row_value(note, field)
+    if not fname or not is_image_filter(fname):
+        return None
+    source = fname
+    src_row = db.execute(
+        'SELECT source FROM trimmed_image_sources WHERE trimmed = ?', (fname,)).fetchone()
+    if src_row and os.path.exists(os.path.join(UPLOAD_FOLDER, src_row['source'])):
+        source = src_row['source']
+    trim_meta = {}
+    try:
+        with open(os.path.join(UPLOAD_FOLDER, source), 'rb') as fh:
+            raw = fh.read()
+        trimmed = _trim_slabbed_note_image(raw, expect_aspect=expect_aspect, meta=trim_meta)
+    except Exception as e:
+        app.logger.warning('banknote %s: trim of %s (%s) failed: %s', record_id, field, source, e)
+        return None
+    if not trimmed:
+        return None
+    new_name = f"{uuid.uuid4().hex}.jpg"
+    with open(os.path.join(UPLOAD_FOLDER, new_name), 'wb') as fh:
+        fh.write(trimmed)
+    db.execute('INSERT OR REPLACE INTO trimmed_image_sources (trimmed, source, quad) VALUES (?, ?, ?)',
+               (new_name, source, json.dumps(trim_meta['quad']) if trim_meta.get('quad') else None))
+    db.execute(f"UPDATE banknotes SET {field} = ?, updated_at = ? WHERE id = ?",
+               (new_name, datetime.utcnow().isoformat(), record_id))
+    return new_name
+
+
+def _banknote_expect_aspect(note):
+    """The sheet's catalog long:short ratio, when both dimensions are on
+    the record, as the trim's geometry anchor."""
+    dims = []
+    for f in ('size_width', 'size_height'):
+        try:
+            dims.append(float(_coin_row_value(note, f) or 0))
+        except (TypeError, ValueError):
+            dims.append(0.0)
+    if all(d > 0 for d in dims):
+        ratio = max(dims) / min(dims)
+        if 1.2 <= ratio <= 4.0:
+            return ratio
+    return None
+
+
 def _coin_row_value(coin, field):
     try:
         return coin[field]
@@ -23921,45 +23979,13 @@ def banknote_lookup_specs(record_id):
             if 1.2 <= ratio <= 4.0:
                 expect_aspect = ratio
         for field in ('image_1', 'image_2'):
-            fname = _coin_row_value(note, field)
-            if not fname or not is_image_filter(fname):
-                continue
             # A stored file that is itself a trim re-processes from its
             # recorded original — a re-run of Check must be able to
             # REDO a bad crop, and a shaved note fills its own frame,
             # so trimming the stored copy again is a guaranteed no-op.
-            source = fname
-            src_row = db.execute(
-                'SELECT source FROM trimmed_image_sources WHERE trimmed = ?',
-                (fname,)).fetchone()
-            if src_row and os.path.exists(
-                    os.path.join(UPLOAD_FOLDER, src_row['source'])):
-                source = src_row['source']
-            trim_meta = {}
-            try:
-                with open(os.path.join(UPLOAD_FOLDER, source), 'rb') as fh:
-                    raw = fh.read()
-                trimmed = _trim_slabbed_note_image(
-                    raw, expect_aspect=expect_aspect, meta=trim_meta)
-            except Exception as e:
-                app.logger.warning('banknote %s: trim of %s (%s) failed: %s',
-                                   record_id, field, source, e)
-                continue
-            if not trimmed:
-                continue
-            new_name = f"{uuid.uuid4().hex}.jpg"
-            with open(os.path.join(UPLOAD_FOLDER, new_name), 'wb') as fh:
-                fh.write(trimmed)
-            db.execute(
-                'INSERT OR REPLACE INTO trimmed_image_sources '
-                '(trimmed, source, quad) VALUES (?, ?, ?)',
-                (new_name, source,
-                 json.dumps(trim_meta['quad'])
-                 if trim_meta.get('quad') else None))
-            db.execute(
-                f"UPDATE banknotes SET {field} = ?, updated_at = ? WHERE id = ?",
-                (new_name, datetime.utcnow().isoformat(), record_id))
-            images_updated[field] = url_for('uploaded_file', filename=new_name)
+            new_name = _trim_banknote_image(db, record_id, note, field, expect_aspect)
+            if new_name:
+                images_updated[field] = url_for('uploaded_file', filename=new_name)
         if images_updated:
             db.commit()
 
@@ -24257,6 +24283,24 @@ def upload_image(category, record_id):
     _autofill_title_from_filename(db, table, record_id, category,
                                   image_field, f.filename)
     db.commit()
+
+    # A banknote slab photo is trimmed to the note as soon as it lands,
+    # not only when Check next runs: a note whose Check ran before the
+    # photos were added (the Mauritius 5 rupees, 2026-09-10) stayed an
+    # untrimmed dealer scan, and Mark cropped it by hand. The original
+    # stays on disk and Check can redo the crop from it.
+    if category == 'banknotes' and image_field in ('image_1', 'image_2') \
+            and is_image_filter(stored):
+        note = db.execute("SELECT * FROM banknotes WHERE id = ?", [record_id]).fetchone()
+        try:
+            new_name = _trim_banknote_image(db, record_id, note, image_field,
+                                            _banknote_expect_aspect(note))
+        except Exception as e:
+            app.logger.warning('banknote %s: trim on upload failed: %s', record_id, e)
+            new_name = None
+        if new_name:
+            db.commit()
+            stored = new_name
 
     return jsonify({
         'url': url_for('uploaded_file', filename=stored),
