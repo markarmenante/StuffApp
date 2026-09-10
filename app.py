@@ -14618,7 +14618,13 @@ def _market_call_theme_once(api_key, category, theme_key, prompt):
             client,
             model=model,
             max_tokens=5000,
-            tools=[dict(anthropic_web_search_tool(_market_search_budget(), default_tool='web_search_20260209'),
+            # The classic search tool: results come back directly with
+            # snippets, max_uses is honoured, and it does not run through the
+            # code-execution sandbox whose "Server tool use limit exceeded"
+            # emptied three scans on 2026-09-10 with the 20260209 tool.
+            tools=[dict(anthropic_web_search_tool(_market_search_budget(),
+                                                  default_tool=os.environ.get('MARKET_SCAN_SEARCH_TOOL')
+                                                  or 'web_search_20250305'),
                         max_uses=_market_search_budget())],
             messages=[{'role': 'user', 'content': prompt}],
         )
