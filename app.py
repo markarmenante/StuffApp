@@ -14825,6 +14825,50 @@ def _market_fetch_page(url, limit=400_000):
         return None, ''
 
 
+_MARKET_PAGE_PRICE_RE = re.compile(
+    r'(?:(?:price|our price|sale price|buy it now|buy now|add to cart|add to basket|'
+    r'in stock)[^$€£0-9]{0,80})?'
+    r'((?:US\s?\$|USD\s?\$?|CA\$|C\$|A\$|\$|€|EUR\s?|£|GBP\s?|CHF\s?)\s?'
+    r'\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)', re.IGNORECASE)
+
+
+def _market_price_from_page(url):
+    """The asking price read off the listing page itself, for finds whose
+    search snippet showed none (most VCoins and dealer pages). Looks in
+    the JSON-LD / meta price first, then the first currency amount in
+    the visible text. Returns a price string or None."""
+    status, html = _market_fetch_page(url)
+    if status != 200 or not html:
+        return None
+    m = re.search(r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?', html)
+    cur = re.search(r'"priceCurrency"\s*:\s*"([A-Z]{3})"', html)
+    if m:
+        amount = float(m.group(1))
+        if 10 <= amount < 10_000_000:
+            code = cur.group(1) if cur else 'USD'
+            prefix = _PRICE_CODE_PREFIX.get(code, code + ' ')
+            return f'{prefix}{amount:,.0f}' if amount == int(amount) else f'{prefix}{amount:,.2f}'
+    m = re.search(r'<meta[^>]+(?:product:price:amount|og:price:amount)[^>]+content="([\d.,]+)"', html, re.IGNORECASE)
+    if m:
+        cur2 = re.search(r'<meta[^>]+(?:product:price:currency|og:price:currency)[^>]+content="([A-Z]{3})"', html, re.IGNORECASE)
+        code = cur2.group(1) if cur2 else 'USD'
+        text = f"{code} {m.group(1)}"
+        formatted = _format_purchase_price(text)
+        if formatted:
+            return formatted
+    text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text)[:60_000]
+    for m in _MARKET_PAGE_PRICE_RE.finditer(text):
+        candidate = m.group(1).replace('US $', '$').replace('US$', '$')
+        formatted = _format_purchase_price(candidate)
+        if formatted:
+            _, amount = _parse_price_amount(formatted)
+            if amount and amount >= 10:
+                return formatted
+    return None
+
+
 def _market_listing_state(url):
     """'ended' when the listing page itself says the lot is sold, ended
     or archived; 'live' when it carries buy/bid wording and no ended
@@ -14890,7 +14934,17 @@ def _market_normalize_item(db, category, raw):
         return _market_drop(raw, 'search-engine URL')
     price = _format_purchase_price(raw.get('price')) or ''
     if not price:
-        return _market_drop(raw, f"no readable price ({raw.get('price')!r})")
+        # Search snippets rarely carry a dealer's price; the listing page
+        # does. Read it there before giving up on the find.
+        price = _market_price_from_page(url) or ''
+        if price:
+            raw['price'] = price
+            raw['live_evidence'] = (str(raw.get('live_evidence') or '').strip() or 'price read from the listing page')
+    if not price:
+        # Still nothing (bot wall, price behind a login): the find is
+        # worth more than the missing figure — keep it and say so.
+        price = 'See listing'
+        raw['why'] = (str(raw.get('why') or '').strip() + ' · price on the listing page').strip(' ·')
     grade_n = _market_grade_number(category, raw)
     rarity = str(raw.get('rarity') or '').strip()
     floor = 64 if category == 'banknotes' else 40
