@@ -96,8 +96,8 @@
     {%- set _periods = [] -%}
     {%- for name, n in profile.periods -%}{%- set _ = _periods.append((name.split(' (')[0], n)) -%}{%- endfor -%}
     {{ columns(_periods, 'Greek coins by period') }}
-    {{ scatter(profile.weight_points['Tetradrachm'], 'Tetradrachm weight through time', [('Attic', 17.2), ('reduced Attic', 16.3), ('Chian/Rhodian', 15.2), ('Ptolemaic', 14.2), ('cistophoric', 12.6)], profile.weight_points['Tetradrachm']|length ~ ' coins · hairlines mark the standards', 11, 18) }}
-    {{ scatter(profile.weight_points['Stater'], 'Stater weight through time', [('Phocaic EL', 16.1), ('Milesian EL', 14.1), ('Aeginetan', 12.2), ('Persic', 10.8), ('Thasian', 9.8), ('Corinthian', 8.6)], profile.weight_points['Stater']|length ~ ' coins · hairlines mark the standards', 5, 18) }}
+    {{ scatter(profile.weight_points['Tetradrachm'], 'Tetradrachm weight through time', [('Attic', 17.2), ('reduced Attic', 16.3), ('Chian/Rhodian', 15.2), ('Ptolemaic', 14.2), ('cistophoric', 12.6)], profile.weight_points['Tetradrachm']|length ~ ' coins · hairlines mark the standards', 11, 18, -30) }}
+    {{ scatter(profile.weight_points['Stater'], 'Stater weight through time', [('Phocaic EL', 16.1), ('Milesian EL', 14.1), ('Aeginetan', 12.2), ('Persic', 10.8), ('Thasian', 9.8), ('Corinthian', 8.6)], profile.weight_points['Stater']|length ~ ' coins · hairlines mark the standards', 5, 18, -30) }}
   </section>
   <section class="an-section">
     <h2>The Greek world, region by region</h2>

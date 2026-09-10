@@ -14553,9 +14553,9 @@ VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VE
 
 {grade_rules}
 
-LIVENESS — HARD RULE: every item must be purchasable now. A fixed-price listing must be in stock today; an auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. Put in `live_evidence` the words on the page that prove it is live ("Buy It Now", "3 available", "bidding ends …", "Sale closes …"); if you cannot find such words, do not return the item. Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
+LIVENESS: every item must be purchasable now. An auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. For FIXED-PRICE dealer stock (VCoins stores, Shanna Schmidt, Harlan J. Berk, Roma's shop, the Nomos and CNG shops, Baldwin's, Forum, MA-Shops, eBay Buy It Now) return the item page whenever the search result shows it offered at a price and nothing says sold, reserved or archived — the scan opens every page itself afterwards and drops the ones that have ended, so you do not have to prove it; put in `live_evidence` what the result showed ("$1,850 — Add to cart", "Buy It Now, 2 available", "bidding ends 2026-10-03"). Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
 
-Use up to 8 web searches, specific ones ("PMG 64 EPQ Philippines 5 pesos Victory ebay", "site:stacksbowers.com Sarawak dollar"). Return 4–8 items, best first. If the theme yields nothing live, return an empty list rather than a weak item — and say in `notes` what you searched and why nothing qualified.
+Use your web searches on specific queries ("PMG 64 EPQ Philippines 5 pesos Victory ebay", "site:stacksbowers.com Sarawak dollar", "site:vcoins.com Knidos tetradrachm"). Return 4–8 items, best first; an item that the search result shows for sale at a price is worth returning even without page-level proof (the scan verifies). Return an empty list only when nothing is offered at all — and then say in `notes` what you searched and why nothing qualified.
 
 COLLECTION PROFILE:
 {profile}
@@ -14584,7 +14584,7 @@ def _market_call_theme(api_key, category, theme_key, prompt):
     except ImportError:
         return [], 'anthropic package not installed'
     try:
-        client = anthropic.Anthropic(api_key=api_key, timeout=240)
+        client = anthropic.Anthropic(api_key=api_key, timeout=480, max_retries=1)
         model = anthropic_lookup_model(
             api_key, 'ANTHROPIC_MARKET_SCAN_MODEL',
             default='auto-sonnet', fable_fallback='sonnet')
@@ -15018,18 +15018,26 @@ def _run_market_scan(category, scan_id):
         analysis_block, analysis_date = _market_analysis_block(db, category)
         themes = _MARKET_THEMES[category]
         results, errors = [], []
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=len(themes)) as pool:
-            futures = {
-                pool.submit(_market_call_theme, api_key, category, key,
-                            _market_scan_prompt(category, key, text, profile, holdings,
-                                                coverage, recent, analysis_block)): key
-                for key, text in themes}
-            for fut in futures:
-                items, err = fut.result()
-                results.extend(items)
-                if err:
-                    errors.append(err)
+        from concurrent.futures import ThreadPoolExecutor, wait as _wait
+        pool = ThreadPoolExecutor(max_workers=len(themes))
+        futures = {
+            pool.submit(_market_call_theme, api_key, category, key,
+                        _market_scan_prompt(category, key, text, profile, holdings,
+                                            coverage, recent, analysis_block)): key
+            for key, text in themes}
+        # A theme still searching after ten minutes does not hold the whole
+        # scan: it is reported and the rest lands (the pool is released
+        # without waiting for it).
+        _wait(list(futures), timeout=600)
+        for fut, key in futures.items():
+            if not fut.done():
+                errors.append(f'{key}: still running after 10 minutes — skipped')
+                continue
+            items, err = fut.result()
+            results.extend(items)
+            if err:
+                errors.append(err)
+        pool.shutdown(wait=False)
         normalized = []
         for raw in results:
             item = _market_normalize_item(db, category, raw)
