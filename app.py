@@ -15322,7 +15322,7 @@ def _market_catalogue_prompt(category, cards, profile, holdings, coverage, recen
 
 Below are cards from VCoins' LIVE stock search, run just now for each series the collection analysis says is missing. Every card is a coin a dealer is offering at a fixed price today; where the scan could read the dealer's own catalogue description it is indented under the card (grade, weight, references and pedigree live there).
 
-Choose the cards worth putting in front of Mark and return them in the schema. Rules:
+Choose the cards worth putting in front of Mark and return them in the schema — AT MOST 15 items, best first (fewer is fine). Rules:
 - ANCIENT GREEK only (archaic through Hellenistic, incl. Sicily, Magna Graecia, Asia Minor, Thrace, Macedon, Ptolemies, Seleucids). Drop Roman, Byzantine, Celtic, medieval, modern, and anything that merely mentions a city.
 - GRADE: the dealer's grade from the description — EF/XF or better wanted; About EF / Good VF acceptable for a genuine rarity or a conspicuous gap (say which in `rarity`); plain VF and below only when the type is truly scarce. When the description states no grade, put "" in `grade` and say so in `why` — do not invent one.
 - Prefer the piece that best fills each gap; several cards of one type: keep the two or three best (grade, style, pedigree, price), not all.
@@ -15353,10 +15353,12 @@ Reply with ONLY a JSON object, no prose, no code fences:
 
 
 def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, recent,
-                            analysis, per_query=8, page_reads=60):
+                            analysis, per_query=5, page_reads=48, max_cards=90):
     """(items, error, note). Searches VCoins for every gap query, reads
     the best cards' pages for their descriptions, and has the model
     shape them into scan items (theme 'vcoins-catalogue')."""
+    if db is None:
+        db = open_db_connection()   # the stage runs in its own thread
     queries = _market_gap_queries(db, category)
     if not queries:
         return [], None, ''
@@ -15382,6 +15384,7 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
             kept += 1
             if kept >= per_query:
                 break
+    cards = cards[:max_cards]
     app.logger.info("market scan vcoins: %d queries, %d cards seen, %d kept for reading; %s",
                     len(queries), hits, len(cards), '; '.join(errors)[:300] or 'no errors')
     if not cards:
@@ -15405,11 +15408,17 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
         client = anthropic.Anthropic(api_key=api_key, timeout=300, max_retries=1)
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_MARKET_SCAN_MODEL',
                                        default='auto-sonnet', fable_fallback='sonnet')
-        resp = _anthropic_create(
-            client, model=model, max_tokens=6000,
+        # A plain call, no budget escalation: with 90 cards the model
+        # once tried to return them all, overran 6k tokens, and the
+        # 24k/32k retries held scan #7 for half an hour. The prompt caps
+        # the list at 15 and _market_parse_json salvages a cut-off.
+        resp = client.messages.create(
+            model=model, max_tokens=8000,
             messages=[{'role': 'user', 'content': _market_catalogue_prompt(
                 category, live_cards, profile, holdings, coverage, recent, analysis)}])
         text = _message_text(resp)
+        app.logger.info("market scan vcoins-catalogue: stop=%s text=%d chars",
+                        getattr(resp, 'stop_reason', None), len(text))
         data = _market_parse_json(text)
         items = data.get('items') if isinstance(data, dict) else None
         if not isinstance(items, list):
@@ -15471,19 +15480,26 @@ def _run_market_scan(category, scan_id):
         # every gap and its cards read — the live catalogue, not the
         # search index's memory of it.
         catalogue_note = ''
-        try:
-            cat_items, cat_err, catalogue_note = _market_catalogue_stage(
-                api_key, db, category, profile, holdings, coverage, recent, analysis_block)
-            results.extend(cat_items)
-            if cat_err:
-                errors.append(cat_err)
-        except Exception as e:
-            app.logger.warning("market scan catalogue stage failed: %s", e)
-            errors.append(f'vcoins-catalogue: {str(e)[:160]}')
+        cat_pool = ThreadPoolExecutor(max_workers=1)
+        cat_future = cat_pool.submit(
+            _market_catalogue_stage, api_key, None, category, profile,
+            holdings, coverage, recent, analysis_block)
         # A theme still searching after 25 minutes does not hold the whole
         # scan: it is reported and the rest lands (the pool is released
         # without waiting for it).
-        _wait(list(futures), timeout=1500)
+        _wait(list(futures) + [cat_future], timeout=1500)
+        if cat_future.done():
+            try:
+                cat_items, cat_err, catalogue_note = cat_future.result()
+                results.extend(cat_items)
+                if cat_err:
+                    errors.append(cat_err)
+            except Exception as e:
+                app.logger.warning("market scan catalogue stage failed: %s", e)
+                errors.append(f'vcoins-catalogue: {str(e)[:160]}')
+        else:
+            errors.append('vcoins-catalogue: still running after 25 minutes — skipped')
+        cat_pool.shutdown(wait=False)
         for fut, key in futures.items():
             if not fut.done():
                 errors.append(f'{key}: still running after 25 minutes — skipped')
