@@ -14839,10 +14839,18 @@ _MARKET_LIVE_PAGE_MARKERS = (
 )
 
 
+_MARKET_LAST_URL = threading.local()
+
+
 def _market_fetch_page(url, limit=400_000):
     """(status, text) for a listing page, browser-style headers, short
-    timeout. (None, '') when unreachable — never raises."""
+    timeout. (None, '') when unreachable — never raises. An HTTP error
+    returns its real status (404, 410 — a sold VCoins lot answers 410)
+    rather than None, so a dead page can be told from a bot wall. The
+    URL the page finally landed on is left in _MARKET_LAST_URL.final."""
     import urllib.request
+    import urllib.error
+    _MARKET_LAST_URL.final = url
     try:
         req = urllib.request.Request(url, headers={
             'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) '
@@ -14853,9 +14861,36 @@ def _market_fetch_page(url, limit=400_000):
         with urllib.request.urlopen(req, timeout=8) as resp:
             body = resp.read(limit)
             charset = resp.headers.get_content_charset() or 'utf-8'
+            _MARKET_LAST_URL.final = resp.geturl() or url
             return resp.status, body.decode(charset, errors='replace')
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read(limit).decode('utf-8', errors='replace')
+        except Exception:
+            body = ''
+        return e.code, body
     except Exception:
         return None, ''
+
+
+def _market_page_gone(url, status):
+    """True when the listing page no longer exists: a 404 / 410, or a
+    product URL that was redirected away to a store front, category or
+    search page (how VCoins and several dealers retire a sold lot)."""
+    if status in (404, 410):
+        return True
+    if status != 200:
+        return False
+    final = getattr(_MARKET_LAST_URL, 'final', url) or url
+    if final == url:
+        return False
+    strip = lambda u: re.sub(r'^https?://(www\.)?', '', u).split('?')[0].rstrip('/').lower()
+    a, b = strip(url), strip(final)
+    if a == b or b.startswith(a) or a.startswith(b) and len(a) - len(b) < 8:
+        return False
+    # Landed somewhere with a much shorter path (the store home, a
+    # category listing) than the product URL asked for.
+    return b.count('/') + 1 < a.count('/') and len(b) < len(a) - 12
 
 
 _MARKET_PAGE_PRICE_RE = re.compile(
@@ -14871,7 +14906,7 @@ def _market_price_from_page(url):
     the JSON-LD / meta price first, then the first currency amount in
     the visible text. Returns a price string or None."""
     status, html = _market_fetch_page(url)
-    if status != 200 or not html:
+    if status != 200 or not html or _market_page_gone(url, status):
         return None
     m = re.search(r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?', html)
     cur = re.search(r'"priceCurrency"\s*:\s*"([A-Z]{3})"', html)
@@ -14908,6 +14943,8 @@ def _market_listing_state(url):
     marker; 'unknown' when the page cannot be read (bot wall, timeout)
     or says neither — unknown never drops an item."""
     status, html = _market_fetch_page(url)
+    if _market_page_gone(url, status):
+        return 'ended'
     if status != 200 or not html:
         return 'unknown'
     text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
@@ -14936,6 +14973,7 @@ def _market_verify_live(items, workers=6):
     kept = []
     for item, state in zip(items, states):
         if state == 'ended':
+            _market_drop(item, 'listing page ended or gone')
             continue
         item['verified'] = (state == 'live')
         kept.append(item)
