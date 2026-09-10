@@ -3943,7 +3943,7 @@ input[type="date"] { -webkit-appearance: none; }
 /* ── COLLECTION ANALYSIS (Watches / Coins / Banknotes) ── */
 .analysis-pill { margin-right: 2px; }
 .analysis-status { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
-.analysis { padding: 14px 18px 40px; max-width: 1180px; }
+.analysis { padding: 14px 18px 40px; max-width: 1640px; }
 .an-hero { margin: 4px 0 14px; }
 .an-hero-title { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
 .an-hero-sub { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
@@ -3951,7 +3951,7 @@ input[type="date"] { -webkit-appearance: none; }
   padding: 18px 24px; margin-bottom: 18px; }
 .an-essay-meta { font-size: 11px; color: var(--text-hint); margin-bottom: 8px; }
 .an-stale { color: #a05a00; }
-.an-essay-body { font-size: 15px; line-height: 1.55; max-width: 78ch; }
+.an-essay-body { font-size: 15px; line-height: 1.55; max-width: 84ch; }
 .an-essay-body h2 { font-size: 19px; font-weight: 700; margin: 22px 0 8px; letter-spacing: -0.01em; }
 .an-essay-body h2:first-child { margin-top: 4px; }
 .an-essay-body h3 { font-size: 15.5px; font-weight: 700; margin: 16px 0 6px; }

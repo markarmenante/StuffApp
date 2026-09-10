@@ -15506,38 +15506,74 @@ def _greek_period(year):
 # Weight standards by denomination: (name, target grams). A coin is
 # assigned the nearest target within 7 %; otherwise it is "off-standard"
 # (worn, clipped, plated, or a local standard not listed).
+# Weight standards by denomination: (name, target grams, metals). A coin
+# is assigned the nearest target within 7 % among the standards struck in
+# its metal; otherwise it is "off-standard" (worn, clipped, plated, or a
+# local standard not modelled). Metals: AR silver, AV gold, EL electrum,
+# AE bronze, BL billon; None = any.
+_AR, _AV, _EL = ('AR', 'BL'), ('AV',), ('EL',)
 _COIN_STANDARDS = {
-    'tetradrachm': (('Attic', 17.2), ('reduced Attic (Hellenistic)', 16.3),
-                    ('Chian / Rhodian', 15.2), ('Ptolemaic / Phoenician', 14.2),
-                    ('Cistophoric', 12.6)),
-    'didrachm': (('Attic / Euboic', 8.6), ('Achaean (Italiote nomos)', 7.9),
-                 ('Campanian', 7.3), ('Aeginetan', 12.2)),
-    'nomos': (('Achaean (Italiote)', 7.9), ('reduced Italiote', 6.6), ('Attic', 8.6)),
-    'stater': (('Aeginetan', 12.2), ('Corinthian / Euboic-Attic', 8.6),
-               ('Persic / Lydian light gold', 8.1), ('Lydian heavy (Kroiseid)', 10.7),
-               ('Milesian electrum', 14.1), ('Phocaic electrum', 16.1),
-               ('Thasian / Thraco-Macedonian', 9.8), ('Phoenician', 14.0),
-               ('Cyzicene electrum', 16.0)),
-    'drachm': (('Attic', 4.3), ('Aeginetan', 6.1), ('Rhodian', 3.8),
-               ('Corinthian', 2.9), ('Persic', 5.5)),
-    'hemidrachm': (('Attic', 2.15), ('Aeginetan', 3.0), ('Rhodian', 1.9)),
-    'tetrobol': (('Attic', 2.9), ('Aeginetan', 4.1)),
-    'triobol': (('Attic', 2.15), ('Aeginetan', 3.0)),
-    'diobol': (('Attic', 1.43), ('Aeginetan', 2.0)),
-    'obol': (('Attic', 0.72), ('Aeginetan', 1.0)),
-    'dekadrachm': (('Attic', 43.0),),
-    'decadrachm': (('Attic', 43.0),),
-    'octodrachm': (('Ptolemaic gold', 27.8), ('Thraco-Macedonian silver', 29.0)),
-    'siglos': (('Persic', 5.5),),
-    'daric': (('Persic gold', 8.4),),
-    'hekte': (('Phocaic (sixth stater)', 2.6), ('Milesian (sixth stater)', 2.35)),
-    'trite': (('Milesian / Lydian (third stater)', 4.7), ('Phocaic (third stater)', 5.4)),
-    'tristater': (('Aeginetan', 36.6),),
-    'distater': (('Attic gold', 17.2), ('Corinthian', 17.2)),
+    'tetradrachm': (('Attic', 17.2, _AR), ('reduced Attic (Hellenistic)', 16.3, _AR),
+                    ('Chian / Rhodian', 15.2, _AR), ('Ptolemaic / Phoenician', 14.2, _AR),
+                    ('Cistophoric', 12.6, _AR), ('Attic gold', 17.2, _AV)),
+    'didrachm': (('Attic / Euboic', 8.6, _AR), ('Achaean (Italiote nomos)', 7.9, _AR),
+                 ('Campanian', 7.3, _AR), ('Aeginetan', 12.2, _AR)),
+    'nomos': (('Achaean (Italiote)', 7.9, _AR), ('reduced Italiote', 6.6, _AR), ('Attic', 8.6, _AR)),
+    'stater': (('Aeginetan', 12.2, _AR), ('Corinthian / Euboic-Attic', 8.6, _AR),
+               ('Thasian / Thraco-Macedonian', 9.8, _AR), ('Phoenician', 14.0, _AR),
+               ('Persic (double siglos)', 10.8, _AR), ('Lycian', 9.9, _AR),
+               ('Attic gold', 8.6, _AV), ('Persic / Lydian light gold', 8.1, _AV),
+               ('Lydian heavy (Kroiseid)', 10.7, _AV + _AR),
+               ('Milesian electrum', 14.1, _EL), ('Phocaic electrum', 16.1, _EL),
+               ('Cyzicene electrum', 16.0, _EL), ('Carthaginian electrum', 7.5, _EL)),
+    'drachm': (('Attic', 4.3, _AR), ('Aeginetan', 6.1, _AR), ('Rhodian', 3.8, _AR),
+               ('Corinthian', 2.9, _AR), ('Persic', 5.5, _AR), ('Ptolemaic', 3.55, _AR)),
+    'hemidrachm': (('Attic', 2.15, _AR), ('Aeginetan', 3.0, _AR), ('Rhodian', 1.9, _AR)),
+    'tetrobol': (('Attic', 2.9, _AR), ('Aeginetan', 4.1, _AR), ('Macedonian light', 2.4, _AR)),
+    'triobol': (('Attic', 2.15, _AR), ('Aeginetan', 3.0, _AR)),
+    'diobol': (('Attic', 1.43, _AR), ('Aeginetan', 2.0, _AR)),
+    'obol': (('Attic', 0.72, _AR), ('Aeginetan', 1.0, _AR)),
+    'trihemiobol': (('Attic', 1.08, _AR), ('Aeginetan', 1.5, _AR)),
+    'dekadrachm': (('Attic', 43.0, _AR),),
+    'decadrachm': (('Attic', 43.0, _AR),),
+    'octodrachm': (('Ptolemaic gold', 27.8, _AV), ('Thraco-Macedonian silver', 29.0, _AR)),
+    'trichryson': (('Ptolemaic gold (pentadrachm)', 17.8, _AV),),
+    'siglos': (('Persic', 5.5, _AR),),
+    'half siglos': (('Persic', 2.75, _AR),),
+    'daric': (('Persic gold', 8.4, _AV),),
+    'hekte': (('Phocaic (sixth stater)', 2.6, _EL), ('Milesian (sixth stater)', 2.35, _EL),
+              ('Cyzicene (sixth stater)', 2.67, _EL)),
+    'hemihekte': (('Phocaic (twelfth stater)', 1.3, _EL), ('Milesian (twelfth stater)', 1.17, _EL)),
+    'sixth stater': (('Phocaic (sixth stater)', 2.6, _EL), ('Milesian (sixth stater)', 2.35, _EL),
+                     ('Cyzicene (sixth stater)', 2.67, _EL)),
+    'twelfth stater': (('Phocaic (twelfth stater)', 1.3, _EL), ('Milesian (twelfth stater)', 1.17, _EL)),
+    '1/12 stater': (('Phocaic (twelfth stater)', 1.3, _EL), ('Milesian (twelfth stater)', 1.17, _EL)),
+    'trite': (('Milesian / Lydian (third stater)', 4.7, _EL + _AV), ('Phocaic (third stater)', 5.4, _EL),
+              ('Persic / Lydian light gold (third)', 2.7, _AV)),
+    'third stater': (('Milesian / Lydian (third stater)', 4.7, _EL + _AV), ('Phocaic (third stater)', 5.4, _EL),
+                     ('Persic / Lydian light gold (third)', 2.7, _AV), ('Lycian (third stater)', 3.3, _AR)),
+    '1/3 stater': (('Milesian / Lydian (third stater)', 4.7, _EL + _AV), ('Phocaic (third stater)', 5.4, _EL),
+                   ('Persic / Lydian light gold (third)', 2.7, _AV), ('Lycian (third stater)', 3.3, _AR)),
+    'half stater': (('Lydian heavy (Kroiseid half)', 5.35, _AV + _AR), ('Milesian (half stater)', 7.05, _EL),
+                    ('Persic / Lydian light gold (half)', 4.05, _AV)),
+    'tristater': (('Aeginetan', 36.6, _AR),),
+    'distater': (('Attic gold', 17.2, _AV), ('Corinthian', 17.2, _AR), ('Achaean (Italiote)', 15.8, _AR)),
+    'shekel': (('Phoenician (Tyrian)', 14.2, _AR),),
+    'tridrachm': (('Ptolemaic', 10.7, _AR),),
+    '16 litrai': (('Syracusan 16 litrai', 13.4, _AR),),
+    '16 litrae': (('Syracusan 16 litrai', 13.4, _AR),),
+    '12 litrai': (('Syracusan 12 litrai', 10.1, _AR),),
+    '10 litrai': (('Syracusan 10 litrai', 8.4, _AR),),
+    '10 litrae': (('Syracusan 10 litrai', 8.4, _AR),),
 }
+_COIN_STANDARD_KEYS = sorted(_COIN_STANDARDS, key=len, reverse=True)
 
 
-def _coin_standard(denomination, weight):
+def _coin_metal_code(metal):
+    return ((metal or '').strip().split(' ')[0].upper() or None)
+
+
+def _coin_standard(denomination, weight, metal=None):
     key = (denomination or '').strip().lower()
     try:
         w = float(weight)
@@ -15547,18 +15583,39 @@ def _coin_standard(denomination, weight):
         return None
     targets = _COIN_STANDARDS.get(key)
     if not targets:
-        for k, v in _COIN_STANDARDS.items():
+        for k in _COIN_STANDARD_KEYS:     # longest first: "hekte – sixth stater" is a hekte
             if k in key:
-                targets = v
+                targets = _COIN_STANDARDS[k]
                 break
     if not targets:
         return None
+    code = _coin_metal_code(metal)
     best = None
-    for name, target in targets:
+    for name, target, metals in targets:
+        if code and metals and code not in metals:
+            continue
         dev = abs(w - target) / target
         if dev <= 0.07 and (best is None or dev < best[1]):
             best = (name, dev)
     return best[0] if best else 'off-standard'
+
+
+# The region field carries spelling variants and sub-headings; fold the
+# obvious ones so the tables read one line per region.
+_COIN_REGION_ALIASES = {
+    'seleukid empire': 'Seleucid Empire', 'seleucid kingdom': 'Seleucid Empire',
+    'seleucid kings of syria': 'Seleucid Empire', 'seleucis and pieria': 'Syria',
+    'baktrian kingdom': 'Bactrian Kingdom', 'bactria': 'Bactrian Kingdom',
+    'corinthia': 'Corinth', 'sikyonia': 'Sikyon', 'islands off attica, aegina': 'Aegina',
+    'islands off attica': 'Aegina', 'islands off thrace, thasos': 'Islands off Thrace',
+    'caria, islands off': 'Islands off Caria', 'ptolemaic kings of egypt': 'Egypt',
+    'kroton': 'Bruttium', 'carthage': 'Zeugitana', 'lycian league': 'Lycia',
+}
+
+
+def _coin_region(r):
+    raw = (r['region'] or r['authority'] or 'Unknown').strip()
+    return _COIN_REGION_ALIASES.get(raw.lower(), raw)
 
 
 def _analysis_coins_profile(db):
@@ -15571,7 +15628,7 @@ def _analysis_coins_profile(db):
     modern = [r for r in rows if r['id'] not in greek_ids and r['id'] not in other_ids]
     regions = {}
     for r in greek:
-        key = (r['region'] or r['authority'] or 'Unknown').strip()
+        key = _coin_region(r)
         g = regions.setdefault(key, {'region': key, 'count': 0, 'authorities': [], 'mints': [],
                                      'denominations': [], 'metals': [], 'years': [], 'price': 0.0})
         g['count'] += 1
@@ -15605,7 +15662,7 @@ def _analysis_coins_profile(db):
         denom = (r['denomination'] or '').strip()
         if not denom:
             continue
-        std = _coin_standard(denom, r['weight'])
+        std = _coin_standard(denom, r['weight'], r['metal'])
         if std:
             standards.setdefault(denom, {})
             standards[denom][std] = standards[denom].get(std, 0) + 1
@@ -15618,6 +15675,8 @@ def _analysis_coins_profile(db):
     standard_list = []
     for denom, ws in sorted(weights.items(), key=lambda kv: -len(kv[1])):
         stds = sorted(standards.get(denom, {}).items(), key=lambda kv: -kv[1])
+        if len(ws) < 2 and not stds:
+            continue
         standard_list.append({
             'denomination': denom, 'count': len(ws),
             'mean': sum(ws) / len(ws), 'min': min(ws), 'max': max(ws),
@@ -15650,12 +15709,12 @@ def _analysis_coins_profile(db):
         'modern_regions': _analysis_tally([r['region'] for r in modern], 8),
         'price_total': price_all, 'price_greek': price_greek,
         'items': [
-            {'region': r['region'], 'authority': r['authority'], 'mint': r['mint'],
+            {'region': _coin_region(r), 'authority': r['authority'], 'mint': r['mint'],
              'denomination': r['denomination'], 'metal': r['metal'],
              'date': r['date_1_text'] or _bc(_safe_int(r['date_1'])),
              'date_1': _safe_int(r['date_1']), 'weight': r['weight'], 'size': r['size'],
              'die_axis': r['die_axis'], 'grade': r['grade'],
-             'standard': _coin_standard(r['denomination'], r['weight']),
+             'standard': _coin_standard(r['denomination'], r['weight'], r['metal']),
              'description': (r['description'] or '')[:160]}
             for r in sorted(greek, key=lambda r: ((r['region'] or ''), _safe_int(r['date_1']) or 0))
         ],
@@ -15678,6 +15737,26 @@ _EMPIRE_WORDS = (
     ('American', ('united states', 'american', 'u.s.')),
 )
 _EMPIRE_BY_COUNTRY = {
+    # Named first so the colonial timeline's opening words (Ceylon:
+    # "Portuguese from 1505…") cannot mis-file a British-era note.
+    'British': ('ceylon', 'bahamas', 'falkland islands', 'mauritius', 'rhodesia',
+                'rhodesia & nyasaland', 'rhodesia and nyasaland', 'southern rhodesia',
+                'northern rhodesia', 'nyasaland', 'bermuda', 'fiji', 'jamaica', 'malta',
+                'gibraltar', 'cyprus', 'hong kong', 'india', 'burma', 'malaya',
+                'malaya and british borneo', 'straits settlements', 'sarawak', 'north borneo',
+                'brunei', 'palestine', 'kenya', 'uganda', 'tanganyika', 'zanzibar', 'nigeria',
+                'gold coast', 'sierra leone', 'gambia', 'barbados', 'trinidad', 'trinidad and tobago',
+                'guyana', 'belize', 'saint helena', 'st. helena', 'seychelles', 'aden',
+                'east africa', 'west africa', 'cayman islands', 'bahrain', 'sudan', 'egypt',
+                'iraq', 'jordan', 'transjordan', 'newfoundland', 'ireland', 'south africa',
+                'new zealand', 'australia', 'canada', 'singapore', 'sabah', 'tonga', 'samoa',
+                'solomon islands', 'gilbert', 'papua', 'new guinea', 'somaliland', 'basutoland',
+                'bechuanaland', 'swaziland', 'leeward islands', 'windward islands',
+                'british caribbean', 'east caribbean', 'grenada', 'dominica', 'st. lucia',
+                'saint lucia', 'st. vincent', 'antigua', 'st. kitts', 'montserrat',
+                'turks and caicos', 'anguilla', 'british virgin islands', 'oman', 'muscat',
+                'qatar', 'kuwait', 'trucial states', 'maldives', 'malawi', 'zambia', 'ghana',
+                'tanzania', 'botswana', 'lesotho', 'sri lanka', 'pakistan', 'bangladesh'),
     'Dutch': ('netherlands indies', 'netherlands east indies', 'curaçao', 'curacao', 'suriname',
               'surinam', 'netherlands antilles'),
     'Portuguese': ('macau', 'macao', 'angola', 'mozambique', 'goa', 'portuguese india', 'timor',
@@ -15930,7 +16009,10 @@ def _analysis_prompt(category, profile):
         "figures from the data. Do not invent pieces that are not in the data; where you "
         "draw on general knowledge to explain a piece's significance, keep it accurate and "
         "mainstream. Do not include a preamble, a title line, disclaimers, or a summary of "
-        "what you were asked. Aim for roughly 1,800–2,600 words. Return Markdown only.\n\n"
+        "what you were asked. Aim for roughly 1,800–2,600 words. Return Markdown only. "
+        "Every money figure in the data is in US dollars (purchase prices paid, or current "
+        "values where labelled value) — write them with a $ sign, never £ or €, and keep them "
+        "to a light touch: the reading is about the objects, not the outlay.\n\n"
         f"FOCUS: {ANALYSIS_FOCUS[category]}\n\n"
         f"COLLECTION PROFILE (computed from the records):\n{json.dumps(slim, default=str)}\n\n"
         f"THE PIECES (compact listing):\n{items_text}\n"
