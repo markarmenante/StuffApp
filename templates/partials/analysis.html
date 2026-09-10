@@ -1,0 +1,213 @@
+{# Collection Analysis — replaces the rows when the Analysis pill is on.
+   Two layers: the computed profile (always current, from the records)
+   and the stored essay (written in the background, refreshed on demand). #}
+{% macro tally(pairs, unit='') -%}
+  {%- for name, n in pairs -%}
+    <span class="an-chip"><span>{{ name }}</span><b>{{ n }}</b></span>
+  {%- endfor -%}
+{%- endmacro %}
+{% macro money(v) -%}{{ '${:,.0f}'.format(v) }}{%- endmacro %}
+
+<div class="analysis" id="analysisRoot">
+  <div class="an-hero">
+    <div class="an-hero-title">{{ cat_info.name }} · Collection Analysis</div>
+    <div class="an-hero-sub">
+      {%- if category == 'watches' -%}
+        {{ profile.total }} watches held · {{ profile.independent_count }} by independent watchmakers ({{ profile.makers|length }} makers) · {{ profile.other_count }} manufacture and brand pieces
+      {%- elif category == 'coins' -%}
+        {{ profile.total }} coins held · {{ profile.greek_count }} ancient Greek across {{ profile.regions|length }} regions · {{ profile.ancient_other_count }} other ancient · {{ profile.modern_count }} modern
+      {%- else -%}
+        {{ profile.total }} notes held · {{ profile.colonial_count }} colonial across {{ profile.empires|length }} empires · {{ profile.us_count }} United States · {{ profile.other_count }} other world
+      {%- endif -%}
+    </div>
+  </div>
+
+  {# ── The essay ── #}
+  <section class="an-essay" id="analysisEssay">
+    {% if analysis and analysis['status'] == 'done' and analysis['markdown'] %}
+      <div class="an-essay-meta">
+        Written {{ analysis['finished_at'][:16]|replace('T', ' ') }} UTC
+        {%- if analysis['model'] %} · {{ analysis['model'] }}{% endif %}
+        {%- if analysis_stale %} · <span class="an-stale">the collection has changed since — Refresh for a current reading</span>{% endif %}
+      </div>
+      <div class="an-essay-body">{{ analysis['markdown']|analysis_html }}</div>
+    {% elif analysis_running or analysis_autorun %}
+      <div class="an-waiting" id="analysisWaiting">
+        <div class="an-spinner" aria-hidden="true"></div>
+        <div class="an-waiting-text">Writing the analysis of {{ analysis_focus }}… this takes a minute or two.</div>
+      </div>
+    {% elif analysis and analysis['status'] == 'failed' %}
+      <div class="an-waiting">
+        <div class="an-waiting-text">The last attempt failed: {{ analysis['error'] }}. Press Refresh to try again.</div>
+      </div>
+    {% endif %}
+  </section>
+
+  {# ── The computed profile ── #}
+  {% if category == 'watches' %}
+  <section class="an-section">
+    <h2>The independents, maker by maker</h2>
+    <table class="an-table">
+      <thead><tr><th>Maker</th><th class="num">Pieces</th><th>Years</th><th>Models held</th><th>Calibres</th><th>Complications</th><th>Escapements</th><th>Metals</th><th class="num">Value</th></tr></thead>
+      <tbody>
+      {% for m in profile.makers %}
+        <tr>
+          <td class="an-strong">{{ m.brand }}</td>
+          <td class="num">{{ m.count }}{% if m.editions %}<span class="an-muted"> · {{ m.editions }} ltd</span>{% endif %}</td>
+          <td class="an-nowrap">{{ m.year_span }}</td>
+          <td>{{ m.models|join(', ') }}</td>
+          <td>{{ m.calibres|join(', ') }}</td>
+          <td>{{ tally(m.complications) }}</td>
+          <td>{{ tally(m.escapements) }}</td>
+          <td>{{ tally(m.metals) }}</td>
+          <td class="num">{% if m.value_n %}{{ money(m.value) }}{% if m.value_n < m.count %}<span class="an-muted"> ({{ m.value_n }} valued)</span>{% endif %}{% else %}<span class="an-muted">—</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section class="an-section an-grid">
+    <div><h3>Complications across the independents</h3><div class="an-chips">{{ tally(profile.complications) }}</div></div>
+    <div><h3>Escapements</h3><div class="an-chips">{{ tally(profile.escapements) }}</div></div>
+    <div><h3>Movement type · origin</h3><div class="an-chips">{{ tally(profile.movement_types) }}{{ tally(profile.movement_origin) }}</div></div>
+    <div><h3>Case metals</h3><div class="an-chips">{{ tally(profile.metals) }}</div></div>
+    <div><h3>By decade of production</h3><div class="an-chips">{{ tally(profile.decades) }}</div></div>
+    <div><h3>The manufactures alongside</h3><div class="an-chips">{{ tally(profile.other_brands) }}</div></div>
+  </section>
+  <section class="an-section an-figures">
+    <div class="an-figure"><div class="an-figure-n">{{ profile.independent_count }}<span class="an-muted"> / {{ profile.total }}</span></div><div class="an-figure-l">independents in the collection</div></div>
+    <div class="an-figure"><div class="an-figure-n">{{ money(profile.price_independent) }}</div><div class="an-figure-l">paid for the independents{% if profile.price_total %} · {{ '{:.0%}'.format(profile.price_independent / profile.price_total) }} of all purchases{% endif %}</div></div>
+    {% if profile.value_independent_n %}<div class="an-figure"><div class="an-figure-n">{{ money(profile.value_independent) }}</div><div class="an-figure-l">current value of {{ profile.value_independent_n }} valued independents</div></div>{% endif %}
+  </section>
+
+  {% elif category == 'coins' %}
+  <section class="an-section an-figures">
+    {% for name, n in profile.periods %}<div class="an-figure"><div class="an-figure-n">{{ n }}</div><div class="an-figure-l">{{ name }}</div></div>{% endfor %}
+  </section>
+  <section class="an-section">
+    <h2>The Greek world, region by region</h2>
+    <table class="an-table">
+      <thead><tr><th>Region</th><th class="num">Coins</th><th>Span</th><th>Authorities</th><th>Mints</th><th>Denominations</th><th>Metals</th></tr></thead>
+      <tbody>
+      {% for g in profile.regions %}
+        <tr>
+          <td class="an-strong">{{ g.region }}</td>
+          <td class="num">{{ g.count }}</td>
+          <td class="an-nowrap">{{ g.span }}</td>
+          <td>{{ g.authorities|join(', ') }}</td>
+          <td>{{ g.mints|join(', ') }}</td>
+          <td>{{ tally(g.denominations) }}</td>
+          <td>{{ tally(g.metals) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section class="an-section">
+    <h2>Weight standards</h2>
+    <p class="an-muted">Each coin is matched to the nearest standard for its denomination within 7 %; the rest are off-standard (worn, clipped, plated, or a local standard not modelled).</p>
+    <table class="an-table">
+      <thead><tr><th>Denomination</th><th class="num">Coins</th><th class="num">Mean g</th><th class="num">Range g</th><th>Standards</th></tr></thead>
+      <tbody>
+      {% for s in profile.standards %}
+        <tr>
+          <td class="an-strong">{{ s.denomination }}</td>
+          <td class="num">{{ s.count }}</td>
+          <td class="num">{{ '%.2f'|format(s.mean) }}</td>
+          <td class="num an-nowrap">{{ '%.2f'|format(s.min) }} – {{ '%.2f'|format(s.max) }}</td>
+          <td>{{ tally(s.standards) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section class="an-section an-grid">
+    <div><h3>Metals</h3><div class="an-chips">{{ tally(profile.metals) }}</div></div>
+    <div><h3>Denominations</h3><div class="an-chips">{{ tally(profile.denominations) }}</div></div>
+    <div><h3>Issuing authorities</h3><div class="an-chips">{{ tally(profile.authorities) }}</div></div>
+    <div><h3>Mints</h3><div class="an-chips">{{ tally(profile.mints) }}</div></div>
+    <div><h3>Grades <span class="an-muted">· {{ profile.graded }} slabbed</span></h3><div class="an-chips">{{ tally(profile.grades) }}</div></div>
+    <div><h3>Die axes</h3><div class="an-chips">{{ tally(profile.die_axes) }}</div></div>
+    <div><h3>Other ancient series held</h3><div class="an-chips">{{ tally(profile.other_ancient) }}</div></div>
+    <div><h3>Modern coinage held</h3><div class="an-chips">{{ tally(profile.modern_regions) }}</div></div>
+  </section>
+
+  {% else %}
+  <section class="an-section an-figures">
+    <div class="an-figure"><div class="an-figure-n">{{ profile.colonial_count }}</div><div class="an-figure-l">colonial notes · {{ profile.empires|length }} empires</div></div>
+    <div class="an-figure"><div class="an-figure-n">{{ profile.us_count }}</div><div class="an-figure-l">United States notes</div></div>
+    <div class="an-figure"><div class="an-figure-n">{{ profile.other_count }}</div><div class="an-figure-l">other world notes</div></div>
+    {% if profile.graded %}<div class="an-figure"><div class="an-figure-n">{{ '%.1f'|format(profile.avg_grade) }}</div><div class="an-figure-l">average grade of {{ profile.graded }} graded · {{ profile.gem_count }} at 65 or better</div></div>{% endif %}
+  </section>
+  <section class="an-section">
+    <h2>Colonial notes, empire by empire</h2>
+    <table class="an-table">
+      <thead><tr><th>Empire</th><th class="num">Notes</th><th>Span</th><th>Territories</th><th>Issuers</th><th>Printers</th><th class="num">Avg grade</th></tr></thead>
+      <tbody>
+      {% for e in profile.empires %}
+        <tr>
+          <td class="an-strong">{{ e.empire }}</td>
+          <td class="num">{{ e.count }}</td>
+          <td class="an-nowrap">{{ e.span }}</td>
+          <td>{{ tally(e.countries) }}</td>
+          <td>{{ e.issuers|join('; ') }}</td>
+          <td>{{ e.printers|join('; ') }}</td>
+          <td class="num">{% if e.avg_grade %}{{ '%.1f'|format(e.avg_grade) }}{% else %}<span class="an-muted">—</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section class="an-section an-grid">
+    <div><h3>United States by note class</h3><div class="an-chips">{{ tally(profile.us_classes) }}</div></div>
+    <div><h3>United States issuers</h3><div class="an-chips">{{ tally(profile.us_issuers) }}</div></div>
+    <div><h3>United States by decade</h3><div class="an-chips">{{ tally(profile.us_decades) }}</div></div>
+    <div><h3>Colonial by decade</h3><div class="an-chips">{{ tally(profile.colonial_decades) }}</div></div>
+    <div><h3>Other world notes</h3><div class="an-chips">{{ tally(profile.other_countries) }}</div></div>
+    <div><h3>Other notes by type · decade</h3><div class="an-chips">{{ tally(profile.other_types) }}{{ tally(profile.other_decades) }}</div></div>
+    <div><h3>Printers</h3><div class="an-chips">{{ tally(profile.printers) }}</div></div>
+    <div><h3>Grading services</h3><div class="an-chips">{{ tally(profile.grading) }}</div></div>
+  </section>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const runUrl = {{ url_for('analysis_run', category=category)|tojson }};
+  const statusUrl = {{ url_for('analysis_status', category=category)|tojson }};
+  const statusEl = document.getElementById('analysisStatus');
+  const refresh = document.getElementById('analysisRefresh');
+  const waiting = document.getElementById('analysisWaiting');
+  let started = null;
+
+  function setStatus(text) { if (statusEl) statusEl.textContent = text; }
+
+  function poll() {
+    fetch(statusUrl).then(r => r.json()).then(d => {
+      if (!d.ok) return;
+      if (d.status === 'running') {
+        started = started || Date.now();
+        const secs = Math.round((Date.now() - started) / 1000);
+        setStatus('Writing… ' + secs + 's');
+        setTimeout(poll, 5000);
+        return;
+      }
+      window.location.reload();
+    }).catch(() => setTimeout(poll, 8000));
+  }
+  function start() {
+    setStatus('Starting…');
+    if (refresh) refresh.disabled = true;
+    fetch(runUrl, { method: 'POST' }).then(r => r.json()).then(d => {
+      if (d && d.ok) { started = Date.now(); poll(); }
+      else setStatus('Could not start');
+    }).catch(() => setStatus('Could not start'));
+  }
+  if (refresh) refresh.addEventListener('click', function () {
+    const essay = document.getElementById('analysisEssay');
+    if (essay) essay.innerHTML = '<div class="an-waiting"><div class="an-spinner" aria-hidden="true"></div><div class="an-waiting-text">Writing a fresh analysis… this takes a minute or two.</div></div>';
+    start();
+  });
+  {% if analysis_running %}started = Date.now(); poll();{% elif analysis_autorun %}start();{% endif %}
+})();
+</script>

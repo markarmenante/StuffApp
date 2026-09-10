@@ -15,6 +15,7 @@
      filter pills (Own / Sold / Carp / etc.) all build URLs without
      the ?at= param and would silently break the navigation chain. #}
   {%- set _market = market_mode|default(false) -%}
+  {%- set _analysis = analysis_mode|default(false) -%}
   {# Market Scan — coins and banknotes only. The pill swaps the list for
      live buy candidates and reads "Collection" while it is showing them;
      pressing Collection returns to the normal list. #}
@@ -23,13 +24,37 @@
     <a href="{{ url_for('list_view', category=category) }}"
        class="toolbar-btn pill active market-pill"
        title="Back to the collection">Collection</a>
-    {% else %}
+    {% elif not _analysis %}
     <a href="{{ url_for('market_view', category=category) }}"
        class="toolbar-btn pill market-pill"
        title="Live buy candidates from eBay, Stack's Bowers, Heritage, dealers and auction houses">Market Scan</a>
     {% endif %}
   {% endif %}
-  {% if not at_property and not _market %}
+  {# Analysis — watches, coins and banknotes. The pill swaps the list for
+     an in-depth horological / numismatic reading of the collection and
+     reads "Collection" while it is showing; pressing Collection returns
+     to the list. #}
+  {% if category in ('watches', 'coins', 'banknotes') and not at_property and not _market %}
+    {% if _analysis %}
+    <a href="{{ url_for('list_view', category=category) }}"
+       class="toolbar-btn pill active analysis-pill"
+       title="Back to the collection">Collection</a>
+    <button type="button" class="toolbar-btn pill" id="analysisRefresh"
+            title="Write the analysis again from the collection as it stands now">Refresh</button>
+    <span class="analysis-status" id="analysisStatus">
+      {%- if analysis_running -%}Writing…
+      {%- elif analysis and analysis['status'] == 'done' and analysis['finished_at'] -%}
+        Written {{ analysis['finished_at'][:10] }}{% if analysis_stale %} · collection changed since{% endif %}
+      {%- elif analysis and analysis['status'] == 'failed' -%}Failed: {{ analysis['error'] }}
+      {%- endif -%}
+    </span>
+    {% else %}
+    <a href="{{ url_for('analysis_view', category=category) }}"
+       class="toolbar-btn pill analysis-pill"
+       title="In-depth analysis of the collection — {{ 'the independent watchmakers' if category == 'watches' else ('the ancient Greek coinage' if category == 'coins' else 'colonial, United States and world notes') }}">Analysis</a>
+    {% endif %}
+  {% endif %}
+  {% if not at_property and not _market and not _analysis %}
   <a href="{{ url_for('new_record', category=category) }}"
      class="toolbar-btn add"
      title="Add {{ cat_info.singular }}"
@@ -51,7 +76,7 @@
   {% if at_property and at_property_url %}
   <a class="list-at-back" href="{{ at_property_url }}" title="Back to {{ at_property }}">&larr; {{ at_property }}</a>
   {% endif %}
-  {% if category == 'coins' and not at_property and not _market %}
+  {% if category == 'coins' and not at_property and not _market and not _analysis %}
   {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
   <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}"
      class="toolbar-btn pill"
@@ -86,7 +111,7 @@
      title="Collection report grouped by artist, with biographies and object notes (PDF)"
      target="_blank">Report</a>
   {% endif %}
-  {% if category == 'banknotes' and not at_property and not _market %}
+  {% if category == 'banknotes' and not at_property and not _market and not _analysis %}
   {# History state rides along on every banknote pill so toggling a filter
      doesn't silently switch the panels back on. Default (on) keeps URLs
      clean by passing None. #}
@@ -103,7 +128,7 @@
   <a href="{{ url_for('banknotes_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
      title="World distribution for the current filter — pins at the issuing city, or the era's principal city">Map</a>
   {% endif %}
-  {% if category == 'watches' and not at_property %}
+  {% if category == 'watches' and not at_property and not _analysis %}
   {% if has_in_service or coin_filter == 'in_service' %}
   <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'in_service' else 'in_service') }}"
      class="toolbar-btn pill {% if coin_filter == 'in_service' %}active{% endif %}"
@@ -145,7 +170,7 @@
      Watches label the Ordered stop "Commissioned", matching the
      detail page. Banknotes carry the history toggle along so cycling
      doesn't silently flip the panels back on. #}
-  {% if status_cycle and status_cycle|length > 1 and not at_property and not _market %}
+  {% if status_cycle and status_cycle|length > 1 and not at_property and not _market and not _analysis %}
   {%- set _st_idx = status_cycle.index(status_current) if status_current in status_cycle else 0 -%}
   {%- set _st_next = status_cycle[(_st_idx + 1) % (status_cycle|length)] -%}
   {%- set _st_hist = (None if show_history else '0') if category == 'banknotes' else None -%}
@@ -159,7 +184,7 @@
   {% endif %}
   {# Every list carries the search bar in its sticky toolbar — even the
      short ones — so the subheading reads the same across categories. #}
-  {% if not _market %}
+  {% if not _market and not _analysis %}
   <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
     <div class="search-wrap">
       <button type="submit" title="Search">🔍</button>
@@ -178,7 +203,9 @@
 </div>
 
 <!-- List -->
-{% if rows %}
+{% if _analysis %}
+  {% include 'partials/analysis.html' %}
+{% elif rows %}
 <div class="item-list item-list-{{ category }}">
   {# Properties: bold divider where the Residential block ends and the
      Commercial block begins. ns.prev tracks the prior row's type so we

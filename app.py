@@ -5498,6 +5498,19 @@ def init_db():
          'created_at TEXT NOT NULL)'),
         'CREATE INDEX IF NOT EXISTS idx_market_scan_items_scan ON market_scan_items(scan_id)',
         'CREATE INDEX IF NOT EXISTS idx_market_scan_items_cat_status ON market_scan_items(category, status)',
+        # Collection Analysis: one row per essay run (watches / coins /
+        # banknotes); the newest 'done' row is what the Analysis page shows.
+        ('CREATE TABLE IF NOT EXISTS collection_analyses ('
+         'id TEXT PRIMARY KEY, '
+         'category TEXT NOT NULL, '
+         'started_at TEXT NOT NULL, '
+         'finished_at TEXT, '
+         'status TEXT NOT NULL, '
+         'model TEXT, '
+         'markdown TEXT, '
+         'profile_hash TEXT, '
+         'error TEXT)'),
+        'CREATE INDEX IF NOT EXISTS idx_collection_analyses_cat ON collection_analyses(category, started_at)',
         # Trimmed note image -> the untrimmed photo it was cut from.
         # The trimmer keeps the original on disk but used to drop the
         # reference, so a bad crop could never be redone (a shaved note
@@ -15239,6 +15252,909 @@ def market_item_dismiss(category, item_id):
     db.execute("UPDATE market_scan_items SET status = 'dismissed' WHERE id = ?", [item_id])
     db.commit()
     return jsonify({'ok': True})
+
+
+
+# ---------------------------------------------------------------------------
+# Collection Analysis — Watches, Coins and Banknotes
+#
+# The "Analysis" pill on those three lists swaps the rows for an in-depth
+# horological / numismatic reading of the collection. Two layers:
+#
+#   1. A profile computed from the records every time the page loads —
+#      counts, makers, periods, mints, weight standards, empires, grades —
+#      rendered as tables, so it is always current.
+#   2. An essay written by Claude from that profile plus a compact listing
+#      of the pieces, stored in collection_analyses and shown until it is
+#      refreshed (the collection rarely changes enough for the reading to
+#      go stale; a Refresh pill regenerates it in the background).
+#
+# Focus, as asked: watches → the independent watchmakers; coins → the
+# ancient Greek series; banknotes → colonial, United States and other.
+# ---------------------------------------------------------------------------
+
+ANALYSIS_CATEGORIES = ('watches', 'coins', 'banknotes')
+ANALYSIS_FOCUS = {
+    'watches': 'the independent watchmakers',
+    'coins': 'the ancient Greek coinage',
+    'banknotes': 'colonial, United States and world notes',
+}
+_ANALYSIS_LOCK = threading.Lock()
+_ANALYSIS_INFLIGHT = set()
+
+# Makers who own their name and their movements outside the groups —
+# the AHCI tradition and the ateliers that grew from it. Matched as a
+# case-insensitive substring of the brand so "Kari Voutilainen" and
+# "Voutilainen" both land.
+INDEPENDENT_WATCHMAKERS = (
+    'F.P. Journe', 'Journe', 'Voutilainen', 'Urban Jürgensen', 'Urban Jurgensen',
+    'Roger W Smith', 'Roger W. Smith', 'Roger Smith', 'Laurent Ferrier',
+    'Philippe Dufour', 'Dufour', 'Petermann Bédat', 'Petermann Bedat',
+    'J.N. Shapiro', 'Shapiro', 'Andreas Strehler', 'Strehler', 'Hajime Asaoka',
+    'Asaoka', 'Grönefeld', 'Gronefeld', 'Kurono', 'Ming', 'McGonigle',
+    'Sartory-Billard', 'Sartory Billard', 'Akrivia', 'Rexhep Rexhepi',
+    'De Bethune', 'MB&F', 'Greubel Forsey', 'Romain Gauthier', 'Christophe Claret',
+    'Vianney Halter', 'Daniel Roth', 'Ludovic Ballouard', 'Raúl Pagès', 'Raul Pages',
+    'Simon Brette', 'Theo Auffret', 'Sylvain Pinaud', 'Cyril Brivet-Naudot',
+    'Bernhard Lederer', 'Konstantin Chaykin', 'Masahiro Kikuno', 'Naoya Hida',
+    'Garrick', 'Struthers', 'Habring', 'H. Moser', 'Moser', 'Ferdinand Berthoud',
+    'Czapek', 'Armin Strom', 'Speake-Marin', 'Speake Marin', 'Antoine Preziuso',
+    'Kudoke', 'Lang & Heyne', 'Lang and Heyne', 'Moritz Grossmann', 'Ochs und Junior',
+    'Ochs & Junior', 'Benzinger', 'Sarpaneva', 'Bexei', 'Fiona Krüger', 'Krüger',
+    'Rexhepi', 'Gauthier', 'Halter', 'Beat Haldimann', 'Haldimann',
+    'Svend Andersen', 'Vincent Calabrese', 'Calabrese', 'George Daniels',
+    'Daniels', 'Derek Pratt', 'Paul Gerber', 'Thomas Prescher', 'Prescher',
+    'Marco Lang', 'Aaron Becsei', 'Becsei', 'Urwerk', 'Ressence', 'Winnerl',
+    'Krayon', 'Atelier Wen', 'Furlan Marri', 'Massena', 'Anoma', 'Bovet',
+    'Charles Frodsham', 'Frodsham', 'Jean Daniel Nicolas', 'Comblémine',
+    'Comblemine', 'Dominique Renaud', 'Rémy Cools', 'Remy Cools',
+    'John-Mikaël Flaux', 'Flaux', 'Antoine Martin', 'Cabestan', 'Hautlence',
+    'Schwarz Etienne', 'Schwarz-Etienne', 'Trilobe', 'Parmigiani',
+)
+# Brands whose names collide with a substring above but are not independents.
+_NOT_INDEPENDENT = ()
+
+
+def _analysis_active_rows(db, table):
+    return db.execute(
+        f"SELECT * FROM {table} WHERE status IS NULL OR status IN ('Own', 'Ordered')"
+    ).fetchall()
+
+
+def _watch_is_independent(brand):
+    b = (brand or '').strip()
+    if not b or b in _NOT_INDEPENDENT:
+        return False
+    low = b.lower()
+    return any(name.lower() in low for name in INDEPENDENT_WATCHMAKERS)
+
+
+def _analysis_money(rows, field):
+    total = 0.0
+    n = 0
+    for r in rows:
+        v = _row_get(r, field)
+        try:
+            if v not in (None, ''):
+                total += float(v)
+                n += 1
+        except (TypeError, ValueError):
+            continue
+    return total, n
+
+
+def _analysis_tally(values, limit=None):
+    counts = {}
+    for v in values:
+        v = (str(v) if v is not None else '').strip()
+        if not v:
+            continue
+        counts[v] = counts.get(v, 0) + 1
+    items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return items[:limit] if limit else items
+
+
+def _safe_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _decade(year):
+    y = _safe_int(year)
+    return f"{(y // 10) * 10}s" if y is not None else None
+
+
+def _bc(year):
+    if year is None:
+        return ''
+    return f"{-year} BC" if year < 0 else f"AD {year}"
+
+
+_BASE_FUNCTIONS = ('Hours', 'Minutes', 'Seconds', 'Open Back', 'Hacking', 'Small Seconds')
+
+
+def _watch_complications(r):
+    out = []
+    for c in (r['complications'] or '').split(','):
+        c = c.strip()
+        if c and c not in _BASE_FUNCTIONS:
+            out.append(c)
+    return out
+
+
+def _analysis_watches_profile(db):
+    rows = _analysis_active_rows(db, 'watches')
+    indies = [r for r in rows if _watch_is_independent(r['brand'])]
+    others = [r for r in rows if not _watch_is_independent(r['brand'])]
+    makers = {}
+    for r in indies:
+        key = (r['brand'] or '').strip()
+        m = makers.setdefault(key, {'brand': key, 'count': 0, 'models': [], 'years': [],
+                                    'calibres': [], 'movement_types': [], 'escapements': [],
+                                    'complications': [], 'metals': [], 'price': 0.0,
+                                    'value': 0.0, 'value_n': 0, 'editions': 0})
+        m['count'] += 1
+        if r['model']:
+            m['models'].append(str(r['model']).strip())
+        y = _safe_int(r['year'])
+        if y:
+            m['years'].append(y)
+        if r['calibre']:
+            m['calibres'].append(str(r['calibre']).strip())
+        m['movement_types'].append(r['movement_type'])
+        m['escapements'].append(r['escapement'])
+        m['metals'].append(r['metal'])
+        m['complications'].extend(_watch_complications(r))
+        try:
+            m['price'] += float(r['price'] or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            if r['value'] not in (None, ''):
+                m['value'] += float(r['value'])
+                m['value_n'] += 1
+        except (TypeError, ValueError):
+            pass
+        if r['edition']:
+            m['editions'] += 1
+    maker_list = []
+    for m in sorted(makers.values(), key=lambda x: (-x['count'], x['brand'])):
+        years = m['years']
+        maker_list.append({
+            'brand': m['brand'],
+            'count': m['count'],
+            'models': [name for name, _ in _analysis_tally(m['models'], 8)],
+            'year_span': (f"{min(years)}–{max(years)}" if len(set(years)) > 1
+                          else (str(years[0]) if years else '')),
+            'calibres': [name for name, _ in _analysis_tally(m['calibres'], 6)],
+            'movement_types': _analysis_tally(m['movement_types'], 3),
+            'escapements': _analysis_tally(m['escapements'], 3),
+            'complications': _analysis_tally(m['complications'], 6),
+            'metals': _analysis_tally(m['metals'], 4),
+            'price': m['price'],
+            'value': m['value'],
+            'value_n': m['value_n'],
+            'editions': m['editions'],
+        })
+    price_all, _ = _analysis_money(rows, 'price')
+    price_ind, _ = _analysis_money(indies, 'price')
+    value_all, value_all_n = _analysis_money(rows, 'value')
+    value_ind, value_ind_n = _analysis_money(indies, 'value')
+    complications = []
+    for r in indies:
+        complications.extend(_watch_complications(r))
+    return {
+        'category': 'watches',
+        'total': len(rows),
+        'independent_count': len(indies),
+        'other_count': len(others),
+        'makers': maker_list,
+        'other_brands': _analysis_tally([r['brand'] for r in others], 12),
+        'complications': _analysis_tally(complications, 12),
+        'escapements': _analysis_tally([r['escapement'] for r in indies], 8),
+        'movement_types': _analysis_tally([r['movement_type'] for r in indies], 6),
+        'movement_origin': _analysis_tally([r['movement_origin'] for r in indies], 4),
+        'metals': _analysis_tally([r['metal'] for r in indies], 8),
+        'decades': sorted(_analysis_tally([_decade(r['year']) for r in indies]),
+                          key=lambda kv: kv[0]),
+        'price_total': price_all, 'price_independent': price_ind,
+        'value_total': value_all, 'value_total_n': value_all_n,
+        'value_independent': value_ind, 'value_independent_n': value_ind_n,
+        'items': [
+            {'brand': r['brand'], 'model': r['model'], 'reference': r['reference'],
+             'year': r['year'], 'calibre': r['calibre'], 'movement_type': r['movement_type'],
+             'escapement': r['escapement'], 'balance_wheel': r['balance_wheel'],
+             'complications': r['complications'], 'metal': r['metal'],
+             'case_diameter': r['case_diameter'], 'edition': r['edition'],
+             'movement_origin': r['movement_origin'], 'status': r['status']}
+            for r in sorted(indies, key=lambda r: ((r['brand'] or ''), _safe_int(r['year']) or 0))
+        ],
+    }
+
+
+# Ancient Greek coinage: everything ancient that is not Roman, Byzantine,
+# Judaean, Celtic or Eastern (Parthian / Sasanian / Indian). Achaemenid
+# sigloi and darics stay in — they were struck for and circulated in the
+# Greek world of Asia Minor and are catalogued with it.
+_NOT_GREEK = ('roman', 'byzantin', 'judaea', 'judea', 'celtic', 'parthia', 'sasan',
+              'kushan', 'india', 'gaul', 'iberia', 'britain', 'nabat', 'himyar',
+              'axum', 'china', 'arab', 'islamic', 'umayyad', 'abbasid')
+
+
+def _coin_is_ancient_greek(r):
+    d = _safe_int(r['date_1'])
+    if d is None or d >= 476:
+        return False
+    blob = f"{r['region'] or ''} {r['authority'] or ''}".lower()
+    return not any(k in blob for k in _NOT_GREEK)
+
+
+def _greek_period(year):
+    if year is None:
+        return 'Undated'
+    if year < -480:
+        return 'Archaic (to 480 BC)'
+    if year < -323:
+        return 'Classical (480–323 BC)'
+    if year < -31:
+        return 'Hellenistic (323–31 BC)'
+    return 'Roman-era Greek (after 31 BC)'
+
+
+# Weight standards by denomination: (name, target grams). A coin is
+# assigned the nearest target within 7 %; otherwise it is "off-standard"
+# (worn, clipped, plated, or a local standard not listed).
+_COIN_STANDARDS = {
+    'tetradrachm': (('Attic', 17.2), ('reduced Attic (Hellenistic)', 16.3),
+                    ('Chian / Rhodian', 15.2), ('Ptolemaic / Phoenician', 14.2),
+                    ('Cistophoric', 12.6)),
+    'didrachm': (('Attic / Euboic', 8.6), ('Achaean (Italiote nomos)', 7.9),
+                 ('Campanian', 7.3), ('Aeginetan', 12.2)),
+    'nomos': (('Achaean (Italiote)', 7.9), ('reduced Italiote', 6.6), ('Attic', 8.6)),
+    'stater': (('Aeginetan', 12.2), ('Corinthian / Euboic-Attic', 8.6),
+               ('Persic / Lydian light gold', 8.1), ('Lydian heavy (Kroiseid)', 10.7),
+               ('Milesian electrum', 14.1), ('Phocaic electrum', 16.1),
+               ('Thasian / Thraco-Macedonian', 9.8), ('Phoenician', 14.0),
+               ('Cyzicene electrum', 16.0)),
+    'drachm': (('Attic', 4.3), ('Aeginetan', 6.1), ('Rhodian', 3.8),
+               ('Corinthian', 2.9), ('Persic', 5.5)),
+    'hemidrachm': (('Attic', 2.15), ('Aeginetan', 3.0), ('Rhodian', 1.9)),
+    'tetrobol': (('Attic', 2.9), ('Aeginetan', 4.1)),
+    'triobol': (('Attic', 2.15), ('Aeginetan', 3.0)),
+    'diobol': (('Attic', 1.43), ('Aeginetan', 2.0)),
+    'obol': (('Attic', 0.72), ('Aeginetan', 1.0)),
+    'dekadrachm': (('Attic', 43.0),),
+    'decadrachm': (('Attic', 43.0),),
+    'octodrachm': (('Ptolemaic gold', 27.8), ('Thraco-Macedonian silver', 29.0)),
+    'siglos': (('Persic', 5.5),),
+    'daric': (('Persic gold', 8.4),),
+    'hekte': (('Phocaic (sixth stater)', 2.6), ('Milesian (sixth stater)', 2.35)),
+    'trite': (('Milesian / Lydian (third stater)', 4.7), ('Phocaic (third stater)', 5.4)),
+    'tristater': (('Aeginetan', 36.6),),
+    'distater': (('Attic gold', 17.2), ('Corinthian', 17.2)),
+}
+
+
+def _coin_standard(denomination, weight):
+    key = (denomination or '').strip().lower()
+    try:
+        w = float(weight)
+    except (TypeError, ValueError):
+        return None
+    if not key or w <= 0:
+        return None
+    targets = _COIN_STANDARDS.get(key)
+    if not targets:
+        for k, v in _COIN_STANDARDS.items():
+            if k in key:
+                targets = v
+                break
+    if not targets:
+        return None
+    best = None
+    for name, target in targets:
+        dev = abs(w - target) / target
+        if dev <= 0.07 and (best is None or dev < best[1]):
+            best = (name, dev)
+    return best[0] if best else 'off-standard'
+
+
+def _analysis_coins_profile(db):
+    rows = _analysis_active_rows(db, 'coins')
+    greek = [r for r in rows if _coin_is_ancient_greek(r)]
+    greek_ids = {r['id'] for r in greek}
+    ancient_other = [r for r in rows if r['id'] not in greek_ids
+                     and _safe_int(r['date_1']) is not None and _safe_int(r['date_1']) < 476]
+    other_ids = {r['id'] for r in ancient_other}
+    modern = [r for r in rows if r['id'] not in greek_ids and r['id'] not in other_ids]
+    regions = {}
+    for r in greek:
+        key = (r['region'] or r['authority'] or 'Unknown').strip()
+        g = regions.setdefault(key, {'region': key, 'count': 0, 'authorities': [], 'mints': [],
+                                     'denominations': [], 'metals': [], 'years': [], 'price': 0.0})
+        g['count'] += 1
+        g['authorities'].append(r['authority'])
+        g['mints'].append(r['mint'])
+        g['denominations'].append(r['denomination'])
+        g['metals'].append((r['metal'] or '').split(' ')[0])
+        y = _safe_int(r['date_1'])
+        if y is not None:
+            g['years'].append(y)
+        try:
+            g['price'] += float(r['price'] or 0)
+        except (TypeError, ValueError):
+            pass
+    region_list = []
+    for g in sorted(regions.values(), key=lambda x: (-x['count'], x['region'])):
+        ys = g['years']
+        region_list.append({
+            'region': g['region'], 'count': g['count'],
+            'authorities': [a for a, _ in _analysis_tally(g['authorities'], 6)],
+            'mints': [m for m, _ in _analysis_tally(g['mints'], 5)],
+            'denominations': _analysis_tally(g['denominations'], 5),
+            'metals': _analysis_tally(g['metals'], 4),
+            'span': (f"{_bc(min(ys))}–{_bc(max(ys))}" if len(set(ys)) > 1
+                     else (_bc(ys[0]) if ys else '')),
+            'price': g['price'],
+        })
+    standards = {}
+    weights = {}
+    for r in greek:
+        denom = (r['denomination'] or '').strip()
+        if not denom:
+            continue
+        std = _coin_standard(denom, r['weight'])
+        if std:
+            standards.setdefault(denom, {})
+            standards[denom][std] = standards[denom].get(std, 0) + 1
+        try:
+            w = float(r['weight'])
+            if w > 0:
+                weights.setdefault(denom, []).append(w)
+        except (TypeError, ValueError):
+            pass
+    standard_list = []
+    for denom, ws in sorted(weights.items(), key=lambda kv: -len(kv[1])):
+        stds = sorted(standards.get(denom, {}).items(), key=lambda kv: -kv[1])
+        standard_list.append({
+            'denomination': denom, 'count': len(ws),
+            'mean': sum(ws) / len(ws), 'min': min(ws), 'max': max(ws),
+            'standards': stds,
+        })
+    period_order = ['Archaic (to 480 BC)', 'Classical (480–323 BC)',
+                    'Hellenistic (323–31 BC)', 'Roman-era Greek (after 31 BC)', 'Undated']
+    periods = sorted(_analysis_tally([_greek_period(_safe_int(r['date_1'])) for r in greek]),
+                     key=lambda kv: period_order.index(kv[0]) if kv[0] in period_order else 99)
+    price_all, _ = _analysis_money(rows, 'price')
+    price_greek, _ = _analysis_money(greek, 'price')
+    return {
+        'category': 'coins',
+        'total': len(rows),
+        'greek_count': len(greek),
+        'ancient_other_count': len(ancient_other),
+        'modern_count': len(modern),
+        'regions': region_list,
+        'periods': periods,
+        'metals': _analysis_tally([r['metal'] for r in greek], 8),
+        'denominations': _analysis_tally([r['denomination'] for r in greek], 12),
+        'authorities': _analysis_tally([r['authority'] for r in greek], 15),
+        'mints': _analysis_tally([r['mint'] for r in greek], 15),
+        'grades': _analysis_tally([r['grade'] for r in greek], 10),
+        'graded': sum(1 for r in greek if (r['grading_authority'] or '').strip()),
+        'die_axes': _analysis_tally([str(r['die_axis']).strip().rstrip('h') + 'h'
+                                     for r in greek if r['die_axis'] not in (None, '')], 12),
+        'standards': standard_list,
+        'other_ancient': _analysis_tally([r['region'] for r in ancient_other], 8),
+        'modern_regions': _analysis_tally([r['region'] for r in modern], 8),
+        'price_total': price_all, 'price_greek': price_greek,
+        'items': [
+            {'region': r['region'], 'authority': r['authority'], 'mint': r['mint'],
+             'denomination': r['denomination'], 'metal': r['metal'],
+             'date': r['date_1_text'] or _bc(_safe_int(r['date_1'])),
+             'date_1': _safe_int(r['date_1']), 'weight': r['weight'], 'size': r['size'],
+             'die_axis': r['die_axis'], 'grade': r['grade'],
+             'standard': _coin_standard(r['denomination'], r['weight']),
+             'description': (r['description'] or '')[:160]}
+            for r in sorted(greek, key=lambda r: ((r['region'] or ''), _safe_int(r['date_1']) or 0))
+        ],
+    }
+
+
+_EMPIRE_WORDS = (
+    ('British', ('british', 'england', 'english', 'britain', 'crown colony', 'east india company')),
+    ('French', ('french', 'france')),
+    ('Portuguese', ('portuguese', 'portugal')),
+    ('Spanish', ('spanish', 'spain')),
+    ('Dutch', ('dutch', 'netherlands')),
+    ('Belgian', ('belgian', 'belgium', 'leopold')),
+    ('Italian', ('italian', 'italy')),
+    ('German', ('german', 'germany')),
+    ('Japanese', ('japanese', 'japan')),
+    ('Danish', ('danish', 'denmark')),
+    ('Ottoman', ('ottoman',)),
+    ('Russian', ('russian', 'russia')),
+    ('American', ('united states', 'american', 'u.s.')),
+)
+_EMPIRE_BY_COUNTRY = {
+    'Dutch': ('netherlands indies', 'netherlands east indies', 'curaçao', 'curacao', 'suriname',
+              'surinam', 'netherlands antilles'),
+    'Portuguese': ('macau', 'macao', 'angola', 'mozambique', 'goa', 'portuguese india', 'timor',
+                   'cape verde', 'são tomé and príncipe', 'sao tome', 'portuguese guinea',
+                   'guinea-bissau'),
+    'Belgian': ('belgian congo', 'ruanda-urundi', 'congo free state'),
+    'French': ('algeria', 'tunisia', 'morocco', 'french indochina', 'indochina', 'indo-china',
+               'madagascar', 'new caledonia', 'tahiti', 'french polynesia', 'réunion', 'reunion',
+               'martinique', 'guadeloupe', 'french guiana', 'syria', 'lebanon', 'djibouti',
+               'french somaliland', 'cameroun', 'togo', 'senegal', 'saint-pierre and miquelon',
+               'new hebrides', 'french west africa', 'french equatorial africa', 'dahomey'),
+    'Italian': ('italian somaliland', 'eritrea', 'libya', 'italian east africa', 'dodecanese',
+                'rhodes', 'albania'),
+    'Spanish': ('cuba', 'puerto rico', 'spanish morocco', 'spanish guinea', 'fernando po'),
+    'Japanese': ('manchukuo', 'korea', 'taiwan', 'formosa'),
+    'Danish': ('danish west indies', 'faroe islands', 'greenland', 'iceland'),
+    'German': ('german east africa', 'kiautschou', 'german new guinea', 'kamerun', 'german south west africa'),
+}
+
+
+def _banknote_empire(country):
+    """Which empire a colonial note belongs to: from the country name
+    first ("British East Africa", "French West Africa"), then from a
+    table of colonies, then from the colonial timeline's opening words."""
+    name = (country or '').strip()
+    low = name.lower()
+    for empire, words in _EMPIRE_WORDS:
+        if any(low.startswith(w + ' ') for w in words):
+            return empire
+    for empire, names in _EMPIRE_BY_COUNTRY.items():
+        if any(low == n or low.startswith(n + ' ') or low.startswith(n + ',') for n in names):
+            return empire
+    try:
+        line = COUNTRY_COLONIAL.get(_country_key(name), '') or ''
+    except Exception:
+        line = ''
+    head = line.split(';')[0].split('.')[0].lower()
+    for empire, words in _EMPIRE_WORDS:
+        if any(w in head for w in words):
+            return empire
+    return 'Other'
+
+
+def _banknote_bucket(r):
+    """us / colonial / other. Colonial American issues (Pennsylvania Colony,
+    New Jersey…) file with the United States, as the list does, so the
+    colonial movement is the overseas empires."""
+    country = (r['country'] or '').strip()
+    low = country.lower()
+    if (low.startswith('united states') or low in ('usa', 'us', 'colonial america')
+            or low.startswith('confederate')):
+        return 'us'
+    try:
+        if _country_key(country) in ('us', 'colonial-america'):
+            return 'us'
+    except Exception:
+        pass
+    if (r['issue_type'] or '').strip().lower() == 'colonial':
+        return 'colonial'
+    return 'other'
+
+
+def _analysis_banknotes_profile(db):
+    rows = _analysis_active_rows(db, 'banknotes')
+    buckets = {'colonial': [], 'us': [], 'other': []}
+    for r in rows:
+        buckets[_banknote_bucket(r)].append(r)
+    colonial = buckets['colonial']
+    empires = {}
+    for r in colonial:
+        e = _banknote_empire(r['country'])
+        g = empires.setdefault(e, {'empire': e, 'count': 0, 'countries': [], 'years': [],
+                                   'issuers': [], 'printers': [], 'grades': []})
+        g['count'] += 1
+        g['countries'].append(r['country'])
+        g['issuers'].append(r['issuer'])
+        g['printers'].append(r['printer'])
+        y = _safe_int(r['date_1'])
+        if y:
+            g['years'].append(y)
+        try:
+            if r['grade_numeric'] not in (None, ''):
+                g['grades'].append(float(r['grade_numeric']))
+        except (TypeError, ValueError):
+            pass
+    empire_list = []
+    for g in sorted(empires.values(), key=lambda x: (-x['count'], x['empire'])):
+        ys = g['years']
+        empire_list.append({
+            'empire': g['empire'], 'count': g['count'],
+            'countries': _analysis_tally(g['countries']),
+            'issuers': [i for i, _ in _analysis_tally(g['issuers'], 6)],
+            'printers': [p for p, _ in _analysis_tally(g['printers'], 5)],
+            'span': f"{min(ys)}–{max(ys)}" if len(set(ys)) > 1 else (str(ys[0]) if ys else ''),
+            'avg_grade': (sum(g['grades']) / len(g['grades'])) if g['grades'] else None,
+        })
+    us = buckets['us']
+    us_classes = []
+    for r in us:
+        try:
+            if _country_key((r['country'] or '').strip()) == 'colonial-america':
+                us_classes.append('Colonial America')
+                continue
+            nc = _us_note_class(r)
+            us_classes.append(nc['name'] if nc else 'State, obsolete and other issues')
+        except Exception:
+            us_classes.append('Unclassified')
+    other = buckets['other']
+    grades_all = []
+    for r in rows:
+        try:
+            if r['grade_numeric'] not in (None, ''):
+                grades_all.append(float(r['grade_numeric']))
+        except (TypeError, ValueError):
+            pass
+
+    def _decades(rs):
+        return sorted(_analysis_tally([_decade(r['date_1']) for r in rs]), key=lambda kv: kv[0])
+
+    def _grade_label(r):
+        try:
+            if r['grade_numeric'] not in (None, ''):
+                return (f"{r['grading_authority'] or ''} {int(float(r['grade_numeric']))}"
+                        f"{(' ' + r['grade_modifier']) if r['grade_modifier'] else ''}").strip()
+        except (TypeError, ValueError):
+            pass
+        return r['grade'] or ''
+
+    def _items(rs):
+        return [
+            {'country': r['country'], 'denomination': r['denomination'], 'issuer': r['issuer'],
+             'issue_type': r['issue_type'], 'series': r['series'], 'pick': r['pick_number'],
+             'year': r['date_1_text'] or r['date_1'], 'printer': r['printer'],
+             'grade': _grade_label(r),
+             'empire': _banknote_empire(r['country']) if _banknote_bucket(r) == 'colonial' else None}
+            for r in sorted(rs, key=lambda r: ((r['country'] or ''), _safe_int(r['date_1']) or 0))
+        ]
+    price_all, _ = _analysis_money(rows, 'price')
+    return {
+        'category': 'banknotes',
+        'total': len(rows),
+        'colonial_count': len(colonial), 'us_count': len(us), 'other_count': len(other),
+        'empires': empire_list,
+        'colonial_decades': _decades(colonial),
+        'us_classes': _analysis_tally(us_classes),
+        'us_decades': _decades(us),
+        'us_issuers': _analysis_tally([r['issuer'] for r in us], 8),
+        'other_countries': _analysis_tally([r['country'] for r in other], 20),
+        'other_types': _analysis_tally([r['issue_type'] for r in other]),
+        'other_decades': _decades(other),
+        'printers': _analysis_tally([r['printer'] for r in rows], 10),
+        'grading': _analysis_tally([r['grading_authority'] for r in rows], 5),
+        'graded': len(grades_all),
+        'avg_grade': (sum(grades_all) / len(grades_all)) if grades_all else None,
+        'gem_count': sum(1 for g in grades_all if g >= 65),
+        'price_total': price_all,
+        'items_colonial': _items(colonial),
+        'items_us': _items(us),
+        'items_other': _items(other),
+    }
+
+
+def _analysis_profile(db, category):
+    if category == 'watches':
+        return _analysis_watches_profile(db)
+    if category == 'coins':
+        return _analysis_coins_profile(db)
+    return _analysis_banknotes_profile(db)
+
+
+def _analysis_profile_hash(profile):
+    import hashlib
+    slim = {k: v for k, v in profile.items() if not k.startswith('items')}
+    slim['n_items'] = sum(len(v) for k, v in profile.items() if k.startswith('items'))
+    return hashlib.sha1(json.dumps(slim, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def _analysis_latest(db, category):
+    return db.execute(
+        "SELECT * FROM collection_analyses WHERE category = ? "
+        "ORDER BY started_at DESC LIMIT 1", [category]).fetchone()
+
+
+_ANALYSIS_BRIEFS = {
+    'watches': (
+        "You are a senior horological writer — the depth of a Phillips or A Collected Man "
+        "catalogue essay crossed with a serious technical review. Write an in-depth analysis "
+        "of this private collection, concentrating on the independent watchmakers. Cover, with "
+        "real horological substance: what the collection says about its owner's taste and "
+        "thesis; each independent maker represented (the maker's place in the history of "
+        "independent watchmaking, the significance of the specific references and calibres "
+        "held, movement architecture — escapements, balances, remontoirs, resonance, "
+        "tourbillons, power reserves — finishing traditions, case metals and series sizes); "
+        "depth versus breadth per maker; the relationships and lineages between the makers "
+        "(Daniels → Smith, Journe → the Geneva school, the AHCI, Dufour's influence, the newer "
+        "generation); notable rarities and reference-level pieces; how the independents sit "
+        "against the manufacture watches also held; gaps a serious collector of independents "
+        "would notice; and where the collection stands in the current independent-watchmaking "
+        "landscape."
+    ),
+    'coins': (
+        "You are a senior numismatist writing for a scholarly collection catalogue (the "
+        "register of a Nomos, CNG or Leu sale essay). Write an in-depth analysis of this "
+        "private collection's ancient Greek coinage. Cover, with real numismatic substance: "
+        "the shape of the collection across the Archaic, Classical and Hellenistic periods and "
+        "across regions (Sicily and Magna Graecia, mainland Greece and the islands, Macedon "
+        "and Thrace, Asia Minor, the Seleucid, Ptolemaic and Bactrian kingdoms, the Persian "
+        "sigloi and darics); the weight standards the pieces follow and what that shows "
+        "(Attic, Aeginetan, Corinthian, Chian/Rhodian, Ptolemaic, the electrum standards) — "
+        "use the weights and standard assignments given; the mints, authorities and issuers "
+        "and the important series among them (Syracusan dekadrachms and tetradrachms, the "
+        "Athenian owl, Alexander and Lysimachos types, Aeginetan turtles, Thraco-Macedonian "
+        "tribal issues, the electrum of Kyzikos and Mytilene, and so on); iconography and "
+        "engraving — what the types and die work say; condition and grading pattern; die axes "
+        "where informative; concentrations and rarities; gaps a serious Greek collector would "
+        "notice; and how the collection compares in scope with well-known private Greek "
+        "collections."
+    ),
+    'banknotes': (
+        "You are a senior paper-money specialist writing a scholarly essay on a private "
+        "collection (the register of a Spink or Heritage world-paper catalogue essay). Write "
+        "an in-depth analysis of the collection in three movements — colonial notes, United "
+        "States notes, and the other world notes. For the colonial material: the empires "
+        "represented and what each empire's issuing model looked like (currency boards, "
+        "chartered and private banks, the Banque de l'Indochine and Banque de l'Algérie, the "
+        "Banco Nacional Ultramarino, the Banque du Congo Belge, the colonial governments), "
+        "the printers (De La Rue, Bradbury Wilkinson, Waterlow, American Bank Note, the "
+        "Banque de France works), design vocabulary, security features, and how the notes "
+        "track the transitions to independence; for the United States: the note classes held "
+        "(Legal Tender, Silver and Gold Certificates, National Bank Notes, Federal Reserve "
+        "issues, fractionals, Colonial and Continental issues), series, signatures, the "
+        "engraving and the significance of the specific notes; for the other world notes: "
+        "the themes that connect them (occupation and military issues, emergency and Notgeld, "
+        "new-nation first issues). Throughout: grading pattern and what the PMG/PCGS grades "
+        "held say about the collecting standard, printers and vignettes, rarities, gaps a "
+        "serious collector of colonial paper would notice, and the collection's overall thesis."
+    ),
+}
+
+
+def _analysis_prompt(category, profile):
+    slim = {k: v for k, v in profile.items() if not k.startswith('items')}
+    items = {k: v for k, v in profile.items() if k.startswith('items')}
+    items_text = json.dumps(items, default=str)[:60000]
+    return (
+        f"{_ANALYSIS_BRIEFS[category]}\n\n"
+        "Write in polished, confident prose — flowing paragraphs under clear headings "
+        "(use Markdown ## headings and ### sub-headings, bold for named pieces). Be "
+        "specific: name pieces, makers, mints, references, calibres, catalogue numbers and "
+        "figures from the data. Do not invent pieces that are not in the data; where you "
+        "draw on general knowledge to explain a piece's significance, keep it accurate and "
+        "mainstream. Do not include a preamble, a title line, disclaimers, or a summary of "
+        "what you were asked. Aim for roughly 1,800–2,600 words. Return Markdown only.\n\n"
+        f"FOCUS: {ANALYSIS_FOCUS[category]}\n\n"
+        f"COLLECTION PROFILE (computed from the records):\n{json.dumps(slim, default=str)}\n\n"
+        f"THE PIECES (compact listing):\n{items_text}\n"
+    )
+
+
+def _run_collection_analysis(category, analysis_id):
+    db = open_db_connection()
+    try:
+        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        if not api_key:
+            raise RuntimeError('ANTHROPIC_API_KEY is not configured on this instance')
+        try:
+            import anthropic
+        except ImportError:
+            raise RuntimeError('anthropic package not installed')
+        profile = _analysis_profile(db, category)
+        prompt = _analysis_prompt(category, profile)
+        client = anthropic.Anthropic(api_key=api_key, timeout=600)
+        model = anthropic_lookup_model(api_key, 'ANTHROPIC_ANALYSIS_MODEL',
+                                       default='auto-sonnet', fable_fallback='opus')
+        resp = _anthropic_create(
+            client, model=model, max_tokens=9000,
+            messages=[{'role': 'user', 'content': prompt}])
+        text = _strip_markdown_wrappers(_message_text(resp)).strip()
+        if not text:
+            raise RuntimeError('the model returned no text')
+        now = datetime.utcnow().isoformat()
+        db.execute("UPDATE collection_analyses SET status = 'done', finished_at = ?, "
+                   "model = ?, markdown = ?, profile_hash = ? WHERE id = ?",
+                   [now, str(model), text, _analysis_profile_hash(profile), analysis_id])
+        db.commit()
+        app.logger.info("collection analysis %s: %d chars from %s", category, len(text), model)
+    except Exception as e:
+        app.logger.warning("collection analysis %s failed: %s", category, e)
+        try:
+            db.execute("UPDATE collection_analyses SET status = 'failed', finished_at = ?, "
+                       "error = ? WHERE id = ?",
+                       [datetime.utcnow().isoformat(), str(e)[:400], analysis_id])
+            db.commit()
+        except Exception:
+            pass
+    finally:
+        with _ANALYSIS_LOCK:
+            _ANALYSIS_INFLIGHT.discard(category)
+        db.close()
+
+
+def _analysis_markdown_html(text):
+    """A small, safe Markdown renderer for the essay: headings, paragraphs,
+    bullet and numbered lists, bold/italic, simple tables. Everything is
+    escaped first; only the markup generated here goes out."""
+    import html as _html
+    from markupsafe import Markup
+    if not text:
+        return Markup('')
+
+    def inline(s):
+        s = _html.escape(s)
+        s = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+        s = re.sub(r'(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])', r'<em>\1</em>', s)
+        s = re.sub(r'`([^`]+)`', r'<code>\1</code>', s)
+        return s
+
+    out = []
+    para = []
+    state = {'list': None}
+    table = []
+
+    def flush_para():
+        if para:
+            out.append('<p>' + inline(' '.join(para)) + '</p>')
+            para.clear()
+
+    def flush_list():
+        if state['list']:
+            out.append(f"</{state['list']}>")
+            state['list'] = None
+
+    def flush_table():
+        if table:
+            rows = [r for r in table if not re.match(r'^\s*\|?\s*:?-{2,}', r)]
+            if rows:
+                out.append('<table class="analysis-table">')
+                for i, r in enumerate(rows):
+                    cells = [c.strip() for c in r.strip().strip('|').split('|')]
+                    tag = 'th' if i == 0 else 'td'
+                    out.append('<tr>' + ''.join(f'<{tag}>{inline(c)}</{tag}>' for c in cells) + '</tr>')
+                out.append('</table>')
+            table.clear()
+
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if line.strip().startswith('|'):
+            flush_para(); flush_list()
+            table.append(line)
+            continue
+        flush_table()
+        m = re.match(r'^(#{1,4})\s+(.*)$', line)
+        if m:
+            flush_para(); flush_list()
+            level = min(max(len(m.group(1)), 2), 5)   # '#' and '##' → h2, '###' → h3 …
+            out.append(f'<h{level}>{inline(m.group(2).strip())}</h{level}>')
+            continue
+        m = re.match(r'^\s*[-*•]\s+(.*)$', line)
+        if m:
+            flush_para()
+            if state['list'] != 'ul':
+                flush_list(); out.append('<ul>'); state['list'] = 'ul'
+            out.append(f'<li>{inline(m.group(1))}</li>')
+            continue
+        m = re.match(r'^\s*\d+[.)]\s+(.*)$', line)
+        if m:
+            flush_para()
+            if state['list'] != 'ol':
+                flush_list(); out.append('<ol>'); state['list'] = 'ol'
+            out.append(f'<li>{inline(m.group(1))}</li>')
+            continue
+        if not line.strip():
+            flush_para(); flush_list()
+            continue
+        if line.strip() in ('---', '***'):
+            flush_para(); flush_list(); out.append('<hr>')
+            continue
+        flush_list()
+        para.append(line.strip())
+    flush_para(); flush_list(); flush_table()
+    return Markup('\n'.join(out))
+
+
+@app.template_filter('analysis_html')
+def analysis_html_filter(value):
+    return _analysis_markdown_html(value)
+
+
+@app.route('/<category>/analysis')
+def analysis_view(category):
+    """The Analysis page: the list's toolbar with the Collection pill,
+    the computed profile, and the stored essay (or a spinner while one
+    is being written)."""
+    if category not in ANALYSIS_CATEGORIES:
+        abort(404)
+    db = get_db()
+    cat_info = CATEGORIES[category]
+    profile = _analysis_profile(db, category)
+    analysis = _analysis_latest(db, category)
+    running = bool(analysis and analysis['status'] == 'running')
+    if running and category not in _ANALYSIS_INFLIGHT:
+        # A restart mid-write leaves a 'running' row behind; mark it failed
+        # so the page can start a fresh one.
+        db.execute("UPDATE collection_analyses SET status = 'failed', finished_at = ?, "
+                   "error = 'interrupted' WHERE id = ?",
+                   [datetime.utcnow().isoformat(), analysis['id']])
+        db.commit()
+        analysis = _analysis_latest(db, category)
+        running = False
+    stale = bool(analysis and analysis['status'] == 'done'
+                 and analysis['profile_hash'] != _analysis_profile_hash(profile))
+    autorun = (not running) and (analysis is None or analysis['status'] == 'failed')
+    return render_template('list.html',
+                           category=category,
+                           cat_info=cat_info,
+                           rows=[],
+                           counts=get_counts(),
+                           current_category=category,
+                           categories=CATEGORIES,
+                           q='',
+                           dot=False,
+                           coin_filter=None,
+                           show_history=False,
+                           at_property=None,
+                           at_property_url=None,
+                           prop_status=None,
+                           prop_type=None,
+                           today_iso=date.today().isoformat(),
+                           result_count=profile['total'],
+                           art_price_total=None,
+                           status_cycle=None,
+                           status_current='all',
+                           has_in_service=False,
+                           watch_open_service_event_ids=[],
+                           extra_fields=[],
+                           fields=visible_fields(category),
+                           analysis_mode=True,
+                           analysis=analysis,
+                           analysis_running=running,
+                           analysis_autorun=autorun,
+                           analysis_stale=stale,
+                           analysis_focus=ANALYSIS_FOCUS[category],
+                           profile=profile)
+
+
+@app.route('/<category>/analysis/run', methods=['POST'])
+def analysis_run(category):
+    if category not in ANALYSIS_CATEGORIES:
+        return jsonify({'error': 'Unknown category'}), 400
+    _market_require_owner()
+    db = get_db()
+    with _ANALYSIS_LOCK:
+        if category in _ANALYSIS_INFLIGHT:
+            current = _analysis_latest(db, category)
+            return jsonify({'ok': True, 'running': True,
+                            'analysis_id': current['id'] if current else None})
+        _ANALYSIS_INFLIGHT.add(category)
+    analysis_id = str(uuid.uuid4())
+    db.execute("INSERT INTO collection_analyses (id, category, started_at, status) "
+               "VALUES (?, ?, ?, 'running')",
+               [analysis_id, category, datetime.utcnow().isoformat()])
+    db.commit()
+    threading.Thread(target=_run_collection_analysis, args=(category, analysis_id),
+                     daemon=True).start()
+    return jsonify({'ok': True, 'running': True, 'analysis_id': analysis_id})
+
+
+@app.route('/<category>/analysis/status')
+def analysis_status(category):
+    if category not in ANALYSIS_CATEGORIES:
+        return jsonify({'error': 'Unknown category'}), 400
+    db = get_db()
+    analysis = _analysis_latest(db, category)
+    if not analysis:
+        return jsonify({'ok': True, 'status': 'none'})
+    return jsonify({'ok': True, 'status': analysis['status'], 'analysis_id': analysis['id'],
+                    'error': analysis['error'], 'finished_at': analysis['finished_at']})
 
 
 
