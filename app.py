@@ -12640,7 +12640,7 @@ results_markdown rules:
     results_md = _html.unescape(data.get('results_markdown') or '')
     if fallback_note:
         results_md = (results_md + '\n\n' + fallback_note).strip()
-    return {'value': value, 'results': results_md}
+    return {'value': value, 'results': results_md, 'fallback': bool(fallback_note)}
 
 
 def fetch_watch_valuation_perplexity(watch, auction_first=False):
@@ -12727,7 +12727,7 @@ results_markdown rules:
                       '; '.join(citations[:6])).strip()
     if fallback_note:
         results_md = (results_md + '\n\n' + fallback_note).strip()
-    return {'value': value, 'results': results_md}
+    return {'value': value, 'results': results_md, 'fallback': bool(fallback_note)}
 
 
 def fetch_watch_valuation(watch, auction_first=False):
@@ -12763,7 +12763,16 @@ def _revalue_one(db, watch, now):
         old_num = float(old_value) if old_value not in (None, '') else None
     except (TypeError, ValueError):
         old_num = None
-    if old_num:
+    if data.get('fallback'):
+        # No auction consensus: the search fell back to the purchase
+        # price. That is not a valuation — keep the stored value (the
+        # first pass on 2026-09-10 wrote $38,000 over a $350,000 Octa
+        # Chronograph this way) and say so at the head of the results.
+        new_value = old_num
+        results = (f"Auction-first revaluation {now[:10]}: no realised auction price or "
+                   f"comparable found — value left at "
+                   f"{('$%s' % format(old_num, ',.0f')) if old_num else 'unset'}.\n\n" + results)
+    elif old_num:
         head = f"Previous value ${old_num:,.0f}" + (f" ({old_when})" if old_when else '')
         if new_value:
             head += f" → auction-first revaluation {now[:10]}: ${float(new_value):,.0f}"
@@ -12776,13 +12785,22 @@ def _revalue_one(db, watch, now):
     return old_num, new_value
 
 
-def _run_revaluation(brand, job_key):
+def _run_revaluation(brand, job_key, ids=None, restore=None):
     db = open_db_connection()
     job = _REVALUE_JOBS[job_key]
     try:
         rows = db.execute(
             "SELECT * FROM watches WHERE lower(brand) LIKE ? AND (status IS NULL OR status IN ('Own', 'Ordered')) "
             "ORDER BY model, year", (f"%{brand.lower()}%",)).fetchall()
+        if ids:
+            rows = [w for w in rows if w['id'] in set(ids)]
+        # `restore` = {id: value} puts a value back before the watch is
+        # revalued (undoing a fallback write from an earlier pass).
+        for wid, val in (restore or {}).items():
+            db.execute("UPDATE watches SET value = ? WHERE id = ?", (val, wid))
+        db.commit()
+        if restore:
+            rows = [db.execute("SELECT * FROM watches WHERE id = ?", (w['id'],)).fetchone() for w in rows]
         job['total'] = len(rows)
         for w in rows:
             now = datetime.utcnow().isoformat()
@@ -12825,7 +12843,9 @@ def watches_revalue():
             return jsonify({'ok': True, 'running': True, 'job': job_key})
         _REVALUE_JOBS[job_key] = {'status': 'running', 'brand': brand, 'total': 0, 'done': 0,
                                   'failed': 0, 'lines': [], 'started_at': datetime.utcnow().isoformat()}
-    threading.Thread(target=_run_revaluation, args=(brand, job_key), daemon=True).start()
+    ids = payload.get('ids') or None
+    restore = payload.get('restore') or None
+    threading.Thread(target=_run_revaluation, args=(brand, job_key, ids, restore), daemon=True).start()
     return jsonify({'ok': True, 'running': True, 'job': job_key})
 
 
