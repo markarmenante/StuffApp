@@ -15030,13 +15030,29 @@ def _market_fetch_page(url, limit=400_000):
         return None, ''
 
 
-def _market_page_gone(url, status):
+_MARKET_CHALLENGE_RE = re.compile(
+    r'incapsula|imperva|_Incapsula_Resource|captcha|cf-chl|challenge-platform|just a moment'
+    r'|access denied|bot detection|are you a human|request unsuccessful|pardon our interruption',
+    re.IGNORECASE)
+
+
+def _market_page_challenged(status, html):
+    """A bot wall's challenge page, not the listing: nothing can be read
+    from it, so it decides nothing (scan #9 dropped twelve VCoins finds
+    whose product URLs were bounced to a challenge page as 'gone')."""
+    if status == 202:
+        return True
+    return bool(html) and len(html) < 20_000 and bool(_MARKET_CHALLENGE_RE.search(html))
+
+
+def _market_page_gone(url, status, html=''):
     """True when the listing page no longer exists: a 404 / 410, or a
     product URL that was redirected away to a store front, category or
-    search page (how VCoins and several dealers retire a sold lot)."""
+    search page (how VCoins and several dealers retire a sold lot). A
+    bot wall's challenge is not a verdict."""
     if status in (404, 410):
         return True
-    if status != 200:
+    if status != 200 or _market_page_challenged(status, html):
         return False
     final = getattr(_MARKET_LAST_URL, 'final', url) or url
     if final == url:
@@ -15063,7 +15079,7 @@ def _market_price_from_page(url):
     the JSON-LD / meta price first, then the first currency amount in
     the visible text. Returns a price string or None."""
     status, html = _market_fetch_page(url)
-    if status != 200 or not html or _market_page_gone(url, status):
+    if status != 200 or not html or _market_page_gone(url, status, html):
         return None
     m = re.search(r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?', html)
     cur = re.search(r'"priceCurrency"\s*:\s*"([A-Z]{3})"', html)
@@ -15100,7 +15116,9 @@ def _market_listing_state(url):
     marker; 'unknown' when the page cannot be read (bot wall, timeout)
     or says neither — unknown never drops an item."""
     status, html = _market_fetch_page(url)
-    if _market_page_gone(url, status):
+    if _market_page_challenged(status, html):
+        return 'unknown'
+    if _market_page_gone(url, status, html):
         return 'ended'
     if status != 200 or not html:
         return 'unknown'
@@ -15437,7 +15455,7 @@ def _vcoins_page_description(url, limit=700):
     weight, references, pedigree live there, not in the card), plus
     whether the page still offers the coin."""
     status, page = _market_fetch_page(url)
-    if status != 200 or not page or _market_page_gone(url, status):
+    if status != 200 or not page or _market_page_gone(url, status, page):
         return '', False
     text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', page, flags=re.DOTALL | re.IGNORECASE)
     text = _html_text(text)
