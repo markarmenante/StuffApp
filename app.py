@@ -14852,6 +14852,23 @@ _MARKET_LIVE_PAGE_MARKERS = (
 
 
 _MARKET_LAST_URL = threading.local()
+_MARKET_OPENER = None
+_MARKET_OPENER_LOCK = threading.Lock()
+
+
+def _market_opener():
+    """One urllib opener with a cookie jar for the whole process: the bot
+    wall in front of VCoins sets a cookie on the first visit and serves
+    202 challenge pages to a client that never sends it back (scan #8:
+    every search answered 202 after scan #7's cookie-less run)."""
+    global _MARKET_OPENER
+    with _MARKET_OPENER_LOCK:
+        if _MARKET_OPENER is None:
+            import urllib.request
+            from http.cookiejar import CookieJar
+            _MARKET_OPENER = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(CookieJar()))
+        return _MARKET_OPENER
 
 
 def _market_fetch_page(url, limit=400_000):
@@ -14867,10 +14884,11 @@ def _market_fetch_page(url, limit=400_000):
         req = urllib.request.Request(url, headers={
             'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) '
                            'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'),
-            'Accept': 'text/html,application/xhtml+xml',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive',
         })
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with _market_opener().open(req, timeout=8) as resp:
             body = resp.read(limit)
             charset = resp.headers.get_content_charset() or 'utf-8'
             _MARKET_LAST_URL.final = resp.geturl() or url
@@ -15260,6 +15278,11 @@ def _vcoins_search(query):
     from urllib.parse import quote_plus
     url = _VCOINS_SEARCH_URL.format(q=quote_plus(query))
     status, page = _market_fetch_page(url, limit=1_500_000)
+    if status == 202 or (status == 200 and page and 'item-detail' not in page
+                         and 'items found' not in page.lower()):
+        # A challenge page from the bot wall: take its cookie, wait, retry.
+        time.sleep(6)
+        status, page = _market_fetch_page(url, limit=1_500_000)
     if status != 200 or not page:
         return [], f'VCoins search {query!r}: HTTP {status}'
     cards = []
@@ -15373,8 +15396,19 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
     if not queries:
         return [], None, ''
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        found = list(pool.map(_vcoins_search, queries))
+    # Warm up: the first visit collects the bot wall's cookie; then the
+    # queries go one at a time, spaced out, like a person searching.
+    _market_fetch_page('https://www.vcoins.com/en/Default.aspx', limit=200_000)
+    time.sleep(2)
+    found = []
+    for i, q in enumerate(queries):
+        if i:
+            time.sleep(1.5)
+        found.append(_vcoins_search(q))
+        if len(found) >= 3 and all(err and 'HTTP 202' in err for _, err in found[-3:]):
+            # Walled off: stop hammering, report, let the scan land.
+            found.extend(([], f'VCoins search {rest!r}: skipped (bot wall)') for rest in queries[i + 1:])
+            break
     cards, errors, seen = [], [], set()
     hits = 0
     for (query_cards, err), query in zip(found, queries):
@@ -15401,7 +15435,7 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
         note = (f"VCoins stock search: {len(queries)} gap queries, nothing offered"
                 + (f" ({errors[0]})" if errors else ''))
         return [], None, note
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         descs = list(pool.map(lambda c: _vcoins_page_description(c['listing_url']), cards[:page_reads]))
     live_cards = []
     for c, (desc, available) in zip(cards, descs):
