@@ -14865,28 +14865,42 @@ def _market_verify_live(items, workers=6):
     return kept
 
 
+_MARKET_DROPS = threading.local()
+
+
+def _market_drop(raw, reason):
+    """Log why a model item was not kept, and tally it for the scan summary."""
+    app.logger.info("market scan drop: %s — %s | %s", reason,
+                    str(raw.get('title') or '')[:80], str(raw.get('listing_url') or '')[:120])
+    tally = getattr(_MARKET_DROPS, 'tally', None)
+    if tally is not None:
+        key = reason.split(' (')[0]
+        tally[key] = tally.get(key, 0) + 1
+    return None
+
+
 def _market_normalize_item(db, category, raw):
     """A model item → the stored payload dict, or None when it is not a
     usable candidate (no URL, no price, grade below the bar)."""
     url = str(raw.get('listing_url') or '').strip()
     if not re.match(r'^https?://', url):
-        return None
+        return _market_drop(raw, 'no listing URL')
     host = re.sub(r'^https?://(www\.)?', '', url).split('/')[0].lower()
     if any(h in host for h in ('google.', 'bing.', 'duckduckgo')):
-        return None
+        return _market_drop(raw, 'search-engine URL')
     price = _format_purchase_price(raw.get('price')) or ''
     if not price:
-        return None
+        return _market_drop(raw, f"no readable price ({raw.get('price')!r})")
     grade_n = _market_grade_number(category, raw)
     rarity = str(raw.get('rarity') or '').strip()
     floor = 64 if category == 'banknotes' else 40
     rare_floor = 50 if category == 'banknotes' else 30
     if grade_n is None:
         if category == 'banknotes':
-            return None  # a note with no readable grade is not a candidate
+            return _market_drop(raw, 'no readable grade')
         grade_n = 0
     if grade_n < floor and not (rarity and grade_n >= rare_floor):
-        return None
+        return _market_drop(raw, f"grade {grade_n:g} below the floor ({raw.get('grade')!r})")
     designation = _market_designation(raw)
     authority = str(raw.get('grading_authority') or '').strip()
     if category == 'banknotes' and authority:
@@ -14898,15 +14912,15 @@ def _market_normalize_item(db, category, raw):
         year = None
     closes = str(raw.get('closes') or '').strip()[:10]
     if closes and closes < date.today().isoformat():
-        return None  # already closed
+        return _market_drop(raw, f'closed {closes}')
     sale_type = 'auction' if str(raw.get('sale_type') or '').lower().startswith('auc') else 'fixed'
     if sale_type == 'auction' and not closes:
-        return None  # an auction lot with no future close date is not live
+        return _market_drop(raw, 'auction lot with no closing date')
     if _MARKET_ENDED_URL_RE.search(url):
-        return None  # a sold / completed / archive / results page
+        return _market_drop(raw, 'sold / archive URL')
     stale_text = ' '.join(str(raw.get(k) or '') for k in ('title', 'why', 'live_evidence'))
     if _MARKET_ENDED_TEXT_RE.search(stale_text):
-        return None  # the model itself describes a past sale
+        return _market_drop(raw, 'described as a past sale')
     item = {
         'title': str(raw.get('title') or '').strip()[:200],
         'listing_url': url,
@@ -15075,13 +15089,16 @@ def _run_market_scan(category, scan_id):
                 errors.append(err)
         pool.shutdown(wait=False)
         normalized = []
+        _MARKET_DROPS.tally = {}
         for raw in results:
             item = _market_normalize_item(db, category, raw)
             if item:
                 item['owned'] = _market_owned_match(db, category, item)
                 item['score'] = _market_score(category, item)
                 normalized.append(item)
+        before_dedupe = len(normalized)
         normalized = _market_dedupe(normalized)
+        duplicates = before_dedupe - len(normalized)
         before_verify = len(normalized)
         normalized = _market_verify_live(normalized)
         dropped_ended = before_verify - len(normalized)
@@ -15107,8 +15124,15 @@ def _run_market_scan(category, scan_id):
             summary += f", guided by the Analysis of {analysis_date[:10]}"
         elif analysis_block:
             summary += ", guided by the computed gap list (no Analysis written yet)"
+        if duplicates:
+            summary += f", {duplicates} duplicate{'s' if duplicates != 1 else ''} folded"
         if dropped_ended:
             summary += f", {dropped_ended} dropped as sold/ended on their own pages"
+        drops = getattr(_MARKET_DROPS, 'tally', None) or {}
+        if drops:
+            summary += ', not kept: ' + ', '.join(f'{n} {why}' for why, n in
+                                                  sorted(drops.items(), key=lambda kv: -kv[1]))
+        _MARKET_DROPS.tally = None
         if errors:
             summary += ' · ' + '; '.join(errors)[:400]
         db.execute("UPDATE market_scans SET status = 'done', finished_at = ?, "
