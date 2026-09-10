@@ -15502,7 +15502,7 @@ ANALYSIS_CATEGORIES = ('watches', 'coins', 'banknotes')
 ANALYSIS_FOCUS = {
     'watches': 'the independent watchmakers',
     'coins': 'the ancient Greek coinage',
-    'banknotes': 'colonial, United States and world notes',
+    'banknotes': 'colonial, United States, military & occupation, and world notes',
 }
 _ANALYSIS_LOCK = threading.Lock()
 _ANALYSIS_INFLIGHT = set()
@@ -16020,21 +16020,219 @@ _EMPIRE_BY_COUNTRY = {
     'Japanese': ('manchukuo', 'korea', 'taiwan', 'formosa'),
     'Danish': ('danish west indies', 'faroe islands', 'greenland', 'iceland'),
     'German': ('german east africa', 'kiautschou', 'german new guinea', 'kamerun', 'german south west africa'),
+    # The Philippines under US rule (1899–1946) are filed as an American
+    # colony — not strictly one, but the collection reads them that way.
+    'American': ('philippines', 'philippine islands', 'hawaii', 'canal zone', 'guam',
+                 'american samoa'),
 }
 
 
-def _banknote_empire(country):
-    """Which empire a colonial note belongs to: from the country name
-    first ("British East Africa", "French West Africa"), then from a
-    table of colonies, then from the colonial timeline's opening words."""
+# The year a territory stopped being a colony, keyed by the colony name
+# as it appears in _EMPIRE_BY_COUNTRY (a note dated on or before the
+# year files as colonial; one dated after it is a national issue).
+# 9999 = still a dependent territory. A colony name missing here is
+# taken as colonial whatever the date.
+_COLONY_END = {
+    'ceylon': 1948, 'bahamas': 1973, 'falkland islands': 9999, 'mauritius': 1968,
+    'rhodesia': 1965, 'rhodesia & nyasaland': 1963, 'rhodesia and nyasaland': 1963,
+    'southern rhodesia': 1964, 'northern rhodesia': 1964, 'nyasaland': 1964, 'bermuda': 9999,
+    'fiji': 1970, 'jamaica': 1962, 'malta': 1964, 'gibraltar': 9999, 'cyprus': 1960,
+    'hong kong': 1997, 'india': 1947, 'burma': 1948, 'malaya': 1963,
+    'malaya and british borneo': 1967, 'straits settlements': 1946, 'sarawak': 1963,
+    'north borneo': 1963, 'brunei': 1984, 'palestine': 1948, 'kenya': 1963, 'uganda': 1962,
+    'tanganyika': 1961, 'zanzibar': 1963, 'nigeria': 1960, 'gold coast': 1957,
+    'sierra leone': 1961, 'gambia': 1965, 'barbados': 1966, 'trinidad': 1962,
+    'trinidad and tobago': 1962, 'guyana': 1966, 'belize': 1981, 'saint helena': 9999,
+    'st. helena': 9999, 'seychelles': 1976, 'aden': 1967, 'east africa': 1966,
+    'west africa': 1965, 'cayman islands': 9999, 'bahrain': 1971, 'sudan': 1956,
+    'egypt': 1922, 'iraq': 1932, 'jordan': 1946, 'transjordan': 1946, 'newfoundland': 1949,
+    'ireland': 1922, 'south africa': 1910, 'new zealand': 1907, 'australia': 1901,
+    'canada': 1867, 'singapore': 1965, 'sabah': 1963, 'tonga': 1970, 'samoa': 1962,
+    'solomon islands': 1978, 'gilbert': 1979, 'papua': 1975, 'new guinea': 1975,
+    'somaliland': 1960, 'basutoland': 1966, 'bechuanaland': 1966, 'swaziland': 1968,
+    'leeward islands': 1956, 'windward islands': 1960, 'british caribbean': 1965,
+    'east caribbean': 1983, 'grenada': 1974, 'dominica': 1978, 'st. lucia': 1979,
+    'saint lucia': 1979, 'st. vincent': 1979, 'antigua': 1981, 'st. kitts': 1983,
+    'montserrat': 9999, 'turks and caicos': 9999, 'anguilla': 9999,
+    'british virgin islands': 9999, 'oman': 1970, 'muscat': 1970, 'qatar': 1971,
+    'kuwait': 1961, 'trucial states': 1971, 'maldives': 1965, 'malawi': 1963, 'zambia': 1964,
+    'ghana': 1957, 'tanzania': 1961, 'botswana': 1966, 'lesotho': 1966, 'sri lanka': 1948,
+    'pakistan': 1947, 'bangladesh': 1947,
+    'netherlands indies': 1949, 'netherlands east indies': 1949, 'curaçao': 1954,
+    'curacao': 1954, 'suriname': 1975, 'surinam': 1975, 'netherlands antilles': 1954,
+    'macau': 1999, 'macao': 1999, 'angola': 1975, 'mozambique': 1975, 'goa': 1961,
+    'portuguese india': 1961, 'timor': 1975, 'cape verde': 1975,
+    'são tomé and príncipe': 1975, 'sao tome': 1975, 'portuguese guinea': 1974,
+    'guinea-bissau': 1974,
+    'belgian congo': 1960, 'ruanda-urundi': 1962, 'congo free state': 1960,
+    'algeria': 1962, 'tunisia': 1956, 'morocco': 1956, 'french indochina': 1954,
+    'indochina': 1954, 'indo-china': 1954, 'madagascar': 1960, 'new caledonia': 9999,
+    'tahiti': 9999, 'french polynesia': 9999, 'réunion': 1975, 'reunion': 1975,
+    'martinique': 1975, 'guadeloupe': 1975, 'french guiana': 1975, 'syria': 1946,
+    'lebanon': 1943, 'djibouti': 1977, 'french somaliland': 1977, 'cameroun': 1960,
+    'togo': 1960, 'senegal': 1960, 'saint-pierre and miquelon': 9999, 'new hebrides': 1980,
+    'french west africa': 1960, 'french equatorial africa': 1960, 'dahomey': 1960,
+    'italian somaliland': 1960, 'eritrea': 1941, 'libya': 1951, 'italian east africa': 1941,
+    'dodecanese': 1947, 'rhodes': 1947, 'albania': 1943,
+    'cuba': 1898, 'puerto rico': 9999, 'spanish morocco': 1956, 'spanish guinea': 1968,
+    'fernando po': 1968,
+    'manchukuo': 1945, 'korea': 1945, 'taiwan': 1945, 'formosa': 1945,
+    'danish west indies': 1917, 'faroe islands': 9999, 'greenland': 9999, 'iceland': 1944,
+    'german east africa': 1919, 'kiautschou': 1919, 'german new guinea': 1919,
+    'kamerun': 1919, 'german south west africa': 1919,
+    'philippines': 1946, 'philippine islands': 1946, 'hawaii': 1959, 'canal zone': 1979,
+    'guam': 9999, 'american samoa': 9999,
+}
+
+# Military and occupation money: the issuing authority read from the
+# note's own text. First match wins; the order puts the specific
+# signals before the general ones.
+_MILITARY_SIGNALS = (
+    ('Japanese occupation', ('japanese government', 'japanese occupation', 'japanese invasion',
+                             'invasion money', 'southern development bank', 'nanpo kaihatsu',
+                             'japanese military', 'japanese imperial government',
+                             'de japansche regeering', 'gouvernement japonais', 'jim note',
+                             'jim pesos', 'jim dollar', 'jim rupee', 'jim gulden', 'jim pound')),
+    ('Allied Military Currency', ('allied military', 'am lire', 'am-lire', 'am-mark', 'am mark',
+                                  'allied occupation', 'military authority in',
+                                  'british military authority', 'supplemental french',
+                                  'b-yen', 'b yen', 'type b military yen')),
+    ('US Military Payment Certificates', ('military payment certificate', 'mpc series')),
+    ('German occupation', ('reichskreditkasse', 'german occupation', 'wehrmacht',
+                           'behelfszahlungsmittel', 'occupation allemande', 'german & italian',
+                           'german and italian', 'axis occupation', 'german military',
+                           'protectorate of bohemia', 'generalgouvernement', 'emissionsbank')),
+    ('Italian occupation', ('italian occupation', 'cassa mediterranea', 'italian military',
+                            'ionian islands')),
+    ('Soviet occupation', ('soviet military', 'red army', 'soviet occupation',
+                           'soviet command')),
+    ('British armed forces vouchers', ('armed forces special voucher', 'british armed forces',
+                                       'naafi')),
+    ('US wartime emergency issue', ('hawaii overprint', 'north africa', 'yellow seal',
+                                    'brown seal', 'wwii emergency', 'emergency issue')),
+)
+
+# Country-and-year fallback for an occupation note whose text names no
+# authority: (first year, last year, authority).
+_OCCUPATION_ERAS = {
+    'greece': ((1941, 1944, 'German & Italian occupation'),),
+    'philippines': ((1942, 1945, 'Japanese occupation'),),
+    'malaya': ((1942, 1945, 'Japanese occupation'),),
+    'burma': ((1942, 1945, 'Japanese occupation'),),
+    'netherlands indies': ((1942, 1945, 'Japanese occupation'),),
+    'oceania': ((1942, 1945, 'Japanese occupation'),),
+    'china': ((1937, 1945, 'Japanese occupation'),),
+    'hong kong': ((1942, 1945, 'Japanese occupation'),),
+    'france': ((1940, 1944, 'German occupation'),),
+    'belgium': ((1940, 1944, 'German occupation'),),
+    'netherlands': ((1940, 1945, 'German occupation'),),
+    'norway': ((1940, 1945, 'German occupation'),),
+    'denmark': ((1940, 1945, 'German occupation'),),
+    'poland': ((1939, 1945, 'German occupation'),),
+    'czechoslovakia': ((1939, 1945, 'German occupation'),),
+    'yugoslavia': ((1941, 1945, 'German & Italian occupation'),),
+    'italy': ((1943, 1950, 'Allied Military Currency'),),
+    'germany': ((1944, 1948, 'Allied Military Currency'),),
+    'austria': ((1944, 1947, 'Allied Military Currency'),),
+    'japan': ((1945, 1958, 'Allied occupation'),),
+    'korea': ((1945, 1948, 'Allied occupation'),),
+    'hungary': ((1944, 1946, 'Soviet occupation'),),
+    'united states': ((1942, 1944, 'US wartime emergency issue'),),
+}
+
+
+def _bn_country_label(country):
+    """One label per territory however the record spells it: "French
+    Indo-China", "French Indochina" and "French Indo-China/Vietnam" are
+    one bucket. A trailing "/…" or "(…)" qualifier is dropped and the
+    country table's display name is used when the name resolves."""
     name = (country or '').strip()
-    low = name.lower()
+    if not name:
+        return name
+    base = re.sub(r'\s*\([^)]*\)\s*$', '', name.split('/')[0]).strip() or name
+    try:
+        key = _country_key(base)
+        display = COUNTRY_ERAS[key][0] if key and key in COUNTRY_ERAS else ''
+    except Exception:
+        display = ''
+    # The table's display name unifies spellings ("French Indo-China" ->
+    # "French Indochina") but must not rename a territory: "British
+    # Honduras" stays itself rather than becoming Belize, "Zaire" does
+    # not become the Belgian Congo. Only a name that opens with the same
+    # word is a respelling.
+    if display and display.split()[0].lower() == base.split()[0].lower():
+        return display
+    return base
+
+
+def _bn_haystack(r, fields=('issuer', 'series', 'issue_type', 'description', 'notes',
+                            'lettering', 'lettering_translation', 'official', 'other_catalog')):
+    return ' '.join(str(_row_get(r, f) or '') for f in fields).lower()
+
+
+def _banknote_military(r):
+    """The issuing authority of a military or occupation note, or None
+    for an ordinary note. The Issue Type field decides that it is one;
+    the note's text (or, failing that, its country and year) says whose."""
+    itype = (_row_get(r, 'issue_type') or '').strip().lower()
+    text = _bn_haystack(r)
+    flagged = 'military' in itype or 'occupation' in itype
+    country = _bn_country_label(_row_get(r, 'country')).lower()
+    for label, words in _MILITARY_SIGNALS:
+        if any(w in text for w in words):
+            if label == 'US wartime emergency issue' and not (flagged or 'united states' in country):
+                continue  # Notgeld is an "emergency issue" too
+            return label
+    if not flagged:
+        # An untyped note still counts when the country/year table and a
+        # generic word agree (an "occupation" note typed National).
+        if not any(w in text for w in ('occupation', 'invasion', 'military', 'wartime')):
+            return None
+    year = _safe_int(_row_get(r, 'date_1'))
+    for name, eras in _OCCUPATION_ERAS.items():
+        if country == name or country.startswith(name + ' ') or country.startswith(name + ','):
+            for start, end, label in eras:
+                if year is None or start <= year <= end:
+                    return label
+    if 'united states' in country and year:
+        try:
+            nc = _us_note_class(r)
+            if nc and 'emergency' in nc['name'].lower():
+                return 'US wartime emergency issue'
+        except Exception:
+            pass
+    return 'Occupation-era issue' if flagged else None
+
+
+def _banknote_colony(country):
+    """(empire, colony-name-as-matched) from the colony table, or None."""
+    low = _bn_country_label(country).lower()
+    if not low:
+        return None
     for empire, words in _EMPIRE_WORDS:
         if any(low.startswith(w + ' ') for w in words):
-            return empire
+            return empire, low
     for empire, names in _EMPIRE_BY_COUNTRY.items():
-        if any(low == n or low.startswith(n + ' ') or low.startswith(n + ',') for n in names):
-            return empire
+        for n in names:
+            if low == n or low.startswith(n + ' ') or low.startswith(n + ','):
+                return empire, n
+    return None
+
+
+def _banknote_empire(country, year=None):
+    """Which empire a colonial note belongs to: from the country name
+    first ("British East Africa", "French West Africa"), then from a
+    table of colonies, then from the colonial timeline's opening words.
+    The Philippines are treated as an American colony from 1899 to 1946
+    (Spanish before that) — not strictly a colony, but filed as one."""
+    name = _bn_country_label(country)
+    low = name.lower()
+    if low.startswith('philippine'):
+        y = _safe_int(year)
+        return 'Spanish' if (y and y < 1899) else 'American'
+    hit = _banknote_colony(name)
+    if hit:
+        return hit[0]
     try:
         line = COUNTRY_COLONIAL.get(_country_key(name), '') or ''
     except Exception:
@@ -16046,10 +16244,40 @@ def _banknote_empire(country):
     return 'Other'
 
 
+def _banknote_is_colonial(r):
+    """Colonial when the Issue Type says so, or when the country is a
+    known colony and the note is dated on or before the end of colonial
+    rule (an undated note of a colony counts). Post-independence issues
+    of a former colony are national notes, not colonial."""
+    if (_row_get(r, 'issue_type') or '').strip().lower() == 'colonial':
+        return True
+    country = _bn_country_label(_row_get(r, 'country'))
+    low = country.lower()
+    year = _safe_int(_row_get(r, 'date_1'))
+    if low.startswith('philippine'):
+        return year is None or year <= 1946
+    hit = _banknote_colony(country)
+    if not hit:
+        return False
+    # "British East Africa", "Belgian Congo", "Italian Somaliland": the
+    # empire is in the name, so the note is colonial whatever its date.
+    if any(low.startswith(w + ' ') for _, words in _EMPIRE_WORDS for w in words):
+        return True
+    end = _COLONY_END.get(hit[1])
+    if end is None:
+        return True
+    return year is None or year <= end
+
+
 def _banknote_bucket(r):
-    """us / colonial / other. Colonial American issues (Pennsylvania Colony,
-    New Jersey…) file with the United States, as the list does, so the
-    colonial movement is the overseas empires."""
+    """military / us / colonial / other. Colonial American issues
+    (Pennsylvania Colony, New Jersey…) file with the United States, as
+    the list does, so the colonial movement is the overseas empires —
+    the American one included: the Philippines under US rule file as a
+    colony. Military and occupation money is its own movement whatever
+    the country."""
+    if _banknote_military(r):
+        return 'military'
     country = (r['country'] or '').strip()
     low = country.lower()
     if (low.startswith('united states') or low in ('usa', 'us', 'colonial america')
@@ -16060,45 +16288,58 @@ def _banknote_bucket(r):
             return 'us'
     except Exception:
         pass
-    if (r['issue_type'] or '').strip().lower() == 'colonial':
+    if _banknote_is_colonial(r):
         return 'colonial'
     return 'other'
 
 
 def _analysis_banknotes_profile(db):
     rows = _analysis_active_rows(db, 'banknotes')
-    buckets = {'colonial': [], 'us': [], 'other': []}
+    buckets = {'military': [], 'colonial': [], 'us': [], 'other': []}
     for r in rows:
         buckets[_banknote_bucket(r)].append(r)
     colonial = buckets['colonial']
-    empires = {}
-    for r in colonial:
-        e = _banknote_empire(r['country'])
-        g = empires.setdefault(e, {'empire': e, 'count': 0, 'countries': [], 'years': [],
-                                   'issuers': [], 'printers': [], 'grades': []})
-        g['count'] += 1
-        g['countries'].append(r['country'])
-        g['issuers'].append(r['issuer'])
-        g['printers'].append(r['printer'])
-        y = _safe_int(r['date_1'])
-        if y:
-            g['years'].append(y)
+    military = buckets['military']
+
+    def _grade_of(r):
         try:
             if r['grade_numeric'] not in (None, ''):
-                g['grades'].append(float(r['grade_numeric']))
+                return float(r['grade_numeric'])
         except (TypeError, ValueError):
             pass
-    empire_list = []
-    for g in sorted(empires.values(), key=lambda x: (-x['count'], x['empire'])):
-        ys = g['years']
-        empire_list.append({
-            'empire': g['empire'], 'count': g['count'],
-            'countries': _analysis_tally(g['countries']),
-            'issuers': [i for i, _ in _analysis_tally(g['issuers'], 6)],
-            'printers': [p for p, _ in _analysis_tally(g['printers'], 5)],
-            'span': f"{min(ys)}–{max(ys)}" if len(set(ys)) > 1 else (str(ys[0]) if ys else ''),
-            'avg_grade': (sum(g['grades']) / len(g['grades'])) if g['grades'] else None,
-        })
+        return None
+
+    def _group_rows(rs, keyfn, keyname):
+        groups = {}
+        for r in rs:
+            k = keyfn(r)
+            g = groups.setdefault(k, {keyname: k, 'count': 0, 'countries': [], 'years': [],
+                                      'issuers': [], 'printers': [], 'grades': []})
+            g['count'] += 1
+            g['countries'].append(_bn_country_label(r['country']))
+            g['issuers'].append(r['issuer'])
+            g['printers'].append(r['printer'])
+            y = _safe_int(r['date_1'])
+            if y:
+                g['years'].append(y)
+            gr = _grade_of(r)
+            if gr is not None:
+                g['grades'].append(gr)
+        out = []
+        for g in sorted(groups.values(), key=lambda x: (-x['count'], x[keyname])):
+            ys = g['years']
+            out.append({
+                keyname: g[keyname], 'count': g['count'],
+                'countries': _analysis_tally(g['countries']),
+                'issuers': [i for i, _ in _analysis_tally(g['issuers'], 6)],
+                'printers': [p for p, _ in _analysis_tally(g['printers'], 5)],
+                'span': f"{min(ys)}–{max(ys)}" if len(set(ys)) > 1 else (str(ys[0]) if ys else ''),
+                'avg_grade': (sum(g['grades']) / len(g['grades'])) if g['grades'] else None,
+            })
+        return out
+
+    empire_list = _group_rows(colonial, lambda r: _banknote_empire(r['country'], r['date_1']), 'empire')
+    military_list = _group_rows(military, _banknote_military, 'authority')
     us = buckets['us']
     us_classes = []
     for r in us:
@@ -16111,13 +16352,7 @@ def _analysis_banknotes_profile(db):
         except Exception:
             us_classes.append('Unclassified')
     other = buckets['other']
-    grades_all = []
-    for r in rows:
-        try:
-            if r['grade_numeric'] not in (None, ''):
-                grades_all.append(float(r['grade_numeric']))
-        except (TypeError, ValueError):
-            pass
+    grades_all = [g for g in (_grade_of(r) for r in rows) if g is not None]
 
     def _decades(rs):
         return sorted(_analysis_tally([_decade(r['date_1']) for r in rs]), key=lambda kv: kv[0])
@@ -16131,20 +16366,34 @@ def _analysis_banknotes_profile(db):
             pass
         return r['grade'] or ''
 
-    def _items(rs):
+    def _home(r):
+        """Where a military note would otherwise file — the essay reads a
+        Philippine JIM note beside the American-colonial run."""
+        country = _bn_country_label(r['country'])
+        low = country.lower()
+        if low.startswith('united states') or low.startswith('confederate'):
+            return 'United States'
+        if _banknote_is_colonial(r) or low.startswith('philippine'):
+            return f"{_banknote_empire(country, r['date_1'])} colonial"
+        return 'other world'
+
+    def _items(rs, bucket):
         return [
-            {'country': r['country'], 'denomination': r['denomination'], 'issuer': r['issuer'],
+            {'country': _bn_country_label(r['country']), 'denomination': r['denomination'], 'issuer': r['issuer'],
              'issue_type': r['issue_type'], 'series': r['series'], 'pick': r['pick_number'],
              'year': r['date_1_text'] or r['date_1'], 'printer': r['printer'],
              'grade': _grade_label(r),
-             'empire': _banknote_empire(r['country']) if _banknote_bucket(r) == 'colonial' else None}
-            for r in sorted(rs, key=lambda r: ((r['country'] or ''), _safe_int(r['date_1']) or 0))
+             'empire': _banknote_empire(r['country'], r['date_1']) if bucket == 'colonial' else None,
+             'authority': _banknote_military(r) if bucket == 'military' else None,
+             'territory_otherwise': _home(r) if bucket == 'military' else None}
+            for r in sorted(rs, key=lambda r: (_bn_country_label(r['country']), _safe_int(r['date_1']) or 0))
         ]
     price_all, _ = _analysis_money(rows, 'price')
     decade_keys = sorted({_decade(r['date_1']) for r in rows if _decade(r['date_1'])})
     decade_series = [
         {'name': 'Colonial', 'values': [sum(1 for r in colonial if _decade(r['date_1']) == d) for d in decade_keys]},
         {'name': 'United States', 'values': [sum(1 for r in us if _decade(r['date_1']) == d) for d in decade_keys]},
+        {'name': 'Military & occupation', 'values': [sum(1 for r in military if _decade(r['date_1']) == d) for d in decade_keys]},
         {'name': 'Other', 'values': [sum(1 for r in other if _decade(r['date_1']) == d) for d in decade_keys]},
     ]
     grade_buckets = []
@@ -16162,12 +16411,20 @@ def _analysis_banknotes_profile(db):
         'grade_buckets': grade_buckets,
         'total': len(rows),
         'colonial_count': len(colonial), 'us_count': len(us), 'other_count': len(other),
+        'military_count': len(military),
         'empires': empire_list,
+        'military_groups': military_list,
+        'military_territories': _analysis_tally([_bn_country_label(r['country']) for r in military], 20),
+        'military_decades': _decades(military),
+        'colonial_rule': ('A note files as colonial when its country was a colony at the date of '
+                          'issue (Issue Type = Colonial always counts); the Philippines under US '
+                          'rule, 1899–1946, are treated as an American colony. Military and '
+                          'occupation money is its own movement, whatever the territory.'),
         'colonial_decades': _decades(colonial),
         'us_classes': _analysis_tally(us_classes),
         'us_decades': _decades(us),
         'us_issuers': _analysis_tally([r['issuer'] for r in us], 8),
-        'other_countries': _analysis_tally([r['country'] for r in other], 20),
+        'other_countries': _analysis_tally([_bn_country_label(r['country']) for r in other], 20),
         'other_types': _analysis_tally([r['issue_type'] for r in other]),
         'other_decades': _decades(other),
         'printers': _analysis_tally([r['printer'] for r in rows], 10),
@@ -16176,9 +16433,10 @@ def _analysis_banknotes_profile(db):
         'avg_grade': (sum(grades_all) / len(grades_all)) if grades_all else None,
         'gem_count': sum(1 for g in grades_all if g >= 65),
         'price_total': price_all,
-        'items_colonial': _items(colonial),
-        'items_us': _items(us),
-        'items_other': _items(other),
+        'items_colonial': _items(colonial, 'colonial'),
+        'items_us': _items(us, 'us'),
+        'items_military': _items(military, 'military'),
+        'items_other': _items(other, 'other'),
     }
 
 
@@ -16241,21 +16499,34 @@ _ANALYSIS_BRIEFS = {
     'banknotes': (
         "You are a senior paper-money specialist writing a scholarly essay on a private "
         "collection (the register of a Spink or Heritage world-paper catalogue essay). Write "
-        "an in-depth analysis of the collection in three movements — colonial notes, United "
-        "States notes, and the other world notes. For the colonial material: the empires "
-        "represented and what each empire's issuing model looked like (currency boards, "
-        "chartered and private banks, the Banque de l'Indochine and Banque de l'Algérie, the "
-        "Banco Nacional Ultramarino, the Banque du Congo Belge, the colonial governments), "
-        "the printers (De La Rue, Bradbury Wilkinson, Waterlow, American Bank Note, the "
-        "Banque de France works), design vocabulary, security features, and how the notes "
-        "track the transitions to independence; for the United States: the note classes held "
-        "(Legal Tender, Silver and Gold Certificates, National Bank Notes, Federal Reserve "
-        "issues, fractionals, Colonial and Continental issues), series, signatures, the "
-        "engraving and the significance of the specific notes; for the other world notes: "
-        "the themes that connect them (occupation and military issues, emergency and Notgeld, "
-        "new-nation first issues). Throughout: grading pattern and what the PMG/PCGS grades "
-        "held say about the collecting standard, printers and vignettes, rarities, gaps a "
-        "serious collector of colonial paper would notice, and the collection's overall thesis."
+        "an in-depth analysis of the collection in four movements — colonial notes, United "
+        "States notes, military and occupation money, and the other world notes. For the "
+        "colonial material: the empires represented and what each empire's issuing model "
+        "looked like (currency boards, chartered and private banks, the Banque de l'Indochine "
+        "and Banque de l'Algérie, the Banco Nacional Ultramarino, the Banque du Congo Belge, "
+        "the colonial governments), the printers (De La Rue, Bradbury Wilkinson, Waterlow, "
+        "American Bank Note, the Banque de France works), design vocabulary, security "
+        "features, and how the notes track the transitions to independence. Treat the "
+        "Philippines under United States rule (1899–1946: Treasury Certificates, the "
+        "Philippine National Bank, the Bank of the Philippine Islands, Commonwealth issues) "
+        "as an American colonial series in the colonial movement — not strictly a colony, "
+        "but read as one here, beside Hawaii and Puerto Rico; Spanish-era Philippine paper "
+        "belongs to the Spanish empire. For the United States: the note classes held (Legal "
+        "Tender, Silver and Gold Certificates, National Bank Notes, Federal Reserve issues, "
+        "fractionals, Colonial and Continental issues), series, signatures, the engraving "
+        "and the significance of the specific notes. For military and occupation money — "
+        "its own clearly headed movement, broken out by issuing authority and territory: "
+        "the Japanese occupation issues (the Philippines' JIM pesos above all, and Malaya, "
+        "Burma, the Netherlands Indies, Oceania), Allied Military Currency, "
+        "Reichskreditkassen and other German and Italian occupation paper (the Greek "
+        "occupation-era drachmai), Soviet issues, Military Payment Certificates, and the "
+        "US Hawaii and North Africa emergency notes: who issued each, under what "
+        "authority, how it circulated and was redeemed, and what the held pieces show. "
+        "For the other world notes: the themes that connect them (emergency and Notgeld, "
+        "new-nation first issues, post-colonial successors to the colonial series held). "
+        "Throughout: grading pattern and what the PMG/PCGS grades held say about the "
+        "collecting standard, printers and vignettes, rarities, gaps a serious collector "
+        "of colonial and occupation paper would notice, and the collection's overall thesis."
     ),
 }
 
@@ -16673,8 +16944,29 @@ _COLONIAL_CANON = {
     'Spanish': ('Philippines (Spanish)', 'Cuba', 'Puerto Rico', 'Spanish Morocco'),
     'Japanese': ('Korea', 'Taiwan', 'Manchukuo', 'Japanese occupation issues'),
     'Danish': ('Danish West Indies', 'Faroe Islands', 'Greenland', 'Iceland'),
-    'US': ('Philippines (US)', 'Hawaii', 'Puerto Rico', 'Canal Zone'),
+    'American': ('Philippines (US)', 'Hawaii', 'Puerto Rico', 'Canal Zone'),
 }
+
+# Military and occupation issues a rounded cabinet holds: (authority, territory).
+_MILITARY_CANON = (
+    ('Japanese occupation', 'Philippines', 'JIM pesos, 1942–45'),
+    ('Japanese occupation', 'Malaya', 'JIM dollars'),
+    ('Japanese occupation', 'Burma', 'JIM rupees'),
+    ('Japanese occupation', 'Netherlands Indies', 'JIM gulden / roepiah'),
+    ('Japanese occupation', 'Oceania', 'JIM pounds and shillings'),
+    ('Japanese occupation', 'Hong Kong', 'military yen'),
+    ('Allied Military Currency', 'Italy', 'AM lire 1943'),
+    ('Allied Military Currency', 'Germany', 'AM marks 1944'),
+    ('Allied Military Currency', 'France', 'supplemental francs 1944'),
+    ('Allied Military Currency', 'Austria', 'AM schillings 1944'),
+    ('Allied Military Currency', 'Japan', 'B-yen'),
+    ('German occupation', 'Europe', 'Reichskreditkassenscheine'),
+    ('German occupation', 'Poland', 'Generalgouvernement / Emissionsbank złoty'),
+    ('German occupation', 'Greece', 'occupation drachmai'),
+    ('US Military Payment Certificates', 'United States', 'MPC series 461–692'),
+    ('US wartime emergency issue', 'United States', 'Hawaii overprint and North Africa yellow-seal notes'),
+    ('British armed forces vouchers', 'United Kingdom', 'British Military Authority / Armed Forces Special Vouchers'),
+)
 
 
 def _analysis_essay_findings(db, category, limit_chars=6000):
@@ -16756,6 +17048,22 @@ def _analysis_computed_gaps(db, category, limit=40):
                 gaps.append(t)
             if gaps:
                 missing.append(f"{empire}: {', '.join(gaps)}")
+        # Military and occupation money held, by (authority, territory).
+        held_mil = set()
+        for r in db.execute(
+                "SELECT * FROM banknotes WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall():
+            auth = _banknote_military(r)
+            if auth:
+                held_mil.add((auth.lower(), _bn_country_label(r['country']).lower()))
+        mil_gaps = []
+        for auth, territory, what in _MILITARY_CANON:
+            if any(a == auth.lower() and (territory.lower() in c or c in territory.lower()
+                                          or territory == 'Europe')
+                   for a, c in held_mil):
+                continue
+            mil_gaps.append(f"{auth} — {territory} ({what})")
+        if mil_gaps:
+            missing.append('Military/occupation: ' + '; '.join(mil_gaps))
         return missing[:limit]
     return []
 
@@ -16772,8 +17080,8 @@ def _market_analysis_block(db, category):
         label = ('Ancient Greek series a rounded cabinet holds that this collection does NOT '
                  '(computed from the records — each is a buy target):'
                  if category == 'coins' else
-                 'Colonial territories a rounded cabinet holds that this collection does NOT '
-                 '(computed from the records — each is a buy target):')
+                 'Colonial territories and military/occupation issues a rounded cabinet holds '
+                 'that this collection does NOT (computed from the records — each is a buy target):')
         parts.append(label + '\n- ' + '\n- '.join(gaps))
     return '\n\n'.join(parts), finished_at
 
