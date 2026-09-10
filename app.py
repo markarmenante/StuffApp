@@ -3,6 +3,7 @@ import uuid
 import os
 import json
 import re
+import html as html_lib
 import base64
 import unicodedata
 import threading
@@ -15024,12 +15025,20 @@ def _market_normalize_item(db, category, raw):
     rarity = str(raw.get('rarity') or '').strip()
     floor = 64 if category == 'banknotes' else 40
     rare_floor = 50 if category == 'banknotes' else 30
+    unstated = False
     if grade_n is None:
         if category == 'banknotes':
             return _market_drop(raw, 'no readable grade')
+        # A dealer's live catalogue card that fills a named gap is shown
+        # even when the description states no grade — the photos and
+        # the price say more than a missing word, and Mark decides.
+        if str(raw.get('theme') or '') == 'vcoins-catalogue' and str(raw.get('fills') or '').strip():
+            unstated = True
         grade_n = 0
-    if grade_n < floor and not (rarity and grade_n >= rare_floor):
+    if grade_n < floor and not (rarity and grade_n >= rare_floor) and not unstated:
         return _market_drop(raw, f"grade {grade_n:g} below the floor ({raw.get('grade')!r})")
+    if unstated:
+        raw['grade'] = 'grade not stated'
     designation = _market_designation(raw)
     authority = str(raw.get('grading_authority') or '').strip()
     if category == 'banknotes' and authority:
@@ -15175,6 +15184,260 @@ def _market_dedupe(items):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Dealer catalogue stage: VCoins searched directly
+#
+# The themes find listings through the model's web search, which returns
+# what the search index has cached — often a lot sold months ago. VCoins
+# has a plain GET search over every store's live stock, so for each gap
+# the scan queries it directly and parses the cards; one model call (no
+# web search) then reads the cards and their pages into the standard
+# item schema. Mark, 2026-09-10: a manual VCoins search found four
+# Gortyna staters the scan had missed.
+# ---------------------------------------------------------------------------
+
+_VCOINS_SEARCH_URL = (
+    'https://www.vcoins.com/en/Search.aspx?search=true&searchQuery={q}&searchQueryExclude='
+    '&searchCategory=0&searchCategoryLevel=2&searchCategoryAncient=True&searchCategoryUs=False'
+    '&searchCategoryWorld=False&searchCategoryMints=True&searchBetween=0&searchBetweenAnd=0'
+    '&searchDate=&searchUseThesaurus=True&searchDisplayCurrency=&searchDisplay=1'
+    '&searchIdStore=0&searchQueryAnyWords=&searchExactPhrase=&searchTitleAndDescription=True'
+    '&searchDateType=0&searchMaxRecords=100&SearchOnSale=False&Unassigned=False'
+)
+_VCOINS_CARD_RE = re.compile(
+    r'<div class="item-detail">(.*?)<div class="watchlisticon">', re.DOTALL)
+_VCOINS_STORE_RE = re.compile(r'lnkStore"[^>]*title="([^"]*)"')
+_VCOINS_TITLE_RE = re.compile(r'lnkTitle"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.DOTALL)
+_VCOINS_PRICE_RE = re.compile(r'<div class="prices">\s*<h3>(.*?)</h3>', re.DOTALL)
+_MARKET_DENOM_WORDS = ('dekadrachm', 'decadrachm', 'tetradrachm', 'didrachm', 'drachm',
+                       'stater', 'nomos', 'owl', 'shield', 'hemidrachm', 'obol')
+
+
+def _market_gap_queries(db, category, limit=30):
+    """VCoins search strings from the computed gap list: the cities of
+    each missing canon series ('Crete — Gortyna, Knossos, Phaistos' ->
+    Gortyna, Knossos, Phaistos), with the series' denomination word when
+    a city alone would flood the search (Syracuse dekadrachm)."""
+    if category != 'coins':
+        return []
+    out, seen = [], set()
+    for label in _analysis_computed_gaps(db, category, limit=60):
+        head, _, tail = label.partition(' — ')
+        head = re.sub(r'\([^)]*\)', '', head)
+        cities = [c.strip() for c in re.split(r'\s*[,/]\s*', head) if c.strip()]
+        denom = next((w for w in _MARKET_DENOM_WORDS if w in tail.lower()), '')
+        for city in cities:
+            q = city
+            if denom and len(cities) == 1 and city.lower() in ('syracuse', 'athens'):
+                q = f'{city} {denom}'
+            key = q.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(q)
+    return out[:limit]
+
+
+def _html_text(fragment):
+    text = re.sub(r'<[^>]+>', ' ', fragment or '')
+    text = html_lib.unescape(text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _vcoins_search(query):
+    """(cards, error): the live VCoins stock matching a query, each card
+    {store, title, price, listing_url}. Never raises."""
+    from urllib.parse import quote_plus
+    url = _VCOINS_SEARCH_URL.format(q=quote_plus(query))
+    status, page = _market_fetch_page(url, limit=1_500_000)
+    if status != 200 or not page:
+        return [], f'VCoins search {query!r}: HTTP {status}'
+    cards = []
+    for block in _VCOINS_CARD_RE.findall(page):
+        m = _VCOINS_TITLE_RE.search(block)
+        if not m:
+            continue
+        href, title = m.group(1), _html_text(m.group(2))
+        store = _VCOINS_STORE_RE.search(block)
+        price = _VCOINS_PRICE_RE.search(block)
+        if href.startswith('/'):
+            href = 'https://www.vcoins.com' + href
+        cards.append({
+            'store': _html_text(store.group(1)) if store else 'VCoins',
+            'title': title[:200],
+            'price': _html_text(price.group(1)) if price else '',
+            'listing_url': href,
+            'query': query,
+        })
+    return cards, None
+
+
+def _vcoins_page_description(url, limit=700):
+    """The catalogue description from a VCoins product page (grade,
+    weight, references, pedigree live there, not in the card), plus
+    whether the page still offers the coin."""
+    status, page = _market_fetch_page(url)
+    if status != 200 or not page or _market_page_gone(url, status):
+        return '', False
+    text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', page, flags=re.DOTALL | re.IGNORECASE)
+    text = _html_text(text)
+    low = text.lower()
+    available = ('not available' not in low[:60_000]) and any(
+        w in low for w in ('add to cart', 'buy now', 'acheter', 'add to basket', 'in den warenkorb'))
+    # The description block follows the "lifetime guarantee" strap and the
+    # share row on every VCoins page; failing that, take the text after
+    # the first "Obverse" / "Av" / weight figure.
+    anchor = None
+    for marker in ('ask the seller', 'demander au vendeur', 'to print', 'imprimer'):
+        i = low.find(marker)
+        if i > 0:
+            anchor = i + len(marker)
+            break
+    if anchor is None:
+        m = re.search(r'\b(obv(?:erse)?|av\.|\d{1,2}[.,]\d{2}\s?g)\b', low)
+        anchor = m.start() if m else 0
+    desc = text[anchor:anchor + limit].strip()
+    return desc, available
+
+
+def _market_catalogue_prompt(category, cards, profile, holdings, coverage, recent, analysis):
+    today = date.today().isoformat()
+    lines = []
+    for i, c in enumerate(cards, 1):
+        lines.append(f"{i}. [{c['store']}] {c['title']} — {c['price'] or 'price on page'} — {c['listing_url']}"
+                     + (f"\n   {c['description']}" if c.get('description') else ''))
+    schema = (
+        '{"items": [{"title": str, "region": str, "authority": str|null, '
+        '"denomination": str, "mint": str|null, "metal": str|null, '
+        '"year": int|null (negative for BC), "grading_authority": "PCGS"|"NGC"|null, '
+        '"grade_numeric": int|null, "grade": str (the dealer\'s grade word: "EF", "Good VF", "About EF", "NGC Ch XF 5/5 4/5"; "" when the description states none), '
+        '"designation": str, "price": str (exactly as on the card, with its currency), '
+        '"venue": str ("VCoins · <store>"), "seller": str, "sale_type": "fixed", "closes": "", '
+        '"listing_url": str (the card\'s URL, verbatim), "image_urls": [], "rarity": str, '
+        '"fills": str (the gap it fills — name it), "empire": "", "new_source": bool, '
+        '"live_evidence": "offered at a price in VCoins\' live stock search today", '
+        '"why": str (one line), "fair": str (one line)}], "notes": str}'
+    )
+    return f"""You are the Market Scan for Mark Armenante's ancient Greek coin collection (stuff.armenante.com). Today is {today}.
+
+Below are cards from VCoins' LIVE stock search, run just now for each series the collection analysis says is missing. Every card is a coin a dealer is offering at a fixed price today; where the scan could read the dealer's own catalogue description it is indented under the card (grade, weight, references and pedigree live there).
+
+Choose the cards worth putting in front of Mark and return them in the schema. Rules:
+- ANCIENT GREEK only (archaic through Hellenistic, incl. Sicily, Magna Graecia, Asia Minor, Thrace, Macedon, Ptolemies, Seleucids). Drop Roman, Byzantine, Celtic, medieval, modern, and anything that merely mentions a city.
+- GRADE: the dealer's grade from the description — EF/XF or better wanted; About EF / Good VF acceptable for a genuine rarity or a conspicuous gap (say which in `rarity`); plain VF and below only when the type is truly scarce. When the description states no grade, put "" in `grade` and say so in `why` — do not invent one.
+- Prefer the piece that best fills each gap; several cards of one type: keep the two or three best (grade, style, pedigree, price), not all.
+- `fills` names the gap from the analysis ("Crete — Gortyna (Europa in plane tree)"). `fair` gives a one-line sense of the asking price against the market. Skip anything the holdings already contain unless a clear upgrade (say so).
+- Copy `listing_url` and `price` exactly from the card.
+
+COLLECTION PROFILE:
+{profile}
+
+CURRENT HOLDINGS (coins):
+{holdings or '(none recorded)'}
+
+DENOMINATION COVERAGE:
+{coverage or '(none recorded)'}
+
+RECENT PURCHASES:
+{recent or '(none recorded)'}
+
+COLLECTION ANALYSIS — FINDINGS AND GAPS:
+{analysis or '(no analysis written yet)'}
+
+THE CARDS ({len(cards)}):
+{chr(10).join(lines)}
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{schema}
+"""
+
+
+def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, recent,
+                            analysis, per_query=8, page_reads=60):
+    """(items, error, note). Searches VCoins for every gap query, reads
+    the best cards' pages for their descriptions, and has the model
+    shape them into scan items (theme 'vcoins-catalogue')."""
+    queries = _market_gap_queries(db, category)
+    if not queries:
+        return [], None, ''
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        found = list(pool.map(_vcoins_search, queries))
+    cards, errors, seen = [], [], set()
+    hits = 0
+    for (query_cards, err), query in zip(found, queries):
+        if err:
+            errors.append(err)
+            continue
+        hits += len(query_cards)
+        # The priciest cards first: the EF pieces and the rarities sit at
+        # the top; the $60 bronzes at the bottom are not what Mark buys.
+        query_cards.sort(key=lambda c: -(_parse_price_amount(_format_purchase_price(c['price']) or '')[1] or 0))
+        kept = 0
+        for c in query_cards:
+            if c['listing_url'] in seen:
+                continue
+            seen.add(c['listing_url'])
+            cards.append(c)
+            kept += 1
+            if kept >= per_query:
+                break
+    app.logger.info("market scan vcoins: %d queries, %d cards seen, %d kept for reading; %s",
+                    len(queries), hits, len(cards), '; '.join(errors)[:300] or 'no errors')
+    if not cards:
+        note = (f"VCoins stock search: {len(queries)} gap queries, nothing offered"
+                + (f" ({errors[0]})" if errors else ''))
+        return [], None, note
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        descs = list(pool.map(lambda c: _vcoins_page_description(c['listing_url']), cards[:page_reads]))
+    live_cards = []
+    for c, (desc, available) in zip(cards, descs):
+        if desc and not available:
+            _market_drop(c, 'VCoins page says not available')
+            continue
+        c['description'] = desc
+        live_cards.append(c)
+    live_cards.extend(cards[page_reads:])
+    if not live_cards:
+        return [], None, f"VCoins stock search: {len(cards)} cards, none still available"
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key, timeout=300, max_retries=1)
+        model = anthropic_lookup_model(api_key, 'ANTHROPIC_MARKET_SCAN_MODEL',
+                                       default='auto-sonnet', fable_fallback='sonnet')
+        resp = _anthropic_create(
+            client, model=model, max_tokens=6000,
+            messages=[{'role': 'user', 'content': _market_catalogue_prompt(
+                category, live_cards, profile, holdings, coverage, recent, analysis)}])
+        text = _message_text(resp)
+        data = _market_parse_json(text)
+        items = data.get('items') if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            return [], 'vcoins-catalogue: no items array', ''
+        out = []
+        by_url = {c['listing_url']: c for c in live_cards}
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            it['theme'] = 'vcoins-catalogue'
+            it['sale_type'] = 'fixed'
+            card = by_url.get(str(it.get('listing_url') or '').strip())
+            if card:
+                # The card is the authority on what the dealer wrote.
+                it['price'] = card['price'] or it.get('price')
+                it['venue'] = f"VCoins · {card['store']}"
+                it.setdefault('seller', card['store'])
+            it.setdefault('live_evidence', "offered at a price in VCoins' live stock search today")
+            out.append(it)
+        note = (f"VCoins stock search: {len(queries)} gap queries, {hits} cards, "
+                f"{len(live_cards)} read, {len(out)} proposed")
+        app.logger.info("market scan vcoins: %s", note)
+        return out, None, note
+    except Exception as e:
+        app.logger.warning("market scan vcoins-catalogue failed: %s", e)
+        return [], f'vcoins-catalogue: {str(e)[:160]}', ''
+
+
 def _run_market_scan(category, scan_id):
     """Background job: run every theme, merge, rank, store."""
     db = open_db_connection()
@@ -15204,6 +15467,19 @@ def _run_market_scan(category, scan_id):
                         _market_scan_prompt(category, key, text, profile, holdings,
                                             coverage, recent, analysis_block)): key
             for key, text in themes}
+        # While the themes search, VCoins' own stock search is run for
+        # every gap and its cards read — the live catalogue, not the
+        # search index's memory of it.
+        catalogue_note = ''
+        try:
+            cat_items, cat_err, catalogue_note = _market_catalogue_stage(
+                api_key, db, category, profile, holdings, coverage, recent, analysis_block)
+            results.extend(cat_items)
+            if cat_err:
+                errors.append(cat_err)
+        except Exception as e:
+            app.logger.warning("market scan catalogue stage failed: %s", e)
+            errors.append(f'vcoins-catalogue: {str(e)[:160]}')
         # A theme still searching after 25 minutes does not hold the whole
         # scan: it is reported and the rest lands (the pool is released
         # without waiting for it).
@@ -15249,6 +15525,8 @@ def _run_market_scan(category, scan_id):
                  item['closes'], item['theme'], json.dumps(item), now])
         summary = (f"{len(normalized)} candidate{'s' if len(normalized) != 1 else ''} "
                    f"from {len(themes)} themes, {len(results)} raw finds")
+        if catalogue_note:
+            summary += f"; {catalogue_note}"
         if analysis_date:
             summary += f", guided by the Analysis of {analysis_date[:10]}"
         elif analysis_block:
