@@ -14830,6 +14830,10 @@ _MARKET_ENDED_PAGE_MARKERS = (
     'auction has ended', 'auction closed', 'sale has ended', 'sale closed',
     'no longer available', 'listing is no longer available', 'sold out',
     'lot is sold', 'winning bid', 'hammer price', 'this item is sold',
+    # VCoins keeps a sold lot's page up, price and all, with the buy
+    # button replaced by "Not available".
+    'not available', 'no longer for sale', 'currently unavailable',
+    'item unavailable', 'this item has been sold', 'reserved',
     'ended:', 'sold ',
 )
 _MARKET_LIVE_PAGE_MARKERS = (
