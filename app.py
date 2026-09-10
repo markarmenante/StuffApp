@@ -14582,6 +14582,37 @@ def _market_search_budget():
         return 10
 
 
+def _market_parse_json(text):
+    """The theme's JSON, or a salvage of it: one unescaped quote in a
+    title used to lose a whole theme ("Expecting ',' delimiter"). On a
+    parse error the item objects are pulled out one at a time and the
+    ones that parse are kept."""
+    try:
+        return parse_model_json_object(text)
+    except (RuntimeError, json.JSONDecodeError, ValueError):
+        pass
+    items = []
+    for m in re.finditer(r'\{(?:[^{}]|\{[^{}]*\})*\}', text or ''):
+        chunk = m.group(0)
+        if '"listing_url"' not in chunk:
+            continue
+        try:
+            items.append(json.loads(chunk))
+            continue
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # Second try: escape stray quotes inside string values.
+        fixed = re.sub(r'(?<=[A-Za-z0-9 ])"(?=[A-Za-z0-9 ][^,:}\]]*")', "'", chunk)
+        try:
+            items.append(json.loads(fixed))
+        except (json.JSONDecodeError, ValueError):
+            continue
+    if not items:
+        raise RuntimeError(f'Could not parse JSON from model output: {(text or "")[:200]}')
+    app.logger.info("market scan: salvaged %d items from unparseable JSON", len(items))
+    return {'items': items, 'notes': ''}
+
+
 def _market_scan_workers():
     try:
         return max(1, int(os.environ.get('MARKET_SCAN_WORKERS', '2')))
@@ -14634,7 +14665,7 @@ def _market_call_theme_once(api_key, category, theme_key, prompt):
         app.logger.info("market scan %s/%s: stop=%s searches=%d text=%d chars",
                         category, theme_key, getattr(resp, 'stop_reason', None),
                         searches, len(text))
-        data = parse_model_json_object(text)
+        data = _market_parse_json(text)
         items = data.get('items') if isinstance(data, dict) else None
         if not isinstance(items, list):
             return [], f'{theme_key}: no items array'
@@ -14679,8 +14710,10 @@ def _market_grade_number(category, item):
     except (TypeError, ValueError):
         pass
     text = f"{item.get('grade') or ''} {item.get('title') or ''}".lower()
-    m = re.search(r'\b(?:pmg|pcgs|ngc|ms|au|xf|ef|vf|unc|cu|gem)?\s*(\d{2})\b', text)
-    if m and 1 <= int(m.group(1)) <= 70 and re.search(r'\b(pmg|pcgs|ngc|ms|au|xf|ef|vf|unc|cu|gem)\b', text):
+    # Only a number that follows a grade word counts ("NGC Ch AU 58",
+    # "PMG 64"); a bare "1/12 stater" or "25mm, 11.63g" is not a grade.
+    m = re.search(r'\b(?:pmg|pcgs|ngc|ms|au|xf|ef|vf|unc|cu|gem)\b[\s\w]{0,12}?\b(\d{2})\b', text)
+    if m and 1 <= int(m.group(1)) <= 70:
         return float(m.group(1))
     table = _ADJECTIVAL_NOTE_GRADES if category == 'banknotes' else _ADJECTIVAL_COIN_GRADES
     for word, value in table:
@@ -15193,6 +15226,10 @@ def _run_market_scan(category, scan_id):
                    "summary = ?, item_count = ? WHERE id = ?",
                    [now, summary, len(normalized), scan_id])
         db.commit()
+        app.logger.info("market scan %s done: %s", category, summary[:600])
+        for item in normalized[:12]:
+            app.logger.info("market scan %s kept: %s | %s | %s", category,
+                            item['title'][:80], item['price'], item['listing_url'][:100])
     except Exception as e:
         try:
             db.execute("UPDATE market_scans SET status = 'failed', finished_at = ?, "
