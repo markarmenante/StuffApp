@@ -14229,6 +14229,25 @@ MARKET_SCAN_PROFILE_PATH = os.path.join(
 _MARKET_SCAN_INFLIGHT = set()
 _MARKET_SCAN_LOCK = threading.Lock()
 
+# The premium ancient-coin dealers Mark wants every coin scan to search
+# (his instruction of 2026-09-10): fixed-price stock at the top of the
+# trade, alongside the auction houses.
+MARKET_PREMIUM_ANCIENTS_TEXT = (
+    "VCoins (vcoins.com — the dealer directory and every store on it), "
+    "Shanna Schmidt Numismatics (shannaschmidt.com), Harlan J. Berk (hjbltd.com), "
+    "Roma Numismatics (romanumismatics.com, shop and e-sales), Nomos (nomosag.com, "
+    "webshop), Leu Numismatik (leunumismatik.com), Numismatica Ars Classica (NAC), "
+    "CNG (cngcoins.com, Coin Shop and e-auctions), Künker, Gorny & Mosch, "
+    "Numismatica Genevensis, Baldwin's (baldwin.co.uk), Spink, Heritage, "
+    "Stack's Bowers, Edward J. Waddell (coinvac.com), Kirk Davis, Athena "
+    "Numismatics, Aegean Numismatics, Sovereign Rarities, Forum Ancient Coins "
+    "(forumancientcoins.com), Numismatik Naumann, Savoca, Bertolami, Nomisma, "
+    "Solidus, Pecunem, Hess-Divo, Jacquier, Münzen & Medaillen, Coin Cabinet, "
+    "Ancient Coin Traders, Wayne Sayles / Sayles & Lavender, David Hendin, "
+    "Tom Vossen, Marc Breitsprecher (ancientimports.com), Numismatic Naumann, "
+    "and the NGC Ancients-certified stock of the major eBay dealers"
+)
+
 MARKET_VENUES_TEXT = (
     "eBay (Buy It Now and auctions, ebay.com), Stack's Bowers "
     "(stacksbowers.com — auction lots and the fixed-price store), Heritage "
@@ -14446,6 +14465,15 @@ _MARKET_THEMES = {
         ('ancients-auctions', "Lots in UPCOMING or LIVE auctions at CNG, Leu, Nomos, NAC, "
                               "Roma, Heritage and the biddr/sixbid houses matching the "
                               "gap list, with the sale name and closing date."),
+        ('ancients-dealers', "PREMIUM DEALERS' STOCK — search the fixed-price stock of the "
+                             "premium ancient-coin dealers named in the scope (VCoins stores, "
+                             "Shanna Schmidt, Harlan J. Berk, Roma, Nomos webshop, CNG Coin "
+                             "Shop, Baldwin's, Waddell, Kirk Davis, Athena, Forum) for pieces "
+                             "that fill the COLLECTION ANALYSIS gaps or deepen its "
+                             "concentrations. Use site: searches (\"site:vcoins.com Knidos "
+                             "tetradrachm\", \"site:shannaschmidt.com stater\", "
+                             "\"site:hjbltd.com Syracuse\"). EF or better, provenance noted, "
+                             "and the item page must still show the piece for sale."),
         ('ancients-sources', "NEW SOURCES: dealers and houses Mark is NOT already using "
                              "for ancient Greek coins — beyond CNG, Heritage, VCoins, eBay, "
                              "Leu, Nomos, NAC — such as Künker, Gorny & Mosch, Naumann, "
@@ -14511,7 +14539,10 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
              if category == 'banknotes' else
              'ANCIENT GREEK coins only — archaic through Hellenistic, including the '
              'Greek world of Sicily, Magna Graecia, Asia Minor, Thrace, Macedon, the '
-             'Ptolemies and Seleucids; no Roman, medieval or modern coins')
+             'Ptolemies and Seleucids; no Roman, medieval or modern coins. '
+             'Mark\'s instruction of 2026-09-10: ALWAYS check the premium ancient-coin '
+             'dealers with live fixed-price stock — ' + MARKET_PREMIUM_ANCIENTS_TEXT + ' — '
+             'and search them directly (site: queries), not only the auction houses')
     return f"""You are the Market Scan for Mark Armenante's {category} collection (stuff.armenante.com). Today is {today}.
 Scope: {scope}.
 
@@ -14913,6 +14944,14 @@ _MARKET_KNOWN_VENUES = ('ebay', 'stacksbowers', 'ha.com', 'heritage', 'numista',
                         'ma-shops', 'banknoteworld', 'vcoins', 'greatcollections',
                         'biddr', 'sixbid', 'cngcoins', 'spink', 'noonans',
                         'lynknight', 'numisbids')
+# Premium ancient dealers: a listing from one of these scores a little
+# higher — their stock is vetted, photographed and provenanced.
+_MARKET_PREMIUM_VENUES = ('vcoins', 'shannaschmidt', 'hjbltd', 'harlan', 'romanumismatics',
+                          'nomosag', 'leunumismatik', 'arsclassica', 'cngcoins', 'kuenker',
+                          'gmcoinart', 'gorny', 'ngsa.ch', 'baldwin', 'coinvac', 'waddell',
+                          'kirkdavis', 'athenanumismatics', 'aegeannumismatics',
+                          'sovr.co.uk', 'forumancientcoins', 'numismatik-naumann', 'savoca',
+                          'bertolami', 'hess-divo', 'jacquier', 'ancientimports')
 
 
 def _market_score(category, item):
@@ -14938,6 +14977,8 @@ def _market_score(category, item):
     blob = (item.get('venue') or '').lower() + ' ' + (item.get('listing_url') or '').lower()
     if any(v in blob for v in _MARKET_KNOWN_VENUES):
         score += 2
+    if category == 'coins' and any(v in blob for v in _MARKET_PREMIUM_VENUES):
+        score += 5
     if item.get('owned'):
         score -= 15
     return score
