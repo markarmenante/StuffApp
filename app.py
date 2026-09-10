@@ -12460,7 +12460,69 @@ def _coerce_number(value):
         return None
 
 
-def fetch_watch_valuation_anthropic(watch):
+def _watch_valuation_description(watch):
+    """The description line of a valuation prompt: the record's own text,
+    and always the dial, edition size, calibre and case size — for a
+    Journe the dial and the edition (Byblos, Dubai, the 38 mm steel set,
+    a 99-piece anniversary) decide the price bracket."""
+    parts = []
+    text = (watch['description'] or '').strip()
+    if text:
+        parts.append(text[:280] + ('…' if len(text) > 280 else ''))
+    specs = []
+    for label, key in (('dial', 'dial_color'), ('edition of', 'edition'), ('calibre', 'calibre'),
+                       ('case', 'case_diameter')):
+        try:
+            v = watch[key]
+        except (KeyError, IndexError):
+            v = None
+        if v not in (None, ''):
+            specs.append(f"{label} {v}{' mm' if key == 'case_diameter' else ''}")
+    if specs:
+        parts.append('; '.join(specs))
+    return ' — '.join(parts)
+
+
+def _watch_valuation_focus(watch, auction_first=False):
+    """The "Focus on" block of the valuation prompt. auction_first is the
+    portfolio revaluation Mark asked for on 2026-09-10 (the Journe
+    auction market has moved far past the dealer asks the April
+    valuations leaned on): the level is set by what the exact
+    reference/metal/dial has actually hammered for in the last 12–18
+    months, dealer asks are secondary, and the previous stored value is
+    not an input."""
+    from datetime import date as _date
+    year_now = _date.today().year
+    if not auction_first:
+        return None
+    return (
+        f"Today is {_date.today().isoformat()}. This is an AUCTION-FIRST valuation: the current "
+        "auction market sets the level, not dealer asking prices and not older data.\n"
+        "- FIRST: realised auction prices for this exact reference, metal and dial in the last "
+        f"12–18 months ({year_now - 1}–{year_now}) — Phillips (Geneva, New York, Hong Kong), "
+        "Christie's, Sotheby's, Antiquorum, Bonhams, Ineichen, Monaco Legend — quote the "
+        "hammer price WITH buyer's premium, the sale, the date and the lot, with URLs "
+        "(phillips.com, christies.com, sothebys.com, antiquorum.swiss, bonhams.com; "
+        "watchcharts.com, everywatch.com and thewatchpages.com auction-result pages are "
+        "acceptable secondary records). Search several sales, not one.\n"
+        "- If the exact configuration has not sold recently, use the nearest comparable "
+        "(same reference in another metal or dial, or the same calibre and case size) and "
+        "say plainly what the comparable is and how you adjusted for metal, dial, edition "
+        "size and year; early brass-movement pieces, limited boutique editions, the 38 mm "
+        "steel set and anniversary series each trade at their own level — do not average "
+        "them with regular production.\n"
+        "- SECOND: current dealer asks (A Collected Man, The 1916 Company, Chrono24, "
+        "WatchBox, Wind Vintage, EveryWatch) as a check on the auction level, not a "
+        "substitute for it.\n"
+        "- consensus_usd = your best estimate of what this watch would realise at a major "
+        "auction TODAY (hammer plus premium), given the comps above. Not the top of the "
+        "range, not the dealer ask, not the previous appraisal.\n"
+        "- The results must be facts and figures with sources; no commentary on the "
+        "collection or the owner."
+    )
+
+
+def fetch_watch_valuation_anthropic(watch, auction_first=False):
     """Use Claude's web_search tool to estimate current market value.
 
     Returns dict {value: float|None, results: str}. Raises RuntimeError
@@ -12477,24 +12539,25 @@ def fetch_watch_valuation_anthropic(watch):
     reference = (watch['reference'] or '').strip()
     year = watch['year']
     metal = (watch['metal'] or '').strip()
-    description = (watch['description'] or '').strip()
+    description = _watch_valuation_description(watch)
 
     ident = ' '.join(x for x in [brand, model, f'Ref. {reference}' if reference else '',
                                  f'({metal})' if metal else '',
                                  str(year) if year else ''] if x)
 
+    focus_block = _watch_valuation_focus(watch, auction_first) or (
+        "Use at most 5 concise web searches. Focus on:\n"
+        "- Chrono24 active listings for this reference (one search; note median/range)\n"
+        "- WatchCharts market data / price history for this reference (one search)\n"
+        "- One recent auction result (Phillips, Christie's, Sotheby's, Antiquorum, or Bonhams)\n"
+        "- Watchbox or A Collected Man if this reference is listed (one search combined)\n\n"
+        "Compute a consensus USD value (central estimate of the comps found).")
     prompt = f"""You are valuing a specific wristwatch from public web data.
 
 Watch: {ident}
 Description: {(description[:280] + '…') if len(description) > 280 else description or '(none)'}
 
-Use at most 5 concise web searches. Focus on:
-- Chrono24 active listings for this reference (one search; note median/range)
-- WatchCharts market data / price history for this reference (one search)
-- One recent auction result (Phillips, Christie's, Sotheby's, Antiquorum, or Bonhams)
-- Watchbox or A Collected Man if this reference is listed (one search combined)
-
-Compute a consensus USD value (central estimate of the comps found).
+{focus_block}
 Also capture the WatchCharts market median specifically, if that page publishes one for this reference.
 
 Reply with ONLY a JSON object, no prose, no code fences:
@@ -12508,7 +12571,7 @@ results_markdown rules:
 
     client = anthropic.Anthropic(api_key=api_key)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_WATCH_LOOKUP_MODEL')
-    web_search = anthropic_web_search_tool(5)
+    web_search = anthropic_web_search_tool(10 if auction_first else 5)
 
     import time as _time
     last_err = None
@@ -12580,7 +12643,7 @@ results_markdown rules:
     return {'value': value, 'results': results_md}
 
 
-def fetch_watch_valuation_perplexity(watch):
+def fetch_watch_valuation_perplexity(watch, auction_first=False):
     """Use Perplexity/Sonar Pro to estimate current watch market value."""
     api_key = os.environ.get('PERPLEXITY_API_KEY')
     if not api_key:
@@ -12591,7 +12654,7 @@ def fetch_watch_valuation_perplexity(watch):
     reference = (watch['reference'] or '').strip()
     year = watch['year']
     metal = (watch['metal'] or '').strip()
-    description = (watch['description'] or '').strip()
+    description = _watch_valuation_description(watch)
 
     if not (brand or model or reference):
         raise RuntimeError('Need at least brand, model, or reference to fetch value.')
@@ -12601,27 +12664,28 @@ def fetch_watch_valuation_perplexity(watch):
         f'({metal})' if metal else '', str(year) if year else '',
     ] if x)
 
+    focus_block = _watch_valuation_focus(watch, auction_first) or (
+        "Use high-quality, current web results. Focus on:\n"
+        "- Chrono24 active listings for this reference (note median/range when available)\n"
+        "- WatchCharts market data / price history for this reference\n"
+        "- Recent auction results (Phillips, Christie's, Sotheby's, Antiquorum, Bonhams)\n"
+        "- WatchBox / The 1916 Company or A Collected Man if this reference is listed\n\n"
+        "Compute a consensus USD value (central estimate of the comps found).")
     prompt = f"""You are valuing a specific wristwatch from current public web data.
 
 Watch: {ident}
 Description: {(description[:280] + '…') if len(description) > 280 else description or '(none)'}
 
-Use high-quality, current web results. Focus on:
-- Chrono24 active listings for this reference (note median/range when available)
-- WatchCharts market data / price history for this reference
-- Recent auction results (Phillips, Christie's, Sotheby's, Antiquorum, Bonhams)
-- WatchBox / The 1916 Company or A Collected Man if this reference is listed
-
-Compute a consensus USD value (central estimate of the comps found).
+{focus_block}
 Also capture the WatchCharts market median specifically, if that page publishes one for this reference.
 
 Reply with ONLY a JSON object matching the requested schema:
 {{"consensus_usd": 12345, "watchcharts_median_usd": 12000, "results_markdown": "- Chrono24 (N listings, median): $X,XXX — URL\\n- WatchCharts median: $X,XXX — URL\\n- Phillips, Month YYYY: $X,XXX — URL\\n- ..."}}
 
 results_markdown rules:
-- 3–6 bullet lines for comps that have a URL source (prefix each with '- ').
+- {'4–8' if auction_first else '3–6'} bullet lines for comps that have a URL source (prefix each with '- '){'; auction results first, each with sale, date and lot' if auction_first else ''}.
 - You MAY add 1–2 short plain (non-bullet) lines of context above or below the comps when useful, e.g. rarity, production numbers, condition caveats, or why a comp does not apply.
-- Keep the whole field under ~700 chars.
+- Keep the whole field under ~{'1000' if auction_first else '700'} chars.
 - Use null for consensus_usd / watchcharts_median_usd if not available."""
 
     api_data, text = perplexity_chat_completion(
@@ -12630,7 +12694,7 @@ results_markdown rules:
         env_names=('PERPLEXITY_WATCH_VALUE_MODEL',
                    'PERPLEXITY_WATCH_LOOKUP_MODEL'),
         default_model='sonar-pro',
-        max_tokens=1536,
+        max_tokens=2048 if auction_first else 1536,
         response_schema=WATCH_VALUE_RESPONSE_SCHEMA,
         schema_name='watchValue',
         search_context_env_names=('PERPLEXITY_WATCH_VALUE_SEARCH_CONTEXT',
@@ -12666,13 +12730,112 @@ results_markdown rules:
     return {'value': value, 'results': results_md}
 
 
-def fetch_watch_valuation(watch):
+def fetch_watch_valuation(watch, auction_first=False):
     """Fetch value with Perplexity/Sonar Pro by default, Claude as fallback."""
     if os.environ.get('PERPLEXITY_API_KEY'):
-        return fetch_watch_valuation_perplexity(watch)
+        return fetch_watch_valuation_perplexity(watch, auction_first=auction_first)
     if os.environ.get('ANTHROPIC_API_KEY'):
-        return fetch_watch_valuation_anthropic(watch)
+        return fetch_watch_valuation_anthropic(watch, auction_first=auction_first)
     raise RuntimeError('PERPLEXITY_API_KEY or ANTHROPIC_API_KEY not configured')
+
+
+# ---------------------------------------------------------------------------
+# Portfolio revaluation: every watch of a brand, auction-first, values
+# overwritten. Mark, 2026-09-10: "the portfolio of Journe watches is
+# seriously undervalued. the current auction scene has driven prices up
+# astronomically. run a valuation of all the journe watches and update
+# the current values."
+# ---------------------------------------------------------------------------
+
+_REVALUE_JOBS = {}
+_REVALUE_LOCK = threading.Lock()
+
+
+def _revalue_one(db, watch, now):
+    """Revalue one watch auction-first and overwrite its value; the old
+    value and its date are kept at the head of the results."""
+    old_value = watch['value']
+    old_when = (watch['value_searched_at'] or '')[:10]
+    data = fetch_watch_valuation(watch, auction_first=True)
+    new_value = data['value']
+    results = (data.get('results') or '').strip()
+    try:
+        old_num = float(old_value) if old_value not in (None, '') else None
+    except (TypeError, ValueError):
+        old_num = None
+    if old_num:
+        head = f"Previous value ${old_num:,.0f}" + (f" ({old_when})" if old_when else '')
+        if new_value:
+            head += f" → auction-first revaluation {now[:10]}: ${float(new_value):,.0f}"
+        results = head + '\n\n' + results
+    db.execute(
+        "UPDATE watches SET value = ?, results = ?, value_searched_at = ?, updated_at = ? "
+        "WHERE id = ?",
+        (new_value, results, now, now, watch['id']))
+    db.commit()
+    return old_num, new_value
+
+
+def _run_revaluation(brand, job_key):
+    db = open_db_connection()
+    job = _REVALUE_JOBS[job_key]
+    try:
+        rows = db.execute(
+            "SELECT * FROM watches WHERE lower(brand) LIKE ? AND (status IS NULL OR status IN ('Own', 'Ordered')) "
+            "ORDER BY model, year", (f"%{brand.lower()}%",)).fetchall()
+        job['total'] = len(rows)
+        for w in rows:
+            now = datetime.utcnow().isoformat()
+            label = ' '.join(x for x in (w['model'], f"Ref. {w['reference']}" if w['reference'] else '',
+                                         w['metal'], str(w['year'] or '')) if x)
+            try:
+                old, new = _revalue_one(db, w, now)
+                job['done'] += 1
+                job['lines'].append({'id': w['id'], 'watch': label, 'old': old, 'new': new})
+                app.logger.info("revalue %s: %s | %s -> %s", brand, label,
+                                f"${old:,.0f}" if old else '—', f"${new:,.0f}" if new else '—')
+            except Exception as e:
+                job['failed'] += 1
+                job['lines'].append({'id': w['id'], 'watch': label, 'error': str(e)[:200]})
+                app.logger.warning("revalue %s: %s failed: %s", brand, label, e)
+            time.sleep(1.0)   # the search API's rate limit
+        job['status'] = 'done'
+    except Exception as e:
+        job['status'] = 'failed'
+        job['error'] = str(e)[:300]
+        app.logger.warning("revalue %s failed: %s", brand, e)
+    finally:
+        job['finished_at'] = datetime.utcnow().isoformat()
+        db.close()
+
+
+@app.route('/watches/revalue', methods=['POST'])
+def watches_revalue():
+    """Start an auction-first revaluation of every owned watch of a brand
+    (form or JSON field `brand`, e.g. "Journe"). Values are overwritten;
+    the previous value is kept at the head of each watch's results."""
+    payload = request.get_json(silent=True) or {}
+    brand = (payload.get('brand') or request.form.get('brand') or request.args.get('brand') or '').strip()
+    if not brand:
+        return jsonify({'ok': False, 'error': 'brand required'}), 400
+    job_key = brand.lower()
+    with _REVALUE_LOCK:
+        job = _REVALUE_JOBS.get(job_key)
+        if job and job['status'] == 'running':
+            return jsonify({'ok': True, 'running': True, 'job': job_key})
+        _REVALUE_JOBS[job_key] = {'status': 'running', 'brand': brand, 'total': 0, 'done': 0,
+                                  'failed': 0, 'lines': [], 'started_at': datetime.utcnow().isoformat()}
+    threading.Thread(target=_run_revaluation, args=(brand, job_key), daemon=True).start()
+    return jsonify({'ok': True, 'running': True, 'job': job_key})
+
+
+@app.route('/watches/revalue/status')
+def watches_revalue_status():
+    job_key = (request.args.get('brand') or '').strip().lower()
+    job = _REVALUE_JOBS.get(job_key)
+    if not job:
+        return jsonify({'ok': True, 'status': 'none'})
+    return jsonify({'ok': True, **job})
 
 
 WATCH_SPEC_SOURCES = [
