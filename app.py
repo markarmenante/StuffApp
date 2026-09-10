@@ -14437,22 +14437,17 @@ _MARKET_THEMES = {
                     "venues, and set `new_source` to true on each."),
     ],
     'coins': [
-        ('ancients-gaps', "COLLECTION GAPS — work from COLLECTION ANALYSIS below: the "
-                          "series the analysis says a serious Greek collector would notice "
-                          "missing, and the computed list of canonical Greek series the "
-                          "collection does not hold (with the profile's own gap list — Crete "
-                          "Gortyna/Knossos, Poseidonia, Velia, Rhegion, Naxos, Eretria, "
-                          "Samos, Chios, Knidos, Cyprus royal issues, a finer Persian daric — "
-                          "as a floor). Search at CNG, Leu, Nomos, NAC, Roma, Heritage, "
-                          "VCoins, NGC Ancients on eBay. EF or better; provenance noted; name "
-                          "the gap filled in `fills`."),
-        ('ancients-analysis', "ANALYSIS FOLLOW-THROUGH — read the essay findings under "
-                              "COLLECTION ANALYSIS: where it praises a concentration "
-                              "(Sicily, Bactria, the electrum, the Successor kingdoms), find "
-                              "the next reference-level piece that deepens it; where it "
-                              "calls a run thin or a period under-represented, find the "
-                              "piece that mends it. Quote the finding you are answering in "
-                              "`why`."),
+        ('ancients-gaps', "COLLECTION GAPS AND FINDINGS — work from COLLECTION ANALYSIS "
+                          "below. First the gaps: the series the analysis says a serious "
+                          "Greek collector would notice missing, and the computed list of "
+                          "canonical Greek series the collection does not hold (Crete "
+                          "Gortyna/Knossos, Poseidonia, Velia, Rhegion, Naxos, Eretria, Samos, "
+                          "Chios, Knidos, Cyprus royal issues, a finer Persian daric as a "
+                          "floor). Then the findings: where the essay praises a concentration "
+                          "(Sicily, Bactria, the electrum, the Successor kingdoms) find the "
+                          "next reference-level piece that deepens it; where it calls a run "
+                          "thin, the piece that mends it. EF or better, provenance noted; name "
+                          "the gap or finding answered in `fills` / `why`."),
         ('ancients-denominations', "DENOMINATION GAPS among the Greek cities and rulers "
                                    "already held (DENOMINATION COVERAGE below): the "
                                    "fractions and multiples missing — a drachm or obol "
@@ -14577,8 +14572,39 @@ Reply with ONLY a JSON object, no prose, no code fences:
 """
 
 
-def _market_call_theme(api_key, category, theme_key, prompt):
-    """One theme's web-search call. Returns (items, error)."""
+def _market_search_budget():
+    """Searches per theme. The global ANTHROPIC_WEB_SEARCH_MAX_USES is
+    honoured by anthropic_web_search_tool; this caps the scan's own default
+    so six themes stay inside the server-tool limit."""
+    try:
+        return max(4, int(os.environ.get('MARKET_SCAN_SEARCHES', '10')))
+    except ValueError:
+        return 10
+
+
+def _market_scan_workers():
+    try:
+        return max(1, int(os.environ.get('MARKET_SCAN_WORKERS', '2')))
+    except ValueError:
+        return 2
+
+
+_MARKET_LIMIT_RE = re.compile(r'tool use limit|rate.?limit|limit exceeded|too many requests|overloaded',
+                              re.IGNORECASE)
+
+
+def _market_call_theme(api_key, category, theme_key, prompt, _attempt=1):
+    """One theme's web-search call. Returns (items, error). A theme that
+    ran into the server-tool limit waits a minute and tries once more."""
+    items, err = _market_call_theme_once(api_key, category, theme_key, prompt)
+    if not items and err and _MARKET_LIMIT_RE.search(err) and _attempt < 3:
+        app.logger.info("market scan %s/%s: search limit hit, retrying in 75s", category, theme_key)
+        time.sleep(75)
+        return _market_call_theme(api_key, category, theme_key, prompt, _attempt + 1)
+    return items, err
+
+
+def _market_call_theme_once(api_key, category, theme_key, prompt):
     try:
         import anthropic
     except ImportError:
@@ -14592,7 +14618,8 @@ def _market_call_theme(api_key, category, theme_key, prompt):
             client,
             model=model,
             max_tokens=5000,
-            tools=[anthropic_web_search_tool(8, default_tool='web_search_20260209')],
+            tools=[dict(anthropic_web_search_tool(_market_search_budget(), default_tool='web_search_20260209'),
+                        max_uses=_market_search_budget())],
             messages=[{'role': 'user', 'content': prompt}],
         )
         text = _message_text(resp)
@@ -15019,19 +15046,22 @@ def _run_market_scan(category, scan_id):
         themes = _MARKET_THEMES[category]
         results, errors = [], []
         from concurrent.futures import ThreadPoolExecutor, wait as _wait
-        pool = ThreadPoolExecutor(max_workers=len(themes))
+        # Two themes at a time: seven at once, each firing twenty searches,
+        # trips Anthropic's server-tool limit ("Server tool use limit
+        # exceeded") and every theme comes back empty.
+        pool = ThreadPoolExecutor(max_workers=_market_scan_workers())
         futures = {
             pool.submit(_market_call_theme, api_key, category, key,
                         _market_scan_prompt(category, key, text, profile, holdings,
                                             coverage, recent, analysis_block)): key
             for key, text in themes}
-        # A theme still searching after ten minutes does not hold the whole
+        # A theme still searching after 25 minutes does not hold the whole
         # scan: it is reported and the rest lands (the pool is released
         # without waiting for it).
-        _wait(list(futures), timeout=600)
+        _wait(list(futures), timeout=1500)
         for fut, key in futures.items():
             if not fut.done():
-                errors.append(f'{key}: still running after 10 minutes — skipped')
+                errors.append(f'{key}: still running after 25 minutes — skipped')
                 continue
             items, err = fut.result()
             results.extend(items)
