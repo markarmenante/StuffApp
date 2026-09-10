@@ -811,6 +811,130 @@ def _similar_banknotes(db, record_id, note):
     return found
 
 
+# ---------------------------------------------------------------------------
+# Coin regions the numismatic way (SNG / HGC / CNG headings)
+#
+# Mark, 2026-09-10, on an Aeginetan turtle filed under "Attica": the
+# catalogue heading is ISLANDS off ATTICA, Aegina — the region is the
+# island group, the authority is the polis. Same for Thasos (Islands off
+# Thrace), Chios and Samos (Islands off Ionia), Rhodes, Kos and Kamiros
+# (Islands off Caria), Tenedos (Islands off Troas). Corinth's region is
+# Corinthia, Sikyon's Sikyonia, Kroton's Bruttium. Lesbos, Euboia, Crete
+# and Cyprus are headings in their own right and stay as they are.
+# ---------------------------------------------------------------------------
+
+_COIN_ISLAND_CITIES = {
+    'aegina': ('Islands off Attica', 'Aegina'), 'aigina': ('Islands off Attica', 'Aegina'),
+    'thasos': ('Islands off Thrace', 'Thasos'), 'thrasos': ('Islands off Thrace', 'Thasos'),
+    'samothrace': ('Islands off Thrace', 'Samothrace'), 'samothrake': ('Islands off Thrace', 'Samothrace'),
+    'imbros': ('Islands off Thrace', 'Imbros'), 'lemnos': ('Islands off Thrace', 'Lemnos'),
+    'chios': ('Islands off Ionia', 'Chios'), 'samos': ('Islands off Ionia', 'Samos'),
+    'ikaria': ('Islands off Ionia', 'Ikaria'),
+    'rhodes': ('Islands off Caria', 'Rhodes'), 'rhodos': ('Islands off Caria', 'Rhodes'),
+    'kamiros': ('Islands off Caria', 'Kamiros'), 'camirus': ('Islands off Caria', 'Kamiros'),
+    'ialysos': ('Islands off Caria', 'Ialysos'), 'lindos': ('Islands off Caria', 'Lindos'),
+    'kos': ('Islands off Caria', 'Kos'), 'cos': ('Islands off Caria', 'Kos'),
+    'kalymna': ('Islands off Caria', 'Kalymna'), 'nisyros': ('Islands off Caria', 'Nisyros'),
+    'karpathos': ('Islands off Caria', 'Karpathos'),
+    'tenedos': ('Islands off Troas', 'Tenedos'),
+}
+_COIN_REGION_CANON = {
+    'islands off attica, aegina': 'Islands off Attica', 'aegina': 'Islands off Attica',
+    'islands off thrace, thasos': 'Islands off Thrace', 'thasos': 'Islands off Thrace',
+    'caria, islands off': 'Islands off Caria', 'islands off caria, rhodes': 'Islands off Caria',
+    'ionia, islands off': 'Islands off Ionia', 'islands off ionia, chios': 'Islands off Ionia',
+    'islands off ionia, samos': 'Islands off Ionia',
+    'attica, islands off': 'Islands off Attica', 'thrace, islands off': 'Islands off Thrace',
+    'corinth': 'Corinthia', 'sikyon': 'Sikyonia', 'kroton': 'Bruttium', 'croton': 'Bruttium',
+}
+_COIN_CIVIC_RE = re.compile(r',?\s*\b(?:civic issue|civic coinage|civic|autonomous issue)\b',
+                            re.IGNORECASE)
+
+
+def _strip_civic(value):
+    """'Aegina civic issue' -> 'Aegina'; 'Elis (Olympia civic issue)' ->
+    'Elis (Olympia)'; 'Gela, civic issue' -> 'Gela'. A civic issue is the
+    norm, and the authority field names the issuer."""
+    out = _COIN_CIVIC_RE.sub('', str(value or ''))
+    out = re.sub(r'\(\s*\)', '', out)
+    out = re.sub(r'\s+\)', ')', out)
+    return re.sub(r'\s+', ' ', out).strip(' ,;-')
+
+
+def _coin_city_key(value):
+    v = re.sub(r'\s*\([^)]*\)\s*$', '', _strip_civic(value).lower())
+    return v.split(',')[-1].strip() if ',' in v else v
+
+
+def canonicalize_coin_fields(fields, existing=None):
+    """Row-aware canonicalization applied on every coin save. Mutates and
+    returns `fields`; `existing` supplies the untouched columns on a
+    partial update. Region takes the catalogue heading; an authority of
+    "Aegina civic issue" becomes "Aegina" (a civic issue is the norm and
+    the field names the issuer); an island city named in the mint or
+    authority pulls the region to its "Islands off …" heading."""
+    def _get(name):
+        if name in fields:
+            return fields[name]
+        return existing[name] if existing is not None and name in existing.keys() else None
+    region = str(_get('region') or '').strip()
+    authority = str(_get('authority') or '').strip()
+    mint = str(_get('mint') or '').strip()
+    if 'authority' in fields and authority:
+        stripped = _strip_civic(authority)
+        if stripped and stripped != authority:
+            authority = stripped
+            fields['authority'] = authority
+    low_region = region.lower()
+    if low_region in _COIN_REGION_CANON:
+        region = _COIN_REGION_CANON[low_region]
+    city = None
+    for candidate in (mint, authority):
+        key = _coin_city_key(candidate)
+        if key in _COIN_ISLAND_CITIES:
+            city = _COIN_ISLAND_CITIES[key]
+            break
+    if city:
+        island_region, city_name = city
+        # Only a plain regional heading (Attica, Thrace, Caria, Ionia,
+        # the island's own name, or blank) moves; a deliberate other
+        # heading (a kingdom, a province) is left alone.
+        plain = low_region in ('', 'attica', 'thrace', 'caria', 'ionia', 'troas', 'islands',
+                               island_region.lower()) or low_region in _COIN_REGION_CANON \
+            or low_region.startswith('islands off')
+        if plain:
+            region = island_region
+        if 'authority' in fields and _coin_city_key(authority) in _COIN_ISLAND_CITIES:
+            fields['authority'] = city_name
+        if 'mint' in fields and mint and _coin_city_key(mint) in _COIN_ISLAND_CITIES:
+            fields['mint'] = city_name
+    if 'region' in fields and region != str(fields.get('region') or '').strip():
+        fields['region'] = region
+    elif 'region' not in fields and existing is not None and region != str(existing['region'] or '').strip():
+        fields['region'] = region
+    return fields
+
+
+def _migrate_canonicalize_coin_regions(db):
+    """Idempotent boot-time backfill: apply canonicalize_coin_fields to
+    every coin, so the Aeginetan turtles, Thasian staters and Rhodian
+    didrachms filed under Attica / Thrace / Caria (or under the city as
+    a region) take their catalogue headings."""
+    cols = _table_cols(db, 'coins')
+    if not {'region', 'authority', 'mint'}.issubset(cols):
+        return
+    n = 0
+    for r in db.execute("SELECT id, region, authority, mint FROM coins").fetchall():
+        fields = {'region': r['region'], 'authority': r['authority'], 'mint': r['mint']}
+        canonicalize_coin_fields(fields, existing=r)
+        if any((fields[k] or '') != (r[k] or '') for k in ('region', 'authority', 'mint')):
+            db.execute("UPDATE coins SET region = ?, authority = ?, mint = ? WHERE id = ?",
+                       (fields['region'], fields['authority'], fields['mint'], r['id']))
+            n += 1
+    if n:
+        app.logger.info("coins: %d records took their catalogue region/authority", n)
+
+
 def _migrate_canonicalize_us_banknotes(db):
     """One-shot + idempotent backfill: apply canonicalize_banknote_fields to
     every existing note and resequence Display Numbers if anything changed.
@@ -5701,6 +5825,7 @@ def init_db():
     _cleanup_coin_research_headings(db)
     _merge_banknote_catalog_numbers(db)
     _migrate_canonicalize_us_banknotes(db)
+    _migrate_canonicalize_coin_regions(db)
     db.commit()
 
     # Migration-state ledger: one row per applied one-shot data
@@ -17620,6 +17745,8 @@ def new_record(category):
 
         if category == 'banknotes':
             canonicalize_banknote_fields(data)
+        elif category == 'coins':
+            canonicalize_coin_fields(data)
 
         # Sell-panel fields live in sale_plans, not the category table
         # (the legacy columns are frozen) — pull them out of the INSERT
@@ -17854,6 +17981,8 @@ def detail_view(category, record_id):
 
         if category == 'banknotes':
             canonicalize_banknote_fields(updates, existing=record)
+        elif category == 'coins':
+            canonicalize_coin_fields(updates, existing=record)
 
         # A note that changed country/town/issuer/year moves in the
         # order, so every Display Number after it shifts.
@@ -18375,6 +18504,13 @@ def save_field(category, record_id):
         _canon = canonicalize_banknote_fields({field_name: value},
                                               existing=existing)
         value = _canon[field_name]
+    elif category == 'coins' and field_name in ('region', 'authority', 'mint'):
+        _canon = canonicalize_coin_fields({field_name: value}, existing=existing)
+        value = _canon[field_name]
+        # A city typed into the mint can move the region too.
+        for _other in ('region', 'authority', 'mint'):
+            if _other != field_name and _other in _canon:
+                db.execute(f"UPDATE coins SET {_other} = ? WHERE id = ?", (_canon[_other], record_id))
 
     if category == 'persons' and _parse_person_medication_field(field_name):
         if _update_person_medication_field(db, record_id, field_name, value):
