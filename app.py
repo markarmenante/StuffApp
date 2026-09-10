@@ -14676,6 +14676,8 @@ VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VE
 
 LIVENESS: every item must be purchasable now. An auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. For FIXED-PRICE dealer stock (VCoins stores, Shanna Schmidt, Harlan J. Berk, Roma's shop, the Nomos and CNG shops, Baldwin's, Forum, MA-Shops, eBay Buy It Now) return the item page whenever the search result shows it offered at a price and nothing says sold, reserved or archived — the scan opens every page itself afterwards and drops the ones that have ended, so you do not have to prove it; put in `live_evidence` what the result showed ("$1,850 — Add to cart", "Buy It Now, 2 available", "bidding ends 2026-10-03"). Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
 
+TONE (Mark's instruction, 2026-09-10): `why`, `fills`, `rarity` and `fair` are factual one-liners — what the piece is, its grade, its price, which gap it fills, and the evidence. No flattery, no "exactly the trophy-grade piece the collection needs", no reading of the collection or the collector; state facts and figures only.
+
 Use your web searches on specific queries ("PMG 64 EPQ Philippines 5 pesos Victory ebay", "site:stacksbowers.com Sarawak dollar", "site:vcoins.com Knidos tetradrachm"). Return 4–8 items, best first; an item that the search result shows for sale at a price is worth returning even without page-level proof (the scan verifies). Return an empty list only when nothing is offered at all — and then say in `notes` what you searched and why nothing qualified.
 
 COLLECTION PROFILE:
@@ -15486,6 +15488,7 @@ Choose the cards worth putting in front of Mark and return them in the schema �
 - Prefer the piece that best fills each gap; several cards of one type: keep the two or three best (grade, style, pedigree, price), not all.
 - `fills` names the gap from the analysis ("Crete — Gortyna (Europa in plane tree)"). `fair` gives a one-line sense of the asking price against the market. Skip anything the holdings already contain unless a clear upgrade (say so).
 - Copy `listing_url` and `price` exactly from the card.
+- TONE: `why`, `fills`, `rarity` and `fair` are factual one-liners — the piece, its grade, its price, the gap, the evidence. No flattery and nothing about the collector or the collection's character.
 
 COLLECTION PROFILE:
 {profile}
@@ -16971,8 +16974,8 @@ _ANALYSIS_BRIEFS = {
         "You are a senior horological writer — the depth of a Phillips or A Collected Man "
         "catalogue essay crossed with a serious technical review. Write an in-depth analysis "
         "of this private collection, concentrating on the independent watchmakers. Cover, with "
-        "real horological substance: what the collection says about its owner's taste and "
-        "thesis; each independent maker represented (the maker's place in the history of "
+        "real horological substance: the makers and references held and what is missing; "
+        "each independent maker represented (the maker's place in the history of "
         "independent watchmaking, the significance of the specific references and calibres "
         "held, movement architecture — escapements, balances, remontoirs, resonance, "
         "tourbillons, power reserves — finishing traditions, case metals and series sizes); "
@@ -16998,8 +17001,7 @@ _ANALYSIS_BRIEFS = {
         "tribal issues, the electrum of Kyzikos and Mytilene, and so on); iconography and "
         "engraving — what the types and die work say; condition and grading pattern; die axes "
         "where informative; concentrations and rarities; gaps a serious Greek collector would "
-        "notice; and how the collection compares in scope with well-known private Greek "
-        "collections."
+        "notice; and, in plain terms, what the collection covers and what it does not."
     ),
     'banknotes': (
         "You are a senior paper-money specialist writing a scholarly essay on a private "
@@ -17029,9 +17031,9 @@ _ANALYSIS_BRIEFS = {
         "authority, how it circulated and was redeemed, and what the held pieces show. "
         "For the other world notes: the themes that connect them (emergency and Notgeld, "
         "new-nation first issues, post-colonial successors to the colonial series held). "
-        "Throughout: grading pattern and what the PMG/PCGS grades held say about the "
-        "collecting standard, printers and vignettes, rarities, gaps a serious collector "
-        "of colonial and occupation paper would notice, and the collection's overall thesis."
+        "Throughout: the grading pattern as a matter of record (which grades, how many, "
+        "which services), printers and vignettes, rarities, and gaps a serious collector "
+        "of colonial and occupation paper would notice."
     ),
 }
 
@@ -17042,10 +17044,18 @@ def _analysis_prompt(category, profile):
     items_text = json.dumps(items, default=str)[:60000]
     return (
         f"{_ANALYSIS_BRIEFS[category]}\n\n"
-        "Write in polished, confident prose — flowing paragraphs under clear headings "
+        "Write in plain, factual prose — flowing paragraphs under clear headings "
         "(use Markdown ## headings and ### sub-headings, bold for named pieces). Be "
         "specific: name pieces, makers, mints, references, calibres, catalogue numbers and "
-        "figures from the data. Do not invent pieces that are not in the data; where you "
+        "figures from the data. TONE (Mark's instruction, 2026-09-10): stick to the facts "
+        "about the objects. Do not characterise the collector, his taste, judgement, "
+        "discipline, standard, eye or intent; do not praise the collection or the choices "
+        "behind it; do not read gaps or grades as signs of anything ('a collector building "
+        "a study collection', 'the gaps of a specialist who has chosen depth', 'honest', "
+        "'disciplined', 'trophy', 'connoisseur', 'thesis' are all out). State what is held, "
+        "what it is, what it weighs, how it grades, what is missing, and what the "
+        "scholarship says about the pieces — nothing about what any of it 'signals' or "
+        "'says about' the owner. No superlatives unless a figure supports them. Do not invent pieces that are not in the data; where you "
         "draw on general knowledge to explain a piece's significance, keep it accurate and "
         "mainstream. Do not include a preamble, a title line, disclaimers, or a summary of "
         "what you were asked. Aim for roughly 1,800–2,600 words. Return Markdown only. "
