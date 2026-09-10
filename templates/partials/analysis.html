@@ -7,6 +7,7 @@
   {%- endfor -%}
 {%- endmacro %}
 {% macro money(v) -%}{{ '${:,.0f}'.format(v) }}{%- endmacro %}
+{% from 'partials/analysis_charts.html' import hbars, columns, stacked, scatter, share %}
 
 <div class="analysis" id="analysisRoot">
   <div class="an-hero">
@@ -45,6 +46,12 @@
 
   {# ── The computed profile ── #}
   {% if category == 'watches' %}
+  <section class="an-charts">
+    {{ hbars(profile.makers[:14]|map(attribute='brand')|list|zip(profile.makers[:14]|map(attribute='count')|list)|list, 'Pieces by independent maker', 'top ' ~ ([profile.makers|length, 14]|min)) }}
+    {{ share([('Pieces', profile.independent_count, profile.other_count), ('Spend', profile.price_independent, profile.price_total - profile.price_independent), ('Value', profile.value_independent, profile.value_total - profile.value_independent)], 'Independents', 'Manufactures', 'Independents\' share of the collection', 'by count, purchase price and current value') }}
+    {{ columns(profile.decades, 'Independents by decade of production') }}
+    {{ hbars(profile.complications[:10], 'Complications across the independents', 'beyond hours, minutes and seconds') }}
+  </section>
   <section class="an-section">
     <h2>The independents, maker by maker</h2>
     <table class="an-table">
@@ -83,6 +90,14 @@
   {% elif category == 'coins' %}
   <section class="an-section an-figures">
     {% for name, n in profile.periods %}<div class="an-figure"><div class="an-figure-n">{{ n }}</div><div class="an-figure-l">{{ name }}</div></div>{% endfor %}
+  </section>
+  <section class="an-charts">
+    {{ hbars(profile.regions[:14]|map(attribute='region')|list|zip(profile.regions[:14]|map(attribute='count')|list)|list, 'Greek coins by region', 'top ' ~ ([profile.regions|length, 14]|min) ~ ' of ' ~ profile.regions|length) }}
+    {%- set _periods = [] -%}
+    {%- for name, n in profile.periods -%}{%- set _ = _periods.append((name.split(' (')[0], n)) -%}{%- endfor -%}
+    {{ columns(_periods, 'Greek coins by period') }}
+    {{ scatter(profile.weight_points['Tetradrachm'], 'Tetradrachm weight through time', [('Attic', 17.2), ('reduced Attic', 16.3), ('Chian/Rhodian', 15.2), ('Ptolemaic', 14.2), ('cistophoric', 12.6)], profile.weight_points['Tetradrachm']|length ~ ' coins · hairlines mark the standards', 11, 18) }}
+    {{ scatter(profile.weight_points['Stater'], 'Stater weight through time', [('Phocaic EL', 16.1), ('Milesian EL', 14.1), ('Aeginetan', 12.2), ('Persic', 10.8), ('Thasian', 9.8), ('Corinthian', 8.6)], profile.weight_points['Stater']|length ~ ' coins · hairlines mark the standards', 5, 18) }}
   </section>
   <section class="an-section">
     <h2>The Greek world, region by region</h2>
@@ -138,6 +153,11 @@
     <div class="an-figure"><div class="an-figure-n">{{ profile.us_count }}</div><div class="an-figure-l">United States notes</div></div>
     <div class="an-figure"><div class="an-figure-n">{{ profile.other_count }}</div><div class="an-figure-l">other world notes</div></div>
     {% if profile.graded %}<div class="an-figure"><div class="an-figure-n">{{ '%.1f'|format(profile.avg_grade) }}</div><div class="an-figure-l">average grade of {{ profile.graded }} graded · {{ profile.gem_count }} at 65 or better</div></div>{% endif %}
+  </section>
+  <section class="an-charts">
+    {{ hbars(profile.empires|map(attribute='empire')|list|zip(profile.empires|map(attribute='count')|list)|list, 'Colonial notes by empire') }}
+    {{ stacked(profile.decade_keys, profile.decade_series, profile.decade_totals, 'Notes by decade of issue') }}
+    {{ columns(profile.grade_buckets, 'Grade distribution', profile.graded ~ ' graded notes (PMG / PCGS)') }}
   </section>
   <section class="an-section">
     <h2>Colonial notes, empire by empire</h2>

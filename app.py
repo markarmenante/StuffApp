@@ -14390,6 +14390,12 @@ _MARKET_THEMES = {
                                  "WWI Tabora issues), Kamerun, New Guinea, South-West Africa. "
                                  "Dutch (Netherlands Indies), Belgian Congo and Spanish "
                                  "colonial issues come next."),
+        ('analysis-gaps', "COLLECTION GAPS — work from COLLECTION ANALYSIS below: the "
+                          "colonial territories, issuers and note classes the analysis says "
+                          "a serious collector of colonial paper would notice missing, and "
+                          "the computed list of empire territories the collection does not "
+                          "hold. Pre-independence issues, PMG/PCGS 64 EPQ or better where "
+                          "they exist; name the gap filled in `fills` and set `empire`."),
         ('denominations', "DENOMINATION GAPS: for the series and issuers listed under "
                           "DENOMINATION COVERAGE, find the denominations NOT yet held — "
                           "the missing 1, 2, 10, 50 of a series where 5 and 20 are held, "
@@ -14412,11 +14418,22 @@ _MARKET_THEMES = {
                     "venues, and set `new_source` to true on each."),
     ],
     'coins': [
-        ('ancients-gaps', "Ancient Greek coins on the gap list in the profile (Crete "
+        ('ancients-gaps', "COLLECTION GAPS — work from COLLECTION ANALYSIS below: the "
+                          "series the analysis says a serious Greek collector would notice "
+                          "missing, and the computed list of canonical Greek series the "
+                          "collection does not hold (with the profile's own gap list — Crete "
                           "Gortyna/Knossos, Poseidonia, Velia, Rhegion, Naxos, Eretria, "
-                          "Samos, Chios, Knidos, Cyprus royal issues, a finer Persian "
-                          "daric) — at CNG, Leu, Nomos, NAC, Roma, Heritage, VCoins, "
-                          "NGC Ancients on eBay. EF or better; provenance noted."),
+                          "Samos, Chios, Knidos, Cyprus royal issues, a finer Persian daric — "
+                          "as a floor). Search at CNG, Leu, Nomos, NAC, Roma, Heritage, "
+                          "VCoins, NGC Ancients on eBay. EF or better; provenance noted; name "
+                          "the gap filled in `fills`."),
+        ('ancients-analysis', "ANALYSIS FOLLOW-THROUGH — read the essay findings under "
+                              "COLLECTION ANALYSIS: where it praises a concentration "
+                              "(Sicily, Bactria, the electrum, the Successor kingdoms), find "
+                              "the next reference-level piece that deepens it; where it "
+                              "calls a run thin or a period under-represented, find the "
+                              "piece that mends it. Quote the finding you are answering in "
+                              "`why`."),
         ('ancients-denominations', "DENOMINATION GAPS among the Greek cities and rulers "
                                    "already held (DENOMINATION COVERAGE below): the "
                                    "fractions and multiples missing — a drachm or obol "
@@ -14441,7 +14458,7 @@ _MARKET_THEMES = {
 
 
 def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
-                        coverage='', recent=''):
+                        coverage='', recent='', analysis=''):
     today = date.today().isoformat()
     if category == 'banknotes':
         grade_rules = (
@@ -14520,6 +14537,9 @@ DENOMINATION COVERAGE (per series / city — anything not listed is a gap):
 
 RECENT PURCHASES (newest first — what Mark is buying now):
 {recent or '(none recorded)'}
+
+COLLECTION ANALYSIS — FINDINGS AND GAPS (the Analysis page's reading of the collection; the gaps it names are the FIRST things to fill — name the gap in `fills` when an item fills one):
+{analysis or '(no analysis written yet)'}
 
 Reply with ONLY a JSON object, no prose, no code fences:
 {schema}
@@ -14954,6 +14974,7 @@ def _run_market_scan(category, scan_id):
         holdings = _market_holdings_summary(db, category)
         coverage = _market_denomination_coverage(db, category)
         recent = _market_recent_purchases(db, category)
+        analysis_block, analysis_date = _market_analysis_block(db, category)
         themes = _MARKET_THEMES[category]
         results, errors = [], []
         from concurrent.futures import ThreadPoolExecutor
@@ -14961,7 +14982,7 @@ def _run_market_scan(category, scan_id):
             futures = {
                 pool.submit(_market_call_theme, api_key, category, key,
                             _market_scan_prompt(category, key, text, profile, holdings,
-                                                coverage, recent)): key
+                                                coverage, recent, analysis_block)): key
                 for key, text in themes}
             for fut in futures:
                 items, err = fut.result()
@@ -14997,6 +15018,10 @@ def _run_market_scan(category, scan_id):
                  item['closes'], item['theme'], json.dumps(item), now])
         summary = (f"{len(normalized)} candidate{'s' if len(normalized) != 1 else ''} "
                    f"from {len(themes)} themes, {len(results)} raw finds")
+        if analysis_date:
+            summary += f", guided by the Analysis of {analysis_date[:10]}"
+        elif analysis_block:
+            summary += ", guided by the computed gap list (no Analysis written yet)"
         if dropped_ended:
             summary += f", {dropped_ended} dropped as sold/ended on their own pages"
         if errors:
@@ -15372,7 +15397,8 @@ def _bc(year):
     return f"{-year} BC" if year < 0 else f"AD {year}"
 
 
-_BASE_FUNCTIONS = ('Hours', 'Minutes', 'Seconds', 'Open Back', 'Hacking', 'Small Seconds')
+_BASE_FUNCTIONS = ('Hours', 'Minutes', 'Seconds', 'Open Back', 'Hacking', 'Small Seconds',
+                   'Automatic', 'Manual', 'Open Dial', 'Waterproof')
 
 
 def _watch_complications(r):
@@ -15688,8 +15714,28 @@ def _analysis_coins_profile(db):
                      key=lambda kv: period_order.index(kv[0]) if kv[0] in period_order else 99)
     price_all, _ = _analysis_money(rows, 'price')
     price_greek, _ = _analysis_money(greek, 'price')
+    # Weight-through-time points for the tetradrachm and stater charts.
+    weight_points = {'Tetradrachm': [], 'Stater': []}
+    for r in greek:
+        denom = (r['denomination'] or '').strip()
+        if denom not in weight_points:
+            continue
+        y = _safe_int(r['date_1'])
+        try:
+            w = float(r['weight'])
+        except (TypeError, ValueError):
+            continue
+        if y is None or w <= 0 or w > 60:
+            continue
+        weight_points[denom].append({
+            'x': y, 'y': round(w, 2), 'metal': _coin_metal_code(r['metal']) or '',
+            'label': ' · '.join(x for x in ((r['region'] or '').strip(), (r['authority'] or '').strip(),
+                                             r['date_1_text'] or _bc(y), f"{w:.2f} g") if x),
+            'standard': _coin_standard(denom, w, r['metal']) or '',
+        })
     return {
         'category': 'coins',
+        'weight_points': weight_points,
         'total': len(rows),
         'greek_count': len(greek),
         'ancient_other_count': len(ancient_other),
@@ -15895,8 +15941,25 @@ def _analysis_banknotes_profile(db):
             for r in sorted(rs, key=lambda r: ((r['country'] or ''), _safe_int(r['date_1']) or 0))
         ]
     price_all, _ = _analysis_money(rows, 'price')
+    decade_keys = sorted({_decade(r['date_1']) for r in rows if _decade(r['date_1'])})
+    decade_series = [
+        {'name': 'Colonial', 'values': [sum(1 for r in colonial if _decade(r['date_1']) == d) for d in decade_keys]},
+        {'name': 'United States', 'values': [sum(1 for r in us if _decade(r['date_1']) == d) for d in decade_keys]},
+        {'name': 'Other', 'values': [sum(1 for r in other if _decade(r['date_1']) == d) for d in decade_keys]},
+    ]
+    grade_buckets = []
+    for lo in range(50, 71, 2):
+        hi = lo + 1
+        n = sum(1 for g in grades_all if lo <= g <= hi)
+        grade_buckets.append((f"{lo}–{hi}" if lo < 70 else "70", n))
+    below = sum(1 for g in grades_all if g < 50)
+    if below:
+        grade_buckets.insert(0, ('<50', below))
     return {
         'category': 'banknotes',
+        'decade_keys': decade_keys, 'decade_series': decade_series,
+        'decade_totals': [sum(s['values'][i] for s in decade_series) for i in range(len(decade_keys))],
+        'grade_buckets': grade_buckets,
         'total': len(rows),
         'colonial_count': len(colonial), 'us_count': len(us), 'other_count': len(other),
         'empires': empire_list,
@@ -16148,6 +16211,9 @@ def analysis_html_filter(value):
     return _analysis_markdown_html(value)
 
 
+app.jinja_env.filters['zip'] = zip
+
+
 @app.route('/<category>/analysis')
 def analysis_view(category):
     """The Analysis page: the list's toolbar with the Collection pill,
@@ -16238,6 +16304,278 @@ def analysis_status(category):
     return jsonify({'ok': True, 'status': analysis['status'], 'analysis_id': analysis['id'],
                     'error': analysis['error'], 'finished_at': analysis['finished_at']})
 
+
+
+
+
+# ---------------------------------------------------------------------------
+# Analysis → Market Scan. The collection analysis knows where the holes
+# are; the scan should hunt for exactly those. Two feeds go into every
+# scan theme's prompt:
+#   1. the gap-related sections of the stored essay (verbatim prose —
+#      "Gaps a serious collector would notice", concentrations, standing);
+#   2. a computed gap list — the canonical Greek series / colonial
+#      territories the collection does not hold, from the same profile.
+# ---------------------------------------------------------------------------
+
+# The Greek series a rounded cabinet is measured against: (label, match
+# tokens). A series counts as held when any token appears in a held coin's
+# region, authority, mint or description.
+_GREEK_CANON = (
+    ('Athens — archaic Wappenmünzen / early owls', ('wappenm', 'archaic owl')),
+    ('Athens — Classical owl tetradrachm', ('athens', 'athenian')),
+    ('Athens — New Style tetradrachm', ('new style',)),
+    ('Aegina — sea turtle / land tortoise staters', ('aegina', 'aigina')),
+    ('Corinth — Pegasos staters', ('corinth',)),
+    ('Thebes / Boeotia — shield staters', ('thebes', 'boeotia', 'boiotia')),
+    ('Elis / Olympia', ('elis', 'olympia')),
+    ('Sikyon', ('sikyon', 'sicyon')),
+    ('Argos', ('argos',)),
+    ('Larissa — Thessalian nymph drachms', ('larissa',)),
+    ('Lokris Opuntia', ('lokri', 'locri', 'opus')),
+    ('Delphi / Amphictionic issues', ('delphi', 'amphict')),
+    ('Crete — Gortyna, Knossos, Phaistos', ('gortyn', 'knossos', 'phaistos', 'crete', 'kydonia', 'lyttos')),
+    ('Euboia — Eretria, Chalkis, Histiaia', ('eretria', 'chalkis', 'histiaia', 'euboia', 'euboea')),
+    ('Syracuse — Deinomenid / Democracy tetradrachms', ('syracuse', 'syrakus')),
+    ('Syracuse — Kimon / Euainetos dekadrachm', ('dekadrachm', 'decadrachm')),
+    ('Syracuse — Agathokles, Hieron II, Philistis', ('agathokles', 'hieron', 'philistis')),
+    ('Akragas — eagle and crab', ('akragas', 'agrigent')),
+    ('Gela — man-headed bull', ('gela',)),
+    ('Katane — Apollo head', ('katane', 'catana')),
+    ('Kamarina', ('kamarina', 'camarina')),
+    ('Leontini — lion head', ('leontin',)),
+    ('Naxos (Sicily) — Dionysos / Silenos', ('naxos',)),
+    ('Himera', ('himera',)),
+    ('Selinos', ('selinos', 'selinus')),
+    ('Messana — mule biga / hare', ('messana', 'messene', 'zankle')),
+    ('Segesta', ('segesta',)),
+    ('Siculo-Punic tetradrachms', ('siculo', 'punic', 'carthag')),
+    ('Tarentum — boy on dolphin nomoi', ('tarent', 'taras')),
+    ('Metapontion — barley ear', ('metapont',)),
+    ('Kroton — tripod', ('kroton', 'croton')),
+    ('Kaulonia', ('kaulonia', 'caulonia')),
+    ('Sybaris / Thourioi', ('sybaris', 'thour', 'thurium')),
+    ('Poseidonia — Poseidon staters', ('poseidonia', 'paestum')),
+    ('Velia — lion', ('velia', 'elea')),
+    ('Herakleia Lucania', ('herakleia lucan', 'heraclea lucan')),
+    ('Rhegion — lion scalp', ('rhegion', 'rhegium')),
+    ('Neapolis — man-headed bull didrachms', ('neapolis',)),
+    ('Massalia', ('massalia', 'marseille')),
+    ('Emporion / Rhode (Iberia)', ('emporion', 'rhode ')),
+    ('Kyrene — silphion', ('kyrene', 'cyrene')),
+    ('Philip II — Zeus / horseman', ('philip ii',)),
+    ('Alexander III — lifetime tetradrachm', ('alexander iii', 'alexander the great')),
+    ('Alexander III — gold stater', ('alexander', 'stater')),
+    ('Philip III Arrhidaios', ('philip iii', 'arrhidai')),
+    ('Kassander / Demetrios Poliorketes', ('kassander', 'cassander', 'poliorket')),
+    ('Antigonos Gonatas / Doson', ('antigonos', 'gonatas', 'doson')),
+    ('Philip V / Perseus', ('philip v', 'perseus')),
+    ('Lysimachos — Alexander head tetradrachm', ('lysimach',)),
+    ('Thasos — satyr and nymph / Dionysos', ('thasos',)),
+    ('Akanthos — lion and bull', ('akanthos', 'acanthus')),
+    ('Mende — Dionysos on ass', ('mende',)),
+    ('Chalkidian League — Apollo / lyre', ('chalkid', 'olynth')),
+    ('Abdera — griffin', ('abdera',)),
+    ('Maroneia — horse', ('maroneia',)),
+    ('Ainos — Hermes head', ('ainos', 'aenus')),
+    ('Thraco-Macedonian tribes (Derrones, Bisaltai, Orreskioi)', ('derron', 'bisalt', 'orresk', 'edon', 'ichnai', 'thraco')),
+    ('Pantikapaion — gold stater', ('pantikapa', 'panticap')),
+    ('Olbia', ('olbia',)),
+    ('Istros', ('istros', 'histria')),
+    ('Byzantion', ('byzant',)),
+    ('Kyzikos — electrum stater', ('kyzik', 'cyzic')),
+    ('Lampsakos — gold stater', ('lampsak', 'lampsac')),
+    ('Abydos', ('abydos',)),
+    ('Mytilene / Phokaia — electrum hektai', ('mytilene', 'phokaia', 'phocaea')),
+    ('Lesbos — billon staters', ('lesbos',)),
+    ('Chios — sphinx', ('chios',)),
+    ('Samos — lion scalp / bull', ('samos',)),
+    ('Ephesos — bee / stag', ('ephes',)),
+    ('Miletos — lion', ('milet',)),
+    ('Klazomenai — winged boar / Apollo', ('klazomen', 'clazomen')),
+    ('Kolophon', ('kolophon', 'colophon')),
+    ('Teos — griffin', ('teos',)),
+    ('Erythrai', ('erythra',)),
+    ('Smyrna', ('smyrna',)),
+    ('Magnesia ad Maeandrum', ('magnesia',)),
+    ('Herakleia ad Latmon', ('latmon', 'latmos')),
+    ('Knidos — Aphrodite / lion', ('knidos', 'cnidus')),
+    ('Kos — Herakles / crab', ('kos ', 'cos ')),
+    ('Rhodes — Helios / rose', ('rhodes', 'rhodos')),
+    ('Rhodes — plinthophoric drachms', ('plinthophor',)),
+    ('Halikarnassos / Hekatomnid satraps', ('halikarnass', 'hekatomn', 'maussol', 'pixodar', 'idrieus')),
+    ('Lydia — Kroiseid gold and silver', ('kroisos', 'croesus', 'kroiseid', 'lydia')),
+    ('Lydo-Milesian electrum trites', ('trite',)),
+    ('Persia — daric and siglos', ('daric', 'siglos')),
+    ('Pergamon — Attalid Philetairos tetradrachm', ('philetair', 'pergamon', 'attal')),
+    ('Pergamon — cistophoric tetradrachm', ('cistophor',)),
+    ('Kyme — Amazon / horse', ('kyme', 'cyme')),
+    ('Myrina — Apollo', ('myrina',)),
+    ('Smyrna / Ionian wreathed tetradrachms', ('wreath',)),
+    ('Aspendos — wrestlers / slinger', ('aspend',)),
+    ('Side — Athena / Nike', ('side',)),
+    ('Selge', ('selge',)),
+    ('Kelenderis — rider dismounting', ('kelender', 'celender')),
+    ('Tarsos — satrapal staters (Pharnabazos, Datames, Mazaios)', ('tarsos', 'tarsus', 'mazai', 'pharnab', 'datames')),
+    ('Lycian dynasts', ('lycia', 'lykia')),
+    ('Phaselis — prow', ('phaselis',)),
+    ('Sinope — nymph / eagle on dolphin', ('sinope',)),
+    ('Amisos', ('amisos',)),
+    ('Herakleia Pontike', ('pontike', 'pontica')),
+    ('Bithynia — Prusias / Nikomedes', ('prusias', 'nikomed', 'bithyn')),
+    ('Pontos — Mithradates VI', ('mithradat', 'mithridat')),
+    ('Kappadokia — Ariarathid drachms', ('ariarath', 'ariobarz', 'cappadoc', 'kappadok')),
+    ('Seleukos I Nikator', ('seleukos i', 'seleucus i', 'nikator', 'nicator')),
+    ('Antiochos I–III', ('antiochos i', 'antiochos ii', 'antiochos iii', 'antiochus i', 'antiochus ii', 'antiochus iii')),
+    ('Antiochos IV Epiphanes', ('antiochos iv', 'antiochus iv', 'epiphanes')),
+    ('Demetrios I / II, Antiochos VII', ('demetrios i', 'demetrius i', 'antiochos vii', 'antiochus vii', 'sidetes')),
+    ('Late Seleucids — Grypos, Kyzikenos, Philip Philadelphos', ('grypos', 'kyziken', 'philadelphos', 'antiochos viii', 'antiochos ix')),
+    ('Ptolemy I Soter — Alexander / Ptolemy types', ('ptolemy i ', 'ptolemy i,', 'soter')),
+    ('Ptolemaic gold mnaieia / octodrachms', ('octodrachm', 'mnaieion', 'arsinoe')),
+    ('Ptolemaic silver tetradrachms (II–XII)', ('ptolemy ii', 'ptolemy iii', 'ptolemy iv', 'ptolemy v', 'ptolemy vi', 'ptolemy viii', 'ptolemy xii')),
+    ('Ptolemaic large bronzes', ('ptolem', 'bronze')),
+    ('Kleopatra VII', ('kleopatra', 'cleopatra')),
+    ('Bactria — Diodotos / Euthydemos', ('diodot', 'euthydem')),
+    ('Bactria — Demetrios I, Antimachos, Agathokles', ('demetrios i aniketos', 'antimach', 'agathokles dikaios')),
+    ('Bactria — Eukratides I', ('eukratid', 'eucratid')),
+    ('Bactria — Menander and the Indo-Greeks', ('menander', 'indo-greek', 'apollodot')),
+    ('Parthia — early Arsakid drachms', ('arsak', 'arsac', 'parthia')),
+    ('Tyre — shekels', ('tyre', 'shekel')),
+    ('Sidon — double shekels', ('sidon',)),
+    ('Cyprus — Salamis, Kition, Paphos', ('salamis', 'kition', 'citium', 'paphos', 'cyprus')),
+    ('Judaea / Nabataea', ('judaea', 'nabata')),
+)
+
+# Colonial paper a rounded cabinet is measured against, per empire.
+_COLONIAL_CANON = {
+    'British': ('India', 'Ceylon', 'Burma', 'Malaya', 'Straits Settlements', 'Sarawak',
+                'British North Borneo', 'Hong Kong', 'Palestine', 'Cyprus', 'Malta', 'Gibraltar',
+                'British East Africa', 'British West Africa', 'Southern Rhodesia',
+                'Rhodesia & Nyasaland', 'British Guiana', 'British Honduras', 'Jamaica',
+                'Barbados', 'Trinidad', 'Bermuda', 'Bahamas', 'British Caribbean Territories',
+                'Fiji', 'Mauritius', 'Seychelles', 'Saint Helena', 'Falkland Islands', 'Aden',
+                'Bahrain', 'Iraq', 'Egypt', 'Sudan', 'Newfoundland', 'Australia', 'New Zealand',
+                'South Africa', 'Ireland', 'Gold Coast', 'Nigeria', 'Sierra Leone', 'Gambia',
+                'Zanzibar', 'Somaliland', 'Tonga', 'Western Samoa', 'Papua New Guinea'),
+    'French': ('French Indochina', 'French West Africa', 'French Equatorial Africa',
+               'Madagascar', 'Morocco', 'Tunisia', 'Algeria', 'French Somaliland', 'Syria',
+               'Lebanon', 'Martinique', 'Guadeloupe', 'French Guiana', 'Réunion',
+               'New Caledonia', 'Tahiti', 'Saint-Pierre and Miquelon', 'New Hebrides',
+               'Cameroun', 'Togo', 'Senegal'),
+    'Italian': ('Italian Somaliland', 'Italian East Africa', 'Eritrea', 'Libya', 'Tripolitania',
+                'Albania', 'Dodecanese'),
+    'Portuguese': ('Angola', 'Mozambique', 'Portuguese Guinea', 'Cape Verde',
+                   'São Tomé and Príncipe', 'Macau', 'Timor', 'Portuguese India'),
+    'German': ('German East Africa', 'Kiautschou', 'German New Guinea', 'Kamerun',
+               'German South West Africa'),
+    'Dutch': ('Netherlands Indies', 'Curaçao', 'Suriname'),
+    'Belgian': ('Belgian Congo', 'Ruanda-Urundi'),
+    'Spanish': ('Philippines (Spanish)', 'Cuba', 'Puerto Rico', 'Spanish Morocco'),
+    'Japanese': ('Korea', 'Taiwan', 'Manchukuo', 'Japanese occupation issues'),
+    'Danish': ('Danish West Indies', 'Faroe Islands', 'Greenland', 'Iceland'),
+    'US': ('Philippines (US)', 'Hawaii', 'Puerto Rico', 'Canal Zone'),
+}
+
+
+def _analysis_essay_findings(db, category, limit_chars=6000):
+    """The gap-related sections of the stored essay, verbatim: any
+    section whose heading mentions gaps, concentrations, depth/breadth,
+    standing or comparison, plus the closing section. Returns
+    (text, finished_at) or ('', None) when no essay is stored."""
+    row = db.execute(
+        "SELECT markdown, finished_at FROM collection_analyses WHERE category = ? "
+        "AND status = 'done' AND markdown IS NOT NULL ORDER BY finished_at DESC LIMIT 1",
+        [category]).fetchone()
+    if not row or not row['markdown']:
+        return '', None
+    sections = []
+    current = ['(opening)', []]
+    for line in row['markdown'].splitlines():
+        m = re.match(r'^#{1,4}\s+(.*)$', line)
+        if m:
+            sections.append(current)
+            current = [m.group(1).strip(), []]
+        else:
+            current[1].append(line)
+    sections.append(current)
+    wanted = re.compile(r'gap|missing|absen|concentrat|depth|breadth|standing|compar|'
+                        r'thesis|next|would notice|weak', re.IGNORECASE)
+    picked = [s for s in sections if wanted.search(s[0])]
+    if sections and sections[-1] not in picked:
+        picked.append(sections[-1])
+    out = []
+    for title, body in picked:
+        text = '\n'.join(l for l in body if l.strip()).strip()
+        if text:
+            out.append(f"### {title}\n{text}")
+    text = '\n\n'.join(out)
+    if len(text) > limit_chars:
+        text = text[:limit_chars].rsplit('\n', 1)[0] + '\n…'
+    return text, row['finished_at']
+
+
+def _analysis_computed_gaps(db, category, limit=40):
+    """Canonical series / territories the collection does not hold,
+    from the same records the Analysis profile reads."""
+    if category == 'coins':
+        rows = db.execute(
+            "SELECT region, authority, mint, denomination, description, date_1 FROM coins "
+            "WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall()
+        blob = '\n'.join(
+            ' '.join(str(r[k] or '') for k in ('region', 'authority', 'mint', 'denomination', 'description'))
+            for r in rows if _coin_is_ancient_greek(r)).lower()
+        missing = [label for label, tokens in _GREEK_CANON
+                   if not any(t in blob for t in tokens)]
+        return missing[:limit]
+    if category == 'banknotes':
+        rows = db.execute(
+            "SELECT country, issue_type FROM banknotes "
+            "WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall()
+        held = {(r['country'] or '').strip().lower() for r in rows}
+        held_keys = set()
+        for r in rows:
+            try:
+                k = _country_key((r['country'] or '').strip())
+                if k:
+                    held_keys.add(k)
+            except Exception:
+                pass
+        missing = []
+        for empire, territories in _COLONIAL_CANON.items():
+            gaps = []
+            for t in territories:
+                base = re.sub(r'\s*\(.*\)$', '', t).strip()
+                low = base.lower()
+                try:
+                    key = _country_key(base)
+                except Exception:
+                    key = None
+                if low in held or (key and key in held_keys) or \
+                        any(low in h or h in low for h in held if len(h) > 4):
+                    continue
+                gaps.append(t)
+            if gaps:
+                missing.append(f"{empire}: {', '.join(gaps)}")
+        return missing[:limit]
+    return []
+
+
+def _market_analysis_block(db, category):
+    """The block the scan prompt carries: essay findings + computed gaps.
+    Returns (text, essay_date)."""
+    findings, finished_at = _analysis_essay_findings(db, category)
+    gaps = _analysis_computed_gaps(db, category)
+    parts = []
+    if findings:
+        parts.append(f"From the collection analysis written {(finished_at or '')[:10]}:\n{findings}")
+    if gaps:
+        label = ('Ancient Greek series a rounded cabinet holds that this collection does NOT '
+                 '(computed from the records — each is a buy target):'
+                 if category == 'coins' else
+                 'Colonial territories a rounded cabinet holds that this collection does NOT '
+                 '(computed from the records — each is a buy target):')
+        parts.append(label + '\n- ' + '\n- '.join(gaps))
+    return '\n\n'.join(parts), finished_at
 
 
 @app.route('/<category>/new', methods=['GET', 'POST'])

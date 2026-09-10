@@ -1,0 +1,163 @@
+{# Inline-SVG charts for the Collection Analysis. Thin marks, one baseline,
+   recessive hairlines, values at the tip; identity from a legend + the
+   mark colour, never text colour. Palette: series-1 blue, series-2 orange,
+   series-3 aqua (validated on white). #}
+
+{# Horizontal bars: rows = [(label, value)], single series. #}
+{% macro hbars(rows, title, subtitle='') -%}
+{%- set vals = rows|map(attribute=1)|list -%}
+{%- set vmax = (vals|max) if vals else 1 -%}
+{%- set rowh = 22 -%}
+{%- set labw = 150 -%}
+{%- set w = 560 -%}
+{%- set h = rows|length * rowh + 8 -%}
+<figure class="an-chart">
+  <figcaption><span class="an-chart-title">{{ title }}</span>{% if subtitle %}<span class="an-chart-sub">{{ subtitle }}</span>{% endif %}</figcaption>
+  <svg viewBox="0 0 {{ w }} {{ h }}" width="100%" role="img" aria-label="{{ title }}">
+    {%- for label, v in rows -%}
+    {%- set y = loop.index0 * rowh + 4 -%}
+    {%- set bw = ((w - labw - 60) * v / vmax) if vmax else 0 -%}
+    <text x="{{ labw - 8 }}" y="{{ y + 14 }}" text-anchor="end" class="an-svg-label">{{ label|truncate(24, True, '…') }}</text>
+    <rect x="{{ labw }}" y="{{ y + 3 }}" width="{{ '%.1f'|format(bw) }}" height="14" rx="0" class="an-bar an-s1"><title>{{ label }}: {{ v }}</title></rect>
+    <text x="{{ '%.1f'|format(labw + bw + 6) }}" y="{{ y + 14 }}" class="an-svg-value">{{ v }}</text>
+    {%- endfor -%}
+    <line x1="{{ labw }}" y1="0" x2="{{ labw }}" y2="{{ h }}" class="an-axis"/>
+  </svg>
+</figure>
+{%- endmacro %}
+
+{# Columns: rows = [(label, value)], single series; label under each. #}
+{% macro columns(rows, title, subtitle='') -%}
+{%- set vals = rows|map(attribute=1)|list -%}
+{%- set vmax = (vals|max) if vals else 1 -%}
+{%- set n = rows|length -%}
+{%- set w = 560 -%}
+{%- set h = 190 -%}
+{%- set top = 18 -%}
+{%- set base = h - 34 -%}
+{%- set slot = (w - 16) / n if n else w -%}
+{%- set bw = [slot * 0.62, 24]|min -%}
+<figure class="an-chart">
+  <figcaption><span class="an-chart-title">{{ title }}</span>{% if subtitle %}<span class="an-chart-sub">{{ subtitle }}</span>{% endif %}</figcaption>
+  <svg viewBox="0 0 {{ w }} {{ h }}" width="100%" role="img" aria-label="{{ title }}">
+    <line x1="8" y1="{{ base }}" x2="{{ w - 8 }}" y2="{{ base }}" class="an-axis"/>
+    {%- for label, v in rows -%}
+    {%- set cx = 8 + slot * loop.index0 + slot / 2 -%}
+    {%- set bh = ((base - top) * v / vmax) if vmax else 0 -%}
+    <rect x="{{ '%.1f'|format(cx - bw / 2) }}" y="{{ '%.1f'|format(base - bh) }}" width="{{ '%.1f'|format(bw) }}" height="{{ '%.1f'|format(bh) }}" class="an-bar an-s1"><title>{{ label }}: {{ v }}</title></rect>
+    {%- if v -%}<text x="{{ '%.1f'|format(cx) }}" y="{{ '%.1f'|format(base - bh - 4) }}" text-anchor="middle" class="an-svg-value">{{ v }}</text>{%- endif -%}
+    <text x="{{ '%.1f'|format(cx) }}" y="{{ base + 14 }}" text-anchor="middle" class="an-svg-label{% if n > 12 %} an-svg-small{% endif %}">{{ label|truncate(14, True, '…') }}</text>
+    {%- endfor -%}
+  </svg>
+</figure>
+{%- endmacro %}
+
+{# Stacked columns: keys = [label…], series = [{name, values}] (<= 3). #}
+{% macro stacked(keys, series, totals, title, subtitle='') -%}
+{%- set n = keys|length -%}
+{%- set vmax = (totals|max) if totals else 1 -%}
+{%- set w = 560 -%}
+{%- set h = 200 -%}
+{%- set top = 18 -%}
+{%- set base = h - 34 -%}
+{%- set slot = (w - 16) / n if n else w -%}
+{%- set bw = [slot * 0.62, 24]|min -%}
+<figure class="an-chart">
+  <figcaption><span class="an-chart-title">{{ title }}</span>{% if subtitle %}<span class="an-chart-sub">{{ subtitle }}</span>{% endif %}
+    <span class="an-legend">{% for s in series %}<span class="an-legend-item"><i class="an-swatch an-s{{ loop.index }}"></i>{{ s.name }}</span>{% endfor %}</span>
+  </figcaption>
+  <svg viewBox="0 0 {{ w }} {{ h }}" width="100%" role="img" aria-label="{{ title }}">
+    <line x1="8" y1="{{ base }}" x2="{{ w - 8 }}" y2="{{ base }}" class="an-axis"/>
+    {%- for label in keys -%}
+    {%- set i = loop.index0 -%}
+    {%- set cx = 8 + slot * i + slot / 2 -%}
+    {%- set ns = namespace(y=base) -%}
+    {%- for s in series -%}
+    {%- set v = s['values'][i] -%}
+    {%- if v -%}
+    {%- set bh = (base - top) * v / vmax -%}
+    <rect x="{{ '%.1f'|format(cx - bw / 2) }}" y="{{ '%.1f'|format(ns.y - bh) }}" width="{{ '%.1f'|format(bw) }}" height="{{ '%.1f'|format([bh - 2, 0.5]|max) }}" class="an-bar an-s{{ loop.index }}"><title>{{ label }} · {{ s.name }}: {{ v }}</title></rect>
+    {%- set ns.y = ns.y - bh -%}
+    {%- endif -%}
+    {%- endfor -%}
+    {%- if totals[i] -%}<text x="{{ '%.1f'|format(cx) }}" y="{{ '%.1f'|format(ns.y - 4) }}" text-anchor="middle" class="an-svg-value">{{ totals[i] }}</text>{%- endif -%}
+    <text x="{{ '%.1f'|format(cx) }}" y="{{ base + 14 }}" text-anchor="middle" class="an-svg-label{% if n > 12 %} an-svg-small{% endif %}">{{ label }}</text>
+    {%- endfor -%}
+  </svg>
+</figure>
+{%- endmacro %}
+
+{# Scatter: points = [{x, y, label, metal}], refs = [(name, value)] drawn as
+   hairlines. x is a year (negative BC), y grams. #}
+{% macro scatter(points_in, title, refs, subtitle='', ymin=None, ymax=None, xmax=100) -%}
+{#- Points off the weight window or after xmax (Roman-era provincial issues) are left out so one outlier cannot flatten the chart. -#}
+{%- set points = points_in|selectattr('x', 'le', xmax)|list -%}
+{%- if ymin is not none %}{% set points = points|selectattr('y', 'ge', ymin)|list %}{% endif -%}
+{%- if ymax is not none %}{% set points = points|selectattr('y', 'le', ymax)|list %}{% endif -%}
+{%- set xs = points|map(attribute='x')|list -%}
+{%- set ys = points|map(attribute='y')|list -%}
+{%- set x0 = (xs|min) if xs else -600 -%}
+{%- set x1 = (xs|max) if xs else 0 -%}
+{%- set y0 = ymin if ymin is not none else ((ys|min) if ys else 0) -%}
+{%- set y1 = ymax if ymax is not none else ((ys|max) if ys else 1) -%}
+{%- set w = 560 -%}
+{%- set h = 240 -%}
+{%- set left = 40 -%}
+{%- set right = 120 -%}
+{%- set top = 12 -%}
+{%- set base = h - 28 -%}
+{%- set xr = (x1 - x0) if x1 != x0 else 1 -%}
+{%- set yr = (y1 - y0) if y1 != y0 else 1 -%}
+<figure class="an-chart">
+  <figcaption><span class="an-chart-title">{{ title }}</span>{% if subtitle %}<span class="an-chart-sub">{{ subtitle }}</span>{% endif %}</figcaption>
+  <svg viewBox="0 0 {{ w }} {{ h }}" width="100%" role="img" aria-label="{{ title }}">
+    {%- for name, v in refs -%}
+    {%- if v >= y0 and v <= y1 -%}
+    {%- set gy = base - (base - top) * (v - y0) / yr -%}
+    <line x1="{{ left }}" y1="{{ '%.1f'|format(gy) }}" x2="{{ w - right }}" y2="{{ '%.1f'|format(gy) }}" class="an-grid"/>
+    <text x="{{ w - right + 6 }}" y="{{ '%.1f'|format(gy + 4) }}" class="an-svg-small">{{ name }} {{ v }} g</text>
+    {%- endif -%}
+    {%- endfor -%}
+    <line x1="{{ left }}" y1="{{ base }}" x2="{{ w - right }}" y2="{{ base }}" class="an-axis"/>
+    <line x1="{{ left }}" y1="{{ top }}" x2="{{ left }}" y2="{{ base }}" class="an-axis"/>
+    <text x="{{ left - 6 }}" y="{{ top + 4 }}" text-anchor="end" class="an-svg-small">{{ y1 }}</text>
+    <text x="{{ left - 6 }}" y="{{ base }}" text-anchor="end" class="an-svg-small">{{ y0 }}</text>
+    {%- for t in range(6) -%}
+    {%- set tx = x0 + xr * t / 5 -%}
+    {%- set px = left + (w - left - right) * t / 5 -%}
+    <text x="{{ '%.1f'|format(px) }}" y="{{ base + 14 }}" text-anchor="middle" class="an-svg-small">{{ (-tx)|round|int ~ ' BC' if tx < 0 else ('AD ' ~ tx|round|int) }}</text>
+    {%- endfor -%}
+    {%- for p in points -%}
+    {%- set px = left + (w - left - right) * (p.x - x0) / xr -%}
+    {%- set py = base - (base - top) * (p.y - y0) / yr -%}
+    <circle cx="{{ '%.1f'|format(px) }}" cy="{{ '%.1f'|format(py) }}" r="4" class="an-dot {{ 'an-s2' if p.metal == 'AV' else ('an-s3' if p.metal == 'EL' else 'an-s1') }}"><title>{{ p.label }}{% if p.standard %} · {{ p.standard }}{% endif %}</title></circle>
+    {%- endfor -%}
+  </svg>
+  <div class="an-legend an-legend-below"><span class="an-legend-item"><i class="an-swatch an-s1"></i>silver</span><span class="an-legend-item"><i class="an-swatch an-s2"></i>gold</span><span class="an-legend-item"><i class="an-swatch an-s3"></i>electrum</span></div>
+</figure>
+{%- endmacro %}
+
+{# Share bars: rows = [(label, a, b)] — two segments with a legend. #}
+{% macro share(rows, a_name, b_name, title, subtitle='') -%}
+{%- set rowh = 26 -%}
+{%- set labw = 150 -%}
+{%- set w = 560 -%}
+{%- set h = rows|length * rowh + 6 -%}
+<figure class="an-chart">
+  <figcaption><span class="an-chart-title">{{ title }}</span>{% if subtitle %}<span class="an-chart-sub">{{ subtitle }}</span>{% endif %}
+    <span class="an-legend"><span class="an-legend-item"><i class="an-swatch an-s1"></i>{{ a_name }}</span><span class="an-legend-item"><i class="an-swatch an-neutral"></i>{{ b_name }}</span></span>
+  </figcaption>
+  <svg viewBox="0 0 {{ w }} {{ h }}" width="100%" role="img" aria-label="{{ title }}">
+    {%- for label, a, b in rows -%}
+    {%- set y = loop.index0 * rowh + 3 -%}
+    {%- set tot = (a + b) or 1 -%}
+    {%- set full = w - labw - 60 -%}
+    {%- set aw = full * a / tot -%}
+    <text x="{{ labw - 8 }}" y="{{ y + 15 }}" text-anchor="end" class="an-svg-label">{{ label }}</text>
+    <rect x="{{ labw }}" y="{{ y + 3 }}" width="{{ '%.1f'|format([aw - 1, 0]|max) }}" height="16" class="an-bar an-s1"><title>{{ label }} · {{ a_name }}: {{ '{:.0%}'.format(a / tot) }}</title></rect>
+    <rect x="{{ '%.1f'|format(labw + aw + 1) }}" y="{{ y + 3 }}" width="{{ '%.1f'|format([full - aw - 1, 0]|max) }}" height="16" class="an-bar an-neutral"><title>{{ label }} · {{ b_name }}: {{ '{:.0%}'.format(b / tot) }}</title></rect>
+    <text x="{{ labw + full + 6 }}" y="{{ y + 15 }}" class="an-svg-value">{{ '{:.0%}'.format(a / tot) }}</text>
+    {%- endfor -%}
+  </svg>
+</figure>
+{%- endmacro %}
