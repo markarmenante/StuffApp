@@ -14833,10 +14833,17 @@ _MARKET_ENDED_PAGE_MARKERS = (
     'lot is sold', 'winning bid', 'hammer price', 'this item is sold',
     # VCoins keeps a sold lot's page up, price and all, with the buy
     # button replaced by "Not available".
-    'not available', 'no longer for sale', 'currently unavailable',
-    'item unavailable', 'this item has been sold', 'reserved',
+    'no longer for sale', 'currently unavailable', 'item unavailable',
+    'this item has been sold', 'item is reserved', 'item reserved', 'currently reserved',
     'ended:', 'sold ',
 )
+# Weak markers: real only when the page offers no way to buy. "Not
+# available" sits in shipping boilerplate too, and a bare "reserved"
+# matched "All rights reserved" on every dealer page (scan #7 dropped
+# sixteen live finds that way).
+_MARKET_WEAK_ENDED_MARKERS = ('not available', 'not for sale', 'reserved')
+_MARKET_BUY_MARKERS = ('add to cart', 'add to basket', 'buy now', 'buy it now', 'acheter',
+                       'in den warenkorb', 'place bid', 'bid now', 'current bid', 'make offer')
 _MARKET_LIVE_PAGE_MARKERS = (
     'buy it now', 'add to cart', 'add to basket', 'place bid', 'bid now',
     'current bid', 'time left', 'ends in', 'bidding ends', 'lot closes',
@@ -14960,7 +14967,10 @@ def _market_listing_state(url):
     head = text[:60_000]
     ended = [m for m in _MARKET_ENDED_PAGE_MARKERS if m in head]
     live = [m for m in _MARKET_LIVE_PAGE_MARKERS if m in head]
+    buyable = any(m in head for m in _MARKET_BUY_MARKERS)
     if ended and ('sold ' not in ended or len(ended) > 1 or not live):
+        return 'ended'
+    if not buyable and any(m in head for m in _MARKET_WEAK_ENDED_MARKERS):
         return 'ended'
     if live:
         return 'live'
