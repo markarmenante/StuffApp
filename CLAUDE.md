@@ -130,6 +130,19 @@ check out on a seller's site: it opens the listing (pay there) and files
 the item as an Ordered record with the price's USD tail and the listing
 URL. Model env: `ANTHROPIC_MARKET_SCAN_MODEL`.
 
+## What the model sees for a banknote (Check, serial scan)
+
+Uploads of `image_1` / `image_2` are trimmed to the bare note on arrival
+(since 2026-09-10), so the stored files no longer show a PMG / PCGS
+holder label. Every vision call therefore resolves each image through
+`_banknote_vision_source` — the untrimmed original recorded in
+`trimmed_image_sources`, when it is still on disk — and reads THAT.
+Forgetting this is what "Check no longer picks up the grading data"
+looked like (Morocco 5 francs, 2026-09-10): the label with Pick #,
+grade, EPQ and cert number had been cropped away before Check ran. The
+page keeps showing the trimmed image. Test:
+`tests/test_banknote_vision_source.py`.
+
 ## Serial-number scan (banknotes)
 
 The Scan button in the Serial # cell of the banknote detail page (Mark,

@@ -22097,6 +22097,28 @@ def _trim_banknote_image(db, record_id, note, field, expect_aspect=None):
     return new_name
 
 
+def _banknote_vision_source(fname, db=None):
+    """The photo a model should READ for a banknote image field: the
+    untrimmed upload (holder label and all) when the stored file is a
+    trim of it, else the stored file itself. Since 2026-09-10 a slab
+    photo is trimmed to the note the moment it is uploaded, so the
+    stored image_1/image_2 no longer carry the PMG/PCGS label — Check
+    and the serial scan must look at the original or they read no
+    grade, cert number or Pick number at all (the Morocco 5 francs,
+    2026-09-10)."""
+    if not fname:
+        return fname
+    try:
+        db = db or get_db()
+        row = db.execute(
+            'SELECT source FROM trimmed_image_sources WHERE trimmed = ?', (fname,)).fetchone()
+    except Exception:
+        return fname
+    if row and row['source'] and os.path.exists(os.path.join(UPLOAD_FOLDER, row['source'])):
+        return row['source']
+    return fname
+
+
 def _banknote_expect_aspect(note):
     """The sheet's catalog long:short ratio, when both dimensions are on
     the record, as the trim's geometry anchor."""
@@ -23447,9 +23469,12 @@ def fetch_banknote_specs(note):
     # Scan the note itself: front/back images are attached ahead of the
     # prompt so the model reads the lettering and printed details
     # directly. Missing/unreadable files degrade to a text-only lookup.
+    # The UNTRIMMED uploads are what the model sees — the stored files
+    # are trimmed to the bare note on upload, and the holder label the
+    # grading fields come from lives only on the original.
     images = _load_vision_images((
-        (_coin_row_value(note, 'image_1'), 'front'),
-        (_coin_row_value(note, 'image_2'), 'back'),
+        (_banknote_vision_source(_coin_row_value(note, 'image_1')), 'front'),
+        (_banknote_vision_source(_coin_row_value(note, 'image_2')), 'back'),
     ))
 
     # Images or a pasted dealer description are enough to identify a
@@ -23972,11 +23997,12 @@ def banknote_lookup_specs(record_id):
                    (now, record_id))
         db.commit()
 
-    # Slab photos have now served their purpose (the lookup above read
-    # the holder label off them) — trim each stored image down to just
-    # the note, levelled. Only after a full run: a failed scan keeps the
-    # labels intact so a retry can still read them. The untrimmed
-    # original stays on disk (orphan-uploads can sweep it later).
+    # Trim each stored image down to just the note, levelled (an upload
+    # is normally trimmed on arrival; this catches one that was not, or
+    # redoes the crop from the original now that the sheet size is
+    # known). The lookup above read the holder label off the UNTRIMMED
+    # originals (_banknote_vision_source), which stay on disk, so the
+    # label survives for any re-run whatever happens here.
     images_updated = {}
     if not lookup_error:
         # The sheet's catalog long:short ratio anchors the trim (see
@@ -24105,9 +24131,11 @@ Respond with ONLY a JSON object, no prose before or after:
 def scan_banknote_serial(note):
     """Read THIS note's serial number off its attached photos via Claude
     vision. Returns the parsed JSON dict (serial_number may be None)."""
+    # The untrimmed uploads, so a holder label's serial line is in view
+    # alongside the note's own printings (see _banknote_vision_source).
     images = _load_vision_images((
-        (_coin_row_value(note, 'image_1'), 'front'),
-        (_coin_row_value(note, 'image_2'), 'back'),
+        (_banknote_vision_source(_coin_row_value(note, 'image_1')), 'front'),
+        (_banknote_vision_source(_coin_row_value(note, 'image_2')), 'back'),
     ))
     if not images:
         raise RuntimeError(
