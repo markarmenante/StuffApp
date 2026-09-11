@@ -218,9 +218,17 @@ lockout or a failed deploy:
 - Country history panels come from the built-in `COUNTRY_KEYS` /
   `COUNTRY_ERAS` tables in `app.py`; uncovered countries fall back to
   Claude-generated histories (the `country_eras` table), which need
-  `ANTHROPIC_API_KEY` at boot. As of Aug 2026 that fallback appears inactive
-  in production — prefer adding built-in entries (see djibouti and
-  guinea-bissau for the pattern; historical territories map to their modern
-  nation).
+  `ANTHROPIC_API_KEY`. That fallback IS active in production (2026-09-10:
+  Réunion, Cayman Islands, British Caribbean Territories all generated
+  within ~2 min of their first note — `ensure_country_history` fires from
+  every banknote write path, the list view, and the startup sweep), so a
+  new country/colony needs no code. The gap is the wait: until the
+  generation lands the list shows a dashed placeholder panel
+  (`usp-pending`, state from `_country_history_state`) that polls
+  `/banknotes/country-history/status` and reloads when ready, or offers
+  `/banknotes/country-history/retry` when a generation failed. Built-in
+  entries are still the better home for a country with many notes (see
+  djibouti and guinea-bissau for the pattern; historical territories map
+  to their modern nation).
 - The SQLite DB lives at `$DATA_DIR/stuffapp.db` (defaults to the repo root;
   gitignored).

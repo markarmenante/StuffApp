@@ -3838,6 +3838,19 @@ input[type="date"] { -webkit-appearance: none; }
    is reserved for a change of country. */
 .us-series-panel.usp-cont { border-top: 1px solid var(--border); }
 
+/* Placeholder panel while a country's history is being generated (or
+   after a failed generation): dashed rule, muted text, a small retry. */
+.us-series-panel.usp-pending { border-top: 3px dashed var(--border); }
+.usp-pending .usp-class { color: var(--text-label); }
+.usp-pending-msg { font-style: italic; }
+.usp-retry-btn {
+  font-size: 11px; line-height: 1; padding: 4px 8px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: #fff; color: var(--text); cursor: pointer; white-space: nowrap;
+}
+.usp-retry-btn:hover:not(:disabled) { background: rgba(0,0,0,.05); }
+.usp-retry-btn:disabled { opacity: .6; cursor: progress; }
+
 .usp-head {
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px;
   margin-bottom: 10px;

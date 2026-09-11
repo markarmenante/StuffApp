@@ -4778,6 +4778,24 @@ def _country_history_slug(country_name):
     return key or _country_slug(name)
 
 
+def _country_history_state(country_name):
+    """Where a country's history panel stands: 'ready' (built-in or
+    generated eras exist, or US), 'pending' (a generation is running in
+    this process), 'missing' (no history and nothing in flight — the
+    generation failed, or never ran because no API key was set), or None
+    for a blank country. Drives the list's placeholder panel."""
+    name = (country_name or '').strip()
+    if not name:
+        return None
+    slug = _country_history_slug(name)
+    if slug is None:
+        return 'ready'
+    with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+        if slug in _COUNTRY_HISTORY_INFLIGHT:
+            return 'pending'
+    return 'missing'
+
+
 def ensure_country_history(country_name):
     """Fire-and-forget: generate and store era bands for a country that
     has none. Called after any banknote write that sets a country, and
@@ -5337,6 +5355,7 @@ def series_panels(rows):
     group_series_seen = None
     prev_row_id = None  # last row of the currently open group
     prev_group_country = None  # country of the previous group, for rule weight
+    prev_pending_country = None  # country of the last placeholder, once per run
 
     def mark(row_id, key, value):
         placements.setdefault(row_id, {})[key] = value
@@ -5352,7 +5371,22 @@ def series_panels(rows):
             group_signature = group_panel = group_series_seen = None
             prev_row_id = None
             prev_group_country = None
+            # A country whose history is still being written (or whose
+            # generation failed) gets a placeholder panel at the head of
+            # its run, so the gap is visible instead of silent — a new
+            # country's history takes a minute or two to generate after
+            # its first note is saved (Réunion, 2026-09-10).
+            country_name = (_row_get(row, 'country') or '').strip()
+            state = _country_history_state(country_name)
+            if state in ('pending', 'missing'):
+                if country_name.lower() != prev_pending_country:
+                    mark(_row_get(row, 'id'), 'pending',
+                         {'country': country_name, 'state': state})
+                prev_pending_country = country_name.lower()
+            else:
+                prev_pending_country = None
             continue
+        prev_pending_country = None
 
         series_label = panel['series'] or (str(panel['year']) if panel['year'] else '')
         signature = (
@@ -24011,6 +24045,32 @@ def banknote_lookup_specs(record_id):
         # a rerun isn't skipped ("it already ran") by mistake.
         'lookup_error': lookup_error,
     })
+
+
+# Country-history placeholder on the banknote list: the page polls this
+# while a country's panel is being generated and reloads once it lands;
+# retry kicks a generation that failed or never ran.
+@app.route('/banknotes/country-history/status')
+def banknote_country_history_status():
+    country = (request.args.get('country') or '').strip()
+    if not country:
+        return jsonify({'error': 'country required'}), 400
+    # Fresh read: a generation finished by another thread is in the table
+    # before the 60 s cache would notice.
+    _generated_country_eras(force=True)
+    return jsonify({'country': country, 'state': _country_history_state(country)})
+
+
+@app.route('/banknotes/country-history/retry', methods=['POST'])
+def banknote_country_history_retry():
+    data = request.get_json(silent=True) or {}
+    country = (data.get('country') or request.form.get('country') or '').strip()
+    if not country:
+        return jsonify({'error': 'country required'}), 400
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        return jsonify({'error': 'ANTHROPIC_API_KEY not configured'}), 503
+    ensure_country_history(country)
+    return jsonify({'country': country, 'state': _country_history_state(country)})
 
 
 # ---------------------------------------------------------------------------

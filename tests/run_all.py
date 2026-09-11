@@ -8,6 +8,7 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_banknote_sort.py',
          'test_banknote_similar.py',
          'test_banknote_price_currency.py',
          'test_banknote_serial_scan.py',
+         'test_country_history_placeholder.py',
          'test_market_scan.py']
 
 failed = []
