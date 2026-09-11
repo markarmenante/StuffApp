@@ -747,6 +747,23 @@ input[type="number"]::-webkit-outer-spin-button {
 .watch-lookup-btn.done:hover:not(:disabled),
 .coin-lookup-btn.done:hover:not(:disabled) { background: #d6efdc; }
 
+/* Banknote Serial # cell: input + a small Scan button that reads the
+   serial off the note's photos. The button sits at the right edge above
+   the cell label, so the label's corner stays clear. */
+.serial-scan-cell { display: flex; align-items: center; gap: 6px; padding-right: 6px; }
+.serial-scan-cell > input { flex: 1 1 auto; min-width: 0; }
+.serial-scan-btn {
+  flex: 0 0 auto;
+  font-size: 10px; line-height: 1;
+  padding: 3px 6px; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: #fff; color: var(--text-label); cursor: pointer;
+  white-space: nowrap;
+}
+.serial-scan-btn:hover:not(:disabled) { background: rgba(0,0,0,.05); color: var(--text); }
+.serial-scan-btn:disabled { opacity: .6; cursor: progress; }
+.serial-scan-btn.done { background: #e6f6ea; border-color: #5fb872; color: #1f6b34; }
+
 /* Status flip pill (floating nav): green while Own, yellow while
    Ordered — same yellow as the bottom Status select's ordered tint. */
 .status-flip-pill {

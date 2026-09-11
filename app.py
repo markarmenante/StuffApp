@@ -24013,6 +24013,167 @@ def banknote_lookup_specs(record_id):
     })
 
 
+# ---------------------------------------------------------------------------
+# Banknote serial-number scan (Mark, 2026-09-10): one click on the Serial #
+# cell reads the serial straight off the note's own photos and stores it.
+# Vision only — no web search, no dealer text — because the serial is
+# printed on THIS note and nowhere else is authoritative. The full ✓ Check
+# also proposes serial_number, but through the review modal; this is the
+# direct path when the photos are in and the field is the only gap.
+# ---------------------------------------------------------------------------
+
+_SERIAL_SCAN_PROMPT = """You are reading the serial number printed on one specific banknote from its photographs.
+
+Look at every image. Serial numbers are usually printed twice on the front (often upper-right and lower-left, sometimes in a different colour from the design), occasionally on the back, and — when the note sits in a grading-service holder (PMG / PCGS Banknote) — repeated on the holder's printed label. Read each printing you can see.
+
+Rules:
+- Transcribe EXACTLY what is printed: prefix letters, digits, suffix letters, block letters, and any separators (spaces, hyphens, slashes) in their printed order. Do not add, drop, or "fix" characters. Digits in the numeric run are digits (a round character there is 0, not O; a vertical stroke is 1, not I or l); characters in the letter prefix/suffix are letters.
+- Ignore plate/position letters, check letters, printer imprints, Pick numbers, the holder's certification number, and the label's barcode string. Only the serial number.
+- If the printings disagree (a genuine mismatched-serial error, or one printing is unreadable), report every reading and say which you trust and why.
+- If the note has no serial number at all (some emergency, military and early issues were printed without one), say so — do not invent one.
+- If part of a serial is hidden, blurred, or cropped, give what is legible and mark the gap with "?" per character, and lower the confidence.
+
+Respond with ONLY a JSON object, no prose before or after:
+{
+  "serial_number": "the serial as printed, or null when the note has none or nothing legible",
+  "readings": ["each distinct printing you read, e.g. 'front upper right: A 12345678 B'"],
+  "confidence": "high | medium | low",
+  "basis": "one short sentence: where you read it and anything the collector should double-check"
+}"""
+
+
+def scan_banknote_serial(note):
+    """Read THIS note's serial number off its attached photos via Claude
+    vision. Returns the parsed JSON dict (serial_number may be None)."""
+    images = _load_vision_images((
+        (_coin_row_value(note, 'image_1'), 'front'),
+        (_coin_row_value(note, 'image_2'), 'back'),
+    ))
+    if not images:
+        raise RuntimeError(
+            'Add a photo of the note first — the serial number is read '
+            'from the front (and back) images.')
+
+    api_key = _require_anthropic_key()
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+    client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
+    lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
+
+    content = []
+    for img in images:
+        content.append({'type': 'text', 'text': f'{img["label"].capitalize()} of the note:'})
+        content.append({'type': 'image', 'source': {
+            'type': 'base64',
+            'media_type': img['media_type'],
+            'data': img['data'],
+        }})
+    content.append({'type': 'text', 'text': _SERIAL_SCAN_PROMPT})
+
+    import time as _time
+    transient_errs = _anthropic_transient_errs(anthropic)
+    resp = None
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = _anthropic_create(
+                client,
+                model=lookup_model,
+                max_tokens=1024,
+                messages=[{'role': 'user', 'content': content}],
+            )
+            break
+        except transient_errs as e:
+            last_err = e
+            if attempt == 2:
+                raise RuntimeError(_friendly_lookup_error('Serial scan', last_err))
+            _time.sleep(5 * (attempt + 1))
+    if resp is None:
+        raise RuntimeError('Serial scan returned no response')
+
+    text = _message_text(resp)
+    text = re.sub(r'^```(?:json)?\s*', '', text.strip())
+    text = re.sub(r'\s*```$', '', text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]*\}', text)
+        if not m:
+            raise RuntimeError('Could not parse the serial scan response')
+        data = json.loads(m.group(0))
+    if not isinstance(data, dict):
+        raise RuntimeError('Serial scan returned an unexpected shape')
+    return data
+
+
+def _clean_scanned_serial(raw):
+    """Storable form of a scanned serial: a trimmed, single-spaced string of
+    3–40 characters, or None. Anything the model marked fully unknown
+    ('null', 'none', all '?') is None too."""
+    if raw is None or not isinstance(raw, str):
+        return None
+    v = re.sub(r'\s+', ' ', raw).strip()
+    if not v or v.lower() in ('null', 'none', 'n/a', 'unknown'):
+        return None
+    if not re.search(r'[A-Za-z0-9]', v):
+        return None
+    if not 3 <= len(v) <= 40:
+        return None
+    return v
+
+
+@app.route('/banknotes/<record_id>/scan-serial', methods=['POST'])
+def banknote_scan_serial(record_id):
+    """Read the serial number off the note's photos and store it.
+
+    Response: ``{"serial_number": str|null, "previous": str|null,
+    "stored": bool, "confidence": str, "readings": [...], "basis": str}``.
+    The value is written to the record when one is read (overwriting a
+    different existing value — the photo is the note itself); the page
+    shows the previous value alongside so a change is visible."""
+    db = get_db()
+    note = db.execute("SELECT * FROM banknotes WHERE id = ?",
+                      (record_id,)).fetchone()
+    if not note:
+        return jsonify({'error': 'Banknote not found'}), 404
+    try:
+        data = scan_banknote_serial(note)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 503
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        return jsonify({'error': f'Serial scan failed: {e or e.__class__.__name__}'}), 500
+
+    serial = _clean_scanned_serial(data.get('serial_number'))
+    previous = (_coin_row_value(note, 'serial_number') or '').strip() or None
+    readings = data.get('readings') if isinstance(data.get('readings'), list) else []
+    readings = [str(r) for r in readings if r][:8]
+    confidence = str(data.get('confidence') or '').strip().lower() or 'unknown'
+    basis = str(data.get('basis') or '').strip()
+
+    stored = False
+    if serial and serial != previous:
+        now = datetime.utcnow().isoformat()
+        db.execute(
+            "UPDATE banknotes SET serial_number = ?, updated_at = ? WHERE id = ?",
+            (serial, now, record_id),
+        )
+        db.commit()
+        stored = True
+    return jsonify({
+        'serial_number': serial,
+        'previous': previous,
+        'stored': stored,
+        'unchanged': bool(serial and serial == previous),
+        'confidence': confidence,
+        'readings': readings,
+        'basis': basis,
+    })
+
+
 @app.route('/banknotes/<record_id>/apply-lookup-specs', methods=['POST'])
 def banknote_apply_lookup_specs(record_id):
     """Apply a user-selected subset of banknote lookup suggestions.

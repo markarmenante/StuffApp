@@ -1553,7 +1553,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- Serial / watermark / physical size / grade -->
   <div class="dgrid" style="grid-template-columns: 1.2fr 1.2fr 0.7fr 0.7fr 0.9fr;">
-    {{ cell('serial_number','Serial #') }}
+    {# Serial # with a Scan button: reads the serial off the note's own
+       photos (POST /banknotes/<id>/scan-serial) and stores it — the
+       direct path when the photos are in and only this field is blank. #}
+    <div class="dcell serial-scan-cell">
+      <input type="text" name="serial_number" value="{{ val('serial_number') }}" {% if is_new and not val('serial_number') %}placeholder="Serial #"{% endif %}>
+      {% if _is_owner and not is_new %}
+      <button type="button" class="serial-scan-btn"
+              data-url="{{ url_for('banknote_scan_serial', record_id=r['id']) }}"
+              title="Read the serial number from the note's photos and save it">Scan</button>
+      {% endif %}
+      <span class="clabel">Serial #</span>
+    </div>
     {{ cell('watermark','Watermark') }}
     <div class="dcell">
       <input type="text" name="size_width" value="{{ '%.0f mm'|format(val('size_width')|float) if val('size_width') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
@@ -4882,6 +4893,58 @@ document.querySelectorAll('.comp-item').forEach(item => {
     }).catch(err => console.warn('Auto-save failed:', err));
   }
   window.saveField = saveField;
+
+  // Banknotes: Scan button in the Serial # cell. The server reads the
+  // serial off the note's photos and stores it itself, so the input is
+  // updated in place without re-firing the autosave.
+  document.querySelectorAll('.serial-scan-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const cell = btn.closest('.serial-scan-cell');
+      const input = cell && cell.querySelector('input[name="serial_number"]');
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Scanning…';
+      try {
+        const res = await fetch(btn.dataset.url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: '{}',
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const text = await res.text().catch(() => '');
+          throw new Error(lookupApplyFailureMessage(res.status, text));
+        }
+        const d = await res.json();
+        if (!res.ok || d.error) throw new Error(d.error || `Server returned ${res.status}`);
+        const detail = [];
+        if (d.readings && d.readings.length) detail.push(d.readings.join('\n'));
+        if (d.basis) detail.push(d.basis);
+        if (d.confidence && d.confidence !== 'high') detail.push(`Confidence: ${d.confidence}`);
+        if (d.serial_number) {
+          if (input) input.value = d.serial_number;
+          btn.classList.add('done');
+          if (d.stored) {
+            showToast();
+            if (d.previous && d.previous !== d.serial_number) {
+              alert(`Serial number updated: ${d.previous} → ${d.serial_number}\n\n${detail.join('\n')}`);
+            } else if (d.confidence && d.confidence !== 'high') {
+              alert(`Serial number saved as ${d.serial_number} — please double-check.\n\n${detail.join('\n')}`);
+            }
+          } else if (d.unchanged) {
+            alert(`Serial number confirmed: ${d.serial_number}` + (detail.length ? `\n\n${detail.join('\n')}` : ''));
+          }
+        } else {
+          alert('No serial number could be read from the photos.' + (detail.length ? `\n\n${detail.join('\n')}` : ''));
+        }
+      } catch (err) {
+        alert('Serial scan failed: ' + (err && err.message ? err.message : err));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    });
+  });
 
   form.addEventListener('submit', function (event) {
     if (!needsLocationBeforeLeave()) return;

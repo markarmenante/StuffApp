@@ -130,6 +130,19 @@ check out on a seller's site: it opens the listing (pay there) and files
 the item as an Ordered record with the price's USD tail and the listing
 URL. Model env: `ANTHROPIC_MARKET_SCAN_MODEL`.
 
+## Serial-number scan (banknotes)
+
+The Scan button in the Serial # cell of the banknote detail page (Mark,
+2026-09-10) posts to `POST /banknotes/<id>/scan-serial`: Claude vision
+reads the serial off the note's own front/back photos (`_load_vision_images`,
+same as Check; no web search, no dealer text) and the route stores it on
+the record — overwriting a different existing value, since the photo is
+the note itself — returning `{serial_number, previous, stored, unchanged,
+confidence, readings, basis}` for the page to report. A note issued
+without a serial, or an unreadable one, returns null and writes nothing.
+Needs `ANTHROPIC_API_KEY` (production has it). Test:
+`tests/test_banknote_serial_scan.py` (model call stubbed).
+
 ## Dev setup
 
 ```bash
