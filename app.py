@@ -15939,10 +15939,19 @@ def _run_market_scan(category, scan_id):
         dropped_ended = before_verify - len(normalized)
         normalized.sort(key=lambda it: (-it['score'], -(it.get('grade_numeric') or 0)))
         now = datetime.utcnow().isoformat()
-        # A new scan replaces the previous one's undecided items; ordered
-        # and dismissed ones stay on their old scan for the record.
-        db.execute("DELETE FROM market_scan_items WHERE category = ? AND status = 'new'",
-                   [category])
+        # A new scan replaces the previous one's undecided items on the
+        # list; ordered and dismissed ones stay on their old scan for the
+        # record, and the undecided ones are KEPT as 'superseded' rather
+        # than deleted (Mark, 2026-09-11: he bought a French Indochina 5
+        # piastres from a candidate's listing without pressing Buy, the
+        # next scan deleted the row, and there was nothing left to file).
+        # "Earlier candidates" on the market page lists them with a
+        # Bought button; anything older than 60 days is pruned.
+        db.execute("UPDATE market_scan_items SET status = 'superseded' "
+                   "WHERE category = ? AND status = 'new'", [category])
+        db.execute("DELETE FROM market_scan_items WHERE category = ? "
+                   "AND status IN ('superseded', 'dismissed') AND created_at < ?",
+                   [category, (datetime.utcnow() - timedelta(days=60)).isoformat()])
         for rank, item in enumerate(normalized, 1):
             db.execute(
                 "INSERT INTO market_scan_items (id, scan_id, category, rank, score, "
@@ -16000,15 +16009,26 @@ def _market_latest_scan(db, category):
         "ORDER BY started_at DESC LIMIT 1", [category]).fetchone()
 
 
-def _market_items(db, category):
-    rows = db.execute(
-        "SELECT * FROM market_scan_items WHERE category = ? AND status = 'new' "
-        "ORDER BY rank", [category]).fetchall()
+def _market_items(db, category, earlier=False):
+    """The market page's rows: the current scan's undecided candidates,
+    or — with ``earlier`` — the candidates of previous scans that were
+    never acted on (superseded) plus the dismissed ones, newest first,
+    so a note bought outside the Buy button can still be filed."""
+    if earlier:
+        rows = db.execute(
+            "SELECT * FROM market_scan_items WHERE category = ? "
+            "AND status IN ('superseded', 'dismissed') "
+            "ORDER BY created_at DESC, rank", [category]).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM market_scan_items WHERE category = ? AND status = 'new' "
+            "ORDER BY rank", [category]).fetchall()
     out = []
     for r in rows:
         item = json.loads(r['payload'])
         item['id'] = r['id']
         item['status'] = r['status']
+        item['scanned_at'] = (r['created_at'] or '')[:10]
         out.append(item)
     return out
 
@@ -16029,7 +16049,8 @@ def market_view(category):
     db = get_db()
     cat_info = CATEGORIES[category]
     scan = _market_latest_scan(db, category)
-    items = _market_items(db, category)
+    earlier = request.args.get('earlier') == '1'
+    items = _market_items(db, category, earlier=earlier)
     running = bool(scan and scan['status'] == 'running')
     # First visit (or a stale scan older than 12 hours with nothing left
     # to act on) starts a scan by itself; the page polls until it lands.
@@ -16040,7 +16061,7 @@ def market_view(category):
             stale = age > timedelta(hours=12)
         except ValueError:
             stale = True
-    autoscan = (not running) and (scan is None or (stale and not items))
+    autoscan = (not running) and (scan is None or (stale and not items)) and not earlier
     return render_template('list.html',
                            category=category,
                            cat_info=cat_info,
@@ -16069,6 +16090,7 @@ def market_view(category):
                            market_scan=scan,
                            market_running=running,
                            market_autoscan=autoscan,
+                           market_earlier=earlier,
                            market_locations=property_choices_for_category(category))
 
 
@@ -16187,7 +16209,11 @@ def _market_create_record(db, category, item, location=None, images=None):
 @app.route('/<category>/market/<item_id>/buy', methods=['POST'])
 def market_item_buy(category, item_id):
     """Buy = open the listing to pay there, and file the item as a new
-    Ordered record now. Returns both URLs for the client."""
+    Ordered record now. Returns both URLs for the client. The Bought
+    button (already paid on the seller's site, e.g. after opening the
+    listing from the row) posts here too and simply does not open the
+    listing; a superseded or dismissed candidate can be filed the same
+    way from the Earlier candidates view."""
     if category not in MARKET_SCAN_CATEGORIES:
         return jsonify({'error': 'Unknown category'}), 400
     _market_require_owner()

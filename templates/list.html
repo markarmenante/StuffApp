@@ -61,10 +61,18 @@
      aria-label="Add {{ cat_info.singular }}">+</a>
   {% endif %}
   {% if _market %}
+  {% if market_earlier %}
+  <a class="toolbar-btn pill" href="{{ url_for('market_view', category=category) }}"
+     title="Back to the current scan's candidates">Current scan</a>
+  {% else %}
   <button type="button" class="toolbar-btn pill" id="marketRescan"
           title="Run the scan again now">Rescan</button>
+  <a class="toolbar-btn pill" href="{{ url_for('market_view', category=category, earlier=1) }}"
+     title="Candidates from earlier scans (superseded or dismissed) — file one you bought with Bought">Earlier candidates</a>
+  {% endif %}
   <span class="market-status" id="marketStatus">
-    {%- if market_running -%}Scanning…
+    {%- if market_earlier -%}Earlier candidates, newest scan first — Bought files one as Ordered
+    {%- elif market_running -%}Scanning…
     {%- elif market_scan and market_scan['finished_at'] -%}
       Scanned {{ market_scan['finished_at'][:16]|replace('T', ' ') }} UTC
       {%- if market_scan['status'] == 'failed' %} · failed: {{ market_scan['error'] }}{% endif -%}
@@ -698,10 +706,17 @@
           {% if row['fair'] %}<span class="market-fair">{{ row['fair'] }}</span>{% endif %}
         </div>
         <div class="market-actions">
+          {% if market_earlier %}<span class="market-tag market-tag-earlier">{{ 'Dismissed' if row['status'] == 'dismissed' else 'Scan of' }} {{ row['scanned_at'] }}</span>{% endif %}
           <a class="market-btn market-view" href="{{ row['listing_url'] }}" target="_blank" rel="noopener">View listing</a>
+          {% if not market_earlier %}
           <button type="button" class="market-btn market-buy" data-id="{{ row['id'] }}"
                   title="Open the listing to pay there and file this as an Ordered {{ cat_info.singular|lower }}">Buy</button>
+          {% endif %}
+          <button type="button" class="market-btn market-buy market-bought" data-id="{{ row['id'] }}" data-bought="1"
+                  title="Already paid on the seller's site — file this as an Ordered {{ cat_info.singular|lower }} without opening the listing">Bought</button>
+          {% if not market_earlier %}
           <button type="button" class="market-btn market-dismiss" data-id="{{ row['id'] }}" title="Hide this candidate">✕</button>
+          {% endif %}
         </div>
       </div>
       {% endif %}
@@ -783,7 +798,7 @@
   // there, and land on the new record.
   const LOCATIONS = {{ market_locations|default([])|tojson }};
   const SINGULAR = {{ cat_info.singular|lower|tojson }};
-  function pickLocation(title) {
+  function pickLocation(title, bought) {
     return new Promise(resolve => {
       const existing = document.querySelector('.location-choice-backdrop');
       if (existing) existing.remove();
@@ -791,8 +806,10 @@
       backdrop.className = 'location-choice-backdrop';
       backdrop.innerHTML = [
         '<div class="location-choice-panel" role="dialog" aria-modal="true" aria-label="Choose location">',
-        '  <div class="location-choice-title">Buy ' + (title ? title.replace(/</g, '&lt;') : 'this ' + SINGULAR) + '</div>',
-        '  <div class="location-choice-subtitle">Where will it live? The listing then opens in a new tab to pay there (PayPal or the seller\'s checkout), and it is filed here as Ordered.</div>',
+        '  <div class="location-choice-title">' + (bought ? 'Bought ' : 'Buy ') + (title ? title.replace(/</g, '&lt;') : 'this ' + SINGULAR) + '</div>',
+        '  <div class="location-choice-subtitle">' + (bought
+            ? 'Where will it live? It is filed here as Ordered with the listing\'s photos; nothing opens.'
+            : 'Where will it live? The listing then opens in a new tab to pay there (PayPal or the seller\'s checkout), and it is filed here as Ordered.') + '</div>',
         '  <div class="location-choice-options"></div>',
         '  <div class="location-choice-options"><button type="button" class="location-choice-pill location-choice-cancel">Cancel</button></div>',
         '</div>'
@@ -815,10 +832,12 @@
       ev.preventDefault(); ev.stopPropagation();
       const row = btn.closest('.item-row');
       const title = row ? (row.querySelector('.market-title')?.textContent || row.querySelector('.item-brand')?.textContent || '').trim() : '';
-      pickLocation(title).then(location => {
+      const bought = btn.dataset.bought === '1';
+      pickLocation(title, bought).then(location => {
         if (!location) return;
-        // Open the tab on the pick (a user gesture) so popup blockers allow it.
-        const tab = window.open('', '_blank');
+        // Open the tab on the pick (a user gesture) so popup blockers
+        // allow it — not for Bought, which was paid already.
+        const tab = bought ? null : window.open('', '_blank');
         btn.disabled = true;
         fetch({{ url_for('market_item_buy', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },

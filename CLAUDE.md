@@ -128,7 +128,15 @@ checked against the collection (`_similar_banknotes`) and ranked.
 Tables: `market_scans`, `market_scan_items` (payload JSON). Buy cannot
 check out on a seller's site: it opens the listing (pay there) and files
 the item as an Ordered record with the price's USD tail and the listing
-URL. Model env: `ANTHROPIC_MARKET_SCAN_MODEL`.
+URL. **Bought** (2026-09-11) files the same way without opening the
+listing — for a note paid for after opening the listing from the row,
+which is a link; before this, buying that way filed nothing (Mark's
+French Indochina 5 piastres, and the next scan deleted the candidate).
+A new scan now marks the previous scan's undecided items `superseded`
+instead of deleting them (60-day prune of superseded + dismissed), and
+`/<cat>/market?earlier=1` ("Earlier candidates") lists superseded and
+dismissed items with Bought. Model env: `ANTHROPIC_MARKET_SCAN_MODEL`.
+Test: `tests/test_market_bought.py`.
 
 ## What the model sees for a banknote (Check, serial scan)
 
