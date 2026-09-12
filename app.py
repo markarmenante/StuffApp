@@ -15145,21 +15145,89 @@ def _market_fetch_image(url, limit=15_000_000):
         return None, None
 
 
+# eBay serves every listing photo from i.ebayimg.com at any size; the
+# scan's search snippets carry the thumbnail (s-l225, s-l500). The
+# full-size file is the same path with s-l1600.
+_EBAY_IMG_SIZE_RE = re.compile(r'/s-l\d+(\.(?:jpg|jpeg|png|webp))', re.IGNORECASE)
+
+
+def _market_full_size_url(url):
+    u = str(url or '').strip()
+    if 'ebayimg.com' in u:
+        u = _EBAY_IMG_SIZE_RE.sub(r'/s-l1600\1', u)
+    return u
+
+
+def _market_page_image_urls(listing_url, html=None):
+    """Direct photo URLs read off the listing page itself, best first:
+    the JSON-LD / og:image, then eBay's image-gallery files, then any
+    large image the page references. Used when the scan stored no image
+    for a candidate (search snippets rarely carry one) — so Buy still
+    brings the note's photos over (Mark, 2026-09-12)."""
+    if html is None:
+        status, html = _market_fetch_page(listing_url, limit=1_500_000)
+        if status != 200 or not html or _market_page_challenged(status, html):
+            return []
+    found = []
+
+    def add(u):
+        u = _market_full_size_url(u.replace('&amp;', '&'))
+        if re.match(r'^https?://', u) and u not in found:
+            found.append(u)
+    for m in re.finditer(r'"image"\s*:\s*\[?\s*"(https?://[^"]+)"', html):
+        add(m.group(1))
+    for m in re.finditer(r'<meta[^>]+(?:property|name)="(?:og:image|twitter:image)"[^>]+content="([^"]+)"', html, re.IGNORECASE):
+        add(m.group(1))
+    for m in re.finditer(r'<meta[^>]+content="([^"]+)"[^>]+(?:property|name)="(?:og:image|twitter:image)"', html, re.IGNORECASE):
+        add(m.group(1))
+    if 'ebayimg.com' in html:
+        for m in re.finditer(r'https?://i\.ebayimg\.com/images/g/[A-Za-z0-9~_-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', html):
+            add(m.group(0))
+    # Drop obvious non-photos (logos, icons, sprites) and keep the first
+    # few distinct files: obverse, reverse, holder.
+    keep = [u for u in found if not re.search(r'logo|icon|sprite|avatar|badge|placeholder|pixel|1x1|\.svg', u, re.IGNORECASE)]
+    return keep[:4]
+
+
 def _market_store_images(item):
     """Download the listing's obverse and reverse photos and store them
     the way an upload is stored. Returns {'image_1': name, 'image_2':
-    name} for whichever came through."""
+    name} for whichever came through. The scan's own image URLs come
+    first (full-size where the CDN allows); when they are missing or
+    fail, the listing page is read for its photos. Every attempt is
+    logged so a photo-less record can be traced."""
     from io import BytesIO
     from werkzeug.datastructures import FileStorage
+    title = str(item.get('title') or '')[:60]
+    urls = [_market_full_size_url(u) for u in (item.get('image_urls') or []) if u]
     stored = {}
-    for field, url in zip(('image_1', 'image_2'), item.get('image_urls') or []):
+
+    def fetch_into(field, url):
         data, ext = _market_fetch_image(url)
         if not data:
-            continue
+            app.logger.info("market buy image: %s failed — %s | %s", field, title, url[:120])
+            return False
         fs = FileStorage(stream=BytesIO(data), filename=f'{field}.{ext}')
         name = save_upload(fs, optimize_image=True)
-        if name:
-            stored[field] = name
+        if not name:
+            app.logger.info("market buy image: %s could not be stored — %s | %s", field, title, url[:120])
+            return False
+        stored[field] = name
+        app.logger.info("market buy image: %s stored as %s — %s | %s", field, name, title, url[:120])
+        return True
+
+    for field, url in zip(('image_1', 'image_2'), urls):
+        fetch_into(field, url)
+    if len(stored) < 2:
+        page_urls = [u for u in _market_page_image_urls(item.get('listing_url')) if u not in urls]
+        if not page_urls:
+            app.logger.info("market buy image: no photos found on the listing page — %s | %s",
+                            title, str(item.get('listing_url') or '')[:120])
+        for url in page_urls:
+            field = 'image_1' if 'image_1' not in stored else 'image_2'
+            if field in stored:
+                break
+            fetch_into(field, url)
     return stored
 
 
@@ -15371,6 +15439,12 @@ def _market_listing_probe(url):
     if status != 200 or not html:
         out['state'], out['why'] = 'unknown', f'status {status}'
         return out
+    # The page was readable: remember its photos for a candidate the
+    # model gave no image for (the list thumbnail, and Buy's copy).
+    try:
+        out['images'] = _market_page_image_urls(url, html)
+    except Exception:
+        out['images'] = []
     text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r'<[^>]+>', ' ', text)
     text = re.sub(r'\s+', ' ', text).lower()
@@ -15468,6 +15542,9 @@ def _market_verify_live(items, workers=6):
             _market_drop(item, 'eBay page unreadable and no live evidence')
             continue
         item['verified'] = (state == 'live')
+        if not item.get('image_urls') and pr.get('images'):
+            item['image_urls'] = pr['images'][:2]
+            item['image_url'] = pr['images'][0]
         kept.append(item)
     return kept
 
@@ -16325,6 +16402,16 @@ def market_item_buy(category, item_id):
         record_id = _market_create_record(db, category, item, location, images)
         db.execute("UPDATE market_scan_items SET status = 'ordered', record_id = ? "
                    "WHERE id = ?", [record_id, item_id])
+        # The listing's slab photos are trimmed to the note like an
+        # upload is (the untrimmed original stays for Check to read).
+        if category == 'banknotes' and images:
+            note = db.execute("SELECT * FROM banknotes WHERE id = ?", [record_id]).fetchone()
+            for field in ('image_1', 'image_2'):
+                if images.get(field):
+                    try:
+                        _trim_banknote_image(db, record_id, note, field, _banknote_expect_aspect(note))
+                    except Exception as e:
+                        app.logger.warning('banknote %s: trim of market photo %s failed: %s', record_id, field, e)
     db.commit()
     if category == 'banknotes' and item.get('country'):
         ensure_country_history(item['country'])

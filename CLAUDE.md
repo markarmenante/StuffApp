@@ -137,6 +137,14 @@ instead of deleting them (60-day prune of superseded + dismissed), and
 `/<cat>/market?earlier=1` ("Earlier candidates") lists superseded and
 dismissed items with Bought. Model env: `ANTHROPIC_MARKET_SCAN_MODEL`.
 Test: `tests/test_market_bought.py`.
+Photos (2026-09-12): Buy/Bought store the listing's photos as the
+record's image_1/image_2 — the scan's own image URL first (eBay
+thumbnails upgraded to s-l1600), then the listing page's photos
+(`_market_page_image_urls`: JSON-LD, og:image, eBay gallery) when the
+scan had none or the fetch failed; the liveness probe harvests the same
+photos for a candidate the model gave no image for, so the list shows a
+thumbnail. Banknote photos are trimmed on Buy like an upload. Every
+image attempt logs `market buy image: …`. Test: `tests/test_market_images.py`.
 eBay liveness (2026-09-12): eBay walls the scan's page fetch with a
 redirect to /splashui/captcha and keeps ended item pages up (title,
 photos, price, an ENDED badge), so an "unknown" verdict — which never
