@@ -137,6 +137,20 @@ instead of deleting them (60-day prune of superseded + dismissed), and
 `/<cat>/market?earlier=1` ("Earlier candidates") lists superseded and
 dismissed items with Bought. Model env: `ANTHROPIC_MARKET_SCAN_MODEL`.
 Test: `tests/test_market_bought.py`.
+eBay liveness (2026-09-12): eBay walls the scan's page fetch with a
+redirect to /splashui/captcha and keeps ended item pages up (title,
+photos, price, an ENDED badge), so an "unknown" verdict — which never
+drops — let months-old ended eBay lots through (ten of thirteen
+candidates on 2026-09-11 were eBay; the French Guinea specimen had
+ended 2024-12-25). Now the captcha bounce counts as a challenge by URL,
+a readable eBay page with no buy/bid control is ended, an unreadable
+eBay page gets one retry and then keeps its item only on the model's
+own live evidence (`closes` in the future, or `live_evidence` quoting
+Buy It Now / bids / time left — the prompt now demands it for eBay),
+and every probe logs `market scan verify: <state> status= len=
+challenged= why=` so a scan's logs show what each venue served. Test:
+`tests/test_market_ebay_liveness.py`. The container's egress proxy
+refuses ebay.com, so eBay can only be checked in production's logs.
 
 ## What the model sees for a banknote (Check, serial scan)
 

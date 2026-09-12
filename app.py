@@ -14898,7 +14898,7 @@ VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VE
 
 {grade_rules}
 
-LIVENESS: every item must be purchasable now. An auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. For FIXED-PRICE dealer stock (VCoins stores, Shanna Schmidt, Harlan J. Berk, Roma's shop, the Nomos and CNG shops, Baldwin's, Forum, MA-Shops, eBay Buy It Now) return the item page whenever the search result shows it offered at a price and nothing says sold, reserved or archived — the scan opens every page itself afterwards and drops the ones that have ended, so you do not have to prove it; put in `live_evidence` what the result showed ("$1,850 — Add to cart", "Buy It Now, 2 available", "bidding ends 2026-10-03"). Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
+LIVENESS: every item must be purchasable now. An auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. For FIXED-PRICE dealer stock (VCoins stores, Shanna Schmidt, Harlan J. Berk, Roma's shop, the Nomos and CNG shops, Baldwin's, Forum, MA-Shops, eBay Buy It Now) return the item page whenever the search result shows it offered at a price and nothing says sold, reserved or archived — the scan opens every page itself afterwards and drops the ones that have ended, so you do not have to prove it; put in `live_evidence` what the result showed ("$1,850 — Add to cart", "Buy It Now, 2 available", "bidding ends 2026-10-03"). eBay is the exception: its item pages cannot always be opened by the scan, and its search results and Google keep ended items for months (a 2024 specimen listing surfaced as a candidate in 2026), so an eBay item is kept ONLY when `live_evidence` quotes the result's own live wording — "Buy It Now", "Add to cart", "N bids · time left", "ends in", "N available" — or `closes` carries a future date; an eBay find without that is discarded, so do not return one. Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
 
 TONE (Mark's instruction, 2026-09-10): `why`, `fills`, `rarity` and `fair` are factual one-liners — what the piece is, its grade, its price, which gap it fills, and the evidence. No flattery, no "exactly the trophy-grade piece the collection needs", no reading of the collection or the collector; state facts and figures only.
 
@@ -15186,6 +15186,11 @@ _MARKET_ENDED_PAGE_MARKERS = (
     # button replaced by "Not available".
     'no longer for sale', 'currently unavailable', 'item unavailable',
     'this item has been sold', 'item is reserved', 'item reserved', 'currently reserved',
+    # eBay: "This listing was ended by the seller on … because the item
+    # is no longer available" / "Bidding ended on …" / the ENDED badge
+    # with the end date ("Ended: Wed, Dec 25").
+    'listing was ended', 'ended by the seller', 'bidding ended on', 'listing ended on',
+    'this item is out of stock', 'the item is no longer available',
     'ended:', 'sold ',
 )
 # Weak markers: real only when the page offers no way to buy. "Not
@@ -15260,13 +15265,26 @@ _MARKET_CHALLENGE_RE = re.compile(
     re.IGNORECASE)
 
 
+_MARKET_CHALLENGE_URL_RE = re.compile(r'/splashui/captcha|/challenge|signin\.ebay\.|/cdn-cgi/challenge', re.IGNORECASE)
+
+
 def _market_page_challenged(status, html):
     """A bot wall's challenge page, not the listing: nothing can be read
     from it, so it decides nothing (scan #9 dropped twelve VCoins finds
-    whose product URLs were bounced to a challenge page as 'gone')."""
+    whose product URLs were bounced to a challenge page as 'gone').
+    eBay's wall is a redirect to /splashui/captcha ("Security Measure"),
+    so the URL the fetch landed on counts too."""
     if status == 202:
         return True
+    final = getattr(_MARKET_LAST_URL, 'final', '') or ''
+    if final and _MARKET_CHALLENGE_URL_RE.search(final):
+        return True
     return bool(html) and len(html) < 20_000 and bool(_MARKET_CHALLENGE_RE.search(html))
+
+
+def _market_is_ebay(url):
+    host = re.sub(r'^https?://(www\.)?', '', str(url or '')).split('/')[0].lower()
+    return host == 'ebay.com' or host.endswith('.ebay.com') or bool(re.match(r'^(?:[a-z]+\.)?ebay\.[a-z.]+$', host))
 
 
 def _market_page_gone(url, status, html=''):
@@ -15334,18 +15352,25 @@ def _market_price_from_page(url):
     return None
 
 
-def _market_listing_state(url):
-    """'ended' when the listing page itself says the lot is sold, ended
-    or archived; 'live' when it carries buy/bid wording and no ended
-    marker; 'unknown' when the page cannot be read (bot wall, timeout)
-    or says neither — unknown never drops an item."""
+def _market_listing_probe(url):
+    """One read of a listing page: {'state', 'status', 'challenged',
+    'length', 'final', 'why'}. state is 'ended' when the page itself
+    says the lot is sold, ended or archived; 'live' when it carries
+    buy/bid wording and no ended marker; 'unknown' when the page cannot
+    be read (bot wall, timeout) or says neither."""
     status, html = _market_fetch_page(url)
-    if _market_page_challenged(status, html):
-        return 'unknown'
+    final = getattr(_MARKET_LAST_URL, 'final', url) or url
+    out = {'status': status, 'length': len(html or ''), 'final': final,
+           'challenged': _market_page_challenged(status, html), 'why': ''}
+    if out['challenged']:
+        out['state'], out['why'] = 'unknown', 'challenge page'
+        return out
     if _market_page_gone(url, status, html):
-        return 'ended'
+        out['state'], out['why'] = 'ended', 'page gone'
+        return out
     if status != 200 or not html:
-        return 'unknown'
+        out['state'], out['why'] = 'unknown', f'status {status}'
+        return out
     text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r'<[^>]+>', ' ', text)
     text = re.sub(r'\s+', ' ', text).lower()
@@ -15356,26 +15381,91 @@ def _market_listing_state(url):
     live = [m for m in _MARKET_LIVE_PAGE_MARKERS if m in head]
     buyable = any(m in head for m in _MARKET_BUY_MARKERS)
     if ended and ('sold ' not in ended or len(ended) > 1 or not live):
-        return 'ended'
+        out['state'], out['why'] = 'ended', 'ended marker: ' + ', '.join(ended[:3])
+        return out
     if not buyable and any(m in head for m in _MARKET_WEAK_ENDED_MARKERS):
-        return 'ended'
+        out['state'], out['why'] = 'ended', 'weak ended marker, nothing to buy'
+        return out
+    # eBay: a live listing always carries a buy or bid control (Buy It
+    # Now / Add to cart / Place bid / Make offer). A readable eBay item
+    # page with none of them is over, whatever else it says — the
+    # ended pages keep the title, photos and price, which is why the
+    # French Guinea specimen (ended 2024-12-25) sailed through as a
+    # candidate on 2026-09-11.
+    if _market_is_ebay(url) and not buyable:
+        out['state'], out['why'] = 'ended', 'ebay page with no buy/bid control'
+        return out
     if live:
-        return 'live'
-    return 'unknown'
+        out['state'], out['why'] = 'live', 'live marker: ' + ', '.join(live[:3])
+        return out
+    out['state'], out['why'] = 'unknown', 'no marker either way'
+    return out
+
+
+def _market_listing_state(url):
+    """'ended' / 'live' / 'unknown' for a listing page (see the probe).
+    An eBay page that cannot be read gets one more try after a pause
+    with a different browser signature — eBay's wall is per request as
+    much as per address — before it is called unknown."""
+    probe = _market_listing_probe(url)
+    if probe['state'] == 'unknown' and _market_is_ebay(url):
+        time.sleep(1.5)
+        probe2 = _market_listing_probe(url)
+        if probe2['state'] != 'unknown':
+            probe = probe2
+    _MARKET_LAST_PROBE.probe = probe
+    return probe['state']
+
+
+_MARKET_LAST_PROBE = threading.local()
+
+_MARKET_LIVE_EVIDENCE_RE = re.compile(
+    r'buy it now|add to cart|place bid|\d+\s*bids?\b|time left|ends? (?:in|on)\b|bidding ends|'
+    r'\d+\s*available|\d+\s*sold\b|make offer|best offer|in stock',
+    re.IGNORECASE)
+
+
+def _market_unreadable_ebay_ok(item):
+    """Whether an eBay candidate whose page could not be read may stay:
+    only with the model's own live evidence — a future closing date, or
+    live_evidence quoting the result's buy/bid/time-left wording. Unknown
+    used to keep everything, and eBay's wall made every eBay find
+    unknown, so ended lots (Curaçao 2½ gulden, ended 2026-08-29; the
+    French Guinea specimen, ended 2024-12-25) filled the 2026-09-11 scan."""
+    closes = str(item.get('closes') or '').strip()[:10]
+    if closes and closes >= date.today().isoformat():
+        return True
+    return bool(_MARKET_LIVE_EVIDENCE_RE.search(str(item.get('live_evidence') or '')))
 
 
 def _market_verify_live(items, workers=6):
     """Fetch every candidate's page in parallel; drop the ones the venue
-    itself says are over; mark the ones it says are live."""
+    itself says are over; mark the ones it says are live. An eBay page
+    that could not be read keeps its item only on the model's live
+    evidence (_market_unreadable_ebay_ok); every probe is logged so a
+    scan's log shows what each venue actually served."""
     if not items:
         return items
     from concurrent.futures import ThreadPoolExecutor
+
+    def probe(it):
+        state = _market_listing_state(it['listing_url'])
+        return state, getattr(_MARKET_LAST_PROBE, 'probe', None) or {}
     with ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
-        states = list(pool.map(lambda it: _market_listing_state(it['listing_url']), items))
+        results = list(pool.map(probe, items))
     kept = []
-    for item, state in zip(items, states):
+    for item, (state, pr) in zip(items, results):
+        app.logger.info(
+            "market scan verify: %s status=%s len=%s challenged=%s why=%s final=%s | %s | %s",
+            state, pr.get('status'), pr.get('length'), pr.get('challenged'), pr.get('why'),
+            str(pr.get('final') or '')[:100], str(item.get('title') or '')[:60],
+            str(item.get('listing_url') or '')[:100])
         if state == 'ended':
             _market_drop(item, 'listing page ended or gone')
+            continue
+        if state == 'unknown' and _market_is_ebay(item.get('listing_url')) \
+                and not _market_unreadable_ebay_ok(item):
+            _market_drop(item, 'eBay page unreadable and no live evidence')
             continue
         item['verified'] = (state == 'live')
         kept.append(item)
