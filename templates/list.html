@@ -78,6 +78,7 @@
       {%- if market_scan['status'] == 'failed' %} · failed: {{ market_scan['error'] }}{% endif -%}
     {%- else -%}Not scanned yet
     {%- endif -%}
+    {%- if market_wantlist and not market_earlier %} · colonial want-list: {{ market_wantlist.open }} of {{ market_wantlist.total }} still open{% endif -%}
   </span>
   {% endif %}
   {# Drilled in from a Property — give a one-tap way back. #}

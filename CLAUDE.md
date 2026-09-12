@@ -137,6 +137,17 @@ instead of deleting them (60-day prune of superseded + dismissed), and
 `/<cat>/market?earlier=1` ("Earlier candidates") lists superseded and
 dismissed items with Bought. Model env: `ANTHROPIC_MARKET_SCAN_MODEL`.
 Test: `tests/test_market_bought.py`.
+Colonial want-list (2026-09-12): `BANKNOTE_COLONIAL_WANTLIST` in app.py
+is the table of banknote-issuing colonies the collection lacked on
+that date (35 entries: name, empire group, issuer, period, `held`
+country substrings, `before` year). `_banknote_wantlist_open` retires
+an entry once an Own/Ordered note's country matches (dated up to
+`before` where set — a 1958 Cuba note does not retire Spanish-colonial
+Cuba); `_banknote_wantlist_themes` turns the open entries into up to
+three TOP-PRIORITY themes (British / French-Portuguese-Dutch / other)
+that lead every banknote scan, and the market page's status line shows
+"colonial want-list: N of 35 still open". Add or retire entries in the
+table; nothing else needs touching. Test: `tests/test_market_wantlist.py`.
 Photos (2026-09-12): Buy/Bought store the listing's photos as the
 record's image_1/image_2 — the scan's own image URL first (eBay
 thumbnails upgraded to s-l1600), then the listing page's photos

@@ -14741,6 +14741,119 @@ def _market_paid_text(price):
 # Each theme is one focused web-search call. Several run at once and
 # their candidates are merged, so a scan looks in every corner of the
 # collection's interests instead of one broad sweep.
+# ---------------------------------------------------------------------------
+# Colonial want-list (Mark, 2026-09-12): the banknote-issuing colonies and
+# dependencies the collection does not hold, from a review of the 309
+# notes on that date. Each entry names the issuer and period the scan
+# should hunt, and `held` — lowercase substrings of the `country` field
+# that mean the gap is filled (with `before`, only a note dated up to
+# that year counts: a 1958 Cuba or 1993 São Tomé note is post-colonial).
+# The scan builds three TOP-PRIORITY themes from whatever is still open
+# (_banknote_wantlist_themes), so the list retires itself as notes land.
+# ---------------------------------------------------------------------------
+BANKNOTE_COLONIAL_WANTLIST = [
+    # (name, empire group, issuer, period, held substrings, before-year)
+    ('Palestine', 'british', 'Palestine Currency Board', '1927–1945', ('palestine',), None),
+    ('Southern Rhodesia', 'british', 'Southern Rhodesia Currency Board', '1939–1955', ('southern rhodesia',), None),
+    ('Newfoundland', 'british', 'Government of Newfoundland', '1901–1920', ('newfoundland',), None),
+    ('British North Borneo', 'british', 'British North Borneo (Chartered) Company', '1886–1940', ('north borneo',), None),
+    ('Barbados', 'british', 'Government of Barbados', '1938–1949', ('barbados',), 1966),
+    ('Trinidad and Tobago', 'british', 'Government of Trinidad and Tobago', '1905–1943', ('trinidad',), 1962),
+    ('Seychelles', 'british', 'Government of Seychelles', '1919–1968', ('seychelles',), 1976),
+    ('Western Samoa', 'british', 'Territory of Western Samoa (New Zealand administration)', '1920–1961', ('samoa',), 1962),
+    ('Zanzibar', 'british', 'Zanzibar Government', '1908–1928', ('zanzibar',), None),
+    ('Bahrain', 'british', 'Bahrain Currency Board', '1964–1965', ('bahrain',), 1971),
+    ('Qatar and Dubai', 'british', 'Qatar & Dubai Currency Board', '1966', ('qatar',), 1973),
+    ('Jersey', 'british', 'States of Jersey', '1963 onward', ('states of jersey', 'jersey (channel', 'jersey, channel', 'bailiwick of jersey'), None),
+    ('Tunisia', 'french', "Banque de l'Algérie et de la Tunisie", '1918–1958', ('tunisia',), 1958),
+    ('Syria (mandate)', 'french', 'Banque de Syrie et du Liban', '1919–1940s', ('syria',), 1946),
+    ('Tahiti / French Oceania', 'french', "Banque de l'Indochine, Papeete; later IEOM", '1905–1960s', ('tahiti', 'french oceania', 'french polynesia', 'polyn'), None),
+    ('New Hebrides', 'french', "Banque de l'Indochine, Nouvelles-Hébrides (Anglo-French condominium)", '1941–1970s', ('new hebrides', 'nouvelles', 'vanuatu'), 1980),
+    ('Saint-Pierre et Miquelon', 'french', "Caisse Centrale de la France d'Outre-Mer overprints", '1950', ('pierre', 'miquelon'), None),
+    ('French India', 'french', "Banque de l'Indochine, Pondichéry", '1919–1940s', ('french india', 'pondich'), None),
+    ('Comoros', 'french', 'Banque de Madagascar et des Comores', '1950–1960s', ('comoro',), 1975),
+    ('Portuguese India', 'french', 'Banco Nacional Ultramarino, Goa (rupias, then escudos)', '1906–1959', ('portuguese india', 'goa', 'estado da', 'india portuguesa'), None),
+    ('São Tomé e Príncipe (colonial)', 'french', 'Banco Nacional Ultramarino', '1909–1974', ('tome', 'tomé'), 1975),
+    ('Nyassa Company', 'french', 'Companhia do Nyassa (Mozambique chartered company)', '1921', ('nyassa', 'niassa'), None),
+    ('Curaçao', 'french', 'De Curaçaosche Bank (Netherlands Antilles)', '1900–1960s', ('cura', 'netherlands antilles'), None),
+    ('Suriname', 'french', 'De Surinaamsche Bank / Government of Suriname', '1900–1970s', ('surinam',), 1975),
+    ('Puerto Rico (Spanish)', 'other', 'Banco Español de Puerto Rico', '1889–1900s', ('puerto rico',), None),
+    ('Cuba (Spanish colonial)', 'other', 'Banco Español de la Isla de Cuba', '1896–1897', ('cuba',), 1898),
+    ('Philippines (Spanish colonial)', 'other', 'Banco Español Filipino', '1852–1896', ('philippin', 'filipin'), 1898),
+    ('Italian East Africa', 'other', "Banca d'Italia, Africa Orientale Italiana", '1938–1939', ('italian east africa', 'africa orientale', 'ethiopia'), 1941),
+    ('Italian Somaliland (rupia)', 'other', "Banca d'Italia / Cassa — rupia issue", '1920s', ('italian somaliland', 'somalia'), 1930),
+    ('Kiautschou (Tsingtau)', 'other', 'Deutsch-Asiatische Bank, Tsingtau', '1907–1914', ('kiautschou', 'kiaochow', 'tsingtau', 'tsingtao'), None),
+    ('German South West Africa', 'other', 'Windhuk Kassenscheine (emergency notes)', '1916–1918', ('south west africa', 'südwestafrika', 'namibia'), 1920),
+    ('Danish West Indies', 'other', 'Bank of the Danish West Indies / National Bank', '1905–1917', ('danish west indies',), None),
+    ('Taiwan (Japanese)', 'other', 'Bank of Taiwan', '1899–1945', ('taiwan', 'formosa'), 1945),
+    ('Manchukuo', 'other', 'Central Bank of Manchou', '1932–1945', ('manchu',), None),
+    ('Hawaii', 'other', 'Republic / Territory of Hawaii silver certificates', '1895–1899', ('hawaii',), 1900),
+]
+
+_WANTLIST_GROUP_TITLES = {
+    'british': 'British Empire',
+    'french': 'French, Portuguese and Dutch empires',
+    'other': 'Spanish, Italian, German, Danish, Japanese and American',
+}
+
+
+def _banknote_wantlist_open(db):
+    """The want-list entries the collection still lacks: an entry is
+    held when an Own/Ordered banknote's country carries one of its
+    substrings (and, where `before` is set, is dated up to that year)."""
+    try:
+        rows = db.execute(
+            "SELECT country, date_1 FROM banknotes "
+            "WHERE (status IS NULL OR status IN ('Own', 'Ordered')) "
+            "AND country IS NOT NULL AND TRIM(country) != ''").fetchall()
+    except sqlite3.Error:
+        rows = []
+    held = []
+    for r in rows:
+        c = (r['country'] or '').strip().lower()
+        try:
+            y = int(r['date_1']) if r['date_1'] not in (None, '') else None
+        except (TypeError, ValueError):
+            y = None
+        held.append((c, y))
+    open_entries = []
+    for entry in BANKNOTE_COLONIAL_WANTLIST:
+        name, group, issuer, period, subs, before = entry
+        got = False
+        for c, y in held:
+            matched = any(sub in c for sub in subs)
+            if name == 'Jersey' and c.strip() == 'jersey':
+                matched = True
+            if matched and (before is None or (y is not None and y <= before)):
+                got = True
+                break
+        if not got:
+            open_entries.append(entry)
+    return open_entries
+
+
+def _banknote_wantlist_themes(db):
+    """Up to three TOP-PRIORITY scan themes built from the open want-list
+    entries, grouped by empire; a group with nothing open yields none."""
+    open_entries = _banknote_wantlist_open(db)
+    themes = []
+    for group in ('british', 'french', 'other'):
+        entries = [e for e in open_entries if e[1] == group]
+        if not entries:
+            continue
+        lines = '; '.join(f"{name} — {issuer}, {period}" for name, _g, issuer, period, _s, _b in entries)
+        themes.append((
+            f'wantlist-{group}',
+            f"TOP PRIORITY — MARK'S COLONIAL WANT-LIST ({_WANTLIST_GROUP_TITLES[group]}): "
+            f"these are the banknote-issuing colonies and dependencies the collection does NOT "
+            f"hold. Find live listings of a note from each issuer, in its colonial period: {lines}. "
+            f"One or two of the best-graded, fairly priced examples per issuer; a scarce issuer "
+            f"(Zanzibar, Kiautschou, French India, the Somaliland rupia) may be shown at a lower grade "
+            f"where the bar allows, with `rarity` set. Put the issuer's name from this list in `fills` "
+            f"and set `empire`."))
+    return themes
+
+
 _MARKET_THEMES = {
     'banknotes': [
         ('colonial-british', "TOP PRIORITY — British colonial issues before independence: "
@@ -16045,7 +16158,11 @@ def _run_market_scan(category, scan_id):
         coverage = _market_denomination_coverage(db, category)
         recent = _market_recent_purchases(db, category)
         analysis_block, analysis_date = _market_analysis_block(db, category)
-        themes = _MARKET_THEMES[category]
+        themes = list(_MARKET_THEMES[category])
+        if category == 'banknotes':
+            # The colonial want-list leads: one theme per empire group,
+            # built from whatever the collection still lacks.
+            themes = _banknote_wantlist_themes(db) + themes
         results, errors = [], []
         from concurrent.futures import ThreadPoolExecutor, wait as _wait
         # Two themes at a time: seven at once, each firing twenty searches,
@@ -16258,6 +16375,10 @@ def market_view(category):
                            market_running=running,
                            market_autoscan=autoscan,
                            market_earlier=earlier,
+                           market_wantlist=(
+                               {'open': len(_banknote_wantlist_open(db)),
+                                'total': len(BANKNOTE_COLONIAL_WANTLIST)}
+                               if category == 'banknotes' else None),
                            market_locations=property_choices_for_category(category))
 
 
