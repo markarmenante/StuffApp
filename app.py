@@ -27236,6 +27236,328 @@ def coins_print_pdf():
                     headers={'Content-Disposition': f'inline; filename="{filename}"'})
 
 
+# ---------------------------------------------------------------------------
+# Banknote collection report (Mark, 2026-09-12): a PDF of the whole
+# banknote collection, one country / colony per section on a fresh
+# page, the country's history first (the era bands the list panels
+# show, and the colonial timeline), then the notes three to a page —
+# front and back images side by side on one row, two compact lines of
+# details under them. Built in a background thread (Cloudflare caps a
+# request at 100 s and 300 notes of photos take longer) into
+# $DATA_DIR/reports/, and the Report pill on the Banknotes list polls
+# for it and opens it.
+# ---------------------------------------------------------------------------
+
+_BANKNOTE_REPORT = {'state': 'idle', 'started_at': None, 'built_at': None,
+                    'error': None, 'notes': 0, 'sections': 0}
+_BANKNOTE_REPORT_LOCK = threading.Lock()
+
+
+def _banknote_report_path():
+    d = os.path.join(DATA_DIR, 'reports')
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, 'banknotes-collection-report.pdf')
+
+
+def _pdf_fonts():
+    """(regular, bold, italic) font names: DejaVu Sans when the system
+    has it (full Latin with diacritics, Greek, Cyrillic), else the
+    built-in Helvetica family."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    candidates = [
+        ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+         '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+         '/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf'),
+        ('/Library/Fonts/DejaVuSans.ttf', '/Library/Fonts/DejaVuSans-Bold.ttf',
+         '/Library/Fonts/DejaVuSans-Oblique.ttf'),
+    ]
+    for reg, bold, ital in candidates:
+        if all(os.path.exists(f) for f in (reg, bold, ital)):
+            try:
+                if 'DejaVuSans' not in pdfmetrics.getRegisteredFontNames():
+                    pdfmetrics.registerFont(TTFont('DejaVuSans', reg))
+                    pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', bold))
+                    pdfmetrics.registerFont(TTFont('DejaVuSans-Oblique', ital))
+                return 'DejaVuSans', 'DejaVuSans-Bold', 'DejaVuSans-Oblique'
+            except Exception:
+                break
+    return 'Helvetica', 'Helvetica-Bold', 'Helvetica-Oblique'
+
+
+def _pdf_text(value, unicode_ok):
+    """Text safe for the chosen font: everything with DejaVu; with the
+    built-in fonts, characters outside Latin-1 are folded to their base
+    letter or dropped (an Arabic or Chinese issuer name shows only its
+    Latin part) rather than printing as black boxes."""
+    t = str(value if value is not None else '').strip()
+    if unicode_ok:
+        return t
+    t = unicodedata.normalize('NFKD', t)
+    return ''.join(ch for ch in t if ord(ch) < 256 and not unicodedata.combining(ch)).strip()
+
+
+def _banknote_report_sections(db):
+    """The report's sections in the list's order: [(country, key, [rows])],
+    one per country / colony as stored, Own and Ordered notes only."""
+    sql, params = build_search_query('banknotes', '', dot=False, coin_filter=None, at_property=None)
+    # Owner-only report (the build route checks), run in a thread with
+    # no request context — so no per-user row filter here.
+    rows = [r for r in db.execute(sql, params).fetchall()
+            if (r['status'] or 'Own') in ('Own', 'Ordered')]
+    sections = []
+    for r in rows:
+        country = (r['country'] or '').strip() or 'Unattributed'
+        if sections and sections[-1][0].lower() == country.lower():
+            sections[-1][2].append(r)
+        else:
+            sections.append((country, _country_key(country), [r]))
+    return sections
+
+
+def _banknote_report_history(country, key, rows):
+    """(title, colonial_line, [(span, label, body)]) for a section: the
+    era bands of the nation the country files under (US notes get the
+    US monetary eras), or the notes' own history context when the
+    country has no panel."""
+    colonial = COUNTRY_COLONIAL.get(key) if key else None
+    if key == 'us' or key == 'colonial-america':
+        title = 'United States' if key == 'us' else 'Colonial America'
+        eras = [(f'{a}–{b}', label, body) for a, b, label, body in US_MONETARY_ERAS]
+        return title, colonial, eras
+    entry = _country_eras_for(key) if key else None
+    if entry:
+        title, era_rows = entry
+        eras = [(f'{e[0]}–{e[1]}' if e[1] < 2100 else f'{e[0]}–', e[2], e[3]) for e in era_rows]
+        return title, colonial, eras
+    ctx = ''
+    for r in rows:
+        ctx = (r['history_context'] or '').strip() if 'history_context' in r.keys() else ''
+        if ctx:
+            break
+    return country, colonial, ([('', 'Historical context', ctx)] if ctx else [])
+
+
+def _banknote_report_lines(r):
+    """The two compact detail lines under a note's images."""
+    def g(k):
+        try:
+            v = r[k]
+        except (KeyError, IndexError):
+            return ''
+        return str(v).strip() if v not in (None, '') else ''
+    year = g('date_1_text') or g('date_1')
+    series = g('series')
+    pick = g('pick_number')
+    line1 = [g('cat_id'), g('denomination'), year, series if series and series != year else '',
+             g('issuer') or g('country'), f'Pick {pick}' if pick and not re.match(r'^(p|pick)', pick, re.I) else pick]
+    grade = ' '.join(x for x in (g('grading_authority'), g('grade_numeric').replace('.0', '') if g('grade_numeric') else '',
+                                 g('grade') if g('grade') and g('grade') != g('grade_numeric') else '',
+                                 g('grade_modifier')) if x)
+    size = f"{g('size_width').replace('.0', '')}×{g('size_height').replace('.0', '')} mm" if g('size_width') and g('size_height') else ''
+    serial = f"S/N {g('serial_number')}" if g('serial_number') else ''
+    price = g('price')
+    bought = ' '.join(x for x in (price, g('vendor'), g('purchase_date')) if x)
+    status = 'ORDERED' if g('status') == 'Ordered' else ''
+    line2 = [grade, serial, size, g('printer'), bought, status]
+    return line1, line2
+
+
+def _build_banknote_report(path):
+    """Write the collection report PDF to `path`. Runs in a thread."""
+    from xml.sax.saxutils import escape as xesc
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (Image as RLImage, KeepTogether, PageBreak,
+                                    Paragraph, SimpleDocTemplate, Spacer, Table,
+                                    TableStyle, HRFlowable)
+    import io as _io
+
+    reg, bold, ital = _pdf_fonts()
+    uni = reg != 'Helvetica'
+    T = lambda v: xesc(_pdf_text(v, uni))
+
+    st_title = ParagraphStyle('t', fontName=bold, fontSize=20, leading=24, spaceAfter=4)
+    st_sub = ParagraphStyle('s', fontName=reg, fontSize=9.5, leading=12,
+                            textColor=colors.HexColor('#666666'), spaceAfter=8)
+    st_country = ParagraphStyle('c', fontName=bold, fontSize=16, leading=19, spaceAfter=1)
+    st_nation = ParagraphStyle('n', fontName=reg, fontSize=9.5, leading=12,
+                               textColor=colors.HexColor('#666666'), spaceAfter=6)
+    st_colonial = ParagraphStyle('col', fontName=ital, fontSize=9, leading=11.5,
+                                 textColor=colors.HexColor('#444444'), spaceAfter=5)
+    st_era_label = ParagraphStyle('el', fontName=bold, fontSize=9, leading=11.5, spaceBefore=3)
+    st_era = ParagraphStyle('e', fontName=reg, fontSize=8.8, leading=11.2,
+                            textColor=colors.HexColor('#333333'), spaceAfter=1)
+    st_l1 = ParagraphStyle('l1', fontName=bold, fontSize=8.8, leading=11, spaceBefore=3)
+    st_l2 = ParagraphStyle('l2', fontName=reg, fontSize=8.2, leading=10.4,
+                           textColor=colors.HexColor('#444444'))
+    st_cont = ParagraphStyle('cont', fontName=reg, fontSize=9, leading=11,
+                             textColor=colors.HexColor('#777777'), spaceAfter=6)
+
+    page_w, page_h = letter
+    margin = 0.6 * inch
+    content_w = page_w - 2 * margin
+    img_w = (content_w - 0.2 * inch) / 2
+    img_h = 2.3 * inch
+    top_margin, bottom_margin = 0.55 * inch, 0.6 * inch
+    avail_h = page_h - top_margin - bottom_margin
+
+    def flow_height(flowables):
+        """Height the flowables take at the content width — how much of
+        the page a section's history uses, so the notes can be paged
+        three to a page after it."""
+        total = 0.0
+        for f in flowables:
+            try:
+                _w, h = f.wrap(content_w, avail_h)
+            except Exception:
+                h = 0
+            total += h + getattr(f, 'spaceBefore', 0) + getattr(f, 'spaceAfter', 0)
+        return total
+
+    def note_image(filename):
+        if not filename or not is_image_filter(filename):
+            return None
+        try:
+            with open(os.path.join(UPLOAD_FOLDER, filename), 'rb') as fh:
+                img = _open_upload_image(fh.read())
+            img = _flatten_image_for_jpeg(img)
+            img.thumbnail((1100, 1100))
+            jb = _io.BytesIO()
+            img.save(jb, format='JPEG', quality=82)
+            jb.seek(0)
+            w, h = img.size
+            scale = min(img_w / w, img_h / h)
+            return RLImage(jb, width=w * scale, height=h * scale)
+        except Exception:
+            return None
+
+    def dotline(parts):
+        return '  ·  '.join(T(p) for p in parts if p not in (None, '') and str(p).strip())
+
+    db = open_db_connection()
+    try:
+        sections = _banknote_report_sections(db)
+        total_notes = sum(len(rows) for _c, _k, rows in sections)
+        story = [Paragraph('Banknote Collection', st_title),
+                 Paragraph(dotline([date.today().strftime('%B %-d, %Y'),
+                                    f'{total_notes} notes', f'{len(sections)} countries and colonies']), st_sub)]
+        for i, (country, key, rows) in enumerate(sections):
+            if i:
+                story.append(PageBreak())
+            title, colonial, eras = _banknote_report_history(country, key, rows)
+            head = [Paragraph(T(country), st_country)]
+            sub = []
+            if title and title.lower() != country.lower():
+                sub.append(title)
+            sub.append(f'{len(rows)} note{"s" if len(rows) != 1 else ""}')
+            head.append(Paragraph(dotline(sub), st_nation))
+            if colonial:
+                head.append(Paragraph(T(colonial), st_colonial))
+            for span, label, body in eras:
+                head.append(Paragraph((T(span) + '  ' if span else '') + T(label), st_era_label))
+                head.append(Paragraph(T(body), st_era))
+            head.append(Spacer(1, 6))
+            head.append(HRFlowable(width='100%', thickness=0.6, color=colors.HexColor('#999999'), spaceAfter=4))
+            story.extend(head)
+            # Paging: the history page takes as many notes as fit under
+            # it (at most three); every page after that carries exactly
+            # three, front and back on one row with two lines beneath.
+            bands = []
+            for r in rows:
+                front = note_image(r['image_1']) or Paragraph('', st_l2)
+                back = note_image(r['image_2']) or Paragraph('', st_l2)
+                tbl = Table([[front, back]], colWidths=[img_w, img_w], rowHeights=[img_h + 4])
+                tbl.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                                         ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                                         ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+                                         ('TOPPADDING', (0, 0), (-1, -1), 2),
+                                         ('BOTTOMPADDING', (0, 0), (-1, -1), 2)]))
+                l1, l2 = _banknote_report_lines(r)
+                bands.append([tbl, Paragraph(dotline(l1), st_l1), Paragraph(dotline(l2), st_l2), Spacer(1, 16)])
+            if not bands:
+                continue
+            band_h = flow_height(bands[0])
+            head_h = flow_height(head) + (flow_height(story[:2]) if i == 0 else 0)
+            on_first = max(0, min(3, int((avail_h - head_h) // band_h)))
+            for j, band in enumerate(bands):
+                if j == on_first or (j > on_first and (j - on_first) % 3 == 0):
+                    story.append(PageBreak())
+                    story.append(Paragraph(T(country) + '  ·  continued', st_cont))
+                story.append(KeepTogether(band))
+    finally:
+        db.close()
+
+    def on_page(canvas, doc):
+        canvas.saveState()
+        canvas.setFont(reg, 7.5)
+        canvas.setFillColor(colors.HexColor('#888888'))
+        canvas.drawRightString(page_w - margin, 0.4 * inch, f'Banknote Collection  ·  {doc.page}')
+        canvas.restoreState()
+
+    tmp = path + '.tmp'
+    doc = SimpleDocTemplate(tmp, pagesize=letter, leftMargin=margin, rightMargin=margin,
+                            topMargin=top_margin, bottomMargin=bottom_margin,
+                            title='Banknote Collection', author='StuffApp')
+    doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
+    os.replace(tmp, path)
+    return total_notes, len(sections)
+
+
+def _run_banknote_report_job():
+    try:
+        with app.app_context():
+            notes, sections = _build_banknote_report(_banknote_report_path())
+        with _BANKNOTE_REPORT_LOCK:
+            _BANKNOTE_REPORT.update(state='done', built_at=datetime.utcnow().isoformat(),
+                                    error=None, notes=notes, sections=sections)
+        print(f'banknote report built: {notes} notes, {sections} sections', flush=True)
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        with _BANKNOTE_REPORT_LOCK:
+            _BANKNOTE_REPORT.update(state='failed', error=f'{e or e.__class__.__name__}')
+
+
+def _banknote_report_status():
+    with _BANKNOTE_REPORT_LOCK:
+        st = dict(_BANKNOTE_REPORT)
+    path = _banknote_report_path()
+    st['exists'] = os.path.exists(path)
+    if st['exists'] and st['state'] == 'idle':
+        st['built_at'] = datetime.utcfromtimestamp(os.path.getmtime(path)).isoformat()
+    st['url'] = url_for('banknote_report_pdf') if st['exists'] else None
+    return st
+
+
+@app.route('/banknotes/report/build', methods=['POST'])
+def banknote_report_build():
+    require_owner()
+    with _BANKNOTE_REPORT_LOCK:
+        if _BANKNOTE_REPORT['state'] == 'running':
+            return jsonify({'ok': True, 'state': 'running'})
+        _BANKNOTE_REPORT.update(state='running', started_at=datetime.utcnow().isoformat(), error=None)
+    threading.Thread(target=_run_banknote_report_job, daemon=True).start()
+    return jsonify({'ok': True, 'state': 'running'})
+
+
+@app.route('/banknotes/report/status')
+def banknote_report_status():
+    return jsonify(_banknote_report_status())
+
+
+@app.route('/banknotes/report.pdf')
+def banknote_report_pdf():
+    path = _banknote_report_path()
+    if not os.path.exists(path):
+        abort(404)
+    return send_file(path, mimetype='application/pdf', as_attachment=False,
+                     download_name='Banknote Collection.pdf', max_age=0)
+
+
 @app.route('/art/report-pdf')
 def art_report_pdf():
     """The art collection as a flowing PDF report, laid out like the

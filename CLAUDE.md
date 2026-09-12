@@ -184,6 +184,26 @@ grade, EPQ and cert number had been cropped away before Check ran. The
 page keeps showing the trimmed image. Test:
 `tests/test_banknote_vision_source.py`.
 
+## Collection report (banknotes)
+
+The Report pill on the Banknotes list (owner only; Mark, 2026-09-12)
+builds a PDF of the whole collection: one country / colony per section
+on a fresh page (grouped by the stored `country`, in the list's order),
+the country's history first — `COUNTRY_COLONIAL` timeline line plus
+the era bands the list panels use (`_country_eras_for`, US notes get
+`US_MONETARY_ERAS`; a country with no panel falls back to a note's
+`history_context`) — then the notes: front and back on one row, two
+compact detail lines under them (`_banknote_report_lines`), as many as
+fit under the history (≤ 3) and then exactly three per page with a
+"<country> · continued" line. Own and Ordered notes only (ORDERED is
+flagged). Built in a background thread into `$DATA_DIR/reports/`
+(`POST /banknotes/report/build`, `GET /banknotes/report/status`,
+`GET /banknotes/report.pdf`); the pill opens a tab at click time and
+points it at the PDF when the build lands. Fonts: DejaVu Sans when the
+system has it, else Helvetica with non-Latin-1 characters folded.
+Test: `tests/test_banknote_report.py` (builds a real PDF, checks the
+paging with pypdf).
+
 ## Serial-number scan (banknotes)
 
 The Scan button in the Serial # cell of the banknote detail page (Mark,

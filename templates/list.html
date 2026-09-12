@@ -54,6 +54,16 @@
        title="In-depth analysis of the collection — {{ 'the independent watchmakers' if category == 'watches' else ('the ancient Greek coinage' if category == 'coins' else 'colonial, United States and world notes') }}">Analysis</a>
     {% endif %}
   {% endif %}
+  {# Banknotes: the collection report PDF — one country / colony per
+     page with its history, three notes to a page. Built in the
+     background; the pill polls and opens it. #}
+  {% if category == 'banknotes' and not at_property and not _market and not _analysis and g.current_user and g.current_user.role == 'owner' %}
+  <button type="button" class="toolbar-btn pill" id="banknoteReport"
+          data-build-url="{{ url_for('banknote_report_build') }}"
+          data-status-url="{{ url_for('banknote_report_status') }}"
+          title="Build the collection report PDF — a page per country with its history, three notes to a page">Report</button>
+  <span class="market-status" id="banknoteReportStatus"></span>
+  {% endif %}
   {% if not at_property and not _market and not _analysis %}
   <a href="{{ url_for('new_record', category=category) }}"
      class="toolbar-btn add"
@@ -1200,6 +1210,72 @@ window.shareCardRow = async function (ev, btn) {
     const btn = el.querySelector('.usp-retry-btn');
     if (btn) wireRetry(el, btn);
     setInterval(() => poll(el), 10000);
+  });
+})();
+</script>
+<script>
+// Banknotes: the Report pill. A click opens a tab at once (a user
+// gesture, so popup blockers allow it), starts the build, polls the
+// status every 3 s and points the tab at the PDF when it is ready.
+(function () {
+  const btn = document.getElementById('banknoteReport');
+  if (!btn) return;
+  const status = document.getElementById('banknoteReportStatus');
+  const say = (t) => { if (status) status.textContent = t || ''; };
+  const when = (iso) => iso ? iso.slice(0, 16).replace('T', ' ') + ' UTC' : '';
+  async function getStatus() {
+    const r = await fetch(btn.dataset.statusUrl, {cache: 'no-store'});
+    return r.ok ? r.json() : null;
+  }
+  getStatus().then(d => {
+    if (!d) return;
+    if (d.state === 'running') { say('Building…'); watch(null); }
+    else if (d.exists) {
+      say('Built ' + when(d.built_at));
+      btn.title = 'Report built ' + when(d.built_at) + ' — click to build it again; open the current one from the status link';
+      if (status && d.url) {
+        const a = document.createElement('a'); a.href = d.url; a.target = '_blank'; a.textContent = ' · open';
+        status.appendChild(a);
+      }
+    }
+  }).catch(() => {});
+  function watch(tab) {
+    const started = Date.now();
+    const tick = async () => {
+      let d = null;
+      try { d = await getStatus(); } catch (e) {}
+      if (d && d.state === 'done' && d.url) {
+        say('Built ' + when(d.built_at) + ' · ' + d.notes + ' notes');
+        btn.disabled = false;
+        if (tab) tab.location = d.url + '?t=' + Date.now(); else window.open(d.url, '_blank');
+        return;
+      }
+      if (d && d.state === 'failed') {
+        say('Failed: ' + (d.error || 'unknown'));
+        btn.disabled = false;
+        if (tab) tab.close();
+        return;
+      }
+      say('Building… ' + Math.round((Date.now() - started) / 1000) + 's');
+      setTimeout(tick, 3000);
+    };
+    tick();
+  }
+  btn.addEventListener('click', async () => {
+    const tab = window.open('', '_blank');
+    if (tab) { try { tab.document.write('<title>Banknote Collection</title><p style="font-family:sans-serif;padding:24px">Building the banknote collection report… this page will show the PDF when it is ready.</p>'); } catch (e) {} }
+    btn.disabled = true;
+    say('Starting…');
+    try {
+      const r = await fetch(btn.dataset.buildUrl, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || ('Server returned ' + r.status));
+      watch(tab);
+    } catch (err) {
+      btn.disabled = false;
+      if (tab) tab.close();
+      say('Could not start: ' + (err && err.message ? err.message : err));
+    }
   });
 })();
 </script>
