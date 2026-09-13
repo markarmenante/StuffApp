@@ -27339,7 +27339,16 @@ def _banknote_report_history(country, key, rows):
 
 
 def _banknote_report_lines(r):
-    """The two compact detail lines under a note's images."""
+    """The four compact detail lines under a note's images (no price,
+    vendor or purchase date — the report is a catalogue, not a ledger):
+    1. identification — cat id, denomination, date, series, issuer,
+       catalogue numbers, issue type, municipality;
+    2. the object — grade line, cert number, serial, size, material,
+       watermark, printer, signatures;
+    3. the design — the Short Desc (obverse / reverse), else the first
+       sentence of the description;
+    4. context — the historical context, else grade / conditions notes.
+    Each line is one row: the text is clipped so four notes always fit."""
     def g(k):
         try:
             v = r[k]
@@ -27349,18 +27358,34 @@ def _banknote_report_lines(r):
     year = g('date_1_text') or g('date_1')
     series = g('series')
     pick = g('pick_number')
+    issue_type = g('issue_type')
     line1 = [g('cat_id'), g('denomination'), year, series if series and series != year else '',
-             g('issuer') or g('country'), f'Pick {pick}' if pick and not re.match(r'^(p|pick)', pick, re.I) else pick]
-    grade = ' '.join(x for x in (g('grading_authority'), g('grade_numeric').replace('.0', '') if g('grade_numeric') else '',
-                                 g('grade') if g('grade') and g('grade') != g('grade_numeric') else '',
-                                 g('grade_modifier')) if x)
+             g('issuer') or g('country'),
+             pick if re.match(r'^(p|pick|fr)', pick, re.I) else (f'Pick {pick}' if pick else ''),
+             g('other_catalog'),
+             issue_type if issue_type and issue_type.lower() != 'national' else '',
+             g('municipality')]
+    num = g('grade_numeric').replace('.0', '') if g('grade_numeric') else ''
+    grade_word = g('grade') if g('grade') and g('grade') != num else ''
+    grade = ' '.join(x for x in (g('grading_authority'), num, grade_word, g('grade_modifier')) if x)
+    cert = f"cert {g('slab_number')}" if g('slab_number') else ''
     size = f"{g('size_width').replace('.0', '')}×{g('size_height').replace('.0', '')} mm" if g('size_width') and g('size_height') else ''
     serial = f"S/N {g('serial_number')}" if g('serial_number') else ''
-    price = g('price')
-    bought = ' '.join(x for x in (price, g('vendor'), g('purchase_date')) if x)
+    wmk = f"wmk {g('watermark')}" if g('watermark') else ''
+    line2 = [grade, cert, serial, size, g('material'), wmk, g('printer'), g('signatures')]
+    design = g('obv_rev')
+    if not design:
+        design = re.split(r'(?<=[.!?])\s+', g('description'), maxsplit=1)[0] if g('description') else ''
+    context = g('history_context') or g('condition') or g('notes')
     status = 'ORDERED' if g('status') == 'Ordered' else ''
-    line2 = [grade, serial, size, g('printer'), bought, status]
-    return line1, line2
+    line3 = [design]
+    line4 = [context, status]
+    return line1, line2, line3, line4
+
+
+def _clip_line(text, limit=175):
+    t = re.sub(r'\s+', ' ', str(text or '')).strip()
+    return t if len(t) <= limit else t[:limit - 1].rstrip() + '…'
 
 
 def _build_banknote_report(path):
@@ -27370,7 +27395,7 @@ def _build_banknote_report(path):
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import inch
-    from reportlab.platypus import (Image as RLImage, KeepTogether, PageBreak,
+    from reportlab.platypus import (Flowable, Image as RLImage, KeepTogether, PageBreak,
                                     Paragraph, SimpleDocTemplate, Spacer, Table,
                                     TableStyle, HRFlowable)
     import io as _io
@@ -27390,9 +27415,13 @@ def _build_banknote_report(path):
     st_era_label = ParagraphStyle('el', fontName=bold, fontSize=9, leading=11.5, spaceBefore=3)
     st_era = ParagraphStyle('e', fontName=reg, fontSize=8.8, leading=11.2,
                             textColor=colors.HexColor('#333333'), spaceAfter=1)
-    st_l1 = ParagraphStyle('l1', fontName=bold, fontSize=8.8, leading=11, spaceBefore=3)
-    st_l2 = ParagraphStyle('l2', fontName=reg, fontSize=8.2, leading=10.4,
+    st_l1 = ParagraphStyle('l1', fontName=bold, fontSize=8.4, leading=10.4, spaceBefore=2)
+    st_l2 = ParagraphStyle('l2', fontName=reg, fontSize=7.8, leading=9.8,
                            textColor=colors.HexColor('#444444'))
+    st_l3 = ParagraphStyle('l3', fontName=ital, fontSize=7.8, leading=9.8,
+                           textColor=colors.HexColor('#444444'))
+    st_l4 = ParagraphStyle('l4', fontName=reg, fontSize=7.6, leading=9.6,
+                           textColor=colors.HexColor('#555555'))
     st_cont = ParagraphStyle('cont', fontName=reg, fontSize=9, leading=11,
                              textColor=colors.HexColor('#777777'), spaceAfter=6)
 
@@ -27400,22 +27429,17 @@ def _build_banknote_report(path):
     margin = 0.6 * inch
     content_w = page_w - 2 * margin
     img_w = (content_w - 0.2 * inch) / 2
-    img_h = 2.3 * inch
-    top_margin, bottom_margin = 0.55 * inch, 0.6 * inch
-    avail_h = page_h - top_margin - bottom_margin
-
-    def flow_height(flowables):
-        """Height the flowables take at the content width — how much of
-        the page a section's history uses, so the notes can be paged
-        three to a page after it."""
-        total = 0.0
-        for f in flowables:
-            try:
-                _w, h = f.wrap(content_w, avail_h)
-            except Exception:
-                h = 0
-            total += h + getattr(f, 'spaceBefore', 0) + getattr(f, 'spaceAfter', 0)
-        return total
+    per_page = 4
+    top_margin, bottom_margin = 0.75 * inch, 0.6 * inch
+    # The frame's usable height (it pads 6 pt top and bottom). A band is
+    # its image row plus four one-row lines and a gap; the image height
+    # is chosen so that exactly `per_page` bands fill a page and one more
+    # cannot fit — platypus then pages the notes by itself, four to a
+    # page, with no estimate to get wrong.
+    frame_h = page_h - top_margin - bottom_margin - 12
+    lines_h = 10.4 + 9.8 + 9.8 + 9.6 + 2 + 8   # four leadings, spaceBefore, gap
+    band_h = frame_h / per_page - 1.5
+    img_h = band_h - lines_h - 8                # table padding 2+2, rowHeight +4
 
     def note_image(filename):
         if not filename or not is_image_filter(filename):
@@ -27437,6 +27461,30 @@ def _build_banknote_report(path):
     def dotline(parts):
         return '  ·  '.join(T(p) for p in parts if p not in (None, '') and str(p).strip())
 
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    def clipped(parts, style):
+        """A detail line: the parts joined and clipped to ONE row by the
+        measured width of the text in the line's font (a character
+        count is not width-aware), then escaped — clipping escaped text
+        could halve an entity. A one-row guarantee is what keeps four
+        bands to a page."""
+        plain = '  ·  '.join(str(p).strip() for p in parts if p not in (None, '') and str(p).strip())
+        plain = _pdf_text(_clip_line(plain, 400), uni)
+        # The frame pads 6 pt each side, so a paragraph gets 12 pt less
+        # than the content width; a little more slack for the ellipsis.
+        max_w = content_w - 18
+        if stringWidth(plain, style.fontName, style.fontSize) > max_w:
+            lo, hi = 0, len(plain)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if stringWidth(plain[:mid] + '…', style.fontName, style.fontSize) <= max_w:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            plain = plain[:lo].rstrip() + '…'
+        return xesc(plain) or '&nbsp;'
+
     db = open_db_connection()
     try:
         sections = _banknote_report_sections(db)
@@ -27444,11 +27492,24 @@ def _build_banknote_report(path):
         story = [Paragraph('Banknote Collection', st_title),
                  Paragraph(dotline([date.today().strftime('%B %-d, %Y'),
                                     f'{total_notes} notes', f'{len(sections)} countries and colonies']), st_sub)]
+        class _SectionMark(Flowable):
+            """Zero-size flowable: when drawn, tells the document which
+            section is open and on which page it opened."""
+            def __init__(self, name):
+                Flowable.__init__(self)
+                self.name = name
+            def wrap(self, aw, ah):
+                return 0, 0
+            def draw(self):
+                doc = self.canv._doctemplate
+                doc._section = self.name
+                doc._section_page = doc.page
+
         for i, (country, key, rows) in enumerate(sections):
             if i:
                 story.append(PageBreak())
             title, colonial, eras = _banknote_report_history(country, key, rows)
-            head = [Paragraph(T(country), st_country)]
+            head = [_SectionMark(country), Paragraph(T(country), st_country)]
             sub = []
             if title and title.lower() != country.lower():
                 sub.append(title)
@@ -27462,9 +27523,7 @@ def _build_banknote_report(path):
             head.append(Spacer(1, 6))
             head.append(HRFlowable(width='100%', thickness=0.6, color=colors.HexColor('#999999'), spaceAfter=4))
             story.extend(head)
-            # Paging: the history page takes as many notes as fit under
-            # it (at most three); every page after that carries exactly
-            # three, front and back on one row with two lines beneath.
+            # The notes: front and back on one row, four lines beneath.
             bands = []
             for r in rows:
                 front = note_image(r['image_1']) or Paragraph('', st_l2)
@@ -27476,17 +27535,16 @@ def _build_banknote_report(path):
                                          ('RIGHTPADDING', (0, 0), (-1, -1), 2),
                                          ('TOPPADDING', (0, 0), (-1, -1), 2),
                                          ('BOTTOMPADDING', (0, 0), (-1, -1), 2)]))
-                l1, l2 = _banknote_report_lines(r)
-                bands.append([tbl, Paragraph(dotline(l1), st_l1), Paragraph(dotline(l2), st_l2), Spacer(1, 16)])
-            if not bands:
-                continue
-            band_h = flow_height(bands[0])
-            head_h = flow_height(head) + (flow_height(story[:2]) if i == 0 else 0)
-            on_first = max(0, min(3, int((avail_h - head_h) // band_h)))
-            for j, band in enumerate(bands):
-                if j == on_first or (j > on_first and (j - on_first) % 3 == 0):
-                    story.append(PageBreak())
-                    story.append(Paragraph(T(country) + '  ·  continued', st_cont))
+                l1, l2, l3, l4 = _banknote_report_lines(r)
+                bands.append([tbl,
+                              Paragraph(clipped(l1, st_l1), st_l1),
+                              Paragraph(clipped(l2, st_l2), st_l2),
+                              Paragraph(clipped(l3, st_l3), st_l3),
+                              Paragraph(clipped(l4, st_l4), st_l4),
+                              Spacer(1, 8)])
+            # Each band stays whole; the history page takes as many as
+            # fit under it and every page after carries exactly four.
+            for band in bands:
                 story.append(KeepTogether(band))
     finally:
         db.close()
@@ -27498,10 +27556,26 @@ def _build_banknote_report(path):
         canvas.drawRightString(page_w - margin, 0.4 * inch, f'Banknote Collection  ·  {doc.page}')
         canvas.restoreState()
 
+    class _ReportDoc(SimpleDocTemplate):
+        """Draws "<country> · continued" in the top margin of every page
+        of a section after its first — the section marker below records
+        the page a section opened on."""
+        _section = None
+        _section_page = None
+
+        def afterPage(self):
+            if self._section and self._section_page != self.page:
+                self.canv.saveState()
+                self.canv.setFont(reg, 9)
+                self.canv.setFillColor(colors.HexColor('#777777'))
+                self.canv.drawString(margin, page_h - top_margin + 10,
+                                     _pdf_text(self._section, uni) + '  ·  continued')
+                self.canv.restoreState()
+
     tmp = path + '.tmp'
-    doc = SimpleDocTemplate(tmp, pagesize=letter, leftMargin=margin, rightMargin=margin,
-                            topMargin=top_margin, bottomMargin=bottom_margin,
-                            title='Banknote Collection', author='StuffApp')
+    doc = _ReportDoc(tmp, pagesize=letter, leftMargin=margin, rightMargin=margin,
+                     topMargin=top_margin, bottomMargin=bottom_margin,
+                     title='Banknote Collection', author='StuffApp')
     doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
     os.replace(tmp, path)
     return total_notes, len(sections)

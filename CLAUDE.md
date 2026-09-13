@@ -192,11 +192,18 @@ on a fresh page (grouped by the stored `country`, in the list's order),
 the country's history first — `COUNTRY_COLONIAL` timeline line plus
 the era bands the list panels use (`_country_eras_for`, US notes get
 `US_MONETARY_ERAS`; a country with no panel falls back to a note's
-`history_context`) — then the notes: front and back on one row, two
-compact detail lines under them (`_banknote_report_lines`), as many as
-fit under the history (≤ 3) and then exactly three per page with a
-"<country> · continued" line. Own and Ordered notes only (ORDERED is
-flagged). Built in a background thread into `$DATA_DIR/reports/`
+`history_context`) — then the notes: front and back on one row, four
+one-row detail lines under them (`_banknote_report_lines`: id /
+denomination / date / series / issuer / catalogue / issue type /
+municipality; grade / cert / serial / size / material / watermark /
+printer / signatures; the Short Desc; the historical context — no
+price, vendor or purchase date). Lines are clipped to one row by
+measured width (`clipped`), and the band height is derived so that
+exactly four bands fill a page and a fifth cannot — platypus pages the
+notes itself (the history page takes what fits under it, every page
+after carries four); a section marker flowable plus the doc's
+`afterPage` draw "<country> · continued" in the top margin of a
+section's later pages. Own and Ordered notes only (ORDERED is flagged). Built in a background thread into `$DATA_DIR/reports/`
 (`POST /banknotes/report/build`, `GET /banknotes/report/status`,
 `GET /banknotes/report.pdf`); the pill opens a tab at click time and
 points it at the PDF when the build lands. Fonts: DejaVu Sans when the
