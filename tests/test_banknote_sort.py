@@ -483,3 +483,48 @@ f = stuffapp.canonicalize_banknote_fields(
     {'country': 'China', 'issuer': 'Bank of China (中國銀行)', 'issue_type': 'National'})
 assert f['issue_type'] == 'National', f
 print('MANCHUKUO ISSUE-TYPE ASSERTIONS PASSED')
+
+# Colonial period, Japanese-theatre territories: a pre-independence
+# note that arrived as National (or untyped) files as Colonial; an
+# occupation issuer and a hand-set type are left alone; a Macau note
+# with no issuer is the Banco Nacional Ultramarino's.
+C = stuffapp.canonicalize_banknote_fields
+assert C({'country': 'Philippines', 'issuer': 'Commonwealth of the Philippines (Philippine Treasury)',
+          'issue_type': 'National', 'date_1': 1936})['issue_type'] == 'Colonial'
+assert C({'country': 'Philippines', 'issuer': 'Philippine National Bank', 'date_1': 1921})['issue_type'] == 'Colonial'
+assert C({'country': 'Philippines', 'issuer': 'Treasury of the Philippines (Central Bank overprint)',
+          'issue_type': 'National', 'date_1': 1949})['issue_type'] == 'National'
+assert C({'country': 'Philippines', 'issuer': 'The Japanese Government', 'issue_type': 'National',
+          'date_1': 1943})['issue_type'] == 'National'          # never Colonial for an occupier
+assert C({'country': 'Philippines', 'issuer': 'The Japanese Government', 'issue_type': 'Military / Occupation',
+          'date_1': 1943})['issue_type'] == 'Military / Occupation'
+assert C({'country': 'Philippines', 'issuer': 'Bank of the Philippine Islands', 'issue_type': 'Specimen',
+          'date_1': 1933})['issue_type'] == 'Specimen'
+assert C({'country': 'Hong Kong', 'issuer': 'The Hongkong and Shanghai Banking Corporation',
+          'issue_type': 'National', 'date_1': 1987})['issue_type'] == 'Colonial'
+assert C({'country': 'Hong Kong', 'issuer': 'The Hongkong and Shanghai Banking Corporation',
+          'issue_type': 'National', 'date_1': 2003})['issue_type'] == 'National'
+f = C({'country': 'Macau', 'issuer': '', 'issue_type': '', 'date_1': 1968})
+assert f['issue_type'] == 'Colonial' and f['issuer'] == 'Banco Nacional Ultramarino', f
+assert C({'country': 'Malaysia', 'issuer': 'Bank Negara Malaysia', 'issue_type': 'National',
+          'date_1': 2012})['issue_type'] == 'National'
+assert C({'country': 'Ceylon', 'issuer': 'Central Bank of Ceylon', 'issue_type': 'National',
+          'date_1': 1954})['issue_type'] == 'National'
+# Partial update: only the year was saved; the stored type moves.
+f = C({'date_1': 1941}, existing={'country': 'Philippines', 'issuer': 'Treasury of the Philippines',
+                                  'issue_type': 'National', 'date_1': None})
+assert f.get('issue_type') == 'Colonial', f
+# Panel heads: years for a non-US panel, series for a US one.
+rows_p = [{'id': 'x1', 'country': 'China', 'issuer': 'Imperial Japanese Government', 'series': 'Block 3',
+           'denomination': '100 Yen', 'date_1': 1945},
+          {'id': 'x2', 'country': 'China', 'issuer': 'Imperial Japanese Government', 'series': 'Block 1 - Title A',
+           'denomination': '100 Yen', 'date_1': 1945}]
+pl = stuffapp.series_panels(rows_p)
+head = pl['x1']['panel']['series_list']
+assert head == ['1945'], head                      # not 'Block 3 · Block 1 - Title A'
+rows_us = [{'id': 'u1', 'country': 'United States of America', 'issuer': '', 'series': 'Series of 1935A',
+            'denomination': '$1', 'date_1': 1935, 'official': '', 'lettering': '', 'lettering_translation': '',
+            'other_catalog': '', 'description': 'Silver Certificate', 'condition': ''}]
+pl = stuffapp.series_panels(rows_us)
+assert pl['u1']['panel']['series_list'] == ['Series of 1935A'], pl['u1']['panel']['series_list']
+print('COLONIAL-PERIOD ASSERTIONS PASSED')

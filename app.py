@@ -715,6 +715,29 @@ def _canonical_us_denomination(value):
 _MANCHUKUO_ISSUER_MARKS = ('manchukuo', 'manchoukuo', 'manchou',
                            '滿洲中央', '満洲中央', '满洲中央')
 
+# The year colonial rule ended, by country key, for the territories the
+# collection reads as colonial paper (the Japanese-theatre review of
+# Sep 2026). A note dated before it whose issue type arrived as
+# 'National' — the extractor's word for any state or bank issue — or
+# blank files as Colonial: the Philippine Commonwealth's treasury
+# certificates and VICTORY notes sit with the Bank of the Philippine
+# Islands issues, a 1987 Hongkong Bank note with the 1958 one. An
+# occupation issuer is never touched (it is Military / Occupation by
+# issuer), nor is a type set by hand to anything else.
+_COLONIAL_UNTIL = {
+    'philippines': 1946,          # US insular possession, then Commonwealth, to 4 July 1946
+    'hong-kong': 1997,
+    'macau': 1999,
+    'malaya': 1963,               # Straits Settlements, Malaya, Malaya & British Borneo
+    'sarawak': 1963,
+    'burma': 1948,
+    'netherlands-indies': 9999,   # the stored name is the colony's own
+    'south-korea': 1945,          # Korea under Japan (Bank of Chosen)
+    'taiwan': 1945,               # Bank of Taiwan under Japan
+    'indochina': 1954,
+}
+_OCCUPATION_ISSUER_MARKS = ('japan', 'nippon', 'gunpyo', 'military', 'occupation')
+
 
 def _mentions_manchukuo(text):
     """True when an issuer (or title) names the Central Bank of Manchou /
@@ -758,6 +781,26 @@ def canonicalize_banknote_fields(fields, existing=None):
             issue_type = _row_get(existing, 'issue_type')
         if (issue_type or '').strip() in ('', 'National'):
             fields['issue_type'] = 'Military / Occupation'
+    ck = _country_key(country)
+    until = _COLONIAL_UNTIL.get(ck)
+    if until or ck == 'macau':
+        issue_type = fields.get('issue_type')
+        if issue_type is None and existing is not None:
+            issue_type = _row_get(existing, 'issue_type')
+        year = fields.get('date_1') if 'date_1' in fields else _row_get(existing, 'date_1')
+        try:
+            year = int(year) if year not in (None, '') else None
+        except (TypeError, ValueError):
+            year = None
+        issuer_l = (issuer or '').lower()
+        occupation = any(m in issuer_l for m in _OCCUPATION_ISSUER_MARKS)
+        if (until and year and year < until and not occupation
+                and (issue_type or '').strip() in ('', 'National')):
+            fields['issue_type'] = 'Colonial'
+        # Macau's paper was the Banco Nacional Ultramarino's alone until
+        # the Bank of China joined it in 1995: a blank issuer is the BNU.
+        if ck == 'macau' and year and year < 1995 and not (issuer or '').strip():
+            fields['issuer'] = 'Banco Nacional Ultramarino'
     if _country_key(country) == 'us' and 'denomination' in fields:
         fields['denomination'] = _canonical_us_denomination(fields['denomination'])
     return fields
@@ -984,14 +1027,14 @@ def _migrate_canonicalize_us_banknotes(db):
     if not {'country', 'denomination'}.issubset(cols):
         return
     changed = False
-    extra = [c for c in ('issuer', 'issue_type') if c in cols]
+    extra = [c for c in ('issuer', 'issue_type', 'date_1') if c in cols]
     sel = "SELECT id, country, denomination%s FROM banknotes" % ''.join(', ' + c for c in extra)
     for r in db.execute(sel).fetchall():
         fields = {'country': r['country'], 'denomination': r['denomination']}
         for c in extra:
             fields[c] = r[c]
         canonicalize_banknote_fields(fields, existing=r)
-        moved = {c: fields[c] for c in ('country', 'denomination', 'issue_type')
+        moved = {c: fields[c] for c in ('country', 'denomination', 'issue_type', 'issuer')
                  if c in fields and c in cols and fields[c] != r[c]}
         if moved:
             db.execute(
@@ -5505,7 +5548,15 @@ def series_panels(rows):
             continue
         prev_pending_country = None
 
-        series_label = panel['series'] or (str(panel['year']) if panel['year'] else '')
+        # The head's right-hand list: US panels spell out the series
+        # they fold together (the series IS the panel's subject); every
+        # other country's panel lists the years of its notes — the
+        # stored series is a catalogue label ('Block 3', 'Lao Text
+        # Type I') that reads as noise beside an era heading.
+        if panel['country_key'] == 'us':
+            series_label = panel['series'] or (str(panel['year']) if panel['year'] else '')
+        else:
+            series_label = str(panel['year']) if panel['year'] else (panel['series'] or '')
         signature = (
             panel['title'],
             panel.get('note_type') or '',
@@ -19206,7 +19257,7 @@ def save_field(category, record_id):
         # An issuer naming the Central Bank of Manchou moves a note
         # filed under China to Manchukuo — the same second-column
         # write the coins branch below does for mint -> region.
-        for _other in ('country', 'issue_type'):
+        for _other in ('country', 'issue_type', 'issuer'):
             if _other != field_name and _other in _canon:
                 db.execute(f"UPDATE banknotes SET {_other} = ? WHERE id = ?",
                            (_canon[_other], record_id))
