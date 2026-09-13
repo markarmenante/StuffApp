@@ -38,8 +38,11 @@ with stuffapp.app.app_context():
             serial_number=f'A{i}12345', size_width=160, size_height=90, printer='Reichsdruckerei',
             price='$120', vendor='dealer', purchase_date='2026-01-0%d' % (i + 1),
             slab_number='1234567-00%d' % i, material='Paper', watermark='Germania head',
-            signatures='Havenstein', obv_rev='Obv: Germania seated / Rev: arabesque frame',
-            history_context='Issued in the goldmark era, when the Reichsbank note was convertible to gold at a fixed parity. ' * 3)
+                        condition=('Issued in the goldmark era, when the Reichsbank note was convertible to gold at a fixed parity and '
+                       'circulated alongside the state banks\' paper; the series was withdrawn after the 1914 suspension. ' * 3)[:600],
+            signatures=('Havenstein (Reichsbankpräsident) · Glasenapp · von Grimm · Kauffmann · Schmidt · Wagner · Schneider · '
+                        'Friedrich · Müller · Lang · Weber · Fischer · Braun · Becker · Hoffmann · Schäfer · Koch · Bauer')[:239],
+            obv_rev='Obv: Germania seated with sword and shield before an oak, value in each corner, serial in red at left and right / Rev: arabesque frame with eagle')
     add('Germany', '5000 Mark', 1922); add('Germany', '10000 Mark', 1922); add('Germany', '20000 Mark', 1923); add('Germany', '50000 Mark', 1923)
     add('French Somaliland', '100 Francs', 1952, issuer='Trésor Public', status='Ordered')
     add('Germany', '1000 Mark', 1922, status='Sold')
@@ -53,15 +56,14 @@ with stuffapp.app.app_context():
     assert title == 'Djibouti' and colonial and 'French Somaliland' in colonial and len(eras) >= 3
     title, colonial, eras = stuffapp._banknote_report_history('United States of America', 'us', [])
     assert title == 'United States' and eras
-    l1, l2, l3, l4 = stuffapp._banknote_report_lines(sections[[c for c, _k, _r in sections].index('Germany')][2][0])
+    l1, l2, l3, l4, l5 = stuffapp._banknote_report_lines(sections[[c for c, _k, _r in sections].index('Germany')][2][0])
     assert 'B1' in l1 and '10 Mark' in l1 and 'Reichsbank' in l1 and 'Pick P-40' not in ' '.join(l1) and 'P-40' in l1
-    assert 'PMG 65 Gem Unc EPQ' in l2 and 'cert 1234567-000' in l2 and 'S/N A012345' in l2 and '160×90 mm' in l2
-    assert 'Paper' in l2 and 'wmk Germania head' in l2 and 'Reichsdruckerei' in l2 and 'Havenstein' in l2
-    assert l3 == ['Obv: Germania seated / Rev: arabesque frame']
-    assert l4[0].startswith('Issued in the goldmark era')
-    joined = ' '.join(l1 + l2 + l3 + l4)
+    assert 'PMG 65 Gem Unc EPQ' in l2 and 'cert 1234567-000' in l2 and 'S/N A012345' in l2 and '160×90 mm' in l2 and 'Paper' in l2
+    assert 'Reichsdruckerei' in l3 and 'wmk Germania head' in l3 and any(x.startswith('Havenstein') for x in l3)
+    assert l4[0].startswith('Obv: Germania seated with sword')
+    assert l5[0].startswith('Issued in the goldmark era') and len(l5[0]) >= 500
+    joined = ' '.join(l1 + l2 + l3 + l4 + l5)
     assert '$120' not in joined and 'dealer' not in joined and '2026-01' not in joined, 'no price / vendor / purchase date'
-    assert len(stuffapp._clip_line('x' * 400, 175)) == 175 and stuffapp._clip_line('x' * 400, 175).endswith('…')
     print('SECTIONS OK')
 
     path = stuffapp._banknote_report_path()
@@ -88,8 +90,14 @@ with stuffapp.app.app_context():
     somali_page = next(i for i, x in enumerate(texts) if 'French Somaliland' in x and '10' in ids[i])
     assert 'Djibouti' in texts[somali_page] and 'ORDERED' in texts[somali_page]
     assert not any('1' in ids[i] and '10' in ids[i] for i in range(len(ids))), 'countries share no page'
-    # Every detail line is one row: the wmk/printer/signatures line keeps its tail or its ellipsis.
-    assert all(('Havenstein' in x) or ('…' in x) for x in texts if 'PMG 65' in x), 'a detail line wrapped'
+    # Nothing is truncated: the 600-character context and the full signature list are
+    # in the page text of every German note page, and no ellipsis was added.
+    rich_pages = [i for i in g_pages + [g_hist] if 'PMG 65' in texts[i]]   # the five fully described notes
+    assert rich_pages
+    for i in rich_pages:
+        t = texts[i].replace('\n', ' ')
+        assert 'suspension' in t and 'Bauer' in t and 'eagle' in t, i   # tail words of context, signatures, design
+        assert '…' not in t, 'a line was clipped'
     print('PDF OK', len(pdf.pages), 'pages')
 
 # Routes and the pill.
