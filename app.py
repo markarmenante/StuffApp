@@ -693,6 +693,11 @@ def _canonical_banknote_country(value):
     key = re.sub(r'[^a-z0-9]', '', value.lower())
     if key in ('unitedstates', 'unitedstatesofamerica', 'usa', 'us'):
         return 'United States of America'
+    # Catalogues file the Central Bank of Manchou under China ("China —
+    # Manchukuo"); the collection files the puppet state as its own
+    # nation, apart from the Republic's issues.
+    if 'manchukuo' in key or 'manchoukuo' in key:
+        return 'Manchukuo'
     return value
 
 
@@ -2805,6 +2810,11 @@ COUNTRY_KEYS = {
     'greece': ('greece', 'kingdom of greece'),
     'yugoslavia': ('yugoslavia', 'kingdom of yugoslavia', 'sfr yugoslavia'),
     'china': ('china', 'republic of china', "people's republic of china"),
+    # The Japanese client state of 1932–45 files as its own nation —
+    # catalogues list the Central Bank of Manchou under China, but the
+    # collection keeps the puppet state apart from the Republic's issues.
+    'manchukuo': ('manchukuo', 'manchoukuo', 'manchukuo (china)', 'empire of manchukuo',
+                  'state of manchukuo', 'manchukuo (japanese puppet state)'),
     'japan': ('japan', 'empire of japan'),
     'india': ('india', 'british india'),
     'turkey': ('turkey', 'ottoman empire', 'türkiye', 'turkiye'),
@@ -3198,6 +3208,29 @@ COUNTRY_ERAS = {
          'the Deutsche Mark.'),
     )),
     'china': ('China', (
+        # Occupation money shares the war years with the Republic's own
+        # notes and is told apart by issuer: the Imperial Japanese
+        # Government's military yen and the Japanese-sponsored banks
+        # (Federal Reserve Bank of China at Peking, Central Reserve Bank
+        # at Nanking, the Mengchiang Bank in Inner Mongolia, Hua Hsing
+        # at Shanghai). Gated and listed first, so a matching note files
+        # here rather than in the fabi/gold-yuan band below. Manchukuo
+        # is its own nation, not a band of China's.
+        (1937, 1945, 'Japanese occupation',
+         'Japan’s armies paid with military yen (gunpyō) the occupied '
+         'were bound to accept, and set up banks of issue behind the '
+         'lines — the Federal Reserve Bank of China at Peking in 1938, '
+         'the Central Reserve Bank at Nanking in 1941, the Mengchiang '
+         'Bank for Inner Mongolia — whose notes were forced on the '
+         'occupied cities in place of the fabi. At the surrender the '
+         'puppet notes were exchanged for fabi at punitive rates (200 '
+         'to one for the Central Reserve Bank’s) and the military yen '
+         'went unredeemed.',
+         ('japanese', 'imperial japan', 'military currency', 'military note',
+          'military yen', 'gunpyo', 'gunpyō', 'federal reserve bank',
+          'central reserve bank', 'mengchiang', 'meng chiang', 'mengkiang',
+          'hua hsing', 'chi tung', 'reformed government', 'wang ching-wei',
+          'wang jingwei', ' yen')),
         (1023, 1911, 'Early paper to the late empire',
          'Song-dynasty jiaozi (11th century) were the first circulating '
          'paper money; Yuan and Ming over-issue led to paper’s '
@@ -3237,6 +3270,37 @@ COUNTRY_ERAS = {
          'The Plaza Accord of 1985 roughly doubled the yen’s dollar '
          'value; the asset bubble burst in 1990, and near-zero interest '
          'rates followed from the late 1990s.'),
+    )),
+    # A dead state: the bands end with it. A note dated outside them
+    # falls to the nearest band, as for every built-in history.
+    'manchukuo': ('Manchukuo', (
+        (1932, 1933, 'A state proclaimed',
+         'Japan’s Kwantung Army seized Manchuria after the Mukden '
+         'Incident of September 1931 and proclaimed Manchukuo on 1 '
+         'March 1932, with Puyi, the last Qing emperor, as Chief '
+         'Executive. The Central Bank of Manchou opened at Hsinking '
+         'that July, its yuan defined in silver like China’s, and set '
+         'about retiring the notes of the four provincial banks it '
+         'absorbed — the Three Eastern Provinces, Kirin Yung Heng, '
+         'Heilungkiang and Frontier banks.'),
+        (1934, 1936, 'Empire and the yen bloc',
+         'Puyi was enthroned as the Kangde Emperor in March 1934. When '
+         'China left silver in 1935 the Manchukuo yuan was fixed at par '
+         'with the Japanese yen, tying the state’s money to Tokyo; the '
+         'Bank of Chosen yen notes that had circulated in Manchuria '
+         'were withdrawn in its favour.'),
+        (1937, 1945, 'War finance',
+         'Note issue funded the five-year industrial plans and, from '
+         '1937, Japan’s war in China — rising from under 200 million '
+         'yuan at the bank’s founding to several billion by 1945. Later '
+         'issues were printed in Manchukuo itself rather than in Tokyo, '
+         'on poorer paper as the war went on.'),
+        (1946, 1948, 'Collapse',
+         'The Soviet invasion of 9 August 1945 ended the state within '
+         'days; Puyi abdicated on the 17th. Soviet military yuan '
+         'circulated during the occupation, and the Nationalist '
+         'government’s Northeast circulating notes and the Communist '
+         'Tung Pei Bank’s issues then replaced Manchukuo paper.'),
     )),
     'india': ('India', (
         (1861, 1946, 'Government and RBI issues',
@@ -4382,6 +4446,7 @@ COUNTRY_COLONIAL = {
     'maldives': 'An Islamic sultanate under British protection from 1887, administered through Ceylon; independent 26 July 1965, a republic from 11 November 1968.',
     'mali': 'French Sudan from the 1880s conquest, a territory of French West Africa from 1895; independent 22 September 1960 after the brief Mali Federation with Senegal.',
     'malta': 'British from 1800, formally ceded in 1814; independent 21 September 1964.',
+    'manchukuo': 'Japanese client state carved from China’s three northeastern provinces after the Mukden Incident of 18 September 1931; proclaimed 1 March 1932 under the last Qing emperor, Puyi; dissolved in the Soviet invasion of August 1945 and returned to China.',
     'mexico': 'Spanish from the 1521 fall of Tenochtitlan; independence declared 16 September 1810, won 27 September 1821.',
     'mongolia': 'Under Qing rule from 1691; declared independence in 1911 and secured it in 1921.',
     'morocco': 'French and Spanish protectorates from the Treaty of Fes, 30 March 1912; independent 2 March 1956.',
@@ -4564,6 +4629,10 @@ def _country_key(country):
     value = (country or '').strip().lower().rstrip('.')
     if not value:
         return None
+    # "China (Manchukuo)", "China — Manchukuo", "Manchoukuo": the puppet
+    # state is its own nation however a catalogue qualifies it.
+    if 'manchukuo' in value or 'manchoukuo' in value:
+        return 'manchukuo'
     # Drop a trailing parenthetical qualifier ("Sarawak (Malaysia)" ->
     # "sarawak") so those forms match by their base name.
     base = re.sub(r'\s*\([^)]*\)\s*$', '', value).strip()
@@ -5158,7 +5227,8 @@ def _country_era(country_key, year, context=''):
     if matched is not None:
         start, end, label, body = eras[matched][:4]
         return {'label': label, 'body': body, 'start': start,
-                'span': _era_span(start, end)}
+                'span': _era_span(start, end),
+                'gated': bool(len(eras[matched]) > 4 and eras[matched][4])}
     # A year outside every band (typical of generated histories whose
     # spans came out too narrow): fall back to the nearest band so the
     # note still gets its divider and history instead of rendering
@@ -5214,7 +5284,13 @@ def _banknote_era_start(country, issuer, series, date_1,
         return year
     era = _country_era(ck, year, context='%s %s %s' % (
         issuer or '', series or '', denomination or ''))
-    return era['start'] if era and 'start' in era else year
+    if era and 'start' in era:
+        # A keyword-gated band (occupation money) opening the same year
+        # as an ungated one sorts half a year after it, so China's
+        # Japanese-occupation issues follow the Republic's 1937–49 run
+        # as one block instead of interleaving with it by note year.
+        return era['start'] + (0.5 if era.get('gated') else 0)
+    return year
 
 
 def _display_series(series, year):
@@ -6343,9 +6419,13 @@ def init_db():
     # COUNTRY_ERA_START resolves its notes to era-band starts instead of
     # their raw years (relative order is unchanged — the reseed just
     # keeps the numbers provably in step with the live ORDER BY).
+    # v20: Manchukuo is its own nation, and China's Japanese-occupation
+    # issues (military yen, the puppet banks) file in a keyword-gated
+    # band after the Republic's wartime run — a gated band now sorts
+    # half a year after an ungated band opening the same year.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v19',),
+        ('banknote_display_number_v20',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6353,7 +6433,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v19', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v20', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -20157,6 +20237,7 @@ BANKNOTE_CAPITALS = {
     'greece': ('Athens', 37.98, 23.73),
     'yugoslavia': ('Belgrade', 44.79, 20.45),
     'china': ('Beijing', 39.90, 116.40),
+    'manchukuo': ('Hsinking (Changchun)', 43.88, 125.32),
     'japan': ('Tokyo', 35.68, 139.69),
     'india': ('New Delhi', 28.61, 77.21),
     'turkey': ('Ankara', 39.93, 32.86),
@@ -20480,6 +20561,10 @@ BANKNOTE_STATE_NAMES = {
         (1644, 1911, '大清', 'Qing Empire'),
         (1912, 1948, '中華民國', 'Republic of China'),
         (1949, _OPEN, '中华人民共和国', "People's Republic of China"),
+    ),
+    'manchukuo': (
+        (1932, 1933, '滿洲國', 'State of Manchukuo (Japanese client state)'),
+        (1934, 1945, '大滿洲帝國', 'Empire of Manchukuo (Japanese client state)'),
     ),
     'japan': (
         (1868, 1946, '大日本帝國', 'Empire of Japan'),
@@ -23836,7 +23921,7 @@ Rules:
 5. Return null whenever a value is not supported by the images, the text, or (for web-allowed fields) a reputable source.
 
 Target fields:
-- country: issuing country as commonly catalogued (e.g. "Iran", "Germany").
+- country: issuing country as commonly catalogued (e.g. "Iran", "Germany"). Notes of the Central Bank of Manchou (Manchukuo, 1932–45) are "Manchukuo", not China; Japanese military yen and the Japanese-sponsored banks of occupied China (Federal Reserve Bank of China, Central Reserve Bank, Mengchiang Bank, Hua Hsing) stay "China" with issue_type "Military / Occupation".
 - municipality: the issuing town / locality for notgeld, emergency, or municipal issues (e.g. "Bielefeld") — usually printed prominently on the note itself. Null for national issues.
 - issue_type: EXACTLY one of [{issue_types}]. German/Austrian emergency money is "Notgeld"; state or central-bank issues are "National". Null if unclear.
 - issuer: the issuing bank or authority (e.g. "Bank Melli Iran (National Bank)", "Stadt Bielefeld").

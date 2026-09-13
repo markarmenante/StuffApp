@@ -359,3 +359,82 @@ expected4 = [
 ]
 assert got4 == expected4, f"\nexpected {expected4}\ngot      {got4}"
 print('WWII EMERGENCY ISSUE ASSERTIONS PASSED')
+
+# Manchukuo is its own nation, apart from China — however a catalogue
+# qualifies it — and China's Japanese-occupation issues (military yen,
+# the puppet banks) file in their own band after the Republic's
+# wartime run rather than interleaving with it by year.
+for spelling in ('Manchukuo', 'Manchoukuo', 'China (Manchukuo)', 'China — Manchukuo',
+                 'Empire of Manchukuo'):
+    assert stuffapp._country_key(spelling) == 'manchukuo', spelling
+assert stuffapp._country_key('China') == 'china'
+assert stuffapp._nation_sort_name('Manchukuo') == 'Manchukuo'
+assert stuffapp._nation_sort_name('China') == 'China'
+assert stuffapp._canonical_banknote_country('China — Manchukuo') == 'Manchukuo'
+assert stuffapp._canonical_banknote_country('Manchoukuo') == 'Manchukuo'
+assert stuffapp._canonical_banknote_country('China') == 'China'
+assert stuffapp.BANKNOTE_CAPITALS['manchukuo'][0].startswith('Hsinking')
+assert 'manchukuo' in stuffapp.BANKNOTE_STATE_NAMES
+p = stuffapp._series_panel_for_row({'country': 'Manchukuo', 'issuer': 'Central Bank of Manchou',
+                                    'series': '', 'denomination': '10 Yuan', 'date_1': 1938})
+assert p and p['title'] == 'Manchukuo' and p['era']['label'] == 'War finance', p
+assert p['colonial'] and 'Puyi' in p['colonial'], p
+for y, label in ((1932, 'A state proclaimed'), (1935, 'Empire and the yen bloc'),
+                 (1944, 'War finance'), (1947, 'Collapse')):
+    p = stuffapp._series_panel_for_row({'country': 'Manchukuo', 'issuer': 'Central Bank of Manchou',
+                                        'series': '', 'denomination': '1 Yuan', 'date_1': y})
+    assert p and p['era']['label'] == label, (y, p)
+# China: the issuer gates the occupation band; the Republic's own notes
+# of the same years stay in the fabi/gold-yuan band.
+p = stuffapp._series_panel_for_row({'country': 'China', 'issuer': 'Imperial Japanese Government (military currency)',
+                                    'series': 'Block 3', 'denomination': '100 Yen', 'date_1': 1945})
+assert p['era']['label'] == 'Japanese occupation' and p['era']['gated'], p
+p = stuffapp._series_panel_for_row({'country': 'China', 'issuer': 'Federal Reserve Bank of China',
+                                    'series': '', 'denomination': '10 Yuan', 'date_1': 1938})
+assert p['era']['label'] == 'Japanese occupation', p
+p = stuffapp._series_panel_for_row({'country': 'China', 'issuer': 'Bank of China (中國銀行)',
+                                    'series': '', 'denomination': '5 Yuan', 'date_1': 1937})
+assert p['era']['label'] == 'War inflation and the gold yuan' and not p['era']['gated'], p
+p = stuffapp._series_panel_for_row({'country': 'China', 'issuer': 'Central Bank of China',
+                                    'series': '', 'denomination': '10 Gold Yuan', 'date_1': 1948})
+assert p['era']['label'] == 'War inflation and the gold yuan', p
+
+db3 = sqlite3.connect(':memory:')
+stuffapp._configure_db_connection(db3)
+db3.execute("""CREATE TABLE banknotes (
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
+    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    date_1 INTEGER)""")
+rows = [
+    ('Manchukuo', 'Central Bank of Manchou', '', '10 Yuan', 1938),
+    ('China', 'Imperial Japanese Government (military currency)', 'Block 3', '100 Yen', 1945),
+    ('China', 'Bank of Communications', '', '100 Yuan', 1941),
+    ('China', "People's Bank of China", '', '1 Yuan', 1953),
+    ('Japan', 'Bank of Japan', '', '1 Yen', 1943),
+    ('China', 'Central Bank of China', '', '10 Gold Yuan', 1948),
+    ('China', 'Federal Reserve Bank of China', '', '10 Yuan', 1938),
+    ('China', 'Bank of China (中國銀行)', '', '5 Yuan', 1937),
+    ('China', 'Imperial Japanese Government (大日本帝國政府)', 'Block 1 - Title A', '100 Yen', 1945),
+]
+for i, (c, iss, s, d, y) in enumerate(rows, 1):
+    db3.execute("INSERT INTO banknotes (id, country, issuer, series, denomination, date_1) "
+                "VALUES (?, ?, ?, ?, ?, ?)", (i, c, iss, s, d, y))
+got = [(r[0], r[1].split(' (')[0], r[2]) for r in db3.execute(
+    "SELECT country, issuer, date_1 FROM banknotes ORDER BY "
+    + stuffapp.CATEGORY_ORDER_BY['banknotes'])]
+for row in got:
+    print(row)
+expected = [
+    ('China', 'Bank of China', 1937),                    # Republic's wartime run…
+    ('China', 'Bank of Communications', 1941),
+    ('China', 'Central Bank of China', 1948),            # …through the gold yuan
+    ('China', 'Federal Reserve Bank of China', 1938),    # then the occupation block
+    ('China', 'Imperial Japanese Government', 1945),
+    ('China', 'Imperial Japanese Government', 1945),
+    ('China', "People's Bank of China", 1953),           # renminbi
+    ('Japan', 'Bank of Japan', 1943),
+    ('Manchukuo', 'Central Bank of Manchou', 1938),      # its own nation, under M
+]
+assert got == expected, f"\nexpected {expected}\ngot      {got}"
+print('MANCHUKUO ASSERTIONS PASSED')
