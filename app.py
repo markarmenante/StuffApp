@@ -712,17 +712,40 @@ def _canonical_us_denomination(value):
     return f'${m.group(1)}' if m else value
 
 
+_MANCHUKUO_ISSUER_MARKS = ('manchukuo', 'manchoukuo', 'manchou',
+                           '滿洲中央', '満洲中央', '满洲中央')
+
+
+def _mentions_manchukuo(text):
+    """True when an issuer (or title) names the Central Bank of Manchou /
+    Manchukuo in any of its spellings — not 'Manchuria', which the
+    Republic's own provincial banks of the 1920s carried."""
+    t = (text or '').lower()
+    return any(m in t for m in _MANCHUKUO_ISSUER_MARKS)
+
+
 def canonicalize_banknote_fields(fields, existing=None):
     """Row-aware canonicalization applied on every banknote save: fold US
     country spellings to one, and — only for US notes — put dollar
     denominations in '$N' form so they sort as a single block. Mutates and
     returns `fields`. `existing` supplies the country on a partial update
-    that didn't touch it."""
+    that didn't touch it.
+
+    A Central Bank of Manchou note filed under China the way the
+    catalogues do — the state named only in the issuer — moves to
+    Manchukuo, whether or not the save touched the country: the fold
+    reads the issuer being saved (or the stored one) and may ADD a
+    'country' key, which every caller writes through."""
     if 'country' in fields:
         fields['country'] = _canonical_banknote_country(fields['country'])
     country = fields.get('country')
     if country is None and existing is not None:
-        country = existing['country']
+        country = _row_get(existing, 'country')
+    issuer = fields.get('issuer')
+    if issuer is None and existing is not None:
+        issuer = _row_get(existing, 'issuer')
+    if _mentions_manchukuo(issuer) and _country_key(country) in ('china', None):
+        fields['country'] = country = 'Manchukuo'
     if _country_key(country) == 'us' and 'denomination' in fields:
         fields['denomination'] = _canonical_us_denomination(fields['denomination'])
     return fields
@@ -949,8 +972,12 @@ def _migrate_canonicalize_us_banknotes(db):
     if not {'country', 'denomination'}.issubset(cols):
         return
     changed = False
-    for r in db.execute("SELECT id, country, denomination FROM banknotes").fetchall():
+    has_issuer = 'issuer' in cols
+    sel = "SELECT id, country, denomination%s FROM banknotes" % (', issuer' if has_issuer else '')
+    for r in db.execute(sel).fetchall():
         fields = {'country': r['country'], 'denomination': r['denomination']}
+        if has_issuer:
+            fields['issuer'] = r['issuer']
         canonicalize_banknote_fields(fields, existing=r)
         if fields['country'] != r['country'] or fields['denomination'] != r['denomination']:
             db.execute(
@@ -15853,6 +15880,8 @@ def _market_normalize_item(db, category, raw):
             'series': (str(raw.get('series') or '').strip()[:60] or None),
             'pick_number': (str(raw.get('pick_number') or '').strip()[:60] or None),
         })
+        if _mentions_manchukuo(item['title']) and _country_key(item['country']) in ('china', None):
+            item['country'] = 'Manchukuo'
         if not item['title']:
             item['title'] = ' '.join(x for x in (item['country'], item['denomination'], item['date_1_text']) if x)
     else:
@@ -19160,6 +19189,12 @@ def save_field(category, record_id):
         _canon = canonicalize_banknote_fields({field_name: value},
                                               existing=existing)
         value = _canon[field_name]
+        # An issuer naming the Central Bank of Manchou moves a note
+        # filed under China to Manchukuo — the same second-column
+        # write the coins branch below does for mint -> region.
+        if field_name != 'country' and 'country' in _canon:
+            db.execute("UPDATE banknotes SET country = ? WHERE id = ?",
+                       (_canon['country'], record_id))
     elif category == 'coins' and field_name in ('region', 'authority', 'mint'):
         _canon = canonicalize_coin_fields({field_name: value}, existing=existing)
         value = _canon[field_name]

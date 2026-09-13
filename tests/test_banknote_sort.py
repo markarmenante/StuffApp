@@ -438,3 +438,29 @@ expected = [
 ]
 assert got == expected, f"\nexpected {expected}\ngot      {got}"
 print('MANCHUKUO ASSERTIONS PASSED')
+
+# The issuer names the state: a Central Bank of Manchou note filed
+# under China (the catalogue convention the extractor follows) moves
+# to Manchukuo on save, on a partial update that only stored the
+# issuer, and on Market Scan candidates — never a Republic bank.
+f = stuffapp.canonicalize_banknote_fields(
+    {'country': 'China', 'issuer': 'Central Bank of Manchukuo (滿洲中央銀行)'})
+assert f['country'] == 'Manchukuo', f
+f = stuffapp.canonicalize_banknote_fields(
+    {'country': 'China', 'issuer': 'Central Bank of Manchou'})
+assert f['country'] == 'Manchukuo', f
+f = stuffapp.canonicalize_banknote_fields({'issuer': 'Central Bank of Manchou'},
+                                          existing={'country': 'China'})
+assert f.get('country') == 'Manchukuo', f          # key added on a partial save
+f = stuffapp.canonicalize_banknote_fields({'country': 'China'},
+                                          existing={'country': 'China', 'issuer': 'Central Bank of Manchou'})
+assert f['country'] == 'Manchukuo', f
+f = stuffapp.canonicalize_banknote_fields({'country': 'China', 'issuer': 'Bank of China (中國銀行)'})
+assert f['country'] == 'China', f
+f = stuffapp.canonicalize_banknote_fields({'country': 'China', 'issuer': 'Bank of Manchuria (Three Eastern Provinces)'})
+assert f['country'] == 'China', f                  # Republic's provincial bank stays
+f = stuffapp.canonicalize_banknote_fields({'country': 'Japan', 'issuer': 'Bank of Japan'})
+assert f['country'] == 'Japan', f
+assert stuffapp._mentions_manchukuo('MANCHUKUO 1 Yuan 1932 P-J125a PMG 64') is True
+assert stuffapp._mentions_manchukuo('China 5 Yuan 1937 P-80') is False
+print('MANCHUKUO ISSUER-FOLD ASSERTIONS PASSED')
