@@ -746,6 +746,18 @@ def canonicalize_banknote_fields(fields, existing=None):
         issuer = _row_get(existing, 'issuer')
     if _mentions_manchukuo(issuer) and _country_key(country) in ('china', None):
         fields['country'] = country = 'Manchukuo'
+    # Numismatically Manchukuo's notes are Japanese puppet-bank issues
+    # (the J series of the Pick China listings, beside the Federal
+    # Reserve Bank of China and the Central Reserve Bank), not the
+    # paper of a nation: a note arriving as 'National' or untyped
+    # files as occupation money. A type set by hand ('Colonial') is
+    # left alone.
+    if _country_key(country) == 'manchukuo':
+        issue_type = fields.get('issue_type')
+        if issue_type is None and existing is not None:
+            issue_type = _row_get(existing, 'issue_type')
+        if (issue_type or '').strip() in ('', 'National'):
+            fields['issue_type'] = 'Military / Occupation'
     if _country_key(country) == 'us' and 'denomination' in fields:
         fields['denomination'] = _canonical_us_denomination(fields['denomination'])
     return fields
@@ -972,17 +984,19 @@ def _migrate_canonicalize_us_banknotes(db):
     if not {'country', 'denomination'}.issubset(cols):
         return
     changed = False
-    has_issuer = 'issuer' in cols
-    sel = "SELECT id, country, denomination%s FROM banknotes" % (', issuer' if has_issuer else '')
+    extra = [c for c in ('issuer', 'issue_type') if c in cols]
+    sel = "SELECT id, country, denomination%s FROM banknotes" % ''.join(', ' + c for c in extra)
     for r in db.execute(sel).fetchall():
         fields = {'country': r['country'], 'denomination': r['denomination']}
-        if has_issuer:
-            fields['issuer'] = r['issuer']
+        for c in extra:
+            fields[c] = r[c]
         canonicalize_banknote_fields(fields, existing=r)
-        if fields['country'] != r['country'] or fields['denomination'] != r['denomination']:
+        moved = {c: fields[c] for c in ('country', 'denomination', 'issue_type')
+                 if c in fields and c in cols and fields[c] != r[c]}
+        if moved:
             db.execute(
-                "UPDATE banknotes SET country = ?, denomination = ? WHERE id = ?",
-                (fields['country'], fields['denomination'], r['id']))
+                "UPDATE banknotes SET %s WHERE id = ?" % ', '.join(f'{c} = ?' for c in moved),
+                (*moved.values(), r['id']))
             changed = True
     if changed:
         _renumber_banknotes(db)
@@ -19192,9 +19206,10 @@ def save_field(category, record_id):
         # An issuer naming the Central Bank of Manchou moves a note
         # filed under China to Manchukuo — the same second-column
         # write the coins branch below does for mint -> region.
-        if field_name != 'country' and 'country' in _canon:
-            db.execute("UPDATE banknotes SET country = ? WHERE id = ?",
-                       (_canon['country'], record_id))
+        for _other in ('country', 'issue_type'):
+            if _other != field_name and _other in _canon:
+                db.execute(f"UPDATE banknotes SET {_other} = ? WHERE id = ?",
+                           (_canon[_other], record_id))
     elif category == 'coins' and field_name in ('region', 'authority', 'mint'):
         _canon = canonicalize_coin_fields({field_name: value}, existing=existing)
         value = _canon[field_name]

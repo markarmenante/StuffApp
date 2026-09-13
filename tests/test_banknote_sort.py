@@ -464,3 +464,22 @@ assert f['country'] == 'Japan', f
 assert stuffapp._mentions_manchukuo('MANCHUKUO 1 Yuan 1932 P-J125a PMG 64') is True
 assert stuffapp._mentions_manchukuo('China 5 Yuan 1937 P-80') is False
 print('MANCHUKUO ISSUER-FOLD ASSERTIONS PASSED')
+
+# Manchukuo paper is Japanese puppet-bank issue (Pick's J series): a
+# note arriving as National or untyped files as occupation money; a
+# type set by hand stays.
+f = stuffapp.canonicalize_banknote_fields(
+    {'country': 'China', 'issuer': 'Central Bank of Manchukuo (Manchou)', 'issue_type': 'National'})
+assert f['country'] == 'Manchukuo' and f['issue_type'] == 'Military / Occupation', f
+f = stuffapp.canonicalize_banknote_fields({'country': 'Manchukuo', 'issuer': 'Central Bank of Manchou'})
+assert f['issue_type'] == 'Military / Occupation', f
+f = stuffapp.canonicalize_banknote_fields({'issuer': 'Central Bank of Manchou'},
+                                          existing={'country': 'China', 'issue_type': 'National'})
+assert f.get('country') == 'Manchukuo' and f.get('issue_type') == 'Military / Occupation', f
+f = stuffapp.canonicalize_banknote_fields(
+    {'country': 'Manchukuo', 'issuer': 'Central Bank of Manchou', 'issue_type': 'Colonial'})
+assert f['issue_type'] == 'Colonial', f
+f = stuffapp.canonicalize_banknote_fields(
+    {'country': 'China', 'issuer': 'Bank of China (中國銀行)', 'issue_type': 'National'})
+assert f['issue_type'] == 'National', f
+print('MANCHUKUO ISSUE-TYPE ASSERTIONS PASSED')
