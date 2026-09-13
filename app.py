@@ -16209,6 +16209,25 @@ Reply with ONLY a JSON object, no prose, no code fences:
 """
 
 
+def _market_catalogue_call(client, model, prompt, max_tokens):
+    """One Messages call for the catalogue stage with thinking disabled;
+    falls back to the plain call if the model or SDK rejects the
+    ``thinking`` parameter (an older Sonnet, an old SDK)."""
+    messages = [{'role': 'user', 'content': prompt}]
+    try:
+        return client.messages.create(
+            model=model, max_tokens=max_tokens, messages=messages,
+            thinking={'type': 'disabled'})
+    except TypeError:
+        pass   # SDK too old to know the parameter
+    except Exception as e:
+        if 'thinking' not in str(e).lower():
+            raise
+        app.logger.info("market scan vcoins-catalogue: model declined thinking=disabled (%s); "
+                        "plain call", str(e)[:120])
+    return client.messages.create(model=model, max_tokens=max_tokens, messages=messages)
+
+
 def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, recent,
                             analysis, per_query=5, page_reads=48, max_cards=90):
     """(items, error, note). Searches VCoins for every gap query, reads
@@ -16280,11 +16299,24 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
         # once tried to return them all, overran 6k tokens, and the
         # 24k/32k retries held scan #7 for half an hour. The prompt caps
         # the list at 15 and _market_parse_json salvages a cut-off.
-        resp = client.messages.create(
-            model=model, max_tokens=8000,
-            messages=[{'role': 'user', 'content': _market_catalogue_prompt(
-                category, live_cards, profile, holdings, coverage, recent, analysis)}])
+        #
+        # Thinking is switched off: the current Sonnets think by default
+        # and the thinking comes out of max_tokens before any text — on
+        # 13 Sep 2026 the stage spent all 8,000 tokens thinking over 90
+        # cards and returned stop=max_tokens with zero characters. This
+        # is a shaping task (cards in, JSON out), not a search; a model
+        # that rejects the parameter gets the plain call. A cut-off with
+        # NO text at all — nothing to salvage — is retried once at twice
+        # the budget, bounded, never the 4x/32k escalation.
+        prompt = _market_catalogue_prompt(
+            category, live_cards, profile, holdings, coverage, recent, analysis)
+        resp = _market_catalogue_call(client, model, prompt, max_tokens=8000)
         text = _message_text(resp)
+        if getattr(resp, 'stop_reason', None) == 'max_tokens' and not text.strip():
+            app.logger.warning("market scan vcoins-catalogue: max_tokens with no text; "
+                               "retrying once at 16000")
+            resp = _market_catalogue_call(client, model, prompt, max_tokens=16000)
+            text = _message_text(resp)
         app.logger.info("market scan vcoins-catalogue: stop=%s text=%d chars",
                         getattr(resp, 'stop_reason', None), len(text))
         data = _market_parse_json(text)
@@ -16467,6 +16499,33 @@ def _market_latest_scan(db, category):
         "ORDER BY started_at DESC LIMIT 1", [category]).fetchone()
 
 
+_MARKET_INTERRUPTED_MSG = ('the server restarted while the scan was running '
+                           '(a deploy) — press Rescan to run it again')
+
+
+def _market_reap_orphan(db, category, scan):
+    """A scan runs as a thread inside this one worker process and marks
+    itself in ``_MARKET_SCAN_INFLIGHT`` before its row is written, so a
+    row still 'running' with nothing in flight is a thread that died
+    with the process — a redeploy mid-scan (13 Sep 2026: the Coins page
+    spun for an hour after four deploys landed in half an hour). Mark it
+    interrupted, timestamped, so the page stops polling and says why;
+    returns the refreshed row."""
+    if not scan or scan['status'] != 'running':
+        return scan
+    with _MARKET_SCAN_LOCK:
+        inflight = category in _MARKET_SCAN_INFLIGHT
+    if inflight:
+        return scan
+    db.execute("UPDATE market_scans SET status = 'interrupted', finished_at = ?, "
+               "error = ? WHERE id = ? AND status = 'running'",
+               [datetime.utcnow().isoformat(), _MARKET_INTERRUPTED_MSG, scan['id']])
+    db.commit()
+    app.logger.warning("market scan %s %s: orphaned 'running' row marked interrupted",
+                       category, scan['id'])
+    return _market_latest_scan(db, category)
+
+
 def _market_items(db, category, earlier=False):
     """The market page's rows: the current scan's undecided candidates,
     or — with ``earlier`` — the candidates of previous scans that were
@@ -16506,7 +16565,7 @@ def market_view(category):
     _market_require_owner()
     db = get_db()
     cat_info = CATEGORIES[category]
-    scan = _market_latest_scan(db, category)
+    scan = _market_reap_orphan(db, category, _market_latest_scan(db, category))
     earlier = request.args.get('earlier') == '1'
     items = _market_items(db, category, earlier=earlier)
     running = bool(scan and scan['status'] == 'running')
@@ -16583,7 +16642,7 @@ def market_scan_status(category):
     if category not in MARKET_SCAN_CATEGORIES:
         return jsonify({'error': 'Unknown category'}), 400
     db = get_db()
-    scan = _market_latest_scan(db, category)
+    scan = _market_reap_orphan(db, category, _market_latest_scan(db, category))
     if not scan:
         return jsonify({'ok': True, 'status': 'none'})
     return jsonify({'ok': True, 'status': scan['status'], 'scan_id': scan['id'],

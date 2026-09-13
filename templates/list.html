@@ -84,8 +84,12 @@
     {%- if market_earlier -%}Earlier candidates, newest scan first — Bought files one as Ordered
     {%- elif market_running -%}Scanning…
     {%- elif market_scan and market_scan['finished_at'] -%}
+      {%- if market_scan['status'] == 'interrupted' -%}
+      Interrupted {{ market_scan['finished_at'][:16]|replace('T', ' ') }} UTC · {{ market_scan['error'] }}
+      {%- else -%}
       Scanned {{ market_scan['finished_at'][:16]|replace('T', ' ') }} UTC
       {%- if market_scan['status'] == 'failed' %} · failed: {{ market_scan['error'] }}{% endif -%}
+      {%- endif -%}
     {%- else -%}Not scanned yet
     {%- endif -%}
     {%- if market_wantlist and not market_earlier %} · colonial want-list: {{ market_wantlist.open }} of {{ market_wantlist.total }} still open{% endif -%}
@@ -750,7 +754,7 @@
   <h3>Scanning the market…</h3>
   <p>Searching eBay, Stack's Bowers, Heritage, dealers and auction houses against your holdings. Two to four minutes.</p>
   {% else %}
-  <h3>No live candidates{% if market_scan and market_scan['status'] == 'failed' %} — the scan failed{% endif %}</h3>
+  <h3>No live candidates{% if market_scan and market_scan['status'] == 'failed' %} — the scan failed{% elif market_scan and market_scan['status'] == 'interrupted' %} — the scan was interrupted{% endif %}</h3>
   <p>{% if market_scan and market_scan['summary'] %}{{ market_scan['summary'] }}{% elif market_scan and market_scan['error'] %}{{ market_scan['error'] }}{% else %}Press Rescan to run one.{% endif %}</p>
   {% endif %}
 </div>
