@@ -40,14 +40,14 @@ def _db(rows):
 
 
 db = _db([
-    {'id': 'a', 'banknote_id': 'B1', 'country': 'France', 'denomination': '5 Francs',
+    {'id': 'a', 'banknote_id': 'P 001', 'country': 'France', 'denomination': '5 Francs',
      'series': '1943', 'pick_number': 'P-98a', 'date_1': 1943, 'date_1_text': '1943',
      'grade': '65 EPQ', 'grading_authority': 'PMG'},
-    {'id': 'b', 'banknote_id': 'B2', 'country': 'France', 'denomination': '10 Francs',
+    {'id': 'b', 'banknote_id': 'P 002', 'country': 'France', 'denomination': '10 Francs',
      'series': '1943', 'pick_number': 'P-99', 'date_1': 1943, 'date_1_text': '1943'},
-    {'id': 'c', 'banknote_id': 'B3', 'country': 'Belgium', 'denomination': '5 Francs',
+    {'id': 'c', 'banknote_id': 'P 003', 'country': 'Belgium', 'denomination': '5 Francs',
      'series': '1943', 'pick_number': 'P-98a', 'date_1': 1943, 'date_1_text': '1943'},
-    {'id': 'd', 'banknote_id': 'B4', 'country': 'USA', 'denomination': '$1',
+    {'id': 'd', 'banknote_id': 'P 004', 'country': 'USA', 'denomination': '$1',
      'series': '1957 B', 'pick_number': 'Fr. 1621', 'date_1': 1957, 'date_1_text': '1957'},
 ])
 
@@ -58,7 +58,7 @@ with stuffapp.app.test_request_context():
                           'denomination': None, 'date_1': None, 'series': None})
     assert [m['id'] for m in got] == ['a'], got
     assert got[0]['reason'] == 'same catalogue number 98a', got[0]
-    assert got[0]['label'] == 'B1 5 Francs 1943 (P-98a) PMG 65 EPQ', got[0]['label']
+    assert got[0]['label'] == 'P 001 5 Francs 1943 (P-98a) PMG 65 EPQ', got[0]['label']
     assert got[0]['url'] == '/banknotes/a'
 
     # Same country + denomination + year, no catalogue number yet.

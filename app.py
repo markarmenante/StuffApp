@@ -6515,9 +6515,11 @@ def init_db():
     # issues (military yen, the puppet banks) file in a keyword-gated
     # band after the Republic's wartime run — a gated band now sorts
     # half a year after an ungated band opening the same year.
+    # v21: the Display Number reads 'P 001' (position, zero-padded)
+    # instead of 'B1' — same order, new format, so every note reseeds.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v20',),
+        ('banknote_display_number_v21',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6525,7 +6527,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v20', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v21', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -35718,8 +35720,10 @@ BANKNOTE_SORT_FIELDS = ('country', 'municipality', 'series',
 def _renumber_banknotes(db):
     """Resequence banknote_id (Display Number) across every note.
 
-    One flat B series — notes have no property/era partition the way
-    coins do, so there's a single sequence rather than a group each.
+    One flat 'P nnn' series (P for position, zero-padded to three
+    digits so the text sorts in list order) — notes have no
+    property/era partition the way coins do, so there's a single
+    sequence rather than a group each.
     Ordering is CATEGORY_ORDER_BY['banknotes'] (country, municipality,
     issuer, date_1), the same ORDER BY the list view uses, so the
     Display Number always runs in the order the list shows. cat_id is
@@ -35732,7 +35736,7 @@ def _renumber_banknotes(db):
     ).fetchall()
     for i, row in enumerate(rows, start=1):
         db.execute("UPDATE banknotes SET banknote_id = ? WHERE id = ?",
-                   (f'B{i}', row['id']))
+                   (f'P {i:03d}', row['id']))
 
 
 def _coin_group_for(property_name, date_1):

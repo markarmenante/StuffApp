@@ -153,7 +153,7 @@ with stuffapp.app.app_context():
     # Owned match and scoring.
     dup = norm(dict(base, pick_number='P-98a', denomination='20 Pesos', title='dup'))
     dup['owned'] = stuffapp._market_owned_match(db, 'banknotes', dup)
-    assert dup['owned'].startswith('B') and 'same catalogue number' in dup['owned'], dup['owned']
+    assert dup['owned'].startswith('P ') and 'same catalogue number' in dup['owned'], dup['owned']
     good['owned'] = stuffapp._market_owned_match(db, 'banknotes', good)
     assert good['owned'] == ''
     colonial = norm(dict(base, empire='British', title='Sarawak $1', country='Sarawak', pick_number='P-20',
@@ -223,7 +223,7 @@ html = client.get('/banknotes/market').get_data(as_text=True)
 assert 'Collection</a>' in html and 'pill active market-pill' in html and 'class="toolbar-btn add"' not in html
 assert 'market-row' in html and 'Sarawak 1 Dollar 1935 PMG 65 EPQ' in html
 assert 'Choice UNC 65</span>' in html and '65 65' not in html
-assert 'British colonial' in html and 'New source' in html and 'You have B' in html
+assert 'British colonial' in html and 'New source' in html and 'You have P ' in html
 assert 'View listing' in html and 'class="market-btn market-buy"' in html
 assert 'Scanned ' in html
 list_html = client.get('/banknotes').get_data(as_text=True)
