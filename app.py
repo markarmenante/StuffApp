@@ -27564,7 +27564,13 @@ def _pdf_fonts():
     built-in Helvetica family."""
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
+    bundled = os.path.join(BASE_DIR, 'static', 'fonts')
     candidates = [
+        # Shipped with the app (Railway's image has no system fonts), so
+        # the deployed report gets the same face as a local build.
+        (os.path.join(bundled, 'DejaVuSans.ttf'),
+         os.path.join(bundled, 'DejaVuSans-Bold.ttf'),
+         os.path.join(bundled, 'DejaVuSans-Oblique.ttf')),
         ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
          '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
          '/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf'),
@@ -27592,18 +27598,147 @@ def _pdf_text(value, unicode_ok):
     t = str(value if value is not None else '').strip()
     if unicode_ok:
         return t
+    # Typographic punctuation the built-in fonts lack folds to its ASCII
+    # shape rather than vanishing (an era span "1868–1919" must not
+    # print as "18681919").
+    t = t.translate(_PDF_ASCII_PUNCT)
     t = unicodedata.normalize('NFKD', t)
     return ''.join(ch for ch in t if ord(ch) < 256 and not unicodedata.combining(ch)).strip()
 
 
-def _banknote_report_sections(db):
+_PDF_ASCII_PUNCT = str.maketrans({'\u2013': '-', '\u2014': ' - ', '\u2012': '-', '\u2015': ' - ',
+                                  '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"',
+                                  '\u2026': '...', '\u00a0': ' ', '\u2009': ' ', '\u202f': ' '})
+
+
+# What a historical or colonial issuing name is today, for the report's
+# section headings ("Rhodesia · now Zimbabwe"). Keyed by the stored
+# country spelling, lower-cased; a spelling with a parenthesis or a
+# slash is also tried on its first part. Only names that have changed
+# are listed — a current name gets no "now" line. (Mark, 2026-09-14:
+# notes file under the name on the note, the current name follows.)
+BANKNOTE_MODERN_NAME = {
+    'austro-hungary': 'Austria and Hungary',
+    'austria-hungary': 'Austria and Hungary',
+    'aden': 'Yemen',
+    'anglo-egyptian sudan': 'Sudan',
+    'basutoland': 'Lesotho',
+    'bechuanaland': 'Botswana',
+    'belgian congo': 'Democratic Republic of the Congo',
+    'zaire': 'Democratic Republic of the Congo',
+    'katanga': 'Democratic Republic of the Congo',
+    'biafra': 'Nigeria',
+    'bohemia and moravia': 'Czech Republic',
+    'czechoslovakia': 'Czech Republic and Slovakia',
+    'british caribbean territories': 'the Eastern Caribbean states',
+    'british east africa': 'Kenya, Uganda and Tanzania',
+    'british guiana': 'Guyana',
+    'british honduras': 'Belize',
+    'british north borneo': 'Malaysia (Sabah)',
+    'british west africa': 'Nigeria, Ghana, Sierra Leone and The Gambia',
+    'burma': 'Myanmar',
+    'ceylon': 'Sri Lanka',
+    'dahomey': 'Benin',
+    'danish west indies': 'United States Virgin Islands',
+    'danzig': 'Poland (Gdańsk)',
+    'dutch guiana': 'Suriname',
+    'dutch new guinea': 'Indonesia (Papua)',
+    'netherlands new guinea': 'Indonesia (Papua)',
+    'east germany': 'Germany',
+    'german democratic republic': 'Germany',
+    'east pakistan': 'Bangladesh',
+    'french equatorial africa': 'Gabon, Republic of the Congo, Central African Republic and Chad',
+    'french indo-china': 'Vietnam, Laos and Cambodia',
+    'french indochina': 'Vietnam, Laos and Cambodia',
+    'indochina': 'Vietnam, Laos and Cambodia',
+    'french somaliland': 'Djibouti',
+    'french sudan': 'Mali',
+    'french west africa': 'Senegal, Mali, Guinea, Côte d’Ivoire, Burkina Faso, Benin, Niger and Mauritania',
+    'german east africa': 'Tanzania, Rwanda and Burundi',
+    'gold coast': 'Ghana',
+    'hawaii': 'United States',
+    'italian east africa': 'Ethiopia, Eritrea and Somalia',
+    'italian somaliland': 'Somalia',
+    'kiautschou': 'China (Qingdao)',
+    'kiaochow': 'China (Qingdao)',
+    'malaya': 'Malaysia and Singapore',
+    'malaya and british borneo': 'Malaysia, Singapore and Brunei',
+    'straits settlements': 'Malaysia and Singapore',
+    'sarawak': 'Malaysia',
+    'manchukuo': 'China (the Northeast)',
+    'manchoukuo': 'China (the Northeast)',
+    'memel': 'Lithuania',
+    'mesopotamia': 'Iraq',
+    'muscat and oman': 'Oman',
+    'netherlands indies': 'Indonesia',
+    'dutch east indies': 'Indonesia',
+    'newfoundland': 'Canada',
+    'new jersey': 'United States',
+    'pennsylvania colony': 'United States',
+    'rhode island and providence plantations': 'United States',
+    'united states (colonial - pennsylvania)': 'United States',
+    'colonial america': 'United States',
+    'northern rhodesia': 'Zambia',
+    'nyasaland': 'Malawi',
+    'palestine': 'Israel and the Palestinian territories',
+    'persia': 'Iran',
+    'portuguese guinea': 'Guinea-Bissau',
+    'portuguese india': 'India (Goa)',
+    'portuguese timor': 'Timor-Leste',
+    'timor': 'Timor-Leste',
+    'rhodesia': 'Zimbabwe',
+    'rhodesia & nyasaland': 'Zimbabwe, Zambia and Malawi',
+    'rhodesia and nyasaland': 'Zimbabwe, Zambia and Malawi',
+    'southern rhodesia': 'Zimbabwe',
+    'ruanda-urundi': 'Rwanda and Burundi',
+    'ryukyu islands': 'Japan (Okinawa)',
+    'siam': 'Thailand',
+    'south west africa': 'Namibia',
+    'spanish guinea': 'Equatorial Guinea',
+    'fernando po': 'Equatorial Guinea',
+    'spanish sahara': 'Western Sahara',
+    'swaziland': 'Eswatini',
+    'tahiti': 'French Polynesia',
+    'taiwan under japan': 'Taiwan',
+    'tanganyika': 'Tanzania',
+    'zanzibar': 'Tanzania',
+    'trucial states': 'United Arab Emirates',
+    'upper volta': 'Burkina Faso',
+    'ussr': 'Russia and the former Soviet republics',
+    'soviet union': 'Russia and the former Soviet republics',
+    'viet nam - south': 'Vietnam',
+    'south vietnam': 'Vietnam',
+    'south viet nam': 'Vietnam',
+    'yugoslavia': 'Serbia, Croatia, Slovenia, Bosnia and Herzegovina, Montenegro and North Macedonia',
+}
+
+
+def _banknote_modern_name(country):
+    """The current name for a historical issuing name, or None when the
+    name still stands (or is not listed)."""
+    raw = (country or '').strip().lower()
+    for cand in (raw, raw.split(' (')[0].strip(), raw.split('/')[0].strip(), raw.split(' - ')[0].strip()):
+        if cand and cand in BANKNOTE_MODERN_NAME:
+            return BANKNOTE_MODERN_NAME[cand]
+    return None
+
+
+def _banknote_report_sections(db, query=None):
     """The report's sections in the list's order: [(country, key, [rows])],
-    one per country / colony as stored, Own and Ordered notes only."""
-    sql, params = build_search_query('banknotes', '', dot=False, coin_filter=None, at_property=None)
+    one per country / colony as stored. `query` is the Banknotes list's
+    own state — {'q', 'dot', 'filter', 'at'} — so the report covers
+    exactly the notes the list shows (a search for "United States"
+    reports those notes); with no status filter, Own and Ordered notes
+    only, as before."""
+    query = query or {}
+    sql, params = build_search_query('banknotes', query.get('q') or '', dot=bool(query.get('dot')),
+                                     coin_filter=query.get('filter') or None,
+                                     at_property=query.get('at') or None)
     # Owner-only report (the build route checks), run in a thread with
     # no request context — so no per-user row filter here.
-    rows = [r for r in db.execute(sql, params).fetchall()
-            if (r['status'] or 'Own') in ('Own', 'Ordered')]
+    rows = db.execute(sql, params).fetchall()
+    if not query.get('filter'):
+        rows = [r for r in rows if (r['status'] or 'Own') in ('Own', 'Ordered')]
     sections = []
     for r in rows:
         country = (r['country'] or '').strip() or 'Unattributed'
@@ -27680,14 +27815,16 @@ def _banknote_report_lines(r):
     if not design:
         design = re.split(r'(?<=[.!?])\s+', g('description'), maxsplit=1)[0] if g('description') else ''
     context = g('history_context') or g('condition')
-    status = 'ORDERED' if g('status') == 'Ordered' else ''
+    # No status flag (ORDERED) — the report is a catalogue (Mark, 2026-09-14).
     line4 = [design]
-    line5 = [context, status]
+    line5 = [context]
     return line1, line2, line3, line4, line5
 
 
-def _build_banknote_report(path):
-    """Write the collection report PDF to `path`. Runs in a thread."""
+def _build_banknote_report(path, query=None):
+    """Write the collection report PDF to `path` — the whole collection,
+    or the notes the Banknotes list currently shows when `query` carries
+    its search / filter state. Runs in a thread."""
     from xml.sax.saxutils import escape as xesc
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
@@ -27705,9 +27842,7 @@ def _build_banknote_report(path):
     st_title = ParagraphStyle('t', fontName=bold, fontSize=20, leading=24, spaceAfter=4)
     st_sub = ParagraphStyle('s', fontName=reg, fontSize=9.5, leading=12,
                             textColor=colors.HexColor('#666666'), spaceAfter=8)
-    st_country = ParagraphStyle('c', fontName=bold, fontSize=16, leading=19, spaceAfter=1)
-    st_nation = ParagraphStyle('n', fontName=reg, fontSize=9.5, leading=12,
-                               textColor=colors.HexColor('#666666'), spaceAfter=6)
+    st_country = ParagraphStyle('c', fontName=bold, fontSize=16, leading=19, spaceAfter=4)
     st_colonial = ParagraphStyle('col', fontName=ital, fontSize=9, leading=11.5,
                                  textColor=colors.HexColor('#444444'), spaceAfter=5)
     st_era_label = ParagraphStyle('el', fontName=bold, fontSize=9, leading=11.5, spaceBefore=3)
@@ -27778,11 +27913,20 @@ def _build_banknote_report(path):
 
     db = open_db_connection()
     try:
-        sections = _banknote_report_sections(db)
+        sections = _banknote_report_sections(db, query)
         total_notes = sum(len(rows) for _c, _k, rows in sections)
+        scope = []
+        if query and query.get('q'):
+            scope.append(f'search “{query["q"]}”')
+        if query and query.get('filter'):
+            scope.append(f'filter {query["filter"]}')
+        if query and query.get('at'):
+            scope.append(f'at {query["at"]}')
         story = [Paragraph('Banknote Collection', st_title),
                  Paragraph(dotline([date.today().strftime('%B %-d, %Y'),
-                                    f'{total_notes} notes', f'{len(sections)} countries and colonies']), st_sub)]
+                                    f'{total_notes} note{"s" if total_notes != 1 else ""}',
+                                    f'{len(sections)} {"countries and colonies" if len(sections) != 1 else "country or colony"}']
+                                   + scope), st_sub)]
         class _SectionMark(Flowable):
             """Zero-size flowable: when drawn, tells the document which
             section is open and on which page it opened."""
@@ -27801,12 +27945,13 @@ def _build_banknote_report(path):
                 # Sections run on: a little air, no page break.
                 story.append(Spacer(1, 14))
             title, colonial, eras = _banknote_report_history(country, key, rows)
-            head = [_SectionMark(country), Paragraph(T(country), st_country)]
-            sub = []
-            if title and title.lower() != country.lower():
-                sub.append(title)
-            sub.append(f'{len(rows)} note{"s" if len(rows) != 1 else ""}')
-            head.append(Paragraph(dotline(sub), st_nation))
+            # One heading line: the name on the note, " - N notes", then
+            # what that place is called today, smaller and grey.
+            now = _banknote_modern_name(country)
+            heading = f'{T(country)} - {len(rows)} note{"s" if len(rows) != 1 else ""}'
+            if now:
+                heading += (f'  <font name="{reg}" size="10" color="#666666">now {T(now)}</font>')
+            head = [_SectionMark(country), Paragraph(heading, st_country)]
             if colonial:
                 head.append(Paragraph(T(colonial), st_colonial))
             era_pairs = [[Paragraph((T(span) + '  ' if span else '') + T(label), st_era_label),
@@ -27885,10 +28030,10 @@ def _build_banknote_report(path):
     return total_notes, len(sections), doc.page
 
 
-def _run_banknote_report_job():
+def _run_banknote_report_job(query=None):
     try:
         with app.app_context():
-            notes, sections, pages = _build_banknote_report(_banknote_report_path())
+            notes, sections, pages = _build_banknote_report(_banknote_report_path(), query)
         with _BANKNOTE_REPORT_LOCK:
             _BANKNOTE_REPORT.update(state='done', built_at=datetime.utcnow().isoformat(),
                                     error=None, notes=notes, sections=sections, pages=pages)
@@ -27916,11 +28061,17 @@ def banknote_report_build():
     """Start a build (owner only). GET is allowed so the owner can
     kick one off from a plain browser tab."""
     require_owner()
+    # The Banknotes list's own state, passed through by the Report pill:
+    # the report covers what the list shows.
+    query = {'q': (request.args.get('q_banknotes') or request.args.get('q') or '').strip(),
+             'dot': request.args.get('dot', '') == '1',
+             'filter': (request.args.get('filter') or '').strip(),
+             'at': (request.args.get('at') or '').strip()}
     with _BANKNOTE_REPORT_LOCK:
         if _BANKNOTE_REPORT['state'] == 'running':
             return jsonify({'ok': True, 'state': 'running'})
         _BANKNOTE_REPORT.update(state='running', started_at=datetime.utcnow().isoformat(), error=None)
-    threading.Thread(target=_run_banknote_report_job, daemon=True).start()
+    threading.Thread(target=_run_banknote_report_job, args=(query,), daemon=True).start()
     return jsonify({'ok': True, 'state': 'running'})
 
 

@@ -61,7 +61,7 @@
   <button type="button" class="toolbar-btn pill" id="banknoteReport"
           data-build-url="{{ url_for('banknote_report_build') }}"
           data-status-url="{{ url_for('banknote_report_status') }}"
-          title="Build the collection report PDF — every country with its history, four notes to a page">Report</button>
+          title="Build the collection report PDF of the notes shown — every country with its history, four notes to a page">Report</button>
   <span class="market-status" id="banknoteReportStatus"></span>
   {% endif %}
   {% if not at_property and not _market and not _analysis %}
@@ -1274,7 +1274,9 @@ window.shareCardRow = async function (ev, btn) {
     btn.disabled = true;
     say('Starting…');
     try {
-      const r = await fetch(btn.dataset.buildUrl, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+      // The list's own search / filter state rides along, so the report
+      // covers exactly the notes on screen.
+      const r = await fetch(btn.dataset.buildUrl + window.location.search, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error || ('Server returned ' + r.status));
       watch(tab);

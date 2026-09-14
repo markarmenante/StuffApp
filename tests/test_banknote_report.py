@@ -92,11 +92,29 @@ with stuffapp.app.app_context():
     assert all(len(x) <= 4 for x in ids), ids
     # French Somaliland follows Germany on the same page when there is
     # room (no page break between countries — Mark, 2026-09-14): its
-    # heading and history travel with its first note, ORDERED flagged.
+    # heading and history precede its first note. No status flag: the
+    # Ordered note carries no ORDERED (Mark, 2026-09-14).
     somali_page = next(i for i, x in enumerate(texts) if 'French Somaliland' in x and '10' in ids[i])
-    assert 'Djibouti' in texts[somali_page] and 'ORDERED' in texts[somali_page]
+    assert 'Djibouti' in texts[somali_page] and 'ORDERED' not in ' '.join(texts)
     assert texts[somali_page].index('Djibouti') < texts[somali_page].index('B10 ')
     assert pages == len(pdf.pages)
+    # One heading line: "<name on the note> - N notes", then the current
+    # name; era spans keep their dash whatever the font.
+    flat = ' '.join(t.replace('\n', ' ') for t in texts)
+    import re as _re2
+    assert _re2.search(r'French Somaliland - 1 note\s+now Djibouti', flat), flat[:400]
+    assert _re2.search(r'Germany - 9 notes', flat) and not _re2.search(r'Germany - 9 notes\s+now', flat)
+    assert '1871–1913' in flat or '1871-1913' in flat, 'era span lost its dash'
+    assert not _re2.search(r'\b18711913\b', flat)
+    assert stuffapp._banknote_modern_name('Rhodesia & Nyasaland') == 'Zimbabwe, Zambia and Malawi'
+    assert stuffapp._banknote_modern_name('Sarawak (Malaysia)') == 'Malaysia'
+    assert stuffapp._banknote_modern_name('Viet Nam - South (South Vietnam)') == 'Vietnam'
+    assert stuffapp._banknote_modern_name('Bahamas') is None
+    # The list's query scopes the report: a search for Somaliland is one note.
+    scoped = stuffapp._banknote_report_sections(db, {'q': 'Somaliland'})
+    assert [(c, len(r)) for c, _k, r in scoped] == [('French Somaliland', 1)], scoped
+    scoped = stuffapp._banknote_report_sections(db, {'filter': 'ordered'})
+    assert [(c, len(r)) for c, _k, r in scoped] == [('French Somaliland', 1)], scoped
     # Nothing is truncated: the 600-character context and the full signature list are
     # in the page text of every German note page, and no ellipsis was added.
     rich_pages = [i for i in g_pages + [g_head] if 'PMG 65' in texts[i]]   # the five fully described notes
@@ -122,7 +140,18 @@ for _ in range(60):
     d = client.get('/banknotes/report/status').get_json()
     if d['state'] in ('done', 'failed'): break
     time.sleep(0.5)
-assert d['state'] == 'done' and d['notes'] == 10, d
+assert d['state'] == 'done' and d['notes'] == 10 and d['pages'] >= 3, d
+# The pill passes the list's query string through; the build honours it (GET works for the owner too).
+r = client.get('/banknotes/report/build?q_banknotes=Somaliland'); assert r.status_code == 200 and r.get_json()['ok']
+for _ in range(60):
+    d = client.get('/banknotes/report/status').get_json()
+    if d['state'] in ('done', 'failed'): break
+    time.sleep(0.5)
+assert d['state'] == 'done' and d['notes'] == 1 and d['sections'] == 1, d
+from pypdf import PdfReader as _PR
+scoped_text = ' '.join((p.extract_text() or '') for p in _PR(stuffapp._banknote_report_path()).pages)
+assert 'search “Somaliland”' in scoped_text or 'search "Somaliland"' in scoped_text, scoped_text[:300]
+assert 'Germany' not in scoped_text
 r = client.get('/coins'); assert 'id="banknoteReport"' not in r.get_data(as_text=True)
 print('ROUTES OK')
 print('ALL BANKNOTE-REPORT ASSERTIONS PASSED')
