@@ -64,11 +64,14 @@ provenance (old collections, named sales) adds real value on ancients.
   VCoins, MA-Shops, dealer eShops) as a buy notice. Those venues — and
   eBay sold results — remain price-evidence/comparables only, per
   sources.md.
-- Banknote grade floor: **55 (About Uncirculated) is as low as Mark
-  goes** — prefer UNC / Choice UNC and better for type notes. The ONLY
-  exception: genuine rarity, where the census shows essentially nothing
-  available at higher grades; then a lower-grade example may be
-  surfaced, with the population evidence stated.
+- Banknote grade rules (2026-09-14, superseding the 55 floor): **only
+  graded notes — PMG or PCGS holders; never a raw note**, however the
+  dealer describes it. An ordinary note must be **63 or better**; prefer
+  Choice/Gem UNC for type notes. EPQ/PPQ is always a bonus (see below).
+  The ONLY exception is genuine rarity — an early colonial issue, a
+  scarce date, a census showing essentially nothing finer available —
+  where a graded example down to **VF 20** may be surfaced, with the
+  population evidence stated. Never below VF 20.
 - **Prioritize EPQ notes** (2026-08-17): among candidate banknotes,
   rank PMG EPQ (Exceptional Paper Quality — original, unpressed paper;
   PCGS "PPQ" is the equivalent) ahead of non-EPQ examples, including a

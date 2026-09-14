@@ -14744,7 +14744,8 @@ def list_view(category):
 # pattern of recent purchases, and venues Mark does not use yet; coins
 # are ancient Greek only — each a web-search Claude call returning JSON; the
 # results are filtered to live lots with a URL and a grade that clears
-# the bar (64+ with EPQ/PPQ preferred; 50+ only for genuine rarity),
+# the bar (banknotes: PMG/PCGS holders only, 63+ with EPQ/PPQ preferred,
+# down to VF for a stated rarity case — Mark's rule of 2026-09-14),
 # de-duplicated, checked against what is already owned, and ranked.
 #
 # Buying: the app cannot check out on a seller's site, so Buy opens the
@@ -15132,12 +15133,13 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
     today = date.today().isoformat()
     if category == 'banknotes':
         grade_rules = (
-            "GRADE RULES: prioritise notes graded 64 or higher by PMG or PCGS "
-            "Banknote WITH the EPQ designation (PCGS 'PPQ' and a PMG star ★ are "
-            "equivalents) — a 64 EPQ outranks a plain 65. A note graded 50–63 is "
-            "acceptable ONLY when it is genuinely rare (state the population or "
-            "census evidence in `rarity`). Raw (ungraded) notes only when "
-            "described as UNC/Gem and clearly photographed. Never below 50. "
+            "GRADE RULES: ONLY notes in a PMG or PCGS Banknote holder — never a raw "
+            "(ungraded) note, however it is described. For an ordinary note the "
+            "grade must be 63 or higher; EPQ (PCGS 'PPQ' and a PMG star ★ are "
+            "equivalents) is always a plus — a 64 EPQ outranks a plain 65. A "
+            "genuinely rare note (an early colonial issue, a scarce date) may be "
+            "any grade from VF 20 up, ONLY with the population or census evidence "
+            "stated in `rarity`. Never below VF 20. "
             "NOT WANTED (Mark's instruction, 2026-09-14): he does not collect "
             "specimen notes or remainders — never return a SPECIMEN (overprinted, "
             "perforated or punch-cancelled, colour trials, Pick suffix 's'), an "
@@ -15375,6 +15377,16 @@ def _market_grade_number(category, item):
         if re.search(r'\b' + re.escape(word) + r'\b', text):
             return float(value)
     return None
+
+
+def _market_banknote_holder(item):
+    """True when a banknote candidate is in a third-party holder — the
+    grading_authority names a service, or the grade/title text does
+    ('PMG 64 EPQ', 'PCGS Banknote 66PPQ'). Raw notes fail."""
+    if banknote_grader_profile(item.get('grading_authority')):
+        return True
+    blob = f"{item.get('grade') or ''} {item.get('title') or ''}"
+    return bool(re.search(r'\b(?:pmg|pcgs|legacy currency|pcgs banknote|pcgs currency)\b', blob, re.I))
 
 
 def _market_designation(item):
@@ -15897,9 +15909,14 @@ def _market_normalize_item(db, category, raw):
         raw['why'] = (str(raw.get('why') or '').strip() + ' · price on the listing page').strip(' ·')
     grade_n = _market_grade_number(category, raw)
     rarity = str(raw.get('rarity') or '').strip()
-    floor = 64 if category == 'banknotes' else 40
-    rare_floor = 50 if category == 'banknotes' else 30
+    floor = 63 if category == 'banknotes' else 40
+    rare_floor = 20 if category == 'banknotes' else 30
     unstated = False
+    if category == 'banknotes' and not _market_banknote_holder(raw):
+        # Mark buys only graded notes (2026-09-14): a raw note is out
+        # however the dealer describes it, so 'Gem UNC' text never
+        # stands in for a holder.
+        return _market_drop(raw, 'not in a PMG/PCGS holder')
     if grade_n is None:
         if category == 'banknotes':
             return _market_drop(raw, 'no readable grade')

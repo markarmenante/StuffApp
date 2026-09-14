@@ -87,10 +87,16 @@ with stuffapp.app.app_context():
     assert norm(dict(base, listing_url='not a url')) is None
     assert norm(dict(base, listing_url='https://www.google.com/search?q=x')) is None
     assert norm(dict(base, price=''))['price'] == 'See listing', 'a priceless find is kept, price read on the page'
-    assert norm(dict(base, grade_numeric=58, grade='AU 58', rarity='')) is None, 'below 64 without rarity'
+    # Mark's rule (2026-09-14): holders only; ordinary notes 63+; a stated
+    # rarity case may go down to VF 20; never below that.
+    assert norm(dict(base, grade_numeric=63, grade='Choice UNC 63', rarity='')), '63 clears the bar'
+    assert norm(dict(base, grade_numeric=58, grade='AU 58', rarity='')) is None, 'below 63 without rarity'
     rare = norm(dict(base, grade_numeric=55, grade='AU 55', rarity='PMG census: 3 graded, none above 58'))
     assert rare and rare['grade_numeric'] == 55
-    assert norm(dict(base, grade_numeric=45, grade='XF 45', rarity='rare')) is None, 'below 50 never'
+    rare_vf = norm(dict(base, title='British Honduras 1 Dollar 1939 P-20a PMG VF 20', grade_numeric=20,
+                        grade='VF 20', rarity='first George VI date; a handful graded'))
+    assert rare_vf and rare_vf['grade_numeric'] == 20, 'a rare note may be VF'
+    assert norm(dict(base, grade_numeric=15, grade='Ch F 15', rarity='rare')) is None, 'below VF 20 never'
     assert norm(dict(base, closes='2020-01-01')) is None, 'closed lot'
     assert norm(dict(base, sale_type='auction', closes='')) is None, 'auction without a close date'
     assert norm(dict(base, sale_type='auction', closes='2099-01-01')), 'auction with a future close'
@@ -125,9 +131,13 @@ with stuffapp.app.app_context():
         dict(lively, listing_url='https://www.noonans.co.uk/lot/blocked')])
     assert [k['listing_url'].rsplit('/', 1)[1] for k in kept] == ['live', 'blocked'], kept
     assert kept[0]['verified'] is True and kept[1]['verified'] is False
+    # A raw note is out however it is described — the holder is the gate.
     raw_unc = norm(dict(base, title='Philippines 5 Pesos Victory Series 66 raw Gem UNC',
                         grade_numeric=None, grade='Gem UNC', grading_authority=None, designation=''))
-    assert raw_unc and raw_unc['grade_numeric'] == 66 and raw_unc['grading_authority'] is None
+    assert raw_unc is None, 'raw Gem UNC must be dropped'
+    # The holder may be named in the title alone, or the grade text.
+    assert norm(dict(base, grading_authority=None, title='Philippines 5 Pesos P-96 PCGS Banknote 64 PPQ')), 'PCGS in the title counts as a holder'
+    assert norm(dict(base, grading_authority=None, grade='PMG 64 EPQ', title='Philippines 5 Pesos P-96')), 'PMG in the grade text'
     euro = norm(dict(base, price='€1.200,00'))
     assert euro['price'] == '€1,200' and euro['price_usd'] == 1320, euro
     # Coins: XF40 floor, rarity down to 30, adjectival grades read.
