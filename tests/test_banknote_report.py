@@ -67,32 +67,39 @@ with stuffapp.app.app_context():
     print('SECTIONS OK')
 
     path = stuffapp._banknote_report_path()
-    notes, secs = stuffapp._build_banknote_report(path)
-    assert notes == 10 and secs == 2 and os.path.exists(path) and os.path.getsize(path) > 10_000
+    notes, secs, pages = stuffapp._build_banknote_report(path)
+    assert notes == 10 and secs == 2 and pages >= 3 and os.path.exists(path) and os.path.getsize(path) > 10_000
     from pypdf import PdfReader
     pdf = PdfReader(path)
     texts = [p.extract_text() or '' for p in pdf.pages]
     import re as _re
     ids = [sorted(set(_re.findall(r'\bB(\d+)\b', x)), key=int) for x in texts]
     assert 'Banknote Collection' in texts[0]
-    # The German section: its history page (era label present) comes first
-    # and holds the history BEFORE any note; note pages after it carry
-    # exactly four until the tail; every one of them opens with the
-    # continued line ("Germany · continued", distinct from the era text).
-    g_hist = next(i for i, t in enumerate(texts) if 'The goldmark' in t)
-    assert '1' in ids[g_hist] and texts[g_hist].index('The goldmark') < texts[g_hist].index('B1 ')
-    g_pages = [i for i, x in enumerate(ids) if x and int(x[0]) <= 9 and i > g_hist]
+    # The German section runs on from the French Somaliland one (no page
+    # break between countries — Mark, 2026-09-14): its history comes
+    # BEFORE any of its notes, its note pages carry at most four (a full
+    # four once the history is out of the way, until the tail), and every
+    # page after the one its heading sits on opens with the continued
+    # line ("Germany · continued", distinct from the era text).
+    g_head = next(i for i, t in enumerate(texts) if 'The goldmark' in t)
+    b1 = next(i for i, x in enumerate(ids) if '1' in x)
+    assert b1 > g_head or texts[g_head].index('The goldmark') < texts[g_head].index('B1 ')
+    g_pages = [i for i, x in enumerate(ids) if x and int(x[0]) <= 9]
     counts = [len(ids[i]) for i in g_pages]
-    assert all(c == 4 for c in counts[:-1]) and 1 <= counts[-1] <= 4, (counts, ids)
-    assert all('Germany  ·  continued' in texts[i] or 'Germany · continued' in texts[i] for i in g_pages), 'continued line missing'
+    assert all(c == 4 for c in counts[1:-1]) and 1 <= counts[-1] <= 4, (counts, ids)
+    assert all('Germany  ·  continued' in texts[i] or 'Germany · continued' in texts[i]
+               for i in g_pages if i > g_head), 'continued line missing'
     assert all(len(x) <= 4 for x in ids), ids
-    # French Somaliland: its own page, history first, ORDERED flagged.
+    # French Somaliland follows Germany on the same page when there is
+    # room (no page break between countries — Mark, 2026-09-14): its
+    # heading and history travel with its first note, ORDERED flagged.
     somali_page = next(i for i, x in enumerate(texts) if 'French Somaliland' in x and '10' in ids[i])
     assert 'Djibouti' in texts[somali_page] and 'ORDERED' in texts[somali_page]
-    assert not any('1' in ids[i] and '10' in ids[i] for i in range(len(ids))), 'countries share no page'
+    assert texts[somali_page].index('Djibouti') < texts[somali_page].index('B10 ')
+    assert pages == len(pdf.pages)
     # Nothing is truncated: the 600-character context and the full signature list are
     # in the page text of every German note page, and no ellipsis was added.
-    rich_pages = [i for i in g_pages + [g_hist] if 'PMG 65' in texts[i]]   # the five fully described notes
+    rich_pages = [i for i in g_pages + [g_head] if 'PMG 65' in texts[i]]   # the five fully described notes
     assert rich_pages
     for i in rich_pages:
         t = texts[i].replace('\n', ' ')

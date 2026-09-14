@@ -54,14 +54,14 @@
        title="In-depth analysis of the collection — {{ 'the independent watchmakers' if category == 'watches' else ('the ancient Greek coinage' if category == 'coins' else 'colonial, United States and world notes') }}">Analysis</a>
     {% endif %}
   {% endif %}
-  {# Banknotes: the collection report PDF — one country / colony per
-     page with its history, three notes to a page. Built in the
-     background; the pill polls and opens it. #}
+  {# Banknotes: the collection report PDF — the countries / colonies
+     in the list's order, each with its history, four notes to a page.
+     Built in the background; the pill polls and opens it. #}
   {% if category == 'banknotes' and not at_property and not _market and not _analysis and g.current_user and g.current_user.role == 'owner' %}
   <button type="button" class="toolbar-btn pill" id="banknoteReport"
           data-build-url="{{ url_for('banknote_report_build') }}"
           data-status-url="{{ url_for('banknote_report_status') }}"
-          title="Build the collection report PDF — a page per country with its history, three notes to a page">Report</button>
+          title="Build the collection report PDF — every country with its history, four notes to a page">Report</button>
   <span class="market-status" id="banknoteReportStatus"></span>
   {% endif %}
   {% if not at_property and not _market and not _analysis %}

@@ -27534,9 +27534,10 @@ def coins_print_pdf():
 
 # ---------------------------------------------------------------------------
 # Banknote collection report (Mark, 2026-09-12): a PDF of the whole
-# banknote collection, one country / colony per section on a fresh
-# page, the country's history first (the era bands the list panels
-# show, and the colonial timeline), then the notes three to a page —
+# banknote collection, one country / colony per section flowing on
+# from the last (no page break between countries — Mark, 2026-09-14),
+# the country's history first (the era bands the list panels
+# show, and the colonial timeline), then the notes four to a page —
 # front and back images side by side on one row, two compact lines of
 # details under them. Built in a background thread (Cloudflare caps a
 # request at 100 s and 300 notes of photos take longer) into
@@ -27545,7 +27546,7 @@ def coins_print_pdf():
 # ---------------------------------------------------------------------------
 
 _BANKNOTE_REPORT = {'state': 'idle', 'started_at': None, 'built_at': None,
-                    'error': None, 'notes': 0, 'sections': 0}
+                    'error': None, 'notes': 0, 'sections': 0, 'pages': 0}
 _BANKNOTE_REPORT_LOCK = threading.Lock()
 
 
@@ -27795,7 +27796,8 @@ def _build_banknote_report(path):
 
         for i, (country, key, rows) in enumerate(sections):
             if i:
-                story.append(PageBreak())
+                # Sections run on: a little air, no page break.
+                story.append(Spacer(1, 14))
             title, colonial, eras = _banknote_report_history(country, key, rows)
             head = [_SectionMark(country), Paragraph(T(country), st_country)]
             sub = []
@@ -27805,12 +27807,23 @@ def _build_banknote_report(path):
             head.append(Paragraph(dotline(sub), st_nation))
             if colonial:
                 head.append(Paragraph(T(colonial), st_colonial))
-            for span, label, body in eras:
-                head.append(Paragraph((T(span) + '  ' if span else '') + T(label), st_era_label))
-                head.append(Paragraph(T(body), st_era))
-            head.append(Spacer(1, 6))
-            head.append(HRFlowable(width='100%', thickness=0.6, color=colors.HexColor('#999999'), spaceAfter=4))
-            story.extend(head)
+            era_pairs = [[Paragraph((T(span) + '  ' if span else '') + T(label), st_era_label),
+                          Paragraph(T(body), st_era)] for span, label, body in eras]
+            rule = [Spacer(1, 6),
+                    HRFlowable(width='100%', thickness=0.6, color=colors.HexColor('#999999'), spaceAfter=4)]
+            # The title stays with its first era (a title never strands at
+            # the foot of a page), each later era label with its text, and
+            # the notes flow on from there, each band whole — so a page
+            # carries four bands, or fewer where a heading sits among them.
+            # Flat groups only: a KeepTogether nested in another is
+            # mis-measured by platypus and throws the whole page.
+            if era_pairs:
+                story.append(KeepTogether(head + era_pairs[0]))
+                for pair in era_pairs[1:]:
+                    story.append(KeepTogether(pair))
+                story.extend(rule)
+            else:
+                story.append(KeepTogether(head + rule))
             # The notes: front and back on one row, four lines beneath.
             bands = []
             for r in rows:
@@ -27833,8 +27846,6 @@ def _build_banknote_report(path):
                                          ('TOPPADDING', (0, 0), (-1, -1), 2),
                                          ('BOTTOMPADDING', (0, 0), (-1, -1), 2)]))
                 bands.append([tbl] + paras + [Spacer(1, band_gap)])
-            # Each band stays whole; the history page takes as many as
-            # fit under it and every page after carries exactly four.
             for band in bands:
                 story.append(KeepTogether(band))
     finally:
@@ -27869,17 +27880,17 @@ def _build_banknote_report(path):
                      title='Banknote Collection', author='StuffApp')
     doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
     os.replace(tmp, path)
-    return total_notes, len(sections)
+    return total_notes, len(sections), doc.page
 
 
 def _run_banknote_report_job():
     try:
         with app.app_context():
-            notes, sections = _build_banknote_report(_banknote_report_path())
+            notes, sections, pages = _build_banknote_report(_banknote_report_path())
         with _BANKNOTE_REPORT_LOCK:
             _BANKNOTE_REPORT.update(state='done', built_at=datetime.utcnow().isoformat(),
-                                    error=None, notes=notes, sections=sections)
-        print(f'banknote report built: {notes} notes, {sections} sections', flush=True)
+                                    error=None, notes=notes, sections=sections, pages=pages)
+        print(f'banknote report built: {notes} notes, {sections} sections, {pages} pages', flush=True)
     except Exception as e:
         import traceback
         print(traceback.format_exc(), flush=True)
@@ -27898,8 +27909,10 @@ def _banknote_report_status():
     return st
 
 
-@app.route('/banknotes/report/build', methods=['POST'])
+@app.route('/banknotes/report/build', methods=['GET', 'POST'])
 def banknote_report_build():
+    """Start a build (owner only). GET is allowed so the owner can
+    kick one off from a plain browser tab."""
     require_owner()
     with _BANKNOTE_REPORT_LOCK:
         if _BANKNOTE_REPORT['state'] == 'running':
