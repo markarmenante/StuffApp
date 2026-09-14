@@ -11962,6 +11962,13 @@ CATEGORY_FILTERS = {
 STATUS_CYCLE_ORDER = ('own', 'ordered', 'sold', 'loaned', 'gifted',
                       'consigned', 'lost')
 STATUS_PILL_CYCLE = ('all', 'own', 'ordered')
+# Categories whose fresh visit (no ?filter=, no search) shows Own rather
+# than every status. Their pill rotates Own -> Ordered -> All -> Own
+# instead, and the All stop is an explicit ?filter=all (a bare URL would
+# just land back on the Own default). Properties keep their own
+# Own/Sold toggle and are not listed here.
+STATUS_DEFAULT_OWN = ('vehicles', 'art')
+STATUS_PILL_CYCLE_OWN_FIRST = ('own', 'ordered', 'all')
 STATUS_CYCLE_CATEGORIES = ('watches', 'coins', 'banknotes', 'cameras',
                            'lenses', 'pens', 'art', 'items', 'vehicles',
                            'recordings', 'audio', 'rifles')
@@ -14604,7 +14611,7 @@ def list_view(category):
     if not q:
         if category == 'properties' and raw_filter is None:
             coin_filter = 'own'
-        if category == 'vehicles' and raw_filter is None:
+        if category in STATUS_DEFAULT_OWN and raw_filter is None:
             coin_filter = 'own'
     sql, params = build_search_query(category, q, dot=dot,
                                      coin_filter=coin_filter,
@@ -14663,10 +14670,14 @@ def list_view(category):
         if category == 'properties' else (None, None)
     # Status pill: a fixed All -> Own -> Ordered rotation. All (the
     # default, no filter) shows every status; Own and Ordered narrow
-    # to that status.
+    # to that status. STATUS_DEFAULT_OWN categories open on Own and
+    # rotate Own -> Ordered -> All, with All spelled ?filter=all so
+    # the link doesn't fall back onto the Own default.
     status_cycle, status_current = [], 'all'
+    status_default_own = category in STATUS_DEFAULT_OWN
     if category in STATUS_CYCLE_CATEGORIES:
-        status_cycle = list(STATUS_PILL_CYCLE)
+        status_cycle = list(STATUS_PILL_CYCLE_OWN_FIRST
+                            if status_default_own else STATUS_PILL_CYCLE)
         if coin_filter in status_cycle:
             status_current = coin_filter
     has_in_service = False
@@ -14711,6 +14722,7 @@ def list_view(category):
                            art_price_total=art_price_total,
                            status_cycle=status_cycle,
                            status_current=status_current,
+                           status_default_own=status_default_own,
                            has_in_service=has_in_service,
                            watch_open_service_event_ids=watch_open_service_event_ids,
                            extra_fields=extra_fields,
