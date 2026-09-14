@@ -64,6 +64,7 @@ with stuffapp.app.app_context():
                                           'PROFILE', holdings, coverage, recent)
     assert 'DENOMINATION COVERAGE' in prompt and 'RECENT PURCHASES' in prompt
     assert 'REPLACES any "major auction houses only" rule' in prompt
+    assert 'NOT WANTED' in prompt and 'remainders' in prompt, 'specimen / remainder rule in the prompt'
     coin_prompt = stuffapp._market_scan_prompt('coins', 'ancients-gaps', 't', '', '', '', '')
     assert 'ANCIENT GREEK coins only' in coin_prompt
 print('PROMPT INPUTS OK')
@@ -85,7 +86,7 @@ with stuffapp.app.app_context():
     assert good['price'] == '$185' and good['price_usd'] == 185
     assert norm(dict(base, listing_url='not a url')) is None
     assert norm(dict(base, listing_url='https://www.google.com/search?q=x')) is None
-    assert norm(dict(base, price='')) is None
+    assert norm(dict(base, price=''))['price'] == 'See listing', 'a priceless find is kept, price read on the page'
     assert norm(dict(base, grade_numeric=58, grade='AU 58', rarity='')) is None, 'below 64 without rarity'
     rare = norm(dict(base, grade_numeric=55, grade='AU 55', rarity='PMG census: 3 graded, none above 58'))
     assert rare and rare['grade_numeric'] == 55
@@ -97,6 +98,15 @@ with stuffapp.app.app_context():
     assert norm(dict(base, listing_url='https://currency.ha.com/prices-realized/lot-1')) is None, 'prices realized page'
     assert norm(dict(base, why='Sold for $900 at Heritage in May')) is None, 'past sale in the text'
     assert norm(dict(base, live_evidence='listing has ended')) is None
+    # Mark does not collect specimens or remainders (2026-09-14).
+    assert norm(dict(base, title='Philippines 5 Pesos SPECIMEN PMG 66 EPQ')) is None, 'specimen in the title'
+    assert norm(dict(base, grade='Choice UNC 64 Specimen')) is None, 'specimen in the grade'
+    assert norm(dict(base, why='unsigned remainder, PMG 65 EPQ')) is None, 'remainder in the text'
+    assert norm(dict(base, pick_number='P-96s')) is None, 'specimen Pick suffix'
+    assert norm(dict(base, pick_number='P-96as')) is None, 'specimen Pick suffix after a variety letter'
+    assert norm(dict(base, pick_number='P-96r')) is None, 'remainder Pick suffix'
+    assert norm(dict(base, pick_number='P-96c')), 'ordinary variety letter kept'
+    assert norm(dict(base, pick_number='P-S101')), 'Pick S-prefix is not a suffix'
     pics = norm(dict(base, image_urls=['https://a/1.jpg', 'not-a-url', 'https://a/2.jpg', 'https://a/3.jpg']))
     assert pics['image_urls'] == ['https://a/1.jpg', 'https://a/2.jpg'] and pics['image_url'] == 'https://a/1.jpg'
     assert norm(dict(base, image_url='https://a/only.jpg'))['image_urls'] == ['https://a/only.jpg']
@@ -115,7 +125,8 @@ with stuffapp.app.app_context():
         dict(lively, listing_url='https://www.noonans.co.uk/lot/blocked')])
     assert [k['listing_url'].rsplit('/', 1)[1] for k in kept] == ['live', 'blocked'], kept
     assert kept[0]['verified'] is True and kept[1]['verified'] is False
-    raw_unc = norm(dict(base, grade_numeric=None, grade='Gem UNC', grading_authority=None, designation=''))
+    raw_unc = norm(dict(base, title='Philippines 5 Pesos Victory Series 66 raw Gem UNC',
+                        grade_numeric=None, grade='Gem UNC', grading_authority=None, designation=''))
     assert raw_unc and raw_unc['grade_numeric'] == 66 and raw_unc['grading_authority'] is None
     euro = norm(dict(base, price='€1.200,00'))
     assert euro['price'] == '€1,200' and euro['price_usd'] == 1320, euro
@@ -152,12 +163,13 @@ CANNED = {
                               empire='British', fills='Sarawak — none held',
                               image_urls=['https://i.ebayimg.com/obv.png', 'https://i.ebayimg.com/rev.png'],
                               listing_url='https://www.stacksbowers.com/lot/sarawak')],
-    'denominations': [dict(base)],
+    'denominations': [dict(base, live_evidence='Buy It Now')],
     'sources': [dict(base, title='Ceylon 5 Rupees 1942 PMG 64 EPQ', country='Ceylon', denomination='5 Rupees',
                      year=1942, pick_number='P-36', empire='British', new_source=True, venue='Noonans',
                      listing_url='https://www.noonans.co.uk/lot/ceylon', price='£420')],
     'pattern': [dict(base, title='Philippines 20 Pesos P-98a (duplicate)', pick_number='P-98a',
-                     denomination='20 Pesos', listing_url='https://www.ebay.com/itm/999')],
+                     denomination='20 Pesos', listing_url='https://www.ebay.com/itm/999',
+                     live_evidence='Buy It Now')],
     'colonial-continental': [dict(base, title='Malaya 10 Dollars 1941 PMG 64 EPQ', country='Malaya',
                                   denomination='10 Dollars', year=1941, pick_number='P-13', empire='British',
                                   listing_url='https://www.ebay.com/itm/ended')],
@@ -183,7 +195,7 @@ for _ in range(100):
         break
     time.sleep(0.1)
 assert st['status'] == 'done', st
-assert sorted(calls) == sorted(k for k, _ in stuffapp._MARKET_THEMES['banknotes']), calls
+assert set(k for k, _ in stuffapp._MARKET_THEMES['banknotes']) <= set(calls), calls  # wantlist themes run too
 assert st['item_count'] == 4 and 'simulated timeout' in st['summary'], st
 assert '1 dropped as sold/ended on their own pages' in st['summary'], st
 with stuffapp.app.app_context():

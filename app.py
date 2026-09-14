@@ -15137,7 +15137,13 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             "equivalents) — a 64 EPQ outranks a plain 65. A note graded 50–63 is "
             "acceptable ONLY when it is genuinely rare (state the population or "
             "census evidence in `rarity`). Raw (ungraded) notes only when "
-            "described as UNC/Gem and clearly photographed. Never below 50."
+            "described as UNC/Gem and clearly photographed. Never below 50. "
+            "NOT WANTED (Mark's instruction, 2026-09-14): he does not collect "
+            "specimen notes or remainders — never return a SPECIMEN (overprinted, "
+            "perforated or punch-cancelled, colour trials, Pick suffix 's'), an "
+            "unissued or unsigned remainder (Pick suffix 'r'), or any note whose "
+            "listing describes it as either; issued notes only. The scan drops "
+            "such items anyway, so they only waste a slot."
         )
         schema = (
             '{"items": [{"title": str, "country": str, "denomination": str, '
@@ -15540,6 +15546,13 @@ _MARKET_ENDED_TEXT_RE = re.compile(
     r'listing (?:has )?ended|auction (?:has )?ended|ended on|closed on|'
     r'sold on|was sold|has sold|archived|past sale|previous sale)\b',
     re.IGNORECASE)
+# Mark does not collect specimen notes or remainders (his instruction of
+# 2026-09-14). A banknote candidate whose own text says specimen /
+# remainder, or whose Pick number carries the 's' (specimen) or 'r'
+# (remainder) suffix, is dropped before it can reach the list.
+_MARKET_UNISSUED_TEXT_RE = re.compile(
+    r'\b(specimens?|sp[eé]cimen|muestra|remainders?)\b', re.IGNORECASE)
+_MARKET_UNISSUED_PICK_RE = re.compile(r'\d[a-z]?[rs]\d*$', re.IGNORECASE)
 _MARKET_ENDED_PAGE_MARKERS = (
     'this listing has ended', 'this listing was ended', 'bidding has ended',
     'this item has ended', 'this listing sold', 'item sold', 'sold for',
@@ -15920,6 +15933,15 @@ def _market_normalize_item(db, category, raw):
     stale_text = ' '.join(str(raw.get(k) or '') for k in ('title', 'why', 'live_evidence'))
     if _MARKET_ENDED_TEXT_RE.search(stale_text):
         return _market_drop(raw, 'described as a past sale')
+    if category == 'banknotes':
+        unissued_text = ' '.join(str(raw.get(k) or '') for k in (
+            'title', 'grade', 'designation', 'series', 'rarity', 'fills',
+            'why', 'live_evidence'))
+        if _MARKET_UNISSUED_TEXT_RE.search(unissued_text):
+            return _market_drop(raw, 'specimen / remainder')
+        pick = str(raw.get('pick_number') or '').strip()
+        if _MARKET_UNISSUED_PICK_RE.search(pick):
+            return _market_drop(raw, f'specimen / remainder (Pick {pick})')
     item = {
         'title': str(raw.get('title') or '').strip()[:200],
         'listing_url': url,
