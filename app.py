@@ -15148,8 +15148,9 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             "grade must be 63 or higher; EPQ (PCGS 'PPQ' and a PMG star ★ are "
             "equivalents) is always a plus — a 64 EPQ outranks a plain 65. A "
             "genuinely rare note (an early colonial issue, a scarce date) may be "
-            "any grade from VF 20 up, ONLY with the population or census evidence "
-            "stated in `rarity`. Never below VF 20. "
+            "any grade from AU 50 up, ONLY with the population or census evidence "
+            "stated in `rarity`. Never below 50 (Mark's instruction, 2026-09-15: "
+            "a grade of 50 is the minimum, rarity or not). "
             "NOT WANTED (Mark's instruction, 2026-09-14): he does not collect "
             "specimen notes or remainders — never return a SPECIMEN (overprinted, "
             "perforated or punch-cancelled, colour trials, Pick suffix 's'), an "
@@ -15971,7 +15972,7 @@ def _market_normalize_item(db, category, raw):
     grade_n = _market_grade_number(category, raw)
     rarity = str(raw.get('rarity') or '').strip()
     floor = 63 if category == 'banknotes' else 40
-    rare_floor = 20 if category == 'banknotes' else 30
+    rare_floor = 50 if category == 'banknotes' else 30   # Mark, 2026-09-15: 50 is the minimum
     unstated = False
     if category == 'banknotes' and not _market_banknote_holder(raw):
         # Mark buys only graded notes (2026-09-14): a raw note is out

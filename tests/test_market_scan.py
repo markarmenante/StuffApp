@@ -88,16 +88,17 @@ with stuffapp.app.app_context():
     assert norm(dict(base, listing_url='not a url')) is None
     assert norm(dict(base, listing_url='https://www.google.com/search?q=x')) is None
     assert norm(dict(base, price=''))['price'] == 'See listing', 'a priceless find is kept, price read on the page'
-    # Mark's rule (2026-09-14): holders only; ordinary notes 63+; a stated
-    # rarity case may go down to VF 20; never below that.
+    # Mark's rule (2026-09-14, floor raised 2026-09-15): holders only;
+    # ordinary notes 63+; a stated rarity case may go down to 50; never below.
     assert norm(dict(base, grade_numeric=63, grade='Choice UNC 63', rarity='')), '63 clears the bar'
     assert norm(dict(base, grade_numeric=58, grade='AU 58', rarity='')) is None, 'below 63 without rarity'
     rare = norm(dict(base, grade_numeric=55, grade='AU 55', rarity='PMG census: 3 graded, none above 58'))
     assert rare and rare['grade_numeric'] == 55
-    rare_vf = norm(dict(base, title='British Honduras 1 Dollar 1939 P-20a PMG VF 20', grade_numeric=20,
-                        grade='VF 20', rarity='first George VI date; a handful graded'))
-    assert rare_vf and rare_vf['grade_numeric'] == 20, 'a rare note may be VF'
-    assert norm(dict(base, grade_numeric=15, grade='Ch F 15', rarity='rare')) is None, 'below VF 20 never'
+    rare_50 = norm(dict(base, title='British Honduras 1 Dollar 1939 P-20a PMG AU 50', grade_numeric=50,
+                        grade='AU 50', rarity='first George VI date; a handful graded'))
+    assert rare_50 and rare_50['grade_numeric'] == 50, 'a rare note may be 50'
+    assert norm(dict(base, grade_numeric=45, grade='XF 45', rarity='a handful graded')) is None, 'below 50 never, rarity or not'
+    assert norm(dict(base, grade_numeric=20, grade='VF 20', rarity='rare')) is None, 'VF no longer clears'
     assert norm(dict(base, closes='2020-01-01')) is None, 'closed lot'
     assert norm(dict(base, sale_type='auction', closes='')) is None, 'auction without a close date'
     assert norm(dict(base, sale_type='auction', closes='2099-01-01')), 'auction with a future close'

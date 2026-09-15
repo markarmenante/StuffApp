@@ -70,8 +70,9 @@ provenance (old collections, named sales) adds real value on ancients.
   Choice/Gem UNC for type notes. EPQ/PPQ is always a bonus (see below).
   The ONLY exception is genuine rarity — an early colonial issue, a
   scarce date, a census showing essentially nothing finer available —
-  where a graded example down to **VF 20** may be surfaced, with the
-  population evidence stated. Never below VF 20.
+  where a graded example down to **50** may be surfaced, with the
+  population evidence stated. Never below 50 (2026-09-15: a grade of 50
+  is the minimum, rarity or not).
 - **Prioritize EPQ notes** (2026-08-17): among candidate banknotes,
   rank PMG EPQ (Exceptional Paper Quality — original, unpressed paper;
   PCGS "PPQ" is the equivalent) ahead of non-EPQ examples, including a
