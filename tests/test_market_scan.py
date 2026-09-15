@@ -73,6 +73,7 @@ print('PROMPT INPUTS OK')
 with stuffapp.app.app_context():
     db = stuffapp.get_db()
     norm = lambda raw: stuffapp._market_normalize_item(db, 'banknotes', raw)
+    _real_fetch_page = stuffapp._market_fetch_page
     base = {'title': 'Philippines 5 Pesos Victory Series 66 PMG 64 EPQ', 'country': 'Philippines',
             'denomination': '5 Pesos', 'series': 'Victory Series 66', 'year': 1944,
             'pick_number': 'P-96', 'grading_authority': 'PMG', 'grade_numeric': 64,
@@ -116,6 +117,23 @@ with stuffapp.app.app_context():
     pics = norm(dict(base, image_urls=['https://a/1.jpg', 'not-a-url', 'https://a/2.jpg', 'https://a/3.jpg']))
     assert pics['image_urls'] == ['https://a/1.jpg', 'https://a/2.jpg'] and pics['image_url'] == 'https://a/1.jpg'
     assert norm(dict(base, image_url='https://a/only.jpg'))['image_urls'] == ['https://a/only.jpg']
+    # Vendor on Buy (2026-09-15): the seller with the marketplace in
+    # brackets; a missing eBay seller is read off the listing page.
+    vn = stuffapp._market_vendor_name
+    assert vn({'seller': 'notesRus', 'venue': 'eBay', 'listing_url': 'https://www.ebay.com/itm/1'}) == 'notesRus (eBay)'
+    assert vn({'seller': None, 'venue': "Stack's Bowers", 'listing_url': 'https://www.stacksbowers.com/lot/1'}) == "Stack's Bowers"
+    assert vn({'seller': 'Noonans', 'venue': 'Noonans', 'listing_url': 'https://www.noonans.co.uk/lot/1'}) == 'Noonans'
+    assert vn({'seller': None, 'venue': 'VCoins', 'listing_url': 'https://www.vcoins.com/en/stores/aegean_numismatics/1/product/x.aspx'}) == 'aegean numismatics (VCoins)'
+    ps = stuffapp._market_page_seller
+    ebay_html = ('<div class="x-sellercard-atf__info__about-seller"><a href="https://www.ebay.com/usr/banknote_barn?x=1">'
+                 '<span class="ux-textspans ux-textspans--BOLD">banknote_barn</span></a> (2,431) 99.8% positive</div>')
+    assert ps('https://www.ebay.com/itm/1', ebay_html) == 'banknote_barn', ps('https://www.ebay.com/itm/1', ebay_html)
+    assert ps('https://www.ebay.com/itm/1', '<a href="https://www.ebay.com/str/CurrencyHouse">store</a>') == 'CurrencyHouse'
+    assert ps('https://www.ebay.com/itm/1', '<p>no seller here</p>') == ''
+    assert ps('https://www.stacksbowers.com/lot/1', '<p>anything</p>') == ''
+    stuffapp._market_fetch_page = lambda url, limit=400_000: (200, ebay_html)
+    assert vn({'seller': None, 'venue': 'eBay', 'listing_url': 'https://www.ebay.com/itm/1'}) == 'banknote_barn (eBay)'
+    stuffapp._market_fetch_page = _real_fetch_page
     lively = norm(dict(base, live_evidence='Buy It Now, 2 available'))
     assert lively['live_evidence'] == 'Buy It Now, 2 available' and lively['verified'] is False
     # Page check: the venue's own wording decides; a bot wall never drops.
@@ -247,7 +265,7 @@ with stuffapp.app.app_context():
 assert rec['status'] == 'Ordered' and rec['country'] == 'Sarawak' and rec['pick_number'] == 'P-20'
 assert rec['grade_modifier'] == 'EPQ' and rec['grading_authority'] == 'PMG' and rec['price'] == '$185'
 assert rec['grade_numeric'] == 65 and '65' in (rec['grade'] or ''), (rec['grade'], rec['grade_numeric'])
-assert rec['vendor'] == 'notesRus' and 'Listing: https://www.stacksbowers.com' in rec['description']
+assert rec['vendor'] == 'notesRus (eBay)' and 'Listing: https://www.stacksbowers.com' in rec['description'], rec['vendor']
 assert rec['note_references'].startswith('Market Scan') and rec['cat_id'].startswith('B')
 assert rec['banknote_id'], 'display number assigned'
 assert rec['property_name'] == 'NYC', 'location required rule honoured'

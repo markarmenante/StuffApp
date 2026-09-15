@@ -15155,7 +15155,7 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"grading_authority": "PMG"|"PCGS"|"PCGS Currency"|"Legacy"|null, '
             '"grade_numeric": int|null, "grade": str, "designation": "EPQ"|"PPQ"|"★"|"", '
             '"price": str (as listed, with its currency, e.g. "$450" or "€1,200"), '
-            '"venue": str, "seller": str|null, "sale_type": "fixed"|"auction", '
+            '"venue": str, "seller": str|null (the eBay seller / store name or the dealer, when the result shows it), "sale_type": "fixed"|"auction", '
             '"closes": "YYYY-MM-DD"|"", "listing_url": str, '
             '"image_urls": [str] (the listing\'s own photos as direct image-file URLs, obverse/holder front first, then reverse/holder back; [] if none), '
             '"rarity": str, "fills": str (the gap it fills, or ""), '
@@ -15475,6 +15475,51 @@ def _market_full_size_url(url):
     return u
 
 
+_MARKET_STORE_VENUES = ('ebay', 'ma-shops', 'vcoins', 'numista', 'delcampe',
+                        'catawiki', 'etsy', 'hipstamp')
+_MARKET_EBAY_SELLER_RES = (
+    # the seller card's own link text: <a href=".../usr/NAME">…<span class="…BOLD">NAME</span>
+    re.compile(r'ebay\.[a-z.]+/(?:usr|str)/([A-Za-z0-9_.\-]{2,64})[^>]*>(?:(?!</a>).)*?'
+               r'<span[^>]*ux-textspans--BOLD[^>]*>\s*([^<]{2,64}?)\s*</span>',
+               re.IGNORECASE | re.DOTALL),
+    re.compile(r'"(?:sellerName|seller_name|sellerUserName|sellerId)"\s*:\s*"([^"]{2,64})"'),
+    re.compile(r'ebay\.[a-z.]+/usr/([A-Za-z0-9_.\-]{2,64})', re.IGNORECASE),
+    re.compile(r'ebay\.[a-z.]+/str/([A-Za-z0-9_.\-]{2,64})', re.IGNORECASE),
+)
+
+
+def _market_page_seller(listing_url, html=None):
+    """The seller's name as the listing page states it, or '' — the
+    eBay user / store name from the seller card (Mark, 2026-09-15: Buy
+    filed a note with no vendor because the model's `seller` was empty
+    for an eBay find — search results never show the seller, the item
+    page always does). VCoins and MA-Shops name the store in the URL
+    itself, so no page read is needed there."""
+    url = str(listing_url or '')
+    host = re.sub(r'^https?://(www\.)?', '', url).split('/')[0].lower()
+    m = re.search(r'vcoins\.com/[a-z]{2}/stores/([^/?#]+)', url, re.IGNORECASE)
+    if m:
+        return m.group(1).replace('_', ' ').replace('-', ' ').strip()[:80]
+    m = re.search(r'ma-shops\.[a-z]+/([^/?#]+)/', url, re.IGNORECASE)
+    if m and m.group(1).lower() not in ('en', 'de', 'fr', 'item', 'shop'):
+        return m.group(1).replace('_', ' ').strip()[:80]
+    if 'ebay.' not in host:
+        return ''
+    if html is None:
+        status, html = _market_fetch_page(url, limit=1_500_000)
+        if status != 200 or not html or _market_page_challenged(status, html):
+            return ''
+    for rx in _MARKET_EBAY_SELLER_RES:
+        m = rx.search(html)
+        if not m:
+            continue
+        name = (m.group(2) if m.lastindex and m.lastindex >= 2 and m.group(2) else m.group(1))
+        name = html_lib.unescape(name).strip()
+        if name and not re.search(r'\s(feedback|items|sold)\b|^\d+%?$', name, re.IGNORECASE):
+            return name[:80]
+    return ''
+
+
 def _market_page_image_urls(listing_url, html=None):
     """Direct photo URLs read off the listing page itself, best first:
     the JSON-LD / og:image, then eBay's image-gallery files, then any
@@ -15769,6 +15814,10 @@ def _market_listing_probe(url):
         out['images'] = _market_page_image_urls(url, html)
     except Exception:
         out['images'] = []
+    try:
+        out['seller'] = _market_page_seller(url, html)
+    except Exception:
+        out['seller'] = ''
     text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r'<[^>]+>', ' ', text)
     text = re.sub(r'\s+', ' ', text).lower()
@@ -15869,6 +15918,8 @@ def _market_verify_live(items, workers=6):
         if not item.get('image_urls') and pr.get('images'):
             item['image_urls'] = pr['images'][:2]
             item['image_url'] = pr['images'][0]
+        if not item.get('seller') and pr.get('seller'):
+            item['seller'] = pr['seller']
         kept.append(item)
     return kept
 
@@ -16713,6 +16764,31 @@ def _market_item_or_404(db, category, item_id):
     return row
 
 
+def _market_vendor_name(item):
+    """The Vendor a bought candidate files under: the seller with the
+    marketplace in brackets ("notesRus (eBay)") when the venue is a
+    marketplace of many sellers, the house or dealer alone otherwise
+    ("Stack's Bowers"). A missing seller is read off the listing page
+    here, at Buy time, so an older candidate still files its vendor."""
+    seller = str(item.get('seller') or '').strip()
+    venue = str(item.get('venue') or '').strip()
+    url = str(item.get('listing_url') or '')
+    host = re.sub(r'^https?://(www\.)?', '', url).split('/')[0].lower()
+    if not venue:
+        venue = host
+    if not seller:
+        try:
+            seller = _market_page_seller(url)
+        except Exception:
+            seller = ''
+        if seller:
+            item['seller'] = seller
+    marketplace = any(v in host or v in venue.lower() for v in _MARKET_STORE_VENUES)
+    if seller and seller.lower() != venue.lower():
+        return f"{seller} ({venue})" if marketplace and venue else seller
+    return venue
+
+
 def _market_create_record(db, category, item, location=None, images=None):
     """File a scan item as a new Ordered record with everything the
     listing gave, at `location` (the same required Location the add form
@@ -16721,7 +16797,7 @@ def _market_create_record(db, category, item, location=None, images=None):
     record_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
     today = date.today().isoformat()
-    vendor = item.get('seller') or item.get('venue') or ''
+    vendor = _market_vendor_name(item)
     listing_line = f"Market Scan {today}: {item.get('venue') or ''} — {item['listing_url']}"
     description = '\n\n'.join(x for x in (
         item.get('title'), item.get('why'),
