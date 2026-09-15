@@ -62,7 +62,9 @@ assert stuffapp._country_key('French Territory of the Afars and Issas') == 'djib
 panel = stuffapp._series_panel_for_row(
     {'country': 'French Somaliland', 'series': '', 'date_1': 1952})
 assert panel is not None, 'French Somaliland should get a history panel'
-assert panel['title'] == 'Djibouti' and panel['era']['label'] == 'The Djibouti franc', panel
+# The panel is headed by the name on the note; the modern nation follows as 'now …'.
+assert panel['title'] == 'French Somaliland' and panel['now'] == 'Djibouti' \
+    and panel['era']['label'] == 'The Djibouti franc', panel
 # Boundary years and the other two bands still resolve.
 for y, label in ((1910, 'French Somaliland'), (1949, 'French Somaliland'),
                  (1977, 'The Djibouti franc'), (2020, 'Independent Djibouti')):
@@ -184,17 +186,20 @@ assert got2 == expected2, f"\nexpected {expected2}\ngot      {got2}"
 # The colonial panels still render with their own title and eras.
 p = stuffapp._series_panel_for_row(
     {'country': 'Pennsylvania Colony', 'series': '', 'date_1': 1773})
-assert p and p['title'] == 'Colonial America' and p['era']['span'] == '1690–1774', p
+assert p and p['title'] == 'Pennsylvania Colony' and p['now'] == 'United States' \
+    and p['era']['span'] == '1690–1774', p
 p = stuffapp._series_panel_for_row(
     {'country': 'Rhode Island and Providence Plantations', 'series': '', 'date_1': 1780})
-assert p and p['title'] == 'Colonial America' and p['era']['span'] == '1775–1783', p
+assert p and p['title'] == 'Rhode Island and Providence Plantations' \
+    and p['era']['span'] == '1775–1783', p
 print('COLONIAL ASSERTIONS PASSED')
 
 # Portuguese Guinea maps to Guinea-Bissau with a panel for the 1971 notes.
 assert stuffapp._nation_sort_name('Portuguese Guinea') == 'Guinea-Bissau'
 p = stuffapp._series_panel_for_row(
     {'country': 'Portuguese Guinea', 'series': '', 'date_1': 1971})
-assert p and p['title'] == 'Guinea-Bissau' and p['era']['label'] == 'Portuguese Guinea', p
+assert p and p['title'] == 'Portuguese Guinea' and p['now'] == 'Guinea-Bissau' \
+    and p['era']['label'] == 'Portuguese Guinea', p
 for y in (1914, 1975, 2005):
     p = stuffapp._series_panel_for_row({'country': 'Portuguese Guinea', 'series': '', 'date_1': y})
     assert p and p['era'], (y, p)
@@ -205,9 +210,10 @@ print('GUINEA-BISSAU ASSERTIONS PASSED')
 assert stuffapp._nation_sort_name('Bermuda') == 'Bermuda'
 assert stuffapp._nation_sort_name('British Guiana') == 'Guyana'
 p = stuffapp._series_panel_for_row({'country': 'Bermuda', 'series': '', 'date_1': 1952})
-assert p and p['title'] == 'Bermuda' and p['era']['label'] == 'The Bermuda pound', p
+assert p and p['title'] == 'Bermuda' and not p['now'] and p['era']['label'] == 'The Bermuda pound', p
 p = stuffapp._series_panel_for_row({'country': 'British Guiana', 'series': '', 'date_1': 1942})
-assert p and p['title'] == 'Guyana' and 'West Indian dollar' in p['era']['label'], p
+assert p and p['title'] == 'British Guiana' and p['now'] == 'Guyana' \
+    and 'West Indian dollar' in p['era']['label'], p
 
 # A year outside every band clamps to the nearest band instead of
 # dropping the panel (Malta's bands start at 1800; 1750 still panels).

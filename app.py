@@ -5469,9 +5469,17 @@ def _series_panel_for_row(row):
         _row_get(row, 'denomination') or ''))
     if era is None:
         return None
+    # The panel is headed by the name on the note ('Southern Rhodesia',
+    # 'British Honduras'), not the modern nation it files under — the
+    # same rule as the collection report — with the nation it became
+    # shown after it as 'now Zimbabwe' (Mark, 2026-09-15). Because the
+    # title is part of the panel signature, a run of notes under one
+    # era splits where the issuing name changes.
+    country_raw = (_row_get(row, 'country') or '').strip()
     return {
         'country_key': country_key,
-        'title': _country_eras_for(country_key)[0],
+        'title': country_raw or _country_eras_for(country_key)[0],
+        'now': _banknote_modern_name(country_raw),
         'title_span': '',
         'note_type': None,
         'series': (_row_get(row, 'series') or '').strip(),

@@ -7,6 +7,11 @@
 
   <div class="usp-head">
     <span class="usp-class">{{ _panel.title }}</span>
+    {# The nation the issuing name became — 'now Zimbabwe' — as on the
+       report's section heads. #}
+    {% if _panel.now %}
+    <span class="usp-now">now {{ _panel.now }}</span>
+    {% endif %}
     {# US panels: every denomination the series was issued in, right after
        the series name. #}
     {% if _panel.denoms %}

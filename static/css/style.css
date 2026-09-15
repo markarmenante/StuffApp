@@ -3861,6 +3861,10 @@ input[type="date"] { -webkit-appearance: none; }
 .usp-span, .usp-clause-span {
   font-size: 12px; color: var(--text-label); font-variant-numeric: tabular-nums;
 }
+/* 'now Zimbabwe' after a historical issuing name. */
+.usp-now {
+  font-size: 12px; color: var(--text-label); font-style: italic;
+}
 .usp-series {
   margin-left: auto; font-size: 12px; color: var(--text-secondary);
 }
