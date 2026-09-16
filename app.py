@@ -37346,7 +37346,7 @@ def _rarity_prompt(category, row):
         task = f"""You are a professional paper-money specialist establishing the RARITY and POPULATION standing of ONE banknote: {label}.
 
 Find, in this order of preference:
-1. The grading-service population for this exact Pick number (variety and signature included): total graded, how many at this note's grade ({grade or 'see the record'}{(' ' + _pedigree_text(row, 'grade_modifier')) if _pedigree_text(row, 'grade_modifier') else ''}), and how many finer. Sources: the PMG population report (pmgnotes.com/population-report — navigate country → Pick number), the PMG certificate-verification page for the slab number when there is one ({authority or 'grading service'} {slab or 'not slabbed'} — pmgnotes.com/certlookup/CERT/GRADE shows the note and, for many notes, "X graded at this grade, Y finer"), the PCGS Banknote population report (pcgsbanknote.com), and auction descriptions that quote the population ("tied for finest graded", "only 3 finer").
+1. The grading-service population for this exact Pick number (variety and signature included): total graded, how many at this note's grade ({grade or 'see the record'}{(' ' + _pedigree_text(row, 'grade_modifier')) if _pedigree_text(row, 'grade_modifier') else ''}), and how many finer. NOTE: pmgnotes.com's population report and cert-lookup pages sit behind a bot check and cannot be retrieved by search — do not spend searches on them. The figures come from sources that QUOTE the census: auction-lot descriptions ("PMG Population 14/3 finer", "tied for finest graded", "only 3 finer") at Heritage, Stack's Bowers, Lyn Knight and Spink, dealer listings, and the PCGS Banknote population report (pcgsbanknote.com) where it is reachable. This note is {authority or 'raw'} {slab or ''}. When nothing quotes the census for this Pick at this grade, leave the counts null and say so.
 2. Whether this note is top-pop (none finer), finest known / sole finest, tied for finest, or how many sit above it — and what a regrade or crossover would do: if it is one point below the top, say so.
 3. Rarity beyond the census: how many examples the Banknote Book, the Standard Catalog of World Paper Money or specialist literature record; how often the type has appeared at auction in the past ten years (Heritage, Stack's Bowers, Lyn Knight, Spink, Noble, Archives International); any rarity rating the catalogues give.
 
@@ -37375,7 +37375,7 @@ THE RECORD:
         authority = _pedigree_text(row, 'grading_authority')
         slabbed = bool(authority and slab)
         if slabbed:
-            standing = (f"""3. Where this specimen stands: the coin is in a {authority} holder (cert {slab}); read the census (ngccoin.com/certlookup/{slab}, the NGC Ancients census for the type) for the total graded, the number at this grade ({grade or 'see the record'}) and finer, and rank it Top Pop / Finest known / Tied finest / Below finest. Say what a regrade or crossover would change if it sits one step below the top.""")
+            standing = (f"""3. Where this specimen stands: the coin is in a {authority} holder (cert {slab}). NOTE: ngccoin.com's cert-lookup and census pages sit behind a bot check and cannot be retrieved by search — do not spend searches on them. Census figures come from sources that QUOTE the census: auction-lot descriptions ("NGC Census: 2 in this grade, 1 finer", "finest graded by NGC"), dealer listings, and the CCG/NGC press and blog posts; when none quote it for this type at this grade, leave the counts null and say so. Rank it Top Pop / Finest known / Tied finest / Below finest only from a quoted census. Say what a regrade or crossover would change if it sits one step below the top.""")
             rank_scale = "Top Pop|Finest known|Tied finest|Below finest|Unknown"
         else:
             standing = (f"""3. Where this specimen stands: the coin is RAW (not in a holder), so there is no census — do not invent one. Compare its grade ({grade or 'see the record'}), strike, surface and centering against the examples in the auction record for the type and say whether it is among the finest known, typical of what trades, or below the norm, and count how many clearly finer examples you saw in the archives.""")
@@ -38034,6 +38034,95 @@ def pedigree_summary_save(category, record_id, kind):
                (text, now, record_id))
     db.commit()
     return jsonify({'status': 'ok', 'summary': text})
+
+
+def _pedigree_cert_url(row):
+    """The grading service's verification page for the record's slab —
+    opened by the owner in their own browser, since those pages sit
+    behind a bot check no automated fetch gets past."""
+    authority = _pedigree_text(row, 'grading_authority').upper()
+    slab = re.sub(r'\s+', '', _pedigree_text(row, 'slab_number'))
+    if not slab:
+        return ''
+    if 'NGC' in authority:
+        return f'https://www.ngccoin.com/certlookup/{slab}/'
+    if 'PMG' in authority:
+        grade = _pedigree_row_get(row, 'grade_numeric')
+        if grade in (None, ''):
+            m = re.search(r'\d{1,2}', _pedigree_text(row, 'grade'))
+            grade = m.group(0) if m else ''
+        try:
+            grade = str(int(float(grade))) if grade not in (None, '') else ''
+        except (TypeError, ValueError):
+            grade = ''
+        return f'https://www.pmgnotes.com/certlookup/{slab}/{grade}/' if grade \
+            else f'https://www.pmgnotes.com/certlookup/{slab}/'
+    if 'PCGS' in authority:
+        return f'https://www.pcgs.com/cert/{slab}'
+    return ''
+
+
+_RARITY_HAND_FIELDS = {
+    'known': 'rarity_known', 'same': 'rarity_same', 'finer': 'rarity_finer',
+    'die_count': 'rarity_die_count', 'market': 'rarity_market', 'census': 'rarity_census',
+}
+
+
+@app.route('/<category>/<record_id>/pedigree/rarity/fields', methods=['POST'])
+def rarity_fields_save(category, record_id):
+    """Hand-entered census figures — the owner reads them off the NGC /
+    PMG cert page (which the research cannot reach) and types them into
+    the boxes. A Finer count sets the standing when the research left it
+    open: 0 finer → Top Pop, otherwise Below finest."""
+    _pedigree_guard(category)
+    db = get_db()
+    row = _pedigree_record(db, category, record_id)
+    if row is None:
+        return jsonify({'error': 'not found'}), 404
+    payload = request.get_json(silent=True) or {}
+    sets, params = [], []
+    for key, col in _RARITY_HAND_FIELDS.items():
+        if key not in payload:
+            continue
+        raw = payload.get(key)
+        value = None if raw in (None, '') else _pedigree_clean_int(raw)
+        if raw not in (None, '') and value is None:
+            return jsonify({'error': f'{key} must be a whole number'}), 400
+        sets.append(f'{col} = ?'); params.append(value)
+    if not sets:
+        return jsonify({'error': 'nothing to save'}), 400
+    table = CATEGORIES[category]['table']
+    now = datetime.utcnow().isoformat()
+    rank = _pedigree_text(row, 'rarity_rank')
+    if 'finer' in payload:
+        finer = _pedigree_clean_int(payload.get('finer'))
+        census_scale = rank.lower() in ('', 'top pop', 'finest known', 'tied finest', 'below finest')
+        if finer is not None and census_scale:
+            rank = 'Top Pop' if finer == 0 else 'Below finest'
+            sets.append('rarity_rank = ?'); params.append(rank)
+    source = _pedigree_text(row, 'rarity_source')
+    if 'entered by hand' not in source.lower():
+        source = (source + ' · ' if source else '') + 'census entered by hand from the cert page'
+        sets.append('rarity_source = ?'); params.append(source)
+    if not _pedigree_text(row, 'rarity_searched_at'):
+        sets.append('rarity_searched_at = ?'); params.append(now)
+    sets.append('updated_at = ?'); params.append(now)
+    params.append(record_id)
+    db.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE id = ?", params)
+    db.commit()
+    row = _pedigree_record(db, category, record_id)
+    return jsonify({
+        'status': 'ok',
+        'known': row['rarity_known'], 'same': row['rarity_same'], 'finer': row['rarity_finer'],
+        'die_count': row['rarity_die_count'], 'market': row['rarity_market'],
+        'census': row['rarity_census'], 'rank': row['rarity_rank'] or '',
+        'source': row['rarity_source'] or '',
+    })
+
+
+@app.template_filter('pedigree_cert_url')
+def pedigree_cert_url_filter(row):
+    return _pedigree_cert_url(row)
 
 
 # ── Bulk runs (the overview pages) ───────────────────────────────────

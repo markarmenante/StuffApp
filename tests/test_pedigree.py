@@ -277,6 +277,44 @@ assert 'class="pdg-restr" data-state="ok"' in html
 # Unknown kind / lost job.
 assert client.post('/coins/c1/pedigree/nonsense/research').status_code == 404
 assert client.get('/coins/c1/pedigree/provenance/job/nope').status_code == 404
+# Cert-page links: the research cannot get past the grading services'
+# bot check, so the owner opens the page and types the census in.
+cu = stuffapp._pedigree_cert_url
+assert cu({'grading_authority': 'NGC', 'slab_number': '5785794-005'}) == 'https://www.ngccoin.com/certlookup/5785794-005/'
+assert cu({'grading_authority': 'PMG', 'slab_number': '8078166-001', 'grade_numeric': 65}) == 'https://www.pmgnotes.com/certlookup/8078166-001/65/'
+assert cu({'grading_authority': 'PMG', 'slab_number': '8078166-001', 'grade': '64 EPQ'}) == 'https://www.pmgnotes.com/certlookup/8078166-001/64/'
+assert cu({'grading_authority': 'PCGS Banknote', 'slab_number': '12345'}) == 'https://www.pcgs.com/cert/12345'
+assert cu({'grading_authority': '', 'slab_number': '1'}) == '' and cu({'grading_authority': 'NGC', 'slab_number': ''}) == ''
+assert 'Open PMG cert' in client.get('/banknotes/b1').get_data(as_text=True)
+assert 'Open ' not in client.get('/coins/c1').get_data(as_text=True).split('Rarity &amp; Population')[1].split('pdg-tiles')[0]
+# Hand-entered census: numbers save, 0 finer → Top Pop, a note is added to the source.
+r = client.post('/banknotes/b1/pedigree/rarity/fields', json={'known': '412', 'same': 30, 'finer': '0'})
+assert r.status_code == 200, r.get_data(as_text=True)
+d = r.get_json()
+assert d['known'] == 412 and d['same'] == 30 and d['finer'] == 0 and d['rank'] == 'Top Pop'
+assert 'entered by hand' in d['source']
+r = client.post('/banknotes/b1/pedigree/rarity/fields', json={'finer': 3})
+assert r.get_json()['rank'] == 'Below finest'
+r = client.post('/banknotes/b1/pedigree/rarity/fields', json={'finer': ''})
+assert r.get_json()['finer'] is None
+assert client.post('/banknotes/b1/pedigree/rarity/fields', json={'finer': 'lots'}).status_code == 400
+assert client.post('/banknotes/b1/pedigree/rarity/fields', json={}).status_code == 400
+# Hand entry on an unresearched note stamps it as researched.
+with stuffapp.app.app_context():
+    assert stuffapp.get_db().execute("SELECT rarity_searched_at FROM banknotes WHERE id='b1'").fetchone()[0]
+    stuffapp.get_db().execute("UPDATE banknotes SET rarity_searched_at = NULL, rarity_known = NULL, rarity_same = NULL, "
+                              "rarity_finer = NULL, rarity_rank = NULL, rarity_source = NULL WHERE id = 'b1'")
+    stuffapp.get_db().commit()
+# A raw-scale standing is left alone by a hand-entered Finer.
+with stuffapp.app.app_context():
+    stuffapp.get_db().execute("UPDATE coins SET rarity_rank = 'Among the finest' WHERE id = 'c1'"); stuffapp.get_db().commit()
+assert client.post('/coins/c1/pedigree/rarity/fields', json={'finer': 2}).get_json()['rank'] == 'Among the finest'
+with stuffapp.app.app_context():
+    stuffapp.get_db().execute("UPDATE coins SET rarity_rank = 'Below finest', rarity_finer = 1 WHERE id = 'c1'"); stuffapp.get_db().commit()
+# Prompts steer away from the bot-checked pages.
+assert 'bot check' in stuffapp._rarity_prompt('banknotes', {'id': 'b1', 'pick_number': 'P-55b', 'grade': '65 EPQ', 'slab_number': '8078166-001', 'grading_authority': 'PMG'})
+assert 'bot check' in stuffapp._rarity_prompt('coins', {'id': 'c1', 'grade': 'Ch AU', 'slab_number': '5785794-005', 'grading_authority': 'NGC'})
+assert 'bot check' not in stuffapp._rarity_prompt('coins', {'id': 'c1', 'grade': 'VF'})
 # Summary edits save.
 r = client.post('/coins/c1/pedigree/rarity/summary', json={'summary': 'My own note.'})
 assert r.status_code == 200

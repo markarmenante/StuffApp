@@ -66,6 +66,11 @@
     <span class="pdg-title">{% if category == 'banknotes' %}Census &amp; rarity{% else %}Rarity &amp; die study{% endif %}</span>
     <span class="pdg-stamp" id="pdgRarStamp">{% if _ra_searched %}researched {{ _ra_searched|short_date }}{% if r['rarity_confidence'] is not none %} · confidence {{ r['rarity_confidence']|pedigree_pct }}{% endif %}{% else %}not yet researched{% endif %}</span>
     <span class="pdg-spacer"></span>
+    {%- set _cert_url = r|pedigree_cert_url if r else '' -%}
+    {% if _cert_url %}
+    <a class="pdg-link" href="{{ _cert_url }}" target="_blank" rel="noopener"
+       title="The grading service's verification page for cert {{ r['slab_number'] }} — it sits behind a bot check the research cannot pass, so open it here and type the census into the boxes (click a number to edit)">Open {{ r['grading_authority'] }} cert ↗</a>
+    {% endif %}
     <a class="pdg-link" href="{{ url_for('pedigree_overview', category=category, kind='rarity') }}" title="Every {{ _noun }}'s rarity standing on one page">All {{ 'coins' if category == 'coins' else 'notes' }} ›</a>
     <button type="button" class="toolbar-btn pill pdg-research" id="pdgRarResearch"
             data-kind="rarity"
@@ -73,8 +78,8 @@
   </div>
   <div class="pdg-error" id="pdgRarError" style="display:none"></div>
   {%- set _slabbed = r and r['grading_authority'] and r['slab_number'] -%}
-  {%- macro tile(id, value, label, title, wide=false) -%}
-  <div class="pdg-tile{% if wide %} pdg-tile-wide{% endif %}" title="{{ title }}"><span class="pdg-tile-n" id="{{ id }}">{{ value if value is not none and value != '' else '—' }}</span><span class="pdg-tile-l">{{ label }}</span></div>
+  {%- macro tile(id, value, label, title, wide=false, field='') -%}
+  <div class="pdg-tile{% if wide %} pdg-tile-wide{% endif %}{% if field %} pdg-tile-edit{% endif %}" title="{{ title }}{% if field %} — click the number to enter it by hand{% endif %}"><span class="pdg-tile-n" id="{{ id }}"{% if field %} data-field="{{ field }}" tabindex="0"{% endif %}>{{ value if value is not none and value != '' else '—' }}</span><span class="pdg-tile-l">{{ label }}</span></div>
   {%- endmacro -%}
   {# The boxes differ by category: a note has a grading-service census
      (graded / at this grade / finer); a coin usually does not — most are
@@ -82,17 +87,17 @@
      and a slabbed coin shows its NGC census on the line below. #}
   <div class="pdg-tiles" data-slabbed="{{ '1' if _slabbed else '0' }}">
     {% if category == 'banknotes' %}
-    {{ tile('pdgRarKnown', r['rarity_known'], 'Graded', 'How many of this Pick number the grading service has graded, in any grade') }}
-    {{ tile('pdgRarSame', r['rarity_same'], 'This grade', 'How many sit at exactly this note\'s grade') }}
-    {{ tile('pdgRarFiner', r['rarity_finer'], 'Finer', 'How many are graded higher than this note — zero means you own the best certified example') }}
+    {{ tile('pdgRarKnown', r['rarity_known'], 'Graded', 'How many of this Pick number the grading service has graded, in any grade', field='known') }}
+    {{ tile('pdgRarSame', r['rarity_same'], 'This grade', 'How many sit at exactly this note\'s grade', field='same') }}
+    {{ tile('pdgRarFiner', r['rarity_finer'], 'Finer', 'How many are graded higher than this note — zero means you own the best certified example', field='finer') }}
     {% else %}
-    {{ tile('pdgRarKnown', r['rarity_known'], 'Recorded', 'Specimens of the type in the auction archives and die study — an upper bound, since the same coin can sell more than once') }}
-    {{ tile('pdgRarDieCount', r['rarity_die_count'], 'This die pair', 'Specimens the die study records from this coin\'s obverse and reverse dies') }}
-    {{ tile('pdgRarFiner', r['rarity_finer'], 'Finer seen', 'Clearly finer examples seen in the auction record — a judgement for a raw coin, a census count for a slabbed one') }}
+    {{ tile('pdgRarKnown', r['rarity_known'], 'Recorded', 'Specimens of the type in the auction archives and die study — an upper bound, since the same coin can sell more than once', field='known') }}
+    {{ tile('pdgRarDieCount', r['rarity_die_count'], 'This die pair', 'Specimens the die study records from this coin\'s obverse and reverse dies', field='die_count') }}
+    {{ tile('pdgRarFiner', r['rarity_finer'], 'Finer seen', 'Clearly finer examples seen in the auction record — a judgement for a raw coin, a census count for a slabbed one', field='finer') }}
     {% endif %}
     <div class="pdg-tile pdg-tile-wide" title="{% if category == 'banknotes' %}Top Pop = none finer in the census; Tied finest = others share the top grade; Below finest = the Finer box says how many{% else %}For a raw coin: among the finest known, typical of what trades, or below the norm — judged against the auction record. A slabbed coin uses the census scale (Top Pop, Tied finest, Below finest).{% endif %}"><span class="pdg-tile-n pdg-rank" id="pdgRarRank" data-rank="{{ (r['rarity_rank'] or '')|lower if r else '' }}">{{ r['rarity_rank'] if r and r['rarity_rank'] else '—' }}</span><span class="pdg-tile-l">Standing</span></div>
     {{ tile('pdgRarRating', r['rarity_rating'], 'Rarity', 'The reference book\'s own rating for the type, independent of grade — HGC R1 common / R2 scarce / R3 rare; RIC C, S, R, R2–R5; the Banknote Book or SCWPM for notes', wide=true) }}
-    {{ tile('pdgRarMarket', r['rarity_market'], 'At auction, 10 yrs', 'How many times the type has come to auction in the past ten years — how liquid it is') }}
+    {{ tile('pdgRarMarket', r['rarity_market'], 'At auction, 10 yrs', 'How many times the type has come to auction in the past ten years — how liquid it is', field='market') }}
   </div>
   <div class="pdg-facts pdg-facts-col">
     {% if category == 'coins' %}
@@ -116,7 +121,8 @@
   'urls': {
     'research': url_for('pedigree_research_start', category=category, record_id=r['id'], kind='KIND'),
     'events': url_for('provenance_events_route', category=category, record_id=r['id']),
-    'summary': url_for('pedigree_summary_save', category=category, record_id=r['id'], kind='KIND')
+    'summary': url_for('pedigree_summary_save', category=category, record_id=r['id'], kind='KIND'),
+    'fields': url_for('rarity_fields_save', category=category, record_id=r['id'])
   }
 }|tojson }}</script>
 <script>
@@ -295,6 +301,43 @@
         btn.disabled = false; btn.textContent = original;
       }
     });
+  });
+
+  // ── Census boxes: click a number to type it in by hand ──────────
+  // The NGC / PMG cert pages sit behind a bot check the research cannot
+  // pass; the owner opens the cert link, reads the figures, enters them.
+  document.querySelectorAll('.pdg-tile-n[data-field]').forEach(el => {
+    const open = () => {
+      if (el.querySelector('input')) return;
+      const current = el.textContent.trim();
+      const input = document.createElement('input');
+      input.type = 'text'; input.inputMode = 'numeric'; input.className = 'pdg-tile-input';
+      input.value = current === '—' ? '' : current;
+      el.textContent = ''; el.appendChild(input); input.focus(); input.select();
+      let done = false;
+      const finish = async (save) => {
+        if (done) return; done = true;
+        const value = input.value.trim();
+        el.textContent = save ? (value || '—') : current;
+        if (!save || value === (current === '—' ? '' : current)) return;
+        try {
+          const res = await fetch(D.urls.fields, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify({[el.dataset.field]: value})});
+          const data = await readJson(res);
+          const n = (v) => (v == null ? '—' : v);
+          el.textContent = n(data[el.dataset.field]);
+          if (data.rank != null) { $('pdgRarRank').textContent = data.rank || '—'; $('pdgRarRank').dataset.rank = (data.rank || '').toLowerCase(); }
+          if (data.source) { $('pdgRarSource').textContent = data.source; $('pdgRarSourceRow').style.display = ''; }
+          showError('pdgRarError', '');
+        } catch (err) { el.textContent = current; showError('pdgRarError', 'Could not save: ' + err.message); }
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      });
+      input.addEventListener('blur', () => finish(true));
+    };
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !el.querySelector('input')) { e.preventDefault(); open(); } });
   });
 
   // ── Summary text: click to edit, blur to save ───────────────────

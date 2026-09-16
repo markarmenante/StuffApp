@@ -4153,3 +4153,7 @@ input[type="date"] { -webkit-appearance: none; }
 .pdg-restr[data-state="warn"] { background: #fff4d6; color: #7a5a00; }
 .pdg-restr[data-state="none"] { background: #f1f1f4; color: #555; }
 .pdg-ov-restriction .pdg-restr { font-size: 11.5px; }
+.pdg-tile-edit .pdg-tile-n { cursor: text; border-bottom: 1px dashed transparent; }
+.pdg-tile-edit:hover .pdg-tile-n { border-bottom-color: var(--border, #d9d9e0); }
+.pdg-tile-input { width: 4.5em; font: inherit; font-size: 16px; font-weight: 600; text-align: center;
+  padding: 0 4px; border: 1px solid var(--blue, #4b6bff); border-radius: 4px; background: #fff; }
