@@ -38062,14 +38062,17 @@ def _pedigree_cert_url(row):
         return f'https://www.ngccoin.com/certlookup/{slab}/{m.group(1)}/' if m \
             else f'https://www.ngccoin.com/certlookup/{slab}/'
     if 'PMG' in authority:
+        # PMG's lookup takes the cert number and the grade; the grade
+        # segment is the number alone — "64 EPQ" → 64, "Net 30" → 30, the
+        # EPQ / PPQ designation and Net / Apparent qualifiers stay out.
         grade = _pedigree_row_get(row, 'grade_numeric')
-        if grade in (None, ''):
-            m = re.search(r'\d{1,2}', _pedigree_text(row, 'grade'))
-            grade = m.group(0) if m else ''
         try:
             grade = str(int(float(grade))) if grade not in (None, '') else ''
         except (TypeError, ValueError):
             grade = ''
+        if not grade:
+            m = re.search(r'\b([1-9]\d?|70)\b', _pedigree_text(row, 'grade'))
+            grade = m.group(1) if m else ''
         return f'https://www.pmgnotes.com/certlookup/{slab}/{grade}/' if grade \
             else f'https://www.pmgnotes.com/certlookup/{slab}/'
     if 'PCGS' in authority:

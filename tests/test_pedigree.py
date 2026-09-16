@@ -288,6 +288,9 @@ assert cu({'grading_authority': 'NGC', 'slab_number': '6034763-001', 'date_1': 1
 assert cu({'grading_authority': 'NGC', 'slab_number': '6034763-001', 'date_1': 1921, 'grade': ''}) == 'https://www.ngccoin.com/certlookup/6034763-001/'
 assert cu({'grading_authority': 'PMG', 'slab_number': '8078166-001', 'grade_numeric': 65}) == 'https://www.pmgnotes.com/certlookup/8078166-001/65/'
 assert cu({'grading_authority': 'PMG', 'slab_number': '8078166-001', 'grade': '64 EPQ'}) == 'https://www.pmgnotes.com/certlookup/8078166-001/64/'
+assert cu({'grading_authority': 'PMG', 'slab_number': '8078166-001', 'grade': 'Net 30'}) == 'https://www.pmgnotes.com/certlookup/8078166-001/30/'
+assert cu({'grading_authority': 'PMG', 'slab_number': '8078166-001', 'grade': '58 PPQ', 'grade_numeric': 58.0}) == 'https://www.pmgnotes.com/certlookup/8078166-001/58/'
+assert cu({'grading_authority': 'PMG', 'slab_number': '8078166 001', 'grade': ''}) == 'https://www.pmgnotes.com/certlookup/8078166001/'
 assert cu({'grading_authority': 'PCGS Banknote', 'slab_number': '12345'}) == 'https://www.pcgs.com/cert/12345'
 assert cu({'grading_authority': '', 'slab_number': '1'}) == '' and cu({'grading_authority': 'NGC', 'slab_number': ''}) == ''
 assert 'Open PMG cert' in client.get('/banknotes/b1').get_data(as_text=True)
