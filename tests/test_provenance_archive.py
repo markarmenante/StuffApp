@@ -173,3 +173,48 @@ r = client.post(f'/coins/{coin_id}/apply-lookup-specs', json={'updates': {'metal
 assert r.status_code == 200 and r.get_json()['fields'] == ['metal', 'weight'], r.get_json()
 
 print('test_provenance_archive: ok')
+
+# ── 3. The Dionysios case: the identified lot IS the purchase sale, so
+#      it is absent from the events — the match field still carries it,
+#      the record stores it with its URL, and the fill runs off it.
+r = client.post('/coins/new', data={'region': 'Syracuse', 'authority': 'Dionysios I', 'denomination': 'Dekadrachm',
+                                    'date_1': '-400', 'weight': '12.24', 'owner': 'Mark', 'vendor': 'CNG',
+                                    'purchase_date': '2024-01-09'}, headers=hdr)
+coin2 = r.get_json()['id']
+def fake_model_call_match(kind, category, prompt, images):
+    return {'events': [
+        {'date': '1999-09-15', 'date_text': '15 September 1999', 'kind': 'auction', 'house': 'CNG',
+         'sale': 'CNG 51', 'lot': '152', 'price': '', 'url': '', 'basis': "stated in the record's pedigree",
+         'confidence': 0.55, 'notes': '', 'candidate': ''}],
+        'match': {'candidate': 'C1', 'confidence': 0.9, 'basis': '34 mm, 43.16 g, 9h, same dies'},
+        'summary': 'Only C1 matches; it is the purchase sale so it is not an event.', 'earliest': '1999-09-15',
+        'restriction': 'None applies', 'confidence': 0.6, 'notes': '', '_searches': 3}
+stuffapp._pedigree_model_call = fake_model_call_match
+SPEC_INPUT.clear()
+with stuffapp.app.app_context():
+    db = stuffapp.get_db()
+    row2 = db.execute("SELECT * FROM coins WHERE id = ?", (coin2,)).fetchone()
+    res2 = stuffapp._run_pedigree_research('provenance', 'coins', row2)
+assert res2['match_title'] == 'Noble Numismatics, Auction 138, Lot 2867 (18.03.2025)', res2['match_title']
+assert res2['match_url'] == 'https://www.acsearch.info/search.html?id=14261144'
+assert res2['match_basis'] == '34 mm, 43.16 g, 9h, same dies'
+assert 'AUCTION LOT MATCHED TO THIS COIN — Noble Numismatics' in SPEC_INPUT['description']   # the fill ran
+assert set(res2['filled']) == {'die_axis', 'size', 'coin_references', 'obv_rev', 'grade_condition'}, res2['filled']
+assert [e['house'] for e in res2['events']] == ['CNG']              # the purchase sale stays out of the chain
+with stuffapp.app.app_context():
+    c2 = stuffapp.get_db().execute("SELECT * FROM coins WHERE id = ?", (coin2,)).fetchone()
+assert c2['provenance_match_title'].startswith('Noble Numismatics') and c2['provenance_match_url'].endswith('id=14261144')
+assert c2['coin_references'] == 'HGC 6, 428' and c2['vendor'] == 'CNG' and c2['purchase_date'] == '2024-01-09'
+html = client.get(f'/coins/{coin2}').get_data(as_text=True)
+assert 'Identified in the archive:' in html and 'id=14261144' in html
+
+# A low-confidence match (below 0.5) is neither stored nor filled from.
+def fake_model_call_weak(kind, category, prompt, images):
+    d = fake_model_call_match(kind, category, prompt, images)
+    d['match'] = {'candidate': 'C2', 'confidence': 0.3, 'basis': 'weight only'}
+    return d
+stuffapp._pedigree_model_call = fake_model_call_weak
+with stuffapp.app.app_context():
+    res3 = stuffapp._run_pedigree_research('provenance', 'coins', row2)
+assert res3['match_title'] == '' and res3['match_url'] == '' and res3['filled'] == [], res3
+print('test_provenance_archive (match): ok')

@@ -52,6 +52,9 @@
     <span><b>Earliest documented:</b> <span id="pdgEarliest">{{ (r['provenance_earliest'] if r and 'provenance_earliest' in r.keys() and r['provenance_earliest'] else '—') }}</span></span>
     {%- set _restr = (r['provenance_restriction'] if r and 'provenance_restriction' in r.keys() and r['provenance_restriction'] else '') -%}
     <span><b>Import restriction:</b> <span id="pdgRestriction" class="pdg-restr" data-state="{{ _restr|restriction_state }}" title="US import restrictions under the CPIA for the coin's origin, and whether the earliest documented appearance predates the designation">{{ _restr or '—' }}</span></span>
+    {%- set _match_title = (r['provenance_match_title'] if r and 'provenance_match_title' in r.keys() and r['provenance_match_title'] else '') -%}
+    {%- set _match_url = (r['provenance_match_url'] if r and 'provenance_match_url' in r.keys() and r['provenance_match_url'] else '') -%}
+    <span id="pdgMatchWrap"{% if not _match_title %} style="display:none"{% endif %}><b>Identified in the archive:</b> <a id="pdgMatch" class="pdg-link" href="{{ _match_url or '#' }}" target="_blank" rel="noopener" title="The auction lot the research matched to this {{ _noun }} by weight, dies and photographs — the sale you bought it from is shown here rather than in the chain">{{ _match_title }}</a></span>
   </div>
   <div class="pdg-summary-wrap">
     <div class="pdg-summary{% if not _pv_summary %} is-empty{% endif %}" id="pdgProvSummary" title="Click to edit" tabindex="0">{{ _pv_summary|format_results }}</div>
@@ -258,6 +261,12 @@
     restr.dataset.state = restrictionState(data.restriction);
     setSummary('pdgProvSummary', 'pdgProvSummaryEdit', data.summary || '');
     $('pdgProvStamp').textContent = `researched ${fmtDate((data.searched_at || '').slice(0, 10))}` + (data.confidence != null ? ` · confidence ${pct(data.confidence)}` : '');
+    if ($('pdgMatchWrap')) {
+      $('pdgMatchWrap').style.display = data.match_title ? '' : 'none';
+      $('pdgMatch').textContent = data.match_title || '';
+      $('pdgMatch').href = data.match_url || '#';
+      if (data.match_basis) $('pdgMatch').title = data.match_basis;
+    }
     // A matched archive lot filled empty fields on the record: the rest
     // of the page still shows the old blanks, so reload once it lands.
     if (Array.isArray(data.filled) && data.filled.length) {

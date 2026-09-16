@@ -37106,6 +37106,11 @@ _PEDIGREE_COLUMNS = (
     'rarity_die_count INTEGER',   # coins: specimens known of this die pair
     'rarity_market INTEGER',      # both: appearances at auction, last ten years
     'rarity_census INTEGER',      # coins in a holder: NGC census total for the type
+    # The archive lot the research identified as THIS specimen (16 Sep
+    # 2026) — kept even when it is the sale the owner bought from, which
+    # the events list excludes, so the identification is not lost.
+    'provenance_match_title TEXT',
+    'provenance_match_url TEXT',
 )
 
 _PROVENANCE_EVENT_KINDS = ('auction', 'dealer', 'collection', 'publication',
@@ -37607,6 +37612,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
      "confidence": 0.0-1.0, "notes": "one line of context, or ''",
      "candidate": "the tag of the archive candidate this event came from (C1, C2 …), or ''"}}
   ],
+  "match": {{"candidate": "the tag of the archive candidate that IS this coin, or ''", "confidence": 0.0-1.0, "basis": "what proves it — diameter, die axis, dies, flan, marks"}} — report the identified candidate HERE even when it is the sale the owner bought from (that sale still stays out of the events list),
   "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, which archive candidates you rejected and why, and what you searched without result. Mention the hammer prices found.",
   "earliest": "the earliest documented date of THIS specimen as YYYY-MM-DD / YYYY-MM / YYYY, or ''",
   "restriction": "ONE terse line, at most 15 words, in exactly this shape — 'Italy, coins designated 2011-01-19; documented 1928, predates' or 'Greece, coins designated 2011-12-01; earliest record 2019, after designation' or 'None applies'. No sentences, no explanation (the summary carries that).",
@@ -37640,6 +37646,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
      "confidence": 0.0-1.0, "notes": "one line of context, or ''",
      "candidate": "the tag of the archive candidate this event came from (C1, C2 …), or ''"}}
   ],
+  "match": {{"candidate": "the tag of the archive candidate that IS this note, or ''", "confidence": 0.0-1.0, "basis": "what proves it — serial number, folds, holder label"}} — report the identified candidate HERE even when it is the sale the owner bought from (that sale still stays out of the events list),
   "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, prices realised, which archive candidates you rejected and why, and what you searched without result.",
   "earliest": "the earliest documented date of THIS note as YYYY-MM-DD / YYYY-MM / YYYY, or ''",
   "restriction": "'None applies' unless there is a specific reason — then one terse line of at most 15 words",
@@ -38092,6 +38099,18 @@ def fetch_provenance(category, row):
             fill_from, best = cand, conf
         if cand and not ev.get('url'):
             ev['url'] = cand['url']
+    # The model's own verdict on which candidate IS the specimen — given
+    # separately because the sale the owner bought from is excluded from
+    # the events (the Dionysios I dekadrachm, 16 Sep 2026: identified as
+    # CNG Triton XXVII, 71, then dropped for being the purchase sale).
+    match = data.get('match') if isinstance(data.get('match'), dict) else {}
+    match_cand = by_tag.get(_pedigree_clean_str(match.get('candidate'), 8).upper())
+    match_conf = _pedigree_clean_confidence(match.get('confidence')) or 0.0
+    if match_cand and match_conf >= 0.7 and match_conf >= best:
+        fill_from, best = match_cand, match_conf
+    identified = fill_from
+    if identified is None and match_cand and match_conf >= 0.5:
+        identified = match_cand
     earliest = _pedigree_clean_date(data.get('earliest'))
     dated = sorted(ev['sort_date'] for ev in events if ev['sort_date'])
     for ev in manual:
@@ -38115,6 +38134,10 @@ def fetch_provenance(category, row):
         'fill_from': ({'title': fill_from['title'], 'url': fill_from['url'],
                        'date_text': fill_from['date_text'], 'full': fill_from.get('full') or ''}
                       if fill_from else None),
+        'match_title': ((f"{identified['title']} ({identified['date_text']})" if identified.get('date_text')
+                         else identified['title']) if identified else ''),
+        'match_url': identified['url'] if identified else '',
+        'match_basis': _pedigree_clean_str(match.get('basis'), 300) if identified else '',
     }
 
 
@@ -38180,9 +38203,11 @@ def _store_provenance(category, record_id, result):
         db.execute(
             f"UPDATE {table} SET provenance_summary = ?, provenance_earliest = ?, "
             f"provenance_restriction = ?, provenance_confidence = ?, "
-            f"provenance_searched_at = ?, updated_at = ? WHERE id = ?",
+            f"provenance_searched_at = ?, provenance_match_title = ?, "
+            f"provenance_match_url = ?, updated_at = ? WHERE id = ?",
             (result['summary'], result['earliest'], result['restriction'],
-             result['confidence'], now, now, record_id))
+             result['confidence'], now, result.get('match_title') or None,
+             result.get('match_url') or None, now, record_id))
         db.commit()
         events = _provenance_events(db, category, record_id)
     finally:
@@ -38193,6 +38218,8 @@ def _store_provenance(category, record_id, result):
         'restriction': result['restriction'], 'confidence': result['confidence'],
         'searched_at': now, 'notes': result.get('notes') or '',
         'filled': filled, 'sweep_status': result.get('sweep_status') or '',
+        'match_title': result.get('match_title') or '', 'match_url': result.get('match_url') or '',
+        'match_basis': result.get('match_basis') or '',
     }
 
 
