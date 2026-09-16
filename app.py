@@ -37382,27 +37382,87 @@ THE RECORD:
     return task
 
 
-def _pedigree_parse_json(text):
+def _pedigree_json_candidates(text):
     raw = (text or '').strip()
     raw = re.sub(r'^```(?:json)?\s*', '', raw)
     raw = re.sub(r'\s*```$', '', raw)
-    try:
-        data = json.loads(raw)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
+    yield raw
     start = raw.find('{')
     end = raw.rfind('}')
-    if start < 0 or end <= start:
+    if start >= 0 and end > start:
+        body = raw[start:end + 1]
+        yield body
+        # A stray quote inside a text value ("the "Star" note") is the
+        # commonest way the model breaks its own JSON.
+        yield _pedigree_fix_stray_quotes(body)
+        # Trailing commas before a closing bracket.
+        yield re.sub(r',\s*([}\]])', r'\1', _pedigree_fix_stray_quotes(body))
+
+
+def _pedigree_fix_stray_quotes(body):
+    """Walk the text; inside a string a double quote only closes it when
+    the next non-space character is structural (: , } ]) — any other
+    quote is content and gets escaped."""
+    out = []
+    in_str = False
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if not in_str:
+            if ch == '"':
+                in_str = True
+            out.append(ch)
+        elif ch == '\\' and i + 1 < n:
+            out.append(ch); out.append(body[i + 1]); i += 1
+        elif ch == '"':
+            j = i + 1
+            while j < n and body[j] in ' \t\r\n':
+                j += 1
+            if j >= n or body[j] in ':,}]':
+                in_str = False
+                out.append(ch)
+            else:
+                out.append('\\"')
+        else:
+            out.append(ch)
+        i += 1
+    return ''.join(out)
+
+
+def _pedigree_parse_json(text):
+    """Model text → dict. Tolerant of fences, prose around the object, a
+    stray quote inside a value and trailing commas; raises RuntimeError
+    (with the decoder's message) when none of that rescues it, so the
+    caller can ask the model to re-emit."""
+    last_err = None
+    for candidate in _pedigree_json_candidates(text):
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError as e:
+            last_err = e
+            continue
+        if isinstance(data, dict):
+            return data
+        last_err = RuntimeError('not a JSON object')
+    if not (text or '').strip() or '{' not in (text or ''):
         raise RuntimeError('No JSON object in the model response.')
-    try:
-        data = json.loads(raw[start:end + 1])
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f'Could not parse the model response as JSON: {e}')
-    if not isinstance(data, dict):
-        raise RuntimeError('Model response was not a JSON object.')
-    return data
+    raise RuntimeError(f'Could not parse the model response as JSON: {last_err}')
+
+
+def _pedigree_reemit_json(client, model, kind, broken_text, error):
+    """The research turn found its answer but broke the JSON around it
+    (a quote inside a value, usually). One cheap turn — no search, no
+    photographs — rewrites that same text as strict JSON rather than
+    throwing the searches away."""
+    prompt = (f'The text below was meant to be a single JSON object but is not valid JSON '
+              f'({error}). Return EXACTLY the same content as one strict, valid JSON object — '
+              f'escape any double quotes inside string values, no markdown fences, no prose '
+              f'before or after, nothing added or removed.\n\n{broken_text}')
+    resp = client.messages.create(
+        model=model, max_tokens=4000,
+        messages=[{'role': 'user', 'content': prompt}])
+    app.logger.info('%s research: JSON re-emit stop=%s', kind, getattr(resp, 'stop_reason', None))
+    return _pedigree_parse_json(_message_text(resp))
 
 
 def _pedigree_search_budget(kind):
@@ -37470,7 +37530,14 @@ def _pedigree_model_call(kind, category, prompt, images):
                     getattr(resp, 'stop_reason', None), searches, len(text))
     if not text.strip():
         raise RuntimeError('The model returned no text (search budget or token limit hit). Try again.')
-    data = _pedigree_parse_json(text)
+    try:
+        data = _pedigree_parse_json(text)
+    except RuntimeError as e:
+        app.logger.warning('%s research %s: %s — asking the model to re-emit', kind, category, e)
+        try:
+            data = _pedigree_reemit_json(client, model, kind, text, e)
+        except transient as e2:
+            raise RuntimeError(_friendly_lookup_error(f'{kind.capitalize()} research', e2))
     data['_searches'] = searches
     return data
 
@@ -37658,7 +37725,10 @@ def _store_provenance(category, record_id, result):
 
 def fetch_rarity(category, row):
     prompt = _rarity_prompt(category, row)
-    data = _pedigree_model_call('rarity', category, prompt, _pedigree_images(category, row))
+    # No photographs on this pass: the census is looked up by Pick number,
+    # cert number and reference, and the grade fields already say what
+    # the eye would — the images are the largest fixed cost of a call.
+    data = _pedigree_model_call('rarity', category, prompt, None)
     rank = _pedigree_clean_str(data.get('rank'), 40)
     url = _pedigree_clean_str(data.get('source_url'), 600)
     if url and not re.match(r'^https?://', url, re.IGNORECASE):

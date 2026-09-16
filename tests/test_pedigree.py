@@ -72,6 +72,45 @@ try:
     raise AssertionError('expected RuntimeError')
 except RuntimeError:
     pass
+# The live failure of 2026-09-16: a quote inside the summary broke the
+# JSON ("Expecting ',' delimiter: line 9 column 582"). Rescued locally.
+broken = ('{"known": 412, "same_grade": 30, "finer": 12, "rank": "Below finest", "rating": "", '
+          '"die": "", "regrade": "", "summary": "PMG has graded 412 of the "Star" replacement notes; '
+          '"tied for finest" per Heritage.", "source": "PMG", "source_url": "", "confidence": 0.7}')
+fixed = stuffapp._pedigree_parse_json(broken)
+assert fixed['known'] == 412 and fixed['confidence'] == 0.7
+assert fixed['summary'] == 'PMG has graded 412 of the "Star" replacement notes; "tied for finest" per Heritage.'
+assert stuffapp._pedigree_parse_json('{"a": 1, "b": [1,2,],}') == {'a': 1, 'b': [1, 2]}
+assert stuffapp._pedigree_parse_json('{"s": "Stack\'s, \\"q\\" fine"}')['s'] == 'Stack\'s, "q" fine'
+assert stuffapp._pedigree_parse_json('{\n "events": [{"sale": "Sale "Triton" XVIII"}]\n}')['events'][0]['sale'] == 'Sale "Triton" XVIII'
+try:
+    stuffapp._pedigree_parse_json('{"a": 1 "b": 2}')
+    raise AssertionError('expected RuntimeError')
+except RuntimeError as e:
+    assert 'Could not parse' in str(e)
+
+
+# When local repair cannot rescue it, one search-free turn asks the
+# model to re-emit the same content as strict JSON.
+class _FakeResp:
+    stop_reason = 'end_turn'
+    def __init__(self, text):
+        self.content = [type('B', (), {'type': 'text', 'text': text})()]
+
+
+class _FakeClient:
+    def __init__(self):
+        self.prompts = []
+        self.messages = self
+    def create(self, **kw):
+        self.prompts.append(kw['messages'][0]['content'])
+        assert 'tools' not in kw
+        return _FakeResp('{"known": 5, "summary": "fixed"}')
+
+
+fc = _FakeClient()
+out = stuffapp._pedigree_reemit_json(fc, 'm', 'rarity', '{"a": 1 "b": 2}', 'Expecting delimiter')
+assert out == {'known': 5, 'summary': 'fixed'} and '{"a": 1 "b": 2}' in fc.prompts[0]
 label = stuffapp._pedigree_label('coins', {'region': 'Aegina', 'authority': 'Aegina civic',
                                            'denomination': 'Stater', 'date_1_text': '480 BC - 440 BC'})
 assert label == 'Aegina, Aegina civic, Stater — 480 BC - 440 BC', label
