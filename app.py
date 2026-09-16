@@ -38045,7 +38045,22 @@ def _pedigree_cert_url(row):
     if not slab:
         return ''
     if 'NGC' in authority:
-        return f'https://www.ngccoin.com/certlookup/{slab}/'
+        # NGC's lookup wants the grade in the URL: the numeric Sheldon grade
+        # for a modern coin, the literal NGCAncients segment for an ancient
+        # (adjectival grade with strike / surface) — that is how NGC's own
+        # indexed pages read, e.g. /certlookup/6057657-007/NGCAncients/.
+        date_1 = _coerce_number(_pedigree_row_get(row, 'date_1'))
+        grade = _pedigree_text(row, 'grade')
+        ancient = (date_1 is not None and date_1 < 500) or \
+            _pedigree_row_get(row, 'strike') not in (None, '') or \
+            'ancient' in authority.lower() or \
+            bool(re.search(r'\b(ch|choice|gem|fine|vf|xf|ef|au|ms|fdc)\b', grade, re.IGNORECASE)
+                 and not re.search(r'\d{2}', grade))
+        if ancient:
+            return f'https://www.ngccoin.com/certlookup/{slab}/NGCAncients/'
+        m = re.search(r'\b(\d{1,2})\b', grade)
+        return f'https://www.ngccoin.com/certlookup/{slab}/{m.group(1)}/' if m \
+            else f'https://www.ngccoin.com/certlookup/{slab}/'
     if 'PMG' in authority:
         grade = _pedigree_row_get(row, 'grade_numeric')
         if grade in (None, ''):

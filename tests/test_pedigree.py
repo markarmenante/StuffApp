@@ -280,7 +280,12 @@ assert client.get('/coins/c1/pedigree/provenance/job/nope').status_code == 404
 # Cert-page links: the research cannot get past the grading services'
 # bot check, so the owner opens the page and types the census in.
 cu = stuffapp._pedigree_cert_url
-assert cu({'grading_authority': 'NGC', 'slab_number': '5785794-005'}) == 'https://www.ngccoin.com/certlookup/5785794-005/'
+# NGC wants the grade in the URL — NGCAncients for an ancient, the number for a modern.
+assert cu({'grading_authority': 'NGC', 'slab_number': '5785794-005', 'date_1': -400, 'grade': 'Ch AU'}) == 'https://www.ngccoin.com/certlookup/5785794-005/NGCAncients/'
+assert cu({'grading_authority': 'NGC', 'slab_number': '5785794-005', 'grade': 'Ch VF', 'strike': 5}) == 'https://www.ngccoin.com/certlookup/5785794-005/NGCAncients/'
+assert cu({'grading_authority': 'NGC Ancients', 'slab_number': '5785794-005'}) == 'https://www.ngccoin.com/certlookup/5785794-005/NGCAncients/'
+assert cu({'grading_authority': 'NGC', 'slab_number': '6034763-001', 'date_1': 1921, 'grade': 'MS 65'}) == 'https://www.ngccoin.com/certlookup/6034763-001/65/'
+assert cu({'grading_authority': 'NGC', 'slab_number': '6034763-001', 'date_1': 1921, 'grade': ''}) == 'https://www.ngccoin.com/certlookup/6034763-001/'
 assert cu({'grading_authority': 'PMG', 'slab_number': '8078166-001', 'grade_numeric': 65}) == 'https://www.pmgnotes.com/certlookup/8078166-001/65/'
 assert cu({'grading_authority': 'PMG', 'slab_number': '8078166-001', 'grade': '64 EPQ'}) == 'https://www.pmgnotes.com/certlookup/8078166-001/64/'
 assert cu({'grading_authority': 'PCGS Banknote', 'slab_number': '12345'}) == 'https://www.pcgs.com/cert/12345'
