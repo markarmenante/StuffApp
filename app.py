@@ -23568,7 +23568,20 @@ def coin_apply_lookup_specs(record_id):
     raw = data.get('updates') or {}
     if not isinstance(raw, dict):
         return jsonify({'error': 'updates must be an object'}), 400
+    updates = _coin_apply_spec_updates(db, coin, raw, record_id)
+    return jsonify({
+        'updated': len(updates),
+        'fields': list(updates.keys()),
+        'values': updates,
+    })
 
+
+def _coin_apply_spec_updates(db, coin, raw, record_id, only_empty=False, skip=()):
+    """Coerce and write a dict of coin spec suggestions; returns the
+    updates written (empty when nothing qualified). ``only_empty`` keeps
+    every field that already holds a value (the provenance fill); ``skip``
+    names fields never to touch. Handles the date text mirror and the
+    cat_id / group resequencing when date_1 changes."""
     metal_allowed = {m.lower(): m for m in VALUE_LISTS['metal_coin']}
 
     def _coerce(field, raw_v):
@@ -23636,14 +23649,16 @@ def coin_apply_lookup_specs(record_id):
 
     updates = {}
     for k, v in raw.items():
-        if k not in COIN_SPEC_FILLABLE:
+        if k not in COIN_SPEC_FILLABLE or k in skip:
+            continue
+        if only_empty and coin[k] not in (None, ''):
             continue
         coerced = _coerce(k, v)
         if coerced in (None, ''):
             continue
         updates[k] = coerced
     if not updates:
-        return jsonify({'updated': 0, 'fields': []})
+        return {}
 
     # The detail template prefers date_1_text / date_2_text for
     # display when present. If we update the integer date columns
@@ -23685,11 +23700,7 @@ def coin_apply_lookup_specs(record_id):
                            (new_cat, record_id))
                 updates['cat_id'] = new_cat
     db.commit()
-    return jsonify({
-        'updated': len(updates),
-        'fields': list(updates.keys()),
-        'values': updates,
-    })
+    return updates
 
 
 # ---------------------------------------------------------------------------
@@ -37254,8 +37265,313 @@ _COIN_IMPORT_RESTRICTIONS = (
 )
 
 
-def _provenance_prompt(category, row, manual_events):
+# ── Auction-archive sweep (acsearch.info) ────────────────────────────
+#
+# Why this exists (16 Sep 2026): the provenance research handed the
+# model a web-search tool and asked it to find THIS coin on acsearch,
+# CoinArchives and CNG by weight. A search engine almost never surfaces
+# an individual lot for "12.24 g" and a mint name, and the tool returns
+# snippets — the model could not open a lot page to read a weight. Seven
+# coins researched that day: full answers, no auction data. acsearch's
+# own public search answers a direct query in a hundredth of a second
+# and embeds its results as JSON (title, description with the weight,
+# date, thumbnail), the lot page carries the full catalogue text with
+# the pedigree chain and a 400 px photograph; only the hammer price sits
+# behind the login. So the app queries the archive itself, keeps the
+# lots that state the coin's weight, and hands the model candidates with
+# photographs: "these weigh what your coin weighs — which IS your coin?"
+
+_ACSEARCH_SEARCH_URL = ('https://www.acsearch.info/search.html?term={term}&category={cat}'
+                        '&lot=&thesaurus=1&images=1&en=1&de=1&fr=1&it=1&es=1&ot=1'
+                        '&currency=usd&order=0')
+_ACSEARCH_LOT_URL = 'https://www.acsearch.info/search.html?id={id}'
+_ACSEARCH_CATEGORY = {'coins': '1-2', 'banknotes': '3'}
+_ACSEARCH_RESULTS_RE = re.compile(r'acsearch\.initSearchResults\s*=\s*')
+_ACSEARCH_DESC_RE = re.compile(r'<div id="details-description">(.*?)</div>', re.DOTALL)
+_ACSEARCH_TITLE_RE = re.compile(r'^(?P<house>.+?),\s*(?P<sale>.+?),\s*Lot\s+(?P<lot>.+?)\s*$',
+                                re.IGNORECASE)
+_ACSEARCH_DATE_RE = re.compile(r'^(\d{2})\.(\d{2})\.(\d{4})$')
+_ARCHIVE_WEIGHT_RE = re.compile(r'(\d{1,3}[.,]\d{1,3})\s*(?:g|gm|gr|grams?|gramm|grs?)\b',
+                                re.IGNORECASE)
+_ARCHIVE_WEIGHT_TOLERANCE = 0.02   # grams; auction records quote to the hundredth
+
+
+def _archive_weight_tolerance():
+    try:
+        return max(0.005, min(float(os.environ.get('PEDIGREE_WEIGHT_TOLERANCE',
+                                                   _ARCHIVE_WEIGHT_TOLERANCE)), 0.2))
+    except (TypeError, ValueError):
+        return _ARCHIVE_WEIGHT_TOLERANCE
+
+
+def _archive_html_text(fragment):
+    """Catalogue HTML → plain text: <br> and block ends become newlines,
+    other tags go, entities unescape, whitespace collapses per line."""
+    text = re.sub(r'(?i)<\s*br\s*/?>|</\s*(?:p|div|li|tr)\s*>', '\n', fragment or '')
+    text = re.sub(r'<[^>]+>', '', text)
+    text = html_lib.unescape(text)
+    lines = [re.sub(r'[ \t\xa0]+', ' ', ln).strip() for ln in text.splitlines()]
+    return '\n'.join(ln for ln in lines if ln).strip()
+
+
+def _archive_text_weights(text):
+    """Every gram figure a catalogue description states, as floats."""
+    out = []
+    for m in _ARCHIVE_WEIGHT_RE.finditer(text or ''):
+        try:
+            out.append(float(m.group(1).replace(',', '.')))
+        except ValueError:
+            continue
+    return out
+
+
+def _acsearch_search(term, category='1-2'):
+    """(status, lots) for one acsearch.info query — the public results
+    page, whose lots sit in an embedded JSON array. Never raises; a
+    non-200 (or a page without the array) returns (status, [])."""
+    import urllib.parse
+    url = _ACSEARCH_SEARCH_URL.format(term=urllib.parse.quote_plus(term), cat=category)
+    status, page = _market_fetch_page(url, limit=2_000_000)
+    if status != 200 or not page or _market_page_challenged(status, page):
+        return (status if status != 200 else 'challenge'), []
+    m = _ACSEARCH_RESULTS_RE.search(page)
+    if not m:
+        return status, []
+    try:
+        raw, _ = json.JSONDecoder().raw_decode(page, m.end())
+    except ValueError:
+        return status, []
+    lots = []
+    for item in (raw if isinstance(raw, list) else []):
+        if not isinstance(item, dict):
+            continue
+        try:
+            lot_id = int(item.get('id'))
+        except (TypeError, ValueError):
+            continue
+        title = html_lib.unescape(str(item.get('title') or '')).strip()
+        mt = _ACSEARCH_TITLE_RE.match(title)
+        date_text = str(item.get('date') or '').strip()
+        md = _ACSEARCH_DATE_RE.match(date_text)
+        description = _archive_html_text(str(item.get('description') or ''))
+        lots.append({
+            'id': lot_id,
+            'title': title,
+            'house': (mt.group('house') if mt else title).strip(),
+            'sale': (mt.group('sale') if mt else '').strip(),
+            'lot': (mt.group('lot') if mt else '').strip(),
+            'date_text': date_text,
+            'sort_date': f'{md.group(3)}-{md.group(2)}-{md.group(1)}' if md else '',
+            'description': description,
+            'image': str(item.get('image') or '').strip(),
+            'url': _ACSEARCH_LOT_URL.format(id=lot_id),
+        })
+    return status, lots
+
+
+def _acsearch_lot_text(lot_id):
+    """The lot page's full catalogue description (the search result is
+    cut at ~300 characters, before the pedigree), or '' when unreachable."""
+    status, page = _market_fetch_page(_ACSEARCH_LOT_URL.format(id=lot_id), limit=2_000_000)
+    if status != 200 or not page:
+        return ''
+    m = _ACSEARCH_DESC_RE.search(page)
+    return _archive_html_text(m.group(1))[:6000] if m else ''
+
+
+def _archive_reference_terms(refs, limit=2):
+    """Catalogue references as search terms: 'HGC 6, 435; SNG Cop 507'
+    → ['HGC 6 435', 'SNG Cop 507']. Pedigree clauses ('Ex CNG 100, lot
+    123') are skipped — the archive is searched by type, not by sale."""
+    out = []
+    for part in re.split(r'[;\n]+', refs or ''):
+        part = re.sub(r'\s+', ' ', part).strip(' .')
+        if not part or len(part) > 40 or re.match(r'(?i)^(ex|from|cf\.?)\b', part):
+            continue
+        if not re.search(r'\d', part):
+            continue
+        term = re.sub(r'[,()]+', ' ', part)
+        term = re.sub(r'\s+', ' ', term).strip()
+        if term and term not in out:
+            out.append(term)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _provenance_archive_queries(category, row):
+    """(queries, key) — the acsearch terms for this record and what makes
+    a hit specific: ('weight', 12.24), ('serial', 'A123456') or (None,
+    None) when only type matches are possible."""
+    text = lambda k: _pedigree_text(row, k)
+    queries = []
+
+    def add(*parts):
+        term = ' '.join(p for p in (str(x).strip() for x in parts if x) if p)
+        term = re.sub(r'\s+', ' ', term).strip()
+        if term and term.lower() not in {q.lower() for q in queries}:
+            queries.append(term)
+
+    if category == 'coins':
+        weight = None
+        try:
+            weight = float(str(_pedigree_row_get(row, 'weight') or '').replace(',', '.'))
+        except ValueError:
+            weight = None
+        if weight is not None and not (0.05 <= weight <= 1000):
+            weight = None
+        denom = text('denomination')
+        mint = text('mint') or text('region')
+        authority = text('authority')
+        refs = _archive_reference_terms(text('coin_references'))
+        if weight is not None:
+            w = f'{weight:.2f}'
+            add(mint, denom, w)
+            if authority and authority.lower() != (mint or '').lower():
+                add(authority, denom, w)
+            for ref in refs:
+                add(ref, w)
+            if not queries:
+                add(denom, w)
+            return queries[:4], ('weight', weight)
+        for ref in refs:
+            add(ref, denom)
+        add(mint, authority, denom)
+        return queries[:3], (None, None)
+
+    serial = text('serial_number')
+    country = text('country')
+    denom = text('denomination')
+    pick = text('pick_number')
+    if serial:
+        add(serial)
+        add(country, denom, serial)
+        return queries[:2], ('serial', serial)
+    add(pick, country, denom)
+    add(country, denom, text('series'))
+    return queries[:2], (None, None)
+
+
+def _provenance_archive_sweep(category, row, max_candidates=8, max_images=6):
+    """Query acsearch.info for this record and return the lots that could
+    be THIS specimen: {'candidates': [...], 'status': '<one line for the
+    summary and the log>', 'keyed': bool}. Each candidate carries the
+    full lot text and, for the first ``max_images``, its photograph as a
+    vision image. Never raises — an unreachable archive is a status line."""
+    queries, (key, key_value) = _provenance_archive_queries(category, row)
+    if not queries:
+        return {'candidates': [], 'keyed': False,
+                'status': 'archive sweep skipped: nothing to search by (no weight, references or serial number on the record)'}
+    cat = _ACSEARCH_CATEGORY.get(category, '1-2')
+    seen, statuses = {}, []
+    for i, q in enumerate(queries):
+        if i:
+            time.sleep(0.6)
+        status, lots = _acsearch_search(q, cat)
+        statuses.append(status)
+        for lot in lots:
+            seen.setdefault(lot['id'], lot)
+    if statuses and all(s != 200 for s in statuses):
+        how = statuses[0]
+        return {'candidates': [], 'keyed': False,
+                'status': ('acsearch.info unreachable from the server '
+                           f'({"bot challenge" if how == "challenge" else ("HTTP " + str(how)) if how else "no connection"})')}
+    tol = _archive_weight_tolerance()
+    matched = []
+    for lot in seen.values():
+        if key == 'weight':
+            weights = _archive_text_weights(lot['description'])
+            diffs = [abs(w - key_value) for w in weights]
+            if diffs and min(diffs) <= tol:
+                lot['weight'] = weights[diffs.index(min(diffs))]
+                lot['_diff'] = min(diffs)
+                matched.append(lot)
+        elif key == 'serial':
+            norm = lambda s: re.sub(r'[\s-]+', '', s or '').lower()
+            if norm(key_value) and norm(key_value) in norm(lot['description']):
+                matched.append(lot)
+        else:
+            matched.append(lot)
+    # Newest sale first; for a weight key the closest weight wins, newest
+    # among equals (the latest sale is likeliest the one the owner bought from).
+    matched.sort(key=lambda l: l['sort_date'] or '', reverse=True)
+    if key == 'weight':
+        matched.sort(key=lambda l: l['_diff'])
+    if key is None:
+        matched = matched[:min(max_candidates, 6)]
+    cands = matched[:max_candidates]
+    for i, c in enumerate(cands):
+        c['tag'] = f'C{i + 1}'
+        if i:
+            time.sleep(0.4)
+        c['full'] = _acsearch_lot_text(c['id']) or c['description']
+    photos = 0
+    for c in cands[:max_images]:
+        if not c.get('image'):
+            continue
+        data, ext = _market_fetch_image(c['image'].replace('.s.jpg', '.m.jpg'))
+        if not data:
+            data, ext = _market_fetch_image(c['image'])
+        if not data:
+            continue
+        media = _VISION_EXT_MEDIA.get(ext or '', 'image/jpeg')
+        c['image_b64'], c['image_media'] = _fit_vision_image(data, media)
+        photos += 1
+    if key == 'weight':
+        what = f'{len(matched)} at {key_value:.2f} g (±{tol:g})'
+    elif key == 'serial':
+        what = f'{len(matched)} quoting serial {key_value}'
+    else:
+        what = f'{len(matched)} type matches (no weight or serial on the record to pin a specimen)'
+    status_line = (f'acsearch.info: {len(queries)} quer{"y" if len(queries) == 1 else "ies"}, '
+                   f'{len(seen)} lots, {what}; {photos} photograph{"" if photos == 1 else "s"} compared')
+    app.logger.info('provenance archive sweep %s %s: %s | %s', category,
+                    _pedigree_row_get(row, 'id'), status_line, ' / '.join(queries))
+    return {'candidates': cands, 'keyed': key is not None, 'status': status_line}
+
+
+def _provenance_archive_block(category, sweep):
+    """The candidate block appended to the provenance prompt."""
+    noun = 'coin' if category == 'coins' else 'note'
+    cands = sweep.get('candidates') or []
+    if not cands:
+        return (f"\n\nAUCTION ARCHIVE SWEEP (acsearch.info, run just now for this record): {sweep.get('status')}. "
+                f"No candidate lots to judge — rely on the record's own pedigree text and your searches.")
+    if sweep.get('keyed'):
+        basis = ('each states the weight on the record' if category == 'coins'
+                 else 'each quotes the serial number on the record')
+        how = (f"compare each against THIS {noun}'s photographs: the same obverse and reverse dies, the same flan "
+               f"outline and centering, the same test cuts, countermarks, edge splits, cracks and surface marks. "
+               f"Two coins of one type can share a weight; the dies and the flan decide."
+               if category == 'coins' else
+               f"a serial-number match is conclusive; confirm against the photographs (folds, stains, holder label).")
+    else:
+        basis = 'type matches only — nothing on the record pins a specimen, so treat them as leads'
+        how = (f"compare each against THIS {noun}'s photographs; accept one only on a die, flan and mark match "
+               f"you can describe, else reject it.")
+    lines = [
+        f"\n\nCANDIDATE LOTS FROM THE AUCTION ARCHIVE (acsearch.info, queried just now for this record; {basis}). "
+        f"Their photographs are attached above, labelled with the same tags. These are the lots to judge — {how} "
+        f"A candidate that IS this {noun} becomes an auction event with its URL and its tag in \"candidate\"; then "
+        f"read that lot's description for earlier pedigree (\"Ex …\", \"From the … Collection\", hoard names, "
+        f"\"This coin\" plate citations) and record each as its own event, with the same tag. Reject the rest "
+        f"and say why in one clause of the summary. acsearch keeps hammer prices behind a login — leave price '' "
+        f"unless another source states it.",
+    ]
+    for c in cands:
+        head = f"[{c['tag']}] {c['title']} — {c['date_text'] or 'date unknown'}"
+        if c.get('weight'):
+            head += f" — {c['weight']:.2f} g"
+        head += f" — {c['url']}"
+        lines.append(head)
+        lines.append((c.get('full') or c.get('description') or '')[:1800])
+        lines.append('')
+    return '\n'.join(lines).rstrip()
+
+
+def _provenance_prompt(category, row, manual_events, archive=None):
     profile = _pedigree_profile(category, row)
+    archive_block = _provenance_archive_block(category, archive) if archive is not None else ''
     label = _pedigree_label(category, row)
     known = ''
     if manual_events:
@@ -37276,7 +37592,7 @@ The distinction that matters: THIS specimen, not the type. Thousands of coins sh
 
 Method:
 1. Read the record: the References, Reference research, Description and Notes fields often already contain pedigree ("Ex CNG 87, lot 245"; "From the collection of …"; "Ex Leu 1978"). Turn every one of those into an event, then try to verify it (find the lot, its date, hammer price and URL).
-2. Search the auction record for this specimen by weight and type: acsearch.info, CoinArchives, cngcoins.com (research archive), numisbids.com, sixbid.com, biddr.com, coins.ha.com (Heritage), stacksbowers.com, romanumismatics.com, nomosag.com, leunumismatik.com, arsclassicacoins.com (NAC), kuenker.de, Nomisma, wildwinds. Query patterns that work: "{_pedigree_text(row, 'weight') or 'WEIGHT'} g" together with the mint/authority and denomination; the reference number with the weight; "site:acsearch.info {_pedigree_text(row, 'mint') or _pedigree_text(row, 'region')} {_pedigree_text(row, 'denomination')} {_pedigree_text(row, 'weight')}"; the NGC cert number on ngccoin.com/certlookup when the coin is slabbed.
+2. The auction archive has already been swept for this record — see CANDIDATE LOTS at the end, when there are any — so spend your searches on verifying candidates and on the pedigree names they cite, not on re-finding lots by weight. Beyond that, search the auction record for this specimen by weight and type: acsearch.info, CoinArchives, cngcoins.com (research archive), numisbids.com, sixbid.com, biddr.com, coins.ha.com (Heritage), stacksbowers.com, romanumismatics.com, nomosag.com, leunumismatik.com, arsclassicacoins.com (NAC), kuenker.de, Nomisma, wildwinds. Query patterns that work: "{_pedigree_text(row, 'weight') or 'WEIGHT'} g" together with the mint/authority and denomination; the reference number with the weight; "site:acsearch.info {_pedigree_text(row, 'mint') or _pedigree_text(row, 'region')} {_pedigree_text(row, 'denomination')} {_pedigree_text(row, 'weight')}"; the NGC cert number on ngccoin.com/certlookup when the coin is slabbed.
 3. Compare each candidate to the photographs when they are supplied: same dies, same centering, same flan outline, same marks. Reject a candidate whose weight or dies differ, however similar the type.
 4. Note the dealer the owner bought it from ({_pedigree_text(row, 'vendor') or 'unknown'}, {_pedigree_text(row, 'purchase_date') or 'date unknown'}) as the final link — do NOT return that purchase as an event, it is recorded separately — but a listing of THIS coin by that dealer (their stock page, a VCoins listing) IS an event.
 5. Import restrictions: the United States restricts import of coins from these origins under the CPIA, with the coin categories designated on roughly these dates (verify): {mou}. Decide which restriction, if any, covers a coin of this origin and type, and whether the earliest documented appearance you found predates the designation date (a pre-designation appearance outside the country of origin is the documentation a collector, auction house or museum would ask for). Report it in the `restriction` field as one terse line — country, designation date, earliest documented year, predates or not — and put any reasoning in the summary instead.
@@ -37288,9 +37604,10 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
      "house": "auction house, dealer, collector or publication", "sale": "sale name / number or collection name", "lot": "lot number or ''",
      "price": "hammer or asking price with currency, or ''", "url": "direct URL to the lot / listing / page, or ''",
      "basis": "what ties this to THIS coin (weight 12.24 g + Milbank IIIa + obverse die; photo match on flan crack at 3h; stated in the record's pedigree)",
-     "confidence": 0.0-1.0, "notes": "one line of context, or ''"}}
+     "confidence": 0.0-1.0, "notes": "one line of context, or ''",
+     "candidate": "the tag of the archive candidate this event came from (C1, C2 …), or ''"}}
   ],
-  "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, and what you searched without result. Mention the hammer prices found.",
+  "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, which archive candidates you rejected and why, and what you searched without result. Mention the hammer prices found.",
   "earliest": "the earliest documented date of THIS specimen as YYYY-MM-DD / YYYY-MM / YYYY, or ''",
   "restriction": "ONE terse line, at most 15 words, in exactly this shape — 'Italy, coins designated 2011-01-19; documented 1928, predates' or 'Greece, coins designated 2011-12-01; earliest record 2019, after designation' or 'None applies'. No sentences, no explanation (the summary carries that).",
   "confidence": 0.0-1.0 (how sure you are the chain describes this exact coin),
@@ -37300,7 +37617,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
 Return an empty events list rather than a type match; a provenance you cannot tie to this specimen is worth nothing. Only events from your own searches or from the record's pedigree text — never invent a sale.
 
 THE RECORD:
-{profile}{known}"""
+{profile}{known}{archive_block}"""
     else:
         task = f"""You are a professional paper-money specialist reconstructing the PROVENANCE — the sale and ownership history — of ONE specific banknote: {label}.
 
@@ -37308,7 +37625,7 @@ The distinction that matters: THIS note, not the type. The serial number is the 
 
 Method:
 1. Read the record: References, Reference research, Description and Notes often already carry pedigree ("Ex Heritage 3033, lot 24512"; "From the … Collection"; a dealer's ticket). Turn each into an event and try to verify it (lot, date, price realised, URL).
-2. Search the auction and dealer record for this specimen by serial number, in quotation marks, with the country and denomination: coins.ha.com/currency (Heritage), stacksbowers.com, lynknight.com, spink.com, noble.com.au, archivesinternational.com, banknoteworld, ebay (sold listings), numisbids, sixbid, the Track & Price and Banknote Book databases, and Google. Also try the serial without its prefix, and the certification number on pmgnotes.com/certlookup or pcgsbanknote.com.
+2. The auction archive has already been swept for this record — see CANDIDATE LOTS at the end, when there are any. Beyond that, search the auction and dealer record for this specimen by serial number, in quotation marks, with the country and denomination: coins.ha.com/currency (Heritage), stacksbowers.com, lynknight.com, spink.com, noble.com.au, archivesinternational.com, banknoteworld, ebay (sold listings), numisbids, sixbid, the Track & Price and Banknote Book databases, and Google. Also try the serial without its prefix, and the certification number on pmgnotes.com/certlookup or pcgsbanknote.com.
 3. Compare each candidate to the photographs when supplied: same serial, same folds and marks, same holder label.
 4. Note the dealer the owner bought it from ({_pedigree_text(row, 'vendor') or 'unknown'}, {_pedigree_text(row, 'purchase_date') or 'date unknown'}) as the final link — do NOT return that purchase as an event, it is recorded separately — but a listing of THIS note by that dealer IS an event.
 5. Import restrictions: paper money is not covered by the US cultural-property MOUs; say "None applies" unless you find a specific reason otherwise.
@@ -37320,9 +37637,10 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
      "house": "auction house, dealer, collector or publication", "sale": "sale name / number or collection name", "lot": "lot number or ''",
      "price": "price realised or asking price with currency, or ''", "url": "direct URL to the lot / listing, or ''",
      "basis": "what ties this to THIS note (serial number match; PMG cert 8078166-001; stated in the record's pedigree)",
-     "confidence": 0.0-1.0, "notes": "one line of context, or ''"}}
+     "confidence": 0.0-1.0, "notes": "one line of context, or ''",
+     "candidate": "the tag of the archive candidate this event came from (C1, C2 …), or ''"}}
   ],
-  "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, prices realised, and what you searched without result.",
+  "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, prices realised, which archive candidates you rejected and why, and what you searched without result.",
   "earliest": "the earliest documented date of THIS note as YYYY-MM-DD / YYYY-MM / YYYY, or ''",
   "restriction": "'None applies' unless there is a specific reason — then one terse line of at most 15 words",
   "confidence": 0.0-1.0,
@@ -37332,7 +37650,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
 Return an empty events list rather than a type match. Only events from your own searches or from the record's pedigree text — never invent a sale.
 
 THE RECORD:
-{profile}{known}"""
+{profile}{known}{archive_block}"""
     return task
 
 
@@ -37525,7 +37843,8 @@ def _pedigree_model_call(kind, category, prompt, images):
     if images:
         content = []
         for img in images:
-            content.append({'type': 'text', 'text': f'{img["label"].capitalize()} of THIS {"coin" if category == "coins" else "note"}:'})
+            caption = img.get('caption') or f'{img["label"].capitalize()} of THIS {"coin" if category == "coins" else "note"}:'
+            content.append({'type': 'text', 'text': caption})
             content.append({'type': 'image', 'source': {
                 'type': 'base64', 'media_type': img['media_type'], 'data': img['data']}})
         content.append({'type': 'text', 'text': prompt})
@@ -37654,6 +37973,7 @@ def _normalise_provenance_event(raw):
         'basis': _pedigree_clean_str(raw.get('basis'), 400),
         'confidence': _pedigree_clean_confidence(raw.get('confidence')),
         'notes': _pedigree_clean_str(raw.get('notes'), 600),
+        'candidate': _pedigree_clean_str(raw.get('candidate'), 8).upper(),
     }
 
 
@@ -37741,13 +38061,37 @@ def fetch_provenance(category, row):
                   if ev.get('source') == 'manual']
     finally:
         db.close()
-    prompt = _provenance_prompt(category, row, manual)
-    data = _pedigree_model_call('provenance', category, prompt, _pedigree_images(category, row))
+    sweep = _provenance_archive_sweep(category, row)
+    prompt = _provenance_prompt(category, row, manual, archive=sweep)
+    images = list(_pedigree_images(category, row) or [])
+    noun = 'coin' if category == 'coins' else 'note'
+    for c in sweep.get('candidates') or []:
+        if c.get('image_b64'):
+            images.append({'label': c['tag'], 'data': c['image_b64'], 'media_type': c['image_media'],
+                           'caption': f"Archive candidate [{c['tag']}] — {c['title']} ({c['date_text'] or 'date unknown'}); "
+                                      f"NOT necessarily this {noun}:"})
+    data = _pedigree_model_call('provenance', category, prompt, images)
+    by_tag = {c['tag']: c for c in (sweep.get('candidates') or [])}
     events = []
     for raw in (data.get('events') or []):
         ev = _normalise_provenance_event(raw)
-        if ev:
-            events.append(ev)
+        if not ev:
+            continue
+        if ev.get('candidate') in by_tag and (ev.get('confidence') or 0.0) < 0.4:
+            # A candidate the model weighed and rejected is not a link in
+            # the chain; the summary says why it was set aside.
+            continue
+        events.append(ev)
+    # The archive lot the model tied to THIS specimen with the most
+    # confidence: its catalogue text fills the record's empty fields.
+    fill_from, best = None, 0.0
+    for ev in events:
+        cand = by_tag.get(ev.get('candidate') or '')
+        conf = ev.get('confidence') or 0.0
+        if cand and ev['kind'] == 'auction' and conf >= 0.7 and conf > best:
+            fill_from, best = cand, conf
+        if cand and not ev.get('url'):
+            ev['url'] = cand['url']
     earliest = _pedigree_clean_date(data.get('earliest'))
     dated = sorted(ev['sort_date'] for ev in events if ev['sort_date'])
     for ev in manual:
@@ -37756,15 +38100,60 @@ def fetch_provenance(category, row):
     dated.sort()
     if dated and (not earliest or dated[0] < earliest):
         earliest = dated[0]
+    summary = _pedigree_clean_str(data.get('summary'), 4000)
+    if sweep.get('status'):
+        summary = (summary + '\n\n' if summary else '') + f"Archive sweep — {sweep['status']}."
     return {
         'events': events,
-        'summary': _pedigree_clean_str(data.get('summary'), 4000),
+        'summary': summary,
         'earliest': earliest,
         'restriction': _pedigree_condense_restriction(data.get('restriction')),
         'confidence': _pedigree_clean_confidence(data.get('confidence')),
         'notes': _pedigree_clean_str(data.get('notes'), 600),
         'searches': data.get('_searches'),
+        'sweep_status': sweep.get('status') or '',
+        'fill_from': ({'title': fill_from['title'], 'url': fill_from['url'],
+                       'date_text': fill_from['date_text'], 'full': fill_from.get('full') or ''}
+                      if fill_from else None),
     }
+
+
+def _provenance_fill_from_lot(db, category, record_id, lot):
+    """Mark, 16 Sep 2026: "when you identify a coin, scrape additional
+    data into the app that might be missing." The matched lot's catalogue
+    text goes through the coin spec extractor and fills EMPTY fields only
+    — die axis, diameter, references, obverse/reverse, grade notes —
+    never a value already on the record, and never the purchase fields
+    (an auction's price and date are the auction's, not the owner's).
+    Returns the list of fields filled; [] when nothing could be."""
+    if category != 'coins' or not lot or not (lot.get('full') or '').strip():
+        return []
+    coin = db.execute("SELECT * FROM coins WHERE id = ?", (record_id,)).fetchone()
+    if coin is None:
+        return []
+    coin_like = {k: coin[k] for k in coin.keys()}
+    own = (coin['description'] or '').strip()
+    coin_like['description'] = (
+        f"AUCTION LOT MATCHED TO THIS COIN — {lot['title']}, {lot.get('date_text') or 'date unknown'} "
+        f"({lot['url']}):\n{lot['full'][:8000]}"
+        + (f"\n\nOWNER'S OWN DESCRIPTION:\n{own[:3000]}" if own else ''))
+    try:
+        specs = fetch_coin_specs(coin_like)
+    except Exception as e:
+        app.logger.warning('provenance fill from lot %s: extractor failed: %s', record_id, e)
+        return []
+    if not isinstance(specs, dict):
+        return []
+    try:
+        updates = _coin_apply_spec_updates(db, coin, specs, record_id, only_empty=True,
+                                           skip=('vendor', 'price', 'purchase_date'))
+    except Exception as e:
+        app.logger.warning('provenance fill from lot %s: apply failed: %s', record_id, e)
+        return []
+    filled = [k for k in updates if k not in ('date_1_text', 'date_2_text', 'cat_id')]
+    app.logger.info('provenance fill from lot %s: %s ← %s', record_id,
+                    ', '.join(filled) or 'nothing to fill', lot['title'])
+    return filled
 
 
 def _store_provenance(category, record_id, result):
@@ -37772,6 +38161,11 @@ def _store_provenance(category, record_id, result):
     now = datetime.utcnow().isoformat()
     db = open_db_connection()
     try:
+        filled = _provenance_fill_from_lot(db, category, record_id, result.get('fill_from'))
+        if filled:
+            result['summary'] = ((result['summary'] or '').rstrip() + ' '
+                                 + f"Filled from {result['fill_from']['title']}: "
+                                 + ', '.join(_COIN_FIELD_LABELS.get(f, f) for f in filled) + '.')
         db.execute(
             "DELETE FROM provenance_events WHERE category = ? AND record_id = ? "
             "AND source = 'research'", (category, record_id))
@@ -37798,7 +38192,19 @@ def _store_provenance(category, record_id, result):
         'summary': result['summary'], 'earliest': result['earliest'],
         'restriction': result['restriction'], 'confidence': result['confidence'],
         'searched_at': now, 'notes': result.get('notes') or '',
+        'filled': filled, 'sweep_status': result.get('sweep_status') or '',
     }
+
+
+_COIN_FIELD_LABELS = {
+    'region': 'region', 'mint': 'mint', 'authority': 'authority', 'official': 'official',
+    'denomination': 'denomination', 'metal': 'metal', 'date_1': 'date', 'date_2': 'date to',
+    'weight': 'weight', 'size': 'diameter', 'die_axis': 'die axis', 'grade': 'grade',
+    'strike': 'strike', 'surface': 'surface', 'sheldon': 'Sheldon grade',
+    'grading_authority': 'grading authority', 'slab_number': 'slab number',
+    'grade_condition': 'condition', 'grade_modifier': 'grade modifier',
+    'obv_rev': 'obverse / reverse', 'coin_references': 'references',
+}
 
 
 def fetch_rarity(category, row):

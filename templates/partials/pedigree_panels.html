@@ -258,6 +258,12 @@
     restr.dataset.state = restrictionState(data.restriction);
     setSummary('pdgProvSummary', 'pdgProvSummaryEdit', data.summary || '');
     $('pdgProvStamp').textContent = `researched ${fmtDate((data.searched_at || '').slice(0, 10))}` + (data.confidence != null ? ` · confidence ${pct(data.confidence)}` : '');
+    // A matched archive lot filled empty fields on the record: the rest
+    // of the page still shows the old blanks, so reload once it lands.
+    if (Array.isArray(data.filled) && data.filled.length) {
+      $('pdgProvStamp').textContent += ` · filled ${data.filled.length} field${data.filled.length === 1 ? '' : 's'} from the matched lot — reloading`;
+      setTimeout(() => window.location.reload(), 2500);
+    }
   }
   function applyRarity(data) {
     const n = (v) => (v == null ? '—' : v);
