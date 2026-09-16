@@ -37089,6 +37089,12 @@ _PEDIGREE_COLUMNS = (
     'rarity_source_url TEXT',
     'rarity_confidence REAL',
     'rarity_searched_at TEXT',
+    # Tailored boxes (2026-09-16): coins are mostly raw, so the census
+    # boxes give way to the die study and the auction record; a slabbed
+    # coin keeps its NGC census on a line of its own.
+    'rarity_die_count INTEGER',   # coins: specimens known of this die pair
+    'rarity_market INTEGER',      # both: appearances at auction, last ten years
+    'rarity_census INTEGER',      # coins in a holder: NGC census total for the type
 )
 
 _PROVENANCE_EVENT_KINDS = ('auction', 'dealer', 'collection', 'publication',
@@ -37129,6 +37135,17 @@ def _ensure_pedigree_schema(db):
                 db.execute(f'ALTER TABLE {table} ADD COLUMN {col}')
             except sqlite3.OperationalError:
                 pass
+        # Restriction notes written before the terse format (2026-09-16)
+        # are condensed in place; already-terse rows are untouched.
+        try:
+            rows = db.execute(
+                f"SELECT id, provenance_restriction FROM {table} "
+                f"WHERE LENGTH(provenance_restriction) > 110").fetchall()
+            for r in rows:
+                db.execute(f"UPDATE {table} SET provenance_restriction = ? WHERE id = ?",
+                           (_pedigree_condense_restriction(r['provenance_restriction']), r['id']))
+        except sqlite3.OperationalError:
+            pass
     db.commit()
 
 
@@ -37262,7 +37279,7 @@ Method:
 2. Search the auction record for this specimen by weight and type: acsearch.info, CoinArchives, cngcoins.com (research archive), numisbids.com, sixbid.com, biddr.com, coins.ha.com (Heritage), stacksbowers.com, romanumismatics.com, nomosag.com, leunumismatik.com, arsclassicacoins.com (NAC), kuenker.de, Nomisma, wildwinds. Query patterns that work: "{_pedigree_text(row, 'weight') or 'WEIGHT'} g" together with the mint/authority and denomination; the reference number with the weight; "site:acsearch.info {_pedigree_text(row, 'mint') or _pedigree_text(row, 'region')} {_pedigree_text(row, 'denomination')} {_pedigree_text(row, 'weight')}"; the NGC cert number on ngccoin.com/certlookup when the coin is slabbed.
 3. Compare each candidate to the photographs when they are supplied: same dies, same centering, same flan outline, same marks. Reject a candidate whose weight or dies differ, however similar the type.
 4. Note the dealer the owner bought it from ({_pedigree_text(row, 'vendor') or 'unknown'}, {_pedigree_text(row, 'purchase_date') or 'date unknown'}) as the final link — do NOT return that purchase as an event, it is recorded separately — but a listing of THIS coin by that dealer (their stock page, a VCoins listing) IS an event.
-5. Import restrictions: the United States restricts import of coins from these origins under the CPIA, with the coin categories designated on roughly these dates (verify): {mou}. State which restriction, if any, covers a coin of this origin and type, and whether the earliest documented appearance you found predates the designation date (a pre-designation appearance outside the country of origin is the documentation a collector, auction house or museum would ask for). If no restriction applies say so plainly.
+5. Import restrictions: the United States restricts import of coins from these origins under the CPIA, with the coin categories designated on roughly these dates (verify): {mou}. Decide which restriction, if any, covers a coin of this origin and type, and whether the earliest documented appearance you found predates the designation date (a pre-designation appearance outside the country of origin is the documentation a collector, auction house or museum would ask for). Report it in the `restriction` field as one terse line — country, designation date, earliest documented year, predates or not — and put any reasoning in the summary instead.
 
 Output: ONLY a JSON object, no prose before or after, no markdown fences:
 {{
@@ -37275,7 +37292,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
   ],
   "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, and what you searched without result. Mention the hammer prices found.",
   "earliest": "the earliest documented date of THIS specimen as YYYY-MM-DD / YYYY-MM / YYYY, or ''",
-  "restriction": "one or two sentences on the import-restriction position, or 'None applies' ",
+  "restriction": "ONE terse line, at most 15 words, in exactly this shape — 'Italy, coins designated 2011-01-19; documented 1928, predates' or 'Greece, coins designated 2011-12-01; earliest record 2019, after designation' or 'None applies'. No sentences, no explanation (the summary carries that).",
   "confidence": 0.0-1.0 (how sure you are the chain describes this exact coin),
   "notes": "what you searched, one line"
 }}
@@ -37307,7 +37324,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
   ],
   "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, prices realised, and what you searched without result.",
   "earliest": "the earliest documented date of THIS note as YYYY-MM-DD / YYYY-MM / YYYY, or ''",
-  "restriction": "'None applies' unless there is a specific reason",
+  "restriction": "'None applies' unless there is a specific reason — then one terse line of at most 15 words",
   "confidence": 0.0-1.0,
   "notes": "what you searched, one line"
 }}
@@ -37338,6 +37355,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
   "known": total graded by the service (integer) or the number of examples known when there is no census, or null,
   "same_grade": integer at this note's grade, or null,
   "finer": integer finer, or null,
+  "auction_10y": appearances of this Pick number at auction in the past ten years (integer) or null,
   "rank": "Top Pop|Finest known|Tied finest|Below finest|Unknown",
   "rating": "catalogue rarity note, e.g. 'R2 (Banknote Book)', 'Rare (SCWPM)', or ''",
   "die": "" ,
@@ -37353,24 +37371,36 @@ Never estimate a census figure — if you could not read the population report, 
 THE RECORD:
 {profile}"""
     else:
+        slab = _pedigree_text(row, 'slab_number')
+        authority = _pedigree_text(row, 'grading_authority')
+        slabbed = bool(authority and slab)
+        if slabbed:
+            standing = (f"""3. Where this specimen stands: the coin is in a {authority} holder (cert {slab}); read the census (ngccoin.com/certlookup/{slab}, the NGC Ancients census for the type) for the total graded, the number at this grade ({grade or 'see the record'}) and finer, and rank it Top Pop / Finest known / Tied finest / Below finest. Say what a regrade or crossover would change if it sits one step below the top.""")
+            rank_scale = "Top Pop|Finest known|Tied finest|Below finest|Unknown"
+        else:
+            standing = (f"""3. Where this specimen stands: the coin is RAW (not in a holder), so there is no census — do not invent one. Compare its grade ({grade or 'see the record'}), strike, surface and centering against the examples in the auction record for the type and say whether it is among the finest known, typical of what trades, or below the norm, and count how many clearly finer examples you saw in the archives.""")
+            rank_scale = "Among the finest|Typical|Below the norm|Unknown"
         task = f"""You are a professional numismatist establishing the RARITY and the standing of ONE ancient or world coin: {label}.
 
 Find, in this order:
-1. Rarity of the type: the rarity rating the standard reference gives (HGC uses R1 common – R2 scarce – R3 rare; RIC uses C, S, R, R2–R5; Roman Imperial / Greek die studies often state the number of known specimens per die pair); the number of specimens recorded in the auction archives (search acsearch.info and CoinArchives for the reference number and type and read the count of records; note that sales of the same coin repeat); how many the die study cited in the References records.
-2. Die-study placement when a die study exists for this series (e.g. Milbank / Meadows for Aegina, Boehringer for Syracuse, Kraay, Jenkins, Le Rider for Philip II, Price for Alexander, Svoronos for Ptolemies, Newell, Houghton–Lorber for Seleucids, Crawford / RRC for Republican, RIC / BMCRE for Imperial): which group, which obverse / reverse die, how many specimens of that die pair are known, and whether this coin is a die match to a plated or published specimen.
-3. Where this specimen stands: for a coin in an NGC Ancients holder, the census (ngccoin.com/certlookup / the NGC Ancients census) for this type at this grade and finer; otherwise compare its grade, strike and surface against the examples in the auction record and say whether it is among the finest, typical, or below the norm. Say what a regrade would change only when the coin is slabbed.
+1. Rarity of the type: the rarity rating the standard reference gives (HGC uses R1 common – R2 scarce – R3 rare; RIC uses C, S, R, R2–R5); the number of specimens recorded in the auction archives (search acsearch.info and CoinArchives for the reference number and type and read the count of records — note that sales of the same coin repeat, so the count is an upper bound); and how often the type has come to auction in the past ten years and at what level (CNG, Roma, Nomos, Leu, NAC, Heritage, Künker, Stack's Bowers).
+2. Die-study placement when a die study exists for this series (e.g. Milbank / Meadows for Aegina, Boehringer for Syracuse, Gallatin for the Syracusan decadrachms, Kraay, Jenkins, Le Rider for Philip II, Price for Alexander, Svoronos for Ptolemies, Newell, Houghton–Lorber for Seleucids, Crawford / RRC for Republican, RIC / BMCRE for Imperial): which group, which obverse / reverse die, how many specimens of that die pair the study records, and whether this coin is a die match to a plated or published specimen.
+{standing}
 
 Output: ONLY a JSON object, no prose before or after, no markdown fences:
 {{
-  "known": approximate number of specimens recorded (auction archive count or die-study count, integer) or null,
-  "same_grade": integer at this grade in the census when slabbed, else null,
-  "finer": integer finer in the census when slabbed, or the number of clearly finer examples you saw in the auction record, or null,
-  "rank": "Top Pop|Finest known|Tied finest|Among the finest|Typical|Below the norm|Unknown",
+  "known": specimens of the TYPE recorded in the auction archives / die study (integer) or null,
+  "die_pair_known": specimens of THIS die pair the die study records (integer) or null,
+  "auction_10y": appearances of the type at auction in the past ten years (integer) or null,
+  "finer": {"integer finer in the census" if slabbed else "the number of clearly finer examples you saw in the auction record (integer)"} or null,
+  "census_graded": {"total graded in the census for the type (integer) or null" if slabbed else "null"},
+  "same_grade": {"integer at this grade in the census, or null" if slabbed else "null"},
+  "rank": "{rank_scale}",
   "rating": "the reference's rarity rating, e.g. 'R2 (HGC)', 'R3 (RIC)', or ''",
-  "die": "die-study placement: group, obverse/reverse die, specimens of the pair, published die matches — or ''",
-  "regrade": "one sentence, only for a slabbed coin, else ''",
+  "die": "die-study placement in one or two sentences: group, obverse/reverse die, specimens of the pair, published die matches — or ''",
+  "regrade": "{"one sentence on what a regrade / crossover would change, or ''" if slabbed else "''"}",
   "summary": "3–6 sentences in plain prose: how rare the type is and by whose reckoning, how many appear at auction and at what level, where this coin's dies and condition place it, and what you could not find.",
-  "source": "the sources the figures came from, e.g. 'acsearch.info (41 records), HGC 6, 435 (R1)'",
+  "source": "the sources the figures came from, e.g. 'acsearch.info (41 records), HGC 2, 1299 (R2), Gallatin'",
   "source_url": "the most useful URL, or ''",
   "confidence": 0.0-1.0
 }}
@@ -37656,6 +37686,54 @@ def _provenance_purchase_event(row):
     }
 
 
+def _pedigree_condense_restriction(value):
+    """The import-restriction note is a status line, not an essay: keep
+    the first sentence when the model runs on, drop a leading 'Yes,'/'No,'
+    and the trailing full stop."""
+    text = _pedigree_clean_str(value, 600)
+    if not text:
+        return ''
+    if re.match(r'^(none|not applicable|n/a|no restriction)', text, re.IGNORECASE):
+        return 'None applies'
+    if len(text) > 110:
+        parts = re.split(r'(?<=[.;])\s+', text, maxsplit=1)
+        first = parts[0]
+        rest = parts[1] if len(parts) > 1 else ''
+        if len(first) < 20:
+            first = text[:110].rsplit(' ', 1)[0] + '…'
+        # Keep the verdict when it lived in the sentences being dropped.
+        verdict = ''
+        if re.search(r'\bpredat', rest, re.IGNORECASE) and not re.search(
+                r'\b(does not|doesn\'t|no record|not predate)', rest, re.IGNORECASE):
+            verdict = 'earliest record predates designation'
+        elif re.search(r'\b(after (the )?designation|post-?dates|no pre-designation|does not predate)', rest, re.IGNORECASE):
+            verdict = 'no record before designation'
+        if verdict and not re.search(r'\bpredat', first, re.IGNORECASE):
+            first = f'{first.rstrip(".;")}; {verdict}'
+        text = first
+    text = re.sub(r'^(yes|no)[,:]\s*', '', text, flags=re.IGNORECASE)
+    return text.rstrip('.').strip()
+
+
+def _pedigree_restriction_state(text):
+    """'ok' when the earliest record predates the designation, 'none'
+    when nothing applies, 'warn' otherwise, '' when unresearched."""
+    t = (text or '').lower().strip()
+    if not t or t == '—':
+        return ''
+    if t.startswith('none'):
+        return 'none'
+    if re.search(r'\bpredates?\b|\bbefore (the )?designation\b|\bpre-designation\b', t) \
+            and not re.search(r'\b(does not|doesn\'t|no record|not predate)\b', t):
+        return 'ok'
+    return 'warn'
+
+
+@app.template_filter('restriction_state')
+def restriction_state_filter(value):
+    return _pedigree_restriction_state(value)
+
+
 def fetch_provenance(category, row):
     db = open_db_connection()
     try:
@@ -37682,7 +37760,7 @@ def fetch_provenance(category, row):
         'events': events,
         'summary': _pedigree_clean_str(data.get('summary'), 4000),
         'earliest': earliest,
-        'restriction': _pedigree_clean_str(data.get('restriction'), 600),
+        'restriction': _pedigree_condense_restriction(data.get('restriction')),
         'confidence': _pedigree_clean_confidence(data.get('confidence')),
         'notes': _pedigree_clean_str(data.get('notes'), 600),
         'searches': data.get('_searches'),
@@ -37737,6 +37815,9 @@ def fetch_rarity(category, row):
         'known': _pedigree_clean_int(data.get('known')),
         'same': _pedigree_clean_int(data.get('same_grade')),
         'finer': _pedigree_clean_int(data.get('finer')),
+        'die_count': _pedigree_clean_int(data.get('die_pair_known')) if category == 'coins' else None,
+        'market': _pedigree_clean_int(data.get('auction_10y')),
+        'census': _pedigree_clean_int(data.get('census_graded')) if category == 'coins' else None,
         'rank': rank if rank.lower() != 'unknown' else '',
         'rating': _pedigree_clean_str(data.get('rating'), 120),
         'die': _pedigree_clean_str(data.get('die'), 800),
@@ -37758,10 +37839,12 @@ def _store_rarity(category, record_id, result):
             f"UPDATE {table} SET rarity_known = ?, rarity_same = ?, rarity_finer = ?, "
             f"rarity_rank = ?, rarity_rating = ?, rarity_die = ?, rarity_regrade = ?, "
             f"rarity_summary = ?, rarity_source = ?, rarity_source_url = ?, "
-            f"rarity_confidence = ?, rarity_searched_at = ?, updated_at = ? WHERE id = ?",
+            f"rarity_confidence = ?, rarity_searched_at = ?, rarity_die_count = ?, "
+            f"rarity_market = ?, rarity_census = ?, updated_at = ? WHERE id = ?",
             (result['known'], result['same'], result['finer'], result['rank'],
              result['rating'], result['die'], result['regrade'], result['summary'],
-             result['source'], result['source_url'], result['confidence'], now, now,
+             result['source'], result['source_url'], result['confidence'], now,
+             result.get('die_count'), result.get('market'), result.get('census'), now,
              record_id))
         db.commit()
     finally:
@@ -38109,6 +38192,9 @@ def _pedigree_overview_rows(db, category, kind):
             item.update({
                 'known': row.get('rarity_known'), 'same': row.get('rarity_same'),
                 'finer': row.get('rarity_finer'), 'rank': _pedigree_text(row, 'rarity_rank'),
+                'die_count': row.get('rarity_die_count'), 'market': row.get('rarity_market'),
+                'census': row.get('rarity_census'),
+                'slabbed': bool(_pedigree_text(row, 'grading_authority') and _pedigree_text(row, 'slab_number')),
                 'rating': _pedigree_text(row, 'rarity_rating'),
                 'die': _pedigree_text(row, 'rarity_die'),
                 'regrade': _pedigree_text(row, 'rarity_regrade'),
@@ -38131,10 +38217,12 @@ def _pedigree_overview_stats(kind, items):
         stats['pre_2000'] = sum(1 for i in items if (i.get('earliest') or '')[:4].isdigit()
                                 and int(i['earliest'][:4]) < 2000)
     else:
-        top = ('finest known', 'top pop', 'tied finest')
+        top = ('finest known', 'top pop', 'tied finest', 'among the finest')
         stats['top_pop'] = sum(1 for i in searched if (i.get('rank') or '').lower() in top)
         stats['one_finer'] = sum(1 for i in searched if i.get('finer') == 1)
         stats['regrade'] = sum(1 for i in searched if i.get('regrade'))
+        stats['rare'] = sum(1 for i in searched
+                            if re.search(r'\bR[2-5]\b|\b(very )?rare\b|\bunique\b', i.get('rating') or '', re.I))
     return stats
 
 

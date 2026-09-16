@@ -50,7 +50,8 @@
   </div>
   <div class="pdg-facts">
     <span><b>Earliest documented:</b> <span id="pdgEarliest">{{ (r['provenance_earliest'] if r and 'provenance_earliest' in r.keys() and r['provenance_earliest'] else '—') }}</span></span>
-    <span><b>Import restriction:</b> <span id="pdgRestriction">{{ (r['provenance_restriction'] if r and 'provenance_restriction' in r.keys() and r['provenance_restriction'] else '—') }}</span></span>
+    {%- set _restr = (r['provenance_restriction'] if r and 'provenance_restriction' in r.keys() and r['provenance_restriction'] else '') -%}
+    <span><b>Import restriction:</b> <span id="pdgRestriction" class="pdg-restr" data-state="{{ _restr|restriction_state }}" title="US import restrictions under the CPIA for the coin's origin, and whether the earliest documented appearance predates the designation">{{ _restr or '—' }}</span></span>
   </div>
   <div class="pdg-summary-wrap">
     <div class="pdg-summary{% if not _pv_summary %} is-empty{% endif %}" id="pdgProvSummary" title="Click to edit" tabindex="0">{{ _pv_summary|format_results }}</div>
@@ -71,14 +72,32 @@
             title="{% if category == 'banknotes' %}PMG / PCGS population for this Pick number and grade — total, at this grade, finer — plus the catalogue rarity{% else %}Specimens in the auction record, the reference's rarity rating, and where this coin sits in the die study{% endif %}">🔎 Research</button>
   </div>
   <div class="pdg-error" id="pdgRarError" style="display:none"></div>
-  <div class="pdg-tiles">
-    <div class="pdg-tile"><span class="pdg-tile-n" id="pdgRarKnown">{{ r['rarity_known'] if r and r['rarity_known'] is not none else '—' }}</span><span class="pdg-tile-l">{% if category == 'banknotes' %}Graded{% else %}Recorded{% endif %}</span></div>
-    <div class="pdg-tile"><span class="pdg-tile-n" id="pdgRarSame">{{ r['rarity_same'] if r and r['rarity_same'] is not none else '—' }}</span><span class="pdg-tile-l">This grade</span></div>
-    <div class="pdg-tile"><span class="pdg-tile-n" id="pdgRarFiner">{{ r['rarity_finer'] if r and r['rarity_finer'] is not none else '—' }}</span><span class="pdg-tile-l">Finer</span></div>
-    <div class="pdg-tile pdg-tile-wide"><span class="pdg-tile-n pdg-rank" id="pdgRarRank" data-rank="{{ (r['rarity_rank'] or '')|lower if r else '' }}">{{ r['rarity_rank'] if r and r['rarity_rank'] else '—' }}</span><span class="pdg-tile-l">Standing</span></div>
-    <div class="pdg-tile pdg-tile-wide"><span class="pdg-tile-n" id="pdgRarRating">{{ r['rarity_rating'] if r and r['rarity_rating'] else '—' }}</span><span class="pdg-tile-l">Rarity</span></div>
+  {%- set _slabbed = r and r['grading_authority'] and r['slab_number'] -%}
+  {%- macro tile(id, value, label, title, wide=false) -%}
+  <div class="pdg-tile{% if wide %} pdg-tile-wide{% endif %}" title="{{ title }}"><span class="pdg-tile-n" id="{{ id }}">{{ value if value is not none and value != '' else '—' }}</span><span class="pdg-tile-l">{{ label }}</span></div>
+  {%- endmacro -%}
+  {# The boxes differ by category: a note has a grading-service census
+     (graded / at this grade / finer); a coin usually does not — most are
+     raw — so its boxes come from the auction archives and the die study,
+     and a slabbed coin shows its NGC census on the line below. #}
+  <div class="pdg-tiles" data-slabbed="{{ '1' if _slabbed else '0' }}">
+    {% if category == 'banknotes' %}
+    {{ tile('pdgRarKnown', r['rarity_known'], 'Graded', 'How many of this Pick number the grading service has graded, in any grade') }}
+    {{ tile('pdgRarSame', r['rarity_same'], 'This grade', 'How many sit at exactly this note\'s grade') }}
+    {{ tile('pdgRarFiner', r['rarity_finer'], 'Finer', 'How many are graded higher than this note — zero means you own the best certified example') }}
+    {% else %}
+    {{ tile('pdgRarKnown', r['rarity_known'], 'Recorded', 'Specimens of the type in the auction archives and die study — an upper bound, since the same coin can sell more than once') }}
+    {{ tile('pdgRarDieCount', r['rarity_die_count'], 'This die pair', 'Specimens the die study records from this coin\'s obverse and reverse dies') }}
+    {{ tile('pdgRarFiner', r['rarity_finer'], 'Finer seen', 'Clearly finer examples seen in the auction record — a judgement for a raw coin, a census count for a slabbed one') }}
+    {% endif %}
+    <div class="pdg-tile pdg-tile-wide" title="{% if category == 'banknotes' %}Top Pop = none finer in the census; Tied finest = others share the top grade; Below finest = the Finer box says how many{% else %}For a raw coin: among the finest known, typical of what trades, or below the norm — judged against the auction record. A slabbed coin uses the census scale (Top Pop, Tied finest, Below finest).{% endif %}"><span class="pdg-tile-n pdg-rank" id="pdgRarRank" data-rank="{{ (r['rarity_rank'] or '')|lower if r else '' }}">{{ r['rarity_rank'] if r and r['rarity_rank'] else '—' }}</span><span class="pdg-tile-l">Standing</span></div>
+    {{ tile('pdgRarRating', r['rarity_rating'], 'Rarity', 'The reference book\'s own rating for the type, independent of grade — HGC R1 common / R2 scarce / R3 rare; RIC C, S, R, R2–R5; the Banknote Book or SCWPM for notes', wide=true) }}
+    {{ tile('pdgRarMarket', r['rarity_market'], 'At auction, 10 yrs', 'How many times the type has come to auction in the past ten years — how liquid it is') }}
   </div>
   <div class="pdg-facts pdg-facts-col">
+    {% if category == 'coins' %}
+    <span id="pdgRarCensusRow" {% if not (r and r['rarity_census'] is not none) %}style="display:none"{% endif %}><b>{{ r['grading_authority'] if r and r['grading_authority'] else 'NGC' }} census:</b> <span id="pdgRarCensus">{% if r and r['rarity_census'] is not none %}{{ r['rarity_census'] }} graded{% if r['rarity_same'] is not none %} · {{ r['rarity_same'] }} at this grade{% endif %}{% if r['rarity_finer'] is not none %} · {{ r['rarity_finer'] }} finer{% endif %}{% endif %}</span></span>
+    {% endif %}
     <span id="pdgRarDieRow" {% if not (r and r['rarity_die']) %}style="display:none"{% endif %}><b>Die study:</b> <span id="pdgRarDie">{{ r['rarity_die'] if r and r['rarity_die'] else '' }}</span></span>
     <span id="pdgRarRegradeRow" {% if not (r and r['rarity_regrade']) %}style="display:none"{% endif %}><b>Regrade:</b> <span id="pdgRarRegrade">{{ r['rarity_regrade'] if r and r['rarity_regrade'] else '' }}</span></span>
     <span id="pdgRarSourceRow" {% if not (r and r['rarity_source']) %}style="display:none"{% endif %}><b>Source:</b> <span id="pdgRarSource">{{ r['rarity_source'] if r and r['rarity_source'] else '' }}</span> <a id="pdgRarSourceUrl" target="_blank" rel="noopener" href="{{ r['rarity_source_url'] if r and r['rarity_source_url'] else '#' }}" {% if not (r and r['rarity_source_url']) %}style="display:none"{% endif %}>open ↗</a></span>
@@ -117,6 +136,13 @@
     return m[1];
   };
   const pct = (c) => (c == null || isNaN(c)) ? '' : `${Math.round(c * 100)}%`;
+  const restrictionState = (t) => {
+    t = (t || '').toLowerCase().trim();
+    if (!t || t === '—') return '';
+    if (t.startsWith('none')) return 'none';
+    if (/\bpredates?\b|\bbefore (the )?designation\b|\bpre-designation\b/.test(t) && !/\b(does not|doesn't|no record|not predate)\b/.test(t)) return 'ok';
+    return 'warn';
+  };
   const kindLabel = {auction: 'Auction', dealer: 'Dealer', collection: 'Collection',
                      publication: 'Published', hoard: 'Hoard', purchase: 'Purchase', other: ''};
 
@@ -221,15 +247,25 @@
     D.events = data.events || [];
     renderEvents(D.events, D.purchase);
     $('pdgEarliest').textContent = data.earliest || '—';
-    $('pdgRestriction').textContent = data.restriction || '—';
+    const restr = $('pdgRestriction');
+    restr.textContent = data.restriction || '—';
+    restr.dataset.state = restrictionState(data.restriction);
     setSummary('pdgProvSummary', 'pdgProvSummaryEdit', data.summary || '');
     $('pdgProvStamp').textContent = `researched ${fmtDate((data.searched_at || '').slice(0, 10))}` + (data.confidence != null ? ` · confidence ${pct(data.confidence)}` : '');
   }
   function applyRarity(data) {
     const n = (v) => (v == null ? '—' : v);
-    $('pdgRarKnown').textContent = n(data.known);
-    $('pdgRarSame').textContent = n(data.same);
-    $('pdgRarFiner').textContent = n(data.finer);
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = n(v); };
+    set('pdgRarKnown', data.known);
+    set('pdgRarSame', data.same);
+    set('pdgRarFiner', data.finer);
+    set('pdgRarDieCount', data.die_count);
+    set('pdgRarMarket', data.market);
+    if ($('pdgRarCensusRow')) {
+      const has = data.census != null;
+      $('pdgRarCensusRow').style.display = has ? '' : 'none';
+      if (has) $('pdgRarCensus').textContent = `${data.census} graded` + (data.same != null ? ` · ${data.same} at this grade` : '') + (data.finer != null ? ` · ${data.finer} finer` : '');
+    }
     $('pdgRarRank').textContent = data.rank || '—';
     $('pdgRarRank').dataset.rank = (data.rank || '').toLowerCase();
     $('pdgRarRating').textContent = data.rating || '—';

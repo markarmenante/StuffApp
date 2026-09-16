@@ -111,6 +111,23 @@ class _FakeClient:
 fc = _FakeClient()
 out = stuffapp._pedigree_reemit_json(fc, 'm', 'rarity', '{"a": 1 "b": 2}', 'Expecting delimiter')
 assert out == {'known': 5, 'summary': 'fixed'} and '{"a": 1 "b": 2}' in fc.prompts[0]
+cr = stuffapp._pedigree_condense_restriction
+long = ('Sicily is part of Italy, and the United States designated Italian coins under the CPIA on '
+        '2011-01-19. The earliest documented appearance of this specimen (Ars Classica XIII, 1928) '
+        'predates that designation by decades, so the coin was on the market long before.')
+assert cr(long) == ('Sicily is part of Italy, and the United States designated Italian coins under the CPIA on '
+                    '2011-01-19; earliest record predates designation'), cr(long)
+late = ('Greece designated coins of Greek type on 2011-12-01. The only appearance found is a 2019 dealer '
+        'listing, after the designation, so no pre-designation record exists.')
+assert cr(late).endswith('; no record before designation'), cr(late)
+assert cr('Italy, coins designated 2011-01-19; documented 1928, predates.') == 'Italy, coins designated 2011-01-19; documented 1928, predates'
+assert cr('No restriction applies to paper money.') == 'None applies'
+assert cr('') == ''
+rs = stuffapp._pedigree_restriction_state
+assert rs('Italy, coins designated 2011-01-19; documented 1928, predates') == 'ok'
+assert rs('Greece, coins designated 2011-12-01; earliest record 2019, after designation') == 'warn'
+assert rs('None applies') == 'none' and rs('') == '' and rs('—') == ''
+assert rs('Turkey, designated 2021-06-16; no record predates it') == 'warn'
 label = stuffapp._pedigree_label('coins', {'region': 'Aegina', 'authority': 'Aegina civic',
                                            'denomination': 'Stater', 'date_1_text': '480 BC - 440 BC'})
 assert label == 'Aegina, Aegina civic, Stater — 480 BC - 440 BC', label
@@ -195,6 +212,7 @@ def fake_model_call(kind, category, prompt, images):
         }
     return {
         'known': '23', 'same_grade': 4, 'finer': 1, 'rank': 'Below finest', 'rating': 'R2 (HGC)',
+        'die_pair_known': 6, 'auction_10y': 19, 'census_graded': None,
         'die': 'Milbank Group IIIa, O-14/R-22, 6 of the pair recorded', 'regrade': '',
         'summary': 'Scarce type; a solid mid-range example.', 'source': 'acsearch.info (23 records), HGC 6, 435',
         'source_url': 'https://www.acsearch.info/search.html?term=aegina', 'confidence': 0.7, '_searches': 4,
@@ -243,10 +261,19 @@ with stuffapp.app.app_context():
     row = stuffapp.get_db().execute("SELECT * FROM coins WHERE id = 'c1'").fetchone()
     assert row['rarity_known'] == 23 and row['rarity_same'] == 4 and row['rarity_searched_at']
     assert row['rarity_source_url'].startswith('https://')
+    assert row['rarity_die_count'] == 6 and row['rarity_market'] == 19 and row['rarity_census'] is None
+assert res['die_count'] == 6 and res['market'] == 19
 
 # The panel now renders the stored figures and summary.
 html = client.get('/coins/c1').get_data(as_text=True)
 assert 'R2 (HGC)' in html and 'Milbank Group IIIa' in html and 'Traced to CNG 87' in html
+# Coin boxes are the raw-coin set; note boxes are the census set.
+assert 'This die pair' in html and 'Finer seen' in html and 'At auction, 10 yrs' in html
+assert '>This grade<' not in html
+nhtml = client.get('/banknotes/b1').get_data(as_text=True)
+assert '>Graded<' in nhtml and '>This grade<' in nhtml and 'This die pair' not in nhtml
+# The restriction line is a coloured status pill.
+assert 'class="pdg-restr" data-state="ok"' in html
 # Unknown kind / lost job.
 assert client.post('/coins/c1/pedigree/nonsense/research').status_code == 404
 assert client.get('/coins/c1/pedigree/provenance/job/nope').status_code == 404
