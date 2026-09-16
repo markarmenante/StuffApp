@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+{%- set _noun = 'Coins' if category == 'coins' else 'Notes' -%}
+{%- set _title = 'Provenance & Pedigree' if kind == 'provenance' else 'Rarity & Population' -%}
+{% block title %}{{ _title }} — {{ cat_info.name }} — StuffApp{% endblock %}
+
+{% block content %}
+<div class="list-toolbar">
+  <span class="list-count">{{ items|length }}</span>
+  <span class="list-cat-title">{{ _title }} — {{ cat_info.name }}</span>
+  <a href="{{ url_for('list_view', category=category) }}" class="toolbar-btn pill" title="Back to the collection">← List</a>
+  <a href="{{ url_for('pedigree_overview', category=category, kind=('rarity' if kind == 'provenance' else 'provenance')) }}"
+     class="toolbar-btn pill pedigree-pill">{{ 'Rarity' if kind == 'provenance' else 'Provenance' }}</a>
+  {% if kind == 'provenance' %}
+  <a href="{{ url_for('pedigree_overview', category=category, kind=kind, sort=('' if sort == 'earliest' else 'earliest')) }}"
+     class="toolbar-btn pill{% if sort == 'earliest' %} active{% endif %}" title="Sort by the earliest documented date">Oldest first</a>
+  {% else %}
+  <a href="{{ url_for('pedigree_overview', category=category, kind=kind, sort=('' if sort == 'number' else 'number')) }}"
+     class="toolbar-btn pill{% if sort == 'number' %} active{% endif %}" title="Collection order instead of rarest first">Collection order</a>
+  {% endif %}
+  {% if is_owner %}
+  <button type="button" class="toolbar-btn pill" id="pdgRunMissing"
+          title="Research every {{ _noun|lower }} that has not been researched yet ({{ stats.missing }}), one after another in the background">Research missing ({{ stats.missing }})</button>
+  <button type="button" class="toolbar-btn pill" id="pdgRunAll"
+          title="Research every {{ _noun|lower }} again, replacing what was found before (hand-entered provenance is kept)">Re-run all</button>
+  <button type="button" class="toolbar-btn pill" id="pdgRunCancel" style="display:none" title="Stop after the current one">Stop</button>
+  {% endif %}
+  <span class="market-status" id="pdgRunStatus"></span>
+</div>
+
+<div class="pdg-overview">
+  <div class="pdg-stats">
+    {% if kind == 'provenance' %}
+    <div class="pdg-stat"><span class="pdg-stat-n">{{ stats.searched }}</span><span class="pdg-stat-l">researched of {{ stats.total }}</span></div>
+    <div class="pdg-stat"><span class="pdg-stat-n">{{ stats.documented }}</span><span class="pdg-stat-l">with a documented prior appearance</span></div>
+    <div class="pdg-stat"><span class="pdg-stat-n">{{ stats.undocumented }}</span><span class="pdg-stat-l">researched, nothing found yet</span></div>
+    <div class="pdg-stat"><span class="pdg-stat-n">{{ stats.pre_2000 }}</span><span class="pdg-stat-l">documented before 2000</span></div>
+    {% else %}
+    <div class="pdg-stat"><span class="pdg-stat-n">{{ stats.searched }}</span><span class="pdg-stat-l">researched of {{ stats.total }}</span></div>
+    <div class="pdg-stat"><span class="pdg-stat-n">{{ stats.top_pop }}</span><span class="pdg-stat-l">top pop / finest known / tied finest</span></div>
+    <div class="pdg-stat"><span class="pdg-stat-n">{{ stats.one_finer }}</span><span class="pdg-stat-l">exactly one finer</span></div>
+    <div class="pdg-stat"><span class="pdg-stat-n">{{ stats.regrade }}</span><span class="pdg-stat-l">with a regrade note</span></div>
+    {% endif %}
+  </div>
+  <p class="pdg-overview-note">
+    {% if kind == 'provenance' %}
+    Each {{ 'coin' if category == 'coins' else 'note' }}'s chain of custody as the research could establish it — matched on weight, dies, serial number and the photographs, never on the type alone. <b>Earliest</b> is the earliest documented appearance of that specimen; for coins from an origin under US import restrictions, an appearance before the designation date is the documentation an auction house or museum asks for.
+    {% elif category == 'banknotes' %}
+    PMG / PCGS population for each note's Pick number: how many are graded, how many at this grade, how many finer, and where the note stands. Rarest first; the figures are as retrieved on the date shown and the source is on each note's page.
+    {% else %}
+    Specimens recorded in the auction archives and die studies, the reference's rarity rating, and where each coin sits among the known examples. Rarest first; details and sources on each coin's page.
+    {% endif %}
+  </p>
+
+  <table class="pdg-ov-table">
+    <thead>
+      <tr>
+        <th class="pdg-ov-num">#</th>
+        <th></th>
+        <th>{{ 'Coin' if category == 'coins' else 'Note' }}</th>
+        <th>Grade</th>
+        {% if kind == 'provenance' %}
+        <th>Earliest</th>
+        <th class="pdg-ov-n">Events</th>
+        <th class="pdg-ov-n">Conf.</th>
+        <th>Import restriction</th>
+        {% else %}
+        <th class="pdg-ov-n">{{ 'Graded' if category == 'banknotes' else 'Recorded' }}</th>
+        <th class="pdg-ov-n">This grade</th>
+        <th class="pdg-ov-n">Finer</th>
+        <th>Standing</th>
+        <th>Rarity</th>
+        <th class="pdg-ov-n">Conf.</th>
+        {% endif %}
+        <th>Researched</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in items %}
+      <tr class="pdg-ov-row{% if not it.searched_at %} is-missing{% endif %}" data-id="{{ it.id }}"
+          onclick="window.location='{{ url_for('detail_view', category=category, record_id=it.id) }}'"
+          title="{{ it.summary[:400] }}">
+        <td class="pdg-ov-num">{{ it.number }}</td>
+        <td class="pdg-ov-thumb">{% if it.image %}<img src="{{ url_for('file_thumb', filename=it.image) }}" alt="" loading="lazy">{% endif %}</td>
+        <td class="pdg-ov-label">{{ it.label }}</td>
+        <td>{{ it.grade }}</td>
+        {% if kind == 'provenance' %}
+        <td class="pdg-ov-earliest">{{ it.earliest or ('—' if it.searched_at else '') }}</td>
+        <td class="pdg-ov-n">{% if it.events %}{{ it.events }}{% if it.manual %} <span class="pdg-src pdg-src-manual" title="{{ it.manual }} entered by hand">+{{ it.manual }}</span>{% endif %}{% elif it.searched_at %}0{% endif %}</td>
+        <td class="pdg-ov-n">{{ it.confidence|pedigree_pct }}</td>
+        <td class="pdg-ov-restriction">{{ it.restriction }}</td>
+        {% else %}
+        <td class="pdg-ov-n">{{ it.known if it.known is not none else '' }}</td>
+        <td class="pdg-ov-n">{{ it.same if it.same is not none else '' }}</td>
+        <td class="pdg-ov-n">{{ it.finer if it.finer is not none else '' }}</td>
+        <td><span class="pdg-rank" data-rank="{{ it.rank|lower }}">{{ it.rank }}</span></td>
+        <td>{{ it.rating }}</td>
+        <td class="pdg-ov-n">{{ it.confidence|pedigree_pct }}</td>
+        {% endif %}
+        <td class="pdg-ov-date">{{ it.searched_at|short_date if it.searched_at else '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script id="pdgRunData" type="application/json">{{ {
+  'run': url_for('pedigree_run_start', category=category, kind=kind),
+  'status': url_for('pedigree_run_status', category=category, kind=kind),
+  'cancel': url_for('pedigree_run_cancel', category=category, kind=kind),
+  'state': run_state,
+  'missing': stats.missing,
+  'total': stats.total,
+  'noun': (_noun|lower)
+}|tojson }}</script>
+<script>
+(function pedigreeRun() {
+  const D = JSON.parse(document.getElementById('pdgRunData').textContent || '{}');
+  const status = document.getElementById('pdgRunStatus');
+  const btnMissing = document.getElementById('pdgRunMissing');
+  const btnAll = document.getElementById('pdgRunAll');
+  const btnCancel = document.getElementById('pdgRunCancel');
+  let timer = null;
+
+  function render(state) {
+    if (!state) { status.textContent = ''; return; }
+    const running = state.status === 'running';
+    if (btnMissing) btnMissing.disabled = running;
+    if (btnAll) btnAll.disabled = running;
+    if (btnCancel) btnCancel.style.display = running ? '' : 'none';
+    const n = (state.done || 0) + (state.failed || 0);
+    if (running) {
+      status.textContent = `Researching ${n + 1} of ${state.total}` + (state.current ? ` — ${state.current}` : '') + (state.failed ? ` · ${state.failed} failed` : '');
+    } else if (state.status === 'done') {
+      const when = (state.finished_at || '').slice(0, 16).replace('T', ' ');
+      status.textContent = `Done: ${state.done || 0} researched` + (state.failed ? `, ${state.failed} failed` : '') + (when ? ` · ${when} UTC` : '');
+      if (state.total && !state._reloaded) { state._reloaded = true; setTimeout(() => window.location.reload(), 1500); }
+    }
+  }
+  async function pollOnce() {
+    try {
+      const res = await fetch(D.status, {headers: {'Accept': 'application/json'}});
+      const data = await res.json();
+      render(data.state);
+      if (data.state && data.state.status === 'running') timer = setTimeout(pollOnce, 6000);
+    } catch (e) { timer = setTimeout(pollOnce, 15000); }
+  }
+  async function start(onlyMissing) {
+    const count = onlyMissing ? D.missing : D.total;
+    if (!count) { status.textContent = 'Nothing to research.'; return; }
+    const what = onlyMissing ? `the ${count} ${D.noun} not yet researched` : `all ${count} ${D.noun} again`;
+    if (!confirm(`Research ${what}? Each one is a separate web-search pass of a minute or two; the run continues in the background and stops if the server restarts (press again to resume — only the ones still missing are redone).`)) return;
+    try {
+      const res = await fetch(D.run, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify({only_missing: onlyMissing})});
+      const data = await res.json();
+      if (!res.ok && res.status !== 202) { status.textContent = data.error || `HTTP ${res.status}`; return; }
+      render(data.state);
+      clearTimeout(timer); timer = setTimeout(pollOnce, 5000);
+    } catch (e) { status.textContent = 'Could not start: ' + e.message; }
+  }
+  if (btnMissing) btnMissing.addEventListener('click', () => start(true));
+  if (btnAll) btnAll.addEventListener('click', () => start(false));
+  if (btnCancel) btnCancel.addEventListener('click', async () => {
+    await fetch(D.cancel, {method: 'POST', headers: {'Accept': 'application/json'}});
+    status.textContent = 'Stopping after the current one…';
+  });
+  if (D.state && D.state.status === 'running') { render(D.state); timer = setTimeout(pollOnce, 5000); }
+  else if (D.state && D.state.status === 'done') { D.state._reloaded = true; render(D.state); }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,286 @@
+{# Provenance & Pedigree + Rarity & Population panels — coins and banknotes
+   share this partial (included from detail.html after "Pedigree,
+   References"). Everything here talks to its own JSON endpoints
+   (/<category>/<id>/pedigree/...), never the main save form, so the
+   panels work without touching the record's Save. #}
+{%- set _pv_conf = r['provenance_confidence'] if r and 'provenance_confidence' in r.keys() else none -%}
+{%- set _pv_summary = (r['provenance_summary'] if r and 'provenance_summary' in r.keys() and r['provenance_summary'] else '') -%}
+{%- set _pv_searched = (r['provenance_searched_at'] if r and 'provenance_searched_at' in r.keys() and r['provenance_searched_at'] else '') -%}
+{%- set _ra_summary = (r['rarity_summary'] if r and 'rarity_summary' in r.keys() and r['rarity_summary'] else '') -%}
+{%- set _ra_searched = (r['rarity_searched_at'] if r and 'rarity_searched_at' in r.keys() and r['rarity_searched_at'] else '') -%}
+{%- set _noun = 'coin' if category == 'coins' else 'note' -%}
+
+<!-- Provenance & Pedigree -->
+<div class="section-bar">Provenance &amp; Pedigree</div>
+<div class="pdg-panel" id="pdgProvenance">
+  <div class="pdg-head">
+    <span class="pdg-title">Chain of custody</span>
+    <span class="pdg-stamp" id="pdgProvStamp">{% if _pv_searched %}researched {{ _pv_searched|short_date }}{% if _pv_conf is not none %} · confidence {{ _pv_conf|pedigree_pct }}{% endif %}{% else %}not yet researched{% endif %}</span>
+    <span class="pdg-spacer"></span>
+    <a class="pdg-link" href="{{ url_for('pedigree_overview', category=category, kind='provenance') }}" title="Every {{ _noun }}'s provenance on one page">All {{ 'coins' if category == 'coins' else 'notes' }} ›</a>
+    <button type="button" class="toolbar-btn pill pdg-research" id="pdgProvResearch"
+            data-kind="provenance"
+            title="Trace this {{ _noun }} through the auction archives, dealer listings and named collections — by weight, dies, serial number and the photographs">🔎 Research</button>
+  </div>
+  <div class="pdg-error" id="pdgProvError" style="display:none"></div>
+  <table class="pdg-table" id="pdgEventsTable">
+    <thead>
+      <tr><th class="pdg-c-date">Date</th><th>Event</th><th class="pdg-c-lot">Lot</th><th class="pdg-c-price">Price</th><th>Basis</th><th class="pdg-c-conf">Conf.</th><th class="pdg-c-x"></th></tr>
+    </thead>
+    <tbody id="pdgEvents"></tbody>
+  </table>
+  <div class="pdg-empty" id="pdgEventsEmpty" style="display:none">No prior appearances on record yet — press Research, or add one by hand below.</div>
+  <div class="pdg-add" id="pdgAdd">
+    <input type="text" class="pdg-in pdg-in-date" id="pdgAddDate" placeholder="Date (2015-01-07 or 1978)" autocomplete="off">
+    <select class="pdg-in pdg-in-kind" id="pdgAddKind">
+      <option value="auction">Auction</option>
+      <option value="dealer">Dealer</option>
+      <option value="collection">Collection</option>
+      <option value="publication">Publication</option>
+      <option value="hoard">Hoard / find</option>
+      <option value="other">Other</option>
+    </select>
+    <input type="text" class="pdg-in" id="pdgAddHouse" placeholder="House / dealer / collector" autocomplete="off">
+    <input type="text" class="pdg-in" id="pdgAddSale" placeholder="Sale / collection name" autocomplete="off">
+    <input type="text" class="pdg-in pdg-in-lot" id="pdgAddLot" placeholder="Lot" autocomplete="off">
+    <input type="text" class="pdg-in pdg-in-price" id="pdgAddPrice" placeholder="Price" autocomplete="off">
+    <input type="text" class="pdg-in" id="pdgAddUrl" placeholder="URL" autocomplete="off">
+    <input type="text" class="pdg-in" id="pdgAddNotes" placeholder="Notes (ex ticket, basis…)" autocomplete="off">
+    <button type="button" class="toolbar-btn pill" id="pdgAddBtn" title="Add this event by hand">+ Add</button>
+  </div>
+  <div class="pdg-facts">
+    <span><b>Earliest documented:</b> <span id="pdgEarliest">{{ (r['provenance_earliest'] if r and 'provenance_earliest' in r.keys() and r['provenance_earliest'] else '—') }}</span></span>
+    <span><b>Import restriction:</b> <span id="pdgRestriction">{{ (r['provenance_restriction'] if r and 'provenance_restriction' in r.keys() and r['provenance_restriction'] else '—') }}</span></span>
+  </div>
+  <div class="pdg-summary-wrap">
+    <div class="pdg-summary{% if not _pv_summary %} is-empty{% endif %}" id="pdgProvSummary" title="Click to edit" tabindex="0">{{ _pv_summary|format_results }}</div>
+    <textarea class="pdg-summary-edit" id="pdgProvSummaryEdit" data-kind="provenance" style="display:none" rows="6">{{ _pv_summary }}</textarea>
+  </div>
+</div>
+
+<!-- Rarity & Population -->
+<div class="section-bar">Rarity &amp; Population</div>
+<div class="pdg-panel" id="pdgRarity">
+  <div class="pdg-head">
+    <span class="pdg-title">{% if category == 'banknotes' %}Census &amp; rarity{% else %}Rarity &amp; die study{% endif %}</span>
+    <span class="pdg-stamp" id="pdgRarStamp">{% if _ra_searched %}researched {{ _ra_searched|short_date }}{% if r['rarity_confidence'] is not none %} · confidence {{ r['rarity_confidence']|pedigree_pct }}{% endif %}{% else %}not yet researched{% endif %}</span>
+    <span class="pdg-spacer"></span>
+    <a class="pdg-link" href="{{ url_for('pedigree_overview', category=category, kind='rarity') }}" title="Every {{ _noun }}'s rarity standing on one page">All {{ 'coins' if category == 'coins' else 'notes' }} ›</a>
+    <button type="button" class="toolbar-btn pill pdg-research" id="pdgRarResearch"
+            data-kind="rarity"
+            title="{% if category == 'banknotes' %}PMG / PCGS population for this Pick number and grade — total, at this grade, finer — plus the catalogue rarity{% else %}Specimens in the auction record, the reference's rarity rating, and where this coin sits in the die study{% endif %}">🔎 Research</button>
+  </div>
+  <div class="pdg-error" id="pdgRarError" style="display:none"></div>
+  <div class="pdg-tiles">
+    <div class="pdg-tile"><span class="pdg-tile-n" id="pdgRarKnown">{{ r['rarity_known'] if r and r['rarity_known'] is not none else '—' }}</span><span class="pdg-tile-l">{% if category == 'banknotes' %}Graded{% else %}Recorded{% endif %}</span></div>
+    <div class="pdg-tile"><span class="pdg-tile-n" id="pdgRarSame">{{ r['rarity_same'] if r and r['rarity_same'] is not none else '—' }}</span><span class="pdg-tile-l">This grade</span></div>
+    <div class="pdg-tile"><span class="pdg-tile-n" id="pdgRarFiner">{{ r['rarity_finer'] if r and r['rarity_finer'] is not none else '—' }}</span><span class="pdg-tile-l">Finer</span></div>
+    <div class="pdg-tile pdg-tile-wide"><span class="pdg-tile-n pdg-rank" id="pdgRarRank" data-rank="{{ (r['rarity_rank'] or '')|lower if r else '' }}">{{ r['rarity_rank'] if r and r['rarity_rank'] else '—' }}</span><span class="pdg-tile-l">Standing</span></div>
+    <div class="pdg-tile pdg-tile-wide"><span class="pdg-tile-n" id="pdgRarRating">{{ r['rarity_rating'] if r and r['rarity_rating'] else '—' }}</span><span class="pdg-tile-l">Rarity</span></div>
+  </div>
+  <div class="pdg-facts pdg-facts-col">
+    <span id="pdgRarDieRow" {% if not (r and r['rarity_die']) %}style="display:none"{% endif %}><b>Die study:</b> <span id="pdgRarDie">{{ r['rarity_die'] if r and r['rarity_die'] else '' }}</span></span>
+    <span id="pdgRarRegradeRow" {% if not (r and r['rarity_regrade']) %}style="display:none"{% endif %}><b>Regrade:</b> <span id="pdgRarRegrade">{{ r['rarity_regrade'] if r and r['rarity_regrade'] else '' }}</span></span>
+    <span id="pdgRarSourceRow" {% if not (r and r['rarity_source']) %}style="display:none"{% endif %}><b>Source:</b> <span id="pdgRarSource">{{ r['rarity_source'] if r and r['rarity_source'] else '' }}</span> <a id="pdgRarSourceUrl" target="_blank" rel="noopener" href="{{ r['rarity_source_url'] if r and r['rarity_source_url'] else '#' }}" {% if not (r and r['rarity_source_url']) %}style="display:none"{% endif %}>open ↗</a></span>
+  </div>
+  <div class="pdg-summary-wrap">
+    <div class="pdg-summary{% if not _ra_summary %} is-empty{% endif %}" id="pdgRarSummary" title="Click to edit" tabindex="0">{{ _ra_summary|format_results }}</div>
+    <textarea class="pdg-summary-edit" id="pdgRarSummaryEdit" data-kind="rarity" style="display:none" rows="6">{{ _ra_summary }}</textarea>
+  </div>
+</div>
+
+<script id="pdgData" type="application/json">{{ {
+  'category': category,
+  'id': r['id'],
+  'events': pedigree_events or [],
+  'purchase': pedigree_purchase,
+  'urls': {
+    'research': url_for('pedigree_research_start', category=category, record_id=r['id'], kind='KIND'),
+    'events': url_for('provenance_events_route', category=category, record_id=r['id']),
+    'summary': url_for('pedigree_summary_save', category=category, record_id=r['id'], kind='KIND')
+  }
+}|tojson }}</script>
+<script>
+(function pedigreePanels() {
+  const dataEl = document.getElementById('pdgData');
+  if (!dataEl) return;
+  const D = JSON.parse(dataEl.textContent || '{}');
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmtDate = (iso) => {
+    if (!iso) return '';
+    const m = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/.exec(iso);
+    if (!m) return iso;
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    if (m[3]) return `${months[+m[2]-1]} ${+m[3]}, ${m[1]}`;
+    if (m[2]) return `${months[+m[2]-1]} ${m[1]}`;
+    return m[1];
+  };
+  const pct = (c) => (c == null || isNaN(c)) ? '' : `${Math.round(c * 100)}%`;
+  const kindLabel = {auction: 'Auction', dealer: 'Dealer', collection: 'Collection',
+                     publication: 'Published', hoard: 'Hoard', purchase: 'Purchase', other: ''};
+
+  // ── Provenance chain ────────────────────────────────────────────
+  function renderEvents(events, purchase) {
+    const tbody = $('pdgEvents');
+    const rows = (events || []).slice();
+    if (purchase) rows.push(purchase);
+    tbody.innerHTML = rows.map(ev => {
+      const when = ev.date_text || fmtDate(ev.sort_date) || '';
+      const kind = kindLabel[ev.kind] || '';
+      const title = [ev.house, ev.sale].filter(Boolean).join(' — ');
+      const link = ev.url ? ` <a href="${esc(ev.url)}" target="_blank" rel="noopener" class="pdg-ev-link" title="${esc(ev.url)}">↗</a>` : '';
+      const src = ev.source === 'manual' ? '<span class="pdg-src pdg-src-manual" title="Entered by hand">hand</span>'
+                : ev.source === 'record' ? '<span class="pdg-src pdg-src-record" title="From the record">you</span>'
+                : '<span class="pdg-src" title="Found by research">found</span>';
+      const del = (ev.id != null) ? `<button type="button" class="pdg-del" data-id="${ev.id}" title="Remove this event">×</button>` : '';
+      const basis = [ev.basis, ev.notes].filter(Boolean).join(' · ');
+      return `<tr class="pdg-ev pdg-ev-${esc(ev.kind || 'other')}">
+        <td class="pdg-c-date">${esc(when)}</td>
+        <td><span class="pdg-ev-kind">${esc(kind)}</span> ${esc(title)}${link} ${src}</td>
+        <td class="pdg-c-lot">${esc(ev.lot || '')}</td>
+        <td class="pdg-c-price">${esc(ev.price || '')}</td>
+        <td class="pdg-c-basis">${esc(basis)}</td>
+        <td class="pdg-c-conf">${pct(ev.confidence)}</td>
+        <td class="pdg-c-x">${del}</td>
+      </tr>`;
+    }).join('');
+    $('pdgEventsTable').style.display = rows.length ? '' : 'none';
+    $('pdgEventsEmpty').style.display = rows.length ? 'none' : '';
+  }
+  renderEvents(D.events, D.purchase);
+
+  async function readJson(res) {
+    const text = await res.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch (e) { data = {error: text.slice(0, 200)}; }
+    if (!res.ok && res.status !== 202) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+  function showError(id, msg) {
+    const el = $(id);
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = msg; el.style.display = '';
+  }
+
+  $('pdgEvents').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.pdg-del');
+    if (!btn) return;
+    e.preventDefault();
+    if (!confirm('Remove this provenance event?')) return;
+    try {
+      const res = await fetch(`${D.urls.events}/${btn.dataset.id}`, {method: 'DELETE', headers: {'Accept': 'application/json'}});
+      const data = await readJson(res);
+      D.events = data.events; renderEvents(D.events, data.purchase || D.purchase);
+      $('pdgEarliest').textContent = data.earliest || '—';
+    } catch (err) { showError('pdgProvError', 'Could not remove: ' + err.message); }
+  });
+
+  async function addEvent() {
+    const payload = {
+      date: $('pdgAddDate').value.trim(), kind: $('pdgAddKind').value,
+      house: $('pdgAddHouse').value.trim(), sale: $('pdgAddSale').value.trim(),
+      lot: $('pdgAddLot').value.trim(), price: $('pdgAddPrice').value.trim(),
+      url: $('pdgAddUrl').value.trim(), notes: $('pdgAddNotes').value.trim(),
+      basis: 'entered by hand', confidence: 1,
+    };
+    if (!payload.house && !payload.sale) { showError('pdgProvError', 'Give the event at least a house, dealer, collector or publication.'); return; }
+    try {
+      const res = await fetch(D.urls.events, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify(payload)});
+      const data = await readJson(res);
+      showError('pdgProvError', '');
+      D.events = data.events; renderEvents(D.events, data.purchase || D.purchase);
+      $('pdgEarliest').textContent = data.earliest || '—';
+      ['pdgAddDate','pdgAddHouse','pdgAddSale','pdgAddLot','pdgAddPrice','pdgAddUrl','pdgAddNotes'].forEach(id => { $(id).value = ''; });
+    } catch (err) { showError('pdgProvError', 'Could not add: ' + err.message); }
+  }
+  $('pdgAddBtn').addEventListener('click', addEvent);
+  // Enter inside the add row adds the event; it must not submit the
+  // record's own Save form that this panel sits inside.
+  $('pdgAdd').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addEvent(); }
+  });
+
+  // ── Research (both kinds) ───────────────────────────────────────
+  async function poll(url, btn, label) {
+    const started = Date.now();
+    while (Date.now() - started < 15 * 60 * 1000) {
+      await new Promise(r => setTimeout(r, 4000));
+      const mins = Math.floor((Date.now() - started) / 60000);
+      btn.textContent = mins ? `${label} ${mins}m…` : `${label}…`;
+      const res = await fetch(url, {headers: {'Accept': 'application/json'}});
+      const data = await readJson(res);
+      if (res.status === 202 || data.status === 'running') continue;
+      if (data.status === 'error') throw new Error(data.error || 'Research failed');
+      return data;
+    }
+    throw new Error('Research is still running after 15 minutes — reload the page later; the result is saved when it lands.');
+  }
+
+  function applyProvenance(data) {
+    D.events = data.events || [];
+    renderEvents(D.events, D.purchase);
+    $('pdgEarliest').textContent = data.earliest || '—';
+    $('pdgRestriction').textContent = data.restriction || '—';
+    setSummary('pdgProvSummary', 'pdgProvSummaryEdit', data.summary || '');
+    $('pdgProvStamp').textContent = `researched ${fmtDate((data.searched_at || '').slice(0, 10))}` + (data.confidence != null ? ` · confidence ${pct(data.confidence)}` : '');
+  }
+  function applyRarity(data) {
+    const n = (v) => (v == null ? '—' : v);
+    $('pdgRarKnown').textContent = n(data.known);
+    $('pdgRarSame').textContent = n(data.same);
+    $('pdgRarFiner').textContent = n(data.finer);
+    $('pdgRarRank').textContent = data.rank || '—';
+    $('pdgRarRank').dataset.rank = (data.rank || '').toLowerCase();
+    $('pdgRarRating').textContent = data.rating || '—';
+    $('pdgRarDie').textContent = data.die || ''; $('pdgRarDieRow').style.display = data.die ? '' : 'none';
+    $('pdgRarRegrade').textContent = data.regrade || ''; $('pdgRarRegradeRow').style.display = data.regrade ? '' : 'none';
+    $('pdgRarSource').textContent = data.source || ''; $('pdgRarSourceRow').style.display = data.source ? '' : 'none';
+    const a = $('pdgRarSourceUrl'); a.href = data.source_url || '#'; a.style.display = data.source_url ? '' : 'none';
+    setSummary('pdgRarSummary', 'pdgRarSummaryEdit', data.summary || '');
+    $('pdgRarStamp').textContent = `researched ${fmtDate((data.searched_at || '').slice(0, 10))}` + (data.confidence != null ? ` · confidence ${pct(data.confidence)}` : '');
+  }
+
+  document.querySelectorAll('.pdg-research').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const kind = btn.dataset.kind;
+      const errId = kind === 'provenance' ? 'pdgProvError' : 'pdgRarError';
+      const original = btn.textContent;
+      btn.disabled = true; btn.textContent = '🔎 Researching…';
+      showError(errId, '');
+      try {
+        const res = await fetch(D.urls.research.replace('KIND', kind), {method: 'POST', headers: {'Accept': 'application/json'}});
+        let data = await readJson(res);
+        if (data.poll_url) data = await poll(data.poll_url, btn, '🔎 Researching');
+        if (kind === 'provenance') applyProvenance(data); else applyRarity(data);
+      } catch (err) {
+        showError(errId, err.message);
+      } finally {
+        btn.disabled = false; btn.textContent = original;
+      }
+    });
+  });
+
+  // ── Summary text: click to edit, blur to save ───────────────────
+  function setSummary(viewId, editId, text) {
+    const view = $(viewId), edit = $(editId);
+    edit.value = text;
+    view.textContent = text;
+    view.classList.toggle('is-empty', !text);
+  }
+  document.querySelectorAll('.pdg-summary').forEach(view => {
+    const edit = view.nextElementSibling;
+    const open = () => { view.style.display = 'none'; edit.style.display = ''; edit.focus(); };
+    view.addEventListener('click', open);
+    view.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } });
+    edit.addEventListener('blur', async () => {
+      const text = edit.value.trim();
+      view.style.display = ''; edit.style.display = 'none';
+      view.textContent = text; view.classList.toggle('is-empty', !text);
+      try {
+        await fetch(D.urls.summary.replace('KIND', edit.dataset.kind), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({summary: text})});
+      } catch (e) { /* best effort — the research result is the source of truth */ }
+    });
+  });
+})();
+</script>

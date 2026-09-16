@@ -54,6 +54,17 @@
        title="In-depth analysis of the collection — {{ 'the independent watchmakers' if category == 'watches' else ('the ancient Greek coinage' if category == 'coins' else 'colonial, United States and world notes') }}">Analysis</a>
     {% endif %}
   {% endif %}
+  {# Provenance & Rarity — the two professional analyses, one page each
+     for the whole category (every coin / note with its chain of custody
+     and earliest documented date; every one with its census standing). #}
+  {% if category in ('coins', 'banknotes') and not at_property and not _market and not _analysis %}
+  <a href="{{ url_for('pedigree_overview', category=category, kind='provenance') }}"
+     class="toolbar-btn pill pedigree-pill"
+     title="Provenance & pedigree — the sale history of each {{ 'coin' if category == 'coins' else 'note' }}, its earliest documented appearance, and the import-restriction position">Provenance</a>
+  <a href="{{ url_for('pedigree_overview', category=category, kind='rarity') }}"
+     class="toolbar-btn pill pedigree-pill"
+     title="Rarity & population — {{ 'PMG / PCGS census by Pick number and grade' if category == 'banknotes' else 'specimens recorded, rarity ratings and die-study placement' }}">Rarity</a>
+  {% endif %}
   {# Banknotes: the collection report PDF — the countries / colonies
      in the list's order, each with its history, four notes to a page.
      Built in the background; the pill polls and opens it. #}

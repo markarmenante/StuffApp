@@ -1169,6 +1169,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
   {% endif %}
+  {% if not is_new %}{% include 'partials/pedigree_panels.html' %}{% endif %}
 
   <!-- Grade, Conditions (existing notes data) + Historical Context, Notes (condition column) -->
   {{ notescell('notes','Grade, Conditions') }}
@@ -1664,6 +1665,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
   {% endif %}
+  {% if not is_new %}{% include 'partials/pedigree_panels.html' %}{% endif %}
 
   {# Unbounded table-backed docs row, same shape as coins. #}
   {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}

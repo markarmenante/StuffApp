@@ -6030,6 +6030,7 @@ def init_db():
     _normalize_owned_status_values(db)
     _backfill_blank_status_own(db)
     _strip_cite_tag_markup(db)
+    _ensure_pedigree_schema(db)
     _backfill_english_banknote_lettering(db)
     _migrate_coin_history_context_into_condition(db)
     _cleanup_coin_research_headings(db)
@@ -19201,11 +19202,20 @@ def detail_view(category, record_id):
                            'country': country,
                            'state': _banknote_state_name(country, year)}
 
+    # Provenance chain for the Provenance & Pedigree panel (coins and
+    # banknotes): stored events plus the owner's own purchase off the record.
+    pedigree_events, pedigree_purchase = [], None
+    if category in PEDIGREE_CATEGORIES:
+        pedigree_events = _provenance_events(db, category, record_id)
+        pedigree_purchase = _provenance_purchase_event(record)
+
     return render_template('detail.html',
                            category=category,
                            cat_info=cat_info,
                            record=record,
                            counts=counts,
+                           pedigree_events=pedigree_events,
+                           pedigree_purchase=pedigree_purchase,
                            current_category=category,
                            categories=CATEGORIES,
                            fields=visible_fields(category),
@@ -37029,6 +37039,1068 @@ def banknote_trim_ab_report():
             f"</td></tr>")
     parts.append('</table>')
     return '\n'.join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Provenance & pedigree · Rarity & population (Mark, 2026-09-16)
+#
+# Two professional analyses for coins and banknotes:
+#
+#   Provenance — the sale history of THIS specimen (not the type): every
+#   auction lot, dealer listing, named collection and publication it can
+#   be traced through, matched on weight / die axis / references / serial
+#   number / the photographs, with the earliest documented date and how
+#   that sits against the US import restrictions (the MOUs) for the
+#   coin's origin. Events live in provenance_events — research-found and
+#   hand-entered rows side by side; a rerun replaces only the research
+#   rows. The summary, earliest date and restriction note sit on the
+#   record.
+#
+#   Rarity — how many exist and where this one stands: PMG / PCGS
+#   population by Pick number and grade for the notes (total, at this
+#   grade, finer, whether it is top-pop, and what a regrade would do),
+#   specimen counts in the auction record, the catalogue rarity rating
+#   and the die-study placement for the coins.
+#
+# Both run as background jobs — one record from the detail page, or the
+# whole category from the overview page (/coins/provenance, /coins/rarity,
+# /banknotes/...) — on the same Claude + web_search path the Market Scan
+# uses, so nothing here waits on the public gateway's request limit.
+# ---------------------------------------------------------------------------
+
+PEDIGREE_CATEGORIES = ('coins', 'banknotes')
+PEDIGREE_KINDS = ('provenance', 'rarity')
+
+_PEDIGREE_COLUMNS = (
+    'provenance_summary TEXT',
+    'provenance_earliest TEXT',
+    'provenance_restriction TEXT',
+    'provenance_confidence REAL',
+    'provenance_searched_at TEXT',
+    'rarity_known INTEGER',
+    'rarity_same INTEGER',
+    'rarity_finer INTEGER',
+    'rarity_rank TEXT',
+    'rarity_rating TEXT',
+    'rarity_die TEXT',
+    'rarity_regrade TEXT',
+    'rarity_summary TEXT',
+    'rarity_source TEXT',
+    'rarity_source_url TEXT',
+    'rarity_confidence REAL',
+    'rarity_searched_at TEXT',
+)
+
+_PROVENANCE_EVENT_KINDS = ('auction', 'dealer', 'collection', 'publication',
+                           'hoard', 'purchase', 'other')
+
+
+def _ensure_pedigree_schema(db):
+    """Idempotent: the provenance_events table plus the provenance_* and
+    rarity_* columns on coins and banknotes."""
+    db.execute(
+        'CREATE TABLE IF NOT EXISTS provenance_events ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'category TEXT NOT NULL, '
+        'record_id TEXT NOT NULL, '
+        'sort_date TEXT, '
+        'date_text TEXT, '
+        'kind TEXT, '
+        'house TEXT, '
+        'sale TEXT, '
+        'lot TEXT, '
+        'price TEXT, '
+        'url TEXT, '
+        'basis TEXT, '
+        'confidence REAL, '
+        'notes TEXT, '
+        "source TEXT DEFAULT 'manual', "
+        "created_at TEXT DEFAULT (datetime('now')), "
+        "updated_at TEXT DEFAULT (datetime('now')))"
+    )
+    db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_provenance_events_record '
+        'ON provenance_events(category, record_id, sort_date)'
+    )
+    for cat in PEDIGREE_CATEGORIES:
+        table = CATEGORIES[cat]['table']
+        for col in _PEDIGREE_COLUMNS:
+            try:
+                db.execute(f'ALTER TABLE {table} ADD COLUMN {col}')
+            except sqlite3.OperationalError:
+                pass
+    db.commit()
+
+
+def _pedigree_row_get(row, key):
+    try:
+        if hasattr(row, 'keys') and key not in row.keys():
+            return None
+        value = row[key]
+    except (KeyError, IndexError, TypeError):
+        return None
+    return value
+
+
+def _pedigree_text(row, key):
+    value = _pedigree_row_get(row, key)
+    if value is None:
+        return ''
+    return re.sub(r'\s+', ' ', str(value)).strip()
+
+
+def _pedigree_label(category, row):
+    """One-line name for a record on the overview pages and in prompts."""
+    if category == 'coins':
+        parts = [_pedigree_text(row, 'region'), _pedigree_text(row, 'authority'),
+                 _pedigree_text(row, 'denomination')]
+        label = ', '.join(p for p in parts if p)
+        mint = _pedigree_text(row, 'mint')
+        if mint and mint.lower() not in label.lower():
+            label = f'{label} ({mint})' if label else mint
+        when = _pedigree_text(row, 'date_1_text') or _pedigree_text(row, 'date_1')
+        return f'{label} — {when}'.strip(' —') if when else label
+    parts = [_pedigree_text(row, 'country'), _pedigree_text(row, 'denomination')]
+    label = ' '.join(p for p in parts if p)
+    series = _pedigree_text(row, 'series') or _pedigree_text(row, 'date_1_text') \
+        or _pedigree_text(row, 'date_1')
+    pick = _pedigree_text(row, 'pick_number')
+    tail = ', '.join(p for p in (series, pick) if p)
+    return f'{label} — {tail}'.strip(' —') if tail else label
+
+
+def _pedigree_display_number(category, row):
+    return _pedigree_text(row, 'coin_id' if category == 'coins' else 'banknote_id') \
+        or _pedigree_text(row, 'cat_id')
+
+
+def _pedigree_profile(category, row):
+    """The record as a labelled block the model reads — every field that
+    can pin THIS specimen (weight to the hundredth of a gram, die axis,
+    the serial number, the slab number) comes first."""
+    if category == 'coins':
+        fields = (
+            ('Region', 'region'), ('Authority', 'authority'), ('Mint', 'mint'),
+            ('Denomination', 'denomination'), ('Metal', 'metal'),
+            ('Date', 'date_1_text'), ('Date to', 'date_2_text'),
+            ('Weight (g)', 'weight'), ('Diameter (mm)', 'size'),
+            ('Die axis', 'die_axis'), ('References', 'coin_references'),
+            ('Reference research', 'coin_references_research'),
+            ('Description', 'description'), ('Notes', 'notes'),
+            ('Grade', 'grade'), ('Grade modifier', 'grade_modifier'),
+            ('Condition', 'grade_condition'), ('Strike', 'strike'), ('Surface', 'surface'),
+            ('Grading authority', 'grading_authority'), ('Slab number', 'slab_number'),
+            ('Bought from', 'vendor'), ('Purchase date', 'purchase_date'),
+        )
+    else:
+        fields = (
+            ('Country', 'country'), ('Municipality', 'municipality'),
+            ('Issuer', 'issuer'), ('Issue type', 'issue_type'),
+            ('Denomination', 'denomination'), ('Series / date', 'series'),
+            ('Date', 'date_1_text'), ('Pick number', 'pick_number'),
+            ('Other catalogue', 'other_catalog'), ('Serial number', 'serial_number'),
+            ('Signatures', 'signatures'), ('Printer', 'printer'),
+            ('Watermark', 'watermark'), ('Material', 'material'),
+            ('Size (mm)', 'size_width'), ('Height (mm)', 'size_height'),
+            ('References', 'note_references'),
+            ('Reference research', 'note_references_research'),
+            ('Description', 'description'), ('Notes', 'notes'),
+            ('Grade', 'grade'), ('Grade (numeric)', 'grade_numeric'),
+            ('Grade modifier', 'grade_modifier'), ('Condition', 'grade_condition'),
+            ('Grading authority', 'grading_authority'), ('Slab number', 'slab_number'),
+            ('Bought from', 'vendor'), ('Purchase date', 'purchase_date'),
+        )
+    lines = []
+    for label, key in fields:
+        value = _pedigree_row_get(row, key)
+        if value is None or str(value).strip() == '':
+            continue
+        text = str(value).strip()
+        if len(text) > 1200:
+            text = text[:1200] + ' …'
+        lines.append(f'{label}: {text}')
+    return '\n'.join(lines)
+
+
+# US import restrictions (the bilateral MOUs / emergency actions under
+# the CPIA) that designate COINS. Effective dates are the designation of
+# the coin categories, which for Cyprus and Italy came later than the
+# original MOU. The model verifies against the live Federal Register /
+# State Department list; this is the hint that tells it what to look for.
+_COIN_IMPORT_RESTRICTIONS = (
+    ('Cyprus', '2007-07-16'), ('China', '2009-01-14'), ('Iraq', '2008-04-30'),
+    ('Italy', '2011-01-19'), ('Greece', '2011-12-01'), ('Bulgaria', '2014-01-16'),
+    ('Syria', '2016-08-15'), ('Egypt', '2016-12-05'), ('Libya', '2017-12-05'),
+    ('Algeria', '2019-08-15'), ('Jordan', '2020-02-05'), ('Yemen', '2020-02-05'),
+    ('Morocco', '2021-01-15'), ('Turkey', '2021-06-16'), ('Afghanistan', '2022-02-22'),
+    ('Albania', '2023-12-01'), ('Tunisia', '2024-01-01'),
+)
+
+
+def _provenance_prompt(category, row, manual_events):
+    profile = _pedigree_profile(category, row)
+    label = _pedigree_label(category, row)
+    known = ''
+    if manual_events:
+        known_lines = []
+        for ev in manual_events:
+            bits = [ev.get('date_text') or ev.get('sort_date') or '', ev.get('house') or '',
+                    ev.get('sale') or '', f"lot {ev['lot']}" if ev.get('lot') else '',
+                    ev.get('price') or '', ev.get('notes') or '']
+            known_lines.append('- ' + ' · '.join(b for b in bits if b))
+        known = ('\n\nProvenance already recorded by hand on this record (keep these; '
+                 'do not repeat them as new events, but you may verify or extend them):\n'
+                 + '\n'.join(known_lines))
+    if category == 'coins':
+        mou = '; '.join(f'{c} (coins designated {d})' for c, d in _COIN_IMPORT_RESTRICTIONS)
+        task = f"""You are a professional numismatist reconstructing the PROVENANCE — the sale and ownership history — of ONE specific ancient or world coin: {label}.
+
+The distinction that matters: THIS specimen, not the type. Thousands of coins share a type; a provenance event is only valid when the evidence points to this exact coin. Evidence that identifies a specimen: weight matching to within ±0.03 g (the single strongest signal — auction records quote weight to the hundredth of a gram), diameter, die axis, the catalogue reference and die group, a distinctive flan shape, test cut, countermark, edge split, wear pattern or centering visible in the photographs, an NGC certification number, or the record's own pedigree text ("Ex …", "From the … Collection", dealer ticket text).
+
+Method:
+1. Read the record: the References, Reference research, Description and Notes fields often already contain pedigree ("Ex CNG 87, lot 245"; "From the collection of …"; "Ex Leu 1978"). Turn every one of those into an event, then try to verify it (find the lot, its date, hammer price and URL).
+2. Search the auction record for this specimen by weight and type: acsearch.info, CoinArchives, cngcoins.com (research archive), numisbids.com, sixbid.com, biddr.com, coins.ha.com (Heritage), stacksbowers.com, romanumismatics.com, nomosag.com, leunumismatik.com, arsclassicacoins.com (NAC), kuenker.de, Nomisma, wildwinds. Query patterns that work: "{_pedigree_text(row, 'weight') or 'WEIGHT'} g" together with the mint/authority and denomination; the reference number with the weight; "site:acsearch.info {_pedigree_text(row, 'mint') or _pedigree_text(row, 'region')} {_pedigree_text(row, 'denomination')} {_pedigree_text(row, 'weight')}"; the NGC cert number on ngccoin.com/certlookup when the coin is slabbed.
+3. Compare each candidate to the photographs when they are supplied: same dies, same centering, same flan outline, same marks. Reject a candidate whose weight or dies differ, however similar the type.
+4. Note the dealer the owner bought it from ({_pedigree_text(row, 'vendor') or 'unknown'}, {_pedigree_text(row, 'purchase_date') or 'date unknown'}) as the final link — do NOT return that purchase as an event, it is recorded separately — but a listing of THIS coin by that dealer (their stock page, a VCoins listing) IS an event.
+5. Import restrictions: the United States restricts import of coins from these origins under the CPIA, with the coin categories designated on roughly these dates (verify): {mou}. State which restriction, if any, covers a coin of this origin and type, and whether the earliest documented appearance you found predates the designation date (a pre-designation appearance outside the country of origin is the documentation a collector, auction house or museum would ask for). If no restriction applies say so plainly.
+
+Output: ONLY a JSON object, no prose before or after, no markdown fences:
+{{
+  "events": [
+    {{"date": "YYYY-MM-DD or YYYY-MM or YYYY", "date_text": "as printed, e.g. 7 January 2015", "kind": "auction|dealer|collection|publication|hoard|other",
+     "house": "auction house, dealer, collector or publication", "sale": "sale name / number or collection name", "lot": "lot number or ''",
+     "price": "hammer or asking price with currency, or ''", "url": "direct URL to the lot / listing / page, or ''",
+     "basis": "what ties this to THIS coin (weight 12.24 g + Milbank IIIa + obverse die; photo match on flan crack at 3h; stated in the record's pedigree)",
+     "confidence": 0.0-1.0, "notes": "one line of context, or ''"}}
+  ],
+  "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, and what you searched without result. Mention the hammer prices found.",
+  "earliest": "the earliest documented date of THIS specimen as YYYY-MM-DD / YYYY-MM / YYYY, or ''",
+  "restriction": "one or two sentences on the import-restriction position, or 'None applies' ",
+  "confidence": 0.0-1.0 (how sure you are the chain describes this exact coin),
+  "notes": "what you searched, one line"
+}}
+
+Return an empty events list rather than a type match; a provenance you cannot tie to this specimen is worth nothing. Only events from your own searches or from the record's pedigree text — never invent a sale.
+
+THE RECORD:
+{profile}{known}"""
+    else:
+        task = f"""You are a professional paper-money specialist reconstructing the PROVENANCE — the sale and ownership history — of ONE specific banknote: {label}.
+
+The distinction that matters: THIS note, not the type. The serial number is the fingerprint — a serial-number hit in an auction archive is conclusive; a Pick-number hit alone is not. Other evidence that identifies a specimen: the PMG / PCGS certification number (the cert-lookup page shows the note and its grade; grading-service labels are also quoted in auction descriptions), a named collection in the record's own text, a distinctive fold, stain, pinhole, stamp or annotation visible in the photographs, and the exact grade and EPQ / PPQ designation combined with a signature variety.
+
+Method:
+1. Read the record: References, Reference research, Description and Notes often already carry pedigree ("Ex Heritage 3033, lot 24512"; "From the … Collection"; a dealer's ticket). Turn each into an event and try to verify it (lot, date, price realised, URL).
+2. Search the auction and dealer record for this specimen by serial number, in quotation marks, with the country and denomination: coins.ha.com/currency (Heritage), stacksbowers.com, lynknight.com, spink.com, noble.com.au, archivesinternational.com, banknoteworld, ebay (sold listings), numisbids, sixbid, the Track & Price and Banknote Book databases, and Google. Also try the serial without its prefix, and the certification number on pmgnotes.com/certlookup or pcgsbanknote.com.
+3. Compare each candidate to the photographs when supplied: same serial, same folds and marks, same holder label.
+4. Note the dealer the owner bought it from ({_pedigree_text(row, 'vendor') or 'unknown'}, {_pedigree_text(row, 'purchase_date') or 'date unknown'}) as the final link — do NOT return that purchase as an event, it is recorded separately — but a listing of THIS note by that dealer IS an event.
+5. Import restrictions: paper money is not covered by the US cultural-property MOUs; say "None applies" unless you find a specific reason otherwise.
+
+Output: ONLY a JSON object, no prose before or after, no markdown fences:
+{{
+  "events": [
+    {{"date": "YYYY-MM-DD or YYYY-MM or YYYY", "date_text": "as printed", "kind": "auction|dealer|collection|publication|other",
+     "house": "auction house, dealer, collector or publication", "sale": "sale name / number or collection name", "lot": "lot number or ''",
+     "price": "price realised or asking price with currency, or ''", "url": "direct URL to the lot / listing, or ''",
+     "basis": "what ties this to THIS note (serial number match; PMG cert 8078166-001; stated in the record's pedigree)",
+     "confidence": 0.0-1.0, "notes": "one line of context, or ''"}}
+  ],
+  "summary": "3–8 sentences in plain prose: the chain of custody you could establish, oldest to newest, what is verified versus inferred, prices realised, and what you searched without result.",
+  "earliest": "the earliest documented date of THIS note as YYYY-MM-DD / YYYY-MM / YYYY, or ''",
+  "restriction": "'None applies' unless there is a specific reason",
+  "confidence": 0.0-1.0,
+  "notes": "what you searched, one line"
+}}
+
+Return an empty events list rather than a type match. Only events from your own searches or from the record's pedigree text — never invent a sale.
+
+THE RECORD:
+{profile}{known}"""
+    return task
+
+
+def _rarity_prompt(category, row):
+    profile = _pedigree_profile(category, row)
+    label = _pedigree_label(category, row)
+    grade = _pedigree_text(row, 'grade')
+    if category == 'banknotes':
+        slab = _pedigree_text(row, 'slab_number')
+        authority = _pedigree_text(row, 'grading_authority')
+        task = f"""You are a professional paper-money specialist establishing the RARITY and POPULATION standing of ONE banknote: {label}.
+
+Find, in this order of preference:
+1. The grading-service population for this exact Pick number (variety and signature included): total graded, how many at this note's grade ({grade or 'see the record'}{(' ' + _pedigree_text(row, 'grade_modifier')) if _pedigree_text(row, 'grade_modifier') else ''}), and how many finer. Sources: the PMG population report (pmgnotes.com/population-report — navigate country → Pick number), the PMG certificate-verification page for the slab number when there is one ({authority or 'grading service'} {slab or 'not slabbed'} — pmgnotes.com/certlookup/CERT/GRADE shows the note and, for many notes, "X graded at this grade, Y finer"), the PCGS Banknote population report (pcgsbanknote.com), and auction descriptions that quote the population ("tied for finest graded", "only 3 finer").
+2. Whether this note is top-pop (none finer), finest known / sole finest, tied for finest, or how many sit above it — and what a regrade or crossover would do: if it is one point below the top, say so.
+3. Rarity beyond the census: how many examples the Banknote Book, the Standard Catalog of World Paper Money or specialist literature record; how often the type has appeared at auction in the past ten years (Heritage, Stack's Bowers, Lyn Knight, Spink, Noble, Archives International); any rarity rating the catalogues give.
+
+Output: ONLY a JSON object, no prose before or after, no markdown fences:
+{{
+  "known": total graded by the service (integer) or the number of examples known when there is no census, or null,
+  "same_grade": integer at this note's grade, or null,
+  "finer": integer finer, or null,
+  "rank": "Top Pop|Finest known|Tied finest|Below finest|Unknown",
+  "rating": "catalogue rarity note, e.g. 'R2 (Banknote Book)', 'Rare (SCWPM)', or ''",
+  "die": "" ,
+  "regrade": "one sentence on what a regrade / crossover would change, or ''",
+  "summary": "3–6 sentences in plain prose: the population figures with their source and date, how this note ranks, how often the type trades and at what level, and what you could not find.",
+  "source": "e.g. 'PMG population report, Pick 55b, retrieved 2026-09-16'",
+  "source_url": "URL of the population / cert page used, or ''",
+  "confidence": 0.0-1.0 (how sure you are the figures are for this exact Pick variety and are current)
+}}
+
+Never estimate a census figure — if you could not read the population report, set the counts to null and say so in the summary. Figures must come from what you actually retrieved.
+
+THE RECORD:
+{profile}"""
+    else:
+        task = f"""You are a professional numismatist establishing the RARITY and the standing of ONE ancient or world coin: {label}.
+
+Find, in this order:
+1. Rarity of the type: the rarity rating the standard reference gives (HGC uses R1 common – R2 scarce – R3 rare; RIC uses C, S, R, R2–R5; Roman Imperial / Greek die studies often state the number of known specimens per die pair); the number of specimens recorded in the auction archives (search acsearch.info and CoinArchives for the reference number and type and read the count of records; note that sales of the same coin repeat); how many the die study cited in the References records.
+2. Die-study placement when a die study exists for this series (e.g. Milbank / Meadows for Aegina, Boehringer for Syracuse, Kraay, Jenkins, Le Rider for Philip II, Price for Alexander, Svoronos for Ptolemies, Newell, Houghton–Lorber for Seleucids, Crawford / RRC for Republican, RIC / BMCRE for Imperial): which group, which obverse / reverse die, how many specimens of that die pair are known, and whether this coin is a die match to a plated or published specimen.
+3. Where this specimen stands: for a coin in an NGC Ancients holder, the census (ngccoin.com/certlookup / the NGC Ancients census) for this type at this grade and finer; otherwise compare its grade, strike and surface against the examples in the auction record and say whether it is among the finest, typical, or below the norm. Say what a regrade would change only when the coin is slabbed.
+
+Output: ONLY a JSON object, no prose before or after, no markdown fences:
+{{
+  "known": approximate number of specimens recorded (auction archive count or die-study count, integer) or null,
+  "same_grade": integer at this grade in the census when slabbed, else null,
+  "finer": integer finer in the census when slabbed, or the number of clearly finer examples you saw in the auction record, or null,
+  "rank": "Top Pop|Finest known|Tied finest|Among the finest|Typical|Below the norm|Unknown",
+  "rating": "the reference's rarity rating, e.g. 'R2 (HGC)', 'R3 (RIC)', or ''",
+  "die": "die-study placement: group, obverse/reverse die, specimens of the pair, published die matches — or ''",
+  "regrade": "one sentence, only for a slabbed coin, else ''",
+  "summary": "3–6 sentences in plain prose: how rare the type is and by whose reckoning, how many appear at auction and at what level, where this coin's dies and condition place it, and what you could not find.",
+  "source": "the sources the figures came from, e.g. 'acsearch.info (41 records), HGC 6, 435 (R1)'",
+  "source_url": "the most useful URL, or ''",
+  "confidence": 0.0-1.0
+}}
+
+Never invent a count — a figure must come from a page you retrieved or a catalogue rating you found; use null and say so otherwise.
+
+THE RECORD:
+{profile}"""
+    return task
+
+
+def _pedigree_parse_json(text):
+    raw = (text or '').strip()
+    raw = re.sub(r'^```(?:json)?\s*', '', raw)
+    raw = re.sub(r'\s*```$', '', raw)
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+    start = raw.find('{')
+    end = raw.rfind('}')
+    if start < 0 or end <= start:
+        raise RuntimeError('No JSON object in the model response.')
+    try:
+        data = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f'Could not parse the model response as JSON: {e}')
+    if not isinstance(data, dict):
+        raise RuntimeError('Model response was not a JSON object.')
+    return data
+
+
+def _pedigree_search_budget(kind):
+    try:
+        return max(2, min(int(os.environ.get(
+            f'PEDIGREE_{kind.upper()}_SEARCHES', 8 if kind == 'provenance' else 6)), 12))
+    except (TypeError, ValueError):
+        return 8 if kind == 'provenance' else 6
+
+
+def _pedigree_images(category, row):
+    if category == 'coins':
+        return _load_coin_vision_images(row)
+    return _load_vision_images((
+        (_pedigree_row_get(row, 'image_1'), 'front'),
+        (_pedigree_row_get(row, 'image_2'), 'back'),
+    ))
+
+
+def _pedigree_model_call(kind, category, prompt, images):
+    """One Claude turn with web search (and the record's photographs when
+    it has any), parsed as a JSON object. Same client shape as the Market
+    Scan: 480 s, the classic search tool with a use budget, continuation
+    through pause_turn / max_tokens in _anthropic_create."""
+    api_key = _require_anthropic_key()
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic package not installed.")
+    if images:
+        content = []
+        for img in images:
+            content.append({'type': 'text', 'text': f'{img["label"].capitalize()} of THIS {"coin" if category == "coins" else "note"}:'})
+            content.append({'type': 'image', 'source': {
+                'type': 'base64', 'media_type': img['media_type'], 'data': img['data']}})
+        content.append({'type': 'text', 'text': prompt})
+    else:
+        content = prompt
+    budget = _pedigree_search_budget(kind)
+    client = anthropic.Anthropic(api_key=api_key, timeout=480, max_retries=1)
+    model = anthropic_lookup_model(
+        api_key, ('ANTHROPIC_PEDIGREE_MODEL', 'ANTHROPIC_MARKET_SCAN_MODEL'),
+        default='auto-sonnet', fable_fallback='sonnet')
+    tool = dict(anthropic_web_search_tool(
+        budget, default_tool=os.environ.get('PEDIGREE_SEARCH_TOOL') or 'web_search_20250305'),
+        max_uses=budget)
+    transient = _anthropic_transient_errs(anthropic)
+    last_err = None
+    for attempt in range(2):
+        try:
+            resp = _anthropic_create(
+                client, model=model, max_tokens=4000, tools=[tool],
+                messages=[{'role': 'user', 'content': content}])
+            break
+        except transient as e:
+            last_err = e
+            if attempt == 1:
+                raise RuntimeError(_friendly_lookup_error(f'{kind.capitalize()} research', e))
+            time.sleep(_bounded_retry_wait(e, 10))
+    else:
+        raise RuntimeError(_friendly_lookup_error(f'{kind.capitalize()} research', last_err))
+    text = _message_text(resp)
+    searches = sum(1 for b in resp.content if getattr(b, 'type', None) == 'server_tool_use')
+    app.logger.info('%s research %s: stop=%s searches=%d text=%d chars', kind, category,
+                    getattr(resp, 'stop_reason', None), searches, len(text))
+    if not text.strip():
+        raise RuntimeError('The model returned no text (search budget or token limit hit). Try again.')
+    data = _pedigree_parse_json(text)
+    data['_searches'] = searches
+    return data
+
+
+def _pedigree_clean_date(value):
+    """'2015-01-07' / '2015-01' / '2015' / 'January 2015' → a sortable
+    ISO-prefix string, or ''."""
+    text = re.sub(r'\s+', ' ', str(value or '')).strip()
+    if not text:
+        return ''
+    m = re.match(r'^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$', text)
+    if m:
+        y, mo, d = m.groups()
+        out = y
+        if mo:
+            out += f'-{int(mo):02d}'
+        if d:
+            out += f'-{int(d):02d}'
+        return out
+    for fmt in ('%d %B %Y', '%B %d, %Y', '%B %d %Y', '%d %b %Y', '%b %d, %Y', '%B %Y', '%b %Y'):
+        try:
+            dt = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        return dt.strftime('%Y-%m-%d') if '%d' in fmt else dt.strftime('%Y-%m')
+    m = re.search(r'\b(1[6-9]\d{2}|20\d{2})\b', text)
+    return m.group(1) if m else ''
+
+
+def _pedigree_clean_str(value, limit=400):
+    text = re.sub(r'\s+', ' ', str(value or '')).strip()
+    text = re.sub(r'</?cite\b[^>]*>', '', text, flags=re.IGNORECASE)
+    return text[:limit]
+
+
+def _pedigree_clean_confidence(value):
+    n = _coerce_number(value)
+    if n is None:
+        return None
+    if n > 1:
+        n = n / 100.0
+    return max(0.0, min(1.0, n))
+
+
+def _pedigree_clean_int(value):
+    if value is None or value == '':
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    m = re.search(r'-?\d[\d,]*', str(value))
+    if not m:
+        return None
+    try:
+        return int(m.group(0).replace(',', ''))
+    except ValueError:
+        return None
+
+
+def _normalise_provenance_event(raw):
+    if not isinstance(raw, dict):
+        return None
+    kind = _pedigree_clean_str(raw.get('kind'), 40).lower()
+    if kind not in _PROVENANCE_EVENT_KINDS:
+        kind = 'other'
+    house = _pedigree_clean_str(raw.get('house'), 200)
+    sale = _pedigree_clean_str(raw.get('sale'), 200)
+    if not (house or sale):
+        return None
+    url = _pedigree_clean_str(raw.get('url'), 600)
+    if url and not re.match(r'^https?://', url, re.IGNORECASE):
+        url = ''
+    date_text = _pedigree_clean_str(raw.get('date_text') or raw.get('date'), 80)
+    return {
+        'sort_date': _pedigree_clean_date(raw.get('date') or raw.get('date_text')),
+        'date_text': date_text,
+        'kind': kind,
+        'house': house,
+        'sale': sale,
+        'lot': _pedigree_clean_str(raw.get('lot'), 40),
+        'price': _pedigree_clean_str(raw.get('price'), 80),
+        'url': url,
+        'basis': _pedigree_clean_str(raw.get('basis'), 400),
+        'confidence': _pedigree_clean_confidence(raw.get('confidence')),
+        'notes': _pedigree_clean_str(raw.get('notes'), 600),
+    }
+
+
+def _provenance_events(db, category, record_id):
+    rows = db.execute(
+        "SELECT * FROM provenance_events WHERE category = ? AND record_id = ? "
+        "ORDER BY CASE WHEN sort_date IS NULL OR sort_date = '' THEN 1 ELSE 0 END, "
+        "sort_date, id",
+        (category, record_id)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _provenance_purchase_event(row):
+    """The owner's own purchase — the last link in the chain — read off
+    the record rather than stored, so it always matches the record."""
+    vendor = _pedigree_text(row, 'vendor')
+    when = _pedigree_text(row, 'purchase_date')
+    price = _pedigree_row_get(row, 'price')
+    if not (vendor or when or price):
+        return None
+    price_text = ''
+    if price not in (None, ''):
+        n = _coerce_number(price)
+        price_text = f'${n:,.0f}' if n is not None else str(price)
+    return {
+        'id': None, 'sort_date': _pedigree_clean_date(when), 'date_text': when,
+        'kind': 'purchase', 'house': vendor, 'sale': 'Bought by the owner',
+        'lot': '', 'price': price_text, 'url': '', 'basis': 'the record',
+        'confidence': 1.0, 'notes': '', 'source': 'record',
+    }
+
+
+def fetch_provenance(category, row):
+    db = open_db_connection()
+    try:
+        manual = [ev for ev in _provenance_events(db, category, row['id'])
+                  if ev.get('source') == 'manual']
+    finally:
+        db.close()
+    prompt = _provenance_prompt(category, row, manual)
+    data = _pedigree_model_call('provenance', category, prompt, _pedigree_images(category, row))
+    events = []
+    for raw in (data.get('events') or []):
+        ev = _normalise_provenance_event(raw)
+        if ev:
+            events.append(ev)
+    earliest = _pedigree_clean_date(data.get('earliest'))
+    dated = sorted(ev['sort_date'] for ev in events if ev['sort_date'])
+    for ev in manual:
+        if ev.get('sort_date'):
+            dated.append(ev['sort_date'])
+    dated.sort()
+    if dated and (not earliest or dated[0] < earliest):
+        earliest = dated[0]
+    return {
+        'events': events,
+        'summary': _pedigree_clean_str(data.get('summary'), 4000),
+        'earliest': earliest,
+        'restriction': _pedigree_clean_str(data.get('restriction'), 600),
+        'confidence': _pedigree_clean_confidence(data.get('confidence')),
+        'notes': _pedigree_clean_str(data.get('notes'), 600),
+        'searches': data.get('_searches'),
+    }
+
+
+def _store_provenance(category, record_id, result):
+    table = CATEGORIES[category]['table']
+    now = datetime.utcnow().isoformat()
+    db = open_db_connection()
+    try:
+        db.execute(
+            "DELETE FROM provenance_events WHERE category = ? AND record_id = ? "
+            "AND source = 'research'", (category, record_id))
+        for ev in result['events']:
+            db.execute(
+                "INSERT INTO provenance_events (category, record_id, sort_date, date_text, "
+                "kind, house, sale, lot, price, url, basis, confidence, notes, source, "
+                "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'research',?,?)",
+                (category, record_id, ev['sort_date'], ev['date_text'], ev['kind'],
+                 ev['house'], ev['sale'], ev['lot'], ev['price'], ev['url'], ev['basis'],
+                 ev['confidence'], ev['notes'], now, now))
+        db.execute(
+            f"UPDATE {table} SET provenance_summary = ?, provenance_earliest = ?, "
+            f"provenance_restriction = ?, provenance_confidence = ?, "
+            f"provenance_searched_at = ?, updated_at = ? WHERE id = ?",
+            (result['summary'], result['earliest'], result['restriction'],
+             result['confidence'], now, now, record_id))
+        db.commit()
+        events = _provenance_events(db, category, record_id)
+    finally:
+        db.close()
+    return {
+        'status': 'done', 'kind': 'provenance', 'events': events,
+        'summary': result['summary'], 'earliest': result['earliest'],
+        'restriction': result['restriction'], 'confidence': result['confidence'],
+        'searched_at': now, 'notes': result.get('notes') or '',
+    }
+
+
+def fetch_rarity(category, row):
+    prompt = _rarity_prompt(category, row)
+    data = _pedigree_model_call('rarity', category, prompt, _pedigree_images(category, row))
+    rank = _pedigree_clean_str(data.get('rank'), 40)
+    url = _pedigree_clean_str(data.get('source_url'), 600)
+    if url and not re.match(r'^https?://', url, re.IGNORECASE):
+        url = ''
+    return {
+        'known': _pedigree_clean_int(data.get('known')),
+        'same': _pedigree_clean_int(data.get('same_grade')),
+        'finer': _pedigree_clean_int(data.get('finer')),
+        'rank': rank if rank.lower() != 'unknown' else '',
+        'rating': _pedigree_clean_str(data.get('rating'), 120),
+        'die': _pedigree_clean_str(data.get('die'), 800),
+        'regrade': _pedigree_clean_str(data.get('regrade'), 400),
+        'summary': _pedigree_clean_str(data.get('summary'), 4000),
+        'source': _pedigree_clean_str(data.get('source'), 300),
+        'source_url': url,
+        'confidence': _pedigree_clean_confidence(data.get('confidence')),
+        'searches': data.get('_searches'),
+    }
+
+
+def _store_rarity(category, record_id, result):
+    table = CATEGORIES[category]['table']
+    now = datetime.utcnow().isoformat()
+    db = open_db_connection()
+    try:
+        db.execute(
+            f"UPDATE {table} SET rarity_known = ?, rarity_same = ?, rarity_finer = ?, "
+            f"rarity_rank = ?, rarity_rating = ?, rarity_die = ?, rarity_regrade = ?, "
+            f"rarity_summary = ?, rarity_source = ?, rarity_source_url = ?, "
+            f"rarity_confidence = ?, rarity_searched_at = ?, updated_at = ? WHERE id = ?",
+            (result['known'], result['same'], result['finer'], result['rank'],
+             result['rating'], result['die'], result['regrade'], result['summary'],
+             result['source'], result['source_url'], result['confidence'], now, now,
+             record_id))
+        db.commit()
+    finally:
+        db.close()
+    out = dict(result)
+    out.pop('searches', None)
+    out.update({'status': 'done', 'kind': 'rarity', 'searched_at': now})
+    return out
+
+
+# ── Per-record jobs ──────────────────────────────────────────────────
+
+PEDIGREE_JOBS = {}
+PEDIGREE_JOBS_LOCK = threading.Lock()
+PEDIGREE_JOB_TTL_SECONDS = 3 * 60 * 60
+
+
+def _set_pedigree_job(job_id, **updates):
+    now_ts = time.time()
+    updates['updated_ts'] = now_ts
+    with PEDIGREE_JOBS_LOCK:
+        job = PEDIGREE_JOBS.setdefault(job_id, {})
+        job.update(updates)
+        stale = now_ts - PEDIGREE_JOB_TTL_SECONDS
+        for jid, j in list(PEDIGREE_JOBS.items()):
+            if j.get('updated_ts', now_ts) < stale:
+                PEDIGREE_JOBS.pop(jid, None)
+        return dict(job)
+
+
+def _get_pedigree_job(job_id):
+    with PEDIGREE_JOBS_LOCK:
+        job = PEDIGREE_JOBS.get(job_id)
+        return dict(job) if job else None
+
+
+def _pedigree_record(db, category, record_id):
+    table = CATEGORIES[category]['table']
+    row = db.execute(f"SELECT * FROM {table} WHERE id = ?", (record_id,)).fetchone()
+    if row is None or not _user_can_see_row(category, row):
+        return None
+    return row
+
+
+def _run_pedigree_research(kind, category, row):
+    """Research + store for one record; returns the stored result dict.
+    Shared by the per-record job and the bulk runner."""
+    row = dict(row)
+    if kind == 'provenance':
+        return _store_provenance(category, row['id'], fetch_provenance(category, row))
+    return _store_rarity(category, row['id'], fetch_rarity(category, row))
+
+
+def _run_pedigree_job(job_id, kind, category, row):
+    try:
+        result = _run_pedigree_research(kind, category, row)
+        _set_pedigree_job(job_id, status='done', result=result,
+                          completed_at=datetime.utcnow().isoformat())
+    except RuntimeError as e:
+        _set_pedigree_job(job_id, status='error', error=str(e) or f'{kind} research failed.',
+                          completed_at=datetime.utcnow().isoformat())
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        _set_pedigree_job(job_id, status='error',
+                          error=f'{kind.capitalize()} research failed: {str(e) or e.__class__.__name__}',
+                          completed_at=datetime.utcnow().isoformat())
+
+
+def _pedigree_guard(category, kind=None):
+    if category not in PEDIGREE_CATEGORIES:
+        abort(404)
+    if kind is not None and kind not in PEDIGREE_KINDS:
+        abort(404)
+
+
+@app.route('/<category>/<record_id>/pedigree/<kind>/research', methods=['POST'])
+def pedigree_research_start(category, record_id, kind):
+    _pedigree_guard(category, kind)
+    db = get_db()
+    row = _pedigree_record(db, category, record_id)
+    if row is None:
+        return jsonify({'error': f'{CATEGORIES[category]["singular"]} not found'}), 404
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        return jsonify({'error': 'ANTHROPIC_API_KEY not configured'}), 503
+    job_id = uuid.uuid4().hex
+    _set_pedigree_job(job_id, status='running', kind=kind, category=category,
+                      record_id=record_id, started_at=datetime.utcnow().isoformat())
+    threading.Thread(target=_run_pedigree_job, args=(job_id, kind, category, dict(row)),
+                     daemon=True).start()
+    return jsonify({
+        'status': 'running', 'job_id': job_id,
+        'poll_url': url_for('pedigree_research_status', category=category,
+                            record_id=record_id, kind=kind, job_id=job_id),
+    }), 202
+
+
+@app.route('/<category>/<record_id>/pedigree/<kind>/job/<job_id>')
+def pedigree_research_status(category, record_id, kind, job_id):
+    _pedigree_guard(category, kind)
+    job = _get_pedigree_job(job_id)
+    if not job or job.get('record_id') != record_id or job.get('kind') != kind:
+        return jsonify({'status': 'error',
+                        'error': 'Research job expired or was lost. Please try again.'}), 404
+    status = job.get('status') or 'running'
+    if status == 'done':
+        return jsonify(job.get('result') or {'status': 'done'})
+    if status == 'error':
+        return jsonify({'status': 'error', 'error': job.get('error') or 'Research failed.'}), 503
+    return jsonify({'status': 'running', 'job_id': job_id,
+                    'started_at': job.get('started_at')}), 202
+
+
+@app.route('/<category>/<record_id>/pedigree/provenance/events', methods=['GET', 'POST'])
+def provenance_events_route(category, record_id):
+    """GET: the chain as JSON. POST: add a hand-entered event."""
+    _pedigree_guard(category)
+    db = get_db()
+    row = _pedigree_record(db, category, record_id)
+    if row is None:
+        return jsonify({'error': 'not found'}), 404
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or request.form.to_dict() or {}
+        ev = _normalise_provenance_event(payload)
+        if not ev:
+            return jsonify({'error': 'An event needs at least a house, dealer, collection or publication.'}), 400
+        now = datetime.utcnow().isoformat()
+        db.execute(
+            "INSERT INTO provenance_events (category, record_id, sort_date, date_text, kind, "
+            "house, sale, lot, price, url, basis, confidence, notes, source, created_at, "
+            "updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'manual',?,?)",
+            (category, record_id, ev['sort_date'], ev['date_text'], ev['kind'], ev['house'],
+             ev['sale'], ev['lot'], ev['price'], ev['url'], ev['basis'],
+             ev['confidence'] if ev['confidence'] is not None else 1.0, ev['notes'], now, now))
+        # A hand-entered date earlier than the researched one moves the
+        # earliest-documented marker with it.
+        table = CATEGORIES[category]['table']
+        current = _pedigree_text(row, 'provenance_earliest')
+        if ev['sort_date'] and (not current or ev['sort_date'] < current):
+            db.execute(f"UPDATE {table} SET provenance_earliest = ?, updated_at = ? WHERE id = ?",
+                       (ev['sort_date'], now, record_id))
+        db.commit()
+    events = _provenance_events(db, category, record_id)
+    row = _pedigree_record(db, category, record_id)
+    return jsonify({
+        'events': events,
+        'purchase': _provenance_purchase_event(row),
+        'earliest': _pedigree_text(row, 'provenance_earliest'),
+    })
+
+
+@app.route('/<category>/<record_id>/pedigree/provenance/events/<int:event_id>',
+           methods=['DELETE', 'POST'])
+def provenance_event_delete(category, record_id, event_id):
+    _pedigree_guard(category)
+    db = get_db()
+    row = _pedigree_record(db, category, record_id)
+    if row is None:
+        return jsonify({'error': 'not found'}), 404
+    db.execute("DELETE FROM provenance_events WHERE id = ? AND category = ? AND record_id = ?",
+               (event_id, category, record_id))
+    events = _provenance_events(db, category, record_id)
+    table = CATEGORIES[category]['table']
+    dated = sorted(ev['sort_date'] for ev in events if ev.get('sort_date'))
+    now = datetime.utcnow().isoformat()
+    db.execute(f"UPDATE {table} SET provenance_earliest = ?, updated_at = ? WHERE id = ?",
+               (dated[0] if dated else '', now, record_id))
+    db.commit()
+    row = _pedigree_record(db, category, record_id)
+    return jsonify({'events': events, 'purchase': _provenance_purchase_event(row),
+                    'earliest': dated[0] if dated else ''})
+
+
+@app.route('/<category>/<record_id>/pedigree/<kind>/summary', methods=['POST'])
+def pedigree_summary_save(category, record_id, kind):
+    """Inline edit of the provenance or rarity summary text."""
+    _pedigree_guard(category, kind)
+    db = get_db()
+    row = _pedigree_record(db, category, record_id)
+    if row is None:
+        return jsonify({'error': 'not found'}), 404
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get('summary') or '').strip()
+    table = CATEGORIES[category]['table']
+    now = datetime.utcnow().isoformat()
+    db.execute(f"UPDATE {table} SET {kind}_summary = ?, updated_at = ? WHERE id = ?",
+               (text, now, record_id))
+    db.commit()
+    return jsonify({'status': 'ok', 'summary': text})
+
+
+# ── Bulk runs (the overview pages) ───────────────────────────────────
+
+PEDIGREE_RUNS = {}
+PEDIGREE_RUNS_LOCK = threading.Lock()
+
+
+def _pedigree_run_key(category, kind):
+    return f'{category}:{kind}'
+
+
+def _pedigree_run_state(category, kind):
+    with PEDIGREE_RUNS_LOCK:
+        state = PEDIGREE_RUNS.get(_pedigree_run_key(category, kind))
+        return dict(state) if state else None
+
+
+def _pedigree_run_update(category, kind, **updates):
+    with PEDIGREE_RUNS_LOCK:
+        state = PEDIGREE_RUNS.setdefault(_pedigree_run_key(category, kind), {})
+        state.update(updates)
+        return dict(state)
+
+
+def _pedigree_bulk_rows(db, category, kind, only_missing):
+    table = CATEGORIES[category]['table']
+    wheres, params = [], []
+    _apply_row_filter_clauses(category, wheres, params)
+    if only_missing:
+        wheres.append(f"({kind}_searched_at IS NULL OR {kind}_searched_at = '')")
+    where = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+    order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
+    return [dict(r) for r in db.execute(
+        f"SELECT * FROM {table} {where} ORDER BY {order_by}", params).fetchall()]
+
+
+def _pedigree_run_worker(category, kind, rows):
+    key = _pedigree_run_key(category, kind)
+    done = failed = 0
+    errors = []
+    for row in rows:
+        with PEDIGREE_RUNS_LOCK:
+            state = PEDIGREE_RUNS.get(key) or {}
+            if state.get('cancel'):
+                break
+        label = _pedigree_label(category, row)
+        _pedigree_run_update(category, kind, current=label, current_id=row['id'])
+        try:
+            _run_pedigree_research(kind, category, row)
+            done += 1
+        except Exception as e:
+            failed += 1
+            errors.append({'id': row['id'], 'label': label, 'error': (str(e) or e.__class__.__name__)[:200]})
+            app.logger.warning('%s run %s: %s failed: %s', kind, category, label, e)
+        _pedigree_run_update(category, kind, done=done, failed=failed, errors=errors[-20:])
+    _pedigree_run_update(category, kind, status='done', current='', current_id='',
+                         finished_at=datetime.utcnow().isoformat(), done=done, failed=failed)
+
+
+@app.route('/<category>/pedigree/<kind>/run', methods=['POST'])
+def pedigree_run_start(category, kind):
+    _pedigree_guard(category, kind)
+    if not g.current_user or g.current_user.get('role') != 'owner':
+        abort(403)
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        return jsonify({'error': 'ANTHROPIC_API_KEY not configured'}), 503
+    payload = request.get_json(silent=True) or {}
+    only_missing = str(payload.get('only_missing', '1')).lower() not in ('0', 'false', 'no', '')
+    ids = payload.get('ids')
+    state = _pedigree_run_state(category, kind)
+    if state and state.get('status') == 'running':
+        return jsonify({'error': 'A run is already in progress.', 'state': state}), 409
+    db = get_db()
+    rows = _pedigree_bulk_rows(db, category, kind, only_missing)
+    if isinstance(ids, list) and ids:
+        wanted = {str(i) for i in ids}
+        rows = [r for r in rows if str(r['id']) in wanted]
+    with PEDIGREE_RUNS_LOCK:
+        PEDIGREE_RUNS[_pedigree_run_key(category, kind)] = {
+            'status': 'running', 'total': len(rows), 'done': 0, 'failed': 0,
+            'errors': [], 'current': '', 'current_id': '', 'cancel': False,
+            'only_missing': only_missing, 'started_at': datetime.utcnow().isoformat(),
+            'finished_at': None,
+        }
+    if not rows:
+        _pedigree_run_update(category, kind, status='done',
+                             finished_at=datetime.utcnow().isoformat())
+        return jsonify({'state': _pedigree_run_state(category, kind)})
+    threading.Thread(target=_pedigree_run_worker, args=(category, kind, rows),
+                     daemon=True).start()
+    return jsonify({'state': _pedigree_run_state(category, kind)}), 202
+
+
+@app.route('/<category>/pedigree/<kind>/run/status')
+def pedigree_run_status(category, kind):
+    _pedigree_guard(category, kind)
+    return jsonify({'state': _pedigree_run_state(category, kind)})
+
+
+@app.route('/<category>/pedigree/<kind>/run/cancel', methods=['POST'])
+def pedigree_run_cancel(category, kind):
+    _pedigree_guard(category, kind)
+    if not g.current_user or g.current_user.get('role') != 'owner':
+        abort(403)
+    state = _pedigree_run_state(category, kind)
+    if state and state.get('status') == 'running':
+        _pedigree_run_update(category, kind, cancel=True)
+    return jsonify({'state': _pedigree_run_state(category, kind)})
+
+
+# ── Overview pages ───────────────────────────────────────────────────
+
+_RARITY_RANK_ORDER = {
+    'finest known': 0, 'top pop': 1, 'tied finest': 2, 'among the finest': 3,
+    'below finest': 4, 'typical': 5, 'below the norm': 6, '': 9,
+}
+
+
+def _pedigree_overview_rows(db, category, kind):
+    table = CATEGORIES[category]['table']
+    wheres, params = [], []
+    _apply_row_filter_clauses(category, wheres, params)
+    where = f"WHERE {' AND '.join(wheres)}" if wheres else ''
+    order_by = CATEGORY_ORDER_BY.get(category, 'created_at DESC')
+    rows = [dict(r) for r in db.execute(
+        f"SELECT * FROM {table} {where} ORDER BY {order_by}", params).fetchall()]
+    counts = {}
+    if kind == 'provenance':
+        for r in db.execute(
+                "SELECT record_id, COUNT(*) AS n, SUM(CASE WHEN source = 'manual' THEN 1 ELSE 0 END) AS manual "
+                "FROM provenance_events WHERE category = ? GROUP BY record_id", (category,)):
+            counts[r['record_id']] = (r['n'], r['manual'])
+    out = []
+    for row in rows:
+        item = {
+            'id': row['id'],
+            'number': _pedigree_display_number(category, row),
+            'label': _pedigree_label(category, row),
+            'grade': ' '.join(p for p in (_pedigree_text(row, 'grade'),
+                                          _pedigree_text(row, 'grade_modifier')) if p),
+            'status': _pedigree_text(row, 'status'),
+            'image': _pedigree_text(row, 'image_1'),
+        }
+        if kind == 'provenance':
+            n, manual = counts.get(row['id'], (0, 0))
+            item.update({
+                'events': n, 'manual': manual or 0,
+                'earliest': _pedigree_text(row, 'provenance_earliest'),
+                'restriction': _pedigree_text(row, 'provenance_restriction'),
+                'confidence': _coerce_number(row.get('provenance_confidence')),
+                'searched_at': _pedigree_text(row, 'provenance_searched_at'),
+                'summary': _pedigree_text(row, 'provenance_summary'),
+            })
+        else:
+            item.update({
+                'known': row.get('rarity_known'), 'same': row.get('rarity_same'),
+                'finer': row.get('rarity_finer'), 'rank': _pedigree_text(row, 'rarity_rank'),
+                'rating': _pedigree_text(row, 'rarity_rating'),
+                'die': _pedigree_text(row, 'rarity_die'),
+                'regrade': _pedigree_text(row, 'rarity_regrade'),
+                'confidence': _coerce_number(row.get('rarity_confidence')),
+                'searched_at': _pedigree_text(row, 'rarity_searched_at'),
+                'summary': _pedigree_text(row, 'rarity_summary'),
+                'source_url': _pedigree_text(row, 'rarity_source_url'),
+            })
+        out.append(item)
+    return out
+
+
+def _pedigree_overview_stats(kind, items):
+    total = len(items)
+    searched = [i for i in items if i.get('searched_at')]
+    stats = {'total': total, 'searched': len(searched), 'missing': total - len(searched)}
+    if kind == 'provenance':
+        stats['documented'] = sum(1 for i in searched if i.get('events'))
+        stats['undocumented'] = sum(1 for i in searched if not i.get('events'))
+        stats['pre_2000'] = sum(1 for i in items if (i.get('earliest') or '')[:4].isdigit()
+                                and int(i['earliest'][:4]) < 2000)
+    else:
+        top = ('finest known', 'top pop', 'tied finest')
+        stats['top_pop'] = sum(1 for i in searched if (i.get('rank') or '').lower() in top)
+        stats['one_finer'] = sum(1 for i in searched if i.get('finer') == 1)
+        stats['regrade'] = sum(1 for i in searched if i.get('regrade'))
+    return stats
+
+
+@app.route('/<category>/pedigree/<kind>')
+def pedigree_overview(category, kind):
+    _pedigree_guard(category, kind)
+    db = get_db()
+    items = _pedigree_overview_rows(db, category, kind)
+    sort = (request.args.get('sort') or '').strip()
+    if kind == 'rarity':
+        if sort == 'number':
+            pass
+        else:
+            items.sort(key=lambda i: (
+                0 if i.get('searched_at') else 1,
+                _RARITY_RANK_ORDER.get((i.get('rank') or '').lower(), 8),
+                i.get('finer') if i.get('finer') is not None else 10 ** 6,
+                i.get('known') if i.get('known') is not None else 10 ** 6))
+    elif sort == 'earliest':
+        items.sort(key=lambda i: (i.get('earliest') or '9999', i.get('number') or ''))
+    return render_template(
+        'pedigree_overview.html', category=category, kind=kind, items=items,
+        stats=_pedigree_overview_stats(kind, items),
+        run_state=_pedigree_run_state(category, kind),
+        current_category=category, cat_info=CATEGORIES[category],
+        is_owner=bool(g.current_user and g.current_user.get('role') == 'owner'),
+        sort=sort)
+
+
+@app.template_filter('pedigree_pct')
+def pedigree_pct_filter(value):
+    n = _coerce_number(value)
+    if n is None:
+        return ''
+    return f'{int(round(n * 100))}%'
+
 
 
 # ---------------------------------------------------------------------------
