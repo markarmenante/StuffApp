@@ -37628,6 +37628,10 @@ def _provenance_archive_sweep(category, row, max_candidates=8, max_images=6):
             time.sleep(0.4)
         c['full'] = _acsearch_lot_text(c['id']) or c['description']
     photos = 0
+    # Mark, 17 Sep 2026: "comparing photos in banknotes not really useful"
+    # — a serial-number match is conclusive, so paper gets no photographs.
+    if category == 'banknotes':
+        max_images = 0
     for c in cands[:max_images]:
         if not c.get('image'):
             continue
@@ -37646,7 +37650,8 @@ def _provenance_archive_sweep(category, row, max_candidates=8, max_images=6):
     else:
         what = f'{len(matched)} type matches (no weight or serial on the record to pin a specimen)'
     status_line = (f'acsearch.info: {len(queries)} quer{"y" if len(queries) == 1 else "ies"}, '
-                   f'{len(seen)} lots, {what}; {photos} photograph{"" if photos == 1 else "s"} compared')
+                   f'{len(seen)} lots, {what}'
+                   + (f'; {photos} photograph{"" if photos == 1 else "s"} compared' if category != 'banknotes' else ''))
     app.logger.info('provenance archive sweep %s %s: %s | %s', category,
                     _pedigree_row_get(row, 'id'), status_line, ' / '.join(queries))
     return {'candidates': cands, 'keyed': key is not None, 'status': status_line}
@@ -37661,19 +37666,20 @@ def _provenance_archive_block(category, sweep):
                 f"No candidate lots to judge — rely on the record's own pedigree text and your searches.")
     if sweep.get('keyed'):
         basis = ('each states the weight on the record' if category == 'coins'
-                 else 'each quotes the serial number on the record')
+                 else 'each quotes the serial number on the record — conclusive; no photographs are attached for paper')
         how = (f"compare each against THIS {noun}'s photographs: the same obverse and reverse dies, the same flan "
                f"outline and centering, the same test cuts, countermarks, edge splits, cracks and surface marks. "
                f"Two coins of one type can share a weight; the dies and the flan decide."
                if category == 'coins' else
-               f"a serial-number match is conclusive; confirm against the photographs (folds, stains, holder label).")
+               f"a serial-number match is conclusive; take the lot's grade, holder and description as this note's.")
     else:
         basis = 'type matches only — nothing on the record pins a specimen, so treat them as leads'
         how = (f"compare each against THIS {noun}'s photographs; accept one only on a die, flan and mark match "
                f"you can describe, else reject it.")
     lines = [
         f"\n\nCANDIDATE LOTS FROM THE AUCTION ARCHIVE (acsearch.info, queried just now for this record; {basis}). "
-        f"Their photographs are attached above, labelled with the same tags. These are the lots to judge — {how} "
+        + (f"Their photographs are attached above, labelled with the same tags. " if category == 'coins' else '')
+        + f"These are the lots to judge — {how} "
         f"A candidate that IS this {noun} becomes an auction event with its URL and its tag in \"candidate\"; then "
         f"read that lot's description for earlier pedigree (\"Ex …\", \"From the … Collection\", hoard names, "
         f"\"This coin\" plate citations) and record each as its own event, with the same tag. Reject the rest "
@@ -38379,7 +38385,8 @@ def fetch_provenance(category, row):
         db.close()
     sweep = _provenance_archive_sweep(category, row)
     prompt = _provenance_prompt(category, row, manual, archive=sweep)
-    images = list(_pedigree_images(category, row) or [])
+    # A note's own scans are not sent either: the serial is the fingerprint.
+    images = list(_pedigree_images(category, row) or []) if category != 'banknotes' else []
     noun = 'coin' if category == 'coins' else 'note'
     for c in sweep.get('candidates') or []:
         if c.get('image_b64'):

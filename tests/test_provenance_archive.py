@@ -354,3 +354,25 @@ assert nres2['top'] == '66' and nres2['standing_detail'] == '3 points below · 2
 assert stuffapp._rarity_standing_detail('banknotes', 'Top Pop', 67, '67 EPQ', 0, 5) == 'at the top · 0 of 5 at auction finer'
 assert stuffapp._rarity_standing_detail('coins', 'Typical', None, '', 18, 110) == '18 of 110 at auction finer'
 print('test_provenance_archive (standing): ok')
+
+# ── 7. Banknotes: no photographs in provenance — not the candidates', not the note's own.
+IMAGES.clear()
+SER_LOTS = [{"id": 401, "title": "Spink, Auction 24001, Lot 77", "description": "Philippines 20 Pesos 1944 P-98a, serial A123456, PMG 64 EPQ",
+             "image": "https://media.acsearch.info/archive/1/1/401.s.jpg", "date": "10.04.2024", "price": "*"}]
+stuffapp._market_fetch_page = lambda url, limit=0: ((200, '<script>acsearch.initSearchResults = ' + json.dumps(SER_LOTS) + ';</script>') if 'term=' in url else (404, ''))
+with stuffapp.app.app_context():
+    nsweep = stuffapp._provenance_archive_sweep('banknotes', {'id': 'n', 'serial_number': 'A 123456', 'country': 'Philippines',
+                                                             'denomination': '20 Pesos', 'pick_number': 'P-98a'})
+assert len(nsweep['candidates']) == 1 and not nsweep['candidates'][0].get('image_b64') and IMAGES == [], (IMAGES, nsweep['status'])
+assert nsweep['status'] == 'acsearch.info: 2 queries, 1 lots, 1 quoting serial A 123456', nsweep['status']
+nblock = stuffapp._provenance_archive_block('banknotes', nsweep)
+assert 'Their photographs are attached' not in nblock and 'no photographs are attached for paper' in nblock
+# fetch_provenance sends no images for a note even when the record has scans.
+CALLS.clear()
+stuffapp._pedigree_model_call = fake_model_call
+stuffapp._pedigree_images = lambda category, row: [{'label': 'front', 'data': 'x', 'media_type': 'image/png'}]
+with stuffapp.app.app_context():
+    stuffapp.fetch_provenance('banknotes', {'id': 'n2', 'serial_number': 'A 123456', 'country': 'Philippines', 'denomination': '20 Pesos',
+                                            'pick_number': 'P-98a', 'vendor': '', 'purchase_date': ''})
+assert CALLS['images'] == [], CALLS['images']
+print('test_provenance_archive (note photos): ok')
