@@ -38619,8 +38619,8 @@ def _rarity_standing_detail(category, rank, grade_numeric, top, auction_finer, a
             own = None
         m = re.match(r'\s*(\d{1,2})', top)
         top_n = int(m.group(1)) if m else None
-        if top:
-            bits.append(f'top {top}')
+        # The top grade itself is the tile's value (Mark: "why not tell
+        # me the finest, it's apparent if it's below"); this line says how far.
         if own is not None and top_n is not None:
             gap = top_n - own
             bits.append('at the top' if gap <= 0 else f'{gap} point{"" if gap == 1 else "s"} below')

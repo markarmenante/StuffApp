@@ -340,17 +340,17 @@ with stuffapp.app.app_context():
     nres = stuffapp._run_pedigree_research('rarity', 'banknotes', nrow)
 assert 'grades stated on 4 lots: 66 ×1, 64 ×1, 63 ×1, 25 ×1; this note reads as 63 — 2 lots grade finer, 1 the same' in RAR['note_prompt'], RAR['note_prompt'][-1200:]
 assert nres['top'] == '67 EPQ' and nres['auction_finer'] == 2 and nres['auction_graded'] == 4 and nres['market'] == 4, nres
-assert nres['standing_detail'] == 'top 67 EPQ · 4 points below · 2 of 4 at auction finer', nres['standing_detail']
+assert nres['standing_detail'] == '4 points below · 2 of 4 at auction finer', nres['standing_detail']
 assert nres['finer'] is None                      # the census 'finer' box is NOT filled from auction lots for notes
 html = client.get(f'/banknotes/{note_id}').get_data(as_text=True)
-assert 'top 67 EPQ · 4 points below · 2 of 4 at auction finer' in html
+assert '4 points below · 2 of 4 at auction finer' in html and '>67 EPQ</span><span class="pdg-tile-l" id="pdgRarRankLabel">Finest<' in html, html[html.find('pdgRarRank'):][:400]
 # No top grade from the model: the finest seen at auction stands in.
 def fake_note_rarity2(kind, category, prompt, images):
     d = fake_note_rarity(kind, category, prompt, images); d['top_grade'] = ''; d['rank'] = 'Unknown'; return d
 stuffapp._pedigree_model_call = fake_note_rarity2
 with stuffapp.app.app_context():
     nres2 = stuffapp._run_pedigree_research('rarity', 'banknotes', nrow)
-assert nres2['top'] == '66' and nres2['standing_detail'] == 'top 66 · 3 points below · 2 of 4 at auction finer', nres2['standing_detail']
-assert stuffapp._rarity_standing_detail('banknotes', 'Top Pop', 67, '67 EPQ', 0, 5) == 'top 67 EPQ · at the top · 0 of 5 at auction finer'
+assert nres2['top'] == '66' and nres2['standing_detail'] == '3 points below · 2 of 4 at auction finer', nres2['standing_detail']
+assert stuffapp._rarity_standing_detail('banknotes', 'Top Pop', 67, '67 EPQ', 0, 5) == 'at the top · 0 of 5 at auction finer'
 assert stuffapp._rarity_standing_detail('coins', 'Typical', None, '', 18, 110) == '18 of 110 at auction finer'
 print('test_provenance_archive (standing): ok')
