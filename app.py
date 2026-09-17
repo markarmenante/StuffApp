@@ -37292,6 +37292,8 @@ _ACSEARCH_SEARCH_URL = ('https://www.acsearch.info/search.html?term={term}&categ
 _ACSEARCH_LOT_URL = 'https://www.acsearch.info/search.html?id={id}'
 _ACSEARCH_CATEGORY = {'coins': '1-2', 'banknotes': '3'}
 _ACSEARCH_RESULTS_RE = re.compile(r'acsearch\.initSearchResults\s*=\s*')
+_ACSEARCH_TOTAL_RE = re.compile(r'of\s*<b>\s*([\d,.]+)\s*</b>')
+_ACSEARCH_LAST = threading.local()   # .total and .url of the last search on this thread
 _ACSEARCH_DESC_RE = re.compile(r'<div id="details-description">(.*?)</div>', re.DOTALL)
 _ACSEARCH_TITLE_RE = re.compile(r'^(?P<house>.+?),\s*(?P<sale>.+?),\s*Lot\s+(?P<lot>.+?)\s*$',
                                 re.IGNORECASE)
@@ -37346,6 +37348,14 @@ def _acsearch_search(term, category='1-2'):
         raw, _ = json.JSONDecoder().raw_decode(page, m.end())
     except ValueError:
         return status, []
+    # The page header states the archive's own total for the query
+    # ("Results 1-81 of 81") — the count the rarity research wants.
+    mt = _ACSEARCH_TOTAL_RE.search(page)
+    try:
+        _ACSEARCH_LAST.total = int(re.sub(r'[,.]', '', mt.group(1))) if mt else None
+    except ValueError:
+        _ACSEARCH_LAST.total = None
+    _ACSEARCH_LAST.url = url
     lots = []
     for item in (raw if isinstance(raw, list) else []):
         if not isinstance(item, dict):
@@ -37661,8 +37671,160 @@ THE RECORD:
     return task
 
 
-def _rarity_prompt(category, row):
+
+# ── Type record for the rarity research ──────────────────────────────
+#
+# The rarity panel (Chalcedon stater, 17 Sep 2026) came back all
+# dashes: "targeted searches of acsearch.info … did not return a
+# retrievable, countable results page". Same instrument problem as the
+# provenance side — a web-search tool cannot count an archive. acsearch
+# states its own total per query, dates every lot and most descriptions
+# give a grade, so the app queries the archive by TYPE (reference, mint +
+# denomination, authority + denomination), counts, and hands the model
+# the record: how many, how many in the last ten years, how the stated
+# grades sit against this coin's.
+
+# Grade words in catalogue descriptions → a coarse rank, so lots can be
+# compared with the record's own grade. English, NGC, German, Italian,
+# French and Spanish conventions; the best match in the text wins.
+_ARCHIVE_GRADE_PATTERNS = (
+    (5.0, r'\b(?:FDC|MS ?6[0-9]|MS\b|Mint State|BU\b|Brilliant Uncirculated|Fleur de coin|Stempelglanz|St\.?\b|SPL/FDC)'),
+    (4.0, r'\b(?:AU ?5[0-9]|Ch(?:oice)? AU|AU\b|About Uncirculated|Nearly Mint State|fast Stempelglanz|vz-st|vz/st|SPL\+|SUP/FDC)'),
+    (3.5, r'\b(?:Ch(?:oice)? (?:XF|EF)|gEF|good EF|Good Extremely Fine|near EF|vorzüglich\+|vz\+|vz-vz\+)'),
+    (3.0, r'\b(?:XF ?4[05]|XF\b|(?<!nearly )(?<!near )(?<!about )(?<!almost )EF\b|Extremely Fine|(?<!fast )vorzüglich|vz\b|SPL\b|SUP\b|EBC\b)'),
+    (2.5, r'\b(?:gVF|good VF|Good Very Fine|nearly EF|near EF|aEF|about EF|almost EF|fast vorzüglich|fast vz|ss-vz|ss/vz|BB\+|TTB\+|BB/SPL|TTB/SUP|MBC\+)'),
+    (2.0, r'\b(?:VF ?[23][05]|(?<!nearly )(?<!near )(?<!about )(?<!almost )VF\b|(?<!nearly )(?<!about )Very Fine|(?<!fast )sehr schön|ss\b|BB\b|TTB\b|MBC\b)'),
+    (1.5, r'\b(?:aVF|about VF|nearly VF|almost VF|nearly Very Fine|about Very Fine|fast sehr schön|s-ss|s/ss|MB/BB|TB/TTB)'),
+    (1.0, r'\b(?:(?<!Very )(?<!Extremely )Fine\b|\bF\b(?!\.)|(?<!sehr )schön\b|MB\b|TB\b|BC\b)'),
+)
+_ARCHIVE_GRADE_RES = tuple((rank, re.compile(pat, re.IGNORECASE)) for rank, pat in _ARCHIVE_GRADE_PATTERNS)
+_ARCHIVE_GRADE_NAMES = {5.0: 'MS/FDC', 4.0: 'AU', 3.5: 'choice EF', 3.0: 'EF', 2.5: 'good VF', 2.0: 'VF', 1.5: 'about VF', 1.0: 'Fine'}
+
+
+def _archive_grade_rank(text):
+    """The highest grade a description states, as a rank, or None. The
+    highest wins because dealers write 'good VF, nearly EF' and the
+    census-style 'VF 30' figures are already in the pattern."""
+    best = None
+    for rank, rx in _ARCHIVE_GRADE_RES:
+        if rx.search(text or ''):
+            best = rank if best is None else max(best, rank)
+    return best
+
+
+def _record_grade_rank(row):
+    """This coin's grade as the same rank: the grade field first
+    ('EF', 'Ch XF 5/5 4/5', 'gVF'), then the condition note."""
+    for key in ('grade', 'grade_condition'):
+        rank = _archive_grade_rank(_pedigree_text(row, key))
+        if rank is not None:
+            return rank
+    return None
+
+
+def _rarity_archive_queries(category, row):
+    text = lambda k: _pedigree_text(row, k)
+    queries = []
+
+    def add(*parts):
+        term = re.sub(r'\s+', ' ', ' '.join(str(x).strip() for x in parts if x and str(x).strip())).strip()
+        if term and term.lower() not in {q.lower() for q in queries}:
+            queries.append(term)
+
+    if category == 'coins':
+        denom = text('denomination')
+        for ref in _archive_reference_terms(text('coin_references'), limit=2):
+            add(ref)
+        add(text('mint') or text('region'), denom)
+        if text('authority') and text('authority').lower() != (text('mint') or text('region') or '').lower():
+            add(text('authority'), denom)
+        return queries[:4]
+    add(text('pick_number'), text('country'))
+    add(text('country'), text('denomination'), text('series'))
+    return queries[:2]
+
+
+def _rarity_archive_sweep(category, row, max_lots=40):
+    """The auction record of the TYPE from acsearch.info: {'queries':
+    [(term, total, url)], 'lots': [...], 'ten_years': n, 'grades': {rank:
+    n}, 'own_rank', 'finer', 'same', 'status': '<one line>'}. Never raises."""
+    queries = _rarity_archive_queries(category, row)
+    if not queries:
+        return {'queries': [], 'lots': [], 'status': 'archive sweep skipped: no reference, mint or denomination on the record'}
+    cat = _ACSEARCH_CATEGORY.get(category, '1-2')
+    seen, results, statuses = {}, [], []
+    for i, q in enumerate(queries):
+        if i:
+            time.sleep(0.6)
+        status, lots = _acsearch_search(q, cat)
+        statuses.append(status)
+        if status != 200:
+            continue
+        results.append((q, getattr(_ACSEARCH_LAST, 'total', None) or len(lots), getattr(_ACSEARCH_LAST, 'url', '')))
+        for lot in lots:
+            seen.setdefault(lot['id'], lot)
+    if statuses and all(st != 200 for st in statuses):
+        how = statuses[0]
+        return {'queries': [], 'lots': [],
+                'status': ('acsearch.info unreachable from the server '
+                           f'({"bot challenge" if how == "challenge" else ("HTTP " + str(how)) if how else "no connection"})')}
+    lots = sorted(seen.values(), key=lambda l: l['sort_date'] or '', reverse=True)
+    cutoff = (date.today() - timedelta(days=3652)).isoformat()
+    ten_years = sum(1 for l in lots if l['sort_date'] and l['sort_date'] >= cutoff)
+    grades = {}
+    for l in lots:
+        l['grade_rank'] = _archive_grade_rank(l['description'])
+        if l['grade_rank'] is not None:
+            grades[l['grade_rank']] = grades.get(l['grade_rank'], 0) + 1
+    own = _record_grade_rank(row)
+    graded = sum(grades.values())
+    finer = sum(n for r, n in grades.items() if own is not None and r > own)
+    same = sum(n for r, n in grades.items() if own is not None and r == own)
+    totals = '; '.join(f"'{q}' {t} record{'' if t == 1 else 's'}" for q, t, _ in results)
+    status_line = (f'acsearch.info: {totals}; {len(lots)} distinct lots read, {ten_years} in the last ten years; '
+                   f'grades stated on {graded}'
+                   + (f", {finer} finer than this coin's {_ARCHIVE_GRADE_NAMES.get(own, 'grade')}, {same} the same"
+                      if own is not None and graded else ''))
+    app.logger.info('rarity archive sweep %s %s: %s', category, _pedigree_row_get(row, 'id'), status_line)
+    return {'queries': results, 'lots': lots[:max_lots], 'ten_years': ten_years, 'grades': grades,
+            'own_rank': own, 'finer': finer if own is not None else None,
+            'same': same if own is not None else None, 'graded': graded,
+            'distinct': len(lots), 'status': status_line}
+
+
+def _rarity_archive_block(category, sweep):
+    noun = 'coin' if category == 'coins' else 'note'
+    if not sweep.get('lots'):
+        return (f"\n\nAUCTION ARCHIVE SWEEP (acsearch.info, run just now for this type): {sweep.get('status')}. "
+                f"No archive counts to work from — use null where you cannot retrieve a figure.")
+    lines = [f"\n\nTYPE RECORD FROM THE AUCTION ARCHIVE (acsearch.info, queried just now for this {noun}'s type). "
+             f"These are retrieved counts, not estimates — use them: the archive's own total per query is an upper "
+             f"bound on specimens (the same {noun} resold appears once per sale); the dated lots give the ten-year "
+             f"frequency; the stated grades place this {noun} against what trades. Cite 'acsearch.info, retrieved today' "
+             f"as the source and quote the query totals."]
+    for q, total, url in sweep['queries']:
+        lines.append(f"- query '{q}': {total} records — {url}")
+    lines.append(f"- {sweep['distinct']} distinct lots retrieved; {sweep['ten_years']} dated within the last ten years")
+    if sweep.get('graded'):
+        dist = ', '.join(f"{_ARCHIVE_GRADE_NAMES.get(r, r)} {n}" for r, n in sorted(sweep['grades'].items(), reverse=True))
+        own = sweep.get('own_rank')
+        lines.append(f"- grades stated on {sweep['graded']} lots: {dist}"
+                     + (f"; this {noun} reads as {_ARCHIVE_GRADE_NAMES.get(own)} — {sweep['finer']} "
+                        f"lot{'' if sweep['finer'] == 1 else 's'} grade{'s' if sweep['finer'] == 1 else ''} finer, "
+                        f"{sweep['same']} the same" if own is not None else ''))
+    lines.append('')
+    lines.append('Lots, newest first (date — house, sale, lot — grade read — weight — description):')
+    for l in sweep['lots']:
+        w = _archive_text_weights(l['description'])
+        lines.append(f"- {l['date_text'] or '?'} — {l['title']} — "
+                     f"{_ARCHIVE_GRADE_NAMES.get(l.get('grade_rank'), 'no grade read')} — "
+                     f"{(str(w[0]) + ' g') if w else '?'} — {l['description'][:220]}")
+    return '\n'.join(lines).rstrip()
+
+
+def _rarity_prompt(category, row, archive=None):
     profile = _pedigree_profile(category, row)
+    archive_block = _rarity_archive_block(category, archive) if archive is not None else ''
     label = _pedigree_label(category, row)
     grade = _pedigree_text(row, 'grade')
     if category == 'banknotes':
@@ -37694,7 +37856,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
 Never estimate a census figure — if you could not read the population report, set the counts to null and say so in the summary. Figures must come from what you actually retrieved.
 
 THE RECORD:
-{profile}"""
+{profile}{archive_block}"""
     else:
         slab = _pedigree_text(row, 'slab_number')
         authority = _pedigree_text(row, 'grading_authority')
@@ -37708,7 +37870,7 @@ THE RECORD:
         task = f"""You are a professional numismatist establishing the RARITY and the standing of ONE ancient or world coin: {label}.
 
 Find, in this order:
-1. Rarity of the type: the rarity rating the standard reference gives (HGC uses R1 common – R2 scarce – R3 rare; RIC uses C, S, R, R2–R5); the number of specimens recorded in the auction archives (search acsearch.info and CoinArchives for the reference number and type and read the count of records — note that sales of the same coin repeat, so the count is an upper bound); and how often the type has come to auction in the past ten years and at what level (CNG, Roma, Nomos, Leu, NAC, Heritage, Künker, Stack's Bowers).
+1. Rarity of the type: the rarity rating the standard reference gives (HGC uses R1 common – R2 scarce – R3 rare; RIC uses C, S, R, R2–R5); the number of specimens recorded in the auction archives — the archive has already been queried for this type, see TYPE RECORD at the end: use those counts (sales of the same coin repeat, so the count is an upper bound) and spend your searches on the reference's rarity rating and the die study instead; and how often the type has come to auction in the past ten years and at what level (CNG, Roma, Nomos, Leu, NAC, Heritage, Künker, Stack's Bowers).
 2. Die-study placement when a die study exists for this series (e.g. Milbank / Meadows for Aegina, Boehringer for Syracuse, Gallatin for the Syracusan decadrachms, Kraay, Jenkins, Le Rider for Philip II, Price for Alexander, Svoronos for Ptolemies, Newell, Houghton–Lorber for Seleucids, Crawford / RRC for Republican, RIC / BMCRE for Imperial): which group, which obverse / reverse die, how many specimens of that die pair the study records, and whether this coin is a die match to a plated or published specimen.
 {standing}
 
@@ -37733,7 +37895,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
 Never invent a count — a figure must come from a page you retrieved or a catalogue rating you found; use null and say so otherwise.
 
 THE RECORD:
-{profile}"""
+{profile}{archive_block}"""
     return task
 
 
@@ -38235,11 +38397,40 @@ _COIN_FIELD_LABELS = {
 
 
 def fetch_rarity(category, row):
-    prompt = _rarity_prompt(category, row)
+    sweep = _rarity_archive_sweep(category, row)
+    prompt = _rarity_prompt(category, row, archive=sweep)
     # No photographs on this pass: the census is looked up by Pick number,
     # cert number and reference, and the grade fields already say what
     # the eye would — the images are the largest fixed cost of a call.
     data = _pedigree_model_call('rarity', category, prompt, None)
+    # The archive's counts stand in wherever the model left a null: the
+    # figures were retrieved, and a dash where a number exists is the
+    # failure this sweep was built to end.
+    if sweep.get('lots'):
+        if data.get('known') in (None, ''):
+            data['known'] = max(t for _, t, _ in sweep['queries'])
+        if data.get('auction_10y') in (None, ''):
+            data['auction_10y'] = sweep['ten_years']
+        if category == 'coins' and data.get('finer') in (None, '') and sweep.get('finer') is not None:
+            data['finer'] = sweep['finer']
+        if not _pedigree_clean_str(data.get('source_url'), 600):
+            best = max(sweep['queries'], key=lambda q: q[1])
+            data['source_url'] = best[2]
+        src = _pedigree_clean_str(data.get('source'), 300)
+        tag = f"acsearch.info ({sweep['distinct']} lots, retrieved {date.today().isoformat()})"
+        if 'acsearch' not in src.lower():
+            data['source'] = (src + '; ' if src else '') + tag
+        rank_now = _pedigree_clean_str(data.get('rank'), 40).strip().lower()
+        if category == 'coins' and rank_now in ('', 'unknown'):
+            # A raw coin's standing from the stated grades alone, when
+            # enough lots carry one: finer than 90% = among the finest.
+            own, finer, graded = sweep.get('own_rank'), sweep.get('finer'), sweep.get('graded') or 0
+            if own is not None and graded >= 5 and not _pedigree_text(row, 'slab_number'):
+                share = finer / graded
+                data['rank'] = 'Among the finest' if share <= 0.1 else ('Typical' if share <= 0.5 else 'Below the norm')
+    summary = _pedigree_clean_str(data.get('summary'), 4000)
+    if sweep.get('status'):
+        data['summary'] = (summary + '\n\n' if summary else '') + f"Archive sweep — {sweep['status']}."
     rank = _pedigree_clean_str(data.get('rank'), 40)
     url = _pedigree_clean_str(data.get('source_url'), 600)
     if url and not re.match(r'^https?://', url, re.IGNORECASE):

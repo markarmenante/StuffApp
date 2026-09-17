@@ -218,3 +218,46 @@ with stuffapp.app.app_context():
     res3 = stuffapp._run_pedigree_research('provenance', 'coins', row2)
 assert res3['match_title'] == '' and res3['match_url'] == '' and res3['filled'] == [], res3
 print('test_provenance_archive (match): ok')
+
+# ── 4. Rarity: the type sweep counts the archive; the counts stand in
+#      wherever the model leaves a null (the Chalcedon stater's dashes).
+TYPE_LOTS = [
+    {"id": 101, "title": "Numisfitz, Auction 3, Lot 10", "description": "KALCHEDON. Stater (15.18 g). HGC 7, 509. Good VF.", "image": "", "date": "18.03.2025", "price": "*"},
+    {"id": 102, "title": "Naumann, Auction 119, Lot 55", "description": "Bithynia, Kalchedon stater, 15.2 g. Extremely fine.", "image": "", "date": "07.08.2022", "price": "*"},
+    {"id": 103, "title": "CNG, Triton IV, Lot 232", "description": "Chalcedon stater 15.18g. EF, toned.", "image": "", "date": "05.12.2000", "price": "*"},
+    {"id": 104, "title": "Tauler & Fau, Auction 100, Lot 7", "description": "Calcedonia. Estatera. 15,1 g. MBC+.", "image": "", "date": "01.02.2024", "price": "*"},
+    {"id": 105, "title": "Leu, Web 30, Lot 300", "description": "Kalchedon. Stater. Ch AU.", "image": "", "date": "10.07.2024", "price": "*"},
+    {"id": 106, "title": "Roma, E-Sale 90, Lot 12", "description": "Kalchedon stater, no grade words at all.", "image": "", "date": "10.07.2023", "price": "*"},
+]
+def fake_fetch_type(url, limit=0):
+    if 'term=' in url:
+        return 200, ('<h1>Results <b><span>1</span>-<span>6</span></b> of <b>1,234</b></h1><script>acsearch.initSearchResults = '
+                     + json.dumps(TYPE_LOTS) + ';</script>')
+    return 404, ''
+stuffapp._market_fetch_page = fake_fetch_type
+r = client.post('/coins/new', data={'region': 'Chalcedon', 'authority': 'Bithynia', 'denomination': 'Stater',
+                                    'date_1': '-380', 'weight': '15.18', 'owner': 'Mark', 'grade': 'EF',
+                                    'coin_references': 'HGC 7, 509; SNG BM 96'}, headers=hdr)
+coin3 = r.get_json()['id']
+RAR = {}
+def fake_rarity_call(kind, category, prompt, images):
+    RAR['prompt'] = prompt
+    return {'known': None, 'die_pair_known': None, 'auction_10y': None, 'finer': None, 'census_graded': None,
+            'same_grade': None, 'rank': 'Unknown', 'rating': 'R1 (HGC)', 'die': '', 'regrade': '',
+            'summary': 'No die study exists for Chalcedon.', 'source': 'HGC 7, 509', 'source_url': '', '_searches': 4}
+stuffapp._pedigree_model_call = fake_rarity_call
+with stuffapp.app.app_context():
+    row3 = stuffapp.get_db().execute("SELECT * FROM coins WHERE id = ?", (coin3,)).fetchone()
+    rar = stuffapp._run_pedigree_research('rarity', 'coins', row3)
+assert 'TYPE RECORD FROM THE AUCTION ARCHIVE' in RAR['prompt'] and "query 'HGC 7 509': 1234 records" in RAR['prompt'], RAR['prompt'][-1500:]
+assert '6 distinct lots retrieved; 5 dated within the last ten years' in RAR['prompt']
+assert 'this coin reads as EF — 1 lot grades finer, 2 the same' in RAR['prompt'], RAR['prompt'][-900:]
+assert rar['known'] == 1234 and rar['market'] == 5 and rar['finer'] == 1, (rar['known'], rar['market'], rar['finer'])
+assert rar['rank'] == 'Typical', rar['rank']       # 1 finer of 5 graded (20%) — the sweep's own standing, since the model said Unknown
+assert rar['source_url'].startswith('https://www.acsearch.info/search.html?term=HGC+7+509')
+assert 'acsearch.info (6 lots, retrieved' in rar['source'] and rar['source'].startswith('HGC 7, 509; ')
+assert rar['summary'].endswith("grades stated on 5, 1 finer than this coin's EF, 2 the same."), rar['summary'][-200:]
+with stuffapp.app.app_context():
+    c3 = stuffapp.get_db().execute("SELECT * FROM coins WHERE id = ?", (coin3,)).fetchone()
+assert c3['rarity_known'] == 1234 and c3['rarity_market'] == 5 and c3['rarity_finer'] == 1 and c3['rarity_rank'] == 'Typical'
+print('test_provenance_archive (rarity): ok')
