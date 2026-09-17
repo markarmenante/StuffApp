@@ -261,3 +261,55 @@ with stuffapp.app.app_context():
     c3 = stuffapp.get_db().execute("SELECT * FROM coins WHERE id = ?", (coin3,)).fetchone()
 assert c3['rarity_known'] == 1234 and c3['rarity_market'] == 5 and c3['rarity_finer'] == 1 and c3['rarity_rank'] == 'Typical'
 print('test_provenance_archive (rarity): ok')
+
+# ── 5. Market Scan: archive context on coin candidates ───────────────
+MK_LOTS = TYPE_LOTS + [
+    {"id": 201, "title": "Peus, Auction 433, Lot 1224", "description": "Kalchedon stater (15.18 g). EF. Ex MMAG 54.", "image": "", "date": "01.11.2022", "price": "*"},
+]
+def fake_fetch_market(url, limit=0):
+    if 'term=' in url:
+        return 200, ("<h1>Results <b>1</b>-<b>7</b> of <b>3'162</b></h1><script>acsearch.initSearchResults = "
+                     + json.dumps(MK_LOTS) + ';</script>')
+    return 404, ''
+stuffapp._market_fetch_page = fake_fetch_market
+items = [
+    {'title': 'Kalchedon stater, EF', 'listing_url': 'https://www.vcoins.com/x/1', 'region': 'Chalcedon', 'authority': 'Bithynia',
+     'mint': None, 'denomination': 'Stater', 'references': 'HGC 7, 509', 'grade': 'EF', 'weight': 15.18, 'score': 50},
+    {'title': 'Some drachm, no weight', 'listing_url': 'https://www.vcoins.com/x/2', 'region': 'Kyme', 'authority': None,
+     'mint': None, 'denomination': 'Drachm', 'references': '', 'grade': 'Good VF', 'weight': None, 'score': 50},
+]
+with stuffapp.app.app_context():
+    note = stuffapp._market_archive_context(items, 'coins')
+assert note == 'acsearch context on 2 candidates', note
+a = items[0]['archive']
+assert a['type_total'] == 3162 and a['ten_years'] == 6 and a['graded'] == 6 and a['finer'] == 1, a
+assert [p['title'] for p in a['prior']] == ['Numisfitz, Auction 3, Lot 10', 'Peus, Auction 433, Lot 1224', 'CNG, Triton IV, Lot 232'], a['prior']   # the 15.18 g lots, newest first (15.2 g and 15,1 g excluded)
+assert items[0]['archive_note'].startswith('Archive: type seldom offered (6 sales in 10 yrs) · EF is upper-quartile (1 of 6 finer)'), items[0]['archive_note']
+assert "this coin's prior sales: Numisfitz, Auction 3, Lot 10 (18.03.2025); Peus, Auction 433, Lot 1224 (01.11.2022)" in items[0]['archive_note'], items[0]['archive_note']
+assert items[0]['score'] == 57, items[0]['score']      # +4 seldom-offered type, +3 upper-quartile grade
+assert items[1]['archive']['prior'] == [] and 'good VF is typical' in items[1]['archive_note'], items[1]['archive_note']
+# Unreachable archive: nothing annotated, a status line, no exception.
+stuffapp._market_fetch_page = lambda url, limit=0: (403, '')
+fresh = [dict(items[0], score=50)]
+fresh[0].pop('archive'); fresh[0].pop('archive_note')
+with stuffapp.app.app_context():
+    note = stuffapp._market_archive_context(fresh, 'coins')
+assert 'unreachable' in note and 'archive' not in fresh[0] and fresh[0]['score'] == 50, (note, fresh[0].get('score'))
+assert stuffapp._market_archive_context(items, 'banknotes') == ''
+stuffapp._market_fetch_page = fake_fetch_market
+# The market page renders the tag from the stored payload.
+with stuffapp.app.app_context():
+    db = stuffapp.get_db()
+    db.execute("INSERT INTO market_scans (id, category, started_at, finished_at, status, summary, item_count) VALUES ('s1','coins',?,?,'done','x',1)",
+               ['2026-09-17T00:00:00', '2026-09-17T00:01:00'])
+    it = dict(items[0], price='$1,000', price_usd=1000.0, venue='VCoins · Store', seller=None, sale_type='fixed', closes='',
+              live_evidence='', verified=False, grade_numeric=45, grading_authority=None, designation='', rarity='', fills='',
+              why='fills the Bithynia gap', fair='', theme='t', empire='', new_source=False, date_1=-380, date_1_text='380 BC',
+              image_urls=[], image_url=None, metal='AR', owned=None)
+    db.execute("INSERT INTO market_scan_items (id, scan_id, category, rank, score, status, title, listing_url, venue, price, price_usd, "
+               "grade_numeric, designation, closes, theme, payload, created_at) VALUES ('i1','s1','coins',1,53,'new',?,?,?,?,?,?,?,?,?,?,?)",
+               [it['title'], it['listing_url'], it['venue'], it['price'], it['price_usd'], 45, '', '', 't', json.dumps(it), '2026-09-17T00:01:00'])
+    db.commit()
+html = client.get('/coins/market').get_data(as_text=True)
+assert 'market-tag-archive' in html and 'EF is upper-quartile' in html and 'term=HGC+7+509' in html, html[html.find('market-tags'):][:600]
+print('test_provenance_archive (market): ok')

@@ -731,6 +731,7 @@
           {% if row['fills'] %}<span class="market-tag market-tag-fills">Fills: {{ row['fills'] }}</span>{% endif %}
           {% if row['rarity'] and (row['grade_numeric'] or 0) < 64 %}<span class="market-tag market-tag-rare">Rarity: {{ row['rarity'] }}</span>{% endif %}
           {% if row['new_source'] %}<span class="market-tag market-tag-new">New source</span>{% endif %}
+          {% if row['archive_note'] %}<span class="market-tag market-tag-archive" title="acsearch.info, queried during the scan: how often the type trades, where this grade sits, and this coin's own prior sales{% if row['archive'] and row['archive']['type_url'] %} — click to open the archive query{% endif %}">{% if row['archive'] and row['archive']['type_url'] %}<a href="{{ row['archive']['type_url'] }}" target="_blank" rel="noopener">{{ row['archive_note'] }}</a>{% else %}{{ row['archive_note'] }}{% endif %}</span>{% endif %}
           {% if row['owned'] %}<span class="market-tag market-tag-owned">You have {{ row['owned'] }}</span>{% endif %}
           {% if row['fair'] %}<span class="market-fair">{{ row['fair'] }}</span>{% endif %}
         </div>

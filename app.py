@@ -15187,6 +15187,8 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
         schema = (
             '{"items": [{"title": str, "region": str, "authority": str|null, '
             '"denomination": str, "mint": str|null, "metal": str|null, '
+            '"weight": number|null (grams, as the listing states it, e.g. 12.24), '
+            '"references": str (catalogue references the listing cites, e.g. "HGC 6, 435; SNG Cop 507"; "" if none), '
             '"year": int|null (negative for BC), "grading_authority": "PCGS"|"NGC"|null, '
             '"grade_numeric": int|null, "grade": str, "designation": str, '
             '"price": str (as listed, with its currency), "venue": str, "seller": str|null, '
@@ -16064,11 +16066,18 @@ def _market_normalize_item(db, category, raw):
         if not item['title']:
             item['title'] = ' '.join(x for x in (item['country'], item['denomination'], item['date_1_text']) if x)
     else:
+        weight = None
+        try:
+            weight = float(str(raw.get('weight') or '').replace(',', '.').strip() or 'x')
+        except ValueError:
+            weight = None
         item.update({
             'region': str(raw.get('region') or '').strip()[:80],
             'authority': (str(raw.get('authority') or '').strip()[:80] or None),
             'mint': (str(raw.get('mint') or '').strip()[:60] or None),
             'metal': (str(raw.get('metal') or '').strip()[:30] or None),
+            'weight': weight if weight and 0.05 <= weight <= 1000 else None,
+            'references': str(raw.get('references') or '').strip()[:200],
         })
         if not item['title']:
             item['title'] = ' '.join(x for x in (item['region'], item['denomination'], item['date_1_text']) if x)
@@ -16132,6 +16141,90 @@ def _market_score(category, item):
     if item.get('owned'):
         score -= 15
     return score
+
+
+# ── Auction-archive context for coin candidates (acsearch.info) ───────
+#
+# Mark, 17 Sep 2026: "can the market search use some of this information
+# as inputs" — the archive that now feeds the Provenance and Rarity
+# panels. acsearch holds closed sales only (its newest lots trail by
+# about two months), so it cannot supply buy candidates; what it gives
+# each candidate is context the theme calls never had: how often the
+# TYPE trades and where the offered grade sits among the grades stated
+# at auction, and — when the listing states a weight — whether THIS
+# coin has been through the rooms recently (a dealer's markup on a lot
+# hammered last season is a different proposition from a fresh coin).
+
+def _market_archive_context(items, category, cap=12):
+    """Annotate the top ``cap`` coin candidates in place with
+    item['archive'] and a one-line item['archive_note'], and adjust
+    item['score']. Never raises; an unreachable archive leaves the items
+    untouched. Returns a status line for the scan summary."""
+    if category != 'coins' or not items:
+        return ''
+    done, unreachable = 0, False
+    for item in items[:cap]:
+        row = {'id': item.get('listing_url', '')[:60], 'region': item.get('region') or '',
+               'authority': item.get('authority') or '', 'mint': item.get('mint') or '',
+               'denomination': item.get('denomination') or '', 'coin_references': item.get('references') or '',
+               'grade': item.get('grade') or '', 'grade_condition': '', 'slab_number': '',
+               'weight': item.get('weight')}
+        try:
+            sweep = _rarity_archive_sweep(category, row, max_lots=0)
+        except Exception as e:
+            app.logger.warning('market archive context: type sweep failed for %s: %s', item.get('title'), e)
+            continue
+        if not sweep.get('queries'):
+            if 'unreachable' in (sweep.get('status') or ''):
+                unreachable = True
+                break
+            continue
+        ctx = {'type_total': max(t for _, t, _ in sweep['queries']),
+               'type_url': max(sweep['queries'], key=lambda q: q[1])[2],
+               'distinct': sweep.get('distinct') or 0, 'ten_years': sweep.get('ten_years') or 0,
+               'graded': sweep.get('graded') or 0, 'finer': sweep.get('finer'),
+               'own_rank': sweep.get('own_rank'), 'prior': []}
+        # This exact coin's prior sales, by weight.
+        if item.get('weight'):
+            try:
+                spec = _provenance_archive_sweep(category, row, max_candidates=4, max_images=0)
+            except Exception as e:
+                app.logger.warning('market archive context: weight sweep failed for %s: %s', item.get('title'), e)
+                spec = {}
+            for c in (spec.get('candidates') or [])[:3]:
+                ctx['prior'].append({'title': c['title'], 'date': c.get('sort_date') or '',
+                                     'date_text': c.get('date_text') or '', 'url': c['url']})
+        item['archive'] = ctx
+        # The score: a type that seldom comes up, and a grade near the top
+        # of what trades, are what the appraisal rules reward.
+        bump, bits = 0, []
+        ty = ctx['ten_years']
+        if ty <= 3:
+            bump += 8; bits.append(f'type rarely offered ({ty} sale{"" if ty == 1 else "s"} in 10 yrs)')
+        elif ty <= 10:
+            bump += 4; bits.append(f'type seldom offered ({ty} sales in 10 yrs)')
+        else:
+            bits.append(f'type trades regularly ({ty} sales in 10 yrs)')
+        if ctx['own_rank'] is not None and ctx['graded'] >= 5:
+            share = (ctx['finer'] or 0) / ctx['graded']
+            name = _ARCHIVE_GRADE_NAMES.get(ctx['own_rank'], 'this grade')
+            if share <= 0.1:
+                bump += 6; bits.append(f'{name} is among the finest offered ({ctx["finer"]} of {ctx["graded"]} finer)')
+            elif share <= 0.25:
+                bump += 3; bits.append(f'{name} is upper-quartile ({ctx["finer"]} of {ctx["graded"]} finer)')
+            else:
+                bits.append(f'{name} is typical ({ctx["finer"]} of {ctx["graded"]} finer)')
+        if ctx['prior']:
+            recent = [p for p in ctx['prior'] if p['date'] and p['date'] >= (date.today() - timedelta(days=400)).isoformat()]
+            named = '; '.join(f"{p['title']} ({p['date_text']})" for p in ctx['prior'][:2])
+            bits.append(('this coin was at auction within the year: ' if recent else 'this coin\'s prior sales: ') + named)
+        item['score'] = (item.get('score') or 0) + bump
+        item['archive_note'] = 'Archive: ' + ' · '.join(bits)
+        done += 1
+        time.sleep(0.4)
+    if unreachable:
+        return 'acsearch context: archive unreachable from the server'
+    return f'acsearch context on {done} candidate{"" if done == 1 else "s"}' if done else ''
 
 
 def _market_dedupe(items):
@@ -16279,6 +16372,8 @@ def _market_catalogue_prompt(category, cards, profile, holdings, coverage, recen
     schema = (
         '{"items": [{"title": str, "region": str, "authority": str|null, '
         '"denomination": str, "mint": str|null, "metal": str|null, '
+        '"weight": number|null (grams, from the card or the description, e.g. 12.24), '
+        '"references": str (catalogue references the description cites; "" if none), '
         '"year": int|null (negative for BC), "grading_authority": "PCGS"|"NGC"|null, '
         '"grade_numeric": int|null, "grade": str (the dealer\'s grade word: "EF", "Good VF", "About EF", "NGC Ch XF 5/5 4/5"; "" when the description states none), '
         '"designation": str, "price": str (exactly as on the card, with its currency), '
@@ -16541,6 +16636,10 @@ def _run_market_scan(category, scan_id):
         before_verify = len(normalized)
         normalized = _market_verify_live(normalized)
         dropped_ended = before_verify - len(normalized)
+        # A first ordering picks the candidates worth the archive's time;
+        # the context it adds moves the score, so the list is sorted again.
+        normalized.sort(key=lambda it: (-it['score'], -(it.get('grade_numeric') or 0)))
+        archive_note = _market_archive_context(normalized, category)
         normalized.sort(key=lambda it: (-it['score'], -(it.get('grade_numeric') or 0)))
         now = datetime.utcnow().isoformat()
         # A new scan replaces the previous one's undecided items on the
@@ -16570,6 +16669,8 @@ def _run_market_scan(category, scan_id):
                    f"from {len(themes)} themes, {len(results)} raw finds")
         if catalogue_note:
             summary += f"; {catalogue_note}"
+        if archive_note:
+            summary += f"; {archive_note}"
         if analysis_date:
             summary += f", guided by the Analysis of {analysis_date[:10]}"
         elif analysis_block:
@@ -37292,7 +37393,7 @@ _ACSEARCH_SEARCH_URL = ('https://www.acsearch.info/search.html?term={term}&categ
 _ACSEARCH_LOT_URL = 'https://www.acsearch.info/search.html?id={id}'
 _ACSEARCH_CATEGORY = {'coins': '1-2', 'banknotes': '3'}
 _ACSEARCH_RESULTS_RE = re.compile(r'acsearch\.initSearchResults\s*=\s*')
-_ACSEARCH_TOTAL_RE = re.compile(r'of\s*<b>\s*([\d,.]+)\s*</b>')
+_ACSEARCH_TOTAL_RE = re.compile(r'of\s*<b>\s*([\d,.\'\u2019\u00a0 ]+)\s*</b>')   # "3'162", "1,234", "1 234"
 _ACSEARCH_LAST = threading.local()   # .total and .url of the last search on this thread
 _ACSEARCH_DESC_RE = re.compile(r'<div id="details-description">(.*?)</div>', re.DOTALL)
 _ACSEARCH_TITLE_RE = re.compile(r'^(?P<house>.+?),\s*(?P<sale>.+?),\s*Lot\s+(?P<lot>.+?)\s*$',
@@ -37352,7 +37453,7 @@ def _acsearch_search(term, category='1-2'):
     # ("Results 1-81 of 81") — the count the rarity research wants.
     mt = _ACSEARCH_TOTAL_RE.search(page)
     try:
-        _ACSEARCH_LAST.total = int(re.sub(r'[,.]', '', mt.group(1))) if mt else None
+        _ACSEARCH_LAST.total = int(re.sub(r'[^\d]', '', mt.group(1))) if mt else None
     except ValueError:
         _ACSEARCH_LAST.total = None
     _ACSEARCH_LAST.url = url
