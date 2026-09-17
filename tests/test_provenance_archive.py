@@ -313,3 +313,44 @@ with stuffapp.app.app_context():
 html = client.get('/coins/market').get_data(as_text=True)
 assert 'market-tag-archive' in html and 'EF is upper-quartile' in html and 'term=HGC+7+509' in html, html[html.find('market-tags'):][:600]
 print('test_provenance_archive (market): ok')
+
+# ── 6. Banknote standing with a distance: numeric PMG/PCGS grades from
+#      the archive, the census top from the model, the sub-line under Standing.
+for t, want in [('PMG 64 EPQ', 64), ('Gem Uncirculated 66 EPQ', 66), ('PCGS Banknote 58 PPQ', 58), ('Choice Unc 63', 63),
+                ('PMG Choice Uncirculated 64 EPQ', 64), ('no grade', None), ('Very Fine 25', 25), ('Fr. 1104 1914 $100', None)]:
+    assert stuffapp._archive_note_grade(t) == want, (t, stuffapp._archive_note_grade(t))
+NOTE_LOTS = [
+    {"id": 301, "title": "Heritage, Auction 3094, Lot 20001", "description": "Fr. 1104 $100 1914 Atlanta. PMG Gem Uncirculated 66 EPQ.", "image": "", "date": "19.08.2021", "price": "*"},
+    {"id": 302, "title": "Stack's Bowers, August 2024, Lot 40010", "description": "Fr. 1104 $100 1914 FRN Atlanta PMG 64 EPQ", "image": "", "date": "14.08.2024", "price": "*"},
+    {"id": 303, "title": "Lyn Knight, June 2023, Lot 512", "description": "$100 1914 Atlanta Fr. 1104 PMG Very Fine 25", "image": "", "date": "10.06.2023", "price": "*"},
+    {"id": 304, "title": "Heritage, Auction 3100, Lot 20500", "description": "Fr. 1104 $100 1914 PMG 63 EPQ", "image": "", "date": "01.02.2025", "price": "*"},
+]
+stuffapp._market_fetch_page = lambda url, limit=0: ((200, '<h1>Results <b>1</b>-<b>4</b> of <b>4</b></h1><script>acsearch.initSearchResults = ' + json.dumps(NOTE_LOTS) + ';</script>') if 'term=' in url else (404, ''))
+r = client.post('/banknotes/new', data={'country': 'United States of America', 'denomination': '$100', 'series': '1914',
+                                        'pick_number': 'Fr. 1104', 'grade_numeric': '63', 'grade_modifier': 'EPQ',
+                                        'grading_authority': 'PMG', 'owner': 'Mark', 'purchase_date': '2026-07-31'}, headers=hdr)
+note_id = r.get_json()['id']
+def fake_note_rarity(kind, category, prompt, images):
+    RAR['note_prompt'] = prompt
+    return {'known': 8, 'same_grade': None, 'finer': None, 'auction_10y': None, 'rank': 'Below finest', 'top_grade': '67 EPQ',
+            'rating': '', 'die': '', 'regrade': '', 'summary': 'Top of census 67 EPQ.', 'source': 'Kagin', 'source_url': '', '_searches': 3}
+stuffapp._pedigree_model_call = fake_note_rarity
+with stuffapp.app.app_context():
+    nrow = stuffapp.get_db().execute("SELECT * FROM banknotes WHERE id = ?", (note_id,)).fetchone()
+    nres = stuffapp._run_pedigree_research('rarity', 'banknotes', nrow)
+assert 'grades stated on 4 lots: 66 ×1, 64 ×1, 63 ×1, 25 ×1; this note reads as 63 — 2 lots grade finer, 1 the same' in RAR['note_prompt'], RAR['note_prompt'][-1200:]
+assert nres['top'] == '67 EPQ' and nres['auction_finer'] == 2 and nres['auction_graded'] == 4 and nres['market'] == 4, nres
+assert nres['standing_detail'] == 'top 67 EPQ · 4 points below · 2 of 4 at auction finer', nres['standing_detail']
+assert nres['finer'] is None                      # the census 'finer' box is NOT filled from auction lots for notes
+html = client.get(f'/banknotes/{note_id}').get_data(as_text=True)
+assert 'top 67 EPQ · 4 points below · 2 of 4 at auction finer' in html
+# No top grade from the model: the finest seen at auction stands in.
+def fake_note_rarity2(kind, category, prompt, images):
+    d = fake_note_rarity(kind, category, prompt, images); d['top_grade'] = ''; d['rank'] = 'Unknown'; return d
+stuffapp._pedigree_model_call = fake_note_rarity2
+with stuffapp.app.app_context():
+    nres2 = stuffapp._run_pedigree_research('rarity', 'banknotes', nrow)
+assert nres2['top'] == '66' and nres2['standing_detail'] == 'top 66 · 3 points below · 2 of 4 at auction finer', nres2['standing_detail']
+assert stuffapp._rarity_standing_detail('banknotes', 'Top Pop', 67, '67 EPQ', 0, 5) == 'top 67 EPQ · at the top · 0 of 5 at auction finer'
+assert stuffapp._rarity_standing_detail('coins', 'Typical', None, '', 18, 110) == '18 of 110 at auction finer'
+print('test_provenance_archive (standing): ok')

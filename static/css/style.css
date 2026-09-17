@@ -4117,6 +4117,7 @@ input[type="date"] { -webkit-appearance: none; }
 .pdg-tile-wide { min-width: 140px; }
 .pdg-tile-n { font-size: 18px; font-weight: 600; color: #222; line-height: 1.2; }
 .pdg-tile-l { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary, #555); margin-top: 2px; }
+.pdg-tile-sub { display: block; font-size: 11px; color: var(--text-secondary, #555); margin-top: 3px; white-space: nowrap; }
 .pdg-rank { display: inline-block; padding: 0 8px; border-radius: 10px; font-size: 12px; font-weight: 600; line-height: 1.7; }
 .pdg-tile .pdg-rank { font-size: 14px; }
 .pdg-rank[data-rank="top pop"], .pdg-rank[data-rank="finest known"] { background: #e6f6e9; color: #1d6b2f; }

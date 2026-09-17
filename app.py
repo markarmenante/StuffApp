@@ -37212,6 +37212,12 @@ _PEDIGREE_COLUMNS = (
     # the events list excludes, so the identification is not lost.
     'provenance_match_title TEXT',
     'provenance_match_url TEXT',
+    # Standing with a distance (Mark, 17 Sep 2026: "Below finest doesn't
+    # tell me much"): the census top grade and, from the archive sweep,
+    # how many of the type's auction lots graded finer than this one.
+    'rarity_top TEXT',              # e.g. '67 EPQ'
+    'rarity_auction_finer INTEGER', # lots at auction graded finer (archive sweep)
+    'rarity_auction_graded INTEGER',# lots at auction with a grade stated
 )
 
 _PROVENANCE_EVENT_KINDS = ('auction', 'dealer', 'collection', 'publication',
@@ -37823,6 +37829,26 @@ def _record_grade_rank(row):
     return None
 
 
+_NOTE_GRADE_RES = (
+    re.compile(r'\b(?:PMG|PCGS(?: Banknote| Currency)?|CGA|Legacy)\b[^\d]{0,40}?(\d{2})\b', re.IGNORECASE),
+    re.compile(r'\b(?:Superb Gem|Gem|Very Choice|Choice|About|Crisp)?\s*(?:Unc(?:irculated)?|Uncirculated|AU|Extremely Fine|XF|EF|Very Fine|VF|Fine|Very Good|VG|Good)\s*(\d{2})\b', re.IGNORECASE),
+)
+
+
+def _archive_note_grade(text):
+    """The numeric (Sheldon 1–70) grade a banknote lot states — 'PMG 64
+    EPQ', 'Gem Uncirculated 66', 'PCGS Banknote 58' — or None."""
+    for rx in _NOTE_GRADE_RES:
+        for m in rx.finditer(text or ''):
+            try:
+                n = int(m.group(1))
+            except ValueError:
+                continue
+            if 1 <= n <= 70:
+                return n
+    return None
+
+
 def _rarity_archive_queries(category, row):
     text = lambda k: _pedigree_text(row, k)
     queries = []
@@ -37873,23 +37899,40 @@ def _rarity_archive_sweep(category, row, max_lots=40):
     cutoff = (date.today() - timedelta(days=3652)).isoformat()
     ten_years = sum(1 for l in lots if l['sort_date'] and l['sort_date'] >= cutoff)
     grades = {}
-    for l in lots:
-        l['grade_rank'] = _archive_grade_rank(l['description'])
-        if l['grade_rank'] is not None:
-            grades[l['grade_rank']] = grades.get(l['grade_rank'], 0) + 1
-    own = _record_grade_rank(row)
+    if category == 'banknotes':
+        # Paper is graded on the 70-point scale by PMG / PCGS; the lot
+        # descriptions quote the number, so the comparison is exact.
+        for l in lots:
+            l['grade_rank'] = _archive_note_grade(l['description'])
+            if l['grade_rank'] is not None:
+                grades[l['grade_rank']] = grades.get(l['grade_rank'], 0) + 1
+        try:
+            own = int(float(_pedigree_row_get(row, 'grade_numeric') or 0)) or None
+        except (TypeError, ValueError):
+            own = None
+        own_name = str(own) if own else 'grade'
+    else:
+        for l in lots:
+            l['grade_rank'] = _archive_grade_rank(l['description'])
+            if l['grade_rank'] is not None:
+                grades[l['grade_rank']] = grades.get(l['grade_rank'], 0) + 1
+        own = _record_grade_rank(row)
+        own_name = _ARCHIVE_GRADE_NAMES.get(own, 'grade')
     graded = sum(grades.values())
     finer = sum(n for r, n in grades.items() if own is not None and r > own)
     same = sum(n for r, n in grades.items() if own is not None and r == own)
+    top = max(grades) if grades else None
     totals = '; '.join(f"'{q}' {t} record{'' if t == 1 else 's'}" for q, t, _ in results)
+    noun = 'coin' if category == 'coins' else 'note'
     status_line = (f'acsearch.info: {totals}; {len(lots)} distinct lots read, {ten_years} in the last ten years; '
                    f'grades stated on {graded}'
-                   + (f", {finer} finer than this coin's {_ARCHIVE_GRADE_NAMES.get(own, 'grade')}, {same} the same"
-                      if own is not None and graded else ''))
+                   + (f", {finer} finer than this {noun}'s {own_name}, {same} the same"
+                      if own is not None and graded else '')
+                   + (f'; finest at auction {top}' if category == 'banknotes' and top else ''))
     app.logger.info('rarity archive sweep %s %s: %s', category, _pedigree_row_get(row, 'id'), status_line)
     return {'queries': results, 'lots': lots[:max_lots], 'ten_years': ten_years, 'grades': grades,
             'own_rank': own, 'finer': finer if own is not None else None,
-            'same': same if own is not None else None, 'graded': graded,
+            'same': same if own is not None else None, 'graded': graded, 'top': top,
             'distinct': len(lots), 'status': status_line}
 
 
@@ -37907,18 +37950,20 @@ def _rarity_archive_block(category, sweep):
         lines.append(f"- query '{q}': {total} records — {url}")
     lines.append(f"- {sweep['distinct']} distinct lots retrieved; {sweep['ten_years']} dated within the last ten years")
     if sweep.get('graded'):
-        dist = ', '.join(f"{_ARCHIVE_GRADE_NAMES.get(r, r)} {n}" for r, n in sorted(sweep['grades'].items(), reverse=True))
+        name = (lambda r: str(r)) if category == 'banknotes' else (lambda r: _ARCHIVE_GRADE_NAMES.get(r, r))
+        dist = ', '.join(f"{name(r)} ×{n}" for r, n in sorted(sweep['grades'].items(), reverse=True))
         own = sweep.get('own_rank')
         lines.append(f"- grades stated on {sweep['graded']} lots: {dist}"
-                     + (f"; this {noun} reads as {_ARCHIVE_GRADE_NAMES.get(own)} — {sweep['finer']} "
+                     + (f"; this {noun} reads as {name(own)} — {sweep['finer']} "
                         f"lot{'' if sweep['finer'] == 1 else 's'} grade{'s' if sweep['finer'] == 1 else ''} finer, "
                         f"{sweep['same']} the same" if own is not None else ''))
     lines.append('')
     lines.append('Lots, newest first (date — house, sale, lot — grade read — weight — description):')
     for l in sweep['lots']:
         w = _archive_text_weights(l['description'])
+        gr = l.get('grade_rank')
         lines.append(f"- {l['date_text'] or '?'} — {l['title']} — "
-                     f"{_ARCHIVE_GRADE_NAMES.get(l.get('grade_rank'), 'no grade read')} — "
+                     f"{(str(gr) if category == 'banknotes' else _ARCHIVE_GRADE_NAMES.get(gr)) if gr is not None else 'no grade read'} — "
                      f"{(str(w[0]) + ' g') if w else '?'} — {l['description'][:220]}")
     return '\n'.join(lines).rstrip()
 
@@ -37945,6 +37990,7 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
   "finer": integer finer, or null,
   "auction_10y": appearances of this Pick number at auction in the past ten years (integer) or null,
   "rank": "Top Pop|Finest known|Tied finest|Below finest|Unknown",
+  "top_grade": "the finest grade recorded for this Pick — in the census when quoted, else the finest seen at auction — with its designation, e.g. '67 EPQ', or ''",
   "rating": "catalogue rarity note, e.g. 'R2 (Banknote Book)', 'Rare (SCWPM)', or ''",
   "die": "" ,
   "regrade": "one sentence on what a regrade / crossover would change, or ''",
@@ -38532,6 +38578,9 @@ def fetch_rarity(category, row):
     summary = _pedigree_clean_str(data.get('summary'), 4000)
     if sweep.get('status'):
         data['summary'] = (summary + '\n\n' if summary else '') + f"Archive sweep — {sweep['status']}."
+    top = _pedigree_clean_str(data.get('top_grade'), 20)
+    if category == 'banknotes' and not top and sweep.get('top'):
+        top = str(sweep['top'])
     rank = _pedigree_clean_str(data.get('rank'), 40)
     url = _pedigree_clean_str(data.get('source_url'), 600)
     if url and not re.match(r'^https?://', url, re.IGNORECASE):
@@ -38552,7 +38601,42 @@ def fetch_rarity(category, row):
         'source_url': url,
         'confidence': _pedigree_clean_confidence(data.get('confidence')),
         'searches': data.get('_searches'),
+        'top': top if category == 'banknotes' else '',
+        'auction_finer': sweep.get('finer') if sweep.get('lots') else None,
+        'auction_graded': sweep.get('graded') if sweep.get('lots') else None,
     }
+
+
+def _rarity_standing_detail(category, rank, grade_numeric, top, auction_finer, auction_graded):
+    """The line under Standing that says how far: 'top 67 EPQ · 4 points
+    below · 2 of 8 at auction finer'. '' when nothing is known."""
+    bits = []
+    if category == 'banknotes':
+        top = (top or '').strip()
+        try:
+            own = int(float(grade_numeric)) if grade_numeric not in (None, '') else None
+        except (TypeError, ValueError):
+            own = None
+        m = re.match(r'\s*(\d{1,2})', top)
+        top_n = int(m.group(1)) if m else None
+        if top:
+            bits.append(f'top {top}')
+        if own is not None and top_n is not None:
+            gap = top_n - own
+            bits.append('at the top' if gap <= 0 else f'{gap} point{"" if gap == 1 else "s"} below')
+    if auction_graded:
+        bits.append(f'{auction_finer or 0} of {auction_graded} at auction finer')
+    return ' · '.join(bits)
+
+
+@app.template_filter('rarity_standing_detail')
+def rarity_standing_detail_filter(r, category):
+    if not r:
+        return ''
+    keys = r.keys()
+    get = lambda k: r[k] if k in keys else None
+    return _rarity_standing_detail(category, get('rarity_rank'), get('grade_numeric'), get('rarity_top'),
+                                   get('rarity_auction_finer'), get('rarity_auction_graded'))
 
 
 def _store_rarity(category, record_id, result):
@@ -38565,18 +38649,34 @@ def _store_rarity(category, record_id, result):
             f"rarity_rank = ?, rarity_rating = ?, rarity_die = ?, rarity_regrade = ?, "
             f"rarity_summary = ?, rarity_source = ?, rarity_source_url = ?, "
             f"rarity_confidence = ?, rarity_searched_at = ?, rarity_die_count = ?, "
-            f"rarity_market = ?, rarity_census = ?, updated_at = ? WHERE id = ?",
+            f"rarity_market = ?, rarity_census = ?, rarity_top = ?, rarity_auction_finer = ?, "
+            f"rarity_auction_graded = ?, updated_at = ? WHERE id = ?",
             (result['known'], result['same'], result['finer'], result['rank'],
              result['rating'], result['die'], result['regrade'], result['summary'],
              result['source'], result['source_url'], result['confidence'], now,
-             result.get('die_count'), result.get('market'), result.get('census'), now,
-             record_id))
+             result.get('die_count'), result.get('market'), result.get('census'),
+             result.get('top') or None, result.get('auction_finer'), result.get('auction_graded'),
+             now, record_id))
         db.commit()
     finally:
         db.close()
     out = dict(result)
     out.pop('searches', None)
     out.update({'status': 'done', 'kind': 'rarity', 'searched_at': now})
+    try:
+        grade_numeric = None
+        if category == 'banknotes':
+            db = open_db_connection()
+            try:
+                row = db.execute(f"SELECT grade_numeric FROM {table} WHERE id = ?", (record_id,)).fetchone()
+                grade_numeric = row['grade_numeric'] if row else None
+            finally:
+                db.close()
+        out['standing_detail'] = _rarity_standing_detail(
+            category, result['rank'], grade_numeric, result.get('top'),
+            result.get('auction_finer'), result.get('auction_graded'))
+    except Exception:
+        out['standing_detail'] = ''
     return out
 
 

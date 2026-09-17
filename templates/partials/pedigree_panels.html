@@ -98,7 +98,7 @@
     {{ tile('pdgRarDieCount', r['rarity_die_count'], 'This die pair', 'Specimens the die study records from this coin\'s obverse and reverse dies', field='die_count') }}
     {{ tile('pdgRarFiner', r['rarity_finer'], 'Finer seen', 'Clearly finer examples seen in the auction record — a judgement for a raw coin, a census count for a slabbed one', field='finer') }}
     {% endif %}
-    <div class="pdg-tile pdg-tile-wide" title="{% if category == 'banknotes' %}Top Pop = none finer in the census; Tied finest = others share the top grade; Below finest = the Finer box says how many{% else %}For a raw coin: among the finest known, typical of what trades, or below the norm — judged against the auction record. A slabbed coin uses the census scale (Top Pop, Tied finest, Below finest).{% endif %}"><span class="pdg-tile-n pdg-rank" id="pdgRarRank" data-rank="{{ (r['rarity_rank'] or '')|lower if r else '' }}">{{ r['rarity_rank'] if r and r['rarity_rank'] else '—' }}</span><span class="pdg-tile-l">Standing</span></div>
+    <div class="pdg-tile pdg-tile-wide" title="{% if category == 'banknotes' %}Top Pop = none finer in the census; Tied finest = others share the top grade; Below finest = the Finer box says how many{% else %}For a raw coin: among the finest known, typical of what trades, or below the norm — judged against the auction record. A slabbed coin uses the census scale (Top Pop, Tied finest, Below finest).{% endif %}"><span class="pdg-tile-n pdg-rank" id="pdgRarRank" data-rank="{{ (r['rarity_rank'] or '')|lower if r else '' }}">{{ r['rarity_rank'] if r and r['rarity_rank'] else '—' }}</span><span class="pdg-tile-l">Standing</span>{%- set _sd = r|rarity_standing_detail(category) -%}<span class="pdg-tile-sub" id="pdgRarStanding"{% if not _sd %} style="display:none"{% endif %}>{{ _sd }}</span></div>
     {{ tile('pdgRarRating', r['rarity_rating'], 'Rarity', 'The reference book\'s own rating for the type, independent of grade — HGC R1 common / R2 scarce / R3 rare; RIC C, S, R, R2–R5; the Banknote Book or SCWPM for notes', wide=true) }}
     {{ tile('pdgRarMarket', r['rarity_market'], 'At auction, 10 yrs', 'How many times the type has come to auction in the past ten years — how liquid it is', field='market') }}
   </div>
@@ -289,6 +289,7 @@
     }
     $('pdgRarRank').textContent = data.rank || '—';
     $('pdgRarRank').dataset.rank = (data.rank || '').toLowerCase();
+    if ($('pdgRarStanding')) { $('pdgRarStanding').textContent = data.standing_detail || ''; $('pdgRarStanding').style.display = data.standing_detail ? '' : 'none'; }
     $('pdgRarRating').textContent = data.rating || '—';
     $('pdgRarDie').textContent = data.die || ''; $('pdgRarDieRow').style.display = data.die ? '' : 'none';
     $('pdgRarRegrade').textContent = data.regrade || ''; $('pdgRarRegradeRow').style.display = data.regrade ? '' : 'none';
