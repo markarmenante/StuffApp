@@ -391,6 +391,11 @@
               {% if row['weight'] %}<span>{{ '%.2f'|format(row['weight']|float) }} g</span>{% endif %}
               {% if row['size'] %}<span>{{ '%.1f'|format(row['size']|float) }} mm</span>{% endif %}
               {% if row['die_axis'] %}<span>{{ row['die_axis'] }}h</span>{% endif %}
+              {# Ancients (date_1 < 500, the same cut as the Ancient pill)
+                 carry the grade after the die axis — the collection's
+                 EF / gVF / aEF convention with the NGC ★ / + attached,
+                 as the detail page shows it. #}
+              {% if row['grade'] and row['date_1'] is not none and (row['date_1']|float(99999)) < 500 %}<span class="coin-list-grade">{{ coin_grade_display(row['grade'], row['grade_modifier']) }}</span>{% endif %}
             </div>
             {% if row['coin_id'] or not at_property %}
             <span class="coin-position-actions" style="display:inline-flex;align-items:center;justify-content:flex-end;gap:8px;margin-left:auto;padding-left:12px;flex-shrink:0;white-space:nowrap;">

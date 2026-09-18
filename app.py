@@ -2344,6 +2344,30 @@ def _series_year_sql(text, country=None):
     return _series_year(text, country)
 
 
+def _note_primary_year(series, country, date_1):
+    """The year a note sorts and bands on. US notes are organised by
+    series (their panels are series-based), so the series label's year
+    leads and the note's own date is the fallback. Everywhere else the
+    note's OWN date leads (Mark, 2026-09-18: "sort these in date order
+    so George VI precedes Elizabeth") — the Bahamas 1936 Currency Note
+    Act issues carried 'L.1936' series labels that filed a 1963
+    Elizabeth II ten shillings ahead of the 1947 George VI one; the
+    series-label year is used only when the note has no date at all.
+    None when neither resolves."""
+    try:
+        own = int(date_1) if date_1 not in (None, '') else None
+    except (TypeError, ValueError):
+        own = None
+    label = _series_year(series, country)
+    if _is_us_country(country):
+        return label or own
+    return own or label
+
+
+def _note_primary_year_sql(series, country, date_1):
+    return _note_primary_year(series, country, date_1)
+
+
 # ── US series panels ────────────────────────────────────────────────────
 #
 # A header block that precedes each series in the US banknote list: what
@@ -5289,8 +5313,9 @@ def _note_year(row):
     and the decimalisation boundary rule in _country_era keeps
     old-currency notes out of the new-currency era when that end year
     lands exactly on the changeover."""
-    year = (_series_year(_row_get(row, 'series'), _row_get(row, 'country'))
-            or _row_get(row, 'date_1'))
+    year = _note_primary_year(_row_get(row, 'series'),
+                              _row_get(row, 'country'),
+                              _row_get(row, 'date_1'))
     if year:
         return year
     for field in ('series', 'date_1_text'):
@@ -5388,12 +5413,7 @@ def _banknote_era_start(country, issuer, series, date_1,
     the note's own year (blanks last) when no era resolves — including
     the US, whose panels are series-based, keeping its ordering
     untouched."""
-    year = _series_year(series, country)
-    if not year:
-        try:
-            year = int(date_1) if date_1 else None
-        except (TypeError, ValueError):
-            year = None
+    year = _note_primary_year(series, country, date_1)
     if not year:
         # Same fallbacks as _note_year, so the SORT never disagrees
         # with the DISPLAY band: an ND note whose series names a range
@@ -5675,6 +5695,11 @@ def _configure_db_connection(db):
     # SERIES_YEAR(series) — the issue-year pulled from a series label, so
     # the note list groups by year regardless of label wording.
     db.create_function('SERIES_YEAR', -1, _series_year_sql,
+                       deterministic=True)
+    # NOTE_YEAR(series, country, date_1) — the year a note files under:
+    # series-label year first for the US, the note's own date first for
+    # every other country (see _note_primary_year).
+    db.create_function('NOTE_YEAR', 3, _note_primary_year_sql,
                        deterministic=True)
     # US_NOTE_GROUP — within the US, Colonial American issues run first
     # (-1), then federal issues (0), then state and obsolete issues (no
@@ -12315,9 +12340,12 @@ CATEGORY_ORDER_BY = {
     # inside its country's chronological run like any national note —
     # municipality is only a tiebreak within a year, keeping a town's
     # same-year set together without splitting Germany or Austria into
-    # per-town blocks. The year comes from the series label when it has
-    # one ('Series of 1896 (Educational Series)' -> 1896) and falls back
-    # to the note's own date_1 otherwise. Denomination is three keys:
+    # per-town blocks. The year (NOTE_YEAR) is the note's own date_1 for
+    # every country but the US, so a run reads chronologically — George
+    # VI before Elizabeth II — with the series label's year only as a
+    # fallback; US notes keep the series-label year first ('Series of
+    # 1896 (Educational Series)' -> 1896) because their panels are
+    # series-based (see _note_primary_year). Denomination is three keys:
     # currency family, then unit worth (Pfennig before Mark, cent before
     # dollar), then the number — so a group reads 1, 2, 10 Rupees rather
     # than 1, 10, 2 by text. date_1 is a final tiebreak. Blanks sort
@@ -12340,7 +12368,7 @@ CATEGORY_ORDER_BY = {
                   f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "
                   "COUNTRY_ERA_START(country, issuer, series, date_1, denomination) END ASC, "
                   f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "
-                  "COALESCE(SERIES_YEAR(series, country), date_1, 99999) END ASC, "
+                  "COALESCE(NOTE_YEAR(series, country, date_1), 99999) END ASC, "
                   f"{_US_EMERGENCY_SQL_CALL} ASC, "
                   "COALESCE(NULLIF(country, ''), 'zzz') COLLATE NODIACRITIC, "
                   f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 'zzz' ELSE "
@@ -21795,13 +21823,7 @@ def _banknote_state_name(country, year):
 def _banknote_map_year(series, date_1, country=None):
     """The note's own year, for picking the era's principal city — the
     first half of _banknote_era_start without the era-band resolution."""
-    year = _series_year(series, country)
-    if not year:
-        try:
-            year = int(date_1) if date_1 else None
-        except (TypeError, ValueError):
-            year = None
-    return year
+    return _note_primary_year(series, country, date_1)
 
 
 def _banknote_pin(country, year):
