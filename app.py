@@ -193,7 +193,11 @@ VALUE_LISTS = {
     'coin_status': ['Own','Ordered','Sold','Loaned'],
     'recording_status': ['Own','Ordered'],
     'metal_coin': ['AE Bronze','AE Copper','AL Aluminium','AR Silver','AV Gold','BL Billon','EL Electrum','NI Nickel'],
-    'coin_grade': ['BU','FDC','MS','PF','cAU','AU','aAU','cEF','EF','aEF','cVF','VF+','VF','aVF','gVF'],
+    # Coin grades, best first. Ancient-coin convention: one intermediate
+    # step per tier — cEF (Choice/Good/Superb EF) above EF, aEF (Near EF)
+    # below it, gVF (Good VF) above VF, aVF (Near VF) below it, then the
+    # Fine tier. cVF and VF+ were retired into gVF (same tier).
+    'coin_grade': ['FDC','MS','BU','PF','cAU','AU','aAU','cEF','EF','aEF','gVF','VF','aVF','gF','F','aF','VG','G'],
     # Paper-money adjectival grades, PMG/PCGS-Banknote style, best first.
     'banknote_grade': ['Superb Gem UNC','Gem UNC','Choice UNC','UNC','cAU','AU','aAU',
                        'cEF','EF','aEF','cVF','VF','aVF','F','VG','G','Fair','Poor'],
@@ -254,16 +258,29 @@ FIELD_ALIASES = {
         'choice au':  'cAU',
         'choice ef':  'cEF',
         'choice xf':  'cEF',
-        'choice vf':  'cVF',
+        'superb ef':  'cEF',
+        'superb xf':  'cEF',
+        'good ef':    'cEF',
+        'good xf':    'cEF',
+        'choice vf':  'gVF',
+        'vf+':        'gVF',
         'about au':   'aAU',
         'almost au':  'aAU',
         'about ef':   'aEF',
         'almost ef':  'aEF',
+        'near ef':    'aEF',
+        'nearly ef':  'aEF',
         'about xf':   'aEF',
         'almost xf':  'aEF',
+        'near xf':    'aEF',
         'about vf':   'aVF',
         'almost vf':  'aVF',
+        'near vf':    'aVF',
+        'nearly vf':  'aVF',
         'good vf':    'gVF',
+        'good fine':  'gF',
+        'about fine': 'aF',
+        'near fine':  'aF',
         'xf':         'EF',
     },
     # Banknote grades: fold PMG/PCGS-Banknote adjectival variants onto
@@ -322,7 +339,8 @@ def expand_coin_grade(grade):
     m = re.match(r'^([cag])([A-Z].*)$', g)
     prefixes = {'c': 'Choice', 'a': 'About', 'g': 'Good'}
     if m and m.group(1) in prefixes:
-        return f'{prefixes[m.group(1)]} {m.group(2)}'
+        base = 'Fine' if m.group(2) == 'F' else m.group(2)
+        return f'{prefixes[m.group(1)]} {base}'
     return g
 
 
@@ -454,6 +472,10 @@ def coin_grade_value_list_match(value):
         return alias
 
     compact = re.sub(r'[^a-z0-9+]+', '', normalized)
+    # "About/Almost/Near Uncirculated" is AU, not MS — check before the
+    # blanket uncirculated -> MS shortcut below.
+    if re.search(r'\b(?:about|almost|near|nearly)\s+(?:uncirculated|unc)\b', normalized):
+        return 'aAU'
     if (
         'mintstate' in compact
         or compact in {'unc', 'uncirc'}
@@ -489,6 +511,12 @@ def coin_grade_value_list_match(value):
         'chxf': 'cEF',
         'cef': 'cEF',
         'cxf': 'cEF',
+        'superbef': 'cEF',
+        'superbxf': 'cEF',
+        'goodef': 'cEF',
+        'goodxf': 'cEF',
+        'gef': 'cEF',
+        'gxf': 'cEF',
         'aboutef': 'aEF',
         'aboutxf': 'aEF',
         'almostef': 'aEF',
@@ -499,23 +527,38 @@ def coin_grade_value_list_match(value):
         'nearxf': 'aEF',
         'aef': 'aEF',
         'axf': 'aEF',
+        'nef': 'aEF',
+        'nxf': 'aEF',
         'ef': 'EF',
         'xf': 'EF',
-        'choicevf': 'cVF',
-        'chvf': 'cVF',
-        'cvf': 'cVF',
+        'choicevf': 'gVF',
+        'chvf': 'gVF',
+        'cvf': 'gVF',
         'goodvf': 'gVF',
         'gvf': 'gVF',
+        'veryfine+': 'gVF',
+        'veryfineplus': 'gVF',
+        'vfplus': 'gVF',
+        'vf+': 'gVF',
         'aboutvf': 'aVF',
         'almostvf': 'aVF',
         'nearlyvf': 'aVF',
         'nearvf': 'aVF',
         'avf': 'aVF',
-        'veryfine+': 'VF+',
-        'veryfineplus': 'VF+',
-        'vfplus': 'VF+',
-        'vf+': 'VF+',
+        'nvf': 'aVF',
         'vf': 'VF',
+        'goodfine': 'gF',
+        'gf': 'gF',
+        'aboutfine': 'aF',
+        'nearfine': 'aF',
+        'nearlyfine': 'aF',
+        'af': 'aF',
+        'fine': 'F',
+        'f': 'F',
+        'verygood': 'VG',
+        'vg': 'VG',
+        'good': 'G',
+        'g': 'G',
     }
     if re.fullmatch(r'ms\d{1,2}', compact):
         return 'MS'
@@ -533,14 +576,18 @@ def coin_grade_value_list_match(value):
         (r'\b(?:choice|ch)\s+(?:au|about\s+uncirculated|almost\s+uncirculated)\b', 'cAU'),
         (r'\b(?:about|almost|near|nearly)\s+(?:au|uncirculated)\b', 'aAU'),
         (r'\bau\b', 'AU'),
-        (r'\b(?:choice|ch)\s+(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'cEF'),
+        (r'\b(?:choice|ch|superb|good)\s+(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'cEF'),
         (r'\b(?:about|almost|near|nearly)\s+(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'aEF'),
         (r'\b(?:ef|xf|extremely\s+fine|extra\s+fine)\b', 'EF'),
-        (r'\b(?:choice|ch)\s+(?:vf|very\s+fine)\b', 'cVF'),
-        (r'\bgood\s+(?:vf|very\s+fine)\b', 'gVF'),
+        (r'\b(?:choice|ch|good)\s+(?:vf|very\s+fine)\b', 'gVF'),
+        (r'\b(?:vf|very\s+fine)\s*(?:\+|plus\b)', 'gVF'),
         (r'\b(?:about|almost|near|nearly)\s+(?:vf|very\s+fine)\b', 'aVF'),
-        (r'\b(?:vf|very\s+fine)\s*(?:\+|plus\b)', 'VF+'),
         (r'\b(?:vf|very\s+fine)\b', 'VF'),
+        (r'\bgood\s+fine\b', 'gF'),
+        (r'\b(?:about|almost|near|nearly)\s+fine\b', 'aF'),
+        (r'\bfine\b', 'F'),
+        (r'\bvery\s+good\b', 'VG'),
+        (r'\bgood\b', 'G'),
     ]
     for pattern, canonical in phrase_patterns:
         if re.search(pattern, normalized):
