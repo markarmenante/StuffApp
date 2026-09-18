@@ -1116,6 +1116,27 @@ input[type="number"]::-webkit-outer-spin-button {
 .value-estimate-panel[open] .value-estimate-bar::before {
   content: '▾';
 }
+
+/* Provenance & Pedigree — collapsible section-bar (open for coins,
+   collapsed for banknotes by default; the <details> `open` attribute
+   is set in the partial). Same chevron treatment as Value Estimate. */
+.section-bar.pdg-collapsible-bar {
+  display: flex; align-items: center;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.pdg-collapsible-bar::-webkit-details-marker {
+  display: none;
+}
+.pdg-collapsible-bar::before {
+  content: '▸';
+  margin-right: 6px;
+  color: var(--text-secondary, #666);
+}
+.pdg-collapsible[open] .pdg-collapsible-bar::before {
+  content: '▾';
+}
 .value-estimate-title { flex: 1 1 auto; }
 .value-search-pill {
   flex: 0 0 auto;

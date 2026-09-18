@@ -10,8 +10,10 @@
 {%- set _ra_searched = (r['rarity_searched_at'] if r and 'rarity_searched_at' in r.keys() and r['rarity_searched_at'] else '') -%}
 {%- set _noun = 'coin' if category == 'coins' else 'note' -%}
 
-<!-- Provenance & Pedigree -->
-<div class="section-bar">Provenance &amp; Pedigree</div>
+<!-- Provenance & Pedigree — collapsible. Open by default for coins;
+     collapsed by default for banknotes (Mark, 2026-09-18). -->
+<details class="pdg-collapsible" id="pdgProvenanceWrap"{% if category == 'coins' %} open{% endif %}>
+<summary class="section-bar pdg-collapsible-bar">Provenance &amp; Pedigree</summary>
 <div class="pdg-panel" id="pdgProvenance">
   <div class="pdg-head">
     <span class="pdg-title">Chain of custody</span>
@@ -61,6 +63,7 @@
     <textarea class="pdg-summary-edit" id="pdgProvSummaryEdit" data-kind="provenance" style="display:none" rows="6">{{ _pv_summary }}</textarea>
   </div>
 </div>
+</details>
 
 <!-- Rarity & Population -->
 <div class="section-bar">Rarity &amp; Population</div>
