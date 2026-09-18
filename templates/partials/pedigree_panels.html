@@ -2,7 +2,10 @@
    share this partial (included from detail.html after "Pedigree,
    References"). Everything here talks to its own JSON endpoints
    (/<category>/<id>/pedigree/...), never the main save form, so the
-   panels work without touching the record's Save. #}
+   panels work without touching the record's Save.
+   The Research pills are tinted by state: green (pill-fresh) once that
+   research has been run for the record, yellow (pill-stale) if it never
+   has (Mark, 2026-09-18). #}
 {%- set _pv_conf = r['provenance_confidence'] if r and 'provenance_confidence' in r.keys() else none -%}
 {%- set _pv_summary = (r['provenance_summary'] if r and 'provenance_summary' in r.keys() and r['provenance_summary'] else '') -%}
 {%- set _pv_searched = (r['provenance_searched_at'] if r and 'provenance_searched_at' in r.keys() and r['provenance_searched_at'] else '') -%}
@@ -20,7 +23,7 @@
     <span class="pdg-stamp" id="pdgProvStamp">{% if _pv_searched %}researched {{ _pv_searched|short_date }}{% if _pv_conf is not none %} · confidence {{ _pv_conf|pedigree_pct }}{% endif %}{% else %}not yet researched{% endif %}</span>
     <span class="pdg-spacer"></span>
     <a class="pdg-link" href="{{ url_for('pedigree_overview', category=category, kind='provenance') }}" title="Every {{ _noun }}'s provenance on one page">All {{ 'coins' if category == 'coins' else 'notes' }} ›</a>
-    <button type="button" class="toolbar-btn pill pdg-research" id="pdgProvResearch"
+    <button type="button" class="toolbar-btn pill pdg-research {{ 'pill-fresh' if _pv_searched else 'pill-stale' }}" id="pdgProvResearch"
             data-kind="provenance"
             title="Trace this {{ _noun }} through the auction archives, dealer listings and named collections — by weight, dies, serial number and the photographs">🔎 Research</button>
   </div>
@@ -78,7 +81,7 @@
        title="The grading service's verification page for cert {{ r['slab_number'] }} — it sits behind a bot check the research cannot pass, so open it here and type the census into the boxes (click a number to edit)">Open {{ r['grading_authority'] }} cert ↗</a>
     {% endif %}
     <a class="pdg-link" href="{{ url_for('pedigree_overview', category=category, kind='rarity') }}" title="Every {{ _noun }}'s rarity standing on one page">All {{ 'coins' if category == 'coins' else 'notes' }} ›</a>
-    <button type="button" class="toolbar-btn pill pdg-research" id="pdgRarResearch"
+    <button type="button" class="toolbar-btn pill pdg-research {{ 'pill-fresh' if _ra_searched else 'pill-stale' }}" id="pdgRarResearch"
             data-kind="rarity"
             title="{% if category == 'banknotes' %}PMG / PCGS population for this Pick number and grade — total, at this grade, finer — plus the catalogue rarity{% else %}Specimens in the auction record, the reference's rarity rating, and where this coin sits in the die study{% endif %}">🔎 Research</button>
   </div>
@@ -317,6 +320,8 @@
         let data = await readJson(res);
         if (data.poll_url) data = await poll(data.poll_url, btn, '🔎 Researching');
         if (kind === 'provenance') applyProvenance(data); else applyRarity(data);
+        // Research has now run: the pill goes green (yellow = never run).
+        btn.classList.remove('pill-stale'); btn.classList.add('pill-fresh');
       } catch (err) {
         showError(errId, err.message);
       } finally {
