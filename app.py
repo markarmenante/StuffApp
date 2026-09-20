@@ -15553,13 +15553,74 @@ def _market_fetch_image(url, limit=15_000_000):
 # scan's search snippets carry the thumbnail (s-l225, s-l500). The
 # full-size file is the same path with s-l1600.
 _EBAY_IMG_SIZE_RE = re.compile(r'/s-l\d+(\.(?:jpg|jpeg|png|webp))', re.IGNORECASE)
+# The photo's own id inside any i.ebayimg.com URL (the /thumbs/ path is
+# how eBay's "similar items" / "seller's other items" carousels refer
+# to a photo; the id is the same either way).
+_EBAY_IMG_ID_RE = re.compile(r'i\.ebayimg\.com/(?:thumbs/)?images/g/([A-Za-z0-9~_-]+)/', re.IGNORECASE)
 
 
 def _market_full_size_url(url):
     u = str(url or '').strip()
     if 'ebayimg.com' in u:
+        u = u.replace('/thumbs/images/g/', '/images/g/')
         u = _EBAY_IMG_SIZE_RE.sub(r'/s-l1600\1', u)
     return u
+
+
+def _market_image_key(url):
+    """What makes two photo URLs the same picture: the eBay image id,
+    else the URL without its query string."""
+    u = str(url or '').strip()
+    m = _EBAY_IMG_ID_RE.search(u)
+    if m:
+        return 'ebay:' + m.group(1)
+    return u.split('?')[0].split('#')[0].lower()
+
+
+def _market_jsonld_images(html):
+    """Every URL in the page's JSON-LD "image" values (a string or an
+    array). On eBay this is the listing's own photo set, complete and
+    in the seller's order."""
+    out = []
+    for m in re.finditer(r'"image"\s*:\s*(\[[^\]]*\]|"https?://[^"]+")', html or ''):
+        for u in re.findall(r'"(https?://[^"]+)"', m.group(1)):
+            if u not in out:
+                out.append(u)
+    return out
+
+
+def _market_listing_photos(listing_url, scan_urls, page_urls):
+    """The photos Buy may store for a listing: the scan's own URLs
+    checked against what the listing page lists, then the page's
+    remaining photos. On eBay the scan's URLs come from search results
+    and item pages that also carry the seller's other items and
+    "similar items" carousels, and the model has handed one of those
+    over as the reverse (Mark, 2026-09-19: a New Hebrides 1000 Francs
+    filed with a 10,000 CFP note's photo as image_2). When the page
+    is readable, a scan URL not among the listing's own photos is
+    dropped and logged; when it is not, the scan's URLs stand."""
+    scan = [_market_full_size_url(u) for u in (scan_urls or []) if u]
+    page = [_market_full_size_url(u) for u in (page_urls or []) if u]
+    if not page:
+        return scan
+    if not _market_is_ebay(listing_url):
+        # A dealer page's JSON-LD / og:image is often just the lead
+        # photo; only eBay lists every photo, so only there is a scan
+        # URL off the list treated as wrong. A model-given photo stands.
+        return scan or page
+    page_keys = {_market_image_key(u) for u in page}
+    kept, dropped = [], []
+    for u in scan:
+        (kept if _market_image_key(u) in page_keys else dropped).append(u)
+    for u in dropped:
+        app.logger.info("market listing photo: not one of the listing's own photos — dropped | %s | %s",
+                        str(listing_url or '')[:100], u[:120])
+    seen = {_market_image_key(u) for u in kept}
+    for u in page:
+        if _market_image_key(u) not in seen:
+            kept.append(u)
+            seen.add(_market_image_key(u))
+    return kept
 
 
 _MARKET_STORE_VENUES = ('ebay', 'ma-shops', 'vcoins', 'numista', 'delcampe',
@@ -15621,15 +15682,20 @@ def _market_page_image_urls(listing_url, html=None):
 
     def add(u):
         u = _market_full_size_url(u.replace('&amp;', '&'))
-        if re.match(r'^https?://', u) and u not in found:
+        if re.match(r'^https?://', u) and _market_image_key(u) not in {_market_image_key(f) for f in found}:
             found.append(u)
-    for m in re.finditer(r'"image"\s*:\s*\[?\s*"(https?://[^"]+)"', html):
-        add(m.group(1))
+    jsonld = _market_jsonld_images(html)
+    for u in jsonld:
+        add(u)
     for m in re.finditer(r'<meta[^>]+(?:property|name)="(?:og:image|twitter:image)"[^>]+content="([^"]+)"', html, re.IGNORECASE):
         add(m.group(1))
     for m in re.finditer(r'<meta[^>]+content="([^"]+)"[^>]+(?:property|name)="(?:og:image|twitter:image)"', html, re.IGNORECASE):
         add(m.group(1))
-    if 'ebayimg.com' in html:
+    if 'ebayimg.com' in html and not jsonld:
+        # No JSON-LD: fall back to any gallery file on the page. With
+        # JSON-LD present it already holds every listing photo, and the
+        # rest of the page is the seller's other items and "similar
+        # items" carousels — never read those (2026-09-19).
         for m in re.finditer(r'https?://i\.ebayimg\.com/images/g/[A-Za-z0-9~_-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', html):
             add(m.group(0))
     # Drop obvious non-photos (logos, icons, sprites) and keep the first
@@ -15649,6 +15715,12 @@ def _market_store_images(item):
     from werkzeug.datastructures import FileStorage
     title = str(item.get('title') or '')[:60]
     urls = [_market_full_size_url(u) for u in (item.get('image_urls') or []) if u]
+    page_urls = None
+    if urls and _market_is_ebay(item.get('listing_url')):
+        # Check the scan's photos against the listing's own before
+        # anything is stored (see _market_listing_photos).
+        page_urls = _market_page_image_urls(item.get('listing_url'))
+        urls = _market_listing_photos(item.get('listing_url'), urls, page_urls)
     stored = {}
 
     def fetch_into(field, url):
@@ -15668,7 +15740,9 @@ def _market_store_images(item):
     for field, url in zip(('image_1', 'image_2'), urls):
         fetch_into(field, url)
     if len(stored) < 2:
-        page_urls = [u for u in _market_page_image_urls(item.get('listing_url')) if u not in urls]
+        if page_urls is None:
+            page_urls = _market_page_image_urls(item.get('listing_url'))
+        page_urls = [u for u in page_urls if u not in urls]
         if not page_urls:
             app.logger.info("market buy image: no photos found on the listing page — %s | %s",
                             title, str(item.get('listing_url') or '')[:120])
@@ -16002,9 +16076,11 @@ def _market_verify_live(items, workers=6):
             _market_drop(item, 'eBay page unreadable and no live evidence')
             continue
         item['verified'] = (state == 'live')
-        if not item.get('image_urls') and pr.get('images'):
-            item['image_urls'] = pr['images'][:2]
-            item['image_url'] = pr['images'][0]
+        if pr.get('images'):
+            photos = _market_listing_photos(item.get('listing_url'), item.get('image_urls'), pr['images'])
+            if photos:
+                item['image_urls'] = photos[:2]
+                item['image_url'] = photos[0]
         if not item.get('seller') and pr.get('seller'):
             item['seller'] = pr['seller']
         kept.append(item)
