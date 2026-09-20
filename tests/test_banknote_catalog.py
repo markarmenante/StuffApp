@@ -12,6 +12,36 @@ import app as stuff
 
 
 class CatalogueTests(unittest.TestCase):
+    def test_puerto_rico_distribution_requires_catalogue_identity(self):
+        base = {'country': 'United States', 'series': 'Series of 1928',
+                'denomination': '$1', 'signatures': 'Woods-Woodin'}
+        for number in ('Fr.1500', 'Fr#1500', 'Friedberg 1500', 'Fr. 1500*'):
+            self.assertIsNotNone(catalog.distribution_callout(dict(base, pick_number=number)))
+        for number in ('Fr.1600', 'Fr.1603', 'Fr.15000', 'Fr.1500a', ''):
+            self.assertIsNone(catalog.distribution_callout(dict(base, pick_number=number)))
+        self.assertIsNone(catalog.distribution_callout(dict(base, country='Puerto Rico', pick_number='Fr.1500')))
+        self.assertIsNone(catalog.distribution_callout(None))
+
+    def test_puerto_rico_callout_visible_with_history_hidden_and_on_detail(self):
+        self.add('legal', 'United States', 1928, 'United States Treasury (Legal Tender Note)')
+        self.db.execute("UPDATE banknotes SET denomination='$1', series='Series of 1928', pick_number='Fr.1500', signatures='Woods-Woodin' WHERE id='legal'")
+        self.add('silver', 'United States', 1928, 'United States Treasury (Silver Certificate)')
+        self.db.execute("UPDATE banknotes SET denomination='$1', series='Series of 1928C', pick_number='Fr.1603', signatures='Woods-Woodin' WHERE id='silver'")
+        self.db.commit()
+        client = stuff.app.test_client()
+        label = catalog.PUERTO_RICO_1928['label']
+        for path in ('/banknotes', '/banknotes?history=0', '/banknotes?filter=heritage_us&history=0'):
+            response = client.get(path)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_data(as_text=True).count(label), 1)
+        detail = client.get('/banknotes/legal').get_data(as_text=True)
+        self.assertIn(label, detail)
+        self.assertIn('April 1949', detail)
+        self.assertIn(catalog.PUERTO_RICO_1928['source'], detail)
+        self.assertNotIn(label, client.get('/banknotes/silver').get_data(as_text=True))
+        row = self.db.execute("SELECT * FROM banknotes WHERE id='legal'").fetchone()
+        self.assertEqual(stuff._us_note_class(row)['name'], 'United States Note (Legal Tender Note)')
+
     def test_periods_and_issuer_precedence(self):
         cases = [
             ('Canada', 2025, 'Bank of Canada', 'british'),

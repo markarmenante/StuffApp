@@ -116,3 +116,20 @@ History-off headings, save/import canonicalization and display-number resequenci
 The existing US monetary-era and Philippine-era tests remain in place. Browser
 verification uses a disposable local database populated with country/year/issuer/
 series metadata from the read-only audit; its denomination and images are fixtures.
+
+## Catalogue-specific distribution callouts
+
+Fr. 1500 (including replacement notes) receives a Puerto Rico distribution
+callout on the collection row even with History hidden, and a sourced explanation
+on its detail page. It remains a United States legal tender note; distribution
+does not change its issuing country, series date, map origin or sort order.
+Match the explicit Friedberg catalogue number, not signatures or a narrative
+mention: Woods–Woodin also occurs on other types.
+
+Source: Jamie Yakes, [“Series of 1928 $1 United States Notes,” Paper Money,
+January/February 2013, pp. 40–51](https://s3.amazonaws.com/pmarchives.spmc/pm283-2013-series-1928-1-united-states-notes.pdf),
+based on Treasury correspondence and inventories at the National Archives.
+The live B362 record retained its Puerto Rico narrative on 2026-09-20; the list
+only exposed a generic United States label. Its saved history was corrected to
+acknowledge the early mainland release and shipments through April 1949, with
+the source linked. No individual circulation provenance is inferred.

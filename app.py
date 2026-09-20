@@ -5678,6 +5678,7 @@ def banknote_grouping(rows):
 
 
 app.jinja_env.globals['banknote_catalog_groups'] = banknote_catalog.GROUPS
+app.jinja_env.globals['banknote_distribution_callout'] = banknote_catalog.distribution_callout
 
 
 def _migrate_banknote_country_aliases(db):

@@ -441,6 +441,8 @@
           {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
         </div>
         {% if _bn_group %}<div class="banknote-period{% if _bn_group.uncertain %} needs-review{% endif %}">{{ _bn_group.period }}</div>{% endif %}
+        {% set _distribution = banknote_distribution_callout(row) %}
+        {% if _distribution %}<div class="banknote-distribution-label">{{ _distribution.label }}</div>{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['municipality'] and row['country'] %}<span>{{ row['municipality'] }}</span>{% endif %}

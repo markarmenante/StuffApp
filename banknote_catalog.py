@@ -9,6 +9,40 @@ import unicodedata
 from functools import lru_cache
 
 
+PUERTO_RICO_1928 = {
+    'label': 'Puerto Rico distribution, 1948–1949 · Woods–Woodin signatures',
+    'body': ('Series 1928 $1 United States Note (legal tender), Fr. 1500, with a red seal '
+             'and Woods–Woodin signatures. Printed in March–April 1933; a small number '
+             'were released at the Treasury in Washington that year. The remaining '
+             'reserve was shipped to Puerto Rico from November 1948 through April 1949 '
+             'to meet demand for $1 notes while keeping legal tender notes separate '
+             'from mainland silver certificates. This is the type’s distribution history, '
+             'not proof that this individual note circulated there. Woods–Woodin also '
+             'appears on 1928C $1 silver certificates and 1928D $5 Federal Reserve Notes.'),
+    'source': 'https://s3.amazonaws.com/pmarchives.spmc/pm283-2013-series-1928-1-united-states-notes.pdf',
+    'source_label': 'Jamie Yakes, Paper Money, Jan/Feb 2013, pp. 40–51',
+}
+
+
+def distribution_callout(row):
+    """Catalogue-specific history, separate from sovereign/era classification.
+
+    Require the actual Friedberg identity; a 1928 date, signature pair or a
+    passing Puerto Rico mention cannot distinguish Fr. 1500 from Fr. 1603.
+    Supports dicts and sqlite Rows without changing stored catalogue data.
+    """
+    if row is None:
+        return None
+    def value(key):
+        return str(row[key] or '') if key in row.keys() else ''
+    if canonical_country(value('country')) != 'United States of America':
+        return None
+    catalogs = ' '.join(value(k) for k in ('pick_number', 'other_catalog'))
+    if re.search(r'\b(?:fr(?:iedberg)?\.?\s*#?\s*)1500(?:\*)?(?![\w])', catalogs, re.I):
+        return dict(PUERTO_RICO_1928)
+    return None
+
+
 def fold(value):
     return re.sub(r'[^a-z0-9]', '', unicodedata.normalize('NFKD', value or '')
                   .encode('ascii', 'ignore').decode().lower())

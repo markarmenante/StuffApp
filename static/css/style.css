@@ -4190,6 +4190,10 @@ input[type="date"] { -webkit-appearance: none; }
 .banknote-group-heading p { margin: 0; font-size: .82rem; color: var(--text-muted, #626970); line-height: 1.45; }
 .banknote-period { font-size: .76rem; color: var(--text-muted, #626970); margin: 4px 0; }
 .banknote-period.needs-review { color: #91611b; }
+.banknote-distribution-label { font-size: .8rem; font-weight: 600; color: #775024; margin: 4px 0; }
+.banknote-distribution { padding: 12px 16px; background: #fff8e9; border-left: 3px solid #a5793d; }
+.banknote-distribution p { margin: 6px 0; line-height: 1.45; }
+.banknote-distribution a { font-size: .8rem; }
 .banknote-group-filter { margin: 0; max-width: 100%; }
 .banknote-group-filter select { max-width: 260px; padding: 7px 10px; border: 1px solid #ccc; border-radius: 18px; background: transparent; color: inherit; font: inherit; font-size: .8rem; }
 .list-toolbar-banknotes { flex-wrap: wrap; }

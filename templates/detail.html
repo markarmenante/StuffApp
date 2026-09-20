@@ -1293,6 +1293,15 @@ document.addEventListener('DOMContentLoaded', function () {
   ══════════════════════════════════════════════════════════ -->
   {% elif category == 'banknotes' %}
 
+  {% set _distribution = banknote_distribution_callout(r) %}
+  {% if _distribution %}
+  <aside class="banknote-distribution" aria-label="Historical distribution">
+    <strong>{{ _distribution.label }}</strong>
+    <p>{{ _distribution.body }}</p>
+    <a href="{{ _distribution.source }}" target="_blank" rel="noopener">{{ _distribution.source_label }} ↗</a>
+  </aside>
+  {% endif %}
+
   <!-- Row 1: Country | Issuing bank -->
   <div class="dgrid dg2 coin-top-row">
     <div class="dcell ta-wrap coin-region-cell">
