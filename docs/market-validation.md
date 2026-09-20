@@ -17,6 +17,19 @@ Product JSON-LD, page image metadata or an identified gallery, never arbitrary
 recommendation thumbnails. These checks reduce false matches; unreadable pages
 remain unverified and cannot supply independent identity evidence.
 
+On 20 September 2026, the Canada 1937 $20 PMG 64 EPQ recommendation
+([eBay 185386368846](https://www.ebay.ca/itm/185386368846)) was also ended.
+The scan log recorded HTTP 403; the stored model claim said "Active eBay.ca
+Buy It Now listing" and the old fallback admitted it with `verified: false`.
+The row was marked unavailable without deleting its history. eBay now requires
+an independently readable live listing: no model wording or future close can
+override an unknown verdict. Legacy unverified offers move to Earlier
+candidates instead of appearing as current recommendations. Buy and View
+listing also reject unknown availability; a transient block preserves the
+record for retries and Bought. Regression tests cover this exact 403, captcha,
+timeout, ended banners with recommendation controls, existing saved rows,
+and recording purchases already made.
+
 On 20 September 2026, the Martha Washington offer linked an eBay search page.
 The matching exact item, [375423430457](https://www.ebay.com/itm/375423430457),
 showed an ended-by-seller banner dated 3 July and the same $6,324.99 price.

@@ -14,6 +14,8 @@ stuffapp._fetch_usd_rate = lambda currency, date_str: 1.1 if currency == 'EUR' e
 PAGES = {
     'https://www.ebay.com/itm/1001': (200, '<html><body><h1>Note</h1><div>This listing has ended.</div></body></html>'),
     'https://www.ebay.com/itm/1002': (200, '<html><body><h1>Note</h1><span>Buy It Now</span><span>2 available</span></body></html>'),
+    'https://www.ebay.com/itm/123': (200, '<h1>Philippines 5 Pesos Victory Series 66 PMG 64 EPQ</h1><button>Buy It Now</button>'),
+    'https://www.ebay.com/itm/999': (200, '<h1>Philippines 20 Pesos P-98a</h1><button>Buy It Now</button>'),
     'https://www.stacksbowers.com/lot/closed': (200, '<html><body>Lot 2101 <b>Sold for $1,200</b> Prices Realized</body></html>'),
     'https://www.noonans.co.uk/lot/blocked': (403, ''),
 }
@@ -140,7 +142,7 @@ with stuffapp.app.app_context():
     stuffapp._market_fetch_page = _real_fetch_page
     lively = norm(dict(base, live_evidence='Buy It Now, 2 available'))
     assert lively['live_evidence'] == 'Buy It Now, 2 available' and lively['verified'] is False
-    # Page check: the venue's own wording decides; a bot wall never drops.
+    # Page check: the venue's own wording decides; non-eBay unknowns remain.
     ls = stuffapp._market_listing_state
     assert ls('https://www.ebay.com/itm/1001') == 'ended'
     assert ls('https://www.ebay.com/itm/1002') == 'live'

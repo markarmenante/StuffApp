@@ -3,8 +3,8 @@ redirect to /splashui/captcha) and keeps ended item pages up with the
 title, photos and price, so 'unknown' — which never drops — let months-
 old ended lots through as candidates (2026-09-11). Now: the captcha
 bounce is a challenge; a readable eBay page with no buy/bid control is
-ended; an unreadable eBay page keeps its item only on the model's own
-live evidence; other venues are unchanged.
+ended; unreadable eBay pages are excluded regardless of model claims
+or future closing dates; other venues are unchanged.
 
 Run: .venv/bin/python tests/test_market_ebay_liveness.py
 """
@@ -82,14 +82,10 @@ items = [
 ]
 kept = stuffapp._market_verify_live(items)
 names = [i['title'] for i in kept]
-assert names == ['live-bin', 'live-auction', 'captcha-with-evidence', 'dead-future-close', 'dealer-unknown', 'live-uk'], names
+assert names == ['live-bin', 'live-auction', 'dealer-unknown', 'live-uk'], names
 by = {i['title']: i for i in kept}
-assert by['live-bin']['verified'] and by['live-uk']['verified'] and not by['captcha-with-evidence']['verified']
+assert by['live-bin']['verified'] and by['live-uk']['verified']
 assert not by['dealer-unknown']['verified']
 print('VERIFY OK')
 
-ok = stuffapp._market_unreadable_ebay_ok
-assert ok({'live_evidence': '3 bids · time left 1d'}) and ok({'live_evidence': 'Add to cart'}) and ok({'closes': tomorrow})
-assert not ok({'live_evidence': '$299.99'}) and not ok({'closes': yesterday}) and not ok({})
-print('EVIDENCE OK')
 print('ALL MARKET-EBAY-LIVENESS ASSERTIONS PASSED')

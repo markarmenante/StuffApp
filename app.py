@@ -15639,7 +15639,7 @@ VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VE
 
 {grade_rules}
 
-LIVENESS: every item must be purchasable now. An auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. For FIXED-PRICE dealer stock (VCoins stores, Shanna Schmidt, Harlan J. Berk, Roma's shop, the Nomos and CNG shops, Baldwin's, Forum, MA-Shops, eBay Buy It Now) return the item page whenever the search result shows it offered at a price and nothing says sold, reserved or archived — the scan opens every page itself afterwards and drops the ones that have ended, so you do not have to prove it; put in `live_evidence` what the result showed ("$1,850 — Add to cart", "Buy It Now, 2 available", "bidding ends 2026-10-03"). eBay is the exception: its item pages cannot always be opened by the scan, and its search results and Google keep ended items for months (a 2024 specimen listing surfaced as a candidate in 2026), so an eBay item is kept ONLY when `live_evidence` quotes the result's own live wording — "Buy It Now", "Add to cart", "N bids · time left", "ends in", "N available" — or `closes` carries a future date; an eBay find without that is discarded, so do not return one. Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
+LIVENESS: every item must be purchasable now. An auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. For FIXED-PRICE dealer stock (VCoins stores, Shanna Schmidt, Harlan J. Berk, Roma's shop, the Nomos and CNG shops, Baldwin's, Forum, MA-Shops, eBay Buy It Now) return the item page whenever the search result shows it offered at a price and nothing says sold, reserved or archived — the scan opens every page itself afterwards and drops the ones that have ended, so you do not have to prove it; put in `live_evidence` what the result showed ("$1,850 — Add to cart", "Buy It Now, 2 available", "bidding ends 2026-10-03"). eBay is the exception: its search results keep ended items for months, so the scan must independently read the exact item's page and confirm its own buy/bid controls before recommending it. Search snippets, `live_evidence`, an asserted active status, a familiar seller, and a future `closes` date cannot override an unreadable, blocked, sold or ended eBay page. Quote only live wording you actually saw on that exact item, never controls on similar-item recommendations. Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
 
 COLONIAL ELIGIBILITY: Collection group is not colonial status. For colonial recommendations, use the actual issue period before independence, not merely an old printed series date. Exclude independent Commonwealth/Republic/successor-bank issues and ambiguous transition years. Include issuer. For undated notes and reissues provide issue_year_start, issue_year_end and issue_date_source (a corroborating catalogue or issuing-bank URL); never invent them. Domestic US large-size themes remain separate. EXCEPTION explicitly requested by Mark: genuine Philippine VICTORY series notes remain wanted after independence, including Roxas signature varieties and Central Bank of the Philippines Victory overprints. Identify the actual Philippine Victory catalogue number, issuer and series; label these accurately as Victory or post-independence Victory-CBP, never automatically colonial.
 
@@ -16566,31 +16566,12 @@ def _market_listing_state(url):
 
 _MARKET_LAST_PROBE = threading.local()
 
-_MARKET_LIVE_EVIDENCE_RE = re.compile(
-    r'buy it now|add to cart|place bid|\d+\s*bids?\b|time left|ends? (?:in|on)\b|bidding ends|'
-    r'\d+\s*available|\d+\s*sold\b|make offer|best offer|in stock',
-    re.IGNORECASE)
-
-
-def _market_unreadable_ebay_ok(item):
-    """Whether an eBay candidate whose page could not be read may stay:
-    only with the model's own live evidence — a future closing date, or
-    live_evidence quoting the result's buy/bid/time-left wording. Unknown
-    used to keep everything, and eBay's wall made every eBay find
-    unknown, so ended lots (Curaçao 2½ gulden, ended 2026-08-29; the
-    French Guinea specimen, ended 2024-12-25) filled the 2026-09-11 scan."""
-    closes = str(item.get('closes') or '').strip()[:10]
-    if closes and closes >= date.today().isoformat():
-        return True
-    return bool(_MARKET_LIVE_EVIDENCE_RE.search(str(item.get('live_evidence') or '')))
-
-
 def _market_verify_live(items, workers=6):
     """Fetch every candidate's page in parallel; drop the ones the venue
-    itself says are over; mark the ones it says are live. An eBay page
-    that could not be read keeps its item only on the model's live
-    evidence (_market_unreadable_ebay_ok); every probe is logged so a
-    scan's log shows what each venue actually served."""
+    itself says are over; mark the ones it says are live. eBay requires
+    a live verdict from the exact page. Model/search claims cannot
+    override a blocked or unreadable page, even with a future close.
+    Every probe is logged so a scan shows what each venue served."""
     if not items:
         return items
     from concurrent.futures import ThreadPoolExecutor
@@ -16610,9 +16591,8 @@ def _market_verify_live(items, workers=6):
         if state in ('ended', 'invalid') or identity_problem:
             _market_drop(item, identity_problem or pr.get('why') or 'listing page ended or gone')
             continue
-        if state == 'unknown' and _market_is_ebay(item.get('listing_url')) \
-                and not _market_unreadable_ebay_ok(item):
-            _market_drop(item, 'eBay page unreadable and no live evidence')
+        if state != 'live' and _market_is_ebay(item.get('listing_url')):
+            _market_drop(item, 'eBay availability could not be verified on the listing page')
             continue
         item['verified'] = (state == 'live')
         if pr.get('images'):
@@ -17663,6 +17643,11 @@ def _market_items(db, category, earlier=False):
         if _market_listing_url_problem(item.get('listing_url')) or (category == 'banknotes' and market_colonial.problem(item)):
             db.execute("UPDATE market_scan_items SET status = 'unavailable' WHERE id = ?", [r['id']])
             continue
+        if not earlier and _market_is_ebay(item.get('listing_url')) and item.get('verified') is not True:
+            # Older scans admitted model-only liveness claims. Keep the
+            # record for Bought, but not among current recommendations.
+            db.execute("UPDATE market_scan_items SET status = 'superseded' WHERE id = ? AND status = 'new'", [r['id']])
+            continue
         item['empire'] = _market_colonial_empire(item)
         item['issue_label'] = market_colonial.victory_label(item) or ('United States issue' if _canonical_banknote_country(item.get('country')) == 'United States of America' else '')
         item['id'] = r['id']
@@ -17893,6 +17878,15 @@ def _market_action_problem(db, row, item, already_paid=False):
             problem = probe['why']
         else:
             problem = _market_listing_identity_problem(item, probe)
+            if not problem and _market_is_ebay(item.get('listing_url')) and probe['state'] != 'live':
+                # A transient block is not proof the item ended. Retain it
+                # for retries / Bought without advertising it as buyable.
+                item['verified'] = False
+                db.execute("UPDATE market_scan_items SET payload = ?, "
+                           "status = CASE WHEN status = 'new' THEN 'superseded' ELSE status END "
+                           "WHERE id = ? AND status != 'ordered'", [json.dumps(item), row['id']])
+                db.commit()
+                return 'Current eBay availability could not be verified. Try again later.'
     if problem:
         db.execute("UPDATE market_scan_items SET status = 'unavailable' WHERE id = ? AND status != 'ordered'", [row['id']])
         db.commit()
@@ -17907,7 +17901,7 @@ def market_item_listing(category, item_id):
     item = json.loads(row['payload'])
     problem = _market_action_problem(db, row, item)
     if problem:
-        return 'This offer is no longer available or could not be matched to the specific item. Return to Market Scan for other candidates.', 410
+        return 'This offer is no longer available, could not be matched to the specific item, or its current availability could not be verified. Return to Market Scan for other candidates.', 410
     return redirect(item['listing_url'])
 
 

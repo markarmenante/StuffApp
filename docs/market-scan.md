@@ -14,9 +14,12 @@ and replaces only its results area when the persisted revision changes. It
 keeps the location picker and active Buy/Bought/dismiss requests intact. Progress
 shows completed sources and candidate count, using the server's start time.
 
-“Checked” does not always mean “verified live”: existing venue evidence rules
-remain in force. Unreadable eBay listings still need explicit live evidence;
-other unreadable sites retain the existing unverified state.
+eBay candidates require a live verdict from a readable exact listing page.
+Search snippets, model-written live evidence and future closing dates cannot
+override a challenge, HTTP error or timeout. Older unverified eBay candidates
+move to Earlier candidates; Buy and View listing recheck current availability.
+Bought can still file a purchase already made. Other unreadable venues retain
+the existing unverified state.
 
 Coin archive enrichment runs after candidates are visible, for at most another
 60 seconds within the overall scan budget. It uses cached archive queries and
