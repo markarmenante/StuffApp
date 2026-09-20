@@ -3,7 +3,7 @@
 
 {% block content %}
 <!-- Toolbar -->
-<div class="list-toolbar list-toolbar-{{ category }}{% if at_property %} list-toolbar-at-prop{% endif %}">
+<div class="list-toolbar list-toolbar-{{ category }}{% if market_mode|default(false) %} list-toolbar-market{% endif %}{% if at_property %} list-toolbar-at-prop{% endif %}">
   {% if category == 'coins' %}
   <span class="list-cat-title list-cat-title-count">{{ result_count }} Coins{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
   {% else %}
@@ -167,6 +167,7 @@
   </form>
   {# Switches the historical/monetary-context panels on and off. #}
   <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=coin_filter or None, history='0' if show_history else None) }}"
+     id="banknoteHistoryToggle"
      class="toolbar-btn pill {% if show_history %}active{% endif %}"
      title="Show or hide the historical context panels">History</a>
   <a href="{{ url_for('banknotes_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
@@ -301,7 +302,7 @@
   {% if _market %}
   {# A market row opens the listing in a new tab; its thumbnail is the
      seller's photo (no upload targets here). #}
-  <div class="item-row market-row" id="item-{{ row['id'] }}" data-href="{{ row['listing_url'] }}" data-external="1">
+  <div class="item-row market-row" id="item-{{ row['id'] }}" data-href="{{ url_for('market_item_listing', category=category, item_id=row['id']) }}" data-external="1">
     <div class="item-thumb market-thumb" title="Open the listing">
       {% if row['image_url'] %}
         <img src="{{ row['image_url'] }}" alt="" loading="lazy" referrerpolicy="no-referrer"
@@ -750,21 +751,25 @@
           <span class="market-venue">{{ row['venue'] }}{% if row['seller'] and row['seller'] != row['venue'] %} · {{ row['seller'] }}{% endif %}</span>
           {% if row['closes'] %}<span class="market-closes">{% if row['sale_type'] == 'auction' %}auction closes{% else %}until{% endif %} {{ row['closes'] }}</span>{% endif %}
           {% if row['verified'] %}<span class="market-live" title="The listing page itself says it is live">✓ live</span>{% endif %}
-          {% if row['live_evidence'] %}<span class="market-evidence">{{ row['live_evidence'] }}</span>{% endif %}
         </div>
-        {% if row['why'] %}<div class="idr market-why"><span>{{ row['why'] }}</span></div>{% endif %}
+        {% set _why = row['why']|market_copy %}
+        {% if _why %}<div class="idr market-why"><span>{{ _why }}</span></div>{% endif %}
         <div class="idr market-tags">
+          {% if row['issue_label'] %}<span class="market-tag">{{ row['issue_label'] }}</span>{% endif %}
           {% if row['empire'] %}<span class="market-tag market-tag-colonial">{{ row['empire'] }} colonial</span>{% endif %}
-          {% if row['fills'] %}<span class="market-tag market-tag-fills">Fills: {{ row['fills'] }}</span>{% endif %}
-          {% if row['rarity'] and (row['grade_numeric'] or 0) < 64 %}<span class="market-tag market-tag-rare">Rarity: {{ row['rarity'] }}</span>{% endif %}
+          {% set _fills = row['fills']|market_copy %}
+          {% if _fills %}<span class="market-tag market-tag-fills">Fills: {{ _fills }}</span>{% endif %}
+          {% set _rarity = row['rarity']|market_copy %}
+          {% if _rarity and (row['grade_numeric'] or 0) < 64 %}<span class="market-tag market-tag-rare">Rarity: {{ _rarity }}</span>{% endif %}
           {% if row['new_source'] %}<span class="market-tag market-tag-new">New source</span>{% endif %}
           {% if row['archive_note'] %}<span class="market-tag market-tag-archive" title="acsearch.info, queried during the scan: how often the type trades, where this grade sits, and this coin's own prior sales{% if row['archive'] and row['archive']['type_url'] %} — click to open the archive query{% endif %}">{% if row['archive'] and row['archive']['type_url'] %}<a href="{{ row['archive']['type_url'] }}" target="_blank" rel="noopener">{{ row['archive_note'] }}</a>{% else %}{{ row['archive_note'] }}{% endif %}</span>{% endif %}
           {% if row['owned'] %}<span class="market-tag market-tag-owned">You have {{ row['owned'] }}</span>{% endif %}
-          {% if row['fair'] %}<span class="market-fair">{{ row['fair'] }}</span>{% endif %}
+          {% set _fair = row['fair']|market_copy %}
+          {% if _fair %}<span class="market-fair">{{ _fair }}</span>{% endif %}
         </div>
         <div class="market-actions">
           {% if market_earlier %}<span class="market-tag market-tag-earlier">{{ 'Dismissed' if row['status'] == 'dismissed' else 'Scan of' }} {{ row['scanned_at'] }}</span>{% endif %}
-          <a class="market-btn market-view" href="{{ row['listing_url'] }}" target="_blank" rel="noopener">View listing</a>
+          <a class="market-btn market-view" href="{{ url_for('market_item_listing', category=category, item_id=row['id']) }}" target="_blank" rel="noopener">View listing</a>
           {% if not market_earlier %}
           <button type="button" class="market-btn market-buy" data-id="{{ row['id'] }}"
                   title="Open the listing to pay there and file this as an Ordered {{ cat_info.singular|lower }}">Buy</button>
@@ -932,7 +937,7 @@
         btn.disabled = true;
         fetch({{ url_for('market_item_buy', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ location })
+          body: JSON.stringify({ location, bought })
         })
           .then(r => r.json())
           .then(d => {
@@ -972,6 +977,9 @@
 </script>
 {% endif %}
 
+{% if category == 'banknotes' and not _market and not _analysis %}
+<script src="{{ url_for('static', filename='js/banknote-history-position.js') }}?v={{ asset_v('js/banknote-history-position.js') }}"></script>
+{% endif %}
 <script>
 // Credit card row share button — same payload as the detail-page share:
 // front + back images attached, plus the cardholder/number/exp/cvc/zip
@@ -1165,10 +1173,14 @@ window.shareCardRow = async function (ev, btn) {
       .catch(function() { thumb.classList.remove('uploading'); alert('Upload failed.'); });
   }
 
+  // A History navigation restores a row + offset, ahead of any old URL anchor.
+  var historyPositionRestored = window.BanknoteHistoryPosition && window.BanknoteHistoryPosition.restore();
+
   // Arrive from a detail page's "Back" link with #item-<id> -> scroll to
   // that row and add a highlight class so the user sees where they were
   // even if the browser doesn't fire :target (e.g. bf-cache restores).
   (function focusAnchoredRow() {
+    if (historyPositionRestored) return;
     if (!window.location.hash) return;
     var target = document.querySelector(window.location.hash.replace(/"/g, ''));
     if (!target || !target.classList.contains('item-row')) return;

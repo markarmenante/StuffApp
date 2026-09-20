@@ -80,3 +80,5 @@ Failed file writes no longer advance the successful-download checkpoint.
 Browsers without the directory API still download a zip using their own download
 settings; the Files dialog explains that fallback. Test directory/checkpoint
 behavior with `node tests/test_files_directory.js` in addition to the Python suite.
+
+History toggle scroll restoration is covered by `node tests/test_banknote_history_position.js`.

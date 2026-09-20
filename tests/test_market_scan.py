@@ -12,8 +12,8 @@ import app as stuffapp
 
 stuffapp._fetch_usd_rate = lambda currency, date_str: 1.1 if currency == 'EUR' else None
 PAGES = {
-    'https://www.ebay.com/itm/ended': (200, '<html><body><h1>Note</h1><div>This listing has ended.</div></body></html>'),
-    'https://www.ebay.com/itm/live': (200, '<html><body><h1>Note</h1><span>Buy It Now</span><span>2 available</span></body></html>'),
+    'https://www.ebay.com/itm/1001': (200, '<html><body><h1>Note</h1><div>This listing has ended.</div></body></html>'),
+    'https://www.ebay.com/itm/1002': (200, '<html><body><h1>Note</h1><span>Buy It Now</span><span>2 available</span></body></html>'),
     'https://www.stacksbowers.com/lot/closed': (200, '<html><body>Lot 2101 <b>Sold for $1,200</b> Prices Realized</body></html>'),
     'https://www.noonans.co.uk/lot/blocked': (403, ''),
 }
@@ -78,6 +78,7 @@ with stuffapp.app.app_context():
     _real_fetch_page = stuffapp._market_fetch_page
     base = {'title': 'Philippines 5 Pesos Victory Series 66 PMG 64 EPQ', 'country': 'Philippines',
             'denomination': '5 Pesos', 'series': 'Victory Series 66', 'year': 1944,
+            'issue_year_start':1944, 'issue_year_end':1945, 'issue_date_source':'https://catalogue.example/fixture',
             'pick_number': 'P-96', 'grading_authority': 'PMG', 'grade_numeric': 64,
             'grade': 'Choice UNC 64', 'designation': 'EPQ', 'price': '$185', 'venue': 'eBay',
             'seller': 'notesRus', 'sale_type': 'fixed', 'closes': '',
@@ -141,16 +142,16 @@ with stuffapp.app.app_context():
     assert lively['live_evidence'] == 'Buy It Now, 2 available' and lively['verified'] is False
     # Page check: the venue's own wording decides; a bot wall never drops.
     ls = stuffapp._market_listing_state
-    assert ls('https://www.ebay.com/itm/ended') == 'ended'
-    assert ls('https://www.ebay.com/itm/live') == 'live'
+    assert ls('https://www.ebay.com/itm/1001') == 'ended'
+    assert ls('https://www.ebay.com/itm/1002') == 'live'
     assert ls('https://www.stacksbowers.com/lot/closed') == 'ended'
     assert ls('https://www.noonans.co.uk/lot/blocked') == 'unknown'
     assert ls('https://nowhere.example/x') == 'unknown'
     kept = stuffapp._market_verify_live([
-        dict(lively, listing_url='https://www.ebay.com/itm/ended'),
-        dict(lively, listing_url='https://www.ebay.com/itm/live'),
+        dict(lively, listing_url='https://www.ebay.com/itm/1001'),
+        dict(lively, listing_url='https://www.ebay.com/itm/1002'),
         dict(lively, listing_url='https://www.noonans.co.uk/lot/blocked')])
-    assert [k['listing_url'].rsplit('/', 1)[1] for k in kept] == ['live', 'blocked'], kept
+    assert [k['listing_url'].rsplit('/', 1)[1] for k in kept] == ['1002', 'blocked'], kept
     assert kept[0]['verified'] is True and kept[1]['verified'] is False
     # A raw note is out however it is described — the holder is the gate.
     raw_unc = norm(dict(base, title='Philippines 5 Pesos Victory Series 66 raw Gem UNC',
@@ -203,7 +204,7 @@ CANNED = {
                      live_evidence='Buy It Now')],
     'colonial-continental': [dict(base, title='Malaya 10 Dollars 1941 PMG 64 EPQ', country='Malaya',
                                   denomination='10 Dollars', year=1941, pick_number='P-13', empire='British',
-                                  listing_url='https://www.ebay.com/itm/ended')],
+                                  listing_url='https://www.ebay.com/itm/1001')],
 }
 calls = []
 

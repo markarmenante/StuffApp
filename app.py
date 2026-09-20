@@ -9,6 +9,7 @@ import unicodedata
 import threading
 import time
 import market_scan as market_runtime
+import market_colonial
 import banknote_catalog
 from datetime import datetime, date, timedelta
 from flask import (Flask, g, render_template, request, redirect, url_for,
@@ -15500,8 +15501,10 @@ _MARKET_THEMES = {
                     "pattern — the same countries, issuers, eras and grade level, "
                     "the next logical notes a collector on that path would want. "
                     "Philippine paper money under Spanish and US administration "
-                    "(PNB, BPI, Treasury certificates, JIM, Victory Series) stays in "
-                    "scope here as US-administered colonial paper."),
+                    "(PNB, BPI, Treasury certificates, unoverprinted Victory Series). "
+                    "Include genuine Philippine VICTORY series even after independence, including "
+                    "Roxas varieties and Victory-CBP overprints; label their period accurately. "
+                    "Other Republic issues are not colonial; distinguish Japanese occupation."),
         ('sources', "NEW SOURCES: find dealers, auction houses and marketplaces Mark "
                     "is NOT already using — anything beyond eBay, Heritage, Stack's "
                     "Bowers, Numista, MA-Shops, Banknote World, VCoins — that stock "
@@ -15579,6 +15582,7 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
         schema = (
             '{"items": [{"title": str, "country": str, "denomination": str, '
             '"series": str|null, "year": int|null, "pick_number": str|null, '
+            '"issuer": str|null, "issue_year_start": int|null, "issue_year_end": int|null, "issue_date_source": str|null, '
             '"grading_authority": "PMG"|"PCGS"|"PCGS Currency"|"Legacy"|null, '
             '"grade_numeric": int|null, "grade": str, "designation": "EPQ"|"PPQ"|"★"|"", '
             '"price": str (as listed, with its currency, e.g. "$450" or "€1,200"), '
@@ -15637,7 +15641,9 @@ VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VE
 
 LIVENESS: every item must be purchasable now. An auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. For FIXED-PRICE dealer stock (VCoins stores, Shanna Schmidt, Harlan J. Berk, Roma's shop, the Nomos and CNG shops, Baldwin's, Forum, MA-Shops, eBay Buy It Now) return the item page whenever the search result shows it offered at a price and nothing says sold, reserved or archived — the scan opens every page itself afterwards and drops the ones that have ended, so you do not have to prove it; put in `live_evidence` what the result showed ("$1,850 — Add to cart", "Buy It Now, 2 available", "bidding ends 2026-10-03"). eBay is the exception: its item pages cannot always be opened by the scan, and its search results and Google keep ended items for months (a 2024 specimen listing surfaced as a candidate in 2026), so an eBay item is kept ONLY when `live_evidence` quotes the result's own live wording — "Buy It Now", "Add to cart", "N bids · time left", "ends in", "N available" — or `closes` carries a future date; an eBay find without that is discarded, so do not return one. Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
 
-TONE (Mark's instruction, 2026-09-10): `why`, `fills`, `rarity` and `fair` are factual one-liners — what the piece is, its grade, its price, which gap it fills, and the evidence. No flattery, no "exactly the trophy-grade piece the collection needs", no reading of the collection or the collector; state facts and figures only.
+COLONIAL ELIGIBILITY: Collection group is not colonial status. For colonial recommendations, use the actual issue period before independence, not merely an old printed series date. Exclude independent Commonwealth/Republic/successor-bank issues and ambiguous transition years. Include issuer. For undated notes and reissues provide issue_year_start, issue_year_end and issue_date_source (a corroborating catalogue or issuing-bank URL); never invent them. Domestic US large-size themes remain separate. EXCEPTION explicitly requested by Mark: genuine Philippine VICTORY series notes remain wanted after independence, including Roxas signature varieties and Central Bank of the Philippines Victory overprints. Identify the actual Philippine Victory catalogue number, issuer and series; label these accurately as Victory or post-independence Victory-CBP, never automatically colonial.
+
+TONE (Mark's instruction, 2026-09-10): `why`, `fills`, `rarity` and `fair` are factual one-liners — what the piece is, its grade, its price, which gap it fills, and the evidence. No flattery, no "exactly the trophy-grade piece the collection needs", no reading of the collection or the collector; state facts and figures only. Keep purchase-button wording, financing language and search/price-extraction commentary in `live_evidence` only; it is internal verification data. Never repeat it in `why`, `fills`, `rarity` or `fair`. Retain concrete price caveats (buyer premium, shipping, estimates), dated comparable sales and attributed census evidence. If the price is unknown use "See listing" in `price`.
 
 Use your web searches on specific queries ("PMG 64 EPQ Philippines 5 pesos Victory ebay", "site:stacksbowers.com Sarawak dollar", "site:vcoins.com Knidos tetradrachm"). Return 4–8 items, best first; an item that the search result shows for sale at a price is worth returning even without page-level proof (the scan verifies). Return an empty list only when nothing is offered at all — and then say in `notes` what you searched and why nothing qualified.
 
@@ -15979,16 +15985,29 @@ def _market_image_key(url):
     return u.split('?')[0].split('#')[0].lower()
 
 
-def _market_jsonld_images(html):
-    """Every URL in the page's JSON-LD "image" values (a string or an
-    array). On eBay this is the listing's own photo set, complete and
-    in the seller's order."""
-    out = []
-    for m in re.finditer(r'"image"\s*:\s*(\[[^\]]*\]|"https?://[^"]+")', html or ''):
-        for u in re.findall(r'"(https?://[^"]+)"', m.group(1)):
-            if u not in out:
-                out.append(u)
-    return out
+def _market_jsonld_images(html, listing_url=None):
+    """Only the primary Product's photos; never ItemList recommendations."""
+    from html import unescape
+    products = []
+    for match in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html or '', re.I | re.S):
+        try:
+            data = json.loads(unescape(match.group(1)))
+        except (ValueError, TypeError):
+            continue
+        nodes = data if isinstance(data, list) else [data]
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            for obj in node.get('@graph', [node]):
+                if isinstance(obj, dict) and obj.get('@type') == 'Product':
+                    products.append(obj)
+    matches = [p for p in products if listing_url and p.get('url') and
+               market_runtime.canonical_url(p['url']) == market_runtime.canonical_url(listing_url)]
+    product = matches[0] if len(matches) == 1 else (products[0] if len(products) == 1 and not products[0].get('url') else {})
+    images = product.get('image', [])
+    images = [images] if isinstance(images, (str, dict)) else images
+    return [i if isinstance(i, str) else i.get('url') for i in images
+            if isinstance(i, str) or isinstance(i, dict) and i.get('url')]
 
 
 def _market_listing_photos(listing_url, scan_urls, page_urls):
@@ -16076,9 +16095,13 @@ def _market_page_image_urls(listing_url, html=None):
     large image the page references. Used when the scan stored no image
     for a candidate (search snippets rarely carry one) — so Buy still
     brings the note's photos over (Mark, 2026-09-12)."""
+    if _market_listing_url_problem(listing_url):
+        return []
     if html is None:
         status, html = _market_fetch_page(listing_url, limit=1_500_000)
         if status != 200 or not html or _market_page_challenged(status, html):
+            return []
+        if _market_listing_url_problem(getattr(_MARKET_LAST_URL, 'final', listing_url)):
             return []
     found = []
 
@@ -16086,7 +16109,7 @@ def _market_page_image_urls(listing_url, html=None):
         u = _market_full_size_url(u.replace('&amp;', '&'))
         if re.match(r'^https?://', u) and _market_image_key(u) not in {_market_image_key(f) for f in found}:
             found.append(u)
-    jsonld = _market_jsonld_images(html)
+    jsonld = _market_jsonld_images(html, listing_url)
     for u in jsonld:
         add(u)
     for m in re.finditer(r'<meta[^>]+(?:property|name)="(?:og:image|twitter:image)"[^>]+content="([^"]+)"', html, re.IGNORECASE):
@@ -16094,11 +16117,8 @@ def _market_page_image_urls(listing_url, html=None):
     for m in re.finditer(r'<meta[^>]+content="([^"]+)"[^>]+(?:property|name)="(?:og:image|twitter:image)"', html, re.IGNORECASE):
         add(m.group(1))
     if 'ebayimg.com' in html and not jsonld:
-        # No JSON-LD: fall back to any gallery file on the page. With
-        # JSON-LD present it already holds every listing photo, and the
-        # rest of the page is the seller's other items and "similar
-        # items" carousels — never read those (2026-09-19).
-        for m in re.finditer(r'https?://i\.ebayimg\.com/images/g/[A-Za-z0-9~_-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', html):
+        gallery = re.search(r'<(?:div|section)[^>]+(?:id|class)=["\'][^"\']*(?:ux-image-carousel|ux-image-filmstrip|icImg)[^"\']*["\'][^>]*>(.*?)</(?:div|section)>', html, re.I | re.S)
+        for m in re.finditer(r'https?://i\.ebayimg\.com/images/g/[A-Za-z0-9~_-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', gallery.group(1) if gallery else ''):
             add(m.group(0))
     # Drop obvious non-photos (logos, icons, sprites) and keep the first
     # few distinct files: obverse, reverse, holder.
@@ -16322,6 +16342,55 @@ def _market_is_ebay(url):
     return host == 'ebay.com' or host.endswith('.ebay.com') or bool(re.match(r'^(?:[a-z]+\.)?ebay\.[a-z.]+$', host))
 
 
+def _market_listing_url_problem(url):
+    """Reject discovery/inventory URLs before trusting any facts or photos."""
+    from urllib.parse import urlsplit, parse_qsl
+    try:
+        parsed = urlsplit(str(url or ''))
+    except ValueError:
+        return 'Invalid listing URL'
+    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+        return 'Invalid listing URL'
+    path = parsed.path.rstrip('/').lower()
+    if _market_is_ebay(url):
+        if not re.fullmatch(r'/itm/(?:[^/]+/)?[0-9]+', path):
+            return 'Search or category page, not an exact eBay item'
+        return ''
+    query = {k.lower(): v for k, v in parse_qsl(parsed.query)}
+    # ID-bearing dealer URLs (including CNG CoinID and MA-Shops id)
+    # remain intact; generic query/search paths do not identify a lot.
+    identity = any(query.get(k) for k in ('coinid', 'lotid', 'itemid', 'productid', 'id'))
+    if parsed.hostname.lower().endswith('cngcoins.com') and path in ('/coin.aspx', '/coin') and not query.get('coinid'):
+        return 'CNG item URL has no CoinID'
+    if not identity and (path in ('', '/index.php', '/index.html', '/shop', '/store', '/inventory', '/coins', '/banknotes')
+            or re.search(r'/(?:search|search-results|category|categories|collections)(?:/|\.|$)', path)
+            or any(k in query for k in ('q', 'query', 'search', 'keyword', 'keywords', '_nkw'))):
+        return 'Search or inventory page, not an exact item'
+    return ''
+
+
+def _market_listing_identity_problem(item, probe):
+    """Use only the primary listing heading, never recommendation cards."""
+    title = probe.get('title') or ''
+    if not title:
+        return ''
+    expected = str(item.get('title') or '') + ' ' + str(item.get('pick_number') or '')
+    for pattern, label in ((r'\b(?:fr[.#\s]*|friedberg\s*)(\d+[a-z]?)', 'catalogue number'),
+                           (r'\bp(?:ick)?[.#\s-]*(\d+[a-z]?)', 'Pick number'),
+                           (r'\b(1[6-9]\d{2}|20\d{2})\b', 'date'),
+                           (r'\b(?:PMG|PCGS)(?:\s+(?:CHOICE|GEM|UNC|UNCIRCULATED))*\s*(\d{2})\b', 'grade'),
+                           (r'\$\s*(\d+)\b', 'denomination')):
+        a = set(re.findall(pattern, expected, re.I))
+        b = set(re.findall(pattern, title, re.I))
+        if a and b and not {x.lower() for x in a} & {x.lower() for x in b}:
+            return 'Listing ' + label + ' differs from candidate'
+    seller = str(item.get('seller') or '').strip().lower()
+    actual = str(probe.get('seller') or '').strip().lower()
+    if _market_is_ebay(item.get('listing_url')) and seller and actual and seller != actual:
+        return 'Listing seller differs from candidate'
+    return ''
+
+
 def _market_page_gone(url, status, html=''):
     """True when the listing page no longer exists: a 404 / 410, or a
     product URL that was redirected away to a store front, category or
@@ -16356,7 +16425,10 @@ def _market_price_from_page(url):
     the JSON-LD / meta price first, then the first currency amount in
     the visible text. Returns a price string or None."""
     status, html = _market_fetch_page(url)
-    if status != 200 or not html or _market_page_gone(url, status, html):
+    if (status != 200 or not html or _market_page_challenged(status, html)
+            or _market_listing_url_problem(url)
+            or _market_listing_url_problem(getattr(_MARKET_LAST_URL, 'final', url))
+            or _market_page_gone(url, status, html)):
         return None
     m = re.search(r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?', html)
     cur = re.search(r'"priceCurrency"\s*:\s*"([A-Z]{3})"', html)
@@ -16376,7 +16448,8 @@ def _market_price_from_page(url):
             return formatted
     text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r'<[^>]+>', ' ', text)
-    text = re.sub(r'\s+', ' ', text)[:60_000]
+    text = re.sub(r'\s+', ' ', text)
+    text = re.split(r'similar items|you may also like|related products|recommended for you', text, maxsplit=1, flags=re.I)[0][:60_000]
     for m in _MARKET_PAGE_PRICE_RE.finditer(text):
         candidate = m.group(1).replace('US $', '$').replace('US$', '$')
         formatted = _format_purchase_price(candidate)
@@ -16394,14 +16467,32 @@ def _market_listing_probe(url, page=None):
     buy/bid wording and no ended marker; 'unknown' when the page cannot
     be read (bot wall, timeout) or says neither."""
     if page is None:
+        _MARKET_LAST_URL.final = url
         status, html = _market_fetch_page(url)
         final = getattr(_MARKET_LAST_URL, 'final', url) or url
     else:
         status, html, final = page.status, page.text, page.final_url
+    _MARKET_LAST_URL.final = final
     out = {'status': status, 'length': len(html or ''), 'final': final,
            'challenged': (page.challenged if page is not None else _market_page_challenged(status, html)), 'why': ''}
+    problem = _market_listing_url_problem(url)
+    if problem:
+        out['state'], out['why'] = 'invalid', problem
+        return out
     if out['challenged']:
         out['state'], out['why'] = 'unknown', 'challenge page'
+        return out
+    problem = _market_listing_url_problem(final)
+    if not problem and _market_is_ebay(url) and market_runtime.canonical_url(url) != market_runtime.canonical_url(final):
+        problem = 'Redirect to a different eBay item'
+    if not problem:
+        from urllib.parse import urlsplit, parse_qsl
+        before = {k.lower(): v for k, v in parse_qsl(urlsplit(url).query)}
+        after = {k.lower(): v for k, v in parse_qsl(urlsplit(final).query)}
+        if any(k in before and k in after and before[k] != after[k] for k in ('coinid', 'lotid', 'itemid', 'productid', 'id')):
+            problem = 'Redirect changes the item identifier'
+    if problem:
+        out['state'], out['why'] = 'invalid', problem
         return out
     if _market_page_gone(url, status, html):
         out['state'], out['why'] = 'ended', 'page gone'
@@ -16409,6 +16500,13 @@ def _market_listing_probe(url, page=None):
     if status != 200 or not html:
         out['state'], out['why'] = 'unknown', f'status {status}'
         return out
+    heading = re.search(r'<h1\b[^>]*>(.*?)</h1>', html, re.I | re.S)
+    if heading:
+        from html import unescape
+        out['title'] = unescape(re.sub(r'<[^>]+>', ' ', heading.group(1))).strip()
+        if re.search(r'\bsearch results\b|^all products$|^inventory$|^shop$', out['title'], re.I):
+            out['state'], out['why'] = 'invalid', 'Inventory heading instead of an item title'
+            return out
     # The page was readable: remember its photos for a candidate the
     # model gave no image for (the list thumbnail, and Buy's copy).
     try:
@@ -16424,7 +16522,7 @@ def _market_listing_probe(url, page=None):
     text = re.sub(r'\s+', ' ', text).lower()
     # The head of the page carries the state banner; the tail carries
     # "similar sold items" blocks that would false-alarm on 'sold '.
-    head = text[:60_000]
+    head = re.split(r'similar items|you may also like|related products|recommended for you', text[:60_000], maxsplit=1)[0]
     ended = [m for m in _MARKET_ENDED_PAGE_MARKERS if m in head]
     live = [m for m in _MARKET_LIVE_PAGE_MARKERS if m in head]
     buyable = any(m in head for m in _MARKET_BUY_MARKERS)
@@ -16508,8 +16606,9 @@ def _market_verify_live(items, workers=6):
             state, pr.get('status'), pr.get('length'), pr.get('challenged'), pr.get('why'),
             str(pr.get('final') or '')[:100], str(item.get('title') or '')[:60],
             str(item.get('listing_url') or '')[:100])
-        if state == 'ended':
-            _market_drop(item, 'listing page ended or gone')
+        identity_problem = _market_listing_identity_problem(item, pr)
+        if state in ('ended', 'invalid') or identity_problem:
+            _market_drop(item, identity_problem or pr.get('why') or 'listing page ended or gone')
             continue
         if state == 'unknown' and _market_is_ebay(item.get('listing_url')) \
                 and not _market_unreadable_ebay_ok(item):
@@ -16550,6 +16649,9 @@ def _market_normalize_item(db, category, raw):
     url = str(raw.get('listing_url') or '').strip()
     if not re.match(r'^https?://', url):
         return _market_drop(raw, 'no listing URL')
+    problem = _market_listing_url_problem(url)
+    if problem:
+        return _market_drop(raw, problem)
     host = re.sub(r'^https?://(www\.)?', '', url).split('/')[0].lower()
     if any(h in host for h in ('google.', 'bing.', 'duckduckgo')):
         return _market_drop(raw, 'search-engine URL')
@@ -16657,6 +16759,10 @@ def _market_normalize_item(db, category, raw):
         'fair': str(raw.get('fair') or '').strip()[:300],
         'theme': str(raw.get('theme') or '')[:40],
         'empire': str(raw.get('empire') or '').strip()[:20],
+        'issuer': str(raw.get('issuer') or '').strip()[:200],
+        'issue_year_start': raw.get('issue_year_start'),
+        'issue_year_end': raw.get('issue_year_end'),
+        'issue_date_source': str(raw.get('issue_date_source') or '').strip()[:1000],
         'new_source': bool(raw.get('new_source')),
         'denomination': str(raw.get('denomination') or '').strip()[:80],
         'date_1': year,
@@ -16668,6 +16774,10 @@ def _market_normalize_item(db, category, raw):
             'series': (str(raw.get('series') or '').strip()[:60] or None),
             'pick_number': (str(raw.get('pick_number') or '').strip()[:60] or None),
         })
+        reason = market_colonial.problem(item)
+        if reason:
+            return _market_drop(raw, reason)
+        item['empire'] = _market_colonial_empire(item)
         if _mentions_manchukuo(item['title']) and _country_key(item['country']) in ('china', None):
             item['country'] = 'Manchukuo'
         if not item['title']:
@@ -17490,6 +17600,49 @@ def _market_reap_orphan(db, category, scan):
     return _market_latest_scan(db, category)
 
 
+@app.template_filter('market_copy')
+def _market_display_copy(value):
+    """Remove retrieval commentary from saved candidates without altering evidence.
+
+    Keep this at presentation time: liveness checks still need the original
+    payload, and existing scans should improve without rerunning paid searches.
+    Filter narrowly by clause so numismatic facts and price caveats survive.
+    """
+    parts = re.split(r'(?<=[.!?])\s+|;\s*|\n+', str(value or '').strip())
+    kept = []
+    for part in parts:
+        low = part.lower()
+        purchase_language = (re.search(r'buy it now|klarna|add to cart', low) and
+                             re.search(r'language|wording|typical|indicat|suggest|proves? .{0,15}live', low))
+        missing_price = (re.search(r'price|pricing', low) and
+                         re.search(r'not (?:captured|extracted|available)|could not (?:capture|extract|read)|not found', low) and
+                         re.search(r'snippet|search result|this pass|fetch|live.price text', low))
+        if re.search(r'no comparable.{0,25}(?:price|sale).{0,40}(?:captured|found|gathered).{0,25}(?:pass|search|snippet)', low):
+            kept.append('Comparable sales not available.')
+            continue
+        if purchase_language or missing_price:
+            continue
+        kept.append(part)
+    return ' '.join(kept)
+
+
+def _market_colonial_empire(item):
+    if market_colonial.victory_label(item):
+        return ''
+    country = str(item.get('country') or '').strip().lower()
+    empire = str(item.get('empire') or '').strip()
+    if country in ('united states', 'united states of america', 'usa', 'us'):
+        return ''
+    if country == 'philippines' and empire.lower() in ('us', 'usa', 'united states', 'american'):
+        try:
+            year = int(item.get('date_1') or 0)
+        except (ValueError, TypeError):
+            year = 0
+        if not 1898 <= year <= 1946 or re.search(r'japan|occupation', str(item.get('title') or ''), re.I):
+            return ''
+    return empire
+
+
 def _market_items(db, category, earlier=False):
     """The market page's rows: the current scan's undecided candidates,
     or — with ``earlier`` — the candidates of previous scans that were
@@ -17507,10 +17660,16 @@ def _market_items(db, category, earlier=False):
     out = []
     for r in rows:
         item = json.loads(r['payload'])
+        if _market_listing_url_problem(item.get('listing_url')) or (category == 'banknotes' and market_colonial.problem(item)):
+            db.execute("UPDATE market_scan_items SET status = 'unavailable' WHERE id = ?", [r['id']])
+            continue
+        item['empire'] = _market_colonial_empire(item)
+        item['issue_label'] = market_colonial.victory_label(item) or ('United States issue' if _canonical_banknote_country(item.get('country')) == 'United States of America' else '')
         item['id'] = r['id']
         item['status'] = r['status']
         item['scanned_at'] = (r['created_at'] or '')[:10]
         out.append(item)
+    db.commit()
     return out
 
 
@@ -17722,6 +17881,36 @@ def _market_create_record(db, category, item, location=None, images=None):
     return record_id
 
 
+def _market_action_problem(db, row, item, already_paid=False):
+    problem = _market_listing_url_problem(item.get('listing_url'))
+    if row['category'] == 'banknotes':
+        problem = problem or market_colonial.problem(item)
+    if row['status'] == 'unavailable':
+        return 'This offer is unavailable or does not identify an exact item.'
+    if not problem and not already_paid:
+        probe = _market_listing_probe(item['listing_url'])
+        if probe['state'] in ('ended', 'invalid'):
+            problem = probe['why']
+        else:
+            problem = _market_listing_identity_problem(item, probe)
+    if problem:
+        db.execute("UPDATE market_scan_items SET status = 'unavailable' WHERE id = ? AND status != 'ordered'", [row['id']])
+        db.commit()
+    return problem
+
+
+@app.route('/<category>/market/<item_id>/listing')
+def market_item_listing(category, item_id):
+    _market_require_owner()
+    db = get_db()
+    row = _market_item_or_404(db, category, item_id)
+    item = json.loads(row['payload'])
+    problem = _market_action_problem(db, row, item)
+    if problem:
+        return 'This offer is no longer available or could not be matched to the specific item. Return to Market Scan for other candidates.', 410
+    return redirect(item['listing_url'])
+
+
 @app.route('/<category>/market/<item_id>/buy', methods=['POST'])
 def market_item_buy(category, item_id):
     """Buy = open the listing to pay there, and file the item as a new
@@ -17736,6 +17925,10 @@ def market_item_buy(category, item_id):
     db = get_db()
     row = _market_item_or_404(db, category, item_id)
     item = json.loads(row['payload'])
+    request_data = request.get_json(silent=True) or {}
+    problem = _market_action_problem(db, row, item, already_paid=request_data.get('bought') is True or row['status'] == 'ordered')
+    if problem:
+        return jsonify({'ok': False, 'error': 'Offer unavailable: ' + problem}), 409
     if row['status'] == 'ordered' and row['record_id']:
         record_id = row['record_id']
     else:

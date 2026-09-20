@@ -3961,6 +3961,20 @@ input[type="date"] { -webkit-appearance: none; }
 .market-pill { margin-right: 2px; }
 .market-status { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 .market-row { cursor: pointer; }
+.list-toolbar-market { flex-wrap: wrap; min-width: 0; }
+.list-toolbar-market .market-status { white-space: normal; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
+.market-row .item-body { min-width: 0; flex: 1; }
+.market-row .item-line1 { flex-wrap: wrap; }
+.market-row .item-body, .market-row .idr, .market-row .idr span,
+.market-row .item-line1 > span, .market-row .market-tag {
+  min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
+}
+.market-row .market-actions { flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .market-row { flex-direction: column; }
+  .market-row .market-thumb { width: 100%; max-height: 180px; border-right: 0; }
+  .market-row .market-thumb img { width: auto; max-width: 100%; height: auto; max-height: 180px; object-fit: contain; }
+}
 .market-tag-earlier { color: var(--text-label); font-style: italic; margin-right: 6px; }
 .market-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .market-meta { margin-top: 4px; }
