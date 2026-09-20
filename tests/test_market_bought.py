@@ -81,7 +81,7 @@ with stuffapp.app.app_context():
     db = stuffapp.get_db()
     row = db.execute("SELECT status, country, denomination, pick_number, grading_authority, grade_modifier, property_name "
                      "FROM banknotes WHERE id = ?", [d['record_id']]).fetchone()
-    assert row['status'] == 'Ordered' and row['country'] == 'French Indochina', dict(row)
+    assert row['status'] == 'Ordered' and row['country'] == 'French Indo-China', dict(row)
     assert row['pick_number'] == 'P-55b' and row['grading_authority'] == 'PMG' and row['grade_modifier'] == 'EPQ', dict(row)
     assert row['property_name'] == 'Carpinteria'
     it = db.execute("SELECT status, record_id FROM market_scan_items WHERE id = 'old-1'").fetchone()

@@ -155,6 +155,16 @@
   <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=_bn_next, history=_hist) }}"
      class="toolbar-btn pill {% if coin_filter in ('us', 'military', 'notgeld') %}active{% endif %}"
      title="Cycle type: All → US → Military → Notgeld">{{ 'US' if coin_filter == 'us' else ('Military' if coin_filter == 'military' else ('Notgeld' if coin_filter == 'notgeld' else 'Type: All')) }}</a>
+  <form method="get" class="banknote-group-filter">
+    {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+    {% if not show_history %}<input type="hidden" name="history" value="0">{% endif %}
+    <select id="banknote-group" name="filter" aria-label="Historical collection group" onchange="this.form.submit()">
+      <option value="">All historical groups</option>
+      {% for key, title, description in banknote_catalog_groups %}
+      <option value="heritage_{{ key }}" {% if coin_filter == 'heritage_' ~ key %}selected{% endif %}>{{ title }}</option>
+      {% endfor %}
+    </select>
+  </form>
   {# Switches the historical/monetary-context panels on and off. #}
   <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=coin_filter or None, history='0' if show_history else None) }}"
      class="toolbar-btn pill {% if show_history %}active{% endif %}"
@@ -255,7 +265,15 @@
      History pill switches all of it off. Placement is precomputed in
      series_panels() so this loop stays dumb. #}
   {% set _us_panels = series_panels(rows) if category == 'banknotes' and show_history else {} %}
+  {% set _bn_groups = banknote_grouping(rows) if category == 'banknotes' and not _market and not _analysis else {} %}
   {% for row in rows %}
+  {% set _bn_group = _bn_groups.get(row['id']) %}
+  {% if _bn_group and _bn_group.heading %}
+  <div class="banknote-group-heading" data-banknote-group="{{ _bn_group.key }}">
+    <h2>{{ _bn_group.title }}</h2>
+    <p>{{ _bn_group.description }}</p>
+  </div>
+  {% endif %}
   {% if category == 'properties' and ns.prev == 'Residential' and (row['type'] or '') == 'Commercial' %}
   <div class="property-type-divider" aria-hidden="true"></div>
   {% endif %}
@@ -422,6 +440,7 @@
           <span class="item-brand">{{ row['country'] or row['municipality'] or row['issuer'] or '—' }}</span>
           {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
         </div>
+        {% if _bn_group %}<div class="banknote-period{% if _bn_group.uncertain %} needs-review{% endif %}">{{ _bn_group.period }}</div>{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['municipality'] and row['country'] %}<span>{{ row['municipality'] }}</span>{% endif %}

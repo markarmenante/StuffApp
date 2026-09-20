@@ -1,4 +1,4 @@
-"""Sanity test: banknote list order groups territories under modern nations."""
+"""Banknote historical collection ordering and monetary-era regressions."""
 import os, sys, sqlite3, tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,12 +38,12 @@ for row in got:
     print(row)
 
 expected = [
+    ('British East Africa', 1943),
+    ('British East Africa', 1956),
+    ('British Honduras', 1973),
     ('Austria', 1922),
-    ('British Honduras', 1973),   # Belize 1894-1973 era
-    ('Belize', 2021),             # Belize 1973-2100 era
+    ('Belize', 2021),
     ('Cameroon', 1983),
-    ('British East Africa', 1943),  # Kenya
-    ('British East Africa', 1956),  # Kenya
 ]
 assert got == expected, f"\nexpected {expected}\ngot      {got}"
 
@@ -175,8 +175,8 @@ got2 = [(r[0], r[1]) for r in db2.execute(
 for row in got2:
     print(row)
 expected2 = [
+    ('Pennsylvania Colony', 1773),                       # British colonial holdings
     ('Portuguese Guinea', 1971),
-    ('Pennsylvania Colony', 1773),                       # colonial block opens the US
     ('Rhode Island and Providence Plantations', 1780),
     ('United States', 1934),                             # federal run
     ('United States', 1872),                             # state/obsolete block last
@@ -272,10 +272,10 @@ got3 = [(r[0], r[1]) for r in db3.execute(
     "SELECT country, denomination FROM banknotes ORDER BY "
     + stuffapp.CATEGORY_ORDER_BY['banknotes'])]
 expected3 = [
-    ('Netherlands', '10 Gulden'),
+    ('New Zealand', '1 Pound'),
     ('Netherlands Indies', '1/2 Roepiah (Setengah Roepiah)'),
     ('Netherlands Indies', '10 Roepiah'),
-    ('New Zealand', '1 Pound'),
+    ('Netherlands', '10 Gulden'),
 ]
 assert got3 == expected3, f"\nexpected {expected3}\ngot      {got3}"
 print('NETHERLANDS INDIES ASSERTIONS PASSED')
@@ -432,15 +432,15 @@ got = [(r[0], r[1].split(' (')[0], r[2]) for r in db3.execute(
 for row in got:
     print(row)
 expected = [
-    ('China', 'Bank of China', 1937),                    # Republic's wartime run…
+    ('China', 'Federal Reserve Bank of China', 1938),
+    ('China', 'Imperial Japanese Government', 1945),
+    ('China', 'Imperial Japanese Government', 1945),
+    ('Manchukuo', 'Central Bank of Manchou', 1938),
+    ('China', 'Bank of China', 1937),
     ('China', 'Bank of Communications', 1941),
-    ('China', 'Central Bank of China', 1948),            # …through the gold yuan
-    ('China', 'Federal Reserve Bank of China', 1938),    # then the occupation block
-    ('China', 'Imperial Japanese Government', 1945),
-    ('China', 'Imperial Japanese Government', 1945),
-    ('China', "People's Bank of China", 1953),           # renminbi
+    ('China', 'Central Bank of China', 1948),
+    ('China', "People's Bank of China", 1953),
     ('Japan', 'Bank of Japan', 1943),
-    ('Manchukuo', 'Central Bank of Manchou', 1938),      # its own nation, under M
 ]
 assert got == expected, f"\nexpected {expected}\ngot      {got}"
 print('MANCHUKUO ASSERTIONS PASSED')

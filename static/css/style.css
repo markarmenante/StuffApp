@@ -4182,3 +4182,14 @@ input[type="date"] { -webkit-appearance: none; }
 .pdg-tile-edit:hover .pdg-tile-n { border-bottom-color: var(--border, #d9d9e0); }
 .pdg-tile-input { width: 4.5em; font: inherit; font-size: 16px; font-weight: 600; text-align: center;
   padding: 0 4px; border: 1px solid var(--blue, #4b6bff); border-radius: 4px; background: #fff; }
+
+
+/* Historical banknote filing groups remain visible with History switched off. */
+.banknote-group-heading { margin: 24px 0 12px; padding: 16px 18px; border-top: 2px solid var(--text, #243345); background: var(--bg-alt, #f3f4f5); }
+.banknote-group-heading h2 { margin: 0 0 5px; font-size: 1.05rem; }
+.banknote-group-heading p { margin: 0; font-size: .82rem; color: var(--text-muted, #626970); line-height: 1.45; }
+.banknote-period { font-size: .76rem; color: var(--text-muted, #626970); margin: 4px 0; }
+.banknote-period.needs-review { color: #91611b; }
+.banknote-group-filter { margin: 0; max-width: 100%; }
+.banknote-group-filter select { max-width: 260px; padding: 7px 10px; border: 1px solid #ccc; border-radius: 18px; background: transparent; color: inherit; font: inherit; font-size: .8rem; }
+.list-toolbar-banknotes { flex-wrap: wrap; }

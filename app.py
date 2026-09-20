@@ -9,6 +9,7 @@ import unicodedata
 import threading
 import time
 import market_scan as market_runtime
+import banknote_catalog
 from datetime import datetime, date, timedelta
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response,
@@ -710,6 +711,8 @@ def normalize_field_value(table, field_name, value):
         grade = coin_grade_value_list_match(value)
         if grade:
             return grade
+    if table == 'banknotes' and field_name == 'country':
+        return banknote_catalog.canonical_country(value)
     if table == 'banknotes' and field_name == 'grade':
         grade = banknote_grade_value_list_match(value)
         if grade:
@@ -734,19 +737,7 @@ _US_DENOM_RE = re.compile(r'^\s*(\d+)\s+dollars?\s*$', re.I)
 
 
 def _canonical_banknote_country(value):
-    if not isinstance(value, str):
-        return value
-    # Strip everything but letters/digits so punctuation and invisible
-    # characters (NBSP, zero-width space) can't defeat the fold.
-    key = re.sub(r'[^a-z0-9]', '', value.lower())
-    if key in ('unitedstates', 'unitedstatesofamerica', 'usa', 'us'):
-        return 'United States of America'
-    # Catalogues file the Central Bank of Manchou under China ("China —
-    # Manchukuo"); the collection files the puppet state as its own
-    # nation, apart from the Republic's issues.
-    if 'manchukuo' in key or 'manchoukuo' in key:
-        return 'Manchukuo'
-    return value
+    return banknote_catalog.canonical_country(value)
 
 
 def _canonical_us_denomination(value):
@@ -2340,7 +2331,7 @@ def _series_year(text, country=None):
 
 
 def _is_us_country(country):
-    value = (country or '').strip().lower().rstrip('.')
+    value = (banknote_catalog.canonical_country(country) or '').strip().lower().rstrip('.')
     return bool(value) and (value in US_COUNTRY_NAMES
                             or value.startswith('united states'))
 
@@ -4786,7 +4777,7 @@ def _clause_dict(clause):
 
 def _country_key(country):
     """Normalize a country field to a COUNTRY_ERAS key, or None."""
-    value = (country or '').strip().lower().rstrip('.')
+    value = (banknote_catalog.canonical_country(country) or '').strip().lower().rstrip('.')
     if not value:
         return None
     # "China (Manchukuo)", "China — Manchukuo", "Manchoukuo": the puppet
@@ -5638,6 +5629,7 @@ def series_panels(rows):
         else:
             series_label = str(panel['year']) if panel['year'] else (panel['series'] or '')
         signature = (
+            banknote_catalog.row_classification(row)['key'],
             panel['title'],
             panel.get('note_type') or '',
             panel['clause']['span'] if panel['clause'] else '',
@@ -5673,8 +5665,45 @@ def series_panels(rows):
     return placements
 
 
+@app.template_global()
+def banknote_grouping(rows):
+    previous = None
+    placements = {}
+    for row in rows:
+        info = dict(banknote_catalog.row_classification(row))
+        info['heading'] = info['key'] != previous
+        placements[row['id']] = info
+        previous = info['key']
+    return placements
+
+
+app.jinja_env.globals['banknote_catalog_groups'] = banknote_catalog.GROUPS
+
+
+def _migrate_banknote_country_aliases(db):
+    """Idempotent spelling cleanup; original values remain auditable."""
+    db.execute("""CREATE TABLE IF NOT EXISTS banknote_country_alias_history (
+        banknote_id TEXT NOT NULL REFERENCES banknotes(id) ON DELETE CASCADE,
+        original_country TEXT NOT NULL,
+        canonical_country TEXT NOT NULL,
+        normalized_at TEXT NOT NULL,
+        PRIMARY KEY (banknote_id, original_country)
+    )""")
+    for row in db.execute('SELECT id, country FROM banknotes').fetchall():
+        canonical = banknote_catalog.canonical_country(row['country'])
+        if canonical != row['country']:
+            db.execute("INSERT OR IGNORE INTO banknote_country_alias_history VALUES (?, ?, ?, ?)",
+                       (row['id'], row['country'], canonical, datetime.utcnow().isoformat()))
+            db.execute('UPDATE banknotes SET country = ?, updated_at = ? WHERE id = ?',
+                       (canonical, datetime.utcnow().isoformat(), row['id']))
+
+
 def _configure_db_connection(db):
     db.row_factory = sqlite3.Row
+    db.create_function('BANKNOTE_GROUP', 4,
+                       lambda *v: banknote_catalog.classify(*v)['rank'], deterministic=True)
+    db.create_function('BANKNOTE_COUNTRY', 1, banknote_catalog.sort_country, deterministic=True)
+    db.create_function('BANKNOTE_COUNTRY_SEARCH', 1, banknote_catalog.country_search, deterministic=True)
     db.execute("PRAGMA foreign_keys = ON")
     # Wait up to 5s for a competing writer (gunicorn runs 4 threads)
     # instead of failing immediately with "database is locked".
@@ -6128,6 +6157,7 @@ def init_db():
     _migrate_coin_history_context_into_condition(db)
     _cleanup_coin_research_headings(db)
     _merge_banknote_catalog_numbers(db)
+    _migrate_banknote_country_aliases(db)
     _migrate_canonicalize_us_banknotes(db)
     _migrate_canonicalize_coin_regions(db)
     db.commit()
@@ -6619,9 +6649,10 @@ def init_db():
     # half a year after an ungated band opening the same year.
     # v21: the Display Number reads 'P 001' (position, zero-padded)
     # instead of 'B1' — same order, new format, so every note reseeds.
+    # v22: historical collection groups and canonical country spellings.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v21',),
+        ('banknote_display_number_v22',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6629,7 +6660,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v21', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v22', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -12056,6 +12087,11 @@ CATEGORY_FILTERS = {
 }
 
 
+for _group in banknote_catalog.GROUP_BY_KEY.values():
+    CATEGORY_FILTERS['banknotes']['heritage_' + _group['key']] = (
+        'BANKNOTE_GROUP(country, date_1, issuer, series) = ?', [_group['rank']])
+
+
 # Lifecycle-status axis, every status-bearing item category alike
 # (properties keep their own compound status+type filter above). Each
 # canonical status becomes a filter key. The default list (no filter)
@@ -12258,7 +12294,8 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
                 wheres.append('(' + ' OR '.join(conds) + ')')
                 continue
             for col in text_fields:
-                conds.append(f"NODIA({col}) LIKE ?")
+                search_col = "BANKNOTE_COUNTRY_SEARCH(country)" if category == "banknotes" and col == "country" else col
+                conds.append(f"NODIA({search_col}) LIKE ?")
                 params.append(f'%{folded_term}%')
             if category in SELL_PANEL_CATEGORIES:
                 # Buyer names moved to sale_plans with the rest of the
@@ -12383,7 +12420,8 @@ CATEGORY_ORDER_BY = {
     # neutralized inside the block: some Hawaii notes carry
     # municipality 'Hawaii' and some don't, and letting it lead would
     # scramble the denomination order within a set.
-    'banknotes': ("NATION_NAME(country) COLLATE NODIACRITIC, "
+    'banknotes': ("BANKNOTE_GROUP(country, date_1, issuer, series), "
+                  "BANKNOTE_COUNTRY(country) COLLATE NODIACRITIC, "
                   "US_NOTE_GROUP(country, series, issuer, official, lettering, "
                   "lettering_translation, other_catalog, description) ASC, "
                   f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "
@@ -18405,27 +18443,8 @@ _OCCUPATION_ERAS = {
 
 
 def _bn_country_label(country):
-    """One label per territory however the record spells it: "French
-    Indo-China", "French Indochina" and "French Indo-China/Vietnam" are
-    one bucket. A trailing "/…" or "(…)" qualifier is dropped and the
-    country table's display name is used when the name resolves."""
-    name = (country or '').strip()
-    if not name:
-        return name
-    base = re.sub(r'\s*\([^)]*\)\s*$', '', name.split('/')[0]).strip() or name
-    try:
-        key = _country_key(base)
-        display = COUNTRY_ERAS[key][0] if key and key in COUNTRY_ERAS else ''
-    except Exception:
-        display = ''
-    # The table's display name unifies spellings ("French Indo-China" ->
-    # "French Indochina") but must not rename a territory: "British
-    # Honduras" stays itself rather than becoming Belize, "Zaire" does
-    # not become the Belgian Congo. Only a name that opens with the same
-    # word is a respelling.
-    if display and display.split()[0].lower() == base.split()[0].lower():
-        return display
-    return base
+    """Shared catalogue spelling, preserving distinct territorial qualifiers."""
+    return banknote_catalog.canonical_country(country) or ''
 
 
 def _bn_haystack(r, fields=('issuer', 'series', 'issue_type', 'description', 'notes',
@@ -18482,29 +18501,13 @@ def _banknote_colony(country):
     return None
 
 
-def _banknote_empire(country, year=None):
-    """Which empire a colonial note belongs to: from the country name
-    first ("British East Africa", "French West Africa"), then from a
-    table of colonies, then from the colonial timeline's opening words.
-    The Philippines are treated as an American colony from 1899 to 1946
-    (Spanish before that) — not strictly a colony, but filed as one."""
-    name = _bn_country_label(country)
-    low = name.lower()
-    if low.startswith('philippine'):
-        y = _safe_int(year)
-        return 'Spanish' if (y and y < 1899) else 'American'
-    hit = _banknote_colony(name)
-    if hit:
-        return hit[0]
-    try:
-        line = COUNTRY_COLONIAL.get(_country_key(name), '') or ''
-    except Exception:
-        line = ''
-    head = line.split(';')[0].split('.')[0].lower()
-    for empire, words in _EMPIRE_WORDS:
-        if any(w in head for w in words):
-            return empire
-    return 'Other'
+def _banknote_empire(country, year=None, issuer=None, series=None):
+    """Analysis uses the same historical filing family as the collection."""
+    key = banknote_catalog.classify(country, year, issuer, series)['key']
+    return {'british': 'British', 'french': 'French', 'spanish': 'Spanish',
+            'portuguese': 'Portuguese', 'dutch': 'Dutch', 'belgian': 'Belgian',
+            'german': 'German', 'italian': 'Italian', 'us': 'American',
+            'japanese': 'Japanese', 'danish': 'Danish', 'joint': 'Joint administrations'}.get(key, 'Other')
 
 
 def _banknote_is_colonial(r):
@@ -18601,7 +18604,7 @@ def _analysis_banknotes_profile(db):
             })
         return out
 
-    empire_list = _group_rows(colonial, lambda r: _banknote_empire(r['country'], r['date_1']), 'empire')
+    empire_list = _group_rows(colonial, lambda r: _banknote_empire(r['country'], r['date_1'], r['issuer'], r['series']), 'empire')
     military_list = _group_rows(military, _banknote_military, 'authority')
     us = buckets['us']
     us_classes = []
@@ -18637,7 +18640,7 @@ def _analysis_banknotes_profile(db):
         if low.startswith('united states') or low.startswith('confederate'):
             return 'United States'
         if _banknote_is_colonial(r) or low.startswith('philippine'):
-            return f"{_banknote_empire(country, r['date_1'])} colonial"
+            return f"{_banknote_empire(country, r['date_1'], r['issuer'], r['series'])} colonial"
         return 'other world'
 
     def _items(rs, bucket):
@@ -18646,7 +18649,7 @@ def _analysis_banknotes_profile(db):
              'issue_type': r['issue_type'], 'series': r['series'], 'pick': r['pick_number'],
              'year': r['date_1_text'] or r['date_1'], 'printer': r['printer'],
              'grade': _grade_label(r),
-             'empire': _banknote_empire(r['country'], r['date_1']) if bucket == 'colonial' else None,
+             'empire': _banknote_empire(r['country'], r['date_1'], r['issuer'], r['series']) if bucket == 'colonial' else None,
              'authority': _banknote_military(r) if bucket == 'military' else None,
              'territory_otherwise': _home(r) if bucket == 'military' else None}
             for r in sorted(rs, key=lambda r: (_bn_country_label(r['country']), _safe_int(r['date_1']) or 0))
@@ -22435,7 +22438,8 @@ def _banknote_state_name(country, year):
         return None
     base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
     key = None
-    for candidate in (raw, base):
+    for candidate in dict.fromkeys((raw, base) + tuple(
+            n.lower() for n in banknote_catalog.country_spellings(country))):
         if candidate in BANKNOTE_STATE_SPELLINGS:
             native, english = BANKNOTE_STATE_SPELLINGS[candidate]
             return {'native': native, 'english': english,
@@ -22476,7 +22480,8 @@ def _banknote_pin(country, year):
         return None
     base = re.sub(r'\s*\([^)]*\)\s*$', '', raw).strip()
     key = None
-    for candidate in (raw, base):
+    for candidate in dict.fromkeys((raw, base) + tuple(
+            n.lower() for n in banknote_catalog.country_spellings(country))):
         if candidate in BANKNOTE_SPELLING_PINS:
             city, lat, lng = BANKNOTE_SPELLING_PINS[candidate]
             return {'city': city, 'latlng': [lat, lng]}
@@ -35528,6 +35533,8 @@ def _finalize_sweep_seed(seed, cat, user, db, now):
     Doesn't overwrite values already in `seed` — so a snapshot-driven
     create that already carries a stable id, owner, and cat_id keeps
     them, while a path-driven create gets fresh ones."""
+    if cat == 'banknotes' and 'country' in seed:
+        seed['country'] = banknote_catalog.canonical_country(seed['country'])
     seed.setdefault('id', str(uuid.uuid4()))
     seed.setdefault('created_at', now)
     # updated_at intentionally overwrites: this is a fresh INSERT, not
@@ -35825,7 +35832,8 @@ def sweep_files():
                             isinstance(cur, str) and not cur.strip())
                         if not cur_blank:
                             continue
-                        updates[col] = val
+                        updates[col] = (banknote_catalog.canonical_country(val)
+                                        if cat == 'banknotes' and col == 'country' else val)
                     if updates:
                         set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
                         db.execute(
@@ -36167,6 +36175,8 @@ def sweep_files():
         report['delete_capped'] = delete_report.get('capped', False)
         report['sync_deletes_mode'] = sync_deletes_mode
 
+    if any(item.get('record', '').startswith('banknotes/') for item in report['uploaded']):
+        _renumber_banknotes(db)
     db.commit()
 
     if request.headers.get('Accept', '').startswith('application/json') \
@@ -36812,7 +36822,7 @@ def _renumber_coin_groups(db, groups=None):
 # has to be resequenced when one is edited. Mirrors the fields in
 # CATEGORY_ORDER_BY['banknotes'] — keep the two in step.
 BANKNOTE_SORT_FIELDS = ('country', 'municipality', 'series',
-                        'denomination', 'date_1')
+                        'denomination', 'date_1', 'issuer')
 
 
 def _renumber_banknotes(db):
