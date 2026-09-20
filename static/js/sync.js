@@ -98,11 +98,20 @@
     });
   }
 
-  async function _saveHandle(handle) {
+  async function _saveHandle(handle, previous) {
+    let same = false;
+    try { same = !!previous && await previous.isSameEntry(handle); } catch (_) {}
     const db = await _openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put(handle, KEY);
+      const store = tx.objectStore(STORE);
+      store.put(handle, KEY);
+      // Folder handles and their checkpoints must change atomically. A new
+      // destination needs a full download and its own upload fingerprints.
+      if (!same) {
+        store.delete(LAST_SYNC_KEY);
+        store.delete(STATE_KEY);
+      }
       tx.oncomplete = () => resolve();
       tx.onerror    = () => reject(tx.error);
     });
@@ -118,24 +127,33 @@
     });
   }
 
+  async function getFolderName() {
+    const handle = await _loadHandle();
+    return handle ? handle.name : null;
+  }
+
   async function _getOrPickDirectory(forcePrompt) {
-    let h = forcePrompt ? null : await _loadHandle();
-    if (h) {
-      let perm = await h.queryPermission({mode: 'readwrite'});
-      if (perm !== 'granted') {
-        try {
-          perm = await h.requestPermission({mode: 'readwrite'});
-        } catch (_) { perm = 'denied'; }
-      }
-      if (perm === 'granted') return h;
+    const previous = await _loadHandle();
+    if (!forcePrompt && previous && previous.name === 'StuffFiles') {
+      try {
+        let perm = await previous.queryPermission({mode: 'readwrite'});
+        if (perm !== 'granted') {
+          perm = await previous.requestPermission({mode: 'readwrite'});
+        }
+        if (perm === 'granted') return previous;
+      } catch (_) { /* Moved, deleted or revoked: choose again. */ }
     }
-    h = await window.showDirectoryPicker({
+    const picked = await window.showDirectoryPicker({
       mode: 'readwrite',
-      id:   'stufffiles',
-      startIn: 'documents',
+      id: 'stufffiles',
+      startIn: previous || 'documents',
     });
-    await _saveHandle(h);
-    return h;
+    // The archive's StuffFiles prefix is stripped during extraction. Never
+    // scatter category folders directly into Documents, Downloads or iCloud.
+    const destination = picked.name === 'StuffFiles' ? picked
+      : await picked.getDirectoryHandle('StuffFiles', {create: true});
+    await _saveHandle(destination, previous);
+    return destination;
   }
 
   async function _ensurePath(rootHandle, relPath) {
@@ -615,6 +633,9 @@
       console.warn('[StuffSync] uncaught syncDown error:', e);
     }
 
+    if (!syncError && written !== total) {
+      syncError = `${total - written} file(s) could not be saved. Retry the download.`;
+    }
     // Persist the new last-sync timestamp so the next syncDown is
     // incremental. Only save when the run reached the end without a
     // syncError — a partial failure leaves the timestamp untouched
@@ -624,7 +645,7 @@
       try { await _saveLastSyncAt(newSyncAt); } catch (_) {}
     }
 
-    return {written, total,
+    return {written, total, folderName: dir.name,
             stale: staleCount, purged, purgedDirs,
             tombstoneApplied, tombstoneFailed,
             since: lastSyncAt || null, syncedAt: newSyncAt,
@@ -827,5 +848,5 @@
   }
 
   window.StuffSync = Object.assign(window.StuffSync || {},
-    {syncDown, syncUp, pickFolder, resetSyncState, resetLastSyncAt});
+    {syncDown, syncUp, pickFolder, getFolderName, resetSyncState, resetLastSyncAt});
 })();

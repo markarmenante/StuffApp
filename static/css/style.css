@@ -4193,3 +4193,10 @@ input[type="date"] { -webkit-appearance: none; }
 .banknote-group-filter { margin: 0; max-width: 100%; }
 .banknote-group-filter select { max-width: 260px; padding: 7px 10px; border: 1px solid #ccc; border-radius: 18px; background: transparent; color: inherit; font: inherit; font-size: .8rem; }
 .list-toolbar-banknotes { flex-wrap: wrap; }
+
+.files-download-dialog { max-width: 460px; width: calc(100% - 40px); border: 1px solid var(--border); border-radius: 10px; padding: 22px; color: var(--text); background: var(--bg, white); }
+.files-download-dialog::backdrop { background: rgba(0,0,0,.35); }
+.files-download-dialog h2 { margin-top: 0; font-size: 20px; }
+.files-download-dialog p { font-size: 14px; line-height: 1.5; }
+.files-download-dialog button { padding: 8px 12px; cursor: pointer; }
+.files-download-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }

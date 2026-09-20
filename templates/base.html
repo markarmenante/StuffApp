@@ -117,7 +117,7 @@
     <a href="{{ url_for('admin_export_files') }}"
        class="nav-item nav-export" id="navExportLink"
        title="Download + auto-extract into your StuffFiles folder. iOS / Safari: gets a zip you save manually."
-       onclick="return startExport(event, this)">
+       onclick="return openFilesDownload(event)">
       <span class="icon" id="navExportIcon">⬇</span>
       <span class="lbl" id="navExportLabel">Files</span>
     </a>
@@ -143,6 +143,20 @@
 
 <!-- Toast for export progress / completion -->
 <div id="exportToast" class="export-toast" hidden></div>
+<dialog id="filesDownloadDialog" class="files-download-dialog" aria-labelledby="filesDownloadTitle">
+  <h2 id="filesDownloadTitle">Download Files</h2>
+  <div id="filesFolderOptions">
+    <p>Destination: <strong id="filesFolderName">Checking saved folder…</strong></p>
+    <p>Choose your existing <b>StuffFiles</b> folder in iCloud Drive. If you choose a parent folder, a StuffFiles folder will be used or created inside it.</p>
+    <button type="button" id="filesChooseFolder" onclick="chooseFilesFolder(this)">Choose folder…</button>
+  </div>
+  <p id="filesZipHelp" hidden>Your browser will save a zip to its download location. Move or extract its StuffFiles folder into iCloud Drive. Chrome supports downloading directly into your chosen folder.</p>
+  <p id="filesFolderStatus" role="status" aria-live="polite"></p>
+  <div class="files-download-actions">
+    <button type="button" onclick="document.getElementById('filesDownloadDialog').close()">Close</button>
+    <button type="button" id="filesDownloadStart" onclick="downloadFilesToFolder(event)">Download</button>
+  </div>
+</dialog>
 
 {% if current_user %}
 <!-- Inventory report dialog: opened by the Report nav button. The
@@ -424,6 +438,59 @@ function _busy(link, iconId, labelId, busyIcon, busyText) {
   return {progress, done};
 }
 
+function filesCanUseFolder() {
+  return !!(window.showDirectoryPicker && window.StuffSync && window.fflate);
+}
+
+async function openFilesDownload(ev) {
+  ev.preventDefault();
+  if (document.getElementById('navExportLink').dataset.busy) return false;
+  const dialog = document.getElementById('filesDownloadDialog');
+  const supported = filesCanUseFolder();
+  document.getElementById('filesFolderOptions').hidden = !supported;
+  document.getElementById('filesZipHelp').hidden = supported;
+  document.getElementById('filesFolderStatus').textContent = '';
+  const start = document.getElementById('filesDownloadStart');
+  start.textContent = supported ? 'Download to StuffFiles' : 'Download zip';
+  start.disabled = supported;
+  document.getElementById('filesFolderName').textContent = 'Checking saved folder…';
+  dialog.showModal();
+  if (supported) {
+    try {
+      const name = await window.StuffSync.getFolderName();
+      document.getElementById('filesFolderName').textContent = name || 'No folder selected';
+      start.disabled = name !== 'StuffFiles';
+      if (name && name !== 'StuffFiles') {
+        document.getElementById('filesFolderStatus').textContent = 'Choose your StuffFiles folder before downloading.';
+      }
+    } catch (err) {
+      document.getElementById('filesFolderStatus').textContent = 'Could not read the saved folder. Choose it again.';
+    }
+  }
+  return false;
+}
+
+async function chooseFilesFolder(button) {
+  button.disabled = true;
+  const status = document.getElementById('filesFolderStatus');
+  status.textContent = '';
+  try {
+    const folder = await window.StuffSync.pickFolder();
+    document.getElementById('filesFolderName').textContent = folder.name;
+    document.getElementById('filesDownloadStart').disabled = false;
+    status.textContent = 'Folder saved for Files downloads and Sweep. You can close this window or download now.';
+  } catch (err) {
+    status.textContent = err.name === 'AbortError' ? 'Folder selection cancelled; previous destination kept.' : 'Could not select folder: ' + err.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function downloadFilesToFolder(ev) {
+  document.getElementById('filesDownloadDialog').close();
+  return startExport(ev, document.getElementById('navExportLink'));
+}
+
 // Files-button click handler. Three paths:
 //   - Chromium (showDirectoryPicker available): zip transmitted, then
 //     unzipped client-side directly into a folder the user picks
@@ -439,7 +506,7 @@ async function startExport(ev, link) {
     try {
       ui.progress('Pick (or confirm) your StuffFiles folder…');
       const result = await window.StuffSync.syncDown(ui.progress);
-      let msg = `Synced ${result.written}/${result.total} files into your folder.`;
+      let msg = `Synced ${result.written}/${result.total} files into ${result.folderName}.`;
       if (result.purged) {
         msg += ` Purged ${result.purged} stale file${result.purged === 1 ? '' : 's'}`;
         if (result.purgedDirs) {
