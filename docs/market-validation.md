@@ -49,7 +49,9 @@ collection records.
 **Mark's explicit exception:** genuine Philippine VICTORY notes remain wanted,
 including later signature varieties and Victory–Central Bank overprints after
 independence. Philippine country, Victory type and a corresponding Pick number
-identify the exception; a marketing keyword alone does not. Original-series Pick 94–101 and CBP Pick 117–124 are recognized with Victory
+identify the exception. When Pick is absent, explicit Victory Series 66/Victory-CBP
+and a matching Philippine Commonwealth/Treasury/Central Bank issuer suffice; an
+incompatible supplied Pick remains a conflict. A marketing keyword alone does not. Original-series Pick 94–101 and CBP Pick 117–124 are recognized with Victory
 context. [Heritage’s Pick 120 catalogue record](https://currency.ha.com/itm/world-currency/philippines-victory-series-10-pesos-nd-1949-pick-120-pmg-choice-uncirculated-63-epq/p/64183-25004.s)
 identifies the 1949 Victory issue. Original-series
 notes receive “Philippine Victory issue” without inferring a colonial issue

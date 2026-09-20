@@ -63,6 +63,14 @@ def victory_label(item):
         return 'Philippine Victory–CBP · post-independence'
     if original:
         return 'Philippine Victory issue'
+    # Missing catalogue numbers need explicit series AND issuer evidence.
+    # An incompatible supplied Pick is a conflict, never a keyword fallback.
+    if not pick.strip() and re.search(r'\bvictory(?:[- ]cbp|\s+(?:series\s*)?66)\b', str(item.get('series') or ''), re.I):
+        issuer = str(item.get('issuer') or '')
+        if re.search(r'central bank of the philippines', issuer, re.I):
+            return 'Philippine Victory–CBP · post-independence'
+        if re.search(r'(?:commonwealth|treasury|government).*philipp|philipp.*(?:treasury|commonwealth)', issuer, re.I):
+            return 'Philippine Victory issue'
     return ''
 
 

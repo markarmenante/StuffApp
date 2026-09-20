@@ -29,6 +29,11 @@ class ColonialTests(unittest.TestCase):
         cbp=dict(data,issuer='Central Bank of the Philippines',title='Victory overprint 1949',pick_number='P-121')
         self.assertFalse(policy.problem(cbp))
         self.assertIn('post-independence',policy.victory_label(cbp))
+        missing=dict(cbp,pick_number='',series='Victory Series 66')
+        self.assertFalse(policy.problem(missing))
+        self.assertIn('post-independence',policy.victory_label(missing))
+        self.assertFalse(policy.victory_label(dict(missing,issuer='Unknown bank')))
+        self.assertFalse(policy.victory_label(dict(missing,pick_number='P-200')))
         for bad in (dict(data,pick_number='P-200',date_1=1960),dict(data,country='India',date_1=1960),dict(data,title='Victory replica',date_1=1960)):
             self.assertFalse(policy.victory_label(bad))
             self.assertTrue(policy.problem(bad))
