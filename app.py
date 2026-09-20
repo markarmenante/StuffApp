@@ -16422,11 +16422,24 @@ def _market_normalize_item(db, category, raw):
         # even when the description states no grade — the photos and
         # the price say more than a missing word, and Mark decides.
         if str(raw.get('theme') or '') == 'vcoins-catalogue' and str(raw.get('fills') or '').strip():
-            unstated = True
-        grade_n = 0
+            if not raw.get('grade_read'):
+                # The stage normally reads the grade word off the page;
+                # an item that reached here without that pass gets one.
+                desc, _ = _vcoins_page_description(url)
+                hint = _market_grade_from_text(desc)
+                if hint:
+                    raw['grade'] = hint
+                    for key in ('why', 'fair'):
+                        raw[key] = _market_strip_no_grade(raw.get(key))
+                    raw['why'] = f"Dealer grades it {hint} (read from the listing description). {raw['why']}".strip()
+                    grade_n = _market_grade_number(category, raw)
+            if grade_n is None:
+                unstated = True
+        if grade_n is None:
+            grade_n = 0
     if grade_n < floor and not (rarity and grade_n >= rare_floor) and not unstated:
         return _market_drop(raw, f"grade {grade_n:g} below the floor ({raw.get('grade')!r})")
-    if unstated:
+    if unstated and not str(raw.get('grade') or '').strip():
         raw['grade'] = 'grade not stated'
     designation = _market_designation(raw)
     authority = str(raw.get('grading_authority') or '').strip()
@@ -16767,8 +16780,111 @@ def _vcoins_search(query):
         })
     return cards, None
 
+# The dealer's own grade word, as written in a catalogue description.
+# "Toned EF", "Good VF", "About EF", "gVF", "Ch XF", "EF/VF"; never a bare
+# "fine" outside a "Grade:" label — "of fine archaic style" is style, not
+# condition.
+_MARKET_GRADE_WORD_RE = re.compile(
+    r'(?<![\w/])('
+    r'(?:(?:(?:lightly|nicely|attractively|beautifully|darkly|deeply|old|cabinet)\s+)?'
+    r'(?:toned|good|about|nearly|near|choice|superb|nice|gem|virtually|almost|practically|ch\.?)\s+)*'
+    r'(?:g?vf\+?|a?ef\+?|xf\+?|au\+?|fdc|ms(?:\s?\d{2})?|unc|mint state|uncirculated|'
+    r'extremely fine|very fine|good very fine|about extremely fine|about uncirculated|'
+    r'nearly extremely fine|near extremely fine)'
+    r'(?:\s*[/-]\s*(?:g?vf|a?ef|xf|au|fdc|unc))?'
+    r')(?![\w/])', re.IGNORECASE)
+_MARKET_GRADE_LABEL_RE = re.compile(
+    r'\b(?:grade|grading|condition|erhaltung|conservation|[eé]tat)\s*:\s*', re.IGNORECASE)
+_MARKET_GRADE_LABEL_END_RE = re.compile(
+    r'\b(?:price|prix|preis|references?|pedigree|provenance|ex|weight|sku|lot|estimate|'
+    r'literature|lit\.|from)\s*:', re.IGNORECASE)
+# The model's own "no grade" wording, dropped from why / fair once the
+# scan has read the dealer's grade word off the page.
+_MARKET_NO_GRADE_RE = re.compile(
+    r'\b(?:no (?:numeric(?: or word)? |stated |readable |word |explicit |formal )?grade|'
+    r'grade (?:is |was )?not (?:stated|given|supplied|confirmed|specified)|ungraded|'
+    r'without a (?:stated |formal )?grade|states? no grade|no grade (?:stated|given|word|supplied)|'
+    r'(?:cannot|can\'t|unable to) (?:be )?(?:confirm|assess|judge)[^,;.]*\b(?:grade|condition)|'
+    r'rather than a stated condition|(?:unstated|unspecified) (?:grade|condition)|'
+    r'grade (?:cannot|can\'t) be confirmed|grade not stated)\b', re.IGNORECASE)
 
-def _vcoins_page_description(url, limit=700):
+
+def _market_grade_from_text(text):
+    """The dealer's grade word as a catalogue description states it
+    ("Toned EF", "Good VF", "About EF"), or ''. A labelled "Grade: …"
+    line wins, and there the closing word is the verdict — Schmidt's
+    "Grade: Lovely toned surfaces … a bit tight. Toned EF" — while a
+    bare "Fine" / "Good" counts only under the label. With no label, the
+    first grade word in the text. (Mark, 2026-09-20: the Knidos drachm
+    was shown as 'grade not stated' when the listing said Toned EF.)"""
+    text = re.sub(r'\s+', ' ', str(text or '')).strip()
+    if not text:
+        return ''
+
+    def hits(seg):
+        out = []
+        for m in _MARKET_GRADE_WORD_RE.finditer(seg):
+            word = m.group(1)
+            # "AU" is also gold in some catalogues: "AU stater", "Au 1/6 stater".
+            if word.lower() == 'au' and re.match(r'\s+(?:stater|hekte|hemihekte|drachm|solidus|aureus|tremissis|\d)',
+                                                 seg[m.end():m.end() + 14], re.IGNORECASE):
+                continue
+            out.append(re.sub(r'\s+', ' ', word).strip())
+        return out
+    m = _MARKET_GRADE_LABEL_RE.search(text)
+    if m:
+        seg = text[m.end():m.end() + 400]
+        cut = _MARKET_GRADE_LABEL_END_RE.search(seg)
+        if cut:
+            seg = seg[:cut.start()]
+        found = hits(seg)
+        if found:
+            return found[-1][:40]
+        m2 = re.match(r'((?:very\s+)?(?:good|fine)|poor|fair)\b', seg, re.IGNORECASE)
+        if m2:
+            return m2.group(1)
+    found = hits(text)
+    return found[0][:40] if found else ''
+
+
+def _market_strip_no_grade(text):
+    """The text with its 'no grade stated' clauses removed — a clause is
+    a sentence or a dash-separated run; the rest keeps its order."""
+    text = str(text or '').strip()
+    if not text:
+        return ''
+    parts = re.split(r'(?<=[.;])\s+|\s+[—–]\s+', text)
+    kept = [p.strip() for p in parts if p.strip() and not _MARKET_NO_GRADE_RE.search(p)]
+    out = ' '.join(kept)
+    return re.sub(r'\s*[;,:]\s*$', '.', out)
+
+
+def _market_catalogue_fill_grade(item, card):
+    """The dealer's grade word goes on the item when the model left
+    `grade` empty: from the description read during the stage, else
+    from the page now (cards past the read cap were never opened). The
+    model's 'no grade' wording in why / fair is dropped so the row does
+    not contradict the listing. Sets grade_read so the normaliser does
+    not open the page a second time."""
+    item['grade_read'] = True
+    if str(item.get('grade') or '').strip() or item.get('grade_numeric'):
+        return
+    hint = str(card.get('grade_hint') or '').strip()
+    if not hint and not card.get('description'):
+        desc, _ = _vcoins_page_description(card['listing_url'])
+        card['description'] = desc
+        hint = card['grade_hint'] = _market_grade_from_text(desc)
+    if not hint:
+        return
+    item['grade'] = hint
+    for key in ('why', 'fair'):
+        item[key] = _market_strip_no_grade(item.get(key))
+    item['why'] = f"Dealer grades it {hint} (read from the listing description). {item['why']}".strip()
+    if not item['fair']:
+        item['fair'] = f"Asking {card.get('price') or item.get('price') or 'the listed price'} for a dealer-graded {hint} piece; no third-party grade."
+
+
+def _vcoins_page_description(url, limit=900):
     """The catalogue description from a VCoins product page (grade,
     weight, references, pedigree live there, not in the card), plus
     whether the page still offers the coin."""
@@ -16784,7 +16900,8 @@ def _vcoins_page_description(url, limit=700):
     # share row on every VCoins page; failing that, take the text after
     # the first "Obverse" / "Av" / weight figure.
     anchor = None
-    for marker in ('ask the seller', 'demander au vendeur', 'to print', 'imprimer'):
+    for marker in ('ask the seller', 'demander au vendeur', 'inquire about this item',
+                   'print this page', 'to print', 'imprimer'):
         i = low.find(marker)
         if i > 0:
             anchor = i + len(marker)
@@ -16801,7 +16918,9 @@ def _market_catalogue_prompt(category, cards, profile, holdings, coverage, recen
     lines = []
     for i, c in enumerate(cards, 1):
         lines.append(f"{i}. [{c['store']}] {c['title']} — {c['price'] or 'price on page'} — {c['listing_url']}"
-                     + (f"\n   {c['description']}" if c.get('description') else ''))
+                     + (f"\n   {c['description']}" if c.get('description') else '')
+                     + (f"\n   Dealer's grade word, read by the scan from that description: {c['grade_hint']}"
+                        if c.get('grade_hint') else ''))
     schema = (
         '{"items": [{"title": str, "region": str, "authority": str|null, '
         '"denomination": str, "mint": str|null, "metal": str|null, '
@@ -16822,7 +16941,7 @@ Below are cards from VCoins' LIVE stock search, run just now for each series the
 
 Choose the cards worth putting in front of Mark and return them in the schema — AT MOST 15 items, best first (fewer is fine). Rules:
 - ANCIENT GREEK only (archaic through Hellenistic, incl. Sicily, Magna Graecia, Asia Minor, Thrace, Macedon, Ptolemies, Seleucids). Drop Roman, Byzantine, Celtic, medieval, modern, and anything that merely mentions a city.
-- GRADE: the dealer's grade from the description — EF/XF or better wanted; About EF / Good VF acceptable for a genuine rarity or a conspicuous gap (say which in `rarity`); plain VF and below only when the type is truly scarce. When the description states no grade, put "" in `grade` and say so in `why` — do not invent one.
+- GRADE: the dealer's grade from the description — EF/XF or better wanted; About EF / Good VF acceptable for a genuine rarity or a conspicuous gap (say which in `rarity`); plain VF and below only when the type is truly scarce. Where the scan shows the dealer's grade word under a card, copy it into `grade` verbatim — never "" for that card. Only when the description states no grade at all, put "" in `grade` and say so in `why` — do not invent one.
 - Prefer the piece that best fills each gap; several cards of one type: keep the two or three best (grade, style, pedigree, price), not all.
 - `fills` names the gap from the analysis ("Crete — Gortyna (Europa in plane tree)"). `fair` gives a one-line sense of the asking price against the market. Skip anything the holdings already contain unless a clear upgrade (say so).
 - Copy `listing_url` and `price` exactly from the card.
@@ -16928,6 +17047,7 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
             _market_drop(c, 'VCoins page says not available')
             continue
         c['description'] = desc
+        c['grade_hint'] = _market_grade_from_text(desc)
         live_cards.append(c)
     live_cards.extend(cards[page_reads:])
     if not live_cards:
@@ -16978,6 +17098,7 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
                 it['price'] = card['price'] or it.get('price')
                 it['venue'] = f"VCoins · {card['store']}"
                 it.setdefault('seller', card['store'])
+                _market_catalogue_fill_grade(it, card)
             it.setdefault('live_evidence', "offered at a price in VCoins' live stock search today")
             out.append(it)
         note = (f"VCoins stock search: {len(queries)} gap queries, {hits} cards, "
