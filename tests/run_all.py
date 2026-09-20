@@ -17,6 +17,9 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_banknote_sort.py',
          'test_market_grade_word.py',
          'test_banknote_report.py',
          'test_pedigree.py',
+         'test_market_interrupted.py',
+         'test_market_runtime.py',
+         'test_market_progressive.py',
          'test_market_scan.py']
 
 failed = []

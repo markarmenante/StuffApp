@@ -18,6 +18,8 @@ PAGES = {
     'https://www.noonans.co.uk/lot/blocked': (403, ''),
 }
 stuffapp._market_fetch_page = lambda url, limit=0: PAGES.get(url, (None, ''))
+stuffapp._market_transport = lambda url, limit, timeout: stuffapp.market_runtime.PageResult(
+    *PAGES.get(url, (None, '')), url)
 import base64
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
 PHOTOS = {'https://i.ebayimg.com/obv.png': PNG, 'https://i.ebayimg.com/rev.png': PNG}

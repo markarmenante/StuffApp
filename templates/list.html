@@ -240,6 +240,7 @@
 </div>
 
 <!-- List -->
+{% if _market %}<div id="marketResults" aria-live="polite">{% endif %}
 {% if _analysis %}
   {% include 'partials/analysis.html' %}
 {% elif rows %}
@@ -772,7 +773,7 @@
   <div class="eicon">{{ cat_info.icon }}</div>
   {% if market_running or market_autoscan %}
   <h3>Scanning the market…</h3>
-  <p>Searching eBay, Stack's Bowers, Heritage, dealers and auction houses against your holdings. Two to four minutes.</p>
+  <p>Searching dealers and auction houses against your holdings. Candidates appear as each source is checked; broader searches continue in the background.</p>
   {% else %}
   <h3>No live candidates{% if market_scan and market_scan['status'] == 'failed' %} — the scan failed{% elif market_scan and market_scan['status'] == 'interrupted' %} — the scan was interrupted{% endif %}</h3>
   <p>{% if market_scan and market_scan['summary'] %}{{ market_scan['summary'] }}{% elif market_scan and market_scan['error'] %}{{ market_scan['error'] }}{% else %}Press Rescan to run one.{% endif %}</p>
@@ -790,6 +791,8 @@
 </div>
 {% endif %}
 
+{% if _market %}</div>{% endif %}
+
 {% if _market %}
 <script>
 (function () {
@@ -799,31 +802,61 @@
   const statusEl = document.getElementById('marketStatus');
   const rescan = document.getElementById('marketRescan');
   let polling = null;
+  let revision = {{ market_scan['revision'] if market_scan else 0 }};
+  let scanId = {{ (market_scan['id'] if market_scan else '')|tojson }};
+  let actionBusy = false;
+  const earlier = {{ market_earlier|default(false)|tojson }};
+  async function refreshCandidates(nextRevision) {
+    if (earlier || actionBusy || document.querySelector('.location-choice-backdrop')) return false;
+    const response = await fetch(window.location.href, {cache: 'no-store'});
+    if (!response.ok) throw new Error('Could not refresh candidates');
+    const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const fresh = page.getElementById('marketResults');
+    const current = document.getElementById('marketResults');
+    if (fresh && current && !actionBusy && !document.querySelector('.location-choice-backdrop')) {
+      current.replaceChildren(...fresh.childNodes);
+      const oldCount = document.querySelector('.list-count, .list-cat-title-count');
+      const newCount = page.querySelector('.list-count, .list-cat-title-count');
+      if (oldCount && newCount) oldCount.textContent = newCount.textContent;
+      revision = nextRevision;
+      return true;
+    }
+    return false;
+  }
 
   function setStatus(text) { if (statusEl) statusEl.textContent = text; }
 
-  // Poll until the background scan lands, then reload with the results.
-  function poll() {
-    fetch(statusUrl).then(r => r.json()).then(d => {
-      if (!d.ok) return;
+  // Refresh only the candidates; preserve dialogs and in-flight user actions.
+  async function poll() {
+    try {
+      const response = await fetch(statusUrl, {cache: 'no-store'});
+      const d = await response.json();
+      if (!d.ok) throw new Error('Status unavailable');
+      if (d.scan_id !== scanId) { scanId = d.scan_id; revision = -1; }
+      if (d.revision !== revision && !earlier) await refreshCandidates(d.revision);
       if (d.status === 'running') {
-        const started = polling || Date.now();
+        const started = Date.parse(d.started_at + 'Z') || polling || Date.now();
         polling = started;
         const secs = Math.round((Date.now() - started) / 1000);
-        setStatus('Scanning… ' + secs + 's');
+        const p = d.progress || {};
+        setStatus((p.phase === 'enriching' ? 'Candidates ready · adding auction history' : 'Scanning… ' + (p.completed || 0) + ' of ' + (p.total || '…') + ' sources checked')
+          + ' · ' + (d.item_count || 0) + (d.item_count === 1 ? ' candidate · ' : ' candidates · ') + secs + 's');
+        if (rescan) rescan.disabled = true;
         setTimeout(poll, 5000);
-        return;
+      } else {
+        setStatus(d.summary || d.error || 'Scan complete');
+        if (rescan) rescan.disabled = false;
+        if (!earlier && d.revision !== revision) setTimeout(poll, 2000);
       }
-      window.location.reload();
-    }).catch(() => setTimeout(poll, 8000));
+    } catch (_) { setTimeout(poll, 8000); }
   }
   function startScan() {
     setStatus('Starting scan…');
     if (rescan) rescan.disabled = true;
     fetch(scanUrl, { method: 'POST' }).then(r => r.json()).then(d => {
       if (d && d.ok) { polling = Date.now(); poll(); }
-      else setStatus('Scan could not start');
-    }).catch(() => setStatus('Scan could not start'));
+      else { setStatus('Scan could not start'); if (rescan) rescan.disabled = false; }
+    }).catch(() => { setStatus('Scan could not start'); if (rescan) rescan.disabled = false; });
   }
   if (rescan) rescan.addEventListener('click', startScan);
   {% if market_running %}polling = Date.now(); poll();{% elif market_autoscan %}startScan();{% endif %}
@@ -862,14 +895,16 @@
       if (first) first.focus();
     });
   }
-  document.querySelectorAll('.market-buy').forEach(btn => {
-    btn.addEventListener('click', ev => {
+  document.addEventListener('click', ev => {
+      const btn = ev.target.closest('.market-buy');
+      if (!btn || actionBusy) return;
+      actionBusy = true;
       ev.preventDefault(); ev.stopPropagation();
       const row = btn.closest('.item-row');
       const title = row ? (row.querySelector('.market-title')?.textContent || row.querySelector('.item-brand')?.textContent || '').trim() : '';
       const bought = btn.dataset.bought === '1';
       pickLocation(title, bought).then(location => {
-        if (!location) return;
+        if (!location) { actionBusy = false; return; }
         // Open the tab on the pick (a user gesture) so popup blockers
         // allow it — not for Bought, which was paid already.
         const tab = bought ? null : window.open('', '_blank');
@@ -884,18 +919,33 @@
             if (tab) tab.location = d.listing_url;
             window.location = d.detail_url;
           })
-          .catch(err => { if (tab) tab.close(); btn.disabled = false; alert(err.message || String(err)); });
+          .catch(err => { if (tab) tab.close(); actionBusy = false; btn.disabled = false; alert(err.message || String(err)); });
       });
-    });
   });
-  document.querySelectorAll('.market-dismiss').forEach(btn => {
-    btn.addEventListener('click', ev => {
+  document.addEventListener('click', ev => {
+      const btn = ev.target.closest('.market-dismiss');
+      if (!btn || actionBusy) return;
+      actionBusy = true;
       ev.preventDefault(); ev.stopPropagation();
       const row = btn.closest('.item-row');
       fetch({{ url_for('market_item_dismiss', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), { method: 'POST' })
         .then(r => r.json())
-        .then(d => { if (d && d.ok && row) row.remove(); });
-    });
+        .then(d => {
+          if (d && d.ok && row) {
+            row.remove();
+            const count = document.querySelectorAll('.market-row').length;
+            const label = document.querySelector('.list-count, .list-cat-title-count');
+            if (label) label.textContent = count + (CAT === 'coins' ? ' Coins' : '');
+          }
+        })
+        .catch(() => { setStatus('Could not dismiss this candidate; please try again.'); })
+        .finally(() => { actionBusy = false; });
+  });
+  document.addEventListener('click', ev => {
+    const row = ev.target.closest('.market-row');
+    if (row && !ev.target.closest('a, button, input, .market-actions')) {
+      window.open(row.dataset.href, '_blank', 'noopener');
+    }
   });
 })();
 </script>
@@ -1107,7 +1157,7 @@ window.shareCardRow = async function (ev, btn) {
     setTimeout(function() { target.classList.remove('just-returned'); }, 2200);
   })();
 
-  document.querySelectorAll('.item-row').forEach(function(row) {
+  document.querySelectorAll('.item-row:not(.market-row)').forEach(function(row) {
     var rowFileBtn = row.querySelector('.row-upload-btn input[type=file]');
     var firstThumb = row.querySelector('.item-thumb[data-upload-url]');
 

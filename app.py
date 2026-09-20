@@ -8,6 +8,7 @@ import base64
 import unicodedata
 import threading
 import time
+import market_scan as market_runtime
 from datetime import datetime, date, timedelta
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response,
@@ -902,13 +903,17 @@ def _similar_banknotes(db, record_id, note):
         my_year = int(note['date_1']) if note['date_1'] not in (None, '') else None
     except (TypeError, ValueError):
         my_year = None
-    rows = db.execute(
+    scan_context = market_runtime.current()
+    cached_rows = scan_context.banknote_rows if scan_context else None
+    rows = cached_rows.get(country_key, []) if cached_rows is not None else db.execute(
         "SELECT id, banknote_id, cat_id, country, denomination, series, "
         "pick_number, date_1, date_1_text, grade, grading_authority "
         "FROM banknotes WHERE id != ? AND country IS NOT NULL",
         [record_id]).fetchall()
     found = []
     for row in rows:
+        if row['id'] == record_id:
+            continue
         if _banknote_country_fold(row['country']) != country_key:
             continue
         shared = my_tokens & _banknote_catalog_tokens(row['pick_number'])
@@ -6097,6 +6102,22 @@ def init_db():
             db.execute(stmt)
         except sqlite3.OperationalError:
             pass
+    # Scan progress is operational metadata; candidate identity remains a column.
+    for table, column, definition in (
+        ('market_scans', 'progress', "TEXT NOT NULL DEFAULT '{}'"),
+        ('market_scans', 'revision', 'INTEGER NOT NULL DEFAULT 0'),
+        ('market_scan_items', 'canonical_url', 'TEXT'),
+    ):
+        if column not in _table_cols(db, table):
+            db.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+    for row in db.execute('SELECT id, listing_url FROM market_scan_items WHERE canonical_url IS NULL').fetchall():
+        try:
+            key = market_runtime.canonical_url(row['listing_url'])
+        except ValueError:
+            key = row['listing_url']
+        db.execute('UPDATE market_scan_items SET canonical_url=? WHERE id=?', [key, row['id']])
+    db.execute('CREATE INDEX IF NOT EXISTS idx_market_identity ON market_scan_items(category, canonical_url)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_market_latest ON market_scans(category, started_at)')
     db.commit()
     _ensure_owner_user(db)
     _normalize_owned_status_values(db)
@@ -14848,6 +14869,7 @@ MARKET_SCAN_PROFILE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     '.claude', 'skills', 'fair-price', 'references', 'collection-profile.md')
 _MARKET_SCAN_INFLIGHT = set()
+_MARKET_SCAN_ACTIVE_IDS = {}
 _MARKET_SCAN_LOCK = threading.Lock()
 
 # The premium ancient-coin dealers Mark wants every coin scan to search
@@ -15653,14 +15675,65 @@ _MARKET_LIMIT_RE = re.compile(r'tool use limit|rate.?limit|limit exceeded|too ma
 
 
 def _market_call_theme(api_key, category, theme_key, prompt, _attempt=1):
-    """One theme's web-search call. Returns (items, error). A theme that
-    ran into the server-tool limit waits a minute and tries once more."""
     items, err = _market_call_theme_once(api_key, category, theme_key, prompt)
-    if not items and err and _MARKET_LIMIT_RE.search(err) and _attempt < 3:
-        app.logger.info("market scan %s/%s: search limit hit, retrying in 75s", category, theme_key)
-        time.sleep(75)
-        return _market_call_theme(api_key, category, theme_key, prompt, _attempt + 1)
+    if not items and err and 'JSON repair failed:' not in err and _MARKET_LIMIT_RE.search(err) and market_runtime.current():
+        raise market_runtime.RetryLater(err, delay=75)
     return items, err
+
+
+def _market_model_json(client, model, response, prompt):
+    """Salvage first; if necessary repair text with NO search tool or re-search."""
+    text = _message_text(response)
+    try:
+        return _market_parse_json(text)
+    except (RuntimeError, ValueError):
+        if not text.strip():
+            raise RuntimeError('model returned no candidate JSON')
+        ctx = market_runtime.current()
+        if ctx:
+            ctx.metric('json_repairs')
+        try:
+            repair = market_runtime.model_call(
+                client, model=model, max_tokens=5000,
+                messages=[{'role': 'user', 'content':
+                    'Repair this malformed JSON response. Return only {"items": [...], "notes": "..."}. '
+                    'Preserve supplied facts only; never invent listings. No research.\n' + text[:24000]}])
+            data = _market_parse_json(_message_text(repair))
+            if isinstance(data, dict) and isinstance(data.get('items'), list):
+                original = text.replace('\\/', '/')
+                data['items'] = [it for it in data['items'] if isinstance(it, dict)
+                                 and it.get('listing_url') and str(it['listing_url']) in original]
+            return data
+        except Exception as e:
+            # A failed repair must not requeue the discovery that already ran.
+            raise RuntimeError('JSON repair failed: ' + str(e)) from e
+
+
+
+def _market_discovery_call(client, **kwargs):
+    messages = list(kwargs.pop('messages'))
+    for turn in range(2):
+        response = market_runtime.model_call(client, messages=messages, **kwargs)
+        if getattr(response, 'stop_reason', None) != 'pause_turn':
+            return response
+        messages.append({'role': 'assistant', 'content': response.content})
+    return response
+
+
+def _market_resolve_model(api_key):
+    ctx = market_runtime.current()
+    if not ctx:
+        return anthropic_lookup_model(api_key, 'ANTHROPIC_MARKET_SCAN_MODEL',
+                                      default='auto-sonnet', fable_fallback='sonnet')
+    with ctx.model_lock:
+        ctx.check(True)
+        if ctx.model is None:
+            ctx.reserve(page_requests=1)  # Conservative reservation for the Models API.
+            ctx.metric('model_resolution_calls')
+            ctx.model = anthropic_lookup_model(api_key, 'ANTHROPIC_MARKET_SCAN_MODEL',
+                                               default='auto-sonnet', fable_fallback='sonnet')
+        ctx.check(True)
+        return ctx.model
 
 
 def _market_call_theme_once(api_key, category, theme_key, prompt):
@@ -15668,12 +15741,11 @@ def _market_call_theme_once(api_key, category, theme_key, prompt):
         import anthropic
     except ImportError:
         return [], 'anthropic package not installed'
+    client = None
     try:
-        client = anthropic.Anthropic(api_key=api_key, timeout=480, max_retries=1)
-        model = anthropic_lookup_model(
-            api_key, 'ANTHROPIC_MARKET_SCAN_MODEL',
-            default='auto-sonnet', fable_fallback='sonnet')
-        resp = _anthropic_create(
+        client = anthropic.Anthropic(api_key=api_key, timeout=240, max_retries=0)
+        model = _market_resolve_model(api_key)
+        resp = _market_discovery_call(
             client,
             model=model,
             max_tokens=5000,
@@ -15693,7 +15765,7 @@ def _market_call_theme_once(api_key, category, theme_key, prompt):
         app.logger.info("market scan %s/%s: stop=%s searches=%d text=%d chars",
                         category, theme_key, getattr(resp, 'stop_reason', None),
                         searches, len(text))
-        data = _market_parse_json(text)
+        data = _market_model_json(client, model, resp, prompt)
         items = data.get('items') if isinstance(data, dict) else None
         if not isinstance(items, list):
             return [], f'{theme_key}: no items array'
@@ -15707,11 +15779,20 @@ def _market_call_theme_once(api_key, category, theme_key, prompt):
             # explained on the page rather than a silent zero.
             notes = re.sub(r'\s+', ' ', str(data.get('notes') or '')).strip()
             why = notes[:220] if notes else f'empty after {searches} searches'
+            ctx = market_runtime.current()
+            if ctx and not _MARKET_LIMIT_RE.search(why):
+                with ctx.lock:
+                    ctx.metrics.setdefault(theme_key, {})['note'] = why
+                return [], None
             return [], f'{theme_key}: {why}'
         return out, None
     except Exception as e:  # one theme failing must not sink the scan
         app.logger.warning("market scan %s/%s failed: %s", category, theme_key, e)
         return [], f'{theme_key}: {str(e)[:160]}'
+
+    finally:
+        if client is not None and hasattr(client, 'close'):
+            client.close()
 
 
 _ADJECTIVAL_NOTE_GRADES = (
@@ -16107,7 +16188,42 @@ def _market_opener():
         return _MARKET_OPENER
 
 
+def _market_transport(url, limit, timeout):
+    status, text = _market_fetch_page_uncached(url, limit, timeout)
+    final = getattr(_MARKET_LAST_URL, 'final', url)
+    challenged = _market_page_challenged(status, text)
+    return market_runtime.PageResult(status, text, final, challenged)
+
+
 def _market_fetch_page(url, limit=400_000):
+    ctx = market_runtime.current()
+    if not ctx or not ctx.fetcher:
+        return _market_fetch_page_uncached(url, limit)
+    page = ctx.fetcher.fetch(url, limit)
+    # Compatibility for older helpers; the cache stores explicit PageResults.
+    _MARKET_LAST_URL.final = page.final_url
+    return page.status, page.text
+
+
+def _market_pause(seconds):
+    ctx = market_runtime.current()
+    if ctx:
+        ctx.pause(seconds)
+    else:
+        time.sleep(seconds)
+
+
+def _market_parallel(fn, items, workers):
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=workers)
+    futures = [market_runtime.submit(pool, fn, item) for item in items]
+    try:
+        return [f.result() for f in futures]
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _market_fetch_page_uncached(url, limit=400_000, timeout=8):
     """(status, text) for a listing page, browser-style headers, short
     timeout. (None, '') when unreachable — never raises. An HTTP error
     returns its real status (404, 410 — a sold VCoins lot answers 410)
@@ -16124,7 +16240,7 @@ def _market_fetch_page(url, limit=400_000):
             'Accept-Language': 'en-US,en;q=0.9',
             'Connection': 'keep-alive',
         })
-        with _market_opener().open(req, timeout=8) as resp:
+        with _market_opener().open(req, timeout=timeout) as resp:
             body = resp.read(limit)
             charset = resp.headers.get_content_charset() or 'utf-8'
             _MARKET_LAST_URL.final = resp.geturl() or url
@@ -16232,16 +16348,19 @@ def _market_price_from_page(url):
     return None
 
 
-def _market_listing_probe(url):
+def _market_listing_probe(url, page=None):
     """One read of a listing page: {'state', 'status', 'challenged',
     'length', 'final', 'why'}. state is 'ended' when the page itself
     says the lot is sold, ended or archived; 'live' when it carries
     buy/bid wording and no ended marker; 'unknown' when the page cannot
     be read (bot wall, timeout) or says neither."""
-    status, html = _market_fetch_page(url)
-    final = getattr(_MARKET_LAST_URL, 'final', url) or url
+    if page is None:
+        status, html = _market_fetch_page(url)
+        final = getattr(_MARKET_LAST_URL, 'final', url) or url
+    else:
+        status, html, final = page.status, page.text, page.final_url
     out = {'status': status, 'length': len(html or ''), 'final': final,
-           'challenged': _market_page_challenged(status, html), 'why': ''}
+           'challenged': (page.challenged if page is not None else _market_page_challenged(status, html)), 'why': ''}
     if out['challenged']:
         out['state'], out['why'] = 'unknown', 'challenge page'
         return out
@@ -16293,18 +16412,19 @@ def _market_listing_probe(url):
 
 
 def _market_listing_state(url):
-    """'ended' / 'live' / 'unknown' for a listing page (see the probe).
-    An eBay page that cannot be read gets one more try after a pause
-    with a different browser signature — eBay's wall is per request as
-    much as per address — before it is called unknown."""
-    probe = _market_listing_probe(url)
-    if probe['state'] == 'unknown' and _market_is_ebay(url):
-        time.sleep(1.5)
-        probe2 = _market_listing_probe(url)
-        if probe2['state'] != 'unknown':
-            probe = probe2
-    _MARKET_LAST_PROBE.probe = probe
-    return probe['state']
+    ctx = market_runtime.current()
+    if ctx and ctx.fetcher:
+        # The probe reads the same cached PageResult used by price and grade.
+        pr = ctx.fetcher.parsed_page(url, 'listing', lambda page: _market_listing_probe(url, page))
+    else:
+        pr = _market_listing_probe(url)
+        if pr['state'] == 'unknown' and _market_is_ebay(url):
+            _market_pause(1.5)
+            retry = _market_listing_probe(url)
+            if retry['state'] != 'unknown':
+                pr = retry
+    _MARKET_LAST_PROBE.probe = pr
+    return pr['state']
 
 
 _MARKET_LAST_PROBE = threading.local()
@@ -16341,8 +16461,7 @@ def _market_verify_live(items, workers=6):
     def probe(it):
         state = _market_listing_state(it['listing_url'])
         return state, getattr(_MARKET_LAST_PROBE, 'probe', None) or {}
-    with ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
-        results = list(pool.map(probe, items))
+    results = _market_parallel(probe, items, min(workers, len(items)))
     kept = []
     for item, (state, pr) in zip(items, results):
         app.logger.info(
@@ -16374,6 +16493,9 @@ _MARKET_DROPS = threading.local()
 
 def _market_drop(raw, reason):
     """Log why a model item was not kept, and tally it for the scan summary."""
+    ctx = market_runtime.current()
+    if ctx:
+        ctx.metric('dropped: ' + reason)
     app.logger.info("market scan drop: %s — %s | %s", reason,
                     str(raw.get('title') or '')[:80], str(raw.get('listing_url') or '')[:120])
     tally = getattr(_MARKET_DROPS, 'tally', None)
@@ -16392,19 +16514,26 @@ def _market_normalize_item(db, category, raw):
     host = re.sub(r'^https?://(www\.)?', '', url).split('/')[0].lower()
     if any(h in host for h in ('google.', 'bing.', 'duckduckgo')):
         return _market_drop(raw, 'search-engine URL')
-    price = _format_purchase_price(raw.get('price')) or ''
-    if not price:
-        # Search snippets rarely carry a dealer's price; the listing page
-        # does. Read it there before giving up on the find.
-        price = _market_price_from_page(url) or ''
-        if price:
-            raw['price'] = price
-            raw['live_evidence'] = (str(raw.get('live_evidence') or '').strip() or 'price read from the listing page')
-    if not price:
-        # Still nothing (bot wall, price behind a login): the find is
-        # worth more than the missing figure — keep it and say so.
-        price = 'See listing'
-        raw['why'] = (str(raw.get('why') or '').strip() + ' · price on the listing page').strip(' ·')
+    closes = str(raw.get('closes') or '').strip()[:10]
+    if closes and closes < date.today().isoformat():
+        return _market_drop(raw, f'closed {closes}')
+    if _MARKET_ENDED_URL_RE.search(url):
+        return _market_drop(raw, 'sold / archive URL')
+    sale_type = 'auction' if str(raw.get('sale_type') or '').lower().startswith('auc') else 'fixed'
+    if sale_type == 'auction' and not closes:
+        return _market_drop(raw, 'auction lot with no closing date')
+    stale_text = ' '.join(str(raw.get(k) or '') for k in ('title', 'why', 'live_evidence'))
+    if _MARKET_ENDED_TEXT_RE.search(stale_text):
+        return _market_drop(raw, 'described as a past sale')
+    if category == 'banknotes':
+        unissued_text = ' '.join(str(raw.get(k) or '') for k in (
+            'title', 'grade', 'designation', 'series', 'rarity', 'fills',
+            'why', 'live_evidence'))
+        if _MARKET_UNISSUED_TEXT_RE.search(unissued_text):
+            return _market_drop(raw, 'specimen / remainder')
+        pick = str(raw.get('pick_number') or '').strip()
+        if _MARKET_UNISSUED_PICK_RE.search(pick):
+            return _market_drop(raw, f'specimen / remainder (Pick {pick})')
     grade_n = _market_grade_number(category, raw)
     rarity = str(raw.get('rarity') or '').strip()
     floor = 63 if category == 'banknotes' else 40
@@ -16450,26 +16579,19 @@ def _market_normalize_item(db, category, raw):
         year = int(year) if year not in (None, '') else None
     except (TypeError, ValueError):
         year = None
-    closes = str(raw.get('closes') or '').strip()[:10]
-    if closes and closes < date.today().isoformat():
-        return _market_drop(raw, f'closed {closes}')
-    sale_type = 'auction' if str(raw.get('sale_type') or '').lower().startswith('auc') else 'fixed'
-    if sale_type == 'auction' and not closes:
-        return _market_drop(raw, 'auction lot with no closing date')
-    if _MARKET_ENDED_URL_RE.search(url):
-        return _market_drop(raw, 'sold / archive URL')
-    stale_text = ' '.join(str(raw.get(k) or '') for k in ('title', 'why', 'live_evidence'))
-    if _MARKET_ENDED_TEXT_RE.search(stale_text):
-        return _market_drop(raw, 'described as a past sale')
-    if category == 'banknotes':
-        unissued_text = ' '.join(str(raw.get(k) or '') for k in (
-            'title', 'grade', 'designation', 'series', 'rarity', 'fills',
-            'why', 'live_evidence'))
-        if _MARKET_UNISSUED_TEXT_RE.search(unissued_text):
-            return _market_drop(raw, 'specimen / remainder')
-        pick = str(raw.get('pick_number') or '').strip()
-        if _MARKET_UNISSUED_PICK_RE.search(pick):
-            return _market_drop(raw, f'specimen / remainder (Pick {pick})')
+    price = _format_purchase_price(raw.get('price')) or ''
+    if not price:
+        # Search snippets rarely carry a dealer's price; the listing page
+        # does. Read it there before giving up on the find.
+        price = _market_price_from_page(url) or ''
+        if price:
+            raw['price'] = price
+            raw['live_evidence'] = (str(raw.get('live_evidence') or '').strip() or 'price read from the listing page')
+    if not price:
+        # Still nothing (bot wall, price behind a login): the find is
+        # worth more than the missing figure — keep it and say so.
+        price = 'See listing'
+        raw['why'] = (str(raw.get('why') or '').strip() + ' · price on the listing page').strip(' ·')
     item = {
         'title': str(raw.get('title') or '').strip()[:200],
         'listing_url': url,
@@ -16610,6 +16732,8 @@ def _market_archive_context(items, category, cap=12):
         return ''
     done, unreachable = 0, False
     for item in items[:cap]:
+        if market_runtime.current():
+            market_runtime.current().check()
         row = {'id': item.get('listing_url', '')[:60], 'region': item.get('region') or '',
                'authority': item.get('authority') or '', 'mint': item.get('mint') or '',
                'denomination': item.get('denomination') or '', 'coin_references': item.get('references') or '',
@@ -16633,7 +16757,7 @@ def _market_archive_context(items, category, cap=12):
         # This exact coin's prior sales, by weight.
         if item.get('weight'):
             try:
-                spec = _provenance_archive_sweep(category, row, max_candidates=4, max_images=0)
+                spec = _provenance_archive_sweep(category, row, max_candidates=4, max_images=0, metadata_only=True)
             except Exception as e:
                 app.logger.warning('market archive context: weight sweep failed for %s: %s', item.get('title'), e)
                 spec = {}
@@ -16667,24 +16791,22 @@ def _market_archive_context(items, category, cap=12):
         item['score'] = (item.get('score') or 0) + bump
         item['archive_note'] = 'Archive: ' + ' · '.join(bits)
         done += 1
-        time.sleep(0.4)
+        _market_pause(0.4)
     if unreachable:
         return 'acsearch context: archive unreachable from the server'
     return f'acsearch context on {done} candidate{"" if done == 1 else "s"}' if done else ''
 
 
 def _market_dedupe(items):
-    seen = set()
-    out = []
-    for it in items:
-        key = re.sub(r'[?#].*$', '', it['listing_url'].lower().rstrip('/'))
-        alt = re.sub(r'[^a-z0-9]', '', (it['title'] or '').lower())[:60]
-        if key in seen or (alt and alt in seen):
+    seen, out = set(), []
+    for item in items:
+        try:
+            key = market_runtime.canonical_url(item.get('listing_url'))
+        except ValueError:
             continue
-        seen.add(key)
-        if alt:
-            seen.add(alt)
-        out.append(it)
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
     return out
 
 
@@ -16757,7 +16879,7 @@ def _vcoins_search(query):
     if status == 202 or (status == 200 and page and 'item-detail' not in page
                          and 'items found' not in page.lower()):
         # A challenge page from the bot wall: take its cookie, wait, retry.
-        time.sleep(6)
+        _market_pause(6)
         status, page = _market_fetch_page(url, limit=1_500_000)
     if status != 200 or not page:
         return [], f'VCoins search {query!r}: HTTP {status}'
@@ -16976,7 +17098,7 @@ def _market_catalogue_call(client, model, prompt, max_tokens):
     ``thinking`` parameter (an older Sonnet, an old SDK)."""
     messages = [{'role': 'user', 'content': prompt}]
     try:
-        return client.messages.create(
+        return market_runtime.model_call(client,
             model=model, max_tokens=max_tokens, messages=messages,
             thinking={'type': 'disabled'})
     except TypeError:
@@ -16986,7 +17108,7 @@ def _market_catalogue_call(client, model, prompt, max_tokens):
             raise
         app.logger.info("market scan vcoins-catalogue: model declined thinking=disabled (%s); "
                         "plain call", str(e)[:120])
-    return client.messages.create(model=model, max_tokens=max_tokens, messages=messages)
+    return market_runtime.model_call(client, model=model, max_tokens=max_tokens, messages=messages)
 
 
 def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, recent,
@@ -16994,20 +17116,25 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
     """(items, error, note). Searches VCoins for every gap query, reads
     the best cards' pages for their descriptions, and has the model
     shape them into scan items (theme 'vcoins-catalogue')."""
-    if db is None:
-        db = open_db_connection()   # the stage runs in its own thread
-    queries = _market_gap_queries(db, category)
+    owned_db = db is None
+    if owned_db:
+        db = open_db_connection()
+    try:
+        queries = _market_gap_queries(db, category)
+    finally:
+        if owned_db:
+            db.close()
     if not queries:
         return [], None, ''
     from concurrent.futures import ThreadPoolExecutor
     # Warm up: the first visit collects the bot wall's cookie; then the
     # queries go one at a time, spaced out, like a person searching.
     _market_fetch_page('https://www.vcoins.com/en/Default.aspx', limit=200_000)
-    time.sleep(2)
+    _market_pause(2)
     found = []
     for i, q in enumerate(queries):
         if i:
-            time.sleep(1.5)
+            _market_pause(1.5)
         found.append(_vcoins_search(q))
         if len(found) >= 3 and all(err and 'HTTP 202' in err for _, err in found[-3:]):
             # Walled off: stop hammering, report, let the scan land.
@@ -17038,9 +17165,8 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
     if not cards:
         note = (f"VCoins stock search: {len(queries)} gap queries, nothing offered"
                 + (f" ({errors[0]})" if errors else ''))
-        return [], None, note
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        descs = list(pool.map(lambda c: _vcoins_page_description(c['listing_url']), cards[:page_reads]))
+        return [], ('vcoins-catalogue: ' + errors[0]) if errors else None, note
+    descs = _market_parallel(lambda c: _vcoins_page_description(c['listing_url']), cards[:page_reads], 3)
     live_cards = []
     for c, (desc, available) in zip(cards, descs):
         if desc and not available:
@@ -17052,36 +17178,20 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
     live_cards.extend(cards[page_reads:])
     if not live_cards:
         return [], None, f"VCoins stock search: {len(cards)} cards, none still available"
+    client = None
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key, timeout=300, max_retries=1)
-        model = anthropic_lookup_model(api_key, 'ANTHROPIC_MARKET_SCAN_MODEL',
-                                       default='auto-sonnet', fable_fallback='sonnet')
-        # A plain call, no budget escalation: with 90 cards the model
-        # once tried to return them all, overran 6k tokens, and the
-        # 24k/32k retries held scan #7 for half an hour. The prompt caps
-        # the list at 15 and _market_parse_json salvages a cut-off.
-        #
-        # Thinking is switched off: the current Sonnets think by default
-        # and the thinking comes out of max_tokens before any text — on
-        # 13 Sep 2026 the stage spent all 8,000 tokens thinking over 90
-        # cards and returned stop=max_tokens with zero characters. This
-        # is a shaping task (cards in, JSON out), not a search; a model
-        # that rejects the parameter gets the plain call. A cut-off with
-        # NO text at all — nothing to salvage — is retried once at twice
-        # the budget, bounded, never the 4x/32k escalation.
+        client = anthropic.Anthropic(api_key=api_key, timeout=180, max_retries=0)
+        model = _market_resolve_model(api_key)
+        # Catalogue shaping has no web tools. Token exhaustion never restarts
+        # discovery; malformed text gets at most one bounded JSON-only repair.
         prompt = _market_catalogue_prompt(
             category, live_cards, profile, holdings, coverage, recent, analysis)
         resp = _market_catalogue_call(client, model, prompt, max_tokens=8000)
         text = _message_text(resp)
-        if getattr(resp, 'stop_reason', None) == 'max_tokens' and not text.strip():
-            app.logger.warning("market scan vcoins-catalogue: max_tokens with no text; "
-                               "retrying once at 16000")
-            resp = _market_catalogue_call(client, model, prompt, max_tokens=16000)
-            text = _message_text(resp)
         app.logger.info("market scan vcoins-catalogue: stop=%s text=%d chars",
                         getattr(resp, 'stop_reason', None), len(text))
-        data = _market_parse_json(text)
+        data = _market_model_json(client, model, resp, prompt)
         items = data.get('items') if isinstance(data, dict) else None
         if not isinstance(items, list):
             return [], 'vcoins-catalogue: no items array', ''
@@ -17104,164 +17214,208 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
         note = (f"VCoins stock search: {len(queries)} gap queries, {hits} cards, "
                 f"{len(live_cards)} read, {len(out)} proposed")
         app.logger.info("market scan vcoins: %s", note)
-        return out, None, note
+        return out, ('vcoins-catalogue: ' + errors[0]) if errors else None, note
     except Exception as e:
         app.logger.warning("market scan vcoins-catalogue failed: %s", e)
         return [], f'vcoins-catalogue: {str(e)[:160]}', ''
 
 
+    finally:
+        if client is not None and hasattr(client, 'close'):
+            client.close()
+
+
+class _MarketPolicy:
+    """Only collection rules differ; execution and persistence are shared."""
+    category = None
+
+    def themes(self, db):
+        return list(_MARKET_THEMES[self.category])
+
+    def prepare(self, db, context):
+        pass
+
+    def normalize(self, db, raw):
+        item = _market_normalize_item(db, self.category, raw)
+        if item:
+            item['owned'] = _market_owned_match(db, self.category, item)
+            item['score'] = _market_score(self.category, item)
+        return item
+
+    def extra_sources(self, api_key, inputs):
+        return []
+
+    def enrich(self, items):
+        return ''
+
+
+class _CoinMarketPolicy(_MarketPolicy):
+    category = 'coins'
+
+    def extra_sources(self, api_key, inputs):
+        return [market_runtime.CatalogueSource('vcoins-catalogue',
+            lambda: _market_catalogue_stage(api_key, None, self.category, *inputs))]
+
+    def enrich(self, items):
+        return _market_archive_context(items, self.category)
+
+
+class _BanknoteMarketPolicy(_MarketPolicy):
+    category = 'banknotes'
+
+    def themes(self, db):
+        priority = _banknote_wantlist_themes(db) + _banknote_us_wantlist_themes(db)
+        themes = priority + [_banknote_obsolete_theme(db)] + super().themes(db)
+        if priority:
+            themes = [(key, text + (
+                ' Other searches already cover missing colonial issuers in the want-list. '
+                'Focus this search on distinctive issues or upgrades from colonial issuers '
+                'already held; leave missing-issuer coverage to those priority searches.'
+                if key in ('colonial-british', 'colonial-continental') else '')) for key, text in themes]
+        return themes
+
+    def prepare(self, db, context):
+        context.banknote_rows = {}
+        rows = db.execute("SELECT id, banknote_id, cat_id, country, denomination, series, "
+                          "pick_number, date_1, date_1_text, grade, grading_authority "
+                          "FROM banknotes WHERE country IS NOT NULL").fetchall()
+        for row in rows:
+            context.banknote_rows.setdefault(_banknote_country_fold(row['country']), []).append(dict(row))
+
+
+_MARKET_POLICIES = {'coins': _CoinMarketPolicy(), 'banknotes': _BanknoteMarketPolicy()}
+
+
 def _run_market_scan(category, scan_id):
-    """Background job: run every theme, merge, rank, store."""
-    db = open_db_connection()
+    """Shared progressive scan: sources -> checked candidates -> optional context."""
+    repo = market_runtime.MarketRepository(open_db_connection, category, scan_id)
+    ctx = None
+    errors, raw_count = [], 0
+    accepted, seen = [], set()
+    merge_lock = threading.Lock()
     try:
         api_key = os.environ.get('ANTHROPIC_API_KEY')
         if not api_key:
-            db.execute("UPDATE market_scans SET status = 'failed', finished_at = ?, "
-                       "error = ? WHERE id = ?",
-                       [datetime.utcnow().isoformat(),
-                        'ANTHROPIC_API_KEY is not configured on this instance', scan_id])
-            db.commit()
-            return
-        profile = _market_profile_text()
-        holdings = _market_holdings_summary(db, category)
-        coverage = _market_denomination_coverage(db, category)
-        recent = _market_recent_purchases(db, category)
-        analysis_block, analysis_date = _market_analysis_block(db, category)
-        themes = list(_MARKET_THEMES[category])
-        if category == 'banknotes':
-            # The colonial want-list leads: one theme per empire group,
-            # built from whatever the collection still lacks. Then the US
-            # large-size type gaps and the 1800s obsoletes (2026-09-19).
-            themes = (_banknote_wantlist_themes(db) + _banknote_us_wantlist_themes(db)
-                      + [_banknote_obsolete_theme(db)] + themes)
-        results, errors = [], []
-        from concurrent.futures import ThreadPoolExecutor, wait as _wait
-        # Two themes at a time: seven at once, each firing twenty searches,
-        # trips Anthropic's server-tool limit ("Server tool use limit
-        # exceeded") and every theme comes back empty.
-        pool = ThreadPoolExecutor(max_workers=_market_scan_workers())
-        futures = {
-            pool.submit(_market_call_theme, api_key, category, key,
-                        _market_scan_prompt(category, key, text, profile, holdings,
-                                            coverage, recent, analysis_block)): key
-            for key, text in themes}
-        # While the themes search, VCoins' own stock search is run for
-        # every gap and its cards read — the live catalogue, not the
-        # search index's memory of it.
-        catalogue_note = ''
-        cat_pool = ThreadPoolExecutor(max_workers=1)
-        cat_future = cat_pool.submit(
-            _market_catalogue_stage, api_key, None, category, profile,
-            holdings, coverage, recent, analysis_block)
-        # A theme still searching after 25 minutes does not hold the whole
-        # scan: it is reported and the rest lands (the pool is released
-        # without waiting for it).
-        _wait(list(futures) + [cat_future], timeout=1500)
-        if cat_future.done():
-            try:
-                cat_items, cat_err, catalogue_note = cat_future.result()
-                results.extend(cat_items)
-                if cat_err:
-                    errors.append(cat_err)
-            except Exception as e:
-                app.logger.warning("market scan catalogue stage failed: %s", e)
-                errors.append(f'vcoins-catalogue: {str(e)[:160]}')
-        else:
-            errors.append('vcoins-catalogue: still running after 25 minutes — skipped')
-        cat_pool.shutdown(wait=False)
-        for fut, key in futures.items():
-            if not fut.done():
-                errors.append(f'{key}: still running after 25 minutes — skipped')
-                continue
-            items, err = fut.result()
-            results.extend(items)
-            if err:
-                errors.append(err)
-        pool.shutdown(wait=False)
-        normalized = []
-        _MARKET_DROPS.tally = {}
-        for raw in results:
-            item = _market_normalize_item(db, category, raw)
-            if item:
-                item['owned'] = _market_owned_match(db, category, item)
-                item['score'] = _market_score(category, item)
-                normalized.append(item)
-        before_dedupe = len(normalized)
-        normalized = _market_dedupe(normalized)
-        duplicates = before_dedupe - len(normalized)
-        before_verify = len(normalized)
-        normalized = _market_verify_live(normalized)
-        dropped_ended = before_verify - len(normalized)
-        # A first ordering picks the candidates worth the archive's time;
-        # the context it adds moves the score, so the list is sorted again.
-        normalized.sort(key=lambda it: (-it['score'], -(it.get('grade_numeric') or 0)))
-        archive_note = _market_archive_context(normalized, category)
-        normalized.sort(key=lambda it: (-it['score'], -(it.get('grade_numeric') or 0)))
-        now = datetime.utcnow().isoformat()
-        # A new scan replaces the previous one's undecided items on the
-        # list; ordered and dismissed ones stay on their old scan for the
-        # record, and the undecided ones are KEPT as 'superseded' rather
-        # than deleted (Mark, 2026-09-11: he bought a French Indochina 5
-        # piastres from a candidate's listing without pressing Buy, the
-        # next scan deleted the row, and there was nothing left to file).
-        # "Earlier candidates" on the market page lists them with a
-        # Bought button; anything older than 60 days is pruned.
-        db.execute("UPDATE market_scan_items SET status = 'superseded' "
-                   "WHERE category = ? AND status = 'new'", [category])
-        db.execute("DELETE FROM market_scan_items WHERE category = ? "
-                   "AND status IN ('superseded', 'dismissed') AND created_at < ?",
-                   [category, (datetime.utcnow() - timedelta(days=60)).isoformat()])
-        for rank, item in enumerate(normalized, 1):
-            db.execute(
-                "INSERT INTO market_scan_items (id, scan_id, category, rank, score, "
-                "status, title, listing_url, venue, price, price_usd, grade_numeric, "
-                "designation, closes, theme, payload, created_at) "
-                "VALUES (?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [str(uuid.uuid4()), scan_id, category, rank, item['score'],
-                 item['title'], item['listing_url'], item['venue'], item['price'],
-                 item['price_usd'], item['grade_numeric'], item['designation'],
-                 item['closes'], item['theme'], json.dumps(item), now])
-        summary = (f"{len(normalized)} candidate{'s' if len(normalized) != 1 else ''} "
-                   f"from {len(themes)} themes, {len(results)} raw finds")
-        if catalogue_note:
-            summary += f"; {catalogue_note}"
-        if archive_note:
-            summary += f"; {archive_note}"
-        if analysis_date:
-            summary += f", guided by the Analysis of {analysis_date[:10]}"
-        elif analysis_block:
-            summary += ", guided by the computed gap list (no Analysis written yet)"
-        if duplicates:
-            summary += f", {duplicates} duplicate{'s' if duplicates != 1 else ''} folded"
-        if dropped_ended:
-            summary += f", {dropped_ended} dropped as sold/ended on their own pages"
-        drops = getattr(_MARKET_DROPS, 'tally', None) or {}
-        if drops:
-            summary += ', not kept: ' + ', '.join(f'{n} {why}' for why, n in
-                                                  sorted(drops.items(), key=lambda kv: -kv[1]))
-        _MARKET_DROPS.tally = None
-        if errors:
-            summary += ' · ' + '; '.join(errors)[:400]
-        db.execute("UPDATE market_scans SET status = 'done', finished_at = ?, "
-                   "summary = ?, item_count = ? WHERE id = ?",
-                   [now, summary, len(normalized), scan_id])
-        db.commit()
-        app.logger.info("market scan %s done: %s", category, summary[:600])
-        for item in normalized[:12]:
-            app.logger.info("market scan %s kept: %s | %s | %s", category,
-                            item['title'][:80], item['price'], item['listing_url'][:100])
-    except Exception as e:
+            raise RuntimeError('ANTHROPIC_API_KEY is not configured on this instance')
+        policy = _MARKET_POLICIES[category]
+        db = open_db_connection()
         try:
-            db.execute("UPDATE market_scans SET status = 'failed', finished_at = ?, "
-                       "error = ? WHERE id = ?",
-                       [datetime.utcnow().isoformat(), str(e)[:400], scan_id])
-            db.commit()
-        except sqlite3.Error:
-            pass
+            themes = policy.themes(db)
+            ctx = market_runtime.ScanContext.configured(len(themes))
+            ctx.fetcher = market_runtime.FetchService(ctx, _market_transport)
+            policy.prepare(db, ctx)
+            profile = _market_profile_text()
+            holdings = _market_holdings_summary(db, category)
+            coverage = _market_denomination_coverage(db, category)
+            recent = _market_recent_purchases(db, category)
+            analysis_block, analysis_date = _market_analysis_block(db, category)
+        finally:
+            db.close()
+        inputs = (profile, holdings, coverage, recent, analysis_block)
+
+        def theme_source(key, text):
+            prompt = _market_scan_prompt(category, key, text, *inputs)
+            return market_runtime.ThemeSource(key,
+                lambda: _market_call_theme(api_key, category, key, prompt))
+
+        sources = [theme_source(key, text) for key, text in themes] + policy.extra_sources(api_key, inputs)
+
+        def process(raw_items):
+            # Each worker owns its DB handle; no network happens in a write txn.
+            conn = open_db_connection()
+            try:
+                batch = []
+                deduped = _market_dedupe(raw_items)
+                ctx.metric('duplicates', len(raw_items) - len(deduped))
+                for raw in deduped:
+                    ctx.check()
+                    key = market_runtime.canonical_url(raw.get('listing_url'))
+                    with merge_lock:
+                        if key in seen:
+                            ctx.metric('duplicates')
+                            continue
+                    item = policy.normalize(conn, raw)
+                    if item:
+                        batch.append(item)
+                before = len(batch)
+                batch = _market_verify_live(batch)
+                ctx.metric('rejected_liveness', before - len(batch))
+                out = []
+                with merge_lock:
+                    for item in batch:
+                        key = market_runtime.canonical_url(item['listing_url'])
+                        if key not in seen:
+                            seen.add(key); out.append(item)
+                return out
+            finally:
+                conn.close()
+
+        def publish(items):
+            ctx.check()
+            saved = repo.publish(items)
+            if saved and ctx.first_candidate_seconds is None:
+                ctx.first_candidate_seconds = round(ctx.clock() - ctx.started, 3)
+            accepted.extend(saved)
+            return len(saved)
+
+        def progress(done, total, failures, raw):
+            data = ctx.snapshot()
+            data.update(completed=done, total=total, phase='searching', raw=raw,
+                        errors=failures, candidates=len(accepted))
+            repo.progress(data)
+
+        with market_runtime.scope(ctx):
+            progress(0, len(sources), [], 0)
+            errors, raw_count = market_runtime.ScanService(ctx, _market_scan_workers()).run(
+                sources, process, publish, progress)
+            accepted.sort(key=lambda it: (-it['score'], -(it.get('grade_numeric') or 0)))
+            # Candidates are already visible/actionable. Give optional context
+            # at most a minute of the remaining overall budget.
+            archive_note = ''
+            if accepted and category == 'coins' and ctx.remaining() > 1:
+                repo.progress(dict(ctx.snapshot(), phase='enriching', completed=len(sources),
+                                   total=len(sources), candidates=len(accepted)))
+                ctx.deadline = min(ctx.deadline, ctx.clock() + 60)
+                try:
+                    with market_runtime.scope(ctx, 'archive'):
+                        archive_note = policy.enrich(accepted)
+                    repo.publish(accepted)
+                except market_runtime.ScanStopped:
+                    archive_note = 'Optional archive context stopped at its time budget'
+            metrics = ctx.snapshot()
+            ended = sum(m.get('rejected_liveness', 0) for m in metrics['sources'].values())
+            duplicates = sum(m.get('duplicates', 0) for m in metrics['sources'].values())
+            summary = f"{len(accepted)} candidate{'s' if len(accepted) != 1 else ''} from {len(themes)} themes, {raw_count} raw finds"
+            if ended:
+                summary += f", {ended} dropped as sold/ended on their own pages"
+            if duplicates:
+                summary += f", {duplicates} duplicates folded"
+            if analysis_date:
+                summary += f", guided by the Analysis of {analysis_date[:10]}"
+            if archive_note:
+                summary += '; ' + archive_note
+            if errors:
+                summary += ' · Partial results; earlier candidates kept · ' + '; '.join(errors)[:400]
+            metrics.update(phase='complete', completed=len(sources), total=len(sources), errors=errors)
+            repo.finish(summary, errors, metrics)
+            app.logger.info('market scan %s done: %s', category, summary)
+            app.logger.info('market scan metrics %s %s: %s', category, scan_id, json.dumps(metrics))
+    except Exception as e:
+        errors.append(str(e))
+        try:
+            metrics = ctx.snapshot() if ctx else {}
+            repo.finish(f'{len(accepted)} candidates saved; earlier candidates kept · ' + str(e)[:300],
+                        errors, dict(metrics, phase='stopped'), failed=not accepted)
+        except market_runtime.ScanStopped:
+            pass  # A newer scan owns the page; late work may never publish.
+        app.logger.warning('market scan %s stopped: %s', category, e)
     finally:
-        db.close()
+        if ctx:
+            ctx.stop.set()
         with _MARKET_SCAN_LOCK:
-            _MARKET_SCAN_INFLIGHT.discard(category)
+            if _MARKET_SCAN_ACTIVE_IDS.get(category) in (None, scan_id):
+                _MARKET_SCAN_ACTIVE_IDS.pop(category, None)
+                _MARKET_SCAN_INFLIGHT.discard(category)
 
 
 def _market_latest_scan(db, category):
@@ -17405,6 +17559,8 @@ def market_scan_start(category):
                "VALUES (?, ?, ?, 'running')",
                [scan_id, category, datetime.utcnow().isoformat()])
     db.commit()
+    with _MARKET_SCAN_LOCK:
+        _MARKET_SCAN_ACTIVE_IDS[category] = scan_id
     threading.Thread(target=_run_market_scan, args=(category, scan_id),
                      daemon=True).start()
     return jsonify({'ok': True, 'running': True, 'scan_id': scan_id})
@@ -17419,6 +17575,8 @@ def market_scan_status(category):
     if not scan:
         return jsonify({'ok': True, 'status': 'none'})
     return jsonify({'ok': True, 'status': scan['status'], 'scan_id': scan['id'],
+                    'started_at': scan['started_at'], 'revision': scan['revision'],
+                    'progress': json.loads(scan['progress'] or '{}'),
                     'summary': scan['summary'], 'error': scan['error'],
                     'item_count': scan['item_count'],
                     'finished_at': scan['finished_at']})
@@ -17579,7 +17737,7 @@ def market_item_dismiss(category, item_id):
     _market_require_owner()
     db = get_db()
     _market_item_or_404(db, category, item_id)
-    db.execute("UPDATE market_scan_items SET status = 'dismissed' WHERE id = ?", [item_id])
+    db.execute("UPDATE market_scan_items SET status = 'dismissed' WHERE id = ? AND status != 'ordered'", [item_id])
     db.commit()
     return jsonify({'ok': True})
 
@@ -24561,12 +24719,18 @@ def _fetch_usd_rate(currency, date_str):
         url = (f'https://api.frankfurter.dev/v1/{when}'
                f'?from={currency}&to=USD')
         try:
+            ctx = market_runtime.current()
+            if ctx:
+                ctx.check()
+                ctx.reserve(page_requests=1)
             req = urllib.request.Request(url, headers={'User-Agent': 'StuffApp/1.0'})
-            with urllib.request.urlopen(req, timeout=6) as resp:
+            with urllib.request.urlopen(req, timeout=min(6, ctx.remaining()) if ctx else 6) as resp:
                 payload = json.loads(resp.read().decode('utf-8'))
             rate = (payload.get('rates') or {}).get('USD')
             if rate:
                 return float(rate)
+        except market_runtime.ScanStopped:
+            raise
         except Exception:
             continue
     return None
@@ -24575,6 +24739,30 @@ def _fetch_usd_rate(currency, date_str):
 def _usd_rate(db, currency, date_str):
     """USD rate for (currency, date): the fx_rates cache first, then one
     provider fetch that is cached for good. None when unavailable."""
+    ctx = market_runtime.current()
+    if ctx:
+        key = ((currency or '').upper(), date_str)
+        with ctx.fx_lock:
+            if key in ctx.fx:
+                return ctx.fx[key]
+            cached = db.execute('SELECT usd_rate FROM fx_rates WHERE currency=? AND date=?', key).fetchone()
+            if key[0] == 'USD':
+                rate = 1.0
+            elif cached:
+                rate = float(cached['usd_rate'])
+            else:
+                ctx.check()
+                rate = _fetch_usd_rate(*key)
+                ctx.check()
+                if rate:
+                    cache_db = open_db_connection()
+                    try:
+                        cache_db.execute('INSERT OR REPLACE INTO fx_rates(currency,date,usd_rate,fetched_at) VALUES(?,?,?,?)', [*key, rate, datetime.utcnow().isoformat()])
+                        cache_db.commit()
+                    finally:
+                        cache_db.close()
+            ctx.fx[key] = rate
+            return rate
     currency = (currency or '').upper()
     if not currency or currency == 'USD':
         return 1.0
@@ -37992,6 +38180,24 @@ def _archive_text_weights(text):
 
 
 def _acsearch_search(term, category='1-2'):
+    ctx = market_runtime.current()
+    if not ctx:
+        return _acsearch_search_uncached(term, category)
+    key = (category, re.sub(r'\s+', ' ', term).strip().lower())
+    cached = ctx.archive_cache.get(key)
+    if cached:
+        status, lots, total, url = cached
+        _ACSEARCH_LAST.total, _ACSEARCH_LAST.url = total, url
+        ctx.metric('archive_query_cache_hits')
+        return status, [dict(lot) for lot in lots]
+    result = _acsearch_search_uncached(term, category)
+    if result[0] == 200:
+        ctx.archive_cache[key] = (result[0], [dict(lot) for lot in result[1]],
+                                  getattr(_ACSEARCH_LAST, 'total', None), getattr(_ACSEARCH_LAST, 'url', ''))
+    return result
+
+
+def _acsearch_search_uncached(term, category='1-2'):
     """(status, lots) for one acsearch.info query — the public results
     page, whose lots sit in an embedded JSON array. Never raises; a
     non-200 (or a page without the array) returns (status, [])."""
@@ -38126,7 +38332,7 @@ def _provenance_archive_queries(category, row):
     return queries[:2], (None, None)
 
 
-def _provenance_archive_sweep(category, row, max_candidates=8, max_images=6):
+def _provenance_archive_sweep(category, row, max_candidates=8, max_images=6, metadata_only=False):
     """Query acsearch.info for this record and return the lots that could
     be THIS specimen: {'candidates': [...], 'status': '<one line for the
     summary and the log>', 'keyed': bool}. Each candidate carries the
@@ -38140,7 +38346,7 @@ def _provenance_archive_sweep(category, row, max_candidates=8, max_images=6):
     seen, statuses = {}, []
     for i, q in enumerate(queries):
         if i:
-            time.sleep(0.6)
+            _market_pause(0.6)
         status, lots = _acsearch_search(q, cat)
         statuses.append(status)
         for lot in lots:
@@ -38176,9 +38382,9 @@ def _provenance_archive_sweep(category, row, max_candidates=8, max_images=6):
     cands = matched[:max_candidates]
     for i, c in enumerate(cands):
         c['tag'] = f'C{i + 1}'
-        if i:
-            time.sleep(0.4)
-        c['full'] = _acsearch_lot_text(c['id']) or c['description']
+        if i and not metadata_only:
+            _market_pause(0.4)
+        c['full'] = c['description'] if metadata_only else (_acsearch_lot_text(c['id']) or c['description'])
     photos = 0
     # Mark, 17 Sep 2026: "comparing photos in banknotes not really useful"
     # — a serial-number match is conclusive, so paper gets no photographs.
@@ -38440,7 +38646,7 @@ def _rarity_archive_sweep(category, row, max_lots=40):
     seen, results, statuses = {}, [], []
     for i, q in enumerate(queries):
         if i:
-            time.sleep(0.6)
+            _market_pause(0.6)
         status, lots = _acsearch_search(q, cat)
         statuses.append(status)
         if status != 200:
