@@ -76,12 +76,77 @@ with stuffapp.app.app_context():
     assert [k for k, _ in themes] == ['wantlist-french', 'wantlist-other'], [k for k, _ in themes]
     print('THEMES OK')
 
+# US large-size types (2026-09-19): Friedberg ranges, retired by any
+# Own/Ordered US note whose catalogue fields carry a number in range.
+USWL = stuffapp.BANKNOTE_US_LARGE_WANTLIST
+assert len({e[0] for e in USWL}) == len(USWL), 'duplicate US entries'
+assert {e[1] for e in USWL} == {'treasury', 'banks'}
+spans = sorted((lo, hi, e[0]) for e in USWL for lo, hi in e[2])
+for (lo1, hi1, n1), (lo2, hi2, n2) in zip(spans, spans[1:]):
+    assert hi1 < lo2, f'overlapping Friedberg ranges: {n1} / {n2}'
+with stuffapp.app.app_context():
+    db = stuffapp.get_db()
+    db.execute("DELETE FROM banknotes")
+    assert len(stuffapp._banknote_us_wantlist_open(db)) == len(USWL)
+    us_rows = [
+        ('United States of America', 1899, '$1', 'United States Treasury', 'Friedberg 229, Greysheet 60401', '', 'Own'),
+        ('United States of America', 1896, '$2', 'United States Treasury', 'Fr#248, Friedberg 248 (FR #248)', '', 'Own'),
+        ('United States of America', 1922, '$20', 'United States Treasury', 'Fr. 1187m', '', 'Own'),
+        ('United States of America', 1882, '$5', 'The San Francisco National Bank', 'Fr.475', '', 'Own'),
+        ('United States of America', 1890, '$10', 'United States Treasury', 'Fr#368', '', 'Ordered'),
+        ('United States of America', 1772, '2 Shillings', 'Province of Pennsylvania', 'Fr#PA-156', '', 'Own'),
+        ('United States of America', 1850, '$50', 'Canal Bank (New Orleans)', 'LA105G48a', '', 'Own'),
+        ('United States of America', 1860, '$1', 'State Bank at New Brunswick', 'Haxby NJ350-G16a', '', 'Own'),
+        ('United States of America', 1872, '$20', 'State of South Carolina', 'SCCR7, Cr-SC-7', '', 'Own'),
+        ('United States of America', 1857, '$5', 'Western Exchange Fire & Marine Insurance Co. (Bishop Hill Colony)', 'NEW215', 'Bishop Hill, Illinois', 'Own'),
+        ('United States of America', 1869, '50 Cents', 'United States Treasury (Fractional Currency)', 'Fr#1379', '', 'Own'),
+        ('United States of America', 1935, '$1', 'United States Treasury', 'Fr#2300', '', 'Own'),
+        ('United States of America', 1862, '$1', 'United States Treasury', 'Fr. 16', '', 'Sold'),
+        ('Philippines', 1944, '1 Peso', 'Treasury', 'P-94', '', 'Own'),
+    ]
+    for i, (c, y, d, iss, pick, muni, st) in enumerate(us_rows):
+        db.execute("INSERT INTO banknotes (id, country, date_1, denomination, issuer, pick_number, municipality, status) "
+                   "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [f'us{i}', c, y, d, iss, pick, muni, st])
+    db.commit()
+    held = stuffapp._banknote_us_friedberg_held(db)
+    assert held == {229, 248, 1187, 475, 368, 1379, 2300}, held  # PA-156 is no Friedberg number; a Sold note does not count
+    open_names = [e[0] for e in stuffapp._banknote_us_wantlist_open(db)]
+    for name in ('$1 Silver Certificate 1899 "Black Eagle"', '$2 Silver Certificate 1896 Educational',
+                 '$20 Gold Certificate 1922', '$5 National Bank Note 1882 Brown Back', '$10 Treasury (Coin) Note 1890'):
+        assert name not in open_names, name
+    for name in ('$1 Legal Tender 1862 (Chase)', '$1 Legal Tender 1869 "Rainbow"', '$10 National Bank Note 1882 Brown Back',
+                 '$5 Federal Reserve Note 1914 Red Seal'):
+        assert name in open_names, name
+    assert len(open_names) == len(USWL) - 5, len(open_names)
+    themes = stuffapp._banknote_us_wantlist_themes(db)
+    assert [k for k, _ in themes] == ['us-large-treasury', 'us-large-banks'], [k for k, _ in themes]
+    assert '$1 Legal Tender 1869 "Rainbow" (Fr. 18)' in themes[0][1]
+    assert 'Black Eagle' not in themes[0][1], 'a held type must not be asked for'
+    assert '$10 National Bank Note 1882 Brown Back (Fr. 479–492)' in themes[1][1]
+    assert 'five-figure type' in themes[0][1] and '`empire` to "US"' in themes[1][1]
+    # Obsoletes: the states held come from the Haxby / Criswell prefix and the issuer / municipality text.
+    states = stuffapp._banknote_obsolete_states_held(db)
+    assert states == {'LA', 'NJ', 'SC', 'IL'}, states  # PA-156 (1772) is a colonial, not an obsolete; Fr. notes are federal
+    key, text = stuffapp._banknote_obsolete_theme(db)
+    assert key == 'us-obsolete'
+    assert 'States already represented: Illinois, Louisiana, New Jersey, South Carolina' in text, text
+    assert 'Massachusetts' in text and 'SIGNED AND DATED' in text and 'remainders' in text
+    # Every group held -> no US theme.
+    for e in USWL:
+        if e[1] == 'banks':
+            db.execute("INSERT INTO banknotes (id, country, date_1, pick_number, status) VALUES (?, 'USA', 1902, ?, 'Own')",
+                       [f'usb-{e[0]}', f'Fr. {e[2][0][0]}'])
+    db.commit()
+    assert [k for k, _ in stuffapp._banknote_us_wantlist_themes(db)] == ['us-large-treasury']
+    print('US LARGE-SIZE OK')
+
 # The market page shows the open count.
 client = stuffapp.app.test_client()
 r = client.get('/banknotes/market')
 assert r.status_code == 200
 html = r.get_data(as_text=True)
 assert 'colonial want-list:' in html and 'of 35 still open' in html, 'want-list count missing'
+assert 'US large-size types:' in html and f'of {len(stuffapp.BANKNOTE_US_LARGE_WANTLIST)} still open' in html, 'US count missing'
 r = client.get('/coins/market')
 assert 'colonial want-list' not in r.get_data(as_text=True)
 print('PAGE OK')

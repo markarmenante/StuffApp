@@ -103,7 +103,7 @@
       {%- endif -%}
     {%- else -%}Not scanned yet
     {%- endif -%}
-    {%- if market_wantlist and not market_earlier %} · colonial want-list: {{ market_wantlist.open }} of {{ market_wantlist.total }} still open{% endif -%}
+    {%- if market_wantlist and not market_earlier %} · colonial want-list: {{ market_wantlist.open }} of {{ market_wantlist.total }} still open · US large-size types: {{ market_wantlist.us_open }} of {{ market_wantlist.us_total }} still open{% endif -%}
   </span>
   {% endif %}
   {# Drilled in from a Property — give a one-tap way back. #}

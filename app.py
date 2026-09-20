@@ -15125,6 +15125,287 @@ def _banknote_wantlist_themes(db):
     return themes
 
 
+# ---------------------------------------------------------------------------
+# US large-size type want-list (Mark, 2026-09-19: "in the banknote market
+# scan also look for large size US notes I'm missing"). The pre-1929
+# federal types a type collector expects, each named by its Friedberg
+# range — Friedberg numbers are unique across the large-size series, so
+# a range IS the type. A type is held when an Own/Ordered note's catalogue
+# fields carry a Friedberg number inside the range (Fr. 229, Fr#256,
+# Friedberg 248 all count). `pricey` marks the types whose gem examples
+# run to five figures, where a lower grade from AU 50 is acceptable with
+# the evidence in `rarity`. The list retires itself as notes land.
+# ---------------------------------------------------------------------------
+BANKNOTE_US_LARGE_WANTLIST = [
+    # (name, theme group, Friedberg ranges, pricey)
+    # -- treasury: Demand, Legal Tender, Silver, Treasury/Coin, Gold --
+    ('$5 Demand Note 1861', 'treasury', ((1, 5),), True),
+    ('$10 Demand Note 1861', 'treasury', ((6, 10),), True),
+    ('$1 Legal Tender 1862 (Chase)', 'treasury', ((16, 17),), False),
+    ('$1 Legal Tender 1869 "Rainbow"', 'treasury', ((18, 18),), False),
+    ('$1 Legal Tender 1874–1878', 'treasury', ((19, 27),), False),
+    ('$1 Legal Tender 1880', 'treasury', ((28, 35),), False),
+    ('$2 Legal Tender 1862', 'treasury', ((41, 41),), False),
+    ('$2 Legal Tender 1869 "Rainbow"', 'treasury', ((42, 42),), False),
+    ('$2 Legal Tender 1874–1878', 'treasury', ((43, 49),), False),
+    ('$2 Legal Tender 1880', 'treasury', ((50, 56),), False),
+    ('$5 Legal Tender 1862–1863', 'treasury', ((61, 63),), False),
+    ('$5 Legal Tender 1869 "Rainbow" Woodchopper', 'treasury', ((64, 64),), False),
+    ('$5 Legal Tender 1875–1878', 'treasury', ((65, 69),), False),
+    ('$5 Legal Tender 1907 Woodchopper', 'treasury', ((83, 92),), False),
+    ('$10 Legal Tender 1862–1863', 'treasury', ((93, 95),), True),
+    ('$10 Legal Tender 1869 "Rainbow"', 'treasury', ((96, 96),), True),
+    ('$10 Legal Tender 1875–1878', 'treasury', ((97, 99),), False),
+    ('$10 Legal Tender 1923', 'treasury', ((123, 123),), False),
+    ('$20 Legal Tender 1862–1863', 'treasury', ((124, 126),), True),
+    ('$20 Legal Tender 1869 "Rainbow"', 'treasury', ((127, 127),), True),
+    ('$20 Legal Tender 1875–1878', 'treasury', ((128, 129),), True),
+    ('$20 Legal Tender 1880', 'treasury', ((130, 147),), False),
+    ('$50 Legal Tender 1874–1880', 'treasury', ((151, 164),), True),
+    ('$100 Legal Tender 1875–1880', 'treasury', ((168, 182),), True),
+    ('$10 Refunding Certificate 1879', 'treasury', ((213, 214),), True),
+    ('$1 Silver Certificate 1886 Martha Washington', 'treasury', ((215, 221),), False),
+    ('$2 Silver Certificate 1891 Windom', 'treasury', ((245, 246),), False),
+    ('$5 Silver Certificate 1886 "Silver Dollar Back"', 'treasury', ((259, 265),), True),
+    ('$5 Silver Certificate 1891 Grant', 'treasury', ((266, 267),), False),
+    ('$5 Silver Certificate 1923 "Porthole"', 'treasury', ((282, 282),), False),
+    ('$10 Silver Certificate 1878–1880', 'treasury', ((283, 290),), True),
+    ('$10 Silver Certificate 1886 "Tombstone"', 'treasury', ((291, 297),), False),
+    ('$10 Silver Certificate 1891', 'treasury', ((298, 301),), False),
+    ('$10 Silver Certificate 1908', 'treasury', ((302, 304),), False),
+    ('$20 Silver Certificate 1878–1880', 'treasury', ((305, 312),), True),
+    ('$20 Silver Certificate 1886 Manning "Diamond Back"', 'treasury', ((313, 316),), True),
+    ('$20 Silver Certificate 1891', 'treasury', ((317, 322),), False),
+    ('$50 Silver Certificate 1878–1891', 'treasury', ((323, 335),), True),
+    ('$100 Silver Certificate 1878–1891', 'treasury', ((336, 344),), True),
+    ('$1 Treasury (Coin) Note 1890', 'treasury', ((347, 349),), False),
+    ('$2 Treasury (Coin) Note 1890', 'treasury', ((353, 355),), False),
+    ('$5 Treasury (Coin) Note 1890', 'treasury', ((359, 361),), False),
+    ('$10 Treasury (Coin) Note 1891', 'treasury', ((369, 371),), False),
+    ('$20 Treasury (Coin) Note 1890', 'treasury', ((372, 374),), True),
+    ('$20 Treasury (Coin) Note 1891', 'treasury', ((375, 375),), True),
+    ('$50 Treasury (Coin) Note 1891', 'treasury', ((376, 376),), True),
+    ('$100 Treasury (Coin) Note 1890 "Watermelon"', 'treasury', ((377, 378),), True),
+    ('$10 Gold Certificate 1907', 'treasury', ((1167, 1172),), False),
+    ('$20 Gold Certificate 1882', 'treasury', ((1174, 1178),), True),
+    ('$20 Gold Certificate 1905 "Technicolor"', 'treasury', ((1179, 1180),), True),
+    ('$20 Gold Certificate 1906', 'treasury', ((1181, 1186),), False),
+    ('$50 Gold Certificate 1882', 'treasury', ((1188, 1197),), True),
+    ('$50 Gold Certificate 1913', 'treasury', ((1198, 1199),), False),
+    ('$100 Gold Certificate 1882', 'treasury', ((1202, 1214),), True),
+    # -- banks: National Bank Notes, Federal Reserve Bank Notes, 1914 FRN red seals --
+    ('$1 National Bank Note, Original Series / 1875 (First Charter)', 'banks', ((380, 386),), False),
+    ('$2 National Bank Note, Original Series / 1875 "Lazy Deuce"', 'banks', ((387, 393),), True),
+    ('$5 National Bank Note, Original Series / 1875', 'banks', ((394, 408),), False),
+    ('$10 National Bank Note, Original Series / 1875', 'banks', ((409, 423),), True),
+    ('$20 National Bank Note, Original Series / 1875', 'banks', ((424, 439),), True),
+    ('$10 National Bank Note 1882 Brown Back', 'banks', ((479, 492),), False),
+    ('$20 National Bank Note 1882 Brown Back', 'banks', ((493, 506),), False),
+    ('$50 National Bank Note 1882 Brown Back', 'banks', ((507, 518),), True),
+    ('$100 National Bank Note 1882 Brown Back', 'banks', ((519, 531),), True),
+    ('$5 National Bank Note 1882 Date Back', 'banks', ((532, 538),), False),
+    ('$10 National Bank Note 1882 Date Back', 'banks', ((539, 548),), False),
+    ('$20 National Bank Note 1882 Date Back', 'banks', ((549, 557),), False),
+    ('$5 National Bank Note 1882 Value Back', 'banks', ((573, 575),), False),
+    ('$10 National Bank Note 1882 Value Back', 'banks', ((576, 579),), False),
+    ('$20 National Bank Note 1882 Value Back', 'banks', ((580, 585),), False),
+    ('$5 National Bank Note 1902 Red Seal', 'banks', ((587, 589),), False),
+    ('$10 National Bank Note 1902 Red Seal', 'banks', ((613, 615),), False),
+    ('$20 National Bank Note 1902 Red Seal', 'banks', ((639, 641),), False),
+    ('$5 National Bank Note 1902 Date Back', 'banks', ((590, 597),), False),
+    ('$10 National Bank Note 1902 Date Back', 'banks', ((616, 623),), False),
+    ('$20 National Bank Note 1902 Date Back', 'banks', ((642, 649),), False),
+    ('$5 National Bank Note 1902 Plain Back', 'banks', ((598, 612),), False),
+    ('$10 National Bank Note 1902 Plain Back', 'banks', ((624, 638),), False),
+    ('$20 National Bank Note 1902 Plain Back', 'banks', ((650, 663),), False),
+    ('$50 National Bank Note 1902 (any back)', 'banks', ((664, 685),), True),
+    ('$100 National Bank Note 1902 (any back)', 'banks', ((686, 707),), True),
+    ('$10 Federal Reserve Bank Note 1915–1918', 'banks', ((810, 821),), False),
+    ('$20 Federal Reserve Bank Note 1915–1918', 'banks', ((822, 830),), True),
+    ('$50 Federal Reserve Bank Note 1918 (St. Louis)', 'banks', ((831, 831),), True),
+    ('$5 Federal Reserve Note 1914 Red Seal', 'banks', ((832, 843),), False),
+    ('$10 Federal Reserve Note 1914 Red Seal', 'banks', ((892, 903),), False),
+    ('$20 Federal Reserve Note 1914 Red Seal', 'banks', ((952, 963),), False),
+    ('$50 Federal Reserve Note 1914 Red Seal', 'banks', ((1012, 1023),), True),
+    ('$100 Federal Reserve Note 1914 Red Seal', 'banks', ((1072, 1083),), True),
+    # -- the types held on 2026-09-19, kept so the list is the whole type set --
+    ('$1 Legal Tender 1917', 'treasury', ((36, 39),), False),
+    ('$1 Legal Tender 1923', 'treasury', ((40, 40),), False),
+    ('$2 Legal Tender 1917', 'treasury', ((57, 60),), False),
+    ('$5 Legal Tender 1880', 'treasury', ((70, 82),), False),
+    ('$10 Legal Tender 1880', 'treasury', ((100, 113),), False),
+    ('$10 Legal Tender 1901 "Bison"', 'treasury', ((114, 122),), False),
+    ('$1 Silver Certificate 1891 Martha Washington', 'treasury', ((222, 223),), False),
+    ('$1 Silver Certificate 1896 Educational', 'treasury', ((224, 225),), False),
+    ('$1 Silver Certificate 1899 "Black Eagle"', 'treasury', ((226, 236),), False),
+    ('$1 Silver Certificate 1923', 'treasury', ((237, 239),), False),
+    ('$2 Silver Certificate 1886 Hancock', 'treasury', ((240, 244),), False),
+    ('$2 Silver Certificate 1896 Educational', 'treasury', ((247, 248),), False),
+    ('$2 Silver Certificate 1899', 'treasury', ((249, 258),), False),
+    ('$5 Silver Certificate 1896 Educational', 'treasury', ((268, 270),), False),
+    ('$5 Silver Certificate 1899 "Chief"', 'treasury', ((271, 281),), False),
+    ('$1 Treasury (Coin) Note 1891', 'treasury', ((350, 352),), False),
+    ('$2 Treasury (Coin) Note 1891', 'treasury', ((356, 358),), False),
+    ('$5 Treasury (Coin) Note 1891', 'treasury', ((362, 365),), False),
+    ('$10 Treasury (Coin) Note 1890', 'treasury', ((366, 368),), True),
+    ('$10 Gold Certificate 1922', 'treasury', ((1173, 1173),), False),
+    ('$20 Gold Certificate 1922', 'treasury', ((1187, 1187),), False),
+    ('$50 Gold Certificate 1922', 'treasury', ((1200, 1201),), False),
+    ('$100 Gold Certificate 1922', 'treasury', ((1215, 1215),), False),
+    ('$5 National Bank Note 1882 Brown Back', 'banks', ((466, 478),), False),
+    ('$1 Federal Reserve Bank Note 1918', 'banks', ((708, 746),), False),
+    ('$2 Federal Reserve Bank Note 1918 "Battleship"', 'banks', ((747, 780),), False),
+    ('$5 Federal Reserve Bank Note 1915–1918', 'banks', ((781, 809),), False),
+    ('$5 Federal Reserve Note 1914 Blue Seal', 'banks', ((844, 891),), False),
+    ('$10 Federal Reserve Note 1914 Blue Seal', 'banks', ((904, 951),), False),
+    ('$20 Federal Reserve Note 1914 Blue Seal', 'banks', ((964, 1011),), False),
+    ('$50 Federal Reserve Note 1914 Blue Seal', 'banks', ((1024, 1071),), False),
+    ('$100 Federal Reserve Note 1914 Blue Seal', 'banks', ((1084, 1131),), False),
+]
+
+_US_WANTLIST_GROUP_TITLES = {
+    'treasury': 'Demand Notes, Legal Tender, Silver Certificates, Treasury Notes, Gold Certificates',
+    'banks': 'National Bank Notes, Federal Reserve Bank Notes, 1914 Federal Reserve Note red seals',
+}
+
+# "Fr. 229", "Fr#256", "Fr.1187m", "Friedberg 248 (FR #248)" — the number
+# after a Friedberg marker; "Fr#PA-156" (a colonial) has none.
+_FRIEDBERG_NUM_RE = re.compile(r'\b(?:Fr|Friedberg)\.?\s*#?\s*(\d{1,4})[a-z]?\b', re.IGNORECASE)
+
+_US_COUNTRY_RE = re.compile(r'united states|\bu\.?s\.?a?\.?\b', re.IGNORECASE)
+
+
+def _banknote_us_friedberg_held(db):
+    """Every Friedberg number an Own/Ordered US note carries, from its
+    Pick / catalogue, other-catalogue and description fields."""
+    try:
+        rows = db.execute(
+            "SELECT country, pick_number, other_catalog, description FROM banknotes "
+            "WHERE (status IS NULL OR status IN ('Own', 'Ordered'))").fetchall()
+    except sqlite3.Error:
+        rows = []
+    held = set()
+    for r in rows:
+        if not _US_COUNTRY_RE.search(r['country'] or ''):
+            continue
+        text = ' '.join(str(r[k] or '') for k in ('pick_number', 'other_catalog', 'description'))
+        for m in _FRIEDBERG_NUM_RE.finditer(text):
+            held.add(int(m.group(1)))
+    return held
+
+
+def _banknote_us_wantlist_open(db, held=None):
+    """The large-size types the collection still lacks."""
+    if held is None:
+        held = _banknote_us_friedberg_held(db)
+    open_entries = []
+    for entry in BANKNOTE_US_LARGE_WANTLIST:
+        name, group, ranges, pricey = entry
+        if not any(lo <= n <= hi for n in held for lo, hi in ranges):
+            open_entries.append(entry)
+    return open_entries
+
+
+def _banknote_us_wantlist_themes(db):
+    """Two scan themes for the open large-size US types, one per group;
+    a group with nothing open yields none."""
+    open_entries = _banknote_us_wantlist_open(db)
+    themes = []
+
+    def _fr(ranges):
+        return ', '.join(f'Fr. {lo}' if lo == hi else f'Fr. {lo}–{hi}' for lo, hi in ranges)
+    for group in ('treasury', 'banks'):
+        entries = [e for e in open_entries if e[1] == group]
+        if not entries:
+            continue
+        lines = '; '.join(f"{name} ({_fr(ranges)}{', five-figure type' if pricey else ''})"
+                          for name, _g, ranges, pricey in entries)
+        themes.append((
+            f'us-large-{group}',
+            f"US LARGE-SIZE TYPE GAPS (Mark, 2026-09-19 — {_US_WANTLIST_GROUP_TITLES[group]}): "
+            f"the pre-1929 large-size federal types the collection does NOT hold, by Friedberg "
+            f"number: {lines}. Find live listings of these types in PMG or PCGS 63 or better "
+            f"(EPQ/PPQ preferred), best price per grade; a type marked five-figure may be shown "
+            f"from AU 50 up with the census / auction evidence in `rarity`. For a National Bank "
+            f"Note any bank and charter counts; name the bank and state in `why`. Put the type's "
+            f"name from this list in `fills`, the Friedberg number in `pick_number`, and set "
+            f"`empire` to \"US\". Not wanted: small-size (1928 onward), fractional currency, "
+            f"Confederate, MPC, or anything already held."))
+    return themes
+
+
+# 1800s obsolete / broken-bank notes (Mark, 2026-09-19: "I'm low on good
+# quality 1800s state obsolete issues"). The states already represented
+# come from the Haxby / Criswell prefix of the catalogue number
+# (LA105G48a, NJ350-G16a, SCCR7) and state names in the issuer.
+_OBSOLETE_STATE_NAMES = {
+    'AL': 'Alabama', 'AR': 'Arkansas', 'CT': 'Connecticut', 'DC': 'District of Columbia',
+    'DE': 'Delaware', 'FL': 'Florida', 'GA': 'Georgia', 'IL': 'Illinois', 'IN': 'Indiana',
+    'IA': 'Iowa', 'KS': 'Kansas', 'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine',
+    'MD': 'Maryland', 'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota',
+    'MS': 'Mississippi', 'MO': 'Missouri', 'NE': 'Nebraska', 'NH': 'New Hampshire',
+    'NJ': 'New Jersey', 'NY': 'New York', 'NC': 'North Carolina', 'OH': 'Ohio',
+    'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina', 'TN': 'Tennessee',
+    'TX': 'Texas', 'VT': 'Vermont', 'VA': 'Virginia', 'WI': 'Wisconsin',
+}
+_OBSOLETE_CATALOG_STATE_RE = re.compile(r'\b([A-Z]{2})(?:CR|-?\d{2,4})', re.IGNORECASE)
+
+
+def _banknote_obsolete_states_held(db):
+    """Two-letter codes of the states whose 1800s obsolete / state notes
+    the collection holds (Own/Ordered US notes dated 1800–1899 that
+    are not federal issues)."""
+    try:
+        rows = db.execute(
+            "SELECT country, issuer, municipality, pick_number, other_catalog, date_1 FROM banknotes "
+            "WHERE (status IS NULL OR status IN ('Own', 'Ordered'))").fetchall()
+    except sqlite3.Error:
+        rows = []
+    names_to_code = {v.lower(): k for k, v in _OBSOLETE_STATE_NAMES.items()}
+    held = set()
+    for r in rows:
+        if not _US_COUNTRY_RE.search(r['country'] or ''):
+            continue
+        try:
+            year = int(r['date_1']) if r['date_1'] not in (None, '') else None
+        except (TypeError, ValueError):
+            year = None
+        if year is None or year < 1800 or year >= 1900:
+            continue  # colonial (pre-1800) and 20th-century notes are neither
+        catalog = ' '.join(str(r[k] or '') for k in ('pick_number', 'other_catalog'))
+        if _FRIEDBERG_NUM_RE.search(catalog):
+            continue  # a federal type
+        for m in _OBSOLETE_CATALOG_STATE_RE.finditer(catalog):
+            code = m.group(1).upper()
+            if code in _OBSOLETE_STATE_NAMES:
+                held.add(code)
+        where = ' '.join(str(r[k] or '') for k in ('issuer', 'municipality')).lower()
+        for name, code in names_to_code.items():
+            if name in where:
+                held.add(code)
+    return held
+
+
+def _banknote_obsolete_theme(db):
+    held = _banknote_obsolete_states_held(db)
+    held_names = ', '.join(_OBSOLETE_STATE_NAMES[c] for c in sorted(held)) or 'none yet'
+    open_names = ', '.join(name for code, name in sorted(_OBSOLETE_STATE_NAMES.items(), key=lambda kv: kv[1])
+                           if code not in held)
+    return (
+        'us-obsolete',
+        f"1800s STATE OBSOLETE / BROKEN-BANK NOTES (Mark, 2026-09-19: \"I'm low on good quality "
+        f"1800s state obsolete issues\"): issued notes of state-chartered banks, state governments, "
+        f"municipalities and private issuers, 1800–1866 — Haxby-listed, SIGNED AND DATED and "
+        f"circulated as money — in PMG or PCGS 63 or better (EPQ preferred). Strictly NOT wanted, "
+        f"whatever the grade: unsigned or undated remainders, remainder sheets, proofs, specimens "
+        f"and reprints (Mark's instruction, 2026-09-19); a gem obsolete is worth returning ONLY when "
+        f"the listing shows it signed, dated and serial-numbered. States already represented: "
+        f"{held_names}. Prefer a state not yet held — {open_names} — then a different bank in a "
+        f"held state with a strong vignette. Put \"obsolete — <state>, <bank>\" in `fills`, the "
+        f"Haxby number in `pick_number`, and set `empire` to \"US\"."
+    )
+
+
 _MARKET_THEMES = {
     'banknotes': [
         ('colonial-british', "TOP PRIORITY — British colonial issues before independence: "
@@ -15274,7 +15555,8 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"notes": str (when items is empty: what you searched and why nothing qualified; else "")}'
         )
     scope = ('paper money — colonial issues before independence first (British, French, '
-             'Italian, Portuguese, German), then the rest of the wanted list'
+             'Italian, Portuguese, German), US large-size type gaps and 1800s state obsolete '
+             'notes (Mark, 2026-09-19), then the rest of the wanted list'
              if category == 'banknotes' else
              'ANCIENT GREEK coins only — archaic through Hellenistic, including the '
              'Greek world of Sicily, Magna Graecia, Asia Minor, Thrace, Macedon, the '
@@ -16727,8 +17009,10 @@ def _run_market_scan(category, scan_id):
         themes = list(_MARKET_THEMES[category])
         if category == 'banknotes':
             # The colonial want-list leads: one theme per empire group,
-            # built from whatever the collection still lacks.
-            themes = _banknote_wantlist_themes(db) + themes
+            # built from whatever the collection still lacks. Then the US
+            # large-size type gaps and the 1800s obsoletes (2026-09-19).
+            themes = (_banknote_wantlist_themes(db) + _banknote_us_wantlist_themes(db)
+                      + [_banknote_obsolete_theme(db)] + themes)
         results, errors = [], []
         from concurrent.futures import ThreadPoolExecutor, wait as _wait
         # Two themes at a time: seven at once, each firing twenty searches,
@@ -16976,7 +17260,9 @@ def market_view(category):
                            market_earlier=earlier,
                            market_wantlist=(
                                {'open': len(_banknote_wantlist_open(db)),
-                                'total': len(BANKNOTE_COLONIAL_WANTLIST)}
+                                'total': len(BANKNOTE_COLONIAL_WANTLIST),
+                                'us_open': len(_banknote_us_wantlist_open(db)),
+                                'us_total': len(BANKNOTE_US_LARGE_WANTLIST)}
                                if category == 'banknotes' else None),
                            market_locations=property_choices_for_category(category))
 
