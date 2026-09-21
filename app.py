@@ -6662,9 +6662,11 @@ def init_db():
     # v21: the Display Number reads 'P 001' (position, zero-padded)
     # instead of 'B1' — same order, new format, so every note reseeds.
     # v22: historical collection groups and canonical country spellings.
+    # v23: the legacy US-prefixed Pennsylvania colony label normalizes to
+    # Pennsylvania Colony, using the same dated filing as its other notes.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v22',),
+        ('banknote_display_number_v23',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6672,7 +6674,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v22', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v23', datetime.utcnow().isoformat()),
         )
         db.commit()
 

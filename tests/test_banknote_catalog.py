@@ -114,6 +114,71 @@ class CatalogueTests(unittest.TestCase):
                 'Timor', 'South Vietnam', 'North Vietnam', 'Austro-Hungary'):
             self.assertEqual(catalog.canonical_country(distinct), distinct)
 
+    def test_pennsylvania_alias_is_specific_to_the_colony(self):
+        for alias in ('United States (Colonial - Pennsylvania)',
+                      'United States (Colonial – Pennsylvania)', 'Pennsylvania Colony'):
+            self.assertEqual(catalog.canonical_country(alias), 'Pennsylvania Colony')
+            self.assertEqual(stuff.normalize_field_value('banknotes', 'country', alias),
+                             'Pennsylvania Colony')
+            self.assertEqual(stuff._canonical_banknote_country(alias), 'Pennsylvania Colony')
+            self.assertEqual(stuff._coerce_banknote_spec('country', alias), 'Pennsylvania Colony')
+            self.assertEqual(catalog.classify(alias, 1772, 'Province of Pennsylvania')['key'],
+                             'british')
+            self.assertEqual(stuff._country_key(alias), 'colonial-america')
+        for distinct in ('Pennsylvania', 'Commonwealth of Pennsylvania', 'New Jersey',
+                         'United States (Colonial - New Jersey)'):
+            self.assertEqual(catalog.canonical_country(distinct), distinct)
+        self.assertEqual(catalog.canonical_country('United States'), 'United States of America')
+        self.assertEqual(catalog.classify('United States', 1928)['key'], 'us')
+
+    def test_pennsylvania_migration_combines_panels_and_preserves_note_data(self):
+        legacy = 'United States (Colonial - Pennsylvania)'
+        self.add('pa1772', legacy, 1772, 'Province of Pennsylvania')
+        self.add('pa1773', 'Pennsylvania Colony', 1773, 'General Assembly of Pennsylvania')
+        self.add('modern', 'United States of America', 1928, 'United States Treasury')
+        self.db.execute("UPDATE banknotes SET denomination='2 Shillings', pick_number='Fr#PA-156', "
+                        "grade='Choice UNCEPQ 64', image_1='original-front.jpg' WHERE id='pa1772'")
+        self.db.commit()
+        before = dict(self.db.execute("SELECT * FROM banknotes WHERE id='pa1772'").fetchone())
+        stuff._migrate_banknote_country_aliases(self.db)
+        stuff._migrate_banknote_country_aliases(self.db)
+        self.db.commit()
+        after = dict(self.db.execute("SELECT * FROM banknotes WHERE id='pa1772'").fetchone())
+        for field, value in before.items():
+            if field not in ('country', 'updated_at'):
+                self.assertEqual(after[field], value, field)
+        self.assertEqual(after['country'], 'Pennsylvania Colony')
+        history = self.db.execute("SELECT original_country,canonical_country FROM "
+                                  "banknote_country_alias_history WHERE banknote_id='pa1772'").fetchall()
+        self.assertEqual([tuple(row) for row in history], [(legacy, 'Pennsylvania Colony')])
+        rows = self.db.execute("SELECT * FROM banknotes WHERE id LIKE 'pa%' ORDER BY date_1").fetchall()
+        panels = stuff.series_panels(rows)
+        self.assertEqual(panels['pa1772']['panel']['title'], 'Pennsylvania Colony')
+        self.assertEqual(panels['pa1772']['panel']['now'], 'United States')
+        self.assertEqual(panels['pa1772']['panel']['series_list'], ['1772', '1773'])
+        self.assertNotIn('panel', panels.get('pa1773', {}))
+        client = stuff.app.test_client()
+        for path in ('/banknotes', '/banknotes?history=0', '/banknotes/pa1772'):
+            response = client.get(path)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('Pennsylvania Colony', response.get_data(as_text=True))
+            self.assertNotIn(legacy, response.get_data(as_text=True))
+        for query in (legacy, 'Pennsylvania Colony'):
+            html = client.get('/banknotes', query_string={'q': query}).get_data(as_text=True)
+            self.assertIn('item-pa1772', html)
+            self.assertIn('item-pa1773', html)
+            self.assertNotIn('item-modern', html)
+        response = client.post('/banknotes/pa1772/save-field',
+                               json={'field': 'country', 'value': legacy})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.db.execute("SELECT country FROM banknotes WHERE id='pa1772'").fetchone()[0],
+                         'Pennsylvania Colony')
+        seed = stuff._finalize_sweep_seed({'country': legacy}, 'banknotes',
+                                         {'role': 'owner'}, self.db, '2026-09-21')
+        self.assertEqual(seed['country'], 'Pennsylvania Colony')
+        self.assertEqual(self.db.execute("SELECT country FROM banknotes WHERE id='modern'").fetchone()[0],
+                         'United States of America')
+
     def setUp(self):
         self.ctx = stuff.app.app_context(); self.ctx.push()
         self.db = stuff.get_db()
@@ -180,12 +245,16 @@ class CatalogueTests(unittest.TestCase):
     def test_startup_migration_reseeds_and_preserves_alias(self):
         self.add('french', 'Indochina', 1940, 'Banque de l’Indochine')
         self.add('british', 'Australia', 2025)
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v22'")
+        self.add('colonial', 'United States (Colonial - Pennsylvania)', 1772,
+                 'Province of Pennsylvania')
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v23'")
         self.db.commit()
         stuff.init_db()
         row = self.db.execute("SELECT country,banknote_id FROM banknotes WHERE id='french'").fetchone()
-        self.assertEqual(tuple(row), ('French Indo-China', 'P 002'))
+        self.assertEqual(tuple(row), ('French Indo-China', 'P 003'))
         self.assertEqual(self.db.execute("SELECT original_country FROM banknote_country_alias_history WHERE banknote_id='french'").fetchone()[0], 'Indochina')
+        row = self.db.execute("SELECT country,banknote_id FROM banknotes WHERE id='colonial'").fetchone()
+        self.assertEqual(tuple(row), ('Pennsylvania Colony', 'P 001'))
 
     def test_save_and_import_canonicalization_and_renumber(self):
         self.add('edit', 'Netherlands Indies', 1944, 'Netherlands Indies Government')

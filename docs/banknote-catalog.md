@@ -72,10 +72,21 @@ migrations, preserving the original spelling in `banknote_country_alias_history`
 The audit table has a composite primary key beginning with its banknote foreign
 key and cascades on deletion. No issuer, historical date, Pick number or note
 identity is changed by this spelling migration. Display-number migration v22
-resequences the list, and issuer edits now resequence too.
+resequenced the list, and issuer edits now resequence too.
+
+The explicit legacy label “United States (Colonial - Pennsylvania)” normalizes
+to **Pennsylvania Colony**, matching the other Pennsylvania colonial notes.
+Their history panels can therefore share a heading, retaining “now United
+States” only as the modern-country reference. Generic US names, other colonies,
+and the later Commonwealth of Pennsylvania are not covered by this alias.
+The original value remains in the alias audit table; migration v23 resequences
+display numbers after this correction. Check, edit and import use the same alias
+rule so the old heading cannot be reintroduced through those paths.
 
 ## Evidence and limits
 
+- [Library of Congress — Early American Paper Money Collection](https://findingaids.loc.gov/exist_collections/ead3pdf/rbc/2019/rb019001.pdf)
+  catalogs the Pennsylvania two-shilling issue dated April 3, 1772.
 - [PMG French Indo-China population report](https://www.pmgnotes.com/population-report/french-cochin-china-and-indo-china/french-indo-china/5-piastres/)
   supplies the canonical numismatic spelling and separates Cochin-China.
 - [Bangko Sentral ng Pilipinas — history of Philippine money](https://www.bsp.gov.ph/Pages/CoinsAndNotes/HistoryOfPhilippineMoney/HistoryOfPhilippineMoney.aspx)
