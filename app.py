@@ -69,6 +69,10 @@ UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'tif', 'tiff', 'heic', 'heif'}
 OPTIMIZED_IMAGE_MAX_EDGE = int(os.environ.get('STUFFAPP_IMAGE_MAX_EDGE', '2800'))
 OPTIMIZED_IMAGE_JPEG_QUALITY = int(os.environ.get('STUFFAPP_IMAGE_JPEG_QUALITY', '88'))
+# Fine engraving and coloured serial numbers need full chroma resolution.
+# Keep the general photo policy unchanged; banknote derivatives use this
+# separate setting and their uploaded originals are not pre-compressed.
+BANKNOTE_IMAGE_JPEG_QUALITY = 97
 
 # iPhones export photos as HEIC; browsers can't render it. Register the HEIF
 # opener so PIL can decode HEIC bytes, then convert to JPEG on upload.
@@ -167,6 +171,11 @@ ITEM_IMAGE_FIELDS_BY_CATEGORY = {
 
 def _is_item_image_field(category, field_name):
     return field_name in ITEM_IMAGE_FIELDS_BY_CATEGORY.get(category, set())
+
+
+def _should_optimize_item_image(category, field_name):
+    """Banknote photos are crop/label sources, not disposable previews."""
+    return category != 'banknotes' and _is_item_image_field(category, field_name)
 
 # Fields per category: name, label, type, options (for select/checkbox-group)
 COMPLICATIONS_OPTIONS = [
@@ -11084,6 +11093,20 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
     w, h = img.size
     if w < 200 or h < 100:
         return None
+    # A cream sheet against cool/neutral holder plastic has a measurable
+    # colour boundary. Prefer that complete paper outline to model seeds
+    # or engraving-based cleanup, which can shave margins off coloured
+    # designs (Canada 1935 $5, 2026-09-20). Render once from the original.
+    paper_quad = _warm_paper_on_light_holder_quad(img, expect_aspect)
+    if paper_quad is not None:
+        rect = _rectify_note_quad(img, paper_quad)
+        if rect is not None:
+            if meta is not None:
+                meta['engine'] = 'paper-boundary'
+                meta['quad'] = [[round(x, 1), round(y, 1)] for x, y in paper_quad]
+            app.logger.info('trim: full paper boundary %dx%d -> %dx%d',
+                            w, h, *rect[0].size)
+            return _encode_trimmed_note(rect[0])
     # Seeded geometry pipeline first when enabled: 'ok' ships its crop,
     # 'noop' means the frame already is the note (store nothing), and
     # only a genuine failure falls through to the detector cascade.
@@ -11252,12 +11275,98 @@ def _vision_crop_verdict(crop):
 def _encode_trimmed_note(crop):
     from io import BytesIO
 
-    if max(crop.size) > OPTIMIZED_IMAGE_MAX_EDGE:
-        crop.thumbnail((OPTIMIZED_IMAGE_MAX_EDGE, OPTIMIZED_IMAGE_MAX_EDGE))
     out = BytesIO()
-    crop.save(out, format='JPEG', quality=OPTIMIZED_IMAGE_JPEG_QUALITY,
-              optimize=True, progressive=True)
+    crop.save(out, format='JPEG', quality=BANKNOTE_IMAGE_JPEG_QUALITY,
+              subsampling=0, optimize=True, progressive=True)
     return out.getvalue()
+
+
+def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
+    """High-confidence full-sheet outline, not the printed design.
+
+    Cream paper is warmer than the pale neutral/blue plastic surrounding
+    it. Require a large, nearly rectangular component and that same
+    paper-to-light-holder transition along EVERY side. White-paper photos,
+    dark backdrops, ambiguous colours and already cropped notes defer to
+    the existing pipeline. No model pixels, sharpening, or recolouring.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+    rgb = np.asarray(img.convert('RGB'))
+    h, w = rgb.shape[:2]
+
+    def paper_mask(a):
+        r, g, b = (a[:, :, i].astype(np.int16) for i in range(3))
+        return ((r - b > 12) & (g - b > 5)).astype(np.uint8) * 255
+
+    scale = min(1.0, 1600.0 / max(w, h))
+    small = (cv2.resize(rgb, (round(w * scale), round(h * scale)),
+                        interpolation=cv2.INTER_AREA) if scale < 1 else rgb)
+    mask = cv2.morphologyEx(paper_mask(small), cv2.MORPH_CLOSE,
+                            np.ones((7, 7), np.uint8))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    for contour in sorted(contours, key=cv2.contourArea, reverse=True):
+        area = cv2.contourArea(contour)
+        if not 0.20 * mask.size <= area <= 0.85 * mask.size:
+            continue
+        poly = cv2.approxPolyDP(contour, 0.015 * cv2.arcLength(contour, True), True)
+        if len(poly) != 4 or not cv2.isContourConvex(poly):
+            continue
+        if area / max(cv2.contourArea(poly), 1) < 0.94:
+            continue
+        pts = poly.reshape(4, 2).astype(float) / scale
+        sums, diffs = pts.sum(axis=1), pts[:, 0] - pts[:, 1]
+        quad = tuple(tuple(p) for p in (pts[sums.argmin()], pts[diffs.argmax()],
+                                       pts[sums.argmax()], pts[diffs.argmin()]))
+        lengths = [np.linalg.norm(np.asarray(quad[(i + 1) % 4]) - quad[i])
+                   for i in range(4)]
+        if min(lengths) < 50 or not (0.85 < lengths[0] / lengths[2] < 1.18
+                                     and 0.85 < lengths[1] / lengths[3] < 1.18):
+            continue
+        aspect = (lengths[0] + lengths[2]) / (lengths[1] + lengths[3])
+        if not 1.4 < aspect < 3.5 or (expect_aspect and
+                abs(aspect / expect_aspect - 1) > 0.08):
+            continue
+        quad = _cv_refine_quad(rgb, quad, paper_mask) or quad
+        centre = np.asarray(quad).mean(axis=0)
+        # A coloured design inside white/cream paper is NOT the sheet:
+        # immediately outside the candidate must be cool neutral plastic,
+        # with a strong warm-paper transition and quiet, light pixels.
+        supported = True
+        for i in range(4):
+            a, b = np.asarray(quad[i]), np.asarray(quad[(i + 1) % 4])
+            tangent = b - a
+            normal = np.array([-tangent[1], tangent[0]])
+            normal /= np.linalg.norm(normal)
+            if np.dot(centre - (a + b) / 2, normal) < 0:
+                normal = -normal
+            samples = a + np.linspace(0.1, 0.9, 100)[:, None] * tangent
+            offset = max(4.0, 0.012 * min(lengths))
+            inside = np.rint(samples + offset * normal).astype(int)
+            outside = np.rint(samples - offset * normal).astype(int)
+            if any((p[:, 0] < 0).any() or (p[:, 0] >= w).any() or
+                   (p[:, 1] < 0).any() or (p[:, 1] >= h).any()
+                   for p in (inside, outside)):
+                supported = False
+                break
+            pin = rgb[inside[:, 1], inside[:, 0]].astype(float)
+            pout = rgb[outside[:, 1], outside[:, 0]].astype(float)
+            warm_in = pin[:, 0] - pin[:, 2]
+            warm_out = pout[:, 0] - pout[:, 2]
+            if (np.mean(warm_in > 12) < 0.75 or
+                    np.mean(warm_out < 10) < 0.85 or
+                    np.median(warm_out) > -2 or
+                    np.median(warm_in - warm_out) < 15 or
+                    np.median(pout.mean(axis=1)) < 160):
+                supported = False
+                break
+        if supported:
+            return quad
+    return None
 
 
 # --- Trim v2: seeded geometry pipeline (2026-08-21) -------------------
@@ -16126,7 +16235,7 @@ def _market_page_image_urls(listing_url, html=None):
     return keep[:4]
 
 
-def _market_store_images(item):
+def _market_store_images(item, category=None):
     """Download the listing's obverse and reverse photos and store them
     the way an upload is stored. Returns {'image_1': name, 'image_2':
     name} for whichever came through. The scan's own image URLs come
@@ -16151,7 +16260,7 @@ def _market_store_images(item):
             app.logger.info("market buy image: %s failed — %s | %s", field, title, url[:120])
             return False
         fs = FileStorage(stream=BytesIO(data), filename=f'{field}.{ext}')
-        name = save_upload(fs, optimize_image=True)
+        name = save_upload(fs, optimize_image=category != 'banknotes')
         if not name:
             app.logger.info("market buy image: %s could not be stored — %s | %s", field, title, url[:120])
             return False
@@ -17934,7 +18043,7 @@ def market_item_buy(category, item_id):
         if not location or (choices and location not in choices):
             return jsonify({'ok': False, 'error': 'Location is required',
                             'choices': choices}), 400
-        images = _market_store_images(item)
+        images = _market_store_images(item, category=category)
         record_id = _market_create_record(db, category, item, location, images)
         db.execute("UPDATE market_scan_items SET status = 'ordered', record_id = ? "
                    "WHERE id = ?", [record_id, item_id])
@@ -19571,7 +19680,7 @@ def new_record(category):
             if field['type'] == 'file':
                 f = request.files.get(fname)
                 stored = save_upload(
-                    f, optimize_image=_is_item_image_field(category, fname)
+                    f, optimize_image=_should_optimize_item_image(category, fname)
                 )
                 if stored:
                     data[fname] = stored
@@ -19903,7 +20012,7 @@ def detail_view(category, record_id):
                 f = request.files.get(fname)
                 if f and f.filename:
                     stored = save_upload(
-                        f, optimize_image=_is_item_image_field(category, fname)
+                        f, optimize_image=_should_optimize_item_image(category, fname)
                     )
                     if stored:
                         updates[fname] = stored
@@ -26263,7 +26372,7 @@ def upload_image(category, record_id):
     if not _user_can_see_row(category, existing):
         return jsonify({'error': 'Forbidden'}), 403
 
-    stored = save_upload(f, optimize_image=_is_item_image_field(category, image_field))
+    stored = save_upload(f, optimize_image=_should_optimize_item_image(category, image_field))
     if not stored:
         return jsonify({'error': 'Upload failed'}), 500
 
@@ -36270,7 +36379,7 @@ def sweep_files():
                     continue
 
             stored = save_upload(
-                f, optimize_image=bool(chosen_field and _is_item_image_field(cat, chosen_field))
+                f, optimize_image=bool(chosen_field and _should_optimize_item_image(cat, chosen_field))
             )
             if not stored:
                 report['skipped'].append({'file': rel, 'reason': 'save_upload failed (unsupported type?)'})

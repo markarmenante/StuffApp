@@ -11,6 +11,7 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_banknote_sort.py', 'test_bank
          'test_country_history_placeholder.py',
          'test_banknote_vision_source.py',
          'test_banknote_check_preserves_images.py',
+         'test_banknote_image_quality.py',
          'test_market_bought.py',
          'test_market_presentation.py',
          'test_market_exact_listing.py',

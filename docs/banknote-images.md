@@ -32,3 +32,28 @@ upload, initial and repeated Check, new / revised / missing dimensions, manual
 adjustment, older unmapped photos, failed lookups, and applying suggestions.
 It checks image pointers, file hashes, and source / corner mappings. Holder-label
 source selection remains covered by `tests/test_banknote_vision_source.py`.
+
+## Upload quality and full-paper boundaries
+
+Banknote uploads bypass general display-photo optimization: supported opaque
+WebP / JPEG / PNG sources remain unchanged, at their original resolution, for
+holder-label reading and future crop edits. This applies to drag/drop, form
+uploads, imports and Market Buy/Bought. Other categories retain their existing
+optimization policy. The existing compatibility conversion for HEIC / transparent
+images is unchanged.
+
+Banknote crop JPEGs retain native crop resolution and use quality 97 with full
+4:4:4 colour sampling. A high-confidence paper-boundary detector handles cream
+paper in a pale cool-coloured holder before the model/cascade pipeline: all four
+sides must show the paper-to-holder colour transition, the outline must form a
+large rectangle, and any known catalog aspect ratio must agree. It rectifies
+directly from the source once and records the exact corners; no later design
+crop, edge shave, or tilt correction runs over this accepted full-sheet crop.
+Ambiguous photos continue through the existing detectors.
+
+This fixes the Canada 1935 $5 upload (September 20, 2026), whose reverse had been
+cropped to the red engraving rather than the full sheet and whose upload had
+already been JPEG-compressed before trimming. Tests in
+`tests/test_banknote_image_quality.py` cover full paper margins, colour sampling,
+native resolution, exact source preservation, and rejection of an inner coloured
+design / already cropped note / uncertain surround.

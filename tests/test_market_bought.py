@@ -18,7 +18,7 @@ os.environ.pop('ANTHROPIC_API_KEY', None)
 import app as stuffapp
 
 client = stuffapp.app.test_client()
-stuffapp._market_store_images = lambda item: {}  # no network in tests
+stuffapp._market_store_images = lambda item, category=None: {}  # no network in tests
 
 def seed_item(db, item_id, status, title, created_at, scan_id='scan-1'):
     payload = {'title': title, 'listing_url': f'https://example.test/{item_id}',
