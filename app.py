@@ -11,6 +11,7 @@ import time
 import market_scan as market_runtime
 import market_colonial
 import banknote_catalog
+import ebay_orders
 from datetime import datetime, date, timedelta
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response,
@@ -28273,7 +28274,7 @@ def _upload_visible_to_current_user(filename):
 # Endpoints that everyone gets to hit regardless of category access.
 # Uploaded files and generated thumbnails are NOT exempt: the route
 # handlers enforce category + row-filter access before serving bytes.
-_AUTH_EXEMPT_ENDPOINTS = {'static', 'healthz'}
+_AUTH_EXEMPT_ENDPOINTS = {'static', 'healthz', 'ebay_public.account_deletion', 'ebay_public.privacy'}
 
 
 @app.before_request
@@ -40251,8 +40252,14 @@ def pedigree_pct_filter(value):
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+_ebay_order_sync = ebay_orders.register(
+    app, get_db, open_db_connection, require_owner, DATA_DIR)
+
 with app.app_context():
     init_db()
+    ebay_orders.init_schema(get_db())
+
+_ebay_order_sync.start()
 
 # Fill in history for any country already in the collection that has
 # none — one sequential daemon thread, a no-op once every country is

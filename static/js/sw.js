@@ -17,7 +17,7 @@
 // Bump on every shipped change to invalidate old caches: a stale CSS
 // entry from before the random→asset_v cache-buster fix would otherwise
 // linger and keep rendering the un-styled page offline.
-const VERSION = 'v5';
+const VERSION = 'v6';
 const SHELL_CACHE = `stuffapp-shell-${VERSION}`;
 const DATA_CACHE  = `stuffapp-data-${VERSION}`;
 
@@ -61,7 +61,7 @@ self.addEventListener('activate', (event) => {
 // the server, or the cached body would be misleading on a re-open.
 const NO_CACHE_PATHS = [
   '/admin', '/sweep', '/files-status', '/admin/export',
-  '/sw.js',
+  '/sw.js', '/banknotes/ebay', '/ebay',
 ];
 
 function shouldNotCache(url) {
@@ -146,6 +146,8 @@ self.addEventListener('message', (event) => {
 });
 
 async function warmCache(urls, port) {
+  // OAuth callbacks and private order pages are never offline snapshots.
+  urls = urls.filter(u => !shouldNotCache(new URL(u, self.location.origin)));
   const cache = await caches.open(DATA_CACHE);
   const total = urls.length;
   let done = 0, ok = 0, skipped = 0, failed = 0, quotaHit = false;

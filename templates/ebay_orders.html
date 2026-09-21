@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% block title %}eBay Orders — Banknotes{% endblock %}
+{% block content %}
+<div class="ebay-page">
+  <div class="ebay-heading">
+    <div><h1>eBay Orders</h1><p>Banknote purchases, shipping and delivery — directly from eBay.</p></div>
+    <a class="toolbar-btn pill" href="{{ url_for('list_view', category='banknotes') }}">← Banknotes</a>
+  </div>
+  <section class="ebay-connection" aria-labelledby="connectionHeading">
+    <h2 id="connectionHeading">{% if connection and connection.connected %}Connected to {{ connection.account_name }}{% else %}Connect your eBay account{% endif %}</h2>
+    {% if not configured %}
+      <p class="ebay-notice">Waiting for one-time eBay application setup. Automatic updates are not running.{% if not connection and not items %} No orders have been read.{% endif %}</p>
+      <p>This connection requires an approved <a href="https://developer.ebay.com/signin" target="_blank" rel="noopener noreferrer">eBay Developers Program</a> account, separate from your normal eBay login. If you have registered and eBay is reviewing the account, wait for its approval. Once setup is complete, Connect eBay will ask for your permission on eBay’s own website.</p>
+      <details class="ebay-setup"><summary>Application setup details</summary>
+        <p>If your developer registration is under review, wait for eBay to approve it before creating production keys.</p>
+        <p>Use a Production keyset with order-reading access. Store <code>EBAY_CLIENT_ID</code>, <code>EBAY_CLIENT_SECRET</code> and the OAuth-enabled <code>EBAY_RUNAME</code> on this deployment, never in this page or a chat message.</p>
+        <p>OAuth accepted and declined URL: <code>https://stuff.armenante.com/banknotes/ebay/callback</code>. Complete eBay’s production-key activation requirements using the signed notification endpoint <code>/ebay/account-deletion</code>. Privacy page: <code>/ebay/privacy</code>. Then set <code>EBAY_SYNC_WORKER=1</code> on this collection’s deployment.</p>
+      </details>
+    {% else %}
+      {% if connection and connection.connected %}
+        <p>{% if connection.enabled and worker_enabled %}<strong>Automatic updates are on</strong> · every {{ interval_minutes }} minutes.{% elif not connection.enabled %}<strong>Automatic updates are paused.</strong>{% else %}<strong>Scheduled checks are not enabled on this deployment.</strong> Check now still works.{% endif %}</p>
+        <p>Last successful check: {{ connection.last_success|default('Not checked yet', true) }}{% if connection.last_success %} (UTC){% endif %}</p>
+        {% if connection.error %}<p class="ebay-notice" role="alert">{{ connection.error }}</p>{% endif %}
+      {% else %}
+        <p>After connection, exact order matches update automatically. No purchases, payments or messages are sent to eBay.</p>
+      {% endif %}
+      <div class="ebay-actions">
+        <form action="{{ url_for('ebay.connect') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="toolbar-btn pill" type="submit">{% if connection and connection.connected %}Reconnect eBay{% else %}Connect eBay{% endif %}</button></form>
+        {% if connection and connection.connected %}
+        <form action="{{ url_for('ebay.sync_now') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="toolbar-btn pill" type="submit" {% if not connection.enabled %}disabled{% endif %}>Check now</button></form>
+        <form action="{{ url_for('ebay.settings') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="{{ 'pause' if connection.enabled else 'resume' }}"><button class="toolbar-btn pill" type="submit">{{ 'Pause automatic updates' if connection.enabled else 'Resume automatic updates' }}</button></form>
+        <form action="{{ url_for('ebay.settings') }}" method="post" onsubmit="return confirm('Disconnect eBay and stop automatic checks? Your collection and existing shipping history will remain.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="disconnect"><button class="toolbar-btn pill" type="submit">Disconnect</button></form>
+        {% endif %}
+      </div>
+    {% endif %}
+    <p class="ebay-help">Shipping progress is separate from Own / Ordered / Sold in your collection. Only confirmed eBay evidence advances delivery; missing updates never mean “Delivered.” Photos and collection details are not changed.</p>
+  </section>
+
+  {% set linked = items|selectattr('banknote_id')|list %}
+  {% set unmatched = items|rejectattr('banknote_id')|list %}
+  <h2>Matched banknotes <span class="ebay-count">{{ linked|length }}</span></h2>
+  {% if not linked %}<p class="ebay-empty">No matched orders yet. Exact purchase-listing links will match automatically after connection.</p>{% endif %}
+  {% for item in linked %}
+  <article class="ebay-order" id="note-{{ item.banknote_id }}">
+    <div class="ebay-order-heading"><a href="{{ url_for('detail_view', category='banknotes', record_id=item.banknote_id) }}">{{ item.cat_id or '' }} · {{ item.country or '' }} {{ item.denomination or '' }}</a><span class="ebay-delivery-badge ebay-{{ (item.manual_status or item.delivery_status)|lower }}">{{ item.manual_status or item.delivery_status }}{% if item.manual_status %} · Manual{% endif %}</span></div>
+    <p><a href="https://www.ebay.com/itm/{{ item.item_id }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a></p>
+    <p class="ebay-meta">Order {{ item.order_id }}{% if item.seller %} · {{ item.seller }}{% endif %} · {{ 'Exact listing match' if item.matched_by == 'listing' else 'Match confirmed by you' }}</p>
+    <div class="ebay-timeline"><span>Ordered<br><b>{{ (item.ordered_at or '—')[:10] }}</b></span><span>Shipped<br><b>{{ (item.shipped_at or 'Not confirmed')[:16] }}</b></span><span>Delivered<br><b>{{ (item.delivered_at or 'Not confirmed')[:16] }}</b></span></div>
+    {% if item.estimated_delivery and not item.delivered_at %}<p>Estimated delivery: {{ item.estimated_delivery[:10] }} — estimate only</p>{% endif %}
+    {% for track in tracking.get(item.line_key, []) %}<p class="ebay-meta">{{ track.carrier }} · Tracking {{ track.tracking_number }}</p>{% endfor %}
+    {% if item.attention %}<p class="ebay-notice">{{ item.attention }}. Automatic status advances are held.</p>{% endif %}
+    <p class="ebay-meta">Last seen on eBay: {{ item.last_seen }} · Older orders may fall outside eBay’s 90-day history window.</p>
+    <details><summary>Correct status or matching</summary>
+      <div class="ebay-actions">
+        <form action="{{ url_for('ebay.override') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="banknote_id" value="{{ item.banknote_id }}"><label>Shipping status <select name="status"><option value="automatic" {% if not item.manual_status %}selected{% endif %}>Automatic from eBay</option>{% for status in ['Ordered','Shipped','Delivered'] %}<option {% if item.manual_status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select></label><button class="toolbar-btn pill" type="submit">Save</button></form>
+        <form action="{{ url_for('ebay.ignore') }}" method="post" onsubmit="return confirm('Remove this match and exclude this order from automatic matching? The banknote stays in your collection.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="line_key" value="{{ item.line_key }}"><button class="toolbar-btn pill" type="submit">Wrong match — exclude order</button></form>
+      </div>
+    </details>
+  </article>
+  {% endfor %}
+
+  <h2>Needs matching <span class="ebay-count">{{ unmatched|length }}</span></h2>
+  {% if not unmatched %}<p class="ebay-empty">No banknote orders awaiting a match.</p>{% endif %}
+  {% for item in unmatched %}
+  <article class="ebay-order">
+    <div class="ebay-order-heading"><a href="https://www.ebay.com/itm/{{ item.item_id }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a><span class="ebay-delivery-badge ebay-{{ item.delivery_status|lower }}">{{ item.delivery_status }}</span></div>
+    <p class="ebay-meta">Order {{ item.order_id }} · {{ (item.ordered_at or '')[:10] }}{% if item.seller %} · {{ item.seller }}{% endif %}</p>
+    {% if item.attention %}<p class="ebay-notice">{{ item.attention }}</p>{% endif %}
+    {% if item.quantity != 1 %}<p class="ebay-notice">Quantity {{ item.quantity }}: this order needs individual review; it will not be assigned to a single banknote automatically.</p>{% endif %}
+    <div class="ebay-actions">
+      {% if item.quantity == 1 %}<form action="{{ url_for('ebay.match') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="line_key" value="{{ item.line_key }}"><label>Banknote <select name="banknote_id" required><option value="">Choose the exact note…</option>{% for note in notes %}<option value="{{ note.id }}">{{ note.cat_id or '' }} · {{ note.country or '' }} {{ note.denomination or '' }} {{ note.date_1 or '' }}{% if note.serial_number %} · S/N {{ note.serial_number }}{% endif %}</option>{% endfor %}</select></label><button class="toolbar-btn pill" type="submit">Confirm match</button></form>{% endif %}
+      <form action="{{ url_for('ebay.ignore') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="line_key" value="{{ item.line_key }}"><button class="toolbar-btn pill" type="submit">Exclude</button></form>
+    </div>
+  </article>
+  {% endfor %}
+
+  <h2>Recent status changes</h2>
+  {% if not events %}<p class="ebay-empty">Changes will be recorded here with their source and date.</p>{% else %}
+  <div class="ebay-table-wrap"><table class="ebay-history"><thead><tr><th>Banknote</th><th>Change</th><th>Evidence date (UTC)</th><th>Recorded (UTC)</th><th>Source</th></tr></thead><tbody>{% for event in events %}<tr><td><a href="{{ url_for('detail_view', category='banknotes', record_id=event.banknote_id) }}">{{ event.cat_id or event.country }} {{ event.denomination or '' }}</a></td><td>{{ event.previous_status or 'Matched' }} → {{ event.new_status }}</td><td>{{ event.occurred_at }}</td><td>{{ event.observed_at }}</td><td>{{ event.source }}</td></tr>{% endfor %}</tbody></table></div>
+  {% endif %}
+  {% if runs %}<details class="ebay-checks"><summary>Recent checks</summary>{% for run in runs %}<p>{{ run.started_at }} · {{ run.status }}{% if run.status == 'done' %} · {{ run.items_seen }} banknote items · {{ run.matched }} new matches · {{ run.updated }} status changes{% endif %}{% if run.error %} · {{ run.error }}{% endif %}</p>{% endfor %}</details>{% endif %}
+  {% if connection or items %}<details class="ebay-checks"><summary>Remove eBay connection data</summary><p>Deletes this connection’s tokens, imported orders, matches and shipping history. Banknotes, photos and collection details remain unchanged. A new connection starts fresh.</p><form action="{{ url_for('ebay.settings') }}" method="post" onsubmit="return confirm('Permanently delete the eBay connection and all imported shipping history? Your collection records and photos will remain.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete_data"><button class="toolbar-btn pill" type="submit">Delete eBay data</button></form></details>{% endif %}
+</div>
+{% endblock %}

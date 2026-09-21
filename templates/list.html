@@ -69,6 +69,8 @@
      in the list's order, each with its history, four notes to a page.
      Built in the background; the pill polls and opens it. #}
   {% if category == 'banknotes' and not at_property and not _market and not _analysis and g.current_user and g.current_user.role == 'owner' %}
+  <a class="toolbar-btn pill" href="{{ url_for('ebay.dashboard') }}"
+     title="eBay purchase, shipping and delivery updates">eBay Orders</a>
   <button type="button" class="toolbar-btn pill" id="banknoteReport"
           data-build-url="{{ url_for('banknote_report_build') }}"
           data-status-url="{{ url_for('banknote_report_status') }}"
@@ -440,6 +442,9 @@
         <div class="item-line1">
           <span class="item-brand">{{ row['country'] or row['municipality'] or row['issuer'] or '—' }}</span>
           {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
+          {% set delivery = banknote_delivery(row['id']) %}
+          {% if delivery %}<span class="ebay-delivery-badge ebay-{{ delivery.status|lower }}"
+             title="eBay shipping progress{% if delivery.manual %} · manual correction{% endif %}{% if delivery.attention %} · review needed{% endif %}">{{ delivery.status }}{% if delivery.attention %} · Review{% endif %}</span>{% endif %}
         </div>
         {% if _bn_group %}<div class="banknote-period{% if _bn_group.uncertain %} needs-review{% endif %}">{{ _bn_group.period }}</div>{% endif %}
         {% set _distribution = banknote_distribution_callout(row) %}

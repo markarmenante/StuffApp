@@ -9,6 +9,8 @@ lens_images/
 art_images/
 .DS_Store
 .env
+.ebay-token-key
+.ebay-sync.lock
 stuffapp-backup-*.zip
 .claude/worktrees/
 ios/Stuff.xcodeproj/project.xcworkspace/

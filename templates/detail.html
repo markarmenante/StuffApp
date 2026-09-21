@@ -433,6 +433,15 @@
 
   <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
   <div class="detail-nav-overlay">
+    {% if category == 'banknotes' and not is_new %}
+      {% set delivery = banknote_delivery(r['id']) %}
+      {% if delivery %}
+        {% if current_user and current_user.role == 'owner' %}
+        <a href="{{ url_for('ebay.dashboard') }}#note-{{ r['id'] }}" class="ebay-delivery-badge ebay-{{ delivery.status|lower }}"
+           title="eBay shipping progress — separate from collection ownership">{{ delivery.status }}{% if delivery.attention %} · Review{% endif %}</a>
+        {% else %}<span class="ebay-delivery-badge ebay-{{ delivery.status|lower }}">{{ delivery.status }}</span>{% endif %}
+      {% endif %}
+    {% endif %}
     {%- set _has_status_field = (fields | selectattr('name', 'equalto', 'status') | list) | length > 0 -%}
     {% if _has_status_field and not is_new %}
     {# Quick status pill, every category alike: each click advances the

@@ -11,3 +11,5 @@ opencv-python-headless>=4.8
 numpy>=1.26
 rembg>=2.0.60
 onnxruntime>=1.17
+cryptography>=43,<47
+defusedxml==0.7.1
