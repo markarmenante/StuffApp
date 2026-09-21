@@ -23785,11 +23785,11 @@ COIN_SPECS_RESPONSE_SCHEMA = {
 
 def _trim_banknote_image(db, record_id, note, field, expect_aspect=None):
     """Trim one stored banknote slab photo down to the note, levelled;
-    record the source so a re-run can redo the crop. Returns the new
-    file name, or None when nothing was trimmed. Shared by Check (which
-    trims after reading the holder label) and the image upload (an image
-    added AFTER Check — the Mauritius 5 rupees of 2026-09-10 — used to
-    stay untrimmed until the next Check)."""
+    record the source for holder-label reading and explicit crop edits.
+    Returns the new file name, or None when nothing was trimmed. Used
+    when an image arrives through upload or market Buy/Bought. Check
+    must never call this: re-detecting corners replaces an already good
+    upload crop (or a user's manual adjustment) with different geometry."""
     fname = _coin_row_value(note, field)
     if not fname or not is_image_filter(fname):
         return None
@@ -25759,18 +25759,12 @@ def banknote_lookup_specs(record_id):
                    (now, record_id))
         db.commit()
 
-    # Trim each stored image down to just the note, levelled (an upload
-    # is normally trimmed on arrival; this catches one that was not, or
-    # redoes the crop from the original now that the sheet size is
-    # known). The lookup above read the holder label off the UNTRIMMED
-    # originals (_banknote_vision_source), which stay on disk, so the
-    # label survives for any re-run whatever happens here.
-    images_updated = {}
+    # Catalog dimensions remain metadata suggestions, not instructions
+    # to re-crop the displayed photos. Check reads the UNTRIMMED holder
+    # originals via _banknote_vision_source while leaving upload/manual
+    # crops untouched (Canada $20, 2026-09-20). Only uploading a new
+    # image or explicitly adjusting its corners changes image geometry.
     if not lookup_error:
-        # The sheet's catalog long:short ratio anchors the trim (see
-        # _trim_slabbed_note_image). Freshest wins: a dimension this
-        # very lookup just read beats the stored column.
-        expect_aspect = None
         dims = []
         for f in ('size_width', 'size_height'):
             v = filled.get(f)
@@ -25785,31 +25779,15 @@ def banknote_lookup_specs(record_id):
         if not all(d > 0 for d in dims):
             # Still no sheet size: scan the dealer text for an explicit
             # 'W x H mm', then fall back to one focused catalog lookup
-            # by the note's identifiers — the trim needs its geometry
-            # anchor BEFORE the images are processed. Whatever is found
-            # also joins the suggestions for the review modal.
+            # by the note's identifiers. Whatever is found joins the
+            # suggestions for the review modal.
             found = _banknote_dims_scan_or_lookup(note, dealer_text)
             if found:
-                dims = list(found)
                 for f, v in (('size_width', found[0]),
                              ('size_height', found[1])):
                     if _coin_row_value(note, f) in (None, '') and \
                             filled.get(f) in (None, ''):
                         filled[f] = v
-        if all(d > 0 for d in dims):
-            ratio = max(dims) / min(dims)
-            if 1.2 <= ratio <= 4.0:
-                expect_aspect = ratio
-        for field in ('image_1', 'image_2'):
-            # A stored file that is itself a trim re-processes from its
-            # recorded original — a re-run of Check must be able to
-            # REDO a bad crop, and a shaved note fills its own frame,
-            # so trimming the stored copy again is a guaranteed no-op.
-            new_name = _trim_banknote_image(db, record_id, note, field, expect_aspect)
-            if new_name:
-                images_updated[field] = url_for('uploaded_file', filename=new_name)
-        if images_updated:
-            db.commit()
 
     # A country this collection hasn't seen before: start its history
     # panel generating NOW, while the user is still reviewing the Check
@@ -25825,7 +25803,7 @@ def banknote_lookup_specs(record_id):
     return jsonify({
         'filled': filled,
         'overwritten': overwritten,
-        'images': images_updated,
+        'images': {},
         'sources': suggestions.get('sources', ''),
         'specs_searched_at': now,
         # The image/web lookup failed but the dealer-description parser
@@ -26299,7 +26277,8 @@ def upload_image(category, record_id):
     # not only when Check next runs: a note whose Check ran before the
     # photos were added (the Mauritius 5 rupees, 2026-09-10) stayed an
     # untrimmed dealer scan, and Mark cropped it by hand. The original
-    # stays on disk and Check can redo the crop from it.
+    # stays on disk for Check to read its label and for explicit crop
+    # adjustment; Check itself never replaces the displayed crop.
     if category == 'banknotes' and image_field in ('image_1', 'image_2') \
             and is_image_filter(stored):
         note = db.execute("SELECT * FROM banknotes WHERE id = ?", [record_id]).fetchone()
