@@ -1,4 +1,42 @@
-# Banknote order updates directly from eBay
+# Banknote order updates from Today
+
+Today reuses its Apple Mail reader to scan eBay notices across all mailboxes,
+including Archive and Deleted/Trash (and deleted index rows whose message files
+still exist). The first pass covers one year; subsequent passes run every 30
+minutes while Today is running. Permanently removed or undownloaded message
+bodies cannot be recovered by this integration.
+
+The sender must be an eBay email domain. A notice needs exactly one item ID and
+one order number, its seller and explicit order/shipping/delivery wording before
+the item section. Combined notices and ambiguous messages are skipped. An
+estimate, label creation or out-for-delivery notice never establishes delivery.
+Shipment notices that omit quantity represent one item; explicit quantities above
+one remain review-only. Confirmation dates are email receipt dates, not inferred
+carrier event times. Cancels/refunds are not used as delivery confirmations.
+
+Today sends only the item/order IDs, title, seller, quantity, status, a short
+evidence phrase, timestamp and a hashed message ID to `POST /ebay/today`.
+No raw email, addresses, payments or attachments leave the Mac. Replays are
+deduplicated and failed submissions retry. Exact listing matching and manual
+overrides use the same rules below. **Collection ownership (`banknotes.status`),
+including `Own`, is never updated.** Only the separate shipping tables change.
+
+Setup uses `STUFFAPP_TODAY_TOKEN` on Railway **web only**, and the same token in
+`~/Library/Application Support/com.boardroom.today/stuffapp-mail.json` (0600):
+`{"url":"https://web-production-cf059.up.railway.app/ebay/today","token":"<secret>"}`.
+The receiver rejects requests when the token is absent or invalid. It does not
+use the legacy owner/header fallback. No eBay developer account or new email
+connection is required. Do not put this token on the separate `gerri` service.
+
+`GET http://localhost:5170/api/stuffapp/status` reports progress without secrets;
+`POST /api/stuffapp/sync` requests an immediate pass. StuffApp's eBay Orders page
+shows the last successful pass and supports pause/resume. Deleting imported data
+also pauses reception so the background sender cannot immediately recreate it.
+
+Tests: `python tests/test_ebay_mail.py`, `python tests/test_ebay_orders.py`, and
+boardroom's `apps/today/ebay-mail.test.ts`.
+
+## Optional direct eBay API
 
 Banknotes → **eBay Orders** connects one buyer account to this collection.
 The worker checks every 30 minutes (minimum supported interval 15 minutes),

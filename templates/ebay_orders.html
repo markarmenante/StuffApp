@@ -3,12 +3,20 @@
 {% block content %}
 <div class="ebay-page">
   <div class="ebay-heading">
-    <div><h1>eBay Orders</h1><p>Banknote purchases, shipping and delivery — directly from eBay.</p></div>
+    <div><h1>eBay Orders</h1><p>Banknote purchases, shipping and delivery.</p></div>
     <a class="toolbar-btn pill" href="{{ url_for('list_view', category='banknotes') }}">← Banknotes</a>
   </div>
   <section class="ebay-connection" aria-labelledby="connectionHeading">
-    <h2 id="connectionHeading">{% if connection and connection.connected %}Connected to {{ connection.account_name }}{% else %}Connect your eBay account{% endif %}</h2>
-    {% if not configured %}
+    <h2 id="connectionHeading">{% if mail_configured %}Updates from Today{% elif connection and connection.connected %}Connected to {{ connection.account_name }}{% else %}Email updates{% endif %}</h2>
+    {% if mail_configured %}
+      <p><strong>{% if mail_connection and not mail_connection.enabled %}Email updates paused{% elif mail_connection and mail_connection.last_received %}Connected to Today{% else %}Waiting for Today{% endif %}</strong></p>
+      <p>Last email check: {{ mail_connection.last_received if mail_connection and mail_connection.last_received else 'Not checked yet' }}{% if mail_connection and mail_connection.last_received %} (UTC){% endif %}</p>
+      <form action="{{ url_for('ebay.settings') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="{{ 'resume_mail' if mail_connection and not mail_connection.enabled else 'pause_mail' }}"><button class="toolbar-btn pill" type="submit">{{ 'Resume email updates' if mail_connection and not mail_connection.enabled else 'Pause email updates' }}</button></form>
+    {% elif not configured %}
+      <p class="ebay-notice">Today email connection is not configured.</p>
+    {% endif %}
+    {% if not configured and not mail_configured %}
+      <details class="ebay-setup"><summary>Optional direct eBay connection</summary>
       <p class="ebay-notice">Waiting for one-time eBay application setup. Automatic updates are not running.{% if not connection and not items %} No orders have been read.{% endif %}</p>
       <p>This connection requires an approved <a href="https://developer.ebay.com/signin" target="_blank" rel="noopener noreferrer">eBay Developers Program</a> account, separate from your normal eBay login. If you have registered and eBay is reviewing the account, wait for its approval. Once setup is complete, Connect eBay will ask for your permission on eBay’s own website.</p>
       <details class="ebay-setup"><summary>Application setup details</summary>
@@ -16,7 +24,8 @@
         <p>Use a Production keyset with order-reading access. Store <code>EBAY_CLIENT_ID</code>, <code>EBAY_CLIENT_SECRET</code> and the OAuth-enabled <code>EBAY_RUNAME</code> on this deployment, never in this page or a chat message.</p>
         <p>OAuth accepted and declined URL: <code>https://stuff.armenante.com/banknotes/ebay/callback</code>. Complete eBay’s production-key activation requirements using the signed notification endpoint <code>/ebay/account-deletion</code>. Privacy page: <code>/ebay/privacy</code>. Then set <code>EBAY_SYNC_WORKER=1</code> on this collection’s deployment.</p>
       </details>
-    {% else %}
+      </details>
+    {% elif configured %}
       {% if connection and connection.connected %}
         <p>{% if connection.enabled and worker_enabled %}<strong>Automatic updates are on</strong> · every {{ interval_minutes }} minutes.{% elif not connection.enabled %}<strong>Automatic updates are paused.</strong>{% else %}<strong>Scheduled checks are not enabled on this deployment.</strong> Check now still works.{% endif %}</p>
         <p>Last successful check: {{ connection.last_success|default('Not checked yet', true) }}{% if connection.last_success %} (UTC){% endif %}</p>
@@ -33,7 +42,7 @@
         {% endif %}
       </div>
     {% endif %}
-    <p class="ebay-help">Shipping progress is separate from Own / Ordered / Sold in your collection. Only confirmed eBay evidence advances delivery; missing updates never mean “Delivered.” Photos and collection details are not changed.</p>
+    <p class="ebay-help">{{ 'Confirmation dates below are email receipt dates.' if mail_configured else 'Shipping progress is separate from collection ownership.' }}</p>
   </section>
 
   {% set linked = items|selectattr('banknote_id')|list %}
@@ -49,7 +58,7 @@
     {% if item.estimated_delivery and not item.delivered_at %}<p>Estimated delivery: {{ item.estimated_delivery[:10] }} — estimate only</p>{% endif %}
     {% for track in tracking.get(item.line_key, []) %}<p class="ebay-meta">{{ track.carrier }} · Tracking {{ track.tracking_number }}</p>{% endfor %}
     {% if item.attention %}<p class="ebay-notice">{{ item.attention }}. Automatic status advances are held.</p>{% endif %}
-    <p class="ebay-meta">Last seen on eBay: {{ item.last_seen }} · Older orders may fall outside eBay’s 90-day history window.</p>
+    <p class="ebay-meta">Last update: {{ item.last_seen }} (UTC)</p>
     <details><summary>Correct status or matching</summary>
       <div class="ebay-actions">
         <form action="{{ url_for('ebay.override') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="banknote_id" value="{{ item.banknote_id }}"><label>Shipping status <select name="status"><option value="automatic" {% if not item.manual_status %}selected{% endif %}>Automatic from eBay</option>{% for status in ['Ordered','Shipped','Delivered'] %}<option {% if item.manual_status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select></label><button class="toolbar-btn pill" type="submit">Save</button></form>

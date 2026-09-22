@@ -28276,7 +28276,7 @@ def _upload_visible_to_current_user(filename):
 # Endpoints that everyone gets to hit regardless of category access.
 # Uploaded files and generated thumbnails are NOT exempt: the route
 # handlers enforce category + row-filter access before serving bytes.
-_AUTH_EXEMPT_ENDPOINTS = {'static', 'healthz', 'ebay_public.account_deletion', 'ebay_public.privacy'}
+_AUTH_EXEMPT_ENDPOINTS = {'static', 'healthz', 'ebay_public.account_deletion', 'ebay_public.privacy', 'ebay_mail.receive'}
 
 
 @app.before_request

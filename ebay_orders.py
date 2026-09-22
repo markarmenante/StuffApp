@@ -324,7 +324,7 @@ def event(db, banknote_id, previous, new, source, occurred=None):
     return 0
 
 
-def apply_items(db, items):
+def apply_items(db, items, source='eBay', auto_match=True):
     """Caller owns the transaction; a partial network page never reaches here."""
     candidates = listing_candidates(db)
     linked = {r['line_key']: dict(r) for r in db.execute('SELECT * FROM banknote_ebay_links')}
@@ -354,7 +354,9 @@ def apply_items(db, items):
         link = linked.get(item['line_key'])
         if link and link['manual_status'] is None:
             updates += event(db, link['banknote_id'], old['delivery_status'] if old else None,
-                             status, 'eBay', values.get('delivered_at') or values.get('shipped_at') or values.get('ordered_at'))
+                             status, source, values.get('delivered_at') or values.get('shipped_at') or values.get('ordered_at'))
+    if not auto_match:
+        return {'items_seen': len(relevant), 'matched': 0, 'updated': updates}
     # Count all stored orders too: repeat purchases of a multi-quantity listing
     # must never silently attach the latest purchase to an older physical note.
     counts = Counter(r['item_id'] for r in db.execute('SELECT item_id FROM ebay_order_items'))
@@ -372,7 +374,7 @@ def apply_items(db, items):
                    (note_id, item['line_key'], 'listing', now))
         occupied.add(note_id)
         matches += 1
-        updates += event(db, note_id, None, item['delivery_status'], 'eBay · exact listing',
+        updates += event(db, note_id, None, item['delivery_status'], source + ' · exact listing',
                          item['delivered_at'] or item['shipped_at'] or item['ordered_at'])
     return {'items_seen': len(relevant), 'matched': matches, 'updated': updates}
 
@@ -535,6 +537,8 @@ def register(app, get_db, open_db, require_owner, data_dir):
     @bp.get('/banknotes/ebay')
     def dashboard():
         db = get_db()
+        from ebay_mail import configured as mail_configured
+        mail_connection = db.execute('SELECT * FROM ebay_mail_connection WHERE id=1').fetchone()
         conn = db.execute('SELECT account_name,enabled,connected_at,last_attempt,last_success,error,refresh_token IS NOT NULL AS connected FROM ebay_connection WHERE id=1').fetchone()
         items = db.execute('SELECT i.*,l.banknote_id,l.manual_status,l.matched_by,b.country,b.denomination,b.cat_id '
                            'FROM ebay_order_items i LEFT JOIN banknote_ebay_links l ON l.line_key=i.line_key '
@@ -552,7 +556,8 @@ def register(app, get_db, open_db, require_owner, data_dir):
         return render_template('ebay_orders.html', current_category='banknotes', connection=conn,
                                configured=sync.client.configured, worker_enabled=sync.worker_enabled,
                                interval_minutes=sync.interval // 60, items=items, notes=notes,
-                               events=events, runs=runs, tracking=tracking, csrf_token=csrf_token())
+                               events=events, runs=runs, tracking=tracking, csrf_token=csrf_token(),
+                               mail_configured=mail_configured(), mail_connection=mail_connection)
 
     @bp.post('/banknotes/ebay/connect')
     def connect():
@@ -621,7 +626,10 @@ def register(app, get_db, open_db, require_owner, data_dir):
     def settings():
         db = get_db()
         action = request.form.get('action')
-        if action == 'pause':
+        if action in ('pause_mail', 'resume_mail'):
+            db.execute('INSERT OR IGNORE INTO ebay_mail_connection (id) VALUES (1)')
+            db.execute('UPDATE ebay_mail_connection SET enabled=? WHERE id=1', (int(action == 'resume_mail'),))
+        elif action == 'pause':
             db.execute('UPDATE ebay_connection SET enabled=0,generation=generation+1 WHERE id=1')
         elif action == 'resume':
             db.execute('UPDATE ebay_connection SET enabled=1,generation=generation+1,last_attempt=NULL WHERE id=1 AND refresh_token IS NOT NULL')
@@ -629,6 +637,8 @@ def register(app, get_db, open_db, require_owner, data_dir):
             db.execute('UPDATE ebay_connection SET enabled=0,refresh_token=NULL,access_token=NULL,access_expires=0,generation=generation+1 WHERE id=1')
             db.execute('DELETE FROM ebay_oauth_states')
         elif action == 'delete_data':
+            db.execute('INSERT OR IGNORE INTO ebay_mail_connection (id) VALUES (1)')
+            db.execute('UPDATE ebay_mail_connection SET enabled=0,last_received=NULL WHERE id=1')
             for table in ('ebay_status_events', 'ebay_order_items', 'ebay_connection', 'ebay_oauth_states', 'ebay_sync_runs'):
                 db.execute('DELETE FROM ' + table)
         else:
@@ -701,4 +711,6 @@ def register(app, get_db, open_db, require_owner, data_dir):
     app.register_blueprint(bp)
     from ebay_notifications import register_notifications
     register_notifications(app, get_db, sync.client)
+    from ebay_mail import register as register_mail
+    register_mail(app, get_db)
     return sync
