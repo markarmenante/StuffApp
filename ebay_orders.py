@@ -280,7 +280,28 @@ def parse_orders(root):
 
 def init_schema(db):
     db.executescript(Path(__file__).with_name('ebay_schema.sql').read_text())
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        sql = db.execute("SELECT sql FROM sqlite_master WHERE name='banknote_ebay_links'").fetchone()[0]
+        if "'details'" not in sql:
+            # Rebuild only the link table to widen its CHECK, preserving every link/override.
+            db.execute(sql.replace('banknote_ebay_links', 'banknote_ebay_links_v2', 1)
+                       .replace("'listing','manual'", "'listing','manual','details'"))
+            db.execute("ALTER TABLE banknote_ebay_links_v2 ADD COLUMN match_evidence TEXT NOT NULL DEFAULT ''")
+            db.execute('INSERT INTO banknote_ebay_links_v2 '
+                       '(banknote_id,line_key,matched_by,matched_at,manual_status) '
+                       'SELECT banknote_id,line_key,matched_by,matched_at,manual_status FROM banknote_ebay_links')
+            db.execute('DROP TABLE banknote_ebay_links')
+            db.execute('ALTER TABLE banknote_ebay_links_v2 RENAME TO banknote_ebay_links')
     db.commit()
+
+
+def detail_match_plan(db):
+    from ebay_matching import plan_matches
+    return plan_matches([dict(r) for r in db.execute('SELECT * FROM banknotes')],
+                        [dict(r) for r in db.execute('SELECT * FROM ebay_order_items')],
+                        [dict(r) for r in db.execute('SELECT * FROM banknote_ebay_links')],
+                        listing_candidates(db))
 
 
 def listing_candidates(db):
@@ -375,6 +396,16 @@ def apply_items(db, items, source='eBay', auto_match=True):
         occupied.add(note_id)
         matches += 1
         updates += event(db, note_id, None, item['delivery_status'], source + ' · exact listing',
+                         item['delivered_at'] or item['shipped_at'] or item['ordered_at'])
+    automatic, _ = detail_match_plan(db)
+    for key, match in automatic.items():
+        item = db.execute('SELECT * FROM ebay_order_items WHERE line_key=?', (key,)).fetchone()
+        db.execute('INSERT INTO banknote_ebay_links '
+                   '(banknote_id,line_key,matched_by,matched_at,match_evidence) VALUES (?,?,?,?,?)',
+                   (match['banknote_id'], key, 'details', now, ', '.join(match['evidence'])))
+        matches += 1
+        updates += event(db, match['banknote_id'], None, item['delivery_status'],
+                         source + ' · identity match: ' + ', '.join(match['evidence']),
                          item['delivered_at'] or item['shipped_at'] or item['ordered_at'])
     return {'items_seen': len(relevant), 'matched': matches, 'updated': updates}
 
@@ -540,7 +571,7 @@ def register(app, get_db, open_db, require_owner, data_dir):
         from ebay_mail import configured as mail_configured
         mail_connection = db.execute('SELECT * FROM ebay_mail_connection WHERE id=1').fetchone()
         conn = db.execute('SELECT account_name,enabled,connected_at,last_attempt,last_success,error,refresh_token IS NOT NULL AS connected FROM ebay_connection WHERE id=1').fetchone()
-        items = db.execute('SELECT i.*,l.banknote_id,l.manual_status,l.matched_by,b.country,b.denomination,b.cat_id '
+        items = db.execute('SELECT i.*,l.banknote_id,l.manual_status,l.matched_by,l.match_evidence,b.country,b.denomination,b.cat_id '
                            'FROM ebay_order_items i LEFT JOIN banknote_ebay_links l ON l.line_key=i.line_key '
                            'LEFT JOIN banknotes b ON b.id=l.banknote_id WHERE i.ignored=0 '
                            'ORDER BY i.ordered_at DESC').fetchall()
@@ -553,10 +584,12 @@ def register(app, get_db, open_db, require_owner, data_dir):
         events = db.execute('SELECT e.*,b.cat_id,b.country,b.denomination FROM ebay_status_events e '
                             'JOIN banknotes b ON b.id=e.banknote_id ORDER BY e.id DESC LIMIT 50').fetchall()
         runs = db.execute('SELECT * FROM ebay_sync_runs ORDER BY started_at DESC LIMIT 5').fetchall()
+        _, suggestions = detail_match_plan(db)
         return render_template('ebay_orders.html', current_category='banknotes', connection=conn,
                                configured=sync.client.configured, worker_enabled=sync.worker_enabled,
                                interval_minutes=sync.interval // 60, items=items, notes=notes,
-                               events=events, runs=runs, tracking=tracking, csrf_token=csrf_token(),
+                               events=events, runs=runs, tracking=tracking, suggestions=suggestions,
+                               csrf_token=csrf_token(),
                                mail_configured=mail_configured(), mail_connection=mail_connection)
 
     @bp.post('/banknotes/ebay/connect')
@@ -665,6 +698,15 @@ def register(app, get_db, open_db, require_owner, data_dir):
         event(db, note_id, None, item['delivery_status'], 'Owner confirmed match')
         db.commit()
         flash('Order matched. Its shipping progress will update automatically.', 'success')
+        return redirect(url_for('ebay.dashboard'))
+
+    @bp.post('/banknotes/ebay/match-auto')
+    def match_auto():
+        db = get_db()
+        db.execute('BEGIN IMMEDIATE')
+        result = apply_items(db, [], source='Recovered eBay orders')
+        db.commit()
+        flash(f"{result['matched']} orders matched. Collection ownership is unchanged.", 'success')
         return redirect(url_for('ebay.dashboard'))
 
     @bp.post('/banknotes/ebay/override')

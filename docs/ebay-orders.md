@@ -88,11 +88,23 @@ resolved by this feature; lock down the origin before expanding access.
 
 - Exact item IDs from a banknote's purchase-source `Listing:` link, a
   `Market Scan YYYY-MM-DD:` reference, or its filed market candidate can
-  auto-match. Comparison links, historical references, similarity of title,
-  denomination or grade cannot. One unambiguous note and one quantity-one
+  auto-match. Comparison links and historical references cannot. One unambiguous note and one quantity-one
   order item are required; repeat listing purchases need manual review.
+- Without a purchase link, country + exact Pick/catalog number + denomination
+  identify candidates. Explicitly different varieties, grades, graders, issue
+  years or serial numbers reject a match. Missing variety letters require
+  matching grade plus year, seller or purchase date. Without a catalog number,
+  a certificate/serial identity or country, denomination, grade, year, seller
+  and purchase date must agree. Purchase dates more than 14 days apart are held.
+- Automatic identity matches must be unique in both directions, considering
+  Own notes as well as Ordered notes. Existing links, exclusions, overrides,
+  multi-quantity orders and repeat purchases remain protected. The matching
+  basis is stored on the link and in the shipping audit history. No banknote
+  fields are written. The Today import also reconciles previously saved orders;
+  **Match recovered orders** runs the same reconciliation immediately.
 - Other likely banknote purchases appear in **Needs matching**. The owner
-  can confirm a match or exclude it. Multi-quantity orders remain review-only.
+  sees candidate banknotes with the matching fields and can confirm or exclude
+  a match. Multi-quantity orders remain review-only.
 - `ShippedTime` proves Shipped. `ActualDeliveryTime` for every package
   proves Delivered. Tracking creation and delivery estimates do not.
   Combined-order dates are not applied to unrelated line items.

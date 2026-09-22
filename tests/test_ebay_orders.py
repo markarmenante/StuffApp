@@ -309,6 +309,25 @@ class WebTests(unittest.TestCase):
         self.assertEqual(res.headers['Cache-Control'], 'no-store')
         self.assertEqual(self.client.post('/banknotes/ebay/connect', base_url='https://localhost').status_code, 403)
         self.assertEqual(self.client.get('/banknotes/ebay', headers={'Cf-Access-Authenticated-User-Email': 'outsider@example.com'}).status_code, 403)
+        self.assertEqual(self.client.post('/banknotes/ebay/match-auto', base_url='https://localhost').status_code, 403)
+
+    def test_reconcile_saved_orders_and_display_match_evidence(self):
+        with self.app.app_context():
+            db = self.stuff.get_db()
+            db.execute("INSERT INTO banknotes (id,country,denomination,pick_number,status) VALUES ('catalog-test','Hong Kong','1 Dollar','P-316','Own')")
+            item = parsed()[0]
+            item['title'] = 'Hong Kong 1 Dollar P-316 banknote'
+            ebay.apply_items(db, [item], auto_match=False)
+            db.commit()
+        self.assertEqual(self.post('/banknotes/ebay/match-auto').status_code, 302)
+        page = self.get('/banknotes/ebay').data
+        self.assertIn(b'Banknote identity match', page)
+        self.assertIn(b'Matched on: Country, Denomination, Catalog number', page)
+        with self.app.app_context():
+            db = self.stuff.get_db()
+            self.assertEqual(db.execute("SELECT status FROM banknotes WHERE id='catalog-test'").fetchone()[0], 'Own')
+            db.execute("DELETE FROM banknotes WHERE id='catalog-test'")
+            db.commit()
 
     def test_oauth_binding_denial_and_replay(self):
         state = self.begin()

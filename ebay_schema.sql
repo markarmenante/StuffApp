@@ -50,9 +50,10 @@ CREATE TABLE IF NOT EXISTS ebay_item_tracking (
 CREATE TABLE IF NOT EXISTS banknote_ebay_links (
     banknote_id TEXT PRIMARY KEY REFERENCES banknotes(id) ON DELETE CASCADE,
     line_key TEXT NOT NULL UNIQUE REFERENCES ebay_order_items(line_key) ON DELETE CASCADE,
-    matched_by TEXT NOT NULL CHECK (matched_by IN ('listing','manual')),
+    matched_by TEXT NOT NULL CHECK (matched_by IN ('listing','manual','details')),
     matched_at TEXT NOT NULL,
-    manual_status TEXT CHECK (manual_status IN ('Ordered','Shipped','Delivered'))
+    manual_status TEXT CHECK (manual_status IN ('Ordered','Shipped','Delivered')),
+    match_evidence TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS ebay_status_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -47,13 +47,16 @@
 
   {% set linked = items|selectattr('banknote_id')|list %}
   {% set unmatched = items|rejectattr('banknote_id')|list %}
-  <h2>Matched banknotes <span class="ebay-count">{{ linked|length }}</span></h2>
-  {% if not linked %}<p class="ebay-empty">No matched orders yet. Exact purchase-listing links will match automatically after connection.</p>{% endif %}
+  <div class="ebay-heading"><h2>Matched banknotes <span class="ebay-count">{{ linked|length }}</span></h2>
+    {% if unmatched %}<form action="{{ url_for('ebay.match_auto') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="toolbar-btn pill" type="submit">Match recovered orders</button></form>{% endif %}
+  </div>
+  {% if not linked %}<p class="ebay-empty">No matched orders yet.</p>{% endif %}
   {% for item in linked %}
   <article class="ebay-order" id="note-{{ item.banknote_id }}">
     <div class="ebay-order-heading"><a href="{{ url_for('detail_view', category='banknotes', record_id=item.banknote_id) }}">{{ item.cat_id or '' }} · {{ item.country or '' }} {{ item.denomination or '' }}</a><span class="ebay-delivery-badge ebay-{{ (item.manual_status or item.delivery_status)|lower }}">{{ item.manual_status or item.delivery_status }}{% if item.manual_status %} · Manual{% endif %}</span></div>
     <p><a href="https://www.ebay.com/itm/{{ item.item_id }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a></p>
-    <p class="ebay-meta">Order {{ item.order_id }}{% if item.seller %} · {{ item.seller }}{% endif %} · {{ 'Exact listing match' if item.matched_by == 'listing' else 'Match confirmed by you' }}</p>
+    <p class="ebay-meta">Order {{ item.order_id }}{% if item.seller %} · {{ item.seller }}{% endif %} · {{ 'Exact listing match' if item.matched_by == 'listing' else ('Banknote identity match' if item.matched_by == 'details' else 'Match confirmed by you') }}</p>
+    {% if item.match_evidence %}<p class="ebay-meta">Matched on: {{ item.match_evidence }}</p>{% endif %}
     <div class="ebay-timeline"><span>Ordered<br><b>{{ (item.ordered_at or '—')[:10] }}</b></span><span>Shipped<br><b>{{ (item.shipped_at or 'Not confirmed')[:16] }}</b></span><span>Delivered<br><b>{{ (item.delivered_at or 'Not confirmed')[:16] }}</b></span></div>
     {% if item.estimated_delivery and not item.delivered_at %}<p>Estimated delivery: {{ item.estimated_delivery[:10] }} — estimate only</p>{% endif %}
     {% for track in tracking.get(item.line_key, []) %}<p class="ebay-meta">{{ track.carrier }} · Tracking {{ track.tracking_number }}</p>{% endfor %}
@@ -76,8 +79,10 @@
     <p class="ebay-meta">Order {{ item.order_id }} · {{ (item.ordered_at or '')[:10] }}{% if item.seller %} · {{ item.seller }}{% endif %}</p>
     {% if item.attention %}<p class="ebay-notice">{{ item.attention }}</p>{% endif %}
     {% if item.quantity != 1 %}<p class="ebay-notice">Quantity {{ item.quantity }}: this order needs individual review; it will not be assigned to a single banknote automatically.</p>{% endif %}
+    {% set proposed = suggestions.get(item.line_key, []) %}
+    {% for candidate in proposed %}<p class="ebay-meta">Possible match: <a href="{{ url_for('detail_view', category='banknotes', record_id=candidate.banknote_id) }}">{{ candidate.label }}</a> · {{ candidate.evidence|join(', ') }}</p>{% endfor %}
     <div class="ebay-actions">
-      {% if item.quantity == 1 %}<form action="{{ url_for('ebay.match') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="line_key" value="{{ item.line_key }}"><label>Banknote <select name="banknote_id" required><option value="">Choose the exact note…</option>{% for note in notes %}<option value="{{ note.id }}">{{ note.cat_id or '' }} · {{ note.country or '' }} {{ note.denomination or '' }} {{ note.date_1 or '' }}{% if note.serial_number %} · S/N {{ note.serial_number }}{% endif %}</option>{% endfor %}</select></label><button class="toolbar-btn pill" type="submit">Confirm match</button></form>{% endif %}
+      {% if item.quantity == 1 %}<form action="{{ url_for('ebay.match') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="line_key" value="{{ item.line_key }}"><label>Banknote <select name="banknote_id" required><option value="">Choose the exact note…</option>{% if proposed %}<optgroup label="Possible matches">{% for candidate in proposed %}<option value="{{ candidate.banknote_id }}">{{ candidate.label }}</option>{% endfor %}</optgroup>{% endif %}<optgroup label="All unmatched banknotes">{% for note in notes %}{% if note.id not in proposed|map(attribute='banknote_id')|list %}<option value="{{ note.id }}">{{ note.cat_id or '' }} · {{ note.country or '' }} {{ note.denomination or '' }} {{ note.date_1 or '' }}{% if note.serial_number %} · S/N {{ note.serial_number }}{% endif %}</option>{% endif %}{% endfor %}</optgroup></select></label><button class="toolbar-btn pill" type="submit">Confirm match</button></form>{% endif %}
       <form action="{{ url_for('ebay.ignore') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="line_key" value="{{ item.line_key }}"><button class="toolbar-btn pill" type="submit">Exclude</button></form>
     </div>
   </article>
