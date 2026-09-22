@@ -4219,6 +4219,9 @@ input[type="date"] { -webkit-appearance: none; }
 .files-download-dialog button { padding: 8px 12px; cursor: pointer; }
 .files-download-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 /* Banknote order progress remains independent of collection ownership. */
+.item-list-banknotes .item-line1 { flex-wrap:wrap; white-space:normal; row-gap:4px; }
+.item-list-banknotes .item-line1 .item-model { flex:0 1 auto; }
+.item-list-banknotes .banknote-status-badge { flex-shrink:0; }
 .ebay-delivery-badge { display:inline-flex; align-items:center; white-space:nowrap; border:1px solid #bac8dc; border-radius:999px; padding:3px 10px; font-size:13px; font-weight:600; background:#eef3fa; color:#294767; text-decoration:none; }
 .ebay-ordered { background:#fff5cb; border-color:#dfc467; color:#70520a; }
 .ebay-shipped { background:#e9f1ff; border-color:#a5bff1; color:#214f99; }

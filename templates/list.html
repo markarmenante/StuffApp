@@ -442,9 +442,13 @@
         <div class="item-line1">
           <span class="item-brand">{{ row['country'] or row['municipality'] or row['issuer'] or '—' }}</span>
           {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
-          {% set delivery = banknote_delivery(row['id']) %}
-          {% if delivery %}<span class="ebay-delivery-badge ebay-{{ delivery.status|lower }}"
-             title="eBay shipping progress{% if delivery.manual %} · manual correction{% endif %}{% if delivery.attention %} · review needed{% endif %}">{{ delivery.status }}{% if delivery.attention %} · Review{% endif %}</span>{% endif %}
+          {% set _ownership = (row['status'] or '')|trim %}
+          {% if _ownership|lower not in ('', 'own', 'owned') %}
+          {% set delivery = banknote_delivery(row['id']) if _ownership|lower == 'ordered' else none %}
+          {% set _status = delivery.status if delivery else _ownership %}
+          <span class="banknote-status-badge ebay-delivery-badge ebay-{{ _status|lower }}"
+                title="{% if delivery %}eBay shipping progress{% if delivery.manual %} · manual correction{% endif %}{% if delivery.attention %} · review needed{% endif %}{% else %}Collection status{% endif %}">{{ _status }}{% if delivery and delivery.attention %} · Review{% endif %}</span>
+          {% endif %}
         </div>
         {% if _bn_group %}<div class="banknote-period{% if _bn_group.uncertain %} needs-review{% endif %}">{{ _bn_group.period }}</div>{% endif %}
         {% set _distribution = banknote_distribution_callout(row) %}
