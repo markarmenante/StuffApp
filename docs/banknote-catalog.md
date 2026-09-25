@@ -83,8 +83,22 @@ The original value remains in the alias audit table; migration v23 resequences
 display numbers after this correction. Check, edit and import use the same alias
 rule so the old heading cannot be reintroduced through those paths.
 
+Generic US records now resolve to a named American colony when a dated issuer
+explicitly says Colony or Province (through 1776), or identifies New York City
+Water Works in its known 1774-1776 issue period. The last Water Works issue is
+March 5, 1776, before independence; a bare 1776 year or a New York mention on its
+own is insufficient. Continental Congress and later state/federal notes are not
+reclassified by this rule. A conflicting named country is not overwritten.
+The same rule drives filing, save/Check/import normalization and startup repair.
+Original country values are retained in the country-history audit table;
+migration v24 resequences display positions without changing permanent B-numbers
+or ownership status. History panels, maps and reports use the corrected country.
+
 ## Evidence and limits
 
+- [PMG - Colonial Currency: Water Works](https://www.pmgnotes.com/news/article/4442/)
+  documents the four New York City issues of August 25, 1774; August 2, 1775;
+  January 6, 1776; and March 5, 1776, including the 8-shilling denomination.
 - [Library of Congress — Early American Paper Money Collection](https://findingaids.loc.gov/exist_collections/ead3pdf/rbc/2019/rb019001.pdf)
   catalogs the Pennsylvania two-shilling issue dated April 3, 1772.
 - [PMG French Indo-China population report](https://www.pmgnotes.com/population-report/french-cochin-china-and-indo-china/french-indo-china/5-piastres/)

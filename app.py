@@ -808,7 +808,8 @@ def canonicalize_banknote_fields(fields, existing=None):
     catalogues do — the state named only in the issuer — moves to
     Manchukuo, whether or not the save touched the country: the fold
     reads the issuer being saved (or the stored one) and may ADD a
-    'country' key, which every caller writes through."""
+    'country' key, which every caller writes through. Confirmed American
+    colonial issuers similarly replace generic US filing with their colony."""
     if 'country' in fields:
         fields['country'] = _canonical_banknote_country(fields['country'])
     country = fields.get('country')
@@ -817,6 +818,15 @@ def canonicalize_banknote_fields(fields, existing=None):
     issuer = fields.get('issuer')
     if issuer is None and existing is not None:
         issuer = _row_get(existing, 'issuer')
+    colonial_country = banknote_catalog.american_colonial_country(
+        country, fields.get('date_1', _row_get(existing, 'date_1')), issuer,
+        fields.get('series', _row_get(existing, 'series')))
+    if colonial_country:
+        if colonial_country != country:
+            fields['country'] = country = colonial_country
+        issue_type = fields.get('issue_type', _row_get(existing, 'issue_type'))
+        if (issue_type or '').strip() in ('', 'National'):
+            fields['issue_type'] = 'Colonial'
     if _mentions_manchukuo(issuer) and _country_key(country) in ('china', None):
         fields['country'] = country = 'Manchukuo'
     # Numismatically Manchukuo's notes are Japanese puppet-bank issues
@@ -1081,7 +1091,7 @@ def _migrate_canonicalize_us_banknotes(db):
     if not {'country', 'denomination'}.issubset(cols):
         return
     changed = False
-    extra = [c for c in ('issuer', 'issue_type', 'date_1') if c in cols]
+    extra = [c for c in ('issuer', 'issue_type', 'date_1', 'series') if c in cols]
     sel = "SELECT id, country, denomination%s FROM banknotes" % ''.join(', ' + c for c in extra)
     for r in db.execute(sel).fetchall():
         fields = {'country': r['country'], 'denomination': r['denomination']}
@@ -1091,6 +1101,9 @@ def _migrate_canonicalize_us_banknotes(db):
         moved = {c: fields[c] for c in ('country', 'denomination', 'issue_type', 'issuer')
                  if c in fields and c in cols and fields[c] != r[c]}
         if moved:
+            if 'country' in moved and r['country'] is not None:
+                db.execute("INSERT OR IGNORE INTO banknote_country_alias_history VALUES (?, ?, ?, ?)",
+                           (r['id'], r['country'], moved['country'], datetime.utcnow().isoformat()))
             db.execute(
                 "UPDATE banknotes SET %s WHERE id = ?" % ', '.join(f'{c} = ?' for c in moved),
                 (*moved.values(), r['id']))
@@ -6664,9 +6677,11 @@ def init_db():
     # v22: historical collection groups and canonical country spellings.
     # v23: the legacy US-prefixed Pennsylvania colony label normalizes to
     # Pennsylvania Colony, using the same dated filing as its other notes.
+    # v24: named American colonial issuers and NYC Water Works move out of
+    # generic US filing and into the British North America collection block.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v23',),
+        ('banknote_display_number_v24',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6674,7 +6689,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v23', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v24', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -20687,7 +20702,7 @@ def save_field(category, record_id):
             if touched:
                 _renumber_coin_groups(db, touched)
 
-    if category == 'banknotes' and field_name in BANKNOTE_SORT_FIELDS:
+    if category == 'banknotes' and any(f in _canon for f in BANKNOTE_SORT_FIELDS):
         _renumber_banknotes(db)
         response_banknote_id = db.execute(
             "SELECT banknote_id FROM banknotes WHERE id = ?",
@@ -28948,6 +28963,8 @@ def _banknote_modern_name(country):
     """The current name for a historical issuing name, or None when the
     name still stands (or is not listed)."""
     raw = (country or '').strip().lower()
+    if raw in {name.lower() for name in banknote_catalog.AMERICAN_COLONIES.values()}:
+        return 'United States'
     for cand in (raw, raw.split(' (')[0].strip(), raw.split('/')[0].strip(), raw.split(' - ')[0].strip()):
         if cand and cand in BANKNOTE_MODERN_NAME:
             return BANKNOTE_MODERN_NAME[cand]
@@ -35812,8 +35829,8 @@ def _finalize_sweep_seed(seed, cat, user, db, now):
     Doesn't overwrite values already in `seed` — so a snapshot-driven
     create that already carries a stable id, owner, and cat_id keeps
     them, while a path-driven create gets fresh ones."""
-    if cat == 'banknotes' and 'country' in seed:
-        seed['country'] = banknote_catalog.canonical_country(seed['country'])
+    if cat == 'banknotes':
+        canonicalize_banknote_fields(seed)
     seed.setdefault('id', str(uuid.uuid4()))
     seed.setdefault('created_at', now)
     # updated_at intentionally overwrites: this is a fresh INSERT, not

@@ -190,9 +190,56 @@ def _year(value):
     return int(m.group()) if m else None
 
 
+AMERICAN_COLONIES = {
+    name: name + ' Colony' for name in (
+        'Connecticut', 'Delaware', 'Georgia', 'Maryland', 'Massachusetts',
+        'New Hampshire', 'New York', 'North Carolina', 'Pennsylvania',
+        'Rhode Island', 'South Carolina', 'Virginia')
+}
+AMERICAN_COLONIES['New Jersey'] = 'New Jersey'
+_AMERICAN_COUNTRIES = {
+    spelling for name, colony in AMERICAN_COLONIES.items()
+    for spelling in (name, colony, 'Colony of ' + name, 'Province of ' + name)
+} | {'Massachusetts Bay', 'Rhode Island and Providence Plantations', 'Colonial America'}
+
+
+def american_colonial_country(country, date=None, issuer=None, series=None):
+    """Resolve a named pre-independence issue, never a generic 1776 date alone.
+
+    The NYC Water Works series is specifically colonial, including its final
+    March 5, 1776 issue. Other transition-year notes need an explicit colony
+    or province issuer; later state and Continental Congress notes stay apart.
+    """
+    country = canonical_country(country) or ''
+    if country not in _AMERICAN_COUNTRIES and country != 'United States of America':
+        return None
+    y = _year(date) or (_year(series) if not date else None)
+    if y is None or not 1690 <= y <= 1776:
+        return None
+    evidence = fold(' '.join((issuer or '', series or '')))
+    if (1774 <= y <= 1776 and 'waterworks' in evidence
+            and country in {'United States of America', 'Colonial America', 'New York',
+                            'New York Colony', 'Colony of New York', 'Province of New York'}
+            and 'newyork' in fold(country + ' ' + (issuer or '') + ' ' + (series or ''))):
+        return AMERICAN_COLONIES['New York']
+    for name, colony in AMERICAN_COLONIES.items():
+        if country not in {'United States of America', 'Colonial America', name, colony,
+                           'Colony of ' + name, 'Province of ' + name}:
+            continue
+        token = fold(name)
+        explicit_issuer = any(prefix + token in fold(issuer)
+                              for prefix in ('colonyof', 'provinceof'))
+        explicit_country = country in {colony, 'Colony of ' + name, 'Province of ' + name} and colony != name
+        if explicit_issuer or explicit_country or (y < 1776 and country == name):
+            return colony
+    return None
+
+
 @lru_cache(maxsize=8192)
 def classify(country, date=None, issuer=None, series=None):
     country = canonical_country(country) or ''
+    colonial_country = american_colonial_country(country, date, issuer, series)
+    country = colonial_country or country
     y = _year(date)
     evidence = fold(' '.join((issuer or '', series or '')))
     def result(key, label, uncertain=False):
@@ -268,12 +315,14 @@ def classify(country, date=None, issuer=None, series=None):
                       and y and y >= 1953 else 'Danish territorial administration'))
     if country == 'Puerto Rico' and y and y > 1898:
         return result('us', 'Puerto Rico — United States territory')
+    if colonial_country:
+        return result('british', 'British North America — colonial issue')
     if country == 'United States of America':
         return result('us', 'United States issue')
     colonial_america = country in {'New Jersey', 'Pennsylvania Colony'} or (country.startswith('United States (') and 'colonial' in country.lower())
-    if colonial_america and (('colony' in evidence) or (y and y < 1776)):
+    if colonial_america and y and 1690 <= y <= 1776 and (('colony' in evidence) or y < 1776):
         return result('british', 'British North America — colonial issue')
-    if country in {'New Jersey', 'Pennsylvania Colony', 'Rhode Island and Providence Plantations'} or country.startswith('United States ('):
+    if country in _AMERICAN_COUNTRIES or country.startswith('United States ('):
         return result('us', 'American colonial / state issue — see issuer and date')
     if country == 'Timor' and 'banconacionalultramarino' in evidence and y and y < 1975:
         return result('portuguese', 'Portuguese Timor — overseas provincial issue')
@@ -304,6 +353,5 @@ def row_classification(row):
 def sort_country(country):
     # Domestic US issues lead their requested Philippine collection family.
     canonical = canonical_country(country) or 'zzz'
-    us_family = canonical == 'United States of America' or canonical.startswith('United States (') or canonical in {
-        'New Jersey', 'Pennsylvania Colony', 'Rhode Island and Providence Plantations'}
+    us_family = canonical == 'United States of America' or canonical.startswith('United States (') or canonical in _AMERICAN_COUNTRIES
     return '0 United States' if us_family else canonical
