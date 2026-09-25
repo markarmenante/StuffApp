@@ -350,8 +350,12 @@ def row_classification(row):
     return classify(*(values.get(k) for k in ('country', 'date_1', 'issuer', 'series')))
 
 
-def sort_country(country):
+def sort_country(country, date=None, issuer=None, series=None):
     # Domestic US issues lead their requested Philippine collection family.
     canonical = canonical_country(country) or 'zzz'
+    colony = american_colonial_country(canonical, date, issuer, series)
+    if colony:
+        # Keep each colony together before sorting its eras and issue dates.
+        return '0 United States ' + colony
     us_family = canonical == 'United States of America' or canonical.startswith('United States (') or canonical in _AMERICAN_COUNTRIES
     return '0 United States' if us_family else canonical

@@ -5727,7 +5727,7 @@ def _configure_db_connection(db):
     db.row_factory = sqlite3.Row
     db.create_function('BANKNOTE_GROUP', 4,
                        lambda *v: banknote_catalog.classify(*v)['rank'], deterministic=True)
-    db.create_function('BANKNOTE_COUNTRY', 1, banknote_catalog.sort_country, deterministic=True)
+    db.create_function('BANKNOTE_COUNTRY', 4, banknote_catalog.sort_country, deterministic=True)
     db.create_function('BANKNOTE_COUNTRY_SEARCH', 1, banknote_catalog.country_search, deterministic=True)
     db.execute("PRAGMA foreign_keys = ON")
     # Wait up to 5s for a competing writer (gunicorn runs 4 threads)
@@ -6679,9 +6679,10 @@ def init_db():
     # Pennsylvania Colony, using the same dated filing as its other notes.
     # v24: named American colonial issuers and NYC Water Works move out of
     # generic US filing and into the British North America collection block.
+    # v25: colony name precedes era/year, keeping a colony's issues together.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v24',),
+        ('banknote_display_number_v25',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6689,7 +6690,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v24', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v25', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -12550,7 +12551,7 @@ CATEGORY_ORDER_BY = {
     # municipality 'Hawaii' and some don't, and letting it lead would
     # scramble the denomination order within a set.
     'banknotes': ("BANKNOTE_GROUP(country, date_1, issuer, series), "
-                  "BANKNOTE_COUNTRY(country) COLLATE NODIACRITIC, "
+                  "BANKNOTE_COUNTRY(country, date_1, issuer, series) COLLATE NODIACRITIC, "
                   "US_NOTE_GROUP(country, series, issuer, official, lettering, "
                   "lettering_translation, other_catalog, description) ASC, "
                   f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "

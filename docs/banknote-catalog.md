@@ -94,6 +94,13 @@ Original country values are retained in the country-history audit table;
 migration v24 resequences display positions without changing permanent B-numbers
 or ownership status. History panels, maps and reports use the corrected country.
 
+American colonies sort alphabetically within their historical group, then by
+era and date within each colony. They no longer share a country sort key that
+interleaves Pennsylvania's 1772-1773 and 1776 issues with Connecticut, New Jersey
+and New York. Migration v25 refreshes display positions only; later state and
+federal ordering is unchanged. The report likewise has one contiguous section
+per colony, retaining all of that colony's historical periods.
+
 ## Evidence and limits
 
 - [PMG - Colonial Currency: Water Works](https://www.pmgnotes.com/news/article/4442/)
