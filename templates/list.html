@@ -75,7 +75,7 @@
           data-build-url="{{ url_for('banknote_report_build') }}"
           data-status-url="{{ url_for('banknote_report_status') }}"
           title="Build the collection report PDF of the notes shown — every country with its history, four notes to a page">Report</button>
-  <span class="market-status" id="banknoteReportStatus"></span>
+  <span class="market-status" id="banknoteReportStatus" role="status" hidden></span>
   {% endif %}
   {% if not at_property and not _market and not _analysis %}
   <a href="{{ url_for('new_record', category=category) }}"
@@ -1337,8 +1337,9 @@ window.shareCardRow = async function (ev, btn) {
   const btn = document.getElementById('banknoteReport');
   if (!btn) return;
   const status = document.getElementById('banknoteReportStatus');
-  const say = (t) => { if (status) status.textContent = t || ''; };
-  const when = (iso) => iso ? iso.slice(0, 16).replace('T', ' ') + ' UTC' : '';
+  const say = (t) => {
+    if (status) { status.textContent = t || ''; status.hidden = !t; }
+  };
   async function getStatus() {
     const r = await fetch(btn.dataset.statusUrl, {cache: 'no-store'});
     return r.ok ? r.json() : null;
@@ -1346,14 +1347,6 @@ window.shareCardRow = async function (ev, btn) {
   getStatus().then(d => {
     if (!d) return;
     if (d.state === 'running') { say('Building…'); watch(null); }
-    else if (d.exists) {
-      say('Built ' + when(d.built_at));
-      btn.title = 'Report built ' + when(d.built_at) + ' — click to build it again; open the current one from the status link';
-      if (status && d.url) {
-        const a = document.createElement('a'); a.href = d.url; a.target = '_blank'; a.textContent = ' · open';
-        status.appendChild(a);
-      }
-    }
   }).catch(() => {});
   function watch(tab) {
     const started = Date.now();
@@ -1361,7 +1354,7 @@ window.shareCardRow = async function (ev, btn) {
       let d = null;
       try { d = await getStatus(); } catch (e) {}
       if (d && d.state === 'done' && d.url) {
-        say('Built ' + when(d.built_at) + ' · ' + d.notes + ' notes');
+        say('');
         btn.disabled = false;
         if (tab) tab.location = d.url + '?t=' + Date.now(); else window.open(d.url, '_blank');
         return;

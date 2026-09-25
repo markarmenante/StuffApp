@@ -130,6 +130,8 @@ client = stuffapp.app.test_client()
 r = client.get('/banknotes')
 html = r.get_data(as_text=True)
 assert 'id="banknoteReport"' in html and '/banknotes/report/build' in html
+assert 'id="banknoteReportStatus" role="status" hidden' in html
+assert "say('Built '" not in html and 'open the current one from the status link' not in html
 r = client.get('/banknotes/report/status'); d = r.get_json()
 assert d['exists'] and d['url'] == '/banknotes/report.pdf' and d['built_at'], d
 r = client.get('/banknotes/report.pdf')
