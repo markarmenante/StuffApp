@@ -3160,26 +3160,27 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- People associated with this property (landlord, plumber, agent,
        neighbor, etc.). Same shape as the alarm-codes / medications
-       tables: per-row × clears + shifts up; "add" is implicit. -->
+       tables: per-row × clears the person; "add" is implicit. -->
   <div class="section-bar">People</div>
-  <div class="people-table dcell">
+  <div class="people-table dcell" role="region" aria-label="Property people" tabindex="0">
     <div class="people-row people-head">
       <span>Name</span><span>Phone</span><span>Role</span><span>Email</span><span>Notes</span><span></span>
     </div>
-    {% for i in range(1, 11) %}
+    {% for person in property_people_rows %}
+    {% set i = person['position'] %}
     <div class="people-row" data-people-idx="{{ i }}">
-      <input type="text" name="people_name_{{ i }}"  value="{{ val('people_name_'  ~ i) }}">
+      <input type="text" name="people_name_{{ i }}" aria-label="Person {{ i }} name" value="{{ person.get('name') or '' }}">
       <div class="people-cell-phone">
-        <input type="text" inputmode="tel" class="us-phone-input" name="people_phone_{{ i }}" value="{{ val('people_phone_' ~ i)|us_phone }}">
+        <input type="text" inputmode="tel" class="us-phone-input" name="people_phone_{{ i }}" aria-label="Person {{ i }} phone" value="{{ (person.get('phone') or '')|us_phone }}">
         <button type="button" class="ppl-act" data-action="tel" data-target="people_phone_{{ i }}" title="Call">📞</button>
         <button type="button" class="ppl-act" data-action="sms" data-target="people_phone_{{ i }}" title="Text">💬</button>
       </div>
-      <input type="text" name="people_role_{{ i }}"  value="{{ val('people_role_'  ~ i) }}">
+      <input type="text" name="people_role_{{ i }}" aria-label="Person {{ i }} role" value="{{ person.get('role') or '' }}">
       <div class="people-cell-email">
-        <input type="email" name="people_email_{{ i }}" value="{{ val('people_email_' ~ i) }}">
+        <input type="email" name="people_email_{{ i }}" aria-label="Person {{ i }} email" value="{{ person.get('email') or '' }}">
         <button type="button" class="ppl-act" data-action="mail" data-target="people_email_{{ i }}" title="Email">✉️</button>
       </div>
-      <input type="text" name="people_note_{{ i }}"  value="{{ val('people_note_'  ~ i) }}">
+      <input type="text" name="people_note_{{ i }}" aria-label="Person {{ i }} notes" value="{{ person.get('note') or '' }}">
       <button type="button" class="people-del-btn" title="Delete this row">×</button>
     </div>
     {% endfor %}
@@ -5155,7 +5156,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
       saveField(el.name, v);
     }, SAVE_DEBOUNCE_MS));
   }
-  form.querySelectorAll('input[name]:not([type=file]):not([type=radio]):not([type=checkbox]):not([type=date]), textarea[name]').forEach(el => {
+  function bindAutosaveInput(el) {
     lastSaved.set(el, el.value);
     el.addEventListener('input', () => {
       // Kick off record creation on the very first keystroke so the
@@ -5166,7 +5167,9 @@ document.querySelectorAll('.comp-item').forEach(item => {
       scheduleSave(el);
     });
     el.addEventListener('blur', () => saveNow(el));
-  });
+  }
+  window.bindAutosaveInput = bindAutosaveInput;
+  form.querySelectorAll('input[name]:not([type=file]):not([type=radio]):not([type=checkbox]):not([type=date]), textarea[name]').forEach(bindAutosaveInput);
   // Flush any pending typed-but-not-saved changes if the page is being
   // unloaded (back button, tab close) — saveField uses keepalive so the
   // request still completes.
@@ -6726,7 +6729,7 @@ async function shareMedicationList(ev, btn) {
 }
 
 // Generic per-row × delete + shift-up + auto-grow visibility. Used by
-// alarm-codes and people (and meds in spirit). Behaviour:
+// alarm codes (and meds in spirit). Behaviour:
 //   - Click × on a row → clear that row, shift rows below up by one,
 //     last row becomes empty.
 //   - .row-empty class flips on rows whose fields are all blank, so
@@ -6791,12 +6794,65 @@ function _wireRowDelete(rowSelector, btnClass, emptyClass, dataAttr,
   });
 }
 
-// Property > People — 10 rows total, 3 visible by default; auto-grows
-// as rows fill, collapses back as they're cleared.
-_wireRowDelete(
-  '.people-row[data-people-idx]', 'people-del-btn',
-  'people-row-empty', 'peopleIdx',
-  ['people_name', 'people_role', 'people_phone', 'people_email', 'people_note'], 10, 3);
+// People keep stable positions in their child table, with a trailing blank row.
+(function propertyPeopleRows() {
+  const table = document.querySelector('.people-table');
+  if (!table) return;
+  const selector = '.people-row[data-people-idx]';
+  const template = table.querySelector(selector).cloneNode(true);
+  let nextPosition = Math.max(...Array.from(table.querySelectorAll(selector), row => Number(row.dataset.peopleIdx))) + 1;
+  function isEmpty(row) {
+    return Array.from(row.querySelectorAll('input')).every(input => !input.value.trim());
+  }
+  function appendRow() {
+    const row = template.cloneNode(true);
+    const position = nextPosition++;
+    row.dataset.peopleIdx = position;
+    row.classList.remove('row-hidden');
+    row.querySelectorAll('input').forEach(input => {
+      input.name = input.name.replace(/_\d+$/, '_' + position);
+      input.value = '';
+      input.setAttribute('aria-label', input.getAttribute('aria-label').replace(/Person \d+/, 'Person ' + position));
+      window.bindAutosaveInput(input);
+    });
+    row.querySelectorAll('.ppl-act').forEach(button => {
+      button.dataset.target = button.dataset.target.replace(/_\d+$/, '_' + position);
+      button.classList.add('is-disabled');
+    });
+    table.appendChild(row);
+    return row;
+  }
+  function refresh() {
+    const rows = Array.from(table.querySelectorAll(selector));
+    if (!rows.length || !isEmpty(rows[rows.length - 1])) rows.push(appendRow());
+    const visible = new Set(rows.filter(row => !isEmpty(row) || row.contains(document.activeElement)));
+    visible.add(rows[rows.length - 1]);
+    for (let i = rows.length - 1; visible.size < 3 && i >= 0; i--) visible.add(rows[i]);
+    rows.forEach(row => {
+      row.classList.toggle('people-row-empty', isEmpty(row));
+      row.classList.toggle('row-hidden', !visible.has(row));
+    });
+  }
+  table.addEventListener('input', refresh);
+  table.addEventListener('blur', () => setTimeout(refresh, 0), true);
+  table.addEventListener('click', event => {
+    const button = event.target.closest('.people-del-btn');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!button.classList.contains('armed')) { _armDelBtn(button); return; }
+    _disarmDelBtn(button);
+    const row = button.closest(selector);
+    row.querySelectorAll('input').forEach(input => {
+      if (!input.value) return;
+      input.value = '';
+      input.dispatchEvent(new Event('blur'));
+    });
+    button.blur();
+    refresh();
+  });
+  refresh();
+})();
 
 // Property > Topics — per-row × button: confirm, DELETE via fetch,
 // fade the row out on success. Each topic is its own DB row in the
@@ -6853,13 +6909,15 @@ document.querySelectorAll('.topic-del-btn').forEach(btn => {
   }
   form.querySelectorAll('.people-cell-phone input').forEach(phoneFormatter);
   refreshActions();
-  form.querySelectorAll('.people-cell-phone input, .people-cell-email input').forEach(inp => {
-    inp.addEventListener('input', refreshActions);
-    inp.addEventListener('blur', () => {
-      if (inp.closest('.people-cell-phone')) phoneFormatter(inp);
-      refreshActions();
-    });
+  form.addEventListener('input', event => {
+    if (event.target.closest('.people-table')) refreshActions();
   });
+  form.addEventListener('blur', event => {
+    const inp = event.target;
+    if (!inp.matches('.people-table input')) return;
+    if (inp.closest('.people-cell-phone')) phoneFormatter(inp);
+    refreshActions();
+  }, true);
   form.addEventListener('click', e => {
     const btn = e.target.closest('.ppl-act');
     if (!btn) return;

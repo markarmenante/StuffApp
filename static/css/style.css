@@ -2298,11 +2298,18 @@ input[type="date"] { -webkit-appearance: none; }
 .alarm-codes-table input {
   text-align: left !important;
 }
-.people-table { padding: 6px 10px 4px; position: relative; }
+.people-table {
+  padding: 0 10px 4px;
+  position: relative;
+  max-height: 220px;
+  overflow: auto !important;
+  scrollbar-gutter: stable;
+  scroll-padding-top: 28px;
+}
 .people-table .people-row {
   display: grid;
   /* Columns: Name | Phone | Role | Email | Notes | × */
-  grid-template-columns: 20% 23% 14% 18% 25% 22px;
+  grid-template-columns: minmax(0, 20fr) minmax(0, 23fr) minmax(0, 14fr) minmax(0, 18fr) minmax(0, 25fr) 34px;
   align-items: stretch;
 }
 .people-cell-phone, .people-cell-email {
@@ -2345,6 +2352,10 @@ input[type="date"] { -webkit-appearance: none; }
 .people-del-btn.armed:hover { background: #a52a1f; border-color: #a52a1f; }
 .people-row.people-row-empty .people-del-btn { visibility: hidden; }
 .people-table .people-row.people-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
   font-size: 10px; color: var(--text-label);
   padding: 2px 2px 4px;
   border-bottom: 1px solid var(--border);

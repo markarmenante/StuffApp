@@ -1397,13 +1397,14 @@ PERSON_MEDICATION_FIELD_RE = re.compile(
 # columns on the properties row, normalized into child tables the same way
 # person medications are: the child table is canonical, every write syncs
 # the legacy columns back so older readers (exports, mobile cache) keep
-# working unchanged.
+# working unchanged. People can grow beyond the ten legacy slots.
 PROPERTY_PEOPLE_SLOTS = 10
 PROPERTY_ALARM_SLOTS = 8
 PROPERTY_SLOT_SPECS = {
     'people': {
         'table': 'property_people',
         'slots': PROPERTY_PEOPLE_SLOTS,
+        'unbounded': True,
         'columns': ('name', 'role', 'phone', 'email', 'note'),
         'field_columns': {
             'people_name': 'name',
@@ -7869,7 +7870,12 @@ def _property_slots_from_property_row(spec, row):
         return []
     keys = set(row.keys())
     items = []
-    for position in range(1, spec['slots'] + 1):
+    positions = range(1, spec['slots'] + 1)
+    if spec.get('unbounded'):
+        positions = sorted({int(match.group(2)) for key in keys
+                            if (match := spec['field_re'].fullmatch(key))
+                            and _valid_property_slot_position(spec, int(match.group(2)))})
+    for position in positions:
         item = {'position': position}
         for prefix, column in spec['field_columns'].items():
             legacy_col = f'{prefix}_{position}'
@@ -7878,6 +7884,37 @@ def _property_slots_from_property_row(spec, row):
         if not _property_slot_row_empty(spec, item):
             items.append(item)
     return items
+
+
+def _valid_property_slot_position(spec, position):
+    return 1 <= position <= (2147483647 if spec.get('unbounded') else spec['slots'])
+
+
+def _property_people_display_rows(items):
+    rows = [dict(item) for item in items]
+    last = max((item['position'] for item in rows), default=0)
+    rows.extend({'position': position} for position in
+                range(last + 1, last + max(1, 3 - len(rows)) + 1))
+    return rows
+
+
+def _save_property_people_form(db, property_id, form, now=None):
+    # Only submitted positions change; legacy clients must not erase extra people.
+    spec = PROPERTY_SLOT_SPECS['people']
+    values = {}
+    for field_name in form:
+        parsed = _parse_property_slot_field(field_name)
+        if not parsed or parsed[0] is not spec:
+            continue
+        _, column, position = parsed
+        value = form.get(field_name, '')
+        if column == 'phone':
+            value = _format_us_phone(value)
+        values.setdefault(position, {})[column] = value
+    for position, fields in values.items():
+        _upsert_property_slot_values(db, spec, property_id, position, fields,
+                                     now=now, sync_legacy=False)
+    _sync_property_slot_legacy(db, spec, property_id, now=now)
 
 
 def _property_slot_rows(db, spec, property_id):
@@ -7910,7 +7947,7 @@ def _replace_property_slots(db, spec, property_id, items, now=None,
             position = int(item.get('position') or 0)
         except (TypeError, ValueError):
             continue
-        if position < 1 or position > spec['slots']:
+        if not _valid_property_slot_position(spec, position):
             continue
         clean = {
             column: (item.get(column) or '').strip()
@@ -7939,52 +7976,24 @@ def _replace_property_slots(db, spec, property_id, items, now=None,
 def _upsert_property_slot_values(db, spec, property_id, position, values,
                                  now=None, sync_legacy=True):
     now = now or datetime.utcnow().isoformat()
-    row = db.execute(
-        f"SELECT * FROM {spec['table']} "
-        "WHERE property_id = ? AND position = ?",
-        [property_id, position],
-    ).fetchone()
-    item = {'position': position}
-    if row:
-        item['id'] = row['id']
-        for column in spec['columns']:
-            item[column] = (row[column] or '').strip()
-    else:
-        item['id'] = str(uuid.uuid4())
-        for column in spec['columns']:
-            item[column] = ''
-    for column, value in (values or {}).items():
-        if column in spec['columns']:
-            item[column] = (value or '').strip()
-    if _property_slot_row_empty(spec, item):
-        db.execute(
-            f"DELETE FROM {spec['table']} "
-            "WHERE property_id = ? AND position = ?",
-            [property_id, position],
-        )
-    elif row:
-        sets = ', '.join(f'{c} = ?' for c in spec['columns'])
-        db.execute(
-            f"UPDATE {spec['table']} SET {sets}, updated_at = ? "
-            "WHERE id = ?",
-            [
-                *[item.get(c) or None for c in spec['columns']],
-                now, item['id'],
-            ],
-        )
-    else:
+    clean = {column: (value or '').strip() or None
+             for column, value in (values or {}).items() if column in spec['columns']}
+    if clean:
         cols = ', '.join(spec['columns'])
         placeholders = ', '.join('?' for _ in spec['columns'])
+        updates = ', '.join(f'{column} = excluded.{column}' for column in clean)
+        # Each autosave changes only its submitted columns, even during parallel edits.
         db.execute(
             f"INSERT INTO {spec['table']} "
             f"(id, property_id, position, {cols}, created_at, updated_at) "
-            f"VALUES (?, ?, ?, {placeholders}, ?, ?)",
-            [
-                item['id'], property_id, position,
-                *[item.get(c) or None for c in spec['columns']],
-                now, now,
-            ],
+            f"VALUES (?, ?, ?, {placeholders}, ?, ?) "
+            f"ON CONFLICT(property_id, position) DO UPDATE SET {updates}, updated_at = excluded.updated_at",
+            [str(uuid.uuid4()), property_id, position,
+             *[clean.get(column) for column in spec['columns']], now, now],
         )
+        empty = ' AND '.join(f"COALESCE(TRIM({column}), '') = ''" for column in spec['columns'])
+        db.execute(f"DELETE FROM {spec['table']} WHERE property_id = ? AND position = ? AND {empty}",
+                   [property_id, position])
     if sync_legacy:
         _sync_property_slot_legacy(db, spec, property_id, now=now)
 
@@ -7995,7 +8004,7 @@ def _parse_property_slot_field(field_name):
         if not m:
             continue
         position = int(m.group(2))
-        if position < 1 or position > spec['slots']:
+        if not _valid_property_slot_position(spec, position):
             return None
         return spec, spec['field_columns'][m.group(1)], position
     return None
@@ -19871,6 +19880,9 @@ def new_record(category):
                 "SELECT * FROM properties WHERE id = ?", [record_id]
             ).fetchone()
             for spec in PROPERTY_SLOT_SPECS.values():
+                if spec.get('unbounded'):
+                    _save_property_people_form(db, record_id, request.form, now=now)
+                    continue
                 _replace_property_slots(
                     db, spec, record_id,
                     _property_slots_from_property_row(spec, created_property),
@@ -19957,6 +19969,9 @@ def _render_new_form(category, data=None, focus_field=None):
                            watch_service_has_open_return=False,
                            record_documents_by_set={},
                            person_medications_by_position={},
+                           property_people_rows=_property_people_display_rows(
+                               _property_slots_from_property_row(
+                                   PROPERTY_SLOT_SPECS['people'], data or {})),
                            today_iso=date.today().isoformat(),
                            complications_options=COMPLICATIONS_OPTIONS,
                            vlists=current_vlists(category),
@@ -20113,6 +20128,9 @@ def detail_view(category, record_id):
                 "SELECT * FROM properties WHERE id = ?", [record_id]
             ).fetchone()
             for spec in PROPERTY_SLOT_SPECS.values():
+                if spec.get('unbounded'):
+                    _save_property_people_form(db, record_id, request.form, now=now)
+                    continue
                 _replace_property_slots(
                     db, spec, record_id,
                     _property_slots_from_property_row(spec, updated_property),
@@ -20151,7 +20169,11 @@ def detail_view(category, record_id):
                 coin_year)
 
     property_topics = None
+    property_people_rows = []
     if category == 'properties':
+        property_people_rows = _property_people_display_rows(
+            _property_slot_rows(db, PROPERTY_SLOT_SPECS['people'], record_id)
+            or _property_slots_from_property_row(PROPERTY_SLOT_SPECS['people'], record))
         property_topics = db.execute(
             'SELECT id, subject, body, image FROM topics '
             'WHERE property_id = ? ORDER BY created_at',
@@ -20362,6 +20384,7 @@ def detail_view(category, record_id):
                            coin_age_val=coin_age_val,
                            coin_capital=coin_capital,
                            property_topics=property_topics,
+                           property_people_rows=property_people_rows,
                            camera_compatible_lenses=camera_compatible_lenses,
                            property_pill_categories=property_pill_categories,
                            lens_compatible_cameras=lens_compatible_cameras,
@@ -20536,6 +20559,11 @@ def save_field(category, record_id):
 
     # Validate field exists in this category
     valid_fields = {f['name']: f for f in visible_fields(category)}
+    if category == 'properties' and (parsed := _parse_property_slot_field(field_name)):
+        spec, _, _ = parsed
+        prefix = field_name.rsplit('_', 1)[0]
+        if spec.get('unbounded') and f'{prefix}_1' in valid_fields:
+            valid_fields[field_name] = {**valid_fields[f'{prefix}_1'], 'name': field_name}
     if field_name not in valid_fields:
         return jsonify({'error': f'Unknown field: {field_name}'}), 400
     # Owner field is owner-only — members can't edit it via the API
