@@ -101,6 +101,12 @@ and New York. Migration v25 refreshes display positions only; later state and
 federal ordering is unchanged. The report likewise has one contiguous section
 per colony, retaining all of that colony's historical periods.
 
+Confirmed New Jersey colonial issues use **New Jersey Colony**, including the
+1776 one-shilling (Fr. NJ-175) and six-shilling (Fr. NJ-178) notes with a Colony
+of New Jersey issuer. Startup repairs the old shortened label, retains its
+audit history, and migration v26 refreshes display positions. A generic New
+Jersey name in 1776 is not sufficient: later state issues keep their own label.
+
 ## Evidence and limits
 
 - [PMG - Colonial Currency: Water Works](https://www.pmgnotes.com/news/article/4442/)

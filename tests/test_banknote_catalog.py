@@ -40,6 +40,66 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(catalog.classify('Rhode Island and Providence Plantations', 1780,
                                          'State of Rhode Island')['key'], 'us')
 
+    def test_new_jersey_colony_label_requires_colonial_evidence(self):
+        for country in ('New Jersey', 'New Jersey Colony', 'Colony of New Jersey',
+                        'Province of New Jersey', 'United States'):
+            info = catalog.classify(country, 1776, 'Colony of New Jersey')
+            self.assertEqual((info['key'], info['country']), ('british', 'New Jersey Colony'))
+        for year, issuer in ((1776, ''), (1776, 'State of New Jersey'),
+                             (1780, 'State of New Jersey'), (1860, 'Bank of New Jersey')):
+            info = catalog.classify('New Jersey', year, issuer)
+            self.assertEqual((info['key'], info['country']), ('us', 'New Jersey'))
+        self.assertEqual(catalog.canonical_country('New Jersey'), 'New Jersey')
+        self.assertEqual(catalog.classify('Jersey', 1776)['country'], 'Jersey')
+
+    def test_new_jersey_startup_repair_updates_both_notes_and_preserves_state_issues(self):
+        for ident, denomination, number, status in (
+                ('nj1', '1 Shilling', 'Fr. NJ-175', 'Own'),
+                ('nj6', '6 Shillings', 'Fr#NJ-178', 'Ordered')):
+            self.add(ident, 'New Jersey', 1776, 'Colony of New Jersey')
+            self.db.execute('UPDATE banknotes SET denomination=?, pick_number=?, status=?, '
+                            "issue_type='Colonial', grade='Choice UNC 64', image_1='original.jpg' WHERE id=?",
+                            (denomination, number, status, ident))
+        self.add('state1776', 'New Jersey', 1776, 'State of New Jersey')
+        self.add('state1780', 'New Jersey', 1780, 'State of New Jersey')
+        self.db.commit()
+        before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
+        stuff.init_db()
+        after = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
+        for ident, row in before.items():
+            self.assertEqual(after[ident]['country'],
+                             'New Jersey Colony' if ident in ('nj1', 'nj6') else 'New Jersey')
+            for field, value in row.items():
+                if field not in ('country', 'banknote_id'):
+                    self.assertEqual(after[ident][field], value, (ident, field))
+        history = self.db.execute('SELECT banknote_id,original_country,canonical_country FROM '
+                                  'banknote_country_alias_history ORDER BY banknote_id').fetchall()
+        self.assertEqual([tuple(r) for r in history], [
+            ('nj1', 'New Jersey', 'New Jersey Colony'), ('nj6', 'New Jersey', 'New Jersey Colony')])
+        stuff.init_db()
+        self.assertEqual(after, {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')})
+        client = stuff.app.test_client()
+        for history in ('0', '1'):
+            html = client.get('/banknotes', query_string={'filter': 'heritage_british',
+                                                         'history': history}).get_data(as_text=True)
+            self.assertEqual(html.count('<span class="item-brand">New Jersey Colony</span>'), 2)
+            self.assertNotIn('item-state1776', html)
+            self.assertNotIn('item-state1780', html)
+        self.assertEqual(stuff._series_panel_for_row(after['nj1'])['title'], 'New Jersey Colony')
+        self.assertIn('New Jersey Colony', client.get('/banknotes/nj1').get_data(as_text=True))
+        sections = stuff._banknote_report_sections(self.db)
+        colony = [rows for country, key, rows in sections if country == 'New Jersey Colony']
+        self.assertEqual(len(colony), 1)
+        self.assertEqual({r['id'] for r in colony[0]}, {'nj1', 'nj6'})
+        response = client.post('/banknotes/nj1/save-field', json={'field': 'country', 'value': 'New Jersey'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.db.execute("SELECT country FROM banknotes WHERE id='nj1'").fetchone()[0],
+                         'New Jersey Colony')
+        seed = stuff._finalize_sweep_seed({'country': 'New Jersey', 'date_1': 1776,
+                                          'issuer': 'Colony of New Jersey'}, 'banknotes',
+                                         {'role': 'owner'}, self.db, '2026-09-27')
+        self.assertEqual(seed['country'], 'New Jersey Colony')
+
     def test_colonial_migration_resorts_without_changing_ownership_or_identity(self):
         self.add('federal', 'United States of America', 1918, 'Federal Reserve Bank of New York')
         self.add('ny', 'United States of America', 1776, self.WATER_WORKS)
@@ -113,7 +173,7 @@ class CatalogueTests(unittest.TestCase):
             ('pa1772', 'Pennsylvania Colony', 1772, 'Province of Pennsylvania'),
             ('ct1776', 'Connecticut Colony', 1776, 'Colony of Connecticut'),
             ('ny1774', 'New York Colony', 1774, self.WATER_WORKS),
-            ('nj1776', 'New Jersey', 1776, 'Colony of New Jersey'),
+            ('nj1776', 'New Jersey Colony', 1776, 'Colony of New Jersey'),
             ('pa1773', 'Pennsylvania Colony', 1773, 'General Assembly of Pennsylvania'),
             ('ri1780', 'Rhode Island and Providence Plantations', 1780, 'State of Rhode Island'),
             ('us1918', 'United States of America', 1918, 'Federal Reserve Bank of New York'),
@@ -124,7 +184,7 @@ class CatalogueTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET issue_type='National', denomination='$1' WHERE id='us1918'")
         self.db.execute("UPDATE banknotes SET status='Ordered' WHERE id IN ('pa1776','ct1776')")
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v25'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v26'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -389,7 +449,7 @@ class CatalogueTests(unittest.TestCase):
         self.add('colonial', 'United States (Colonial - Pennsylvania)', 1772,
                  'Province of Pennsylvania')
         self.add('ny', 'United States of America', 1776, self.WATER_WORKS)
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v25'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v26'")
         self.db.commit()
         stuff.init_db()
         row = self.db.execute("SELECT country,banknote_id FROM banknotes WHERE id='french'").fetchone()

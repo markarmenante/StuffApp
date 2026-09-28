@@ -6681,9 +6681,10 @@ def init_db():
     # v24: named American colonial issuers and NYC Water Works move out of
     # generic US filing and into the British North America collection block.
     # v25: colony name precedes era/year, keeping a colony's issues together.
+    # v26: confirmed New Jersey colonial issues use New Jersey Colony.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v25',),
+        ('banknote_display_number_v26',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6691,7 +6692,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v25', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v26', datetime.utcnow().isoformat()),
         )
         db.commit()
 

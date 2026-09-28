@@ -193,10 +193,9 @@ def _year(value):
 AMERICAN_COLONIES = {
     name: name + ' Colony' for name in (
         'Connecticut', 'Delaware', 'Georgia', 'Maryland', 'Massachusetts',
-        'New Hampshire', 'New York', 'North Carolina', 'Pennsylvania',
+        'New Hampshire', 'New Jersey', 'New York', 'North Carolina', 'Pennsylvania',
         'Rhode Island', 'South Carolina', 'Virginia')
 }
-AMERICAN_COLONIES['New Jersey'] = 'New Jersey'
 _AMERICAN_COUNTRIES = {
     spelling for name, colony in AMERICAN_COLONIES.items()
     for spelling in (name, colony, 'Colony of ' + name, 'Province of ' + name)
