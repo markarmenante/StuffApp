@@ -39080,7 +39080,7 @@ def _rarity_prompt(category, row, archive=None):
 
 Find, in this order of preference:
 1. The grading-service population for this exact Pick number (variety and signature included): total graded, how many at this note's grade ({grade or 'see the record'}{(' ' + _pedigree_text(row, 'grade_modifier')) if _pedigree_text(row, 'grade_modifier') else ''}), and how many finer. NOTE: pmgnotes.com's population report and cert-lookup pages sit behind a bot check and cannot be retrieved by search — do not spend searches on them. The figures come from sources that QUOTE the census: auction-lot descriptions ("PMG Population 14/3 finer", "tied for finest graded", "only 3 finer") at Heritage, Stack's Bowers, Lyn Knight and Spink, dealer listings, and the PCGS Banknote population report (pcgsbanknote.com) where it is reachable. This note is {authority or 'raw'} {slab or ''}. When nothing quotes the census for this Pick at this grade, leave the counts null and say so.
-2. Whether this note is top-pop (none finer), finest known / sole finest, tied for finest, or how many sit above it — and what a regrade or crossover would do: if it is one point below the top, say so.
+2. Whether this note is top-pop (none finer), finest known / sole finest, tied for finest, or how many sit above it. Do not speculate about regrading or crossover outcomes.
 3. Rarity beyond the census: how many examples the Banknote Book, the Standard Catalog of World Paper Money or specialist literature record; how often the type has appeared at auction in the past ten years (Heritage, Stack's Bowers, Lyn Knight, Spink, Noble, Archives International); any rarity rating the catalogues give.
 
 Output: ONLY a JSON object, no prose before or after, no markdown fences:
@@ -39091,10 +39091,10 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
   "auction_10y": appearances of this Pick number at auction in the past ten years (integer) or null,
   "rank": "Top Pop|Finest known|Tied finest|Below finest|Unknown",
   "top_grade": "the finest grade recorded for this Pick — in the census when quoted, else the finest seen at auction — with its designation, e.g. '67 EPQ', or ''",
-  "rating": "catalogue rarity note, e.g. 'R2 (Banknote Book)', 'Rare (SCWPM)', or ''",
+  "rating": "Only a verified rarity label or scale code, e.g. 'Rare', 'Scarce', 'R2', or '' when unavailable. No explanation, source or catalogue identifier (Renniks R48 and Pick P-27d are identifiers, not rarity ratings).",
   "die": "" ,
-  "regrade": "At most 25 words on what a regrade or crossover could change, or ''. Do not predict a higher grade or repeat a dealer quotation.",
-  "summary": "At most two short sentences (60 words total): the key finding and any material limitation, including unverified census counts. Do not repeat the tiles, regrade note or source line. Omit search narration, listing titles and unrelated varieties.",
+  "regrade": "",
+  "summary": "At most two short sentences (60 words total): the key finding and any material limitation, including unverified census counts. Do not repeat the tiles or source line. Omit search narration, listing titles and unrelated varieties.",
   "source": "e.g. 'PMG population report, Pick 55b, retrieved 2026-09-16'",
   "source_url": "URL of the population / cert page used, or ''",
   "confidence": 0.0-1.0 (how sure you are the figures are for this exact Pick variety and are current)
@@ -39336,6 +39336,24 @@ def _pedigree_clean_str(value, limit=400):
     text = re.sub(r'\s+', ' ', str(value or '')).strip()
     text = re.sub(r'</?cite\b[^>]*>', '', text, flags=re.IGNORECASE)
     return text[:limit]
+
+
+@app.template_filter('rarity_label')
+def rarity_label(value, category):
+    """Keep banknote rarity to a rating; catalogue IDs are not ratings."""
+    text = _pedigree_clean_str(value, 400)
+    if category != 'banknotes':
+        return text
+    if re.search(r"catalog(?:ue)? (?:number|reference)|\b(?:unverified|unconfirmed|unknown)\b|"
+                 r"no (?:separate )?(?:rarity|scarcity) rating|not (?:found|confirmed|verified)", text, re.I):
+        return ''
+    match = re.match(
+        r'^(very rare|extremely rare|very scarce|rare|scarce|common|uncommon|unique|'
+        r'R(?:10|[1-9])|RRR|RR|R|C|S)(?=$|\s*[(;:]|\s+[—–-]\s)', text, re.I)
+    if not match:
+        return ''
+    label = match.group(1)
+    return label.upper() if len(label) <= 3 else label.capitalize()
 
 
 def _pedigree_clean_confidence(value):
@@ -39694,7 +39712,7 @@ def fetch_rarity(category, row):
         'market': _pedigree_clean_int(data.get('auction_10y')),
         'census': _pedigree_clean_int(data.get('census_graded')) if category == 'coins' else None,
         'rank': rank if rank.lower() != 'unknown' else '',
-        'rating': _pedigree_clean_str(data.get('rating'), 120),
+        'rating': rarity_label(data.get('rating'), category),
         'die': _pedigree_clean_str(data.get('die'), 800),
         'regrade': _pedigree_clean_str(data.get('regrade'), 400),
         'summary': _pedigree_clean_str(data.get('summary'), 4000),
@@ -40228,7 +40246,7 @@ def _pedigree_overview_rows(db, category, kind):
                 'die_count': row.get('rarity_die_count'), 'market': row.get('rarity_market'),
                 'census': row.get('rarity_census'),
                 'slabbed': bool(_pedigree_text(row, 'grading_authority') and _pedigree_text(row, 'slab_number')),
-                'rating': _pedigree_text(row, 'rarity_rating'),
+                'rating': rarity_label(_pedigree_text(row, 'rarity_rating'), category),
                 'die': _pedigree_text(row, 'rarity_die'),
                 'regrade': _pedigree_text(row, 'rarity_regrade'),
                 'confidence': _coerce_number(row.get('rarity_confidence')),

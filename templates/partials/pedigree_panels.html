@@ -105,21 +105,21 @@
     {{ tile('pdgRarFiner', r['rarity_finer'], 'Finer seen', 'Clearly finer examples seen in the auction record — a judgement for a raw coin, a census count for a slabbed one', field='finer') }}
     {% endif %}
     <div class="pdg-tile pdg-tile-wide" title="{% if category == 'banknotes' %}Top Pop = none finer in the census; Tied finest = others share the top grade; Below finest = the Finer box says how many{% else %}For a raw coin: among the finest known, typical of what trades, or below the norm — judged against the auction record. A slabbed coin uses the census scale (Top Pop, Tied finest, Below finest).{% endif %}">{%- set _top = (r['rarity_top'] if r and 'rarity_top' in r.keys() and r['rarity_top'] else '') -%}<span class="pdg-tile-n pdg-rank" id="pdgRarRank" data-rank="{{ (r['rarity_rank'] or '')|lower if r else '' }}">{% if category == 'banknotes' and _top %}{{ _top }}{% else %}{{ r['rarity_rank'] if r and r['rarity_rank'] else '—' }}{% endif %}</span><span class="pdg-tile-l" id="pdgRarRankLabel">{% if category == 'banknotes' and _top %}Finest{% else %}Standing{% endif %}</span>{%- set _sd = r|rarity_standing_detail(category) -%}<span class="pdg-tile-sub" id="pdgRarStanding"{% if not _sd %} style="display:none"{% endif %}>{{ _sd }}</span></div>
-    {{ tile('pdgRarRating', r['rarity_rating'], 'Rarity', 'The reference book\'s own rating for the type, independent of grade — HGC R1 common / R2 scarce / R3 rare; RIC C, S, R, R2–R5; the Banknote Book or SCWPM for notes', wide=true) }}
+    {{ tile('pdgRarRating', r['rarity_rating']|rarity_label(category), 'Rarity', 'Published rarity rating' if category == 'banknotes' else 'The reference book\'s rarity rating', wide=(category != 'banknotes')) }}
     {{ tile('pdgRarMarket', r['rarity_market'], 'At auction, 10 yrs', 'How many times the type has come to auction in the past ten years — how liquid it is', field='market') }}
-  </div>
-  <div class="pdg-facts pdg-facts-col">
-    {% if category == 'coins' %}
-    <span id="pdgRarCensusRow" {% if not (r and r['rarity_census'] is not none) %}style="display:none"{% endif %}><b>{{ r['grading_authority'] if r and r['grading_authority'] else 'NGC' }} census:</b> <span id="pdgRarCensus">{% if r and r['rarity_census'] is not none %}{{ r['rarity_census'] }} graded{% if r['rarity_same'] is not none %} · {{ r['rarity_same'] }} at this grade{% endif %}{% if r['rarity_finer'] is not none %} · {{ r['rarity_finer'] }} finer{% endif %}{% endif %}</span></span>
-    {% endif %}
-    <span id="pdgRarDieRow" {% if not (r and r['rarity_die']) %}style="display:none"{% endif %}><b>Die study:</b> <span id="pdgRarDie">{{ r['rarity_die'] if r and r['rarity_die'] else '' }}</span></span>
-    <span id="pdgRarRegradeRow" {% if not (r and r['rarity_regrade']) %}style="display:none"{% endif %}><b>Regrade:</b> <span id="pdgRarRegrade">{{ r['rarity_regrade'] if r and r['rarity_regrade'] else '' }}</span></span>
-    <span id="pdgRarSourceRow" {% if not (r and r['rarity_source']) %}style="display:none"{% endif %}><b>Source:</b> <span id="pdgRarSource">{{ r['rarity_source'] if r and r['rarity_source'] else '' }}</span> <a id="pdgRarSourceUrl" target="_blank" rel="noopener" href="{{ r['rarity_source_url'] if r and r['rarity_source_url'] else '#' }}" {% if not (r and r['rarity_source_url']) %}style="display:none"{% endif %}>open ↗</a></span>
   </div>
   {% if category == 'banknotes' %}
   <details class="pdg-research-details">
     <summary>Research details</summary>
   {% endif %}
+  <div class="pdg-facts pdg-facts-col">
+    {% if category == 'coins' %}
+    <span id="pdgRarCensusRow" {% if not (r and r['rarity_census'] is not none) %}style="display:none"{% endif %}><b>{{ r['grading_authority'] if r and r['grading_authority'] else 'NGC' }} census:</b> <span id="pdgRarCensus">{% if r and r['rarity_census'] is not none %}{{ r['rarity_census'] }} graded{% if r['rarity_same'] is not none %} · {{ r['rarity_same'] }} at this grade{% endif %}{% if r['rarity_finer'] is not none %} · {{ r['rarity_finer'] }} finer{% endif %}{% endif %}</span></span>
+    <span id="pdgRarDieRow" {% if not (r and r['rarity_die']) %}style="display:none"{% endif %}><b>Die study:</b> <span id="pdgRarDie">{{ r['rarity_die'] if r and r['rarity_die'] else '' }}</span></span>
+    <span id="pdgRarRegradeRow" {% if not (r and r['rarity_regrade']) %}style="display:none"{% endif %}><b>Regrade:</b> <span id="pdgRarRegrade">{{ r['rarity_regrade'] if r and r['rarity_regrade'] else '' }}</span></span>
+    {% endif %}
+    <span id="pdgRarSourceRow" {% if not (r and r['rarity_source']) %}style="display:none"{% endif %}><b>Source:</b> <span id="pdgRarSource">{{ r['rarity_source'] if r and r['rarity_source'] else '' }}</span> <a id="pdgRarSourceUrl" target="_blank" rel="noopener" href="{{ r['rarity_source_url'] if r and r['rarity_source_url'] else '#' }}" {% if not (r and r['rarity_source_url']) %}style="display:none"{% endif %}>open ↗</a></span>
+  </div>
   <div class="pdg-summary-wrap">
     <div class="pdg-summary{% if not _ra_summary %} is-empty{% endif %}" id="pdgRarSummary" title="Click to edit" tabindex="0">{{ _ra_summary|format_results }}</div>
     <textarea class="pdg-summary-edit" id="pdgRarSummaryEdit" data-kind="rarity" style="display:none" rows="6">{{ _ra_summary }}</textarea>
@@ -305,8 +305,10 @@
     if ($('pdgRarRankLabel')) $('pdgRarRankLabel').textContent = (isNote && data.top) ? 'Finest' : 'Standing';
     if ($('pdgRarStanding')) { $('pdgRarStanding').textContent = data.standing_detail || ''; $('pdgRarStanding').style.display = data.standing_detail ? '' : 'none'; }
     $('pdgRarRating').textContent = data.rating || '—';
-    $('pdgRarDie').textContent = data.die || ''; $('pdgRarDieRow').style.display = data.die ? '' : 'none';
-    $('pdgRarRegrade').textContent = data.regrade || ''; $('pdgRarRegradeRow').style.display = data.regrade ? '' : 'none';
+    if (!isNote) {
+      $('pdgRarDie').textContent = data.die || ''; $('pdgRarDieRow').style.display = data.die ? '' : 'none';
+      $('pdgRarRegrade').textContent = data.regrade || ''; $('pdgRarRegradeRow').style.display = data.regrade ? '' : 'none';
+    }
     $('pdgRarSource').textContent = data.source || ''; $('pdgRarSourceRow').style.display = data.source ? '' : 'none';
     const a = $('pdgRarSourceUrl'); a.href = data.source_url || '#'; a.style.display = data.source_url ? '' : 'none';
     setSummary('pdgRarSummary', 'pdgRarSummaryEdit', data.summary || '');

@@ -137,6 +137,15 @@ assert '12.24' in prompt and 'Greece' in prompt and 'THIS specimen' in prompt
 rprompt = stuffapp._rarity_prompt('banknotes', {'id': 'b1', 'pick_number': 'P-55b', 'grade': '65 EPQ',
                                                'slab_number': '8078166-001', 'grading_authority': 'PMG'})
 assert 'pmgnotes.com' in rprompt and '8078166-001' in rprompt
+# Catalogue identifiers and missing ratings must not masquerade as rarity.
+for raw, expected in (
+    ('R48 (Renniks catalogue number; no separate scarcity rating found)', ''),
+    ('R48', ''), ('P-27d', ''), ('No rarity rating found', ''),
+    ('Rare (unconfirmed)', ''), ('Rare (SCWPM)', 'Rare'),
+    ('R2 (Banknote Book)', 'R2'), ('Very scarce — specialist catalogue', 'Very scarce'),
+):
+    assert stuffapp.rarity_label(raw, 'banknotes') == expected, raw
+assert stuffapp.rarity_label('R2 (HGC)', 'coins') == 'R2 (HGC)'
 print('cleaners OK')
 
 # ── panels render ─────────────────────────────────────────────────────
@@ -150,6 +159,11 @@ r = client.get('/banknotes/b1')
 assert r.status_code == 200, r.status_code
 html = r.get_data(as_text=True)
 assert 'Census &amp; rarity' in html and 'pdgRarResearch' in html
+assert 'id="pdgRarRegradeRow"' not in html
+start = html.index('<details class="pdg-research-details">')
+end = html.index('</details>', start)
+assert start < html.index('id="pdgRarSourceRow"') < end
+assert start < html.index('id="pdgRarSummary"') < end
 # A new record has no panels (nothing to research yet).
 r = client.get('/coins/new')
 assert r.status_code == 200 and 'pdgData' not in r.get_data(as_text=True)
