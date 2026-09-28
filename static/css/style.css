@@ -4153,6 +4153,7 @@ input[type="date"] { -webkit-appearance: none; }
 .pdg-summary { color: #111; line-height: 1.45; cursor: text; white-space: pre-wrap; padding: 6px 8px;
   border: 1px dashed transparent; border-radius: 4px; }
 .pdg-summary:hover { border-color: var(--border, #d9d9e0); }
+.pdg-research-details > summary { cursor: pointer; color: var(--text-secondary, #555); padding: 6px 0; }
 .pdg-summary.is-empty::before { content: 'No summary yet — Research writes one, or click to write your own.'; color: var(--text-hint, #888); font-style: italic; }
 .pdg-summary p { margin: 0 0 6px; }
 .pdg-summary-edit { width: 100%; box-sizing: border-box; font: inherit; color: #111; line-height: 1.45;

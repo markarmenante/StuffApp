@@ -39093,8 +39093,8 @@ Output: ONLY a JSON object, no prose before or after, no markdown fences:
   "top_grade": "the finest grade recorded for this Pick — in the census when quoted, else the finest seen at auction — with its designation, e.g. '67 EPQ', or ''",
   "rating": "catalogue rarity note, e.g. 'R2 (Banknote Book)', 'Rare (SCWPM)', or ''",
   "die": "" ,
-  "regrade": "one sentence on what a regrade / crossover would change, or ''",
-  "summary": "3–6 sentences in plain prose: the population figures with their source and date, how this note ranks, how often the type trades and at what level, and what you could not find.",
+  "regrade": "At most 25 words on what a regrade or crossover could change, or ''. Do not predict a higher grade or repeat a dealer quotation.",
+  "summary": "At most two short sentences (60 words total): the key finding and any material limitation, including unverified census counts. Do not repeat the tiles, regrade note or source line. Omit search narration, listing titles and unrelated varieties.",
   "source": "e.g. 'PMG population report, Pick 55b, retrieved 2026-09-16'",
   "source_url": "URL of the population / cert page used, or ''",
   "confidence": 0.0-1.0 (how sure you are the figures are for this exact Pick variety and are current)

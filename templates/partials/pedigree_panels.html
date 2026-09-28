@@ -116,10 +116,15 @@
     <span id="pdgRarRegradeRow" {% if not (r and r['rarity_regrade']) %}style="display:none"{% endif %}><b>Regrade:</b> <span id="pdgRarRegrade">{{ r['rarity_regrade'] if r and r['rarity_regrade'] else '' }}</span></span>
     <span id="pdgRarSourceRow" {% if not (r and r['rarity_source']) %}style="display:none"{% endif %}><b>Source:</b> <span id="pdgRarSource">{{ r['rarity_source'] if r and r['rarity_source'] else '' }}</span> <a id="pdgRarSourceUrl" target="_blank" rel="noopener" href="{{ r['rarity_source_url'] if r and r['rarity_source_url'] else '#' }}" {% if not (r and r['rarity_source_url']) %}style="display:none"{% endif %}>open ↗</a></span>
   </div>
+  {% if category == 'banknotes' %}
+  <details class="pdg-research-details">
+    <summary>Research details</summary>
+  {% endif %}
   <div class="pdg-summary-wrap">
     <div class="pdg-summary{% if not _ra_summary %} is-empty{% endif %}" id="pdgRarSummary" title="Click to edit" tabindex="0">{{ _ra_summary|format_results }}</div>
     <textarea class="pdg-summary-edit" id="pdgRarSummaryEdit" data-kind="rarity" style="display:none" rows="6">{{ _ra_summary }}</textarea>
   </div>
+  {% if category == 'banknotes' %}</details>{% endif %}
 </div>
 
 <script id="pdgData" type="application/json">{{ {
