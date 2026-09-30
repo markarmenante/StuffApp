@@ -1595,7 +1595,7 @@ document.addEventListener('DOMContentLoaded', function () {
              {% if is_new and not val('size_height') %}placeholder="H"{% endif %}>
       <span class="clabel">H mm</span>
     </div>
-    <div class="dcell"><select name="grade" style="text-align:center"><option value=""></option>{% for o in vlists.banknote_grade %}<option value="{{ o }}" {{ 'selected' if val('grade')==o }}>{{ o }}</option>{% endfor %}</select><span class="clabel">Grade</span></div>
+    <div class="dcell"><input type="text" value="{{ coin_grade_display(val('grade'), val('grade_modifier')) }}" readonly class="banknote-grade-summary" aria-label="Combined grade" style="text-align:center"><span class="clabel">Grade · edit below</span></div>
   </div>
 
   <!-- Purchase -->
@@ -1621,18 +1621,31 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- Grade, Conditions -->
   {{ notescell('notes','Grade, Conditions') }}
-  {# Grading-service row: authority (narrow — it holds "PMG"/"PCGS"),
-     cert number, combined grade readout, numeric grade, EPQ/PPQ/★
-     designation, condition qualifier (wide — label comment lists). #}
-  <div class="dgrid coin-grading-row" style="grid-template-columns: 0.7fr 1.3fr 1.1fr 0.6fr 0.6fr 1.6fr;">
-    {{ cell('grading_authority','Grading Authority') }}
+  <div class="dgrid banknote-grading-row">
+    {{ tacell('grading_authority','Grading Service', banknote_grading_services()) }}
     {{ cell('slab_number','Cert Number') }}
+    {% if not is_hidden_field(category, 'grade') %}
     <div class="dcell">
-      <input type="text" value="{{ coin_grade_display(val('grade'), val('grade_modifier')) }}" readonly tabindex="-1" class="coin-grade-readout" style="color:#444">
+      <select name="grade" aria-label="Alphabetical grade">
+        <option value=""></option>
+        {% if val('grade') and val('grade') not in vlists.banknote_grade %}<option value="{{ val('grade') }}" selected>{{ val('grade') }}</option>{% endif %}
+        {% for o in vlists.banknote_grade %}<option value="{{ o }}" {{ 'selected' if val('grade') == o }}>{{ coin_grade_display(o) }}</option>{% endfor %}
+      </select>
       <span class="clabel">Grade</span>
     </div>
-    {{ numcell('grade_numeric','Numeric') }}
-    {{ cell('grade_modifier','EPQ / PPQ / ★') }}
+    {% endif %}
+    {% if not is_hidden_field(category, 'grade_numeric') %}
+    {% set grade_numbers = [70,69,68,67,66,65,64,63,62,61,60,58,55,53,50,45,40,35,30,25,20,15,12,10,8,6,4,3,2,1] %}
+    <div class="dcell">
+      <select name="grade_numeric" aria-label="Numeric grade">
+        <option value=""></option>
+        {% if val('grade_numeric') and val('grade_numeric')|float not in grade_numbers %}<option value="{{ val('grade_numeric') }}" selected>{{ val('grade_numeric') }}</option>{% endif %}
+        {% for n in grade_numbers %}<option value="{{ n }}" {{ 'selected' if val('grade_numeric') and val('grade_numeric')|float == n }}>{{ n }}</option>{% endfor %}
+      </select>
+      <span class="clabel">Numeric</span>
+    </div>
+    {% endif %}
+    {{ tacell('grade_modifier','EPQ / PPQ / ★', ['EPQ','PPQ','EPQ ★','★','+']) }}
     {{ cell('grade_condition','Condition') }}
   </div>
   <!-- Description -->
@@ -8574,4 +8587,22 @@ window.openPerplexitySearch = function openPerplexitySearch(btn) {
   window.open(url, '_blank', 'noopener,noreferrer');
 };
 </script>
+{% if category == 'banknotes' %}
+<script>
+(function () {
+  const grade = document.querySelector('select[name="grade"]');
+  const modifier = document.querySelector('[name="grade_modifier"]');
+  const summary = document.querySelector('.banknote-grade-summary');
+  if (!grade || !summary) return;
+  function updateGradeSummary() {
+    const label = grade.selectedOptions[0]?.textContent || '';
+    summary.value = [label, modifier?.value.trim() || ''].filter(Boolean).join(' ');
+  }
+  grade.addEventListener('change', updateGradeSummary);
+  modifier?.addEventListener('input', updateGradeSummary);
+  modifier?.addEventListener('change', updateGradeSummary);
+  updateGradeSummary();
+})();
+</script>
+{% endif %}
 {% endblock %}

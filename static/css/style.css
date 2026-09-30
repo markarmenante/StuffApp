@@ -4264,3 +4264,11 @@ input[type="date"] { -webkit-appearance: none; }
 .ebay-setup code { overflow-wrap:anywhere; }
 .ebay-checks { margin:24px 0; }
 @media(max-width:640px) { .ebay-page { padding:14px; } .ebay-timeline { gap:18px; } .ebay-actions form { width:100%; } .ebay-actions select { max-width:calc(100vw - 90px); } }
+
+/* Keep editable banknote grading controls together at every screen width. */
+.banknote-grading-row { grid-template-columns: 1fr 1.2fr 1.4fr .65fr .9fr 1.4fr; }
+.banknote-grading-row .dcell { min-width: 0; }
+.banknote-grading-row select { width: 100%; min-width: 0; }
+@media (max-width: 700px) {
+  .banknote-grading-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

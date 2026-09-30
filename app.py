@@ -442,6 +442,11 @@ def normalize_banknote_grading_authority(value):
     return normalize_grading_authority(v)
 
 
+@app.template_global()
+def banknote_grading_services():
+    return [grader['name'] for grader in BANKNOTE_GRADERS]
+
+
 def banknote_grader_profile(name):
     """The BANKNOTE_GRADERS entry for a stored grading_authority, or None."""
     canon = normalize_banknote_grading_authority(name)
