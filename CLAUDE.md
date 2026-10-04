@@ -8,6 +8,12 @@ fold new standing instructions in here — nowhere else.)
 
 - **Commit and push directly to `main`.** No draft-PR round-trips — `main` is
   the deploy branch; Railway auto-deploys it.
+- **Shared connections and pathways** (2026-10-04): read this repo's
+  `CONNECTORS.md` and its canonical registry before integration work. Reuse
+  existing approved adapters within their account/scope/runtime boundaries;
+  missing local authorization is not a reason to recreate a provider app.
+  Update the canonical entry in the same task as pathway changes. Keep this
+  public repo's reference free of secret values and private account inventories.
 - **Proactively install/connect whatever tools, MCP connectors, or
   dependencies streamline development**, and tell Mark when something needs a
   one-time authorization on his side.
