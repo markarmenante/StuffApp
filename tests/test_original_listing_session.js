@@ -1,0 +1,91 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const source = fs.readFileSync(path.join(__dirname, '../static/js/original-listing.js'), 'utf8');
+const state = (extra = {}) => ({
+  links: [], check: null, review: {token: 'evidence-1', reason: 'Check refund', dismissed: false, sources: []},
+  delivery: {status: 'Delivered', attention: true}, ...extra,
+});
+const response = (status, data) => ({status, ok: status === 200, json: async () => data});
+const expired = () => response(403, {code: 'csrf_expired', error: 'Session expired'});
+
+async function page(replies, initial = state()) {
+  let click;
+  const element = () => ({dataset: {}, textContent: '', hidden: false,
+    replaceChildren() {}, append() {}, setAttribute() {}, addEventListener(_, fn) { click = fn; }});
+  const selectors = ['title', 'reasons', 'progress', 'error', 'action'];
+  const elements = Object.fromEntries(selectors.map(name => [`[data-listing-${name}]`, element()]));
+  elements['[data-purchase-links]'] = element();
+  elements['[data-listing-initial]'] = {textContent: JSON.stringify(initial)};
+  const panel = {dataset: {url: '/banknotes/test/original-listing', csrf: 'old-session'},
+    querySelector: key => elements[key]};
+  const badge = element(), requests = [];
+  const queue = [response(200, {...initial, csrf_token: 'initial-session'}), ...replies];
+  vm.runInNewContext(source, {
+    document: {querySelector: key => key === '[data-original-listing]' ? panel : badge,
+      createElement: element},
+    window: {setTimeout() { throw Error('Unexpected polling'); }},
+    URLSearchParams, AbortSignal, clearTimeout,
+    fetch: async (url, options) => {
+      requests.push({url, method: options.method || 'GET', body: Object.fromEntries(options.body || [])});
+      const next = queue.shift();
+      if (!next) throw Error('Unexpected request');
+      if (next instanceof Error) throw next;
+      return next;
+    },
+  });
+  await new Promise(setImmediate);
+  return {panel, badge, requests, click, button: elements['[data-listing-action]'],
+    title: elements['[data-listing-title]'], error: elements['[data-listing-error]']};
+}
+
+(async () => {
+  for (const action of ['dismiss', 'restore']) {
+    const initial = state({review: {...state().review, dismissed: action === 'restore'}});
+    const saved = state({review: {...initial.review, dismissed: action === 'dismiss'},
+      delivery: {status: 'Delivered', attention: action === 'restore'}});
+    const ui = await page([expired(), response(200, {...initial, csrf_token: 'renewed-session'}),
+      response(200, saved)], initial);
+    await ui.click();
+    assert.deepEqual(ui.requests.map(r => r.method), ['GET', 'POST', 'GET', 'POST']);
+    const first = ui.requests[1].body, retry = ui.requests[3].body;
+    assert.equal(first.csrf_token, 'initial-session');
+    assert.deepEqual(retry, {...first, csrf_token: 'renewed-session'});
+    assert.equal(retry.action, action);
+    assert.equal(ui.title.textContent, action === 'dismiss' ? 'Marked reviewed' : 'Review Reason');
+    assert.equal(ui.badge.textContent, action === 'dismiss' ? 'Delivered' : 'Delivered \u00b7 Review');
+    assert.equal(ui.error.hidden, true);
+    assert.equal(ui.button.disabled, false);
+  }
+  console.log('Expired sessions renew once; dismiss/undo preserve the original evidence and action.');
+
+  for (const changed of [state({review: {...state().review, token: 'evidence-2'}}),
+                         state({check: {token: 'new-listing-check', differences: []}})]) {
+    const ui = await page([expired(), response(200, {...changed, csrf_token: 'renewed'})]);
+    await ui.click();
+    assert.equal(ui.requests.filter(r => r.method === 'POST').length, 1);
+    assert.match(ui.error.textContent, /review changed/);
+    assert.equal(ui.title.textContent, 'Review Reason');
+    assert.equal(ui.button.disabled, false);
+  }
+  console.log('Changed purchase or listing evidence is displayed, never silently dismissed.');
+
+  for (const failure of [response(403, {}), response(409, {error: 'Review changed'}),
+                         response(500, {}), new Error('Connection lost')]) {
+    const ui = await page([failure]);
+    await ui.click();
+    assert.equal(ui.requests.length, 2);
+    assert.equal(ui.error.hidden, false);
+    assert.equal(ui.button.disabled, false);
+  }
+  const denied = await page([expired(), response(403, {})]);
+  await denied.click();
+  assert.equal(denied.requests.length, 3);
+  assert.match(denied.error.textContent, /refresh the page session/);
+  const repeated = await page([expired(), response(200, {...state(), csrf_token: 'renewed'}), expired()]);
+  await repeated.click();
+  assert.equal(repeated.requests.length, 4);
+  assert.equal(repeated.error.hidden, false);
+  console.log('Authorization, conflicts, timeouts and repeated expiry do not trigger blind retries.');
+})().catch(err => { console.error(err); process.exit(1); });

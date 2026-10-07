@@ -14,7 +14,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from flask import Blueprint, abort, jsonify, g, request, session, url_for
 
-from ebay_orders import banknote_deliveries, listing_id, review_digest, safe_review_source_url, now_iso
+from ebay_orders import banknote_deliveries, csrf_token, listing_id, review_digest, safe_review_source_url, now_iso
 import listing_checks
 import source_documents
 
@@ -376,7 +376,10 @@ def register(app, get_db, connect, can_see, require_owner, analyze, upload_folde
         record = get_db().execute(f'SELECT * FROM {category} WHERE id=?', (record_id,)).fetchone()
         if not record or not can_see(category, record):
             abort(404)
-        response = jsonify(service.lookup(category, record))
+        data = service.lookup(category, record)
+        if (g.get('current_user') or {}).get('role') == 'owner':
+            data['csrf_token'] = csrf_token()
+        response = jsonify(data)
         response.headers['Cache-Control'] = 'no-store'
         return response
 
@@ -387,7 +390,10 @@ def register(app, get_db, connect, can_see, require_owner, analyze, upload_folde
             abort(403)
         expected, provided = session.get('ebay_csrf', ''), request.form.get('csrf_token', '')
         if not expected or not hmac.compare_digest(expected.encode(), provided.encode()):
-            abort(403)
+            response = jsonify(code='csrf_expired', error='The page session expired. Please try again.')
+            response.status_code = 403
+            response.headers['Cache-Control'] = 'no-store'
+            return response
         action = request.form.get('action')
         if action not in ('dismiss', 'restore'):
             abort(400)

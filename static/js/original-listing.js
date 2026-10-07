@@ -12,6 +12,7 @@
 
   function render(data) {
     result = data;
+    if (data.csrf_token) panel.dataset.csrf = data.csrf_token;
     const review = data.review, check = data.check;
     const differences = check?.differences || [];
     const needsReview = (review && !review.dismissed) || (differences.length > 0 && !check.dismissed);
@@ -90,12 +91,33 @@
     if (busy) return;
     busy = true; button.disabled = true; error.hidden = true; clearTimeout(timer);
     try {
-      const response = await fetch(panel.dataset.url + '/review', {
+      const body = new URLSearchParams({ action: button.dataset.listingAction, csrf_token: panel.dataset.csrf,
+        review_token: result.review?.token || '', check_token: result.check?.token || '' });
+      const submit = () => fetch(panel.dataset.url + '/review', {
         method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(15000),
-        body: new URLSearchParams({ action: button.dataset.listingAction, csrf_token: panel.dataset.csrf,
-          review_token: result.review?.token || '', check_token: result.check?.token || '' }),
+        body,
       });
-      const data = await response.json().catch(() => ({}));
+      let response = await submit();
+      let data = await response.json().catch(() => ({}));
+      if (response.status === 403 && data.code === 'csrf_expired') {
+        const currentResponse = await fetch(panel.dataset.url, {
+          credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000),
+        });
+        const current = await currentResponse.json().catch(() => ({}));
+        if (!currentResponse.ok || !current.csrf_token) {
+          throw new Error('Could not refresh the page session. Reload and try again.');
+        }
+        // Renew only the session token; never acknowledge evidence the user has not seen.
+        if ((current.review?.token || '') !== body.get('review_token') ||
+            (current.check?.token || '') !== body.get('check_token')) {
+          render(current);
+          throw new Error('The review changed. Check the updated details before confirming it.');
+        }
+        panel.dataset.csrf = current.csrf_token;
+        body.set('csrf_token', current.csrf_token);
+        response = await submit();
+        data = await response.json().catch(() => ({}));
+      }
       if (!response.ok) throw new Error(data.error || 'Could not confirm the review. Reload and try again.');
       render(data);
     } catch (err) {

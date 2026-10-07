@@ -300,6 +300,65 @@ class ListingTests(unittest.TestCase):
         self.assertEqual(self.db.execute('SELECT weight FROM coins WHERE id=?', (self.id,)).fetchone()[0], 12.5)
         self.assertFalse(checks.run_once(stuff.open_db_connection, lambda _: ('available', TEXT), analyze))
 
+    def test_review_recovers_after_deployment_expires_session_both_categories(self):
+        self.banknote_order()
+        self.db.execute('INSERT INTO coin_purchase_reviews VALUES (?,?,?)', (self.id, 'Check price', 'today'))
+        self.db.commit()
+        for category in ('coins', 'banknotes'):
+            with self.subTest(category=category):
+                path = f'/{category}/{self.id}/original-listing'
+                current = self.state(category)
+                before = dict(self.db.execute(f'SELECT * FROM {category} WHERE id=?', (self.id,)).fetchone())
+                data = dict(action='dismiss', review_token=current['review']['token'], check_token='',
+                            csrf_token=current['csrf_token'])
+                with patch.dict(stuff.app.config, SECRET_KEY=os.urandom(32)):
+                    rejected = self.client.post(path + '/review', data=data, base_url='https://localhost')
+                    self.assertEqual(rejected.status_code, 403)
+                    self.assertEqual(rejected.json['code'], 'csrf_expired')
+                    self.assertEqual(rejected.headers['Cache-Control'], 'no-store')
+                    refreshed = self.get(path)
+                    self.assertEqual(refreshed.headers['Cache-Control'], 'no-store')
+                    self.assertNotEqual(refreshed.json['csrf_token'], data['csrf_token'])
+                    self.assertFalse(refreshed.json['review']['dismissed'])
+                    self.assertEqual(refreshed.json['review']['token'], data['review_token'])
+                    data['csrf_token'] = refreshed.json['csrf_token']
+                    saved = self.client.post(path + '/review', data=data, base_url='https://localhost')
+                    self.assertEqual(saved.status_code, 200)
+                    self.assertTrue(saved.json['review']['dismissed'])
+                    self.assertTrue(self.state(category)['review']['dismissed'])
+                    data['action'] = 'restore'
+                    restored = self.client.post(path + '/review', data=data, base_url='https://localhost')
+                    self.assertEqual(restored.status_code, 200)
+                    self.assertFalse(restored.json['review']['dismissed'])
+                self.assertEqual(before, dict(self.db.execute(f'SELECT * FROM {category} WHERE id=?',
+                                                              (self.id,)).fetchone()))
+
+    def test_refreshed_session_still_rejects_changed_review_and_cross_site_requests(self):
+        self.banknote_order()
+        path = f'/banknotes/{self.id}/original-listing'
+        current = self.state('banknotes')
+        data = dict(action='dismiss', review_token=current['review']['token'], check_token='',
+                    csrf_token=current['csrf_token'])
+        with self.client.session_transaction(base_url='https://localhost') as session:
+            session.clear()
+        self.db.execute('UPDATE ebay_order_items SET attention=? WHERE line_key=?',
+                        ('Partially refunded; verify amount', self.id))
+        self.db.commit()
+        data['csrf_token'] = self.state('banknotes')['csrf_token']
+        rejected = self.client.post(path + '/review', data=data, base_url='https://localhost')
+        self.assertEqual(rejected.status_code, 409)
+        self.assertFalse(self.state('banknotes')['review']['dismissed'])
+        data['review_token'] = self.state('banknotes')['review']['token']
+        rejected = self.client.post(path + '/review', data=data, base_url='https://localhost',
+                                    headers={'Origin': 'https://untrusted.example'})
+        self.assertEqual(rejected.status_code, 403)
+        self.assertFalse(rejected.is_json)
+        self.assertFalse(self.state('banknotes')['review']['dismissed'])
+        forbidden = self.client.get(path, base_url='https://localhost',
+                                    headers={'Cf-Access-Authenticated-User-Email': 'outsider@example.com'})
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertNotIn(b'csrf_token', forbidden.data)
+
     def test_concurrent_edit_defers_report(self):
         self.available()
         checks.ensure(self.db, 'coins', self.id, URL)

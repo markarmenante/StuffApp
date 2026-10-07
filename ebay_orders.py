@@ -40,6 +40,12 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
+def csrf_token():
+    if 'ebay_csrf' not in session:
+        session['ebay_csrf'] = secrets.token_urlsafe(32)
+    return session['ebay_csrf']
+
+
 def timestamp(value, observed=False):
     """Normalize timestamps; future estimates must never prove delivery."""
     try:
@@ -619,11 +625,6 @@ def register(app, get_db, open_db, require_owner, data_dir):
     sync = OrderSync(app, open_db, data_dir)
     app.extensions['ebay_orders'] = sync
     bp = Blueprint('ebay', __name__)
-
-    def csrf_token():
-        if 'ebay_csrf' not in session:
-            session['ebay_csrf'] = secrets.token_urlsafe(32)
-        return session['ebay_csrf']
 
     @bp.before_request
     def authorize(category='banknotes'):
