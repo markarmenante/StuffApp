@@ -298,10 +298,16 @@ def init_schema(db):
 
 def detail_match_plan(db):
     from ebay_matching import plan_matches
+    unverified = unverified_email_keys(db)
     return plan_matches([dict(r) for r in db.execute('SELECT * FROM banknotes')],
-                        [dict(r) for r in db.execute('SELECT * FROM ebay_order_items')],
+                        [dict(r) for r in db.execute('SELECT * FROM ebay_order_items') if r['line_key'] not in unverified],
                         [dict(r) for r in db.execute('SELECT * FROM banknote_ebay_links')],
                         listing_candidates(db))
+
+
+def unverified_email_keys(db):
+    return {r[0] for r in db.execute('SELECT DISTINCT r.line_key FROM ebay_mail_receipts r '
+        'LEFT JOIN ebay_purchase_observations p ON p.line_key=r.line_key WHERE p.line_key IS NULL')}
 
 
 def listing_candidates(db):
@@ -345,7 +351,7 @@ def event(db, banknote_id, previous, new, source, occurred=None):
     return 0
 
 
-def apply_items(db, items, source='eBay', auto_match=True):
+def apply_items(db, items, source='eBay', auto_match=True, authoritative=False):
     """Caller owns the transaction; a partial network page never reaches here."""
     candidates = listing_candidates(db)
     linked = {r['line_key']: dict(r) for r in db.execute('SELECT * FROM banknote_ebay_links')}
@@ -357,13 +363,13 @@ def apply_items(db, items, source='eBay', auto_match=True):
         old = db.execute('SELECT * FROM ebay_order_items WHERE line_key=?', (item['line_key'],)).fetchone()
         status = item['delivery_status']
         # Exceptions do not advance a shipment. Missing/older evidence never regresses it.
-        if item['attention']:
+        if item['attention'] and not authoritative:
             status = old['delivery_status'] if old else 'Ordered'
-        elif old and RANK[old['delivery_status']] > RANK[status]:
+        elif old and not authoritative and RANK[old['delivery_status']] > RANK[status]:
             status = old['delivery_status']
         values = dict(item, delivery_status=status, last_seen=now)
         for field in ('ordered_at', 'shipped_at', 'delivered_at'):
-            values[field] = (old[field] if old else None) or item[field]
+            values[field] = item[field] if authoritative else (old[field] if old else None) or item[field]
         fields = [k for k in values if k != 'tracking']
         db.execute('INSERT INTO ebay_order_items (' + ','.join(fields) + ') VALUES (' +
                    ','.join('?' for _ in fields) + ') ON CONFLICT(line_key) DO UPDATE SET ' +
@@ -383,10 +389,11 @@ def apply_items(db, items, source='eBay', auto_match=True):
     counts = Counter(r['item_id'] for r in db.execute('SELECT item_id FROM ebay_order_items'))
     occupied = {r['banknote_id'] for r in db.execute('SELECT banknote_id FROM banknote_ebay_links')}
     reverse = Counter(note for ids in candidates.values() for note in ids)
+    unverified = unverified_email_keys(db)
     for item in db.execute('SELECT i.* FROM ebay_order_items i LEFT JOIN banknote_ebay_links l '
                            'ON l.line_key=i.line_key WHERE l.line_key IS NULL AND i.ignored=0').fetchall():
         ids = candidates.get(item['item_id'], set())
-        if len(ids) != 1 or counts[item['item_id']] != 1 or item['quantity'] != 1 or item['attention']:
+        if item['line_key'] in unverified or len(ids) != 1 or counts[item['item_id']] != 1 or item['quantity'] != 1 or item['attention']:
             continue
         note_id = next(iter(ids))
         if note_id in occupied or reverse[note_id] != 1:
@@ -584,11 +591,16 @@ def register(app, get_db, open_db, require_owner, data_dir):
         events = db.execute('SELECT e.*,b.cat_id,b.country,b.denomination FROM ebay_status_events e '
                             'JOIN banknotes b ON b.id=e.banknote_id ORDER BY e.id DESC LIMIT 50').fetchall()
         runs = db.execute('SELECT * FROM ebay_sync_runs ORDER BY started_at DESC LIMIT 5').fetchall()
+        notices = db.execute('SELECT * FROM merchant_purchase_notices ORDER BY observed_at DESC LIMIT 100').fetchall()
+        observations = {r['line_key']: dict(r) for r in db.execute('SELECT * FROM ebay_purchase_observations')}
+        unverified = unverified_email_keys(db)
+        items = [dict(r, display_status=r['manual_status'] or ('Unverified' if r['line_key'] in unverified or r['attention'].startswith('Multiple purchase rows') else r['delivery_status'])) for r in items]
         _, suggestions = detail_match_plan(db)
         return render_template('ebay_orders.html', current_category='banknotes', connection=conn,
                                configured=sync.client.configured, worker_enabled=sync.worker_enabled,
                                interval_minutes=sync.interval // 60, items=items, notes=notes,
                                events=events, runs=runs, tracking=tracking, suggestions=suggestions,
+                               merchant_notices=notices, purchase_observations=observations,
                                csrf_token=csrf_token(),
                                mail_configured=mail_configured(), mail_connection=mail_connection)
 
@@ -672,7 +684,7 @@ def register(app, get_db, open_db, require_owner, data_dir):
         elif action == 'delete_data':
             db.execute('INSERT OR IGNORE INTO ebay_mail_connection (id) VALUES (1)')
             db.execute('UPDATE ebay_mail_connection SET enabled=0,last_received=NULL WHERE id=1')
-            for table in ('ebay_status_events', 'ebay_order_items', 'ebay_connection', 'ebay_oauth_states', 'ebay_sync_runs'):
+            for table in ('ebay_status_events', 'ebay_order_items', 'ebay_connection', 'ebay_oauth_states', 'ebay_sync_runs', 'ebay_purchase_account'):
                 db.execute('DELETE FROM ' + table)
         else:
             abort(400)
@@ -739,10 +751,11 @@ def register(app, get_db, open_db, require_owner, data_dir):
 
     def deliveries():
         if 'ebay_deliveries' not in g:
-            rows = get_db().execute('SELECT l.banknote_id,l.manual_status,i.delivery_status,i.attention,i.last_seen '
+            unverified = unverified_email_keys(get_db())
+            rows = get_db().execute('SELECT l.banknote_id,l.line_key,l.manual_status,i.delivery_status,i.attention,i.last_seen '
                                     'FROM banknote_ebay_links l JOIN ebay_order_items i ON i.line_key=l.line_key').fetchall()
-            g.ebay_deliveries = {r['banknote_id']: {'status': r['manual_status'] or r['delivery_status'],
-                               'manual': bool(r['manual_status']), 'attention': bool(r['attention']),
+            g.ebay_deliveries = {r['banknote_id']: {'status': r['manual_status'] or ('Unverified' if r['line_key'] in unverified or r['attention'].startswith('Multiple purchase rows') else r['delivery_status']),
+                               'manual': bool(r['manual_status']), 'attention': bool(r['attention']) or r['line_key'] in unverified,
                                'last_seen': r['last_seen']} for r in rows}
         return g.ebay_deliveries
 

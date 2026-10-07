@@ -1,25 +1,36 @@
 # Banknote order updates from Today
 
-Today reuses its Apple Mail reader to scan eBay notices across all mailboxes,
-including Archive and Deleted/Trash (and deleted index rows whose message files
-still exist). The first pass covers one year; subsequent passes run every 30
-minutes while Today is running. Permanently removed or undownloaded message
-bodies cannot be recovered by this integration.
+eBay shipment status comes from the signed-in **Purchases** panel in Chrome,
+not email. Today opens its own background tab, reads all pages in the default
+purchase-history period (maximum 40 pages), and closes only that tab. Chrome
+must allow JavaScript from Apple Events and automation from Today/node. Missing
+login, unreadable rows or incomplete pagination cause no partial update.
+Duplicate purchase identities are held for review without blocking other orders.
+The first authenticated snapshot binds the eBay username;
+subsequent snapshots must match it and any configured API buyer account.
 
-The sender must be an eBay email domain. A notice needs exactly one item ID and
-one order number, its seller and explicit order/shipping/delivery wording before
-the item section. Combined notices and ambiguous messages are skipped. An
-estimate, label creation or out-for-delivery notice never establishes delivery.
-Shipment notices that omit quantity represent one item; explicit quantities above
-one remain review-only. Confirmation dates are email receipt dates, not inferred
-carrier event times. Cancels/refunds are not used as delivery confirmations.
+The authenticated `POST /ebay/today` bridge accepts `source: ebay_purchases`
+with account, observation time and structured purchased items. Item/order IDs,
+seller, title, quantity, displayed status, displayed delivery text and order date
+are retained. Recommendations are never read. Delivery requires an explicit
+Delivered status and the purchased item's Delivered-on date. Tracking available
+and estimates do not prove shipment. Unknown/exception statuses need review.
+Actual shipping dates stay unknown when the panel does not give one.
 
-Today sends only the item/order IDs, title, seller, quantity, status, a short
-evidence phrase, timestamp and a hashed message ID to `POST /ebay/today`.
-No raw email, addresses, payments or attachments leave the Mac. Replays are
-deduplicated and failed submissions retry. Exact listing matching and manual
-overrides use the same rules below. **Collection ownership (`banknotes.status`),
-including `Own`, is never updated.** Only the separate shipping tables change.
+The retired eBay-email protocol returns HTTP 410. Old email-only statuses are
+shown as Unverified until Purchases confirms them. Newer snapshots can correct
+old email conclusions; older/replayed snapshots do not overwrite newer ones.
+Manual corrections survive. **Collection ownership (`banknotes.status`), photos
+and other collection fields never change.**
+
+Today also scans one year of locally available non-eBay purchase messages across
+Apple Mail, including Archive and Deleted/Trash. Explicit notices with a single
+order identity appear under Other purchase messages as review-only evidence.
+eBay references, estimates and ambiguous notices are excluded. Only sender,
+subject, order ID, status phrase, receipt time and a message hash leave the Mac;
+no raw bodies, addresses, payments or attachments. Missing message bodies retry.
+The two sources run independently every 30 minutes while Today is running, so
+a closed browser does not block other sellers' notices.
 
 Setup uses `STUFFAPP_TODAY_TOKEN` on Railway **web only**, and the same token in
 `~/Library/Application Support/com.boardroom.today/stuffapp-mail.json` (0600):

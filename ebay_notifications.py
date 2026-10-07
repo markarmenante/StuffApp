@@ -102,9 +102,11 @@ def delete_account_data(db, payload):
     db.execute('BEGIN IMMEDIATE')
     db.executemany('INSERT OR IGNORE INTO ebay_deleted_accounts VALUES (?)', [(v,) for v in identities])
     connection = db.execute('SELECT account_key,account_name FROM ebay_connection WHERE id=1').fetchone()
-    if connection and ({connection['account_key'], digest(connection['account_name'].lower())} & identities):
-        for table in ('ebay_status_events', 'ebay_order_items', 'ebay_connection', 'ebay_oauth_states', 'ebay_sync_runs'):
+    purchases = db.execute('SELECT account_name FROM ebay_purchase_account WHERE id=1').fetchone()
+    if (connection and ({connection['account_key'], digest(connection['account_name'].lower())} & identities)) or (purchases and digest(purchases['account_name'].lower()) in identities):
+        for table in ('ebay_status_events', 'ebay_order_items', 'ebay_connection', 'ebay_oauth_states', 'ebay_sync_runs', 'ebay_purchase_account'):
             db.execute('DELETE FROM ' + table)
+        db.execute('UPDATE ebay_mail_connection SET enabled=0,last_received=NULL WHERE id=1')
     else:
         # Invalidate any in-flight snapshot before erasing the seller's data.
         db.execute('UPDATE ebay_connection SET generation=generation+1 WHERE id=1')

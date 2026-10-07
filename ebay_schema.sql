@@ -1,5 +1,5 @@
 -- Shipping is independent of banknotes.status (collection ownership).
--- Email evidence can be supplied by Today.
+-- eBay status comes from Purchases. Other merchants' mail stays review-only.
 -- No addresses, payment details, raw API responses, or plaintext tokens.
 CREATE TABLE IF NOT EXISTS ebay_connection (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -92,3 +92,22 @@ CREATE TABLE IF NOT EXISTS ebay_mail_receipts (
     received_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ebay_mail_item ON ebay_mail_receipts(line_key);
+CREATE TABLE IF NOT EXISTS ebay_purchase_account (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    account_name TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ebay_purchase_observations (
+    line_key TEXT PRIMARY KEY REFERENCES ebay_order_items(line_key) ON DELETE CASCADE,
+    observed_at TEXT NOT NULL,
+    status_text TEXT NOT NULL,
+    delivery_text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS merchant_purchase_notices (
+    message_id TEXT PRIMARY KEY,
+    sender TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    order_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('Ordered','Shipped','Delivered')),
+    observed_at TEXT NOT NULL,
+    evidence TEXT NOT NULL
+);
