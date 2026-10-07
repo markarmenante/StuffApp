@@ -39,7 +39,9 @@ Unmatched refunds stay in Needs matching; similar titles do not authorize a
 collection match. Legal-tender note titles are retained even without "banknote".
 An owner-requested uncertain coin match is stored separately in
 `coin_purchase_reviews` and displays a red **Please Review** pill in the coin
-list. Its tooltip gives the review reason. It does not assert that the coin was
+list. Its tooltip and the detail page's read-only **Review Reason** field show
+the discrepancy and its source, separately from editable coin notes. The field
+does not participate in autosave. A flag does not assert that the coin was
 refunded or change ownership, and disappears when the associated coin is deleted.
 
 The retired eBay-email protocol returns HTTP 410. Old email-only statuses are

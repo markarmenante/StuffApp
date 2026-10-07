@@ -359,16 +359,26 @@ class WebTests(unittest.TestCase):
             db.commit()
         try:
             self.assertNotIn(b'class="purchase-review-pill"', self.get('/coins?era=all').data)
+            self.assertNotIn(b'id="coinReviewReason"', self.get('/coins/coin-review-test').data)
+            reason = 'Refunded order; purchase match unconfirmed\nSource: <purchase confirmation>'
             with self.app.app_context():
                 db = self.stuff.get_db()
                 db.execute('INSERT INTO coin_purchase_reviews VALUES (?,?,?)',
-                           ('coin-review-test', 'Refunded order; purchase match unconfirmed', ebay.now_iso()))
+                           ('coin-review-test', reason, ebay.now_iso()))
                 db.commit()
             page = self.get('/coins?era=all')
             self.assertEqual(page.status_code, 200)
             self.assertIn(b'class="purchase-review-pill"', page.data)
             self.assertIn(b'>Please Review</span>', page.data)
             self.assertIn(b'Refunded order; purchase match unconfirmed', page.data)
+            detail = self.get('/coins/coin-review-test')
+            self.assertEqual(detail.status_code, 200)
+            self.assertIn(b'<label for="coinReviewReason">Review Reason</label>', detail.data)
+            self.assertIn(b'<textarea id="coinReviewReason" rows="3" readonly>', detail.data)
+            self.assertIn(b'Source: &lt;purchase confirmation&gt;', detail.data)
+            self.assertNotIn(b'Source: <purchase confirmation>', detail.data)
+            self.assertNotIn(b'name="coinReviewReason"', detail.data)
+            self.assertNotIn(b'id="coinReviewReason"', self.get('/coins/new').data)
             with self.app.app_context():
                 self.assertEqual(self.stuff.get_db().execute("SELECT status FROM coins WHERE id='coin-review-test'").fetchone()[0], 'Own')
         finally:
