@@ -351,6 +351,33 @@ class WebTests(unittest.TestCase):
                 db.execute("DELETE FROM banknotes WHERE id='refund-test'")
                 db.commit()
 
+    def test_coin_review_pill_is_explicit_and_preserves_ownership(self):
+        with self.app.app_context():
+            db = self.stuff.get_db()
+            db.execute("INSERT INTO coins (id,region,authority,status,date_1) VALUES "
+                       "('coin-review-test','Great Britain','George III','Own',1793)")
+            db.commit()
+        try:
+            self.assertNotIn(b'class="purchase-review-pill"', self.get('/coins?era=all').data)
+            with self.app.app_context():
+                db = self.stuff.get_db()
+                db.execute('INSERT INTO coin_purchase_reviews VALUES (?,?,?)',
+                           ('coin-review-test', 'Refunded order; purchase match unconfirmed', ebay.now_iso()))
+                db.commit()
+            page = self.get('/coins?era=all')
+            self.assertEqual(page.status_code, 200)
+            self.assertIn(b'class="purchase-review-pill"', page.data)
+            self.assertIn(b'>Please Review</span>', page.data)
+            self.assertIn(b'Refunded order; purchase match unconfirmed', page.data)
+            with self.app.app_context():
+                self.assertEqual(self.stuff.get_db().execute("SELECT status FROM coins WHERE id='coin-review-test'").fetchone()[0], 'Own')
+        finally:
+            with self.app.app_context():
+                db = self.stuff.get_db()
+                db.execute("DELETE FROM coins WHERE id='coin-review-test'")
+                db.commit()
+                self.assertFalse(db.execute("SELECT 1 FROM coin_purchase_reviews WHERE coin_id='coin-review-test'").fetchone())
+
     def test_oauth_binding_denial_and_replay(self):
         state = self.begin()
         other = self.app.test_client()

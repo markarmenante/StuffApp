@@ -37,6 +37,10 @@ Partial refunds do not imply non-fulfillment. A refund never erases a delivery
 previously confirmed through Purchases, and manual corrections take precedence.
 Unmatched refunds stay in Needs matching; similar titles do not authorize a
 collection match. Legal-tender note titles are retained even without "banknote".
+An owner-requested uncertain coin match is stored separately in
+`coin_purchase_reviews` and displays a red **Please Review** pill in the coin
+list. Its tooltip gives the review reason. It does not assert that the coin was
+refunded or change ownership, and disappears when the associated coin is deleted.
 
 The retired eBay-email protocol returns HTTP 410. Old email-only statuses are
 shown as Unverified until Purchases confirms them. Newer snapshots can correct

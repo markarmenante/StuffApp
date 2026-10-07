@@ -397,6 +397,8 @@
           {% if row['region'] and row['authority'] and row['authority'] != row['region'] %}
           <span class="item-model">{{ row['authority'] }}</span>
           {% endif %}
+          {% set _purchase_review = coin_purchase_review(row['id']) %}
+          {% if _purchase_review %}<span class="purchase-review-pill" title="{{ _purchase_review }}">Please Review</span>{% endif %}
         </div>
         <div class="item-detail-rows">
           <div class="idr">

@@ -65,6 +65,12 @@ CREATE TABLE IF NOT EXISTS ebay_status_events (
     observed_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ebay_events_note ON ebay_status_events(banknote_id, id);
+-- Owner-requested review flags do not assert a purchase match or change ownership.
+CREATE TABLE IF NOT EXISTS coin_purchase_reviews (
+    coin_id TEXT PRIMARY KEY REFERENCES coins(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ebay_sync_runs (
     id TEXT PRIMARY KEY,
     started_at TEXT NOT NULL,

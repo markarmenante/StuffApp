@@ -781,7 +781,13 @@ def register(app, get_db, open_db, require_owner, data_dir):
 
     @app.context_processor
     def delivery_context():
-        return {'banknote_delivery': lambda note_id: deliveries().get(note_id)}
+        def coin_purchase_review(coin_id):
+            if 'coin_purchase_reviews' not in g:
+                g.coin_purchase_reviews = {r['coin_id']: r['reason'] for r in
+                    get_db().execute('SELECT coin_id,reason FROM coin_purchase_reviews')}
+            return g.coin_purchase_reviews.get(coin_id)
+        return {'banknote_delivery': lambda note_id: deliveries().get(note_id),
+                'coin_purchase_review': coin_purchase_review}
 
     app.register_blueprint(bp)
     from ebay_notifications import register_notifications
