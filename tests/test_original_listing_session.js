@@ -10,8 +10,9 @@ const state = (extra = {}) => ({
 const response = (status, data) => ({status, ok: status === 200, json: async () => data});
 const expired = () => response(403, {code: 'csrf_expired', error: 'Session expired'});
 
-async function page(replies, initial = state()) {
+async function page(replies, initial = state(), ownership = 'Ordered') {
   let click;
+  let changeStatus;
   const element = () => ({dataset: {}, textContent: '', hidden: false,
     replaceChildren() {}, append() {}, setAttribute() {}, addEventListener(_, fn) { click = fn; }});
   const selectors = ['title', 'reasons', 'progress', 'error', 'action'];
@@ -21,9 +22,11 @@ async function page(replies, initial = state()) {
   const panel = {dataset: {url: '/banknotes/test/original-listing', csrf: 'old-session'},
     querySelector: key => elements[key]};
   const badge = element(), requests = [];
+  const statusSelect = {value: ownership, addEventListener(_, fn) { changeStatus = fn; }};
   const queue = [response(200, {...initial, csrf_token: 'initial-session'}), ...replies];
   vm.runInNewContext(source, {
-    document: {querySelector: key => key === '[data-original-listing]' ? panel : badge,
+    document: {querySelector: key => key === '[data-original-listing]' ? panel
+      : key === '[data-delivery-badge]' ? badge : statusSelect,
       createElement: element},
     window: {setTimeout() { throw Error('Unexpected polling'); }},
     URLSearchParams, AbortSignal, clearTimeout,
@@ -36,7 +39,8 @@ async function page(replies, initial = state()) {
     },
   });
   await new Promise(setImmediate);
-  return {panel, badge, requests, click, button: elements['[data-listing-action]'],
+  return {panel, badge, requests, click, setOwnership(value) { statusSelect.value = value; changeStatus(); },
+    button: elements['[data-listing-action]'],
     title: elements['[data-listing-title]'], error: elements['[data-listing-error]']};
 }
 
@@ -88,4 +92,31 @@ async function page(replies, initial = state()) {
   assert.equal(repeated.requests.length, 4);
   assert.equal(repeated.error.hidden, false);
   console.log('Authorization, conflicts, timeouts and repeated expiry do not trigger blind retries.');
+
+  for (const [ownership, shipping, hidden] of [
+    ['Own', 'Delivered', true], ['Owned', 'Delivered', true], ['Ordered', 'Ordered', true],
+    ['Ordered', 'Shipped', false], ['Ordered', 'Delivered', false], ['Sold', 'Delivered', false],
+    ['Own', 'Refunded', false], ['Own', 'Cancelled', false], ['Own', 'Unverified', false],
+  ]) {
+    const ui = await page([], state({delivery: {status: shipping, attention: false}}), ownership);
+    assert.equal(ui.badge.hidden, hidden, ownership + '/' + shipping);
+  }
+  const duplicate = state({delivery: {status: 'Ordered', attention: true}});
+  const dismissed = state({delivery: {status: 'Ordered', attention: false},
+    review: {...state().review, dismissed: true}});
+  const ui = await page([response(200, dismissed), response(200, duplicate)], duplicate);
+  assert.equal(ui.badge.hidden, false);
+  assert.equal(ui.badge.textContent, 'Please Review');
+  assert.equal(ui.badge.className, 'purchase-review-pill');
+  await ui.click();
+  assert.equal(ui.badge.hidden, true);
+  ui.setOwnership('Own');
+  assert.equal(ui.badge.hidden, false);
+  assert.equal(ui.badge.textContent, 'Ordered');
+  ui.setOwnership('Ordered');
+  assert.equal(ui.badge.hidden, true);
+  await ui.click();
+  assert.equal(ui.badge.hidden, false);
+  assert.equal(ui.badge.textContent, 'Please Review');
+  console.log('Redundant delivery pills hide; shipping exceptions, review/Undo and ownership edits stay accurate.');
 })().catch(err => { console.error(err); process.exit(1); });

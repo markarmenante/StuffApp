@@ -7,8 +7,23 @@
   const progress = panel.querySelector('[data-listing-progress]');
   const error = panel.querySelector('[data-listing-error]');
   const button = panel.querySelector('[data-listing-action]');
+  const deliveryBadge = document.querySelector('[data-delivery-badge]');
+  const statusSelect = document.querySelector('#mainForm select[name="status"]');
   let result = JSON.parse(panel.querySelector('[data-listing-initial]').textContent);
   let attempts = 0, busy = false, timer;
+
+  function renderDelivery(delivery) {
+    if (!deliveryBadge || !delivery) return;
+    const ownership = (statusSelect?.value || deliveryBadge.dataset.ownershipStatus || 'Own').trim().toLowerCase();
+    const duplicate = delivery.status.toLowerCase() === ownership ||
+      (delivery.status === 'Delivered' && ['own', 'owned'].includes(ownership));
+    deliveryBadge.hidden = duplicate && !delivery.attention;
+    deliveryBadge.textContent = duplicate && delivery.attention ? 'Please Review'
+      : delivery.status + (delivery.attention ? ' \u00b7 Review' : '');
+    deliveryBadge.className = duplicate && delivery.attention ? 'purchase-review-pill'
+      : 'ebay-delivery-badge ebay-' + delivery.status.toLowerCase();
+  }
+  statusSelect?.addEventListener('change', () => renderDelivery(result.delivery));
 
   function render(data) {
     result = data;
@@ -17,11 +32,7 @@
     const differences = check?.differences || [];
     const needsReview = (review && !review.dismissed) || (differences.length > 0 && !check.dismissed);
     const reviewed = !needsReview && (review?.dismissed || check?.dismissed);
-    const deliveryBadge = document.querySelector('[data-delivery-badge]');
-    if (deliveryBadge && data.delivery) {
-      deliveryBadge.textContent = data.delivery.status + (data.delivery.attention ? ' \u00b7 Review' : '');
-      deliveryBadge.className = 'ebay-delivery-badge ebay-' + data.delivery.status.toLowerCase();
-    }
+    renderDelivery(data.delivery);
     panel.hidden = !(data.links?.length || review || check);
     title.textContent = needsReview ? 'Review Reason' : reviewed ? 'Marked reviewed' : 'Purchase sources';
     links.replaceChildren();

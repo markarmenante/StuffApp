@@ -1,5 +1,6 @@
 """Original purchase evidence, persistent links and one-time comparison safety."""
 import json
+from html.parser import HTMLParser
 import os
 from pathlib import Path
 import sqlite3
@@ -288,6 +289,48 @@ class ListingTests(unittest.TestCase):
         self.assertEqual(self.client.post(path, data=data, base_url='https://localhost',
                          headers={'Cf-Access-Authenticated-User-Email': 'outsider@example.com'}).status_code, 403)
         self.assertEqual(self.post(dict(action='dismiss', review_token='stale'), 'banknotes').status_code, 409)
+
+    def test_banknote_header_hides_only_redundant_delivery_labels(self):
+        class BadgeParser(HTMLParser):
+            attrs = None
+            text = ''
+            active = False
+            def handle_starttag(self, tag, attrs):
+                if 'data-delivery-badge' in dict(attrs):
+                    self.attrs = dict(attrs)
+                    self.active = True
+            def handle_data(self, data):
+                if self.active:
+                    self.text += data
+            def handle_endtag(self, tag):
+                if tag == 'a':
+                    self.active = False
+
+        self.banknote_order('', 'Awaiting shipment')
+        for ownership, shipping, attention, hidden, label in [
+            ('Own', 'Delivered', '', True, 'Delivered'),
+            ('Ordered', 'Ordered', '', True, 'Ordered'),
+            ('Ordered', 'Shipped', '', False, 'Shipped'),
+            ('Ordered', 'Delivered', '', False, 'Delivered'),
+            ('Sold', 'Delivered', '', False, 'Delivered'),
+            ('Own', 'Delivered', 'Partially refunded', False, 'Please Review'),
+            ('Ordered', 'Ordered', 'Check the order', False, 'Please Review'),
+        ]:
+            with self.subTest(ownership=ownership, shipping=shipping, attention=attention):
+                self.db.execute('UPDATE banknotes SET status=? WHERE id=?', (ownership, self.id))
+                self.db.execute('UPDATE ebay_order_items SET delivery_status=?,attention=? WHERE line_key=?',
+                                (shipping, attention, self.id))
+                self.db.commit()
+                parser = BadgeParser()
+                html = self.get('/banknotes/' + self.id).data.decode()
+                parser.feed(html)
+                self.assertIsNotNone(parser.attrs)
+                self.assertEqual('hidden' in parser.attrs, hidden)
+                self.assertEqual(parser.text, label)
+                self.assertEqual('purchase-review-pill' in parser.attrs['class'], bool(attention))
+                self.assertIn('id="statusFlipPill"', html)
+                self.assertEqual(self.db.execute('SELECT status FROM banknotes WHERE id=?',
+                                                (self.id,)).fetchone()[0], ownership)
 
     def test_failed_checks_need_evidence_and_never_write_item_fields(self):
         self.available()

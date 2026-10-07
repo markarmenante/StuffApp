@@ -436,10 +436,15 @@
     {% if category == 'banknotes' and not is_new %}
       {% set delivery = banknote_delivery(r['id']) %}
       {% if delivery %}
+        {% set _ownership = (r['status'] or 'Own')|trim|lower %}
+        {% set _duplicate_delivery = delivery.status|lower == _ownership or (delivery.status == 'Delivered' and _ownership in ('own', 'owned')) %}
         {% if current_user and current_user.role == 'owner' %}
-        <a href="{{ url_for('ebay.dashboard') }}#note-{{ r['id'] }}" class="ebay-delivery-badge ebay-{{ delivery.status|lower }}" data-delivery-badge
-           title="eBay shipping progress — separate from collection ownership">{{ delivery.status }}{% if delivery.attention %} · Review{% endif %}</a>
-        {% else %}<span class="ebay-delivery-badge ebay-{{ delivery.status|lower }}">{{ delivery.status }}</span>{% endif %}
+        <a href="{{ url_for('ebay.dashboard') }}#note-{{ r['id'] }}"
+           class="{{ 'purchase-review-pill' if _duplicate_delivery and delivery.attention else 'ebay-delivery-badge ebay-' ~ delivery.status|lower }}"
+           data-delivery-badge data-ownership-status="{{ r['status'] or 'Own' }}"
+           {% if _duplicate_delivery and not delivery.attention %}hidden{% endif %}
+           title="eBay shipping progress — separate from collection ownership">{% if _duplicate_delivery and delivery.attention %}Please Review{% else %}{{ delivery.status }}{% if delivery.attention %} · Review{% endif %}{% endif %}</a>
+        {% else %}<span class="ebay-delivery-badge ebay-{{ delivery.status|lower }}" {% if _duplicate_delivery %}hidden{% endif %}>{{ delivery.status }}</span>{% endif %}
       {% endif %}
     {% endif %}
     {%- set _has_status_field = (fields | selectattr('name', 'equalto', 'status') | list) | length > 0 -%}
