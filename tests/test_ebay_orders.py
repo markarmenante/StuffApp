@@ -329,6 +329,28 @@ class WebTests(unittest.TestCase):
             db.execute("DELETE FROM banknotes WHERE id='catalog-test'")
             db.commit()
 
+    def test_refund_marker_on_owned_collection_record_and_order_page(self):
+        with self.app.app_context():
+            db = self.stuff.get_db()
+            db.execute("INSERT INTO banknotes (id,country,denomination,status,description) VALUES "
+                       "('refund-test','Canada','20 Dollars','Own','Listing: https://www.ebay.com/itm/185386368846')")
+            item = parsed()[0]
+            ebay.apply_items(db, [item])
+            db.execute('INSERT INTO ebay_purchase_observations VALUES (?,?,?,?)',
+                       (item['line_key'], ebay.now_iso(), 'Refunded', ''))
+            db.commit()
+        try:
+            for url in ('/banknotes', '/banknotes/refund-test', '/banknotes/ebay'):
+                page = self.get(url)
+                self.assertEqual(page.status_code, 200)
+                self.assertIn(b'ebay-refunded', page.data)
+                self.assertIn(b'Refunded', page.data)
+        finally:
+            with self.app.app_context():
+                db = self.stuff.get_db()
+                db.execute("DELETE FROM banknotes WHERE id='refund-test'")
+                db.commit()
+
     def test_oauth_binding_denial_and_replay(self):
         state = self.begin()
         other = self.app.test_client()

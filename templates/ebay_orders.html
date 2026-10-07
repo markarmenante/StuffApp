@@ -61,7 +61,7 @@
     {% set observation = purchase_observations.get(item.line_key) %}{% if observation %}<p class="ebay-meta">Purchases: {{ observation.status_text }}{% if observation.delivery_text %} · {{ observation.delivery_text }}{% endif %}</p>{% endif %}
     {% if item.estimated_delivery and not item.delivered_at %}<p>Estimated delivery: {{ item.estimated_delivery[:10] }} — estimate only</p>{% endif %}
     {% for track in tracking.get(item.line_key, []) %}<p class="ebay-meta">{{ track.carrier }} · Tracking {{ track.tracking_number }}</p>{% endfor %}
-    {% if item.attention %}<p class="ebay-notice">{{ item.attention }}. Automatic status advances are held.</p>{% endif %}
+    {% if item.attention %}<p class="ebay-notice">{{ item.attention }}.</p>{% endif %}
     <p class="ebay-meta">Last update: {{ item.last_seen }} (UTC)</p>
     <details><summary>Correct status or matching</summary>
       <div class="ebay-actions">

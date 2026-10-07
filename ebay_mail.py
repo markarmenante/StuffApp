@@ -8,6 +8,8 @@ import uuid
 from flask import Blueprint, abort, jsonify, request
 import ebay_orders as ebay
 
+ORDER_ID = r'(?:\d{2}-\d{5}-\d{5}|\d{9,15}(?:-\d{1,15})?)'
+
 
 def configured():
     return len(os.environ.get('STUFFAPP_TODAY_TOKEN', '')) >= 32
@@ -41,8 +43,8 @@ def validate_purchase(raw):
     if not isinstance(raw, dict):
         raise ValueError('Invalid purchase')
     result = {k: text(raw, k, n, p) for k, n, p in [
-        ('order_id', 14, r'\d{2}-\d{5}-\d{5}'), ('item_id', 15, r'\d{9,15}'),
-        ('title', 500, None), ('seller', 150, r'[\w.%-]+'), ('status_text', 300, None)]}
+        ('order_id', 31, ORDER_ID), ('item_id', 15, r'\d{9,15}'),
+        ('title', 500, None), ('seller', 150, r'[\w.*%-]+'), ('status_text', 300, None)]}
     result['delivery_text'] = text(raw, 'delivery_text', 500, empty=True)
     result['ordered_at'] = date_only(text(raw, 'ordered_date', 40))
     if not result['ordered_at']:
@@ -53,9 +55,8 @@ def validate_purchase(raw):
     result['quantity'] = quantity
     result.update(delivery_status='Ordered', shipped_at=None, delivered_at=None, attention='')
     status, delivery = result['status_text'].lower(), result['delivery_text']
-    if re.search(r'cancel|refund|return|not delivered|failed', status, re.I):
-        result['attention'] = result['status_text']
-    elif status == 'delivered' and delivery.startswith('Delivered on '):
+    refunded = status in ('refunded', 'partially refunded')
+    if (status == 'delivered' or refunded) and delivery.startswith('Delivered on '):
         delivered = date_only(delivery[len('Delivered on '):], result['ordered_at'])
         if not delivered:
             raise ValueError('Invalid confirmed delivery date')
@@ -63,8 +64,12 @@ def validate_purchase(raw):
     elif status in ('shipped', 'in transit', 'out for delivery'):
         result['delivery_status'] = 'Shipped'
         # Observation time is not a shipping time. Leave the latter unknown.
-    elif status not in ('awaiting shipment', 'paid', 'order placed', 'ordered'):
+    elif not refunded and status not in ('awaiting shipment', 'paid', 'order placed', 'ordered'):
         result['attention'] = result['status_text'] + '; shipment or delivery not confirmed'
+    if refunded:
+        result['attention'] = result['status_text']
+        if not result['delivered_at']:
+            result['attention'] += '; delivery not confirmed'
     if raw.get('identity_ambiguous') is True:
         result.update(delivery_status='Ordered', shipped_at=None, delivered_at=None,
                       attention='Multiple purchase rows share this identity; review required')
@@ -90,7 +95,7 @@ def validate_purchases(raw):
     items, skipped, seen = [], {}, set()
     for index, item in enumerate(raw):
         order_id = item.get('order_id') if isinstance(item, dict) else None
-        if not isinstance(order_id, str) or not re.fullmatch(r'\d{2}-\d{5}-\d{5}', order_id):
+        if not isinstance(order_id, str) or not re.fullmatch(ORDER_ID, order_id):
             order_id = None
         try:
             evidence = validate_purchase(item)
@@ -122,9 +127,19 @@ def apply_purchases(db, items, observed, auto_match=True):
             continue
         old = existing[(evidence['order_id'], evidence['item_id'])]
         key = old['line_key'] if old else 'purchases:' + evidence['order_id'] + ':' + evidence['item_id']
-        seen = db.execute('SELECT observed_at FROM ebay_purchase_observations WHERE line_key=?', (key,)).fetchone()
+        seen = db.execute('SELECT * FROM ebay_purchase_observations WHERE line_key=?', (key,)).fetchone()
         if seen and seen['observed_at'] >= observed:
             continue
+        # A refund can replace the delivery line in Purchases. Do not erase an
+        # earlier Purchases-confirmed delivery merely because that line vanished.
+        if (old and seen and evidence['status_text'].lower() in ('refunded', 'partially refunded')
+                and not evidence['attention'].startswith('Multiple purchase rows')
+                and not evidence['delivered_at'] and old['delivered_at']
+                and (seen['delivery_text'].startswith('Delivered on ')
+                     or old['attention'].endswith('; previously confirmed delivered'))):
+            evidence = dict(evidence, delivery_status='Delivered', delivered_at=old['delivered_at'],
+                            shipped_at=old['shipped_at'],
+                            attention=evidence['status_text'] + '; previously confirmed delivered')
         item = {k: evidence[k] for k in ('order_id', 'item_id', 'title', 'seller', 'quantity',
                 'ordered_at', 'shipped_at', 'delivered_at', 'delivery_status', 'attention')}
         item.update(line_key=key, seller_key=old['seller_key'] if old else '', estimated_delivery=None, tracking=[])

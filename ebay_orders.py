@@ -32,7 +32,7 @@ from flask import (Blueprint, abort, flash, g, jsonify, redirect,
 SCOPE = 'https://api.ebay.com/oauth/api_scope'
 NS = 'urn:ebay:apis:eBLBaseComponents'
 RANK = {'Ordered': 0, 'Shipped': 1, 'Delivered': 2}
-NOTE_WORDS = re.compile(r'\b(banknotes?|paper money|currency|PMG|Pick[ -]?\d|piastres?|francs?|rupees?|shillings?)\b', re.I)
+NOTE_WORDS = re.compile(r'\b(banknotes?|paper money|legal tender|friedberg|currency|PMG|Pick[ -]?\d|piastres?|francs?|rupees?|shillings?)\b', re.I)
 EBAY_HOST = re.compile(r'(?:[a-z0-9-]+\.)*ebay\.(?:com|ca|co\.uk|com\.au|de|fr|it|es|at|be|ch|ie|nl|pl|com\.sg|com\.hk)$', re.I)
 
 
@@ -351,6 +351,22 @@ def event(db, banknote_id, previous, new, source, occurred=None):
     return 0
 
 
+def purchase_display_status(item, unverified=False):
+    if item['manual_status']:
+        return item['manual_status']
+    if unverified or item['attention'].startswith('Multiple purchase rows'):
+        return 'Unverified'
+    # Refunds and fulfillment are independent: partial refunds and delivered
+    # purchases must not be presented as unfulfilled orders.
+    if item['delivery_status'] != 'Delivered':
+        status = (item['purchase_status'] or '').strip().lower()
+        if status == 'refunded':
+            return 'Refunded'
+        if status in ('canceled', 'cancelled', 'order canceled', 'order cancelled'):
+            return 'Cancelled'
+    return item['delivery_status']
+
+
 def apply_items(db, items, source='eBay', auto_match=True, authoritative=False):
     """Caller owns the transaction; a partial network page never reaches here."""
     candidates = listing_candidates(db)
@@ -594,7 +610,9 @@ def register(app, get_db, open_db, require_owner, data_dir):
         notices = db.execute('SELECT * FROM merchant_purchase_notices ORDER BY observed_at DESC LIMIT 100').fetchall()
         observations = {r['line_key']: dict(r) for r in db.execute('SELECT * FROM ebay_purchase_observations')}
         unverified = unverified_email_keys(db)
-        items = [dict(r, display_status=r['manual_status'] or ('Unverified' if r['line_key'] in unverified or r['attention'].startswith('Multiple purchase rows') else r['delivery_status'])) for r in items]
+        items = [dict(r, display_status=purchase_display_status(
+            dict(r, purchase_status=observations.get(r['line_key'], {}).get('status_text')),
+            r['line_key'] in unverified)) for r in items]
         _, suggestions = detail_match_plan(db)
         return render_template('ebay_orders.html', current_category='banknotes', connection=conn,
                                configured=sync.client.configured, worker_enabled=sync.worker_enabled,
@@ -752,9 +770,11 @@ def register(app, get_db, open_db, require_owner, data_dir):
     def deliveries():
         if 'ebay_deliveries' not in g:
             unverified = unverified_email_keys(get_db())
-            rows = get_db().execute('SELECT l.banknote_id,l.line_key,l.manual_status,i.delivery_status,i.attention,i.last_seen '
-                                    'FROM banknote_ebay_links l JOIN ebay_order_items i ON i.line_key=l.line_key').fetchall()
-            g.ebay_deliveries = {r['banknote_id']: {'status': r['manual_status'] or ('Unverified' if r['line_key'] in unverified or r['attention'].startswith('Multiple purchase rows') else r['delivery_status']),
+            rows = get_db().execute('SELECT l.banknote_id,l.line_key,l.manual_status,i.delivery_status,i.attention,i.last_seen, '
+                                    'o.status_text AS purchase_status FROM banknote_ebay_links l '
+                                    'JOIN ebay_order_items i ON i.line_key=l.line_key '
+                                    'LEFT JOIN ebay_purchase_observations o ON o.line_key=i.line_key').fetchall()
+            g.ebay_deliveries = {r['banknote_id']: {'status': purchase_display_status(r, r['line_key'] in unverified),
                                'manual': bool(r['manual_status']), 'attention': bool(r['attention']) or r['line_key'] in unverified,
                                'last_seen': r['last_seen']} for r in rows}
         return g.ebay_deliveries

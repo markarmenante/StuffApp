@@ -10,6 +10,10 @@ Its previous data stays unchanged. Today records skipped order/page references
 and reasons in its local sync status; the receiver also reports per-order
 validation and stored-identity failures. An all-skipped run is not success.
 Duplicate purchase identities are held for review without blocking other orders.
+Legacy numeric and item-transaction order IDs, and seller usernames containing
+asterisks, are supported. An incomplete-looking page gets extra settling time
+before its genuinely unreadable orders are skipped. Skips with a known order
+identity are counted once per order, not once per purchased item.
 The first authenticated snapshot binds the eBay username;
 subsequent snapshots must match it and any configured API buyer account.
 When a check skips orders, valid purchases still import and existing linked
@@ -20,9 +24,19 @@ The authenticated `POST /ebay/today` bridge accepts `source: ebay_purchases`
 with account, observation time and structured purchased items. Item/order IDs,
 seller, title, quantity, displayed status, displayed delivery text and order date
 are retained. Recommendations are never read. Delivery requires an explicit
-Delivered status and the purchased item's Delivered-on date. Tracking available
+Delivered status and the purchased item's Delivered-on date, or that same
+confirmed date alongside a full or partial refund. Tracking available
 and estimates do not prove shipment. Unknown/exception statuses need review.
 Actual shipping dates stay unknown when the panel does not give one.
+
+Full refunds without confirmed delivery display **Refunded** on the order and
+any matched collection record, including records currently filed as Own. The
+detail text says delivery is not confirmed; absence of a delivery date alone
+does not prove the seller never shipped. Cancelled orders have their own marker.
+Partial refunds do not imply non-fulfillment. A refund never erases a delivery
+previously confirmed through Purchases, and manual corrections take precedence.
+Unmatched refunds stay in Needs matching; similar titles do not authorize a
+collection match. Legal-tender note titles are retained even without "banknote".
 
 The retired eBay-email protocol returns HTTP 410. Old email-only statuses are
 shown as Unverified until Purchases confirms them. Newer snapshots can correct

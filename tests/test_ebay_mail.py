@@ -65,6 +65,70 @@ class PurchasesTests(unittest.TestCase):
         self.assertEqual(ebay_mail.date_only('Fri, Jan 2', '2025-12-31T00:00:00Z'), '2026-01-02T00:00:00Z')
         self.assertIsNone(ebay_mail.date_only('Thu, Dec 31', '2026-10-01T00:00:00Z'))
 
+    def test_legacy_order_ids_and_seller_names_are_not_unreadable(self):
+        for order_id in ('362612610393-1028917710023', '238257826017'):
+            result = ebay_mail.validate_purchase(purchase(order_id=order_id, seller='*old*dealer*'))
+            self.assertEqual(result['order_id'], order_id)
+        good, skipped = ebay_mail.validate_purchases([
+            purchase(order_id='238257826017', seller=''),
+            purchase(order_id='238257826017', item_id='166226977839'), purchase()])
+        self.assertEqual(len(good), 1)
+        self.assertEqual(len(skipped), 1)
+        for order_id in ('bad', '../238257826017', '123-abc', '1' * 32):
+            with self.assertRaises(ValueError):
+                ebay_mail.validate_purchase(purchase(order_id=order_id))
+
+    def test_refund_and_delivery_are_independent(self):
+        for status in ('Refunded', 'Partially refunded'):
+            with self.subTest(status=status):
+                delivered = ebay_mail.validate_purchase(purchase(status_text=status))
+                self.assertEqual(delivered['delivery_status'], 'Delivered')
+                self.assertEqual(delivered['delivered_at'], '2026-09-22T00:00:00Z')
+                self.assertEqual(delivered['attention'], status)
+                missing = ebay_mail.validate_purchase(purchase(status_text=status, delivery_text=''))
+                self.assertEqual(missing['delivery_status'], 'Ordered')
+                self.assertIn('delivery not confirmed', missing['attention'])
+                display = ebay_orders.purchase_display_status(dict(missing,
+                    purchase_status=status, manual_status=None))
+                self.assertEqual(display, 'Refunded' if status == 'Refunded' else 'Ordered')
+        manual = dict(missing, purchase_status='Refunded', manual_status='Delivered')
+        self.assertEqual(ebay_orders.purchase_display_status(manual), 'Delivered')
+        self.assertEqual(ebay_orders.purchase_display_status(dict(manual, manual_status=None), True), 'Unverified')
+
+    def test_refund_does_not_erase_previous_confirmed_delivery(self):
+        self.post()
+        for hour in ('07', '08'):
+            self.post([purchase(status_text='Refunded', delivery_text='')],
+                      observed_at=f'2026-10-07T{hour}:00:00Z')
+            row = dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone())
+            self.assertEqual(row['delivery_status'], 'Delivered')
+            self.assertEqual(row['delivered_at'], '2026-09-22T00:00:00Z')
+            self.assertEqual(ebay_orders.purchase_display_status(dict(row,
+                purchase_status='Refunded', manual_status=None)), 'Delivered')
+        self.post([purchase(status_text='Refunded', delivery_text='', identity_ambiguous=True)],
+                  observed_at='2026-10-07T09:00:00Z')
+        row = dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone())
+        self.assertEqual(ebay_orders.purchase_display_status(dict(row,
+            purchase_status='Refunded', manual_status=None)), 'Unverified')
+
+    def test_full_refund_flags_an_existing_link_without_changing_ownership(self):
+        before = tuple(self.db.execute('SELECT * FROM banknotes').fetchone())
+        self.post([purchase(status_text='Awaiting shipment', delivery_text='')])
+        self.post([purchase(status_text='Refunded', delivery_text='')], observed_at='2026-10-07T07:00:00Z')
+        row = dict(self.db.execute('SELECT i.*,l.manual_status,o.status_text AS purchase_status '
+            'FROM ebay_order_items i JOIN banknote_ebay_links l ON l.line_key=i.line_key '
+            'JOIN ebay_purchase_observations o ON o.line_key=i.line_key').fetchone())
+        self.assertEqual(ebay_orders.purchase_display_status(row), 'Refunded')
+        self.assertEqual(tuple(self.db.execute('SELECT * FROM banknotes').fetchone()), before)
+        self.assertIsNone(row['delivered_at'])
+
+    def test_legal_tender_refund_is_retained_for_review_without_a_false_match(self):
+        result = self.post([purchase(item_id='206480786083',
+            title='AC Fr 40 1923 $1 Legal Tender PCGS 64', status_text='Refunded', delivery_text='')]).json
+        self.assertEqual(result['items_seen'], 1)
+        self.assertEqual(result['matched'], 0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0], 0)
+
     def test_purchases_corrects_legacy_email_but_not_manual_override(self):
         self.post()
         self.db.execute("INSERT INTO ebay_mail_receipts VALUES ('old', 'purchases:18-15170-60765:166226977838','Delivered','email','2026-09-01T00:00:00Z')")
