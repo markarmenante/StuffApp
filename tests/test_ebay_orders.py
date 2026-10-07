@@ -420,6 +420,92 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.get('/banknotes/ebay/callback?state=' + state + '&error=access_denied').status_code, 302)
         self.assertEqual(self.get('/banknotes/ebay/callback?state=' + state + '&code=x').status_code, 400)
 
+    def review_action_fixture(self):
+        coin_id = 'review-action-test'
+        with self.app.app_context():
+            db = self.stuff.get_db()
+            db.execute("INSERT INTO coins (id,region,authority,status,date_1,price) VALUES (?,?,?,?,?,?)",
+                       (coin_id, 'Great Britain', 'George III', 'Own', 1793, 1500))
+            db.execute('INSERT INTO coin_purchase_reviews VALUES (?,?,?)',
+                       (coin_id, 'Confirm invoice price', '2026-10-07T00:00:00Z'))
+            db.execute('INSERT INTO coin_purchase_review_sources VALUES (?,?,?,?)',
+                       (coin_id, '/uploads/invoice.pdf', 'Invoice', 0))
+            db.commit()
+            token = ebay.review_digest(db.execute('SELECT * FROM coin_purchase_reviews WHERE coin_id=?', (coin_id,)).fetchone())
+            original = dict(db.execute('SELECT * FROM coins WHERE id=?', (coin_id,)).fetchone())
+        def cleanup():
+            with self.app.app_context():
+                db = self.stuff.get_db()
+                db.execute('DELETE FROM coins WHERE id=?', (coin_id,))
+                db.commit()
+                self.assertFalse(db.execute('SELECT 1 FROM coin_purchase_review_dismissals WHERE coin_id=?', (coin_id,)).fetchone())
+        self.addCleanup(cleanup)
+        return '/coins/' + coin_id, token, original
+
+    def test_mark_reviewed_persists_preserves_evidence_and_undoes(self):
+        path, token, original = self.review_action_fixture()
+        detail = self.get(path)
+        self.assertIn(b'data-review-action="dismiss">Mark Reviewed', detail.data)
+        self.assertIn(token.encode(), detail.data)
+        with self.client.session_transaction(base_url='https://localhost') as session:
+            csrf = session['ebay_csrf']
+        data = {'action': 'dismiss', 'review_token': token, 'csrf_token': csrf}
+        for _ in range(2):
+            result = self.client.post(path + '/purchase-review', data=data, base_url='https://localhost')
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.json, {'dismissed': True})
+            self.assertEqual(result.headers['Cache-Control'], 'no-store')
+        self.assertNotIn(b'id="coinReviewReason"', self.get(path).data)
+        self.assertNotIn(b'class="purchase-review-pill"', self.get('/coins?era=all').data)
+        with self.app.app_context():
+            db = self.stuff.get_db()
+            self.assertEqual(dict(db.execute('SELECT * FROM coins WHERE id=?', (original['id'],)).fetchone()), original)
+            self.assertEqual(db.execute('SELECT reason FROM coin_purchase_reviews WHERE coin_id=?', (original['id'],)).fetchone()[0], 'Confirm invoice price')
+            self.assertEqual(db.execute('SELECT count(*) FROM coin_purchase_review_sources WHERE coin_id=?', (original['id'],)).fetchone()[0], 1)
+        result = self.post(path + '/purchase-review', {'action': 'restore', 'review_token': token})
+        self.assertEqual(result.json, {'dismissed': False})
+        self.assertIn(b'id="coinReviewReason"', self.get(path).data)
+        self.assertIn(b'class="purchase-review-pill"', self.get('/coins?era=all').data)
+
+    def test_new_review_reappears_and_stale_actions_cannot_dismiss_it(self):
+        path, token, original = self.review_action_fixture()
+        self.assertEqual(self.post(path + '/purchase-review', {'action': 'dismiss', 'review_token': token}).status_code, 200)
+        with self.app.app_context():
+            db = self.stuff.get_db()
+            db.execute('UPDATE coin_purchase_reviews SET reason=? WHERE coin_id=?', ('New weight discrepancy', original['id']))
+            db.commit()
+            new_token = ebay.review_digest(db.execute('SELECT * FROM coin_purchase_reviews WHERE coin_id=?', (original['id'],)).fetchone())
+        self.assertIn(b'New weight discrepancy', self.get(path).data)
+        self.assertIn(b'class="purchase-review-pill"', self.get('/coins?era=all').data)
+        for action in ('dismiss', 'restore'):
+            self.assertEqual(self.post(path + '/purchase-review', {'action': action, 'review_token': token}).status_code, 409)
+        self.assertEqual(self.post(path + '/purchase-review', {'action': 'dismiss', 'review_token': new_token}).status_code, 200)
+        with self.app.app_context():
+            db = self.stuff.get_db()
+            db.execute('UPDATE coin_purchase_reviews SET created_at=? WHERE coin_id=?', ('2026-10-08T00:00:00Z', original['id']))
+            db.commit()
+        self.assertIn(b'id="coinReviewReason"', self.get(path).data)
+
+    def test_review_actions_require_owner_csrf_and_coin_access(self):
+        path, token, original = self.review_action_fixture()
+        url = path + '/purchase-review'
+        self.get(path)
+        with self.client.session_transaction(base_url='https://localhost') as session:
+            csrf = session['ebay_csrf']
+        data = {'action': 'dismiss', 'review_token': token, 'csrf_token': csrf}
+        for bad in ('', 'invalid', '\u00e9'):
+            self.assertEqual(self.client.post(url, data=dict(data, csrf_token=bad), base_url='https://localhost').status_code, 403)
+        self.assertEqual(self.client.post(url, data=data, headers={'Cf-Access-Authenticated-User-Email': 'outsider@example.com'}, base_url='https://localhost').status_code, 403)
+        for bad in ('', 'invalid', '\u00e9'):
+            self.assertEqual(self.client.post(url, data=dict(data, review_token=bad), base_url='https://localhost').status_code, 409)
+        self.assertEqual(self.post(url, {'action': 'delete', 'review_token': token}).status_code, 400)
+        self.assertEqual(self.get(url).status_code, 405)
+        with patch.object(self.stuff, 'TENANT_CATEGORIES', {'banknotes'}):
+            self.assertEqual(self.client.post(url, data=data, base_url='https://localhost').status_code, 403)
+        with patch.object(self.stuff, 'TENANT_CATEGORIES', {'coins'}):
+            self.assertEqual(self.client.post(url, data=data, base_url='https://localhost').status_code, 200)
+        self.assertEqual(self.post('/coins/missing/purchase-review', {'action': 'dismiss', 'review_token': token}).status_code, 404)
+
     def test_successful_oauth_encrypts_and_enables_automatic_updates(self):
         state = self.begin()
         with patch.object(self.sync.client, 'token', return_value={'access_token': 'access-private', 'refresh_token': 'refresh-private', 'expires_in': 7200}), patch.object(self.sync.client, 'identity', return_value=('stable', 'buyer')), patch('ebay_orders.threading.Thread'):

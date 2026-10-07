@@ -58,6 +58,10 @@ def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def review_digest(row):
+    return digest(json.dumps([row['coin_id'], row['created_at'], row['reason']]))
+
+
 def listing_id(url):
     try:
         p = urlparse(html.unescape(str(url)).strip())
@@ -587,21 +591,49 @@ def register(app, get_db, open_db, require_owner, data_dir):
         return session['ebay_csrf']
 
     @bp.before_request
-    def authorize():
+    def authorize(category='banknotes'):
         require_owner()
-        if 'banknotes' not in g.get('allowed_cats', set()):
+        if category not in g.get('allowed_cats', set()):
             abort(403)
         if request.method == 'POST':
             expected = session.get('ebay_csrf', '')
             provided = request.form.get('csrf_token', '')
-            if not expected or not hmac.compare_digest(expected, provided):
-                abort(403, description='Reload the eBay Orders page and try again.')
+            if not expected or not hmac.compare_digest(expected.encode(), provided.encode()):
+                abort(403, description='Reload this page and try again.')
 
     @bp.after_request
     def private_response(response):
         response.headers['Cache-Control'] = 'no-store'
         response.headers['Referrer-Policy'] = 'no-referrer'
         return response
+
+    coin_bp = Blueprint('coin_reviews', __name__)
+    coin_bp.before_request(lambda: authorize('coins'))
+    coin_bp.after_request(private_response)
+
+    @coin_bp.post('/coins/<coin_id>/purchase-review')
+    def set_review_state(coin_id):
+        action = request.form.get('action')
+        if action not in ('dismiss', 'restore'):
+            return jsonify(error='Choose Mark Reviewed or Undo.'), 400
+        db = get_db()
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('SELECT * FROM coin_purchase_reviews WHERE coin_id=?', (coin_id,)).fetchone()
+        if not row:
+            db.rollback()
+            return jsonify(error='This review no longer exists. Reload the page.'), 404
+        token = review_digest(row)
+        if not hmac.compare_digest(token.encode(), request.form.get('review_token', '').encode()):
+            db.rollback()
+            return jsonify(error='The review has changed. Reload the page and check the updated reason.'), 409
+        if action == 'dismiss':
+            db.execute('INSERT INTO coin_purchase_review_dismissals (coin_id,review_digest,dismissed_at) VALUES (?,?,?) '
+                       'ON CONFLICT(coin_id) DO UPDATE SET review_digest=excluded.review_digest,dismissed_at=excluded.dismissed_at',
+                       (coin_id, token, now_iso()))
+        else:
+            db.execute('DELETE FROM coin_purchase_review_dismissals WHERE coin_id=? AND review_digest=?', (coin_id, token))
+        db.commit()
+        return jsonify(dismissed=action == 'dismiss')
 
     @bp.get('/banknotes/ebay')
     def dashboard():
@@ -796,20 +828,31 @@ def register(app, get_db, open_db, require_owner, data_dir):
 
     @app.context_processor
     def delivery_context():
-        def coin_purchase_review(coin_id):
+        def coin_reviews():
             if 'coin_purchase_reviews' not in g:
-                g.coin_purchase_reviews = {r['coin_id']: r['reason'] for r in
-                    get_db().execute('SELECT coin_id,reason FROM coin_purchase_reviews')}
-            return g.coin_purchase_reviews.get(coin_id)
+                g.coin_purchase_reviews = {r['coin_id']: dict(r) for r in get_db().execute(
+                    'SELECT r.*,d.review_digest AS dismissed_digest FROM coin_purchase_reviews r '
+                    'LEFT JOIN coin_purchase_review_dismissals d ON d.coin_id=r.coin_id')}
+            return g.coin_purchase_reviews
+        def coin_purchase_review(coin_id):
+            row = coin_reviews().get(coin_id)
+            if row and row['dismissed_digest'] != review_digest(row):
+                return row['reason']
+            return None
+        def coin_purchase_review_token(coin_id):
+            return review_digest(coin_reviews()[coin_id])
         def coin_purchase_review_sources(coin_id):
             return [dict(row) for row in get_db().execute(
                 'SELECT label,url FROM coin_purchase_review_sources WHERE coin_id=? ORDER BY position,url',
                 (coin_id,)) if safe_review_source_url(row['url'])]
         return {'banknote_delivery': lambda note_id: deliveries().get(note_id),
                 'coin_purchase_review': coin_purchase_review,
+                'coin_purchase_review_token': coin_purchase_review_token,
+                'coin_review_csrf_token': csrf_token,
                 'coin_purchase_review_sources': coin_purchase_review_sources}
 
     app.register_blueprint(bp)
+    app.register_blueprint(coin_bp)
     from ebay_notifications import register_notifications
     register_notifications(app, get_db, sync.client)
     from ebay_mail import register as register_mail

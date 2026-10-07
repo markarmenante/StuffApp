@@ -1153,7 +1153,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
   {% set _purchase_review = coin_purchase_review(r['id']) if r and not is_new else none %}
   {% if _purchase_review %}
-  <div class="section-bar"><label for="coinReviewReason">Review Reason</label></div>
+  <div id="coinReviewPanel"{% if _is_owner %}
+       data-url="{{ url_for('coin_reviews.set_review_state', coin_id=r['id']) }}"
+       data-csrf="{{ coin_review_csrf_token() }}"
+       data-review-token="{{ coin_purchase_review_token(r['id']) }}"{% endif %}>
+  <div data-review-open>
+  <div class="section-bar coin-review-toolbar">
+    <label for="coinReviewReason">Review Reason</label>
+    {% if _is_owner %}<button type="button" class="purchase-review-action" data-review-action="dismiss">Mark Reviewed</button>{% endif %}
+  </div>
   <div class="dgrid dg1 coin-review-reason">
     <div class="dcell">
       {% set _review_sources = coin_purchase_review_sources(r['id']) %}
@@ -1166,6 +1174,16 @@ document.addEventListener('DOMContentLoaded', function () {
       {% endif %}
       <textarea id="coinReviewReason" rows="3" readonly>{{ _purchase_review }}</textarea>
     </div>
+  </div>
+  </div>
+  {% if _is_owner %}
+  <div class="section-bar coin-review-toolbar" data-review-dismissed hidden>
+    <span role="status">Marked reviewed</span>
+    <button type="button" class="purchase-review-action" data-review-action="restore">Undo</button>
+  </div>
+  <p class="coin-review-error" role="alert" hidden></p>
+  <script src="{{ url_for('static', filename='js/coin-review.js') }}" defer></script>
+  {% endif %}
   </div>
   {% endif %}
 

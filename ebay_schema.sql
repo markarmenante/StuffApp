@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS coin_purchase_review_sources (
     position INTEGER NOT NULL DEFAULT 0 CHECK(position >= 0),
     PRIMARY KEY (coin_id, url)
 );
+CREATE TABLE IF NOT EXISTS coin_purchase_review_dismissals (
+    coin_id TEXT PRIMARY KEY REFERENCES coin_purchase_reviews(coin_id) ON DELETE CASCADE,
+    review_digest TEXT NOT NULL,
+    dismissed_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ebay_sync_runs (
     id TEXT PRIMARY KEY,
     started_at TEXT NOT NULL,

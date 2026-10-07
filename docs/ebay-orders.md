@@ -48,6 +48,12 @@ pills above the reason. A review may link to multiple vendor records, saved
 invoices, or comparison coins. Fallback searches must be labeled as searches,
 not as verified item links. Links open in a separate tab; unsafe URL schemes
 are not rendered. Source rows cascade when their review is removed.
+The owner can **Mark Reviewed** on the detail page, hiding the reason and
+list flag without changing coin fields or deleting the source evidence.
+An immediate **Undo** restores it. Dismissals persist across reloads and
+are bound to the review's reason and creation timestamp; a changed finding
+appears again. Writes require the owner, coin access, a session CSRF token,
+and the displayed review version so a stale page cannot dismiss a new finding.
 
 The retired eBay-email protocol returns HTTP 410. Old email-only statuses are
 shown as Unverified until Purchases confirms them. Newer snapshots can correct
