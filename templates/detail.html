@@ -1156,6 +1156,14 @@ document.addEventListener('DOMContentLoaded', function () {
   <div class="section-bar"><label for="coinReviewReason">Review Reason</label></div>
   <div class="dgrid dg1 coin-review-reason">
     <div class="dcell">
+      {% set _review_sources = coin_purchase_review_sources(r['id']) %}
+      {% if _review_sources %}
+      <nav class="purchase-review-sources" aria-label="Review sources">
+        {% for source in _review_sources %}
+        <a class="purchase-review-source" href="{{ source['url'] }}" target="_blank" rel="noopener noreferrer">{{ source['label'] }}</a>
+        {% endfor %}
+      </nav>
+      {% endif %}
       <textarea id="coinReviewReason" rows="3" readonly>{{ _purchase_review }}</textarea>
     </div>
   </div>

@@ -43,6 +43,11 @@ list. Its tooltip and the detail page's read-only **Review Reason** field show
 the discrepancy and its source, separately from editable coin notes. The field
 does not participate in autosave. A flag does not assert that the coin was
 refunded or change ownership, and disappears when the associated coin is deleted.
+Verified source links live in `coin_purchase_review_sources` and appear as
+pills above the reason. A review may link to multiple vendor records, saved
+invoices, or comparison coins. Fallback searches must be labeled as searches,
+not as verified item links. Links open in a separate tab; unsafe URL schemes
+are not rendered. Source rows cascade when their review is removed.
 
 The retired eBay-email protocol returns HTTP 410. Old email-only statuses are
 shown as Unverified until Purchases confirms them. Newer snapshots can correct

@@ -4238,6 +4238,11 @@ input[type="date"] { -webkit-appearance: none; }
 .ebay-refunded, .ebay-cancelled { background:#fff4e5; border-color:#dba554; color:#784916; }
 .purchase-review-pill { display:inline-flex; flex:0 0 auto; align-items:center; white-space:nowrap; border:1px solid #b42332; border-radius:999px; padding:3px 10px; background:#b42332; color:#fff; font-size:13px; font-weight:600; line-height:1.4; }
 .item-list-coins .item-line1:has(.purchase-review-pill) { flex-wrap:wrap; row-gap:4px; }
+.coin-review-reason .dcell { display:block; min-width:0; }
+.purchase-review-sources { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0 8px; }
+.purchase-review-source { display:inline-flex; max-width:100%; padding:4px 10px; border:1px solid #bac8dc; border-radius:999px; background:#eef3fa; color:#294767; font-size:13px; font-weight:600; line-height:1.4; text-decoration:none; overflow-wrap:anywhere; }
+.purchase-review-source:hover { background:#dfe9f6; }
+.purchase-review-source:focus-visible { outline:2px solid #294767; outline-offset:2px; }
 .ebay-ordered { background:#fff5cb; border-color:#dfc467; color:#70520a; }
 .ebay-shipped { background:#e9f1ff; border-color:#a5bff1; color:#214f99; }
 .ebay-delivered { background:#e7f4e9; border-color:#9fc9a5; color:#286038; }

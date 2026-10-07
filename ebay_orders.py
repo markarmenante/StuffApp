@@ -69,6 +69,21 @@ def listing_id(url):
         return None
 
 
+def safe_review_source_url(value):
+    if not isinstance(value, str) or re.search(r'[\x00-\x20\\]', value):
+        return False
+    try:
+        parsed = urlparse(value)
+        if parsed.username or parsed.password:
+            return False
+        if parsed.scheme == 'https' and parsed.hostname:
+            return True
+        return (not parsed.scheme and not parsed.netloc and
+                re.fullmatch(r'/(?:coins/[a-zA-Z0-9-]+|uploads/[a-zA-Z0-9_.-]+)', parsed.path) is not None)
+    except ValueError:
+        return False
+
+
 class EbayError(Exception):
     """Only safe, curated messages may reach logs or the dashboard."""
 
@@ -786,8 +801,13 @@ def register(app, get_db, open_db, require_owner, data_dir):
                 g.coin_purchase_reviews = {r['coin_id']: r['reason'] for r in
                     get_db().execute('SELECT coin_id,reason FROM coin_purchase_reviews')}
             return g.coin_purchase_reviews.get(coin_id)
+        def coin_purchase_review_sources(coin_id):
+            return [dict(row) for row in get_db().execute(
+                'SELECT label,url FROM coin_purchase_review_sources WHERE coin_id=? ORDER BY position,url',
+                (coin_id,)) if safe_review_source_url(row['url'])]
         return {'banknote_delivery': lambda note_id: deliveries().get(note_id),
-                'coin_purchase_review': coin_purchase_review}
+                'coin_purchase_review': coin_purchase_review,
+                'coin_purchase_review_sources': coin_purchase_review_sources}
 
     app.register_blueprint(bp)
     from ebay_notifications import register_notifications

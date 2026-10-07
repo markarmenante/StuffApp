@@ -68,6 +68,20 @@ def note(db, note_id='n1', item_id='185386368846'):
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_review_source_urls_only_allow_safe_links(self):
+        for url in ['https://www.ebay.com/itm/144277439666',
+                    'https://www.cngcoins.com/Coin.aspx?CoinID=394449',
+                    'https://www.vcoins.com/en/Search.aspx?searchQuery=coin',
+                    '/coins/coin-review-test', '/uploads/invoice.pdf']:
+            with self.subTest(url=url):
+                self.assertTrue(ebay.safe_review_source_url(url))
+        for url in ['javascript:alert(1)', 'data:text/html,bad', 'file:///tmp/test',
+                    '//example.com', '/\\example.com', '/coins/../admin',
+                    'https://user:secret@example.com', 'https://example.com\n',
+                    'https://[invalid', '', None]:
+            with self.subTest(url=url):
+                self.assertFalse(ebay.safe_review_source_url(url))
+
     def test_delivery_requires_actual_evidence(self):
         self.assertEqual(parsed(package())[0]['delivery_status'], 'Ordered')
         item = parsed('<ShippedTime>2026-09-02T12:00:00Z</ShippedTime>' + package())[0]
@@ -365,6 +379,11 @@ class WebTests(unittest.TestCase):
                 db = self.stuff.get_db()
                 db.execute('INSERT INTO coin_purchase_reviews VALUES (?,?,?)',
                            ('coin-review-test', reason, ebay.now_iso()))
+                db.executemany('INSERT INTO coin_purchase_review_sources (coin_id,url,label,position) VALUES (?,?,?,?)', [
+                    ('coin-review-test', 'https://www.ebay.com/itm/144277439666', 'eBay listing', 0),
+                    ('coin-review-test', '/uploads/invoice.pdf', 'Invoice <original>', 1),
+                    ('coin-review-test', 'javascript:alert(1)', 'Unsafe source', 2),
+                ])
                 db.commit()
             page = self.get('/coins?era=all')
             self.assertEqual(page.status_code, 200)
@@ -379,6 +398,11 @@ class WebTests(unittest.TestCase):
             self.assertNotIn(b'Source: <purchase confirmation>', detail.data)
             self.assertNotIn(b'name="coinReviewReason"', detail.data)
             self.assertNotIn(b'id="coinReviewReason"', self.get('/coins/new').data)
+            self.assertIn(b'aria-label="Review sources"', detail.data)
+            self.assertIn(b'href="https://www.ebay.com/itm/144277439666" target="_blank" rel="noopener noreferrer">eBay listing</a>', detail.data)
+            self.assertIn(b'Invoice &lt;original&gt;', detail.data)
+            self.assertNotIn(b'Unsafe source', detail.data)
+            self.assertLess(detail.data.index(b'>eBay listing</a>'), detail.data.index(b'>Invoice &lt;original&gt;</a>'))
             with self.app.app_context():
                 self.assertEqual(self.stuff.get_db().execute("SELECT status FROM coins WHERE id='coin-review-test'").fetchone()[0], 'Own')
         finally:
@@ -387,6 +411,7 @@ class WebTests(unittest.TestCase):
                 db.execute("DELETE FROM coins WHERE id='coin-review-test'")
                 db.commit()
                 self.assertFalse(db.execute("SELECT 1 FROM coin_purchase_reviews WHERE coin_id='coin-review-test'").fetchone())
+                self.assertFalse(db.execute("SELECT 1 FROM coin_purchase_review_sources WHERE coin_id='coin-review-test'").fetchone())
 
     def test_oauth_binding_denial_and_replay(self):
         state = self.begin()
