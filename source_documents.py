@@ -13,7 +13,7 @@ import uuid
 TABLES = {'coins': ('coin_source_archives', 'coin_id'),
           'banknotes': ('banknote_source_archives', 'banknote_id')}
 HOSTS = {'vcoins.com', 'www.vcoins.com', 'cngcoins.com', 'www.cngcoins.com',
-         'ebay.com', 'www.ebay.com', 'ma-shops.com', 'www.ma-shops.com'}
+         'ebay.com', 'www.ebay.com', 'order.ebay.com', 'ma-shops.com', 'www.ma-shops.com'}
 IMAGE_HOSTS = HOSTS | {'images.vcoins.com', 'images.cngcoins.com', 'i.ebayimg.com',
                        'img.ma-shops.com'}
 

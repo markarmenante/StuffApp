@@ -519,7 +519,7 @@
     <button type="button"
             class="coin-lookup-btn coin-spec-check-btn{% if r and r['specs_searched_at'] %} done{% endif %}"
             data-spec-url="{% if not is_new %}{{ url_for('banknote_lookup_specs', record_id=r['id']) }}{% endif %}"
-            title="{% if r and r['specs_searched_at'] %}Check last run {{ r['specs_searched_at'][:10] }} — click to re-run missing-field lookup{% else %}Check identifying fields and complete missing banknote specs{% endif %}">
+            title="Check banknote fields against photos, original listing and invoice; save available source PDFs">
       ✓ Check
     </button>
     {% endif %}
@@ -1629,6 +1629,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {% include 'partials/original_listing.html' %}
 
   <!-- Grade, Conditions -->
+  <p id="banknoteCheckSources" role="status" hidden style="padding:8px 12px;white-space:pre-line;overflow-wrap:anywhere"></p>
   {{ notescell('notes','Grade, Conditions') }}
   <div class="dgrid banknote-grading-row">
     {{ tacell('grading_authority','Grading Service', banknote_grading_services()) }}
@@ -7187,6 +7188,23 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     row.appendChild(tile);
   }
 
+  document.addEventListener('banknote-check-documents', ev => {
+    if (!getBase().endsWith('/documents/main')) return;
+    const docs = ev.detail || [];
+    const tiles = Array.from(row.querySelectorAll('.dyn-doc:not(.dyn-doc-row-empty)'));
+    // Do not replace a user's in-progress upload, title edit, or reordered documents.
+    if (row.contains(document.activeElement) || tiles.length > docs.length ||
+        tiles.some((tile, i) => {
+          const link = tile.querySelector('a.doc-link');
+          const expected = docs[i]?.filename;
+          return expected ? !link || !link.href.endsWith('/uploads/' + encodeURIComponent(expected)) : Boolean(link);
+        })) return;
+    for (let i = tiles.length; i < docs.length; i++) {
+      promoteEmptyTile(i, docs[i].title || '', docs[i].filename || '');
+      spawnEmptyTile();
+    }
+  });
+
   // Title input — blur saves. On the empty tile, blur with a non-empty
   // title creates a new doc.
   row.addEventListener('blur', async (ev) => {
@@ -7641,8 +7659,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       ],
       banknotes: [
         'country', 'municipality', 'issuer', 'official', 'denomination',
-        'series', 'pick_number', 'printer', 'signatures',
-        'serial_number', 'watermark', 'date_1', 'description',
+        'series', 'pick_number', 'other_catalog', 'printer', 'signatures',
+        'serial_number', 'watermark', 'date_1', 'date_2', 'description',
         'note_references', 'notes', 'vendor', 'price', 'purchase_date',
         'grade', 'obv_rev',
       ],
@@ -7676,6 +7694,19 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     }
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.error || 'Lookup failed');
+
+    if (data.purchase_sources) {
+      const summary = document.getElementById('banknoteCheckSources');
+      if (summary) {
+        summary.textContent = [...data.purchase_sources.reports, ...data.purchase_sources.warnings].join('\n');
+        summary.hidden = !summary.textContent;
+      }
+      document.dispatchEvent(new CustomEvent('banknote-check-documents', {detail: data.documents || []}));
+      document.dispatchEvent(new CustomEvent('purchase-sources-updated'));
+      if (data.purchase_sources.warnings.length) {
+        alert('Purchase source check:\n\n' + data.purchase_sources.warnings.join('\n\n'));
+      }
+    }
 
     // Banknote Check trims slab photos down to just the note once the
     // label has been read — swap the refreshed images in regardless of

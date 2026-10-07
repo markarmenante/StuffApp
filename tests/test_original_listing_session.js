@@ -13,6 +13,7 @@ const expired = () => response(403, {code: 'csrf_expired', error: 'Session expir
 async function page(replies, initial = state(), ownership = 'Ordered') {
   let click;
   let changeStatus;
+  const events = {};
   const element = () => ({dataset: {}, textContent: '', hidden: false,
     replaceChildren() {}, append() {}, setAttribute() {}, addEventListener(_, fn) { click = fn; }});
   const selectors = ['title', 'reasons', 'progress', 'error', 'action'];
@@ -27,7 +28,7 @@ async function page(replies, initial = state(), ownership = 'Ordered') {
   vm.runInNewContext(source, {
     document: {querySelector: key => key === '[data-original-listing]' ? panel
       : key === '[data-delivery-badge]' ? badge : statusSelect,
-      createElement: element},
+      createElement: element, addEventListener(name, fn) { events[name] = fn; }},
     window: {setTimeout() { throw Error('Unexpected polling'); }},
     URLSearchParams, AbortSignal, clearTimeout,
     fetch: async (url, options) => {
@@ -39,12 +40,16 @@ async function page(replies, initial = state(), ownership = 'Ordered') {
     },
   });
   await new Promise(setImmediate);
-  return {panel, badge, requests, click, setOwnership(value) { statusSelect.value = value; changeStatus(); },
+  return {panel, badge, requests, click, events, setOwnership(value) { statusSelect.value = value; changeStatus(); },
     button: elements['[data-listing-action]'],
     title: elements['[data-listing-title]'], error: elements['[data-listing-error]']};
 }
 
 (async () => {
+  const updated = await page([response(200, state({links: [{url: '/uploads/receipt.pdf', label: 'Receipt PDF'}]}))]);
+  updated.events['purchase-sources-updated']();
+  await new Promise(setImmediate);
+  assert.equal(updated.requests.length, 2, 'Check refreshes purchase-source links');
   for (const action of ['dismiss', 'restore']) {
     const initial = state({review: {...state().review, dismissed: action === 'restore'}});
     const saved = state({review: {...initial.review, dismissed: action === 'dismiss'},

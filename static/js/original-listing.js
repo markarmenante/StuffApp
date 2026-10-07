@@ -139,5 +139,6 @@
     }
   });
   render(result);
+  document.addEventListener('purchase-sources-updated', () => { attempts = 0; clearTimeout(timer); refresh(); });
   refresh();
 })();
