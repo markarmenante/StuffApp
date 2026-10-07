@@ -11320,9 +11320,10 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
 
     Cream paper is warmer than the pale neutral/blue plastic surrounding
     it. Require a large, nearly rectangular component and that same
-    paper-to-light-holder transition along EVERY side. White-paper photos,
-    dark backdrops, ambiguous colours and already cropped notes defer to
-    the existing pipeline. No model pixels, sharpening, or recolouring.
+    paper-to-light-holder transition along EVERY side. Neutral surrounds
+    also need a separate label and quiet cream margins: white paper alone
+    must not authorize cropping to a coloured design. Ambiguous photos
+    defer to the existing pipeline. No sharpening or recolouring.
     """
     try:
         import cv2
@@ -11332,18 +11333,24 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
     rgb = np.asarray(img.convert('RGB'))
     h, w = rgb.shape[:2]
 
-    def paper_mask(a):
+    def paper_mask(a, warmth=12):
         r, g, b = (a[:, :, i].astype(np.int16) for i in range(3))
-        return ((r - b > 12) & (g - b > 5)).astype(np.uint8) * 255
+        return ((r - b > warmth) & (g - b > 5)).astype(np.uint8) * 255
 
     scale = min(1.0, 1600.0 / max(w, h))
     small = (cv2.resize(rgb, (round(w * scale), round(h * scale)),
                         interpolation=cv2.INTER_AREA) if scale < 1 else rgb)
-    mask = cv2.morphologyEx(paper_mask(small), cv2.MORPH_CLOSE,
-                            np.ones((7, 7), np.uint8))
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
-                                   cv2.CHAIN_APPROX_SIMPLE)
-    for contour in sorted(contours, key=cv2.contourArea, reverse=True):
+    # JPEG colour bleed can join the paper to a faint holder reflection.
+    # Retry its contour more strictly; every edge still has to validate.
+    candidates = []
+    for warmth in (12, 16):
+        mask = cv2.morphologyEx(paper_mask(small, warmth), cv2.MORPH_CLOSE,
+                                np.ones((7, 7), np.uint8))
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        candidates.extend((c, warmth) for c in
+                          sorted(contours, key=cv2.contourArea, reverse=True))
+    for contour, warmth in candidates:
         area = cv2.contourArea(contour)
         if not 0.20 * mask.size <= area <= 0.85 * mask.size:
             continue
@@ -11365,12 +11372,14 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
         if not 1.4 < aspect < 3.5 or (expect_aspect and
                 abs(aspect / expect_aspect - 1) > 0.08):
             continue
-        quad = _cv_refine_quad(rgb, quad, paper_mask) or quad
+        quad = _cv_refine_quad(rgb, quad, lambda a: paper_mask(a, warmth)) or quad
         centre = np.asarray(quad).mean(axis=0)
-        # A coloured design inside white/cream paper is NOT the sheet:
-        # immediately outside the candidate must be cool neutral plastic,
-        # with a strong warm-paper transition and quiet, light pixels.
+        # A coloured design inside white/cream paper is NOT the sheet.
+        # Neutral plastic needs independent holder evidence below; keep
+        # the existing cool-plastic path for unlabelled photos unchanged.
         supported = True
+        cool_surround = True
+        cream_margins = True
         for i in range(4):
             a, b = np.asarray(quad[i]), np.asarray(quad[(i + 1) % 4])
             tangent = b - a
@@ -11391,16 +11400,66 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
             pout = rgb[outside[:, 1], outside[:, 0]].astype(float)
             warm_in = pin[:, 0] - pin[:, 2]
             warm_out = pout[:, 0] - pout[:, 2]
+            cool_surround &= bool(np.median(warm_out) <= -2)
+            cream_margins &= bool(np.mean(
+                (np.abs(pin[:, 0] - pin[:, 1]) < 30) &
+                (pin.mean(axis=1) > 130)) >= 0.85)
             if (np.mean(warm_in > 12) < 0.75 or
                     np.mean(warm_out < 10) < 0.85 or
-                    np.median(warm_out) > -2 or
+                    np.median(warm_out) > 6 or
                     np.median(warm_in - warm_out) < 15 or
                     np.median(pout.mean(axis=1)) < 160):
                 supported = False
                 break
-        if supported:
+        if supported and (cool_surround or (cream_margins and
+                _neutral_holder_has_label(rgb, quad))):
             return quad
     return None
+
+
+def _neutral_holder_has_label(rgb, quad):
+    """Independent holder evidence for a cream sheet on neutral plastic.
+
+    A grading label is a broad, shallow framed rectangle, separated from
+    the paper and aligned with its width. A rule, text fragments, the
+    note itself or a blank surround do not qualify.
+    """
+    import cv2
+    import numpy as np
+
+    pts = np.asarray(quad)
+    left, top = pts.min(axis=0)
+    right, bottom = pts.max(axis=0)
+    width, height = right - left, bottom - top
+    stop = int(max(pts[0, 1], pts[1, 1]) - 4)
+    if stop < height * 0.12:
+        return False
+    gray = cv2.cvtColor(rgb[:stop], cv2.COLOR_RGB2GRAY)
+    mask = (gray < 150).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    tangent = pts[1] - pts[0]
+    inward = np.array([-tangent[1], tangent[0]])
+    inward /= np.linalg.norm(inward)
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        rect = cv2.minAreaRect(contour)
+        rw, rh = sorted(rect[1], reverse=True)
+        if rh < 1:
+            continue
+        separation = max(np.dot(p - pts[0], inward) for p in cv2.boxPoints(rect))
+        if (rw < width * 0.8 or not height * 0.12 <= rh <= height * 0.65
+                or rw / rh < 3.5 or y + h >= stop
+                or not -height * 0.25 <= separation <= -4
+                or abs((x + w / 2) - (left + right) / 2) > width * 0.1
+                or cv2.contourArea(contour) < rw * rh * 0.85):
+            continue
+        # A solid bar is not a label; its framed interior must be light.
+        inset = max(2, int(h * 0.12))
+        interior = gray[y + inset:y + h - inset, x + inset:x + w - inset]
+        if interior.size and np.mean(interior > 170) >= 0.5:
+            return True
+    return False
 
 
 # --- Trim v2: seeded geometry pipeline (2026-08-21) -------------------

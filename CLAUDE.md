@@ -190,6 +190,16 @@ grade, EPQ and cert number had been cropped away before Check ran. The
 page keeps showing the trimmed image. Test:
 `tests/test_banknote_vision_source.py`.
 
+Neutral PMG holders (2026-10-07): cream paper can sit in gray, not
+bluish plastic. The paper-boundary fast path accepts that transition
+only with four supported paper edges, quiet cream margins, and a
+separate framed grading label above the note. Unlabelled neutral
+photos defer to the existing pipeline; white paper alone is not
+evidence for cropping to an interior coloured design. Regression:
+`tests/test_banknote_image_quality.py` (rotations, false positives,
+upload round-trip, original preservation). Check still never re-trims
+stored photos or overwrites a manual crop.
+
 ## Collection report (banknotes)
 
 The Report pill on the Banknotes list (owner only; Mark, 2026-09-12)

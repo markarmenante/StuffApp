@@ -73,6 +73,56 @@ rotated = holder().rotate(2, resample=Image.Resampling.BICUBIC,
                           fillcolor=(215, 225, 232))
 assert stuffapp._warm_paper_on_light_holder_quad(rotated) is not None
 
+# Neutral PMG holder scans (South Carolina 1872 $5, 2026-10-07): the
+# previous blue-only surround gate rejected all four real paper edges.
+def neutral_holder(paper=(232, 223, 185), label=True):
+    img = holder(background=(238, 237, 234))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((0, 0, 1599, 280), fill=(238, 237, 234))
+    if label:
+        draw.rectangle((85, 55, 1540, 250), fill=(50, 75, 60))
+        draw.rectangle((98, 68, 1527, 237), fill=(232, 232, 232))
+        draw.text((110, 90), 'PMG - 66 EPQ', fill=(25, 25, 25))
+    draw.polygon([(220, 300), (1400, 315), (1395, 855), (215, 840)], fill=paper)
+    draw.polygon([(260, 345), (1360, 359), (1355, 810), (255, 796)],
+                 fill=(45, 85, 65))
+    return img
+
+
+for angle in (0, 2, -2):
+    img = neutral_holder().rotate(angle, resample=Image.Resampling.BICUBIC,
+                                  fillcolor=(238, 237, 234))
+    meta = {}
+    with patch.object(stuffapp, '_trim_note_v2', side_effect=AssertionError('second crop')), \
+            patch.object(stuffapp, '_trim_note_cv_cascade', side_effect=AssertionError('second crop')):
+        output = stuffapp._trim_slabbed_note_image(encoded(img), meta=meta)
+    result = Image.open(io.BytesIO(output))
+    assert meta['engine'] == 'paper-boundary', meta
+    assert abs(result.width - 1180) <= 8 and abs(result.height - 540) <= 8, result.size
+    assert stuffapp._warm_paper_on_light_holder_quad(result) is None
+    assert JpegImagePlugin.get_sampling(result) == 0
+assert stuffapp._warm_paper_on_light_holder_quad(neutral_holder(label=False)) is None
+assert stuffapp._warm_paper_on_light_holder_quad(neutral_holder(), expect_aspect=3.4) is None
+# Even with a holder label, a saturated print surrounded by white paper
+# must not be mistaken for the sheet's quiet cream edge.
+assert stuffapp._warm_paper_on_light_holder_quad(neutral_holder(paper=(190, 65, 40))) is None
+solid_bar = neutral_holder()
+ImageDraw.Draw(solid_bar).rectangle((85, 55, 1540, 250), fill=(50, 75, 60))
+assert stuffapp._warm_paper_on_light_holder_quad(solid_bar) is None
+
+# Screenshot uploads with alpha are flattened to JPEG before detection.
+# Exercise that saved-image format too, including chroma subsampling.
+for quality in (80, 90, 95):
+    jpeg = io.BytesIO()
+    neutral_holder().save(jpeg, format='JPEG', quality=quality)
+    meta = {}
+    with patch.object(stuffapp, '_trim_note_v2', side_effect=AssertionError('fallback')), \
+            patch.object(stuffapp, '_trim_note_cv_cascade', side_effect=AssertionError('fallback')):
+        output = stuffapp._trim_slabbed_note_image(jpeg.getvalue(), meta=meta)
+    assert meta['engine'] == 'paper-boundary', meta
+    assert all(abs(a - b) <= 8 for a, b in
+               zip(Image.open(io.BytesIO(output)).size, (1180, 540)))
+
 # Preserve native crop dimensions, even beyond the general photo resize cap.
 large = Image.new('RGB', (3600, 1600), (225, 215, 185))
 result = Image.open(io.BytesIO(stuffapp._encode_trimmed_note(large)))
@@ -86,7 +136,7 @@ with stuffapp.app.app_context():
     db = stuffapp.get_db()
     db.execute("INSERT INTO banknotes (id) VALUES ('quality')")
     db.commit()
-raw = encoded(holder())
+raw = encoded(neutral_holder())
 response = client.post('/banknotes/quality/upload-image', data={
     'field': 'image_2', 'image': (io.BytesIO(raw), 'original.webp'),
 })
@@ -100,6 +150,8 @@ with stuffapp.app.app_context():
         assert f.read() == raw, 'Holder original must not be JPEG re-encoded'
     mapping = db.execute('SELECT quad FROM trimmed_image_sources WHERE trimmed=?', (name,)).fetchone()
     assert mapping['quad'], 'Full source geometry must be saved'
+    saved = Image.open(os.path.join(stuffapp.UPLOAD_FOLDER, name))
+    assert abs(saved.width - 1180) <= 8 and abs(saved.height - 540) <= 8, saved.size
     images = stuffapp._load_vision_images([(source, 'holder')])
     assert images and images[0]['media_type'] == 'image/webp'
 
