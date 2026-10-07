@@ -4247,14 +4247,15 @@ input[type="date"] { -webkit-appearance: none; }
 .purchase-review-action:disabled { opacity:.6; cursor:wait; }
 .coin-review-error { margin:8px 12px; color:#b42332; }
 .purchase-review-sources { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0 8px; }
-.purchase-review-source { display:inline-flex; max-width:100%; padding:4px 10px; border:1px solid #bac8dc; border-radius:999px; background:#eef3fa; color:#294767; font-size:13px; font-weight:600; line-height:1.4; text-decoration:none; overflow-wrap:anywhere; }
+.purchase-review-source { display:inline-flex; max-width:100%; padding:4px 10px; border:1px solid #bac8dc; border-radius:999px; background:#eef3fa; color:#294767; font-family:var(--font); font-size:13px; font-weight:600; line-height:1.4; letter-spacing:0; text-transform:none; text-decoration:none; overflow-wrap:anywhere; }
 .purchase-review-source:hover { background:#dfe9f6; }
 .purchase-review-source:focus-visible { outline:2px solid #294767; outline-offset:2px; }
 [data-original-listing][hidden], [data-original-listing] [hidden] { display:none; }
 [data-original-listing] .purchase-review-sources { flex:1; margin:0; padding:0; min-width:0; }
-.listing-review-reasons { padding:6px 12px; overflow-wrap:anywhere; }
-.listing-review-reasons textarea { width:100%; box-sizing:border-box; }
+.listing-review-reasons { padding:6px 12px; font-size:13px; line-height:1.45; overflow-wrap:anywhere; }
+.listing-review-reasons textarea { display:block; width:100%; box-sizing:border-box; font:inherit; letter-spacing:0; color:var(--text); background:transparent; border:0; padding:0; resize:vertical; }
 .listing-review-reasons p { margin:4px 0; }
+@media (max-width:640px) { .listing-review-reasons { font-size:15px; } }
 .listing-check-status { margin:6px 12px; font-size:12px; color:#555; }
 .ebay-ordered { background:#fff5cb; border-color:#dfc467; color:#70520a; }
 .ebay-shipped { background:#e9f1ff; border-color:#a5bff1; color:#214f99; }

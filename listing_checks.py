@@ -1,6 +1,7 @@
 """One successful source comparison per original listing; never edits item facts."""
 import hashlib
 import json
+import re
 import time
 import uuid
 
@@ -49,6 +50,10 @@ def validate_result(category, record, page_text, result):
         if outcome == 'different' and normalized(stored) == normalized(value):
             outcome = 'match'
         seen.add(field)
+        if field == 'price' and (outcome == 'uncertain'
+                or re.search(r'\b(?:asking|estimate|best offer|hammer)\b', quote + ' ' + value, re.I)
+                or not re.search(r'\b(?:paid|order total|amount charged|purchase (?:price|total)|invoice total)\b', quote, re.I)):
+            continue
         comparisons.append(dict(field=field, label=LABELS.get(field, field.replace('_', ' ').capitalize()),
                                 stored=stored, listed=value, evidence=quote, outcome=outcome))
     if not comparisons:

@@ -204,6 +204,20 @@ class ListingTests(unittest.TestCase):
             self.assertEqual(fetch.call_count, 1)
         self.assertIsNotNone(self.state()['link'])
 
+    def test_asking_prices_are_not_purchase_discrepancies(self):
+        weight = {'field': 'weight', 'listing_value': '13.15', 'evidence': 'Weight: 13.15 g', 'outcome': 'match'}
+        for quote, value, outcome in [('Price: $45.00 or Best Offer', '$45 asking price', 'uncertain'),
+                                      ('Price: $45', '$45', 'different'),
+                                      ('Hammer price paid: $45', '$45', 'different')]:
+            result = checks.validate_result('coins', {'weight': '13.15', 'price': '$50'},
+                quote + ' Weight: 13.15 g', {'comparisons': [weight, {
+                    'field': 'price', 'listing_value': value, 'evidence': quote, 'outcome': outcome}]})
+            self.assertEqual([r['field'] for r in result], ['weight'])
+        result = checks.validate_result('coins', {'price': '$50'}, 'Order total paid: $45',
+            {'comparisons': [{'field': 'price', 'listing_value': '$45',
+                              'evidence': 'Order total paid: $45', 'outcome': 'different'}]})
+        self.assertEqual(result[0]['outcome'], 'different')
+
     def test_comparison_opt_in_required(self):
         self.available()
         self.assertIsNone(self.state()['check'])
