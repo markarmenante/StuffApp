@@ -16,6 +16,11 @@
     const differences = check?.differences || [];
     const needsReview = (review && !review.dismissed) || (differences.length > 0 && !check.dismissed);
     const reviewed = !needsReview && (review?.dismissed || check?.dismissed);
+    const deliveryBadge = document.querySelector('[data-delivery-badge]');
+    if (deliveryBadge && data.delivery) {
+      deliveryBadge.textContent = data.delivery.status + (data.delivery.attention ? ' \u00b7 Review' : '');
+      deliveryBadge.className = 'ebay-delivery-badge ebay-' + data.delivery.status.toLowerCase();
+    }
     panel.hidden = !(data.links?.length || review || check);
     title.textContent = needsReview ? 'Review Reason' : reviewed ? 'Marked reviewed' : 'Purchase sources';
     links.replaceChildren();

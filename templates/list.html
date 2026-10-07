@@ -443,11 +443,11 @@
            detail line. #}
         <div class="item-line1">
           <span class="item-brand">{{ row['country'] or row['municipality'] or row['issuer'] or '—' }}</span>
-          {% set _listing_review = listing_review_reason(category, row['id']) %}
+          {% set _delivery = banknote_delivery(row['id']) %}
+          {% set _listing_review = listing_review_reason(category, row['id']) or (_delivery.review.reason if _delivery and _delivery.attention else none) %}
           {% if _listing_review %}<span class="purchase-review-pill" title="{{ _listing_review }}">Please Review</span>{% endif %}
           {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
           {% set _ownership = (row['status'] or '')|trim %}
-          {% set _delivery = banknote_delivery(row['id']) %}
           {% set _refund = _delivery and _delivery.status in ('Refunded', 'Cancelled') %}
           {% if _ownership|lower not in ('', 'own', 'owned') or _refund %}
           {% set delivery = _delivery if _ownership|lower == 'ordered' or _refund else none %}

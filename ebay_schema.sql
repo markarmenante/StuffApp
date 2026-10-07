@@ -55,6 +55,11 @@ CREATE TABLE IF NOT EXISTS banknote_ebay_links (
     manual_status TEXT CHECK (manual_status IN ('Ordered','Shipped','Delivered')),
     match_evidence TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS banknote_purchase_review_dismissals (
+    banknote_id TEXT PRIMARY KEY REFERENCES banknote_ebay_links(banknote_id) ON DELETE CASCADE,
+    review_digest TEXT NOT NULL,
+    dismissed_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ebay_status_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     banknote_id TEXT NOT NULL REFERENCES banknotes(id) ON DELETE CASCADE,

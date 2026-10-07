@@ -29,5 +29,5 @@
   <p data-listing-error class="coin-review-error" role="alert" hidden></p>
   <script type="application/json" data-listing-initial>{{ _original|tojson }}</script>
 </section>
-<script src="{{ url_for('static', filename='js/original-listing.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/original-listing.js') }}?v={{ asset_v('js/original-listing.js') }}" defer></script>
 {% endif %}

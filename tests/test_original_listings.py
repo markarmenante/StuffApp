@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import Mock, patch
+from flask import g
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuff-original-listing-')
@@ -54,6 +55,9 @@ class ListingTests(unittest.TestCase):
         self.db.commit()
 
     def get(self, path):
+        # This fixture retains an app context; real requests get a fresh g.
+        g.pop('ebay_deliveries', None)
+        g.pop('listing_review_reasons', None)
         return self.client.get(path, base_url='https://localhost')
 
     def state(self, category='coins'):
@@ -161,6 +165,122 @@ class ListingTests(unittest.TestCase):
         self.assertTrue(self.post(data).json['check']['dismissed'])
         self.assertFalse(checks.run_once(stuff.open_db_connection, fetch, analyze))
         self.assertFalse(self.post(dict(data, action='restore')).json['check']['dismissed'])
+
+    def banknote_order(self, attention='Refunded; delivery not confirmed', status='Refunded'):
+        self.db.execute("UPDATE banknotes SET status='Ordered' WHERE id=?", (self.id,))
+        self.db.execute('INSERT INTO ebay_order_items '
+                        '(line_key,order_id,item_id,title,quantity,delivery_status,attention,last_seen) '
+                        "VALUES (?,'10-15260-84325','226073044650','Japan 10 Yen',1,'Ordered',?,'today')",
+                        (self.id, attention))
+        self.db.execute('INSERT INTO banknote_ebay_links '
+                        '(banknote_id,line_key,matched_by,matched_at) VALUES (?,?,?,?)',
+                        (self.id, self.id, 'listing', 'today'))
+        self.db.execute('INSERT INTO ebay_purchase_observations VALUES (?,?,?,?)',
+                        (self.id, 'today', status, ''))
+        self.db.commit()
+
+    def test_banknote_shipping_reason_displays_and_review_clears_both_views(self):
+        self.banknote_order()
+        before = dict(self.db.execute('SELECT * FROM banknotes WHERE id=?', (self.id,)).fetchone())
+        state = self.state('banknotes')
+        self.assertEqual(state['review']['reason'], 'Refunded; delivery not confirmed')
+        page = self.get('/banknotes/' + self.id).data.decode()
+        self.assertIn('Review Reason', page)
+        self.assertIn('Refunded; delivery not confirmed</textarea>', page)
+        self.assertIn('Refunded \u00b7 Review', page)
+        self.assertIn('Please Review', self.get('/banknotes').data.decode())
+        data = dict(action='dismiss', review_token=state['review']['token'], check_token='')
+        response = self.post(data, 'banknotes')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json['review']['dismissed'])
+        self.assertFalse(response.json['delivery']['attention'])
+        self.assertEqual(response.json['delivery']['status'], 'Refunded')
+        page = self.get('/banknotes/' + self.id).data.decode()
+        self.assertIn('Marked reviewed', page)
+        self.assertIn('eBay Purchases: 10-15260-84325', page)
+        self.assertNotIn('id="coinReviewReason"', page)
+        self.assertNotIn('Refunded \u00b7 Review', page)
+        listing = self.get('/banknotes').data.decode()
+        self.assertNotIn('Please Review', listing)
+        self.assertNotIn('Refunded \u00b7 Review', listing)
+        self.assertEqual(before, dict(self.db.execute('SELECT * FROM banknotes WHERE id=?', (self.id,)).fetchone()))
+        restored = self.post(dict(data, action='restore'), 'banknotes')
+        self.assertTrue(restored.json['delivery']['attention'])
+        self.assertIn('Refunded; delivery not confirmed</textarea>', self.get('/banknotes/' + self.id).data.decode())
+
+    def test_banknote_review_stays_dismissed_until_evidence_changes(self):
+        self.banknote_order()
+        state = self.state('banknotes')
+        data = dict(action='dismiss', review_token=state['review']['token'], check_token='')
+        self.assertEqual(self.post(data, 'banknotes').status_code, 200)
+        self.db.execute('UPDATE ebay_order_items SET last_seen=? WHERE line_key=?', ('tomorrow', self.id))
+        self.db.execute('UPDATE ebay_purchase_observations SET observed_at=? WHERE line_key=?', ('tomorrow', self.id))
+        self.db.commit()
+        self.assertTrue(self.state('banknotes')['review']['dismissed'])
+        self.db.execute('UPDATE ebay_order_items SET attention=? WHERE line_key=?', ('Payment disputed', self.id))
+        self.db.commit()
+        self.assertFalse(self.state('banknotes')['review']['dismissed'])
+        self.assertEqual(self.post(data, 'banknotes').status_code, 409)
+        self.db.execute('DELETE FROM banknote_ebay_links WHERE banknote_id=?', (self.id,))
+        self.assertIsNone(self.db.execute('SELECT * FROM banknote_purchase_review_dismissals WHERE banknote_id=?', (self.id,)).fetchone())
+
+    def test_banknote_tracking_does_not_reopen_dismissed_listing_review(self):
+        self.banknote_order('Tracking available; shipment or delivery not confirmed', 'Tracking available')
+        self.available('banknotes')
+        checks.ensure(self.db, 'banknotes', self.id, URL)
+        self.db.execute("UPDATE original_listing_checks SET state='checked',dismissed=1,result=? WHERE banknote_id=?",
+                        (json.dumps([dict(field='grade', label='Grade', stored='EF', listed='VF',
+                                          evidence='Grade: VF', outcome='different')]), self.id))
+        self.db.commit()
+        state = self.state('banknotes')
+        self.assertIsNone(state['review'])
+        self.assertFalse(state['delivery']['attention'])
+        self.assertEqual(state['delivery']['status'], 'Ordered')
+        page = self.get('/banknotes/' + self.id).data.decode()
+        self.assertIn('Marked reviewed', page)
+        self.assertNotIn('Ordered \u00b7 Review', page)
+        self.assertNotIn('Ordered \u00b7 Review', self.get('/banknotes').data.decode())
+
+    def test_banknote_listing_discrepancy_has_visible_reason_and_dismissal(self):
+        self.available('banknotes')
+        checks.ensure(self.db, 'banknotes', self.id, URL)
+        self.db.execute("UPDATE original_listing_checks SET state='checked',result=? WHERE banknote_id=?",
+                        (json.dumps([dict(field='grade', label='Grade', stored='EF', listed='VF',
+                                          evidence='Grade: VF', outcome='different')]), self.id))
+        self.db.commit()
+        page = self.get('/banknotes/' + self.id).data.decode()
+        self.assertIn('Review Reason', page)
+        self.assertIn('<strong>Grade</strong>: EF; listing: VF', page)
+        state = self.state('banknotes')
+        result = self.post(dict(action='dismiss', review_token='', check_token=state['check']['token']), 'banknotes')
+        self.assertTrue(result.json['check']['dismissed'])
+        self.assertIn('Marked reviewed', self.get('/banknotes/' + self.id).data.decode())
+
+    def test_banknote_unverified_email_has_explanation_not_false_delivery(self):
+        self.banknote_order('', 'Delivered')
+        self.db.execute('DELETE FROM ebay_purchase_observations WHERE line_key=?', (self.id,))
+        self.db.execute('INSERT INTO ebay_mail_receipts VALUES (?,?,?,?,?)',
+                        (self.id, self.id, 'Delivered', 'Email says delivered', 'today'))
+        self.db.commit()
+        state = self.state('banknotes')
+        self.assertIn('Email alone does not confirm', state['review']['reason'])
+        self.assertEqual(state['delivery']['status'], 'Unverified')
+        result = self.post(dict(action='dismiss', review_token=state['review']['token']), 'banknotes')
+        self.assertFalse(result.json['delivery']['attention'])
+        self.assertEqual(result.json['delivery']['status'], 'Unverified')
+
+    def test_banknote_review_requires_owner_csrf_and_current_evidence(self):
+        self.banknote_order()
+        path = f'/banknotes/{self.id}/original-listing/review'
+        state = self.state('banknotes')
+        data = dict(action='dismiss', review_token=state['review']['token'])
+        self.assertEqual(self.client.post(path, data=data, base_url='https://localhost').status_code, 403)
+        self.get('/banknotes/' + self.id)
+        with self.client.session_transaction(base_url='https://localhost') as session:
+            data['csrf_token'] = session['ebay_csrf']
+        self.assertEqual(self.client.post(path, data=data, base_url='https://localhost',
+                         headers={'Cf-Access-Authenticated-User-Email': 'outsider@example.com'}).status_code, 403)
+        self.assertEqual(self.post(dict(action='dismiss', review_token='stale'), 'banknotes').status_code, 409)
 
     def test_failed_checks_need_evidence_and_never_write_item_fields(self):
         self.available()

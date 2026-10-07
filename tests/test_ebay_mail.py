@@ -65,6 +65,15 @@ class PurchasesTests(unittest.TestCase):
         self.assertEqual(ebay_mail.date_only('Fri, Jan 2', '2025-12-31T00:00:00Z'), '2026-01-02T00:00:00Z')
         self.assertIsNone(ebay_mail.date_only('Thu, Dec 31', '2026-10-01T00:00:00Z'))
 
+    def test_tracking_available_is_normal_progress_not_a_review_warning(self):
+        item = ebay_mail.validate_purchase(purchase(status_text='Tracking available', delivery_text=''))
+        self.assertEqual(item['delivery_status'], 'Ordered')
+        self.assertEqual(item['attention'], '')
+        self.assertIsNone(item['shipped_at'])
+        self.assertIsNone(item['delivered_at'])
+        for status in ('Returned', 'Not delivered', 'Payment pending', 'Cancelled'):
+            self.assertTrue(ebay_mail.validate_purchase(purchase(status_text=status))['attention'])
+
     def test_legacy_order_ids_and_seller_names_are_not_unreadable(self):
         for order_id in ('362612610393-1028917710023', '238257826017'):
             result = ebay_mail.validate_purchase(purchase(order_id=order_id, seller='*old*dealer*'))

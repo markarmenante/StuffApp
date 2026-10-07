@@ -14,7 +14,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from flask import Blueprint, abort, jsonify, g, request, session, url_for
 
-from ebay_orders import listing_id, review_digest, safe_review_source_url, now_iso
+from ebay_orders import banknote_deliveries, listing_id, review_digest, safe_review_source_url, now_iso
 import listing_checks
 import source_documents
 
@@ -218,6 +218,8 @@ def check_page(url):
 
 
 def manual_review(db, category, record_id):
+    if category == 'banknotes':
+        return banknote_deliveries(db, record_id).get(record_id, {}).get('review')
     if category != 'coins':
         return None
     row = db.execute('SELECT r.*,d.review_digest AS dismissed_digest FROM coin_purchase_reviews r '
@@ -285,6 +287,10 @@ class ListingService:
         if pending:
             self.wake.set()
         links = purchase_links(db, category, record['id'], link)
+        delivery = banknote_deliveries(db, record['id']).get(record['id']) if category == 'banknotes' else None
+        review = delivery['review'] if delivery else manual_review(db, category, record['id'])
+        if category == 'banknotes' and review:
+            links.extend(review['sources'])
         archive_pending = False
         if os.environ.get('ORIGINAL_LISTING_ARCHIVES') == '1':
             if link:
@@ -301,7 +307,7 @@ class ListingService:
             if archive_pending:
                 self.wake.set()
         return dict(link=link, links=links, pending=pending, archive_pending=archive_pending,
-                    check=check, review=manual_review(db, category, record['id']))
+                    check=check, review=review, delivery=delivery)
 
     def work_once(self):
         db = self.connect()
@@ -399,12 +405,14 @@ def register(app, get_db, connect, can_see, require_owner, analyze, upload_folde
                 db.rollback()
                 return jsonify(error='The review changed. Reload the page before confirming it.'), 409
         if current:
+            table = 'coin_purchase_review_dismissals' if category == 'coins' else 'banknote_purchase_review_dismissals'
+            key = 'coin_id' if category == 'coins' else 'banknote_id'
             if action == 'dismiss':
-                db.execute('INSERT INTO coin_purchase_review_dismissals VALUES (?,?,?) '
-                           'ON CONFLICT(coin_id) DO UPDATE SET review_digest=excluded.review_digest,dismissed_at=excluded.dismissed_at',
+                db.execute(f'INSERT INTO {table} ({key},review_digest,dismissed_at) VALUES (?,?,?) '
+                           f'ON CONFLICT({key}) DO UPDATE SET review_digest=excluded.review_digest,dismissed_at=excluded.dismissed_at',
                            (record_id, current['token'], now_iso()))
             else:
-                db.execute('DELETE FROM coin_purchase_review_dismissals WHERE coin_id=?', (record_id,))
+                db.execute(f'DELETE FROM {table} WHERE {key}=?', (record_id,))
         if check and check['state'] == 'checked':
             key = 'coin_id' if category == 'coins' else 'banknote_id'
             db.execute(f'UPDATE original_listing_checks SET dismissed=? WHERE {key}=?',

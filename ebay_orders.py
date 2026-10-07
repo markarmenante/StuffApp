@@ -386,6 +386,41 @@ def purchase_display_status(item, unverified=False):
     return item['delivery_status']
 
 
+def banknote_deliveries(db, record_id=None):
+    unverified = unverified_email_keys(db)
+    rows = db.execute(
+        'SELECT l.banknote_id,l.line_key,l.manual_status,i.delivery_status,i.attention,i.last_seen, '
+        'i.order_id,i.shipped_at,i.delivered_at,o.status_text AS purchase_status, '
+        'd.review_digest AS dismissed_digest FROM banknote_ebay_links l '
+        'JOIN ebay_order_items i ON i.line_key=l.line_key '
+        'LEFT JOIN ebay_purchase_observations o ON o.line_key=i.line_key '
+        'LEFT JOIN banknote_purchase_review_dismissals d ON d.banknote_id=l.banknote_id '
+        + ('WHERE l.banknote_id=?' if record_id is not None else ''),
+        (record_id,) if record_id is not None else ()).fetchall()
+    deliveries = {}
+    for row in rows:
+        reason = row['attention'].strip()
+        # Older syncs classified tracking labels as exceptions, without proof of shipment.
+        if reason.casefold() == 'tracking available; shipment or delivery not confirmed':
+            reason = ''
+        if row['line_key'] in unverified:
+            reason = ' '.join(filter(None, (reason,
+                'This order has not been verified in eBay Purchases. Email alone does not confirm shipment or delivery.')))
+        review = None
+        if reason:
+            token = digest(json.dumps([row[key] for key in (
+                'banknote_id', 'line_key', 'purchase_status', 'delivery_status',
+                'shipped_at', 'delivered_at', 'manual_status')] + [reason]))
+            review = dict(reason=reason, token=token, dismissed=row['dismissed_digest'] == token,
+                          sources=[dict(label='eBay Purchases: ' + row['order_id'],
+                                        url='https://www.ebay.com/mye/myebay/purchase')])
+        deliveries[row['banknote_id']] = dict(
+            status=purchase_display_status(row, row['line_key'] in unverified),
+            manual=bool(row['manual_status']), attention=bool(review and not review['dismissed']),
+            last_seen=row['last_seen'], review=review)
+    return deliveries
+
+
 def apply_items(db, items, source='eBay', auto_match=True, authoritative=False):
     """Caller owns the transaction; a partial network page never reaches here."""
     candidates = listing_candidates(db)
@@ -816,14 +851,7 @@ def register(app, get_db, open_db, require_owner, data_dir):
 
     def deliveries():
         if 'ebay_deliveries' not in g:
-            unverified = unverified_email_keys(get_db())
-            rows = get_db().execute('SELECT l.banknote_id,l.line_key,l.manual_status,i.delivery_status,i.attention,i.last_seen, '
-                                    'o.status_text AS purchase_status FROM banknote_ebay_links l '
-                                    'JOIN ebay_order_items i ON i.line_key=l.line_key '
-                                    'LEFT JOIN ebay_purchase_observations o ON o.line_key=i.line_key').fetchall()
-            g.ebay_deliveries = {r['banknote_id']: {'status': purchase_display_status(r, r['line_key'] in unverified),
-                               'manual': bool(r['manual_status']), 'attention': bool(r['attention']) or r['line_key'] in unverified,
-                               'last_seen': r['last_seen']} for r in rows}
+            g.ebay_deliveries = banknote_deliveries(get_db())
         return g.ebay_deliveries
 
     @app.context_processor

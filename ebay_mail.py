@@ -64,7 +64,7 @@ def validate_purchase(raw):
     elif status in ('shipped', 'in transit', 'out for delivery'):
         result['delivery_status'] = 'Shipped'
         # Observation time is not a shipping time. Leave the latter unknown.
-    elif not refunded and status not in ('awaiting shipment', 'paid', 'order placed', 'ordered'):
+    elif not refunded and status not in ('awaiting shipment', 'paid', 'order placed', 'ordered', 'tracking available'):
         result['attention'] = result['status_text'] + '; shipment or delivery not confirmed'
     if refunded:
         result['attention'] = result['status_text']

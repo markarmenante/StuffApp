@@ -437,7 +437,7 @@
       {% set delivery = banknote_delivery(r['id']) %}
       {% if delivery %}
         {% if current_user and current_user.role == 'owner' %}
-        <a href="{{ url_for('ebay.dashboard') }}#note-{{ r['id'] }}" class="ebay-delivery-badge ebay-{{ delivery.status|lower }}"
+        <a href="{{ url_for('ebay.dashboard') }}#note-{{ r['id'] }}" class="ebay-delivery-badge ebay-{{ delivery.status|lower }}" data-delivery-badge
            title="eBay shipping progress — separate from collection ownership">{{ delivery.status }}{% if delivery.attention %} · Review{% endif %}</a>
         {% else %}<span class="ebay-delivery-badge ebay-{{ delivery.status|lower }}">{{ delivery.status }}</span>{% endif %}
       {% endif %}
