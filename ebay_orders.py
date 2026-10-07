@@ -412,8 +412,8 @@ def banknote_deliveries(db, record_id=None):
                 'banknote_id', 'line_key', 'purchase_status', 'delivery_status',
                 'shipped_at', 'delivered_at', 'manual_status')] + [reason]))
             review = dict(reason=reason, token=token, dismissed=row['dismissed_digest'] == token,
-                          sources=[dict(label='eBay Purchases: ' + row['order_id'],
-                                        url='https://www.ebay.com/mye/myebay/purchase')])
+                          sources=[dict(label='eBay Order ' + row['order_id'],
+                                        url='https://order.ebay.com/ord/show?' + urlencode({'orderId': row['order_id']}))])
         deliveries[row['banknote_id']] = dict(
             status=purchase_display_status(row, row['line_key'] in unverified),
             manual=bool(row['manual_status']), attention=bool(review and not review['dismissed']),
