@@ -1389,6 +1389,17 @@ input[type="date"] { -webkit-appearance: none; }
 .coin-specs .dcell select { text-align: center; }
 .coin-purchase .dcell input,
 .coin-purchase .dcell select { text-align: center; }
+.coin-purchase.dg4 { grid-template-columns: 1.5fr 1fr 1fr 1fr; }
+.coin-purchase .ebay-order-cell { padding-bottom: 13px; }
+.ebay-order-numbers { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 8px; min-height: 19px; font-size: 14px; line-height: 1.35; }
+.ebay-order-numbers a { text-decoration: underline; overflow-wrap: anywhere; }
+.detail-page-coins .ebay-order-numbers { font-size: 13px; }
+@media (max-width: 640px) {
+  .dgrid.coin-purchase.dg4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .coin-purchase.dg4 .dcell { min-width: 0; }
+  .ebay-order-numbers { font-size: 16px; }
+  .detail-page-coins .ebay-order-numbers { font-size: 15px; }
+}
 .coin-reference-source-row .dcell {
   border-bottom: none;
 }

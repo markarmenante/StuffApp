@@ -253,6 +253,39 @@ def purchase_links(db, category, record_id, listing):
     return [link for link in links if not (link['url'] in seen or seen.add(link['url']))]
 
 
+def ebay_purchase_orders(db, category, record_id):
+    """Expose exact saved purchase associations, never infer from seller names."""
+    if category not in TABLES or not record_id:
+        return []
+    numbers = set()
+    if category == 'banknotes':
+        numbers.update(row['order_id'] for row in db.execute(
+            'SELECT i.order_id FROM banknote_ebay_links l JOIN ebay_order_items i '
+            'ON i.line_key=l.line_key WHERE l.banknote_id=?', (record_id,)))
+    table, key, _ = TABLES[category]
+    listing = db.execute(f'SELECT url FROM {table} WHERE {key}=?', (record_id,)).fetchone()
+    item_id = listing_id(listing['url']) if listing else None
+    if item_id:
+        numbers.update(row['order_id'] for row in db.execute(
+            'SELECT order_id FROM ebay_order_items WHERE item_id=? AND ignored=0', (item_id,)))
+    table, key = source_documents.TABLES[category]
+    for row in db.execute(f'SELECT a.url FROM {table} l JOIN purchase_source_archives a ON a.url=l.url '
+                          f'WHERE l.{key}=? AND a.kind IN (\'order\',\'invoice\')', (record_id,)):
+        try:
+            url = urlsplit(row['url'])
+            if (url.scheme == 'https' and url.hostname == 'order.ebay.com'
+                    and not url.username and not url.password and url.port in (None, 443)
+                    and url.path == '/ord/show'):
+                values = parse_qs(url.query).get('orderId', [])
+                if len(values) == 1:
+                    numbers.add(values[0])
+        except ValueError:
+            continue
+    return [dict(number=number, url='https://order.ebay.com/ord/show?orderId=' + number)
+            for number in sorted(n for n in numbers if isinstance(n, str)
+                                 and re.fullmatch(r'\d{2}-\d{5}-\d{5}', n))]
+
+
 class ListingService:
     def __init__(self, app, get_db, connect, analyze, upload_folder, fonts):
         self.app, self.get_db, self.connect = app, get_db, connect
@@ -440,7 +473,8 @@ def register(app, get_db, connect, can_see, require_owner, analyze, upload_folde
                     g.listing_review_reasons[(('coins' if row['coin_id'] else 'banknotes'),
                                               row['coin_id'] or row['banknote_id'])] = '; '.join(reasons)
             return g.listing_review_reasons.get((category, record_id))
-        return {'original_listing': service.lookup, 'listing_review_reason': review_reason}
+        return {'original_listing': service.lookup, 'listing_review_reason': review_reason,
+                'ebay_purchase_orders': lambda category, record_id: ebay_purchase_orders(get_db(), category, record_id)}
 
     app.register_blueprint(bp)
     return service

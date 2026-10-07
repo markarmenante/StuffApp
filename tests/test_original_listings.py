@@ -505,6 +505,52 @@ class ListingTests(unittest.TestCase):
                     'https://www.vcoins.com:8443/invoice.pdf','https://user@www.vcoins.com/invoice.pdf'):
             self.assertFalse(archives.safe_remote(url))
 
+    def test_order_number_from_receipt_after_vendor_both_categories(self):
+        order_url = 'https://order.ebay.com/ord/show?orderId=23-15242-04872'
+        for category in ('coins', 'banknotes'):
+            archives.enqueue(self.db, category, self.id, order_url, 'eBay Order Receipt', 'order')
+            self.db.commit()
+            expected = [dict(number='23-15242-04872', url=order_url)]
+            self.assertEqual(sources.ebay_purchase_orders(self.db, category, self.id), expected)
+            page = self.get(f'/{category}/{self.id}').data.decode()
+            purchase = page.split('coin-purchase"', 1)[1].split('</a>', 1)[0]
+            self.assertLess(purchase.index('name="vendor"'), purchase.index('23-15242-04872'))
+            self.assertIn('href="' + order_url + '"', purchase)
+            self.assertIn('eBay Order Number', page)
+            self.assertLess(page.index('id="ebayOrderLabel"'), page.index('name="purchase_date"'))
+
+    def test_order_numbers_from_matched_purchase_and_exact_listing_deduplicate(self):
+        order_url = 'https://order.ebay.com/ord/show?orderId=23-15242-04872'
+        self.db.execute("INSERT INTO ebay_order_items (line_key,order_id,item_id,title,quantity,delivery_status,last_seen) "
+                        "VALUES (?,'23-15242-04872','325643741723','Tonga 1 Pound',1,'Ordered','now')", (self.id,))
+        self.db.execute("INSERT INTO banknote_ebay_links (banknote_id,line_key,matched_by,matched_at) VALUES (?,?,'manual','now')",
+                        (self.id, self.id))
+        for category in ('coins', 'banknotes'):
+            sources.add_source(self.db, category, self.id, 'https://www.ebay.com/itm/325643741723')
+            archives.enqueue(self.db, category, self.id, order_url, 'Order receipt', 'order')
+            self.assertEqual(sources.ebay_purchase_orders(self.db, category, self.id),
+                             [dict(number='23-15242-04872', url=order_url)])
+        self.db.execute('DELETE FROM banknote_ebay_links WHERE banknote_id=?', (self.id,))
+        self.db.execute('DELETE FROM ebay_order_items WHERE line_key=?', (self.id,))
+
+    def test_order_numbers_do_not_guess_from_reviews_or_listing_ids(self):
+        self.db.execute('INSERT INTO coin_purchase_reviews VALUES (?,?,?)', (self.id, 'Uncertain purchase match', 'today'))
+        self.db.execute('INSERT INTO coin_purchase_review_sources VALUES (?,?,?,?)',
+                        (self.id, 'https://order.ebay.com/ord/show?orderId=23-15242-04872', 'Possible eBay order', 0))
+        sources.add_source(self.db, 'coins', self.id, 'https://www.ebay.com/itm/325643741723')
+        self.assertEqual(sources.ebay_purchase_orders(self.db, 'coins', self.id), [])
+        self.assertEqual(sources.ebay_purchase_orders(self.db, 'banknotes', None), [])
+        self.assertEqual(sources.ebay_purchase_orders(self.db, 'watches', self.id), [])
+
+    def test_order_urls_must_be_exact_not_generic_or_malformed(self):
+        for url in ['https://www.ebay.com/mye/myebay/purchase?orderId=23-15242-04872',
+                    'https://order.ebay.com/ord/show?orderId=invalid',
+                    'https://order.ebay.com/ord/show?orderId=23-15242-04872&orderId=99-99999-99999',
+                    'https://order.ebay.com/ord/show?itemId=325643741723',
+                    'https://www.vcoins.com/ord/show?orderId=23-15242-04872']:
+            archives.enqueue(self.db, 'banknotes', self.id, url, 'Order receipt', 'order')
+        self.assertEqual(sources.ebay_purchase_orders(self.db, 'banknotes', self.id), [])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

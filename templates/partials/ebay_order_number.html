@@ -1,0 +1,9 @@
+<div class="dcell ebay-order-cell">
+  <div class="ebay-order-numbers" aria-labelledby="ebayOrderLabel">
+    {% for order in ebay_purchase_orders(category, r['id'] if r and not is_new else none) %}
+    <a href="{{ order.url }}" target="_blank" rel="noopener noreferrer"
+       aria-label="Open eBay order {{ order.number }}">{{ order.number }}</a>
+    {% endfor %}
+  </div>
+  <span class="clabel" id="ebayOrderLabel">eBay Order Number</span>
+</div>

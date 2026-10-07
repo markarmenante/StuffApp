@@ -1136,12 +1136,13 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   <!-- Purchase -->
-  <div class="dgrid dg3 coin-purchase">
+  <div class="dgrid dg4 coin-purchase">
     <div class="dcell ta-wrap">
       <input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center"
              {% if is_new and not val('vendor') %}placeholder="Vendor"{% endif %}>
       <span class="clabel">Vendor</span>
     </div>
+    {% include 'partials/ebay_order_number.html' %}
     <div class="dcell date-overlay-cell">
       {% set _pd = val('purchase_date') %}
       {% set _pd_eff = _pd if _pd else (today_iso if is_new else '') %}
@@ -1606,12 +1607,13 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 
   <!-- Purchase -->
-  <div class="dgrid dg3 coin-purchase">
+  <div class="dgrid dg4 coin-purchase">
     <div class="dcell ta-wrap">
       <input type="text" name="vendor" value="{{ val('vendor') }}" autocomplete="off" class="ta-input" data-ta="{{ ta.get('vendor', [])|join('||') }}" style="text-align:center"
              {% if is_new and not val('vendor') %}placeholder="Vendor"{% endif %}>
       <span class="clabel">Vendor</span>
     </div>
+    {% include 'partials/ebay_order_number.html' %}
     <div class="dcell date-overlay-cell">
       {% set _pd = val('purchase_date') %}
       {% set _pd_eff = _pd if _pd else (today_iso if is_new else '') %}
