@@ -16,6 +16,8 @@ os.chdir(REPO)
 sys.path.insert(0, REPO)
 os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuffapp-pedigree-')
 os.environ['ANTHROPIC_API_KEY'] = 'test-key'
+os.environ['ORIGINAL_LISTING_WORKER'] = '0'
+os.environ['EBAY_SYNC_WORKER'] = '0'
 
 import app as stuffapp
 
@@ -46,6 +48,19 @@ with stuffapp.app.app_context():
         "'8078166-001', 1946, 'Heritage', '2026-09-11', 900, 'Own')")
     db.commit()
 print('schema OK')
+
+# Purchase edits update the owner's derived custody row, not earlier sales.
+for category, record_id in (('coins', 'c1'), ('banknotes', 'b1')):
+    for price in ('$4,950', 'EUR 479 / $479', '0', ''):
+        response = client.post(f'/{category}/{record_id}/save-field', json={'field':'price','value':price})
+        assert response.status_code == 200, response.get_data(as_text=True)
+        saved = response.get_json()
+        chain = client.get(f'/{category}/{record_id}/pedigree/provenance/events').get_json()
+        assert saved['provenance_purchase'] == chain['purchase']
+        assert saved['provenance_purchase']['price'] == stuffapp.currency_filter(price)
+        assert saved['purchase_updated_at']
+    client.post(f'/{category}/{record_id}/save-field', json={'field':'price','value':'4800' if category=='coins' else '900'})
+assert stuffapp._provenance_purchase_event({'price':0})['price'] == '$0'
 
 # ── cleaners ──────────────────────────────────────────────────────────
 cd = stuffapp._pedigree_clean_date

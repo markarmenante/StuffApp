@@ -397,7 +397,7 @@
           {% if row['region'] and row['authority'] and row['authority'] != row['region'] %}
           <span class="item-model">{{ row['authority'] }}</span>
           {% endif %}
-          {% set _purchase_review = coin_purchase_review(row['id']) %}
+          {% set _purchase_review = coin_purchase_review(row['id']) or listing_review_reason(category, row['id']) %}
           {% if _purchase_review %}<span class="purchase-review-pill" title="{{ _purchase_review }}">Please Review</span>{% endif %}
         </div>
         <div class="item-detail-rows">
@@ -443,6 +443,8 @@
            detail line. #}
         <div class="item-line1">
           <span class="item-brand">{{ row['country'] or row['municipality'] or row['issuer'] or '—' }}</span>
+          {% set _listing_review = listing_review_reason(category, row['id']) %}
+          {% if _listing_review %}<span class="purchase-review-pill" title="{{ _listing_review }}">Please Review</span>{% endif %}
           {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
           {% set _ownership = (row['status'] or '')|trim %}
           {% set _delivery = banknote_delivery(row['id']) %}

@@ -1,0 +1,33 @@
+{% if r and not is_new %}
+{% set _original = original_listing(category, r) %}
+{% set _manual = _original.review %}
+{% set _check = _original.check %}
+{% set _needs_review = (_manual and not _manual.dismissed) or (_check and _check.differences and not _check.dismissed) %}
+{% set _reviewed = not _needs_review and ((_manual and _manual.dismissed) or (_check and _check.dismissed)) %}
+<section data-original-listing data-url="{{ url_for('original_listings.status', category=category, record_id=r['id']) }}"
+         {% if _is_owner %}data-csrf="{{ coin_review_csrf_token() }}"{% endif %}
+         {% if not (_original.links or _manual or _check) %}hidden{% endif %}>
+  <div class="section-bar coin-review-toolbar">
+    <span data-listing-title role="status">{% if _needs_review %}Review Reason{% elif _reviewed %}Marked reviewed{% else %}Purchase sources{% endif %}</span>
+    <nav class="purchase-review-sources" data-purchase-links aria-label="Purchase sources">
+      {% for source in _original.links %}
+      <a class="purchase-review-source" href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.label }}</a>
+      {% endfor %}
+    </nav>
+    {% if _is_owner %}<button type="button" class="purchase-review-action" data-listing-action="{{ 'dismiss' if _needs_review else 'restore' }}" {% if not (_needs_review or _reviewed) %}hidden{% endif %}>{{ 'Mark Reviewed' if _needs_review else 'Undo' }}</button>{% endif %}
+  </div>
+  <div data-listing-reasons class="listing-review-reasons">
+    {% if _manual and not _manual.dismissed %}
+    <nav class="purchase-review-sources" aria-label="Review sources">
+      {% for source in _manual.sources if source not in _original.links %}<a class="purchase-review-source" href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.label }}</a>{% endfor %}
+    </nav>
+    <textarea id="coinReviewReason" rows="3" readonly>{{ _manual.reason }}</textarea>
+    {% endif %}
+    {% if _check and not _check.dismissed %}{% for item in _check.differences %}<p><strong>{{ item.label }}</strong>: {{ item.stored or 'Missing' }}; listing: {{ item.listed }}</p>{% endfor %}{% endif %}
+  </div>
+  <p data-listing-progress class="listing-check-status" role="status"></p>
+  <p data-listing-error class="coin-review-error" role="alert" hidden></p>
+  <script type="application/json" data-listing-initial>{{ _original|tojson }}</script>
+</section>
+<script src="{{ url_for('static', filename='js/original-listing.js') }}" defer></script>
+{% endif %}

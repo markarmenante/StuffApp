@@ -45,8 +45,9 @@ does not participate in autosave. A flag does not assert that the coin was
 refunded or change ownership, and disappears when the associated coin is deleted.
 Verified source links live in `coin_purchase_review_sources` and appear as
 pills above the reason. A review may link to multiple vendor records, saved
-invoices, or comparison coins. Fallback searches must be labeled as searches,
-not as verified item links. Links open in a separate tab; unsafe URL schemes
+invoices, or comparison coins. Use the original order when a listing has gone;
+archive searches can return no results even for a real purchase. Do not present
+unverified search URLs as record links. Links open in a separate tab; unsafe URL schemes
 are not rendered. Source rows cascade when their review is removed.
 The owner can **Mark Reviewed** on the detail page, hiding the reason and
 list flag without changing coin fields or deleting the source evidence.
@@ -54,6 +55,53 @@ An immediate **Undo** restores it. Dismissals persist across reloads and
 are bound to the review's reason and creation timestamp; a changed finding
 appears again. Writes require the owner, coin access, a session CSRF token,
 and the displayed review version so a stale page cannot dismiss a new finding.
+
+## Original listing pills
+
+Coin and banknote purchase details show an **Original Listing** pill independently
+of review flags. The original-listing service uses exact, saved purchase sources:
+linked eBay purchases, explicit Listing / Market Scan purchase lines, and
+ordered market-scan records. General references and uncertain review comparisons
+are never promoted to original purchases. Confirmed audit matches can be added
+with add_source; the coin/banknote junction tables preserve foreign keys.
+
+Availability lives separately in original_listing_pages. A background worker
+verifies exact eBay, VCoins, CNG and MA-Shops item URLs. Readable sold/ended listings
+qualify; searches, missing pages, login/bot walls, changed item redirects and
+unverified pages do not. Only a positive check from the last 24 hours renders a
+pill. Unknown checks retry in an hour; removed pages retry after seven days.
+No network request runs in the detail-page request, and UI polling never changes
+editable fields. Database leases avoid duplicate checks across server workers;
+set ORIGINAL_LISTING_WORKER=0 for isolated tests.
+
+Tests: python tests/test_original_listings.py.
+
+The purchase-source pills remain in the **Marked reviewed** header after
+dismissal and reload. Saved invoice/receipt documents and verified order links
+remain accessible even when an original listing has been removed. Speculative
+comparison links remain evidence in the open review, not original-listing pills.
+
+With the owner's explicit Anthropic data-sharing consent, set
+`ORIGINAL_LISTING_AI_CHECKS=1` on that owner's service only. It is off by default.
+This sends the readable listing text and an allowlist of saved item fields
+(including price, serial/certificate numbers) to the existing Anthropic service.
+No attachments, contact data, account sessions or invoice contents are sent.
+One successful check is saved per record/source URL; page refreshes do not rerun
+it. Failed checks retry at most three times, an hour apart. A new source URL
+starts a new check. Quote-validated discrepancies appear as Please Review and
+read-only reasons; stored item facts are never overwritten. Snapshot checks
+prevent a result from overwriting a concurrent edit's review state. Dismissal
+requires owner access, CSRF and the displayed versions of both review reports.
+
+Set `ORIGINAL_LISTING_ARCHIVES=1` on the requested owner's service to save
+readable source PDFs into Documents once per source URL. Listing snapshots retain
+visible page text without summarizing it, the source URL and capture date, plus
+the original social-preview photograph where safely available. They are labelled
+as readable source copies, not pixel-identical web-page prints. Existing invoice
+PDFs are reused; publicly downloadable invoice PDFs are preserved verbatim.
+Login-required HTML invoices need a signed-in browser capture, never a saved
+login/error page. Archives and item associations are separate normalized tables;
+existing Documents entries are retained, and repeat checks do not add duplicates.
 
 The retired eBay-email protocol returns HTTP 410. Old email-only statuses are
 shown as Unverified until Purchases confirms them. Newer snapshots can correct

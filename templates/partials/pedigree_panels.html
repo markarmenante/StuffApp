@@ -195,6 +195,14 @@
     $('pdgEventsEmpty').style.display = rows.length ? 'none' : '';
   }
   renderEvents(D.events, D.purchase);
+  let purchaseUpdatedAt = '';
+  document.addEventListener('record-purchase-saved', (event) => {
+    const {purchase, updatedAt} = event.detail;
+    if (updatedAt && updatedAt < purchaseUpdatedAt) return;
+    purchaseUpdatedAt = updatedAt || purchaseUpdatedAt;
+    D.purchase = purchase;
+    renderEvents(D.events, D.purchase);
+  });
 
   async function readJson(res) {
     const text = await res.text();

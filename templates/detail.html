@@ -1151,41 +1151,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  {% set _purchase_review = coin_purchase_review(r['id']) if r and not is_new else none %}
-  {% if _purchase_review %}
-  <div id="coinReviewPanel"{% if _is_owner %}
-       data-url="{{ url_for('coin_reviews.set_review_state', coin_id=r['id']) }}"
-       data-csrf="{{ coin_review_csrf_token() }}"
-       data-review-token="{{ coin_purchase_review_token(r['id']) }}"{% endif %}>
-  <div data-review-open>
-  <div class="section-bar coin-review-toolbar">
-    <label for="coinReviewReason">Review Reason</label>
-    {% if _is_owner %}<button type="button" class="purchase-review-action" data-review-action="dismiss">Mark Reviewed</button>{% endif %}
-  </div>
-  <div class="dgrid dg1 coin-review-reason">
-    <div class="dcell">
-      {% set _review_sources = coin_purchase_review_sources(r['id']) %}
-      {% if _review_sources %}
-      <nav class="purchase-review-sources" aria-label="Review sources">
-        {% for source in _review_sources %}
-        <a class="purchase-review-source" href="{{ source['url'] }}" target="_blank" rel="noopener noreferrer">{{ source['label'] }}</a>
-        {% endfor %}
-      </nav>
-      {% endif %}
-      <textarea id="coinReviewReason" rows="3" readonly>{{ _purchase_review }}</textarea>
-    </div>
-  </div>
-  </div>
-  {% if _is_owner %}
-  <div class="section-bar coin-review-toolbar" data-review-dismissed hidden>
-    <span role="status">Marked reviewed</span>
-    <button type="button" class="purchase-review-action" data-review-action="restore">Undo</button>
-  </div>
-  <p class="coin-review-error" role="alert" hidden></p>
-  <script src="{{ url_for('static', filename='js/coin-review.js') }}" defer></script>
-  {% endif %}
-  </div>
-  {% endif %}
+  {% include 'partials/original_listing.html' %}
 
   <!-- Description -->
   <div class="section-bar">Description</div>
@@ -1654,6 +1620,8 @@ document.addEventListener('DOMContentLoaded', function () {
       <span class="clabel">Price</span>
     </div>
   </div>
+
+  {% include 'partials/original_listing.html' %}
 
   <!-- Grade, Conditions -->
   {{ notescell('notes','Grade, Conditions') }}
@@ -4948,6 +4916,11 @@ document.querySelectorAll('.comp-item').forEach(item => {
         .then(r => r.json())
         .then(d => {
           if (d.ok) {
+            if (Object.prototype.hasOwnProperty.call(d, 'provenance_purchase')) {
+              document.dispatchEvent(new CustomEvent('record-purchase-saved', {
+                detail: {purchase: d.provenance_purchase, updatedAt: d.purchase_updated_at},
+              }));
+            }
             if (d.actual_delivery_date) {
               const actualInput = form.querySelector('input[name="actual_delivery_date"]');
               if (actualInput) actualInput.value = d.actual_delivery_date;

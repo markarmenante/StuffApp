@@ -65,6 +65,7 @@ const NO_CACHE_PATHS = [
 ];
 
 function shouldNotCache(url) {
+  if (/^\/(coins|banknotes)\/[^/]+\/original-listing(?:\/|$)/.test(url.pathname)) return true;
   return NO_CACHE_PATHS.some(p => url.pathname === p ||
                                    url.pathname.startsWith(p + '/'));
 }

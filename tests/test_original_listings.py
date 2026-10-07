@@ -1,0 +1,267 @@
+"""Original purchase evidence, persistent links and one-time comparison safety."""
+import json
+import os
+from pathlib import Path
+import sqlite3
+import sys
+import tempfile
+import time
+import unittest
+from unittest.mock import Mock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuff-original-listing-')
+os.environ['ORIGINAL_LISTING_WORKER'] = '0'
+os.environ['ORIGINAL_LISTING_AI_CHECKS'] = '0'
+os.environ['EBAY_SYNC_WORKER'] = '0'
+os.environ.pop('ANTHROPIC_API_KEY', None)
+
+import original_listings as sources
+import listing_checks as checks
+import source_documents as archives
+import app as stuff
+
+URL = 'https://www.vcoins.com/en/stores/dealer/123/product/silver_tetradrachm/123456/Default.aspx'
+HTML = '<html><title>Silver coin</title><h1>Ancient silver tetradrachm</h1><p>Weight: 13.15 g. Sold.</p></html>'
+TEXT = 'Ancient silver tetradrachm. Weight: 13.15 g. Sold.'
+
+
+class ListingTests(unittest.TestCase):
+    def setUp(self):
+        self.client = stuff.app.test_client()
+        self.id = 'original-test-' + self._testMethodName
+        self.context = stuff.app.app_context()
+        self.context.push()
+        self.db = stuff.get_db()
+        self.db.execute("INSERT INTO coins (id,region,weight,status) VALUES (?,'Syria',12.5,'Own')", (self.id,))
+        self.db.execute("INSERT INTO banknotes (id,country,status) VALUES (?,'Canada','Own')", (self.id,))
+        self.db.commit()
+
+    def tearDown(self):
+        self.db.rollback()
+        for table in ('coins', 'banknotes'):
+            self.db.execute(f'DELETE FROM {table} WHERE id=?', (self.id,))
+        self.db.execute('DELETE FROM original_listing_pages')
+        self.db.execute('DELETE FROM purchase_source_archives')
+        self.db.execute('DELETE FROM record_documents WHERE record_id=?', (self.id,))
+        self.db.commit()
+        self.context.pop()
+
+    def available(self, category='coins'):
+        sources.add_source(self.db, category, self.id, URL)
+        self.db.execute("UPDATE original_listing_pages SET state='available',checked_at=?,next_check_at=?",
+                        (time.time(), time.time() + 86400))
+        self.db.commit()
+
+    def get(self, path):
+        return self.client.get(path, base_url='https://localhost')
+
+    def state(self, category='coins'):
+        return self.get(f'/{category}/{self.id}/original-listing').json
+
+    def post(self, data, category='coins'):
+        self.get(f'/{category}/{self.id}')
+        with self.client.session_transaction(base_url='https://localhost') as session:
+            csrf = session['ebay_csrf']
+        return self.client.post(f'/{category}/{self.id}/original-listing/review',
+                                base_url='https://localhost', data=dict(csrf_token=csrf, **data))
+
+    def test_only_exact_item_urls(self):
+        for url in [URL, 'https://ebay.com/itm/123456789012?abc=1',
+                    'https://cngcoins.com/Coin.aspx?CoinID=123',
+                    'https://www.cngcoins.com/Lot.aspx?LOT_ID=4',
+                    'https://ma-shops.com/dealer/item.php?id=123']:
+            self.assertIsNotNone(sources.exact_listing(url), url)
+        for url in ['https://www.vcoins.com/en/Search.aspx?searchQuery=SKU',
+                    'https://www.ebay.com/sch/i.html', 'https://www.cngcoins.com/Search.aspx',
+                    'https://localhost/itm/123456789012', URL.replace('www.vcoins.com', 'www.vcoins.com.evil.test'),
+                    URL.replace('https://', 'file://'), URL.replace('www.', 'user:pass@www.'),
+                    URL.replace('www.vcoins.com', 'www.vcoins.com:8443')]:
+            self.assertIsNone(sources.exact_listing(url), url)
+
+    def test_page_liveness_includes_sold_excludes_blocked_and_gone(self):
+        self.assertEqual(sources.page_state(URL, 200, HTML, URL), 'available')
+        for status, body, expected in [(410, '', 'gone'), (404, '', 'gone'), (503, HTML, 'unknown'),
+            (200, '<h1>Access denied</h1>', 'unknown'),
+            (200, '<h1>Just a moment</h1>', 'unknown'),
+            (200, '<h1>Search our inventory</h1>', 'unknown'),
+            (200, '<h1>This listing was removed</h1>', 'gone')]:
+            self.assertEqual(sources.page_state(URL, status, body, URL), expected)
+        self.assertEqual(sources.page_state(URL, 200, HTML, URL.replace('123456/', '999999/')), 'unknown')
+        lot = 'https://www.cngcoins.com/Lot.aspx?LOT_ID=4'
+        self.assertEqual(sources.page_state(lot, 200, '<h3 id="_ctl0_txtName">AEOLIS, Myrina. Silver coin.</h3>', lot), 'available')
+        shop = 'https://www.cngcoins.com/Coin.aspx?CoinID=123'
+        self.assertEqual(sources.page_state(shop, 200, '<title>CNG: The Coin Shop. KINGS of MACEDON. Perseus. Silver.</title>', shop), 'available')
+
+    def test_reference_links_not_promoted_but_explicit_purchase_is(self):
+        row = dict(self.db.execute('SELECT * FROM coins WHERE id=?', (self.id,)).fetchone())
+        row['coin_references'] = 'Compare with ' + URL
+        self.assertIsNone(sources.candidate(self.db, 'coins', row))
+        row['description'] = 'Listing: ' + URL
+        self.assertEqual(sources.candidate(self.db, 'coins', row), URL)
+        row['description'] += '\nListing: ' + URL.replace('123456/', '999999/')
+        self.assertIsNone(sources.candidate(self.db, 'coins', row))
+
+    def test_link_without_warning_both_categories_no_network_in_request(self):
+        for category in ('coins', 'banknotes'):
+            self.available(category)
+            with patch.object(sources, 'fetch_listing', side_effect=AssertionError('network during request')):
+                result = self.state(category)
+                self.assertEqual(result['link']['url'], URL)
+                page = self.get(f'/{category}/{self.id}')
+                self.assertEqual(page.status_code, 200)
+                self.assertTrue(b'VCoins Original Listing' in page.data)
+                self.assertIsNone(result['review'])
+
+    def test_stale_unreadable_link_hidden(self):
+        self.available()
+        for state, age in [('available', 86401), ('gone', 0), ('unknown', 0)]:
+            self.db.execute('UPDATE original_listing_pages SET state=?,checked_at=?', (state, time.time()-age))
+            self.db.commit()
+            self.assertIsNone(self.state()['link'])
+
+    def test_review_header_retains_invoice_listing_and_order_after_reload(self):
+        self.available()
+        self.db.execute('INSERT INTO coin_purchase_reviews VALUES (?,?,?)', (self.id, 'Check currency', 'today'))
+        self.db.execute('INSERT INTO coin_purchase_review_sources VALUES (?,?,?,?)',
+                        (self.id, 'https://www.vcoins.com/en/MyAccount/ShowOrder.aspx?IdOrder=1', 'VCoins order 1', 0))
+        self.db.execute('INSERT INTO record_documents (id,category,record_id,title,filename) VALUES (?,?,?,?,?)',
+                        (self.id, 'coins', self.id, 'Invoice', 'test-invoice.pdf'))
+        self.db.commit()
+        current = self.state()
+        before = dict(self.db.execute('SELECT * FROM coins WHERE id=?', (self.id,)).fetchone())
+        result = self.post(dict(action='dismiss', review_token=current['review']['token'], check_token=''))
+        self.assertEqual(result.status_code, 200)
+        self.assertTrue(result.json['review']['dismissed'])
+        self.assertEqual(len(result.json['links']), 3)
+        page = self.get('/coins/' + self.id).data.decode()
+        header = page.split('data-listing-title')[1].split('</div>')[0]
+        for text in ('Marked reviewed', 'VCoins Original Listing', 'Invoice', 'VCoins order 1'):
+            self.assertIn(text, header)
+        self.assertNotIn('id="coinReviewReason"', page)
+        self.assertEqual(before, dict(self.db.execute('SELECT * FROM coins WHERE id=?', (self.id,)).fetchone()))
+        result = self.post(dict(action='restore', review_token=current['review']['token'], check_token=''))
+        self.assertFalse(result.json['review']['dismissed'])
+
+    def test_check_once_never_overwrites_facts_and_dismisses(self):
+        self.available()
+        checks.ensure(self.db, 'coins', self.id, URL)
+        self.db.commit()
+        analyze = Mock(return_value={'comparisons': [{'field': 'weight', 'listing_value': '13.15',
+                        'evidence': 'Weight: 13.15 g.', 'outcome': 'different'}]})
+        fetch = Mock(return_value=('available', TEXT))
+        self.assertTrue(checks.run_once(stuff.open_db_connection, fetch, analyze))
+        self.assertFalse(checks.run_once(stuff.open_db_connection, fetch, analyze))
+        self.assertEqual(analyze.call_count, 1)
+        self.assertEqual(self.db.execute('SELECT weight FROM coins WHERE id=?', (self.id,)).fetchone()[0], 12.5)
+        state = self.state()
+        self.assertEqual(state['check']['state'], 'checked')
+        self.assertEqual(len(state['check']['differences']), 1)
+        data = dict(action='dismiss', review_token='', check_token=state['check']['token'])
+        self.assertTrue(self.post(data).json['check']['dismissed'])
+        self.assertFalse(checks.run_once(stuff.open_db_connection, fetch, analyze))
+        self.assertFalse(self.post(dict(data, action='restore')).json['check']['dismissed'])
+
+    def test_failed_checks_need_evidence_and_never_write_item_fields(self):
+        self.available()
+        checks.ensure(self.db, 'coins', self.id, URL)
+        self.db.commit()
+        analyze = Mock(return_value={'comparisons': [{'field': 'weight', 'listing_value': '99',
+                        'evidence': 'Invented quote', 'outcome': 'different'}]})
+        checks.run_once(stuff.open_db_connection, lambda _: ('available', TEXT), analyze)
+        self.assertEqual(self.state()['check']['state'], 'failed')
+        self.assertEqual(self.db.execute('SELECT weight FROM coins WHERE id=?', (self.id,)).fetchone()[0], 12.5)
+        self.assertFalse(checks.run_once(stuff.open_db_connection, lambda _: ('available', TEXT), analyze))
+
+    def test_concurrent_edit_defers_report(self):
+        self.available()
+        checks.ensure(self.db, 'coins', self.id, URL)
+        self.db.commit()
+        def analyze(*args):
+            self.db.execute('UPDATE coins SET weight=13.15 WHERE id=?', (self.id,))
+            self.db.commit()
+            return {'comparisons': [{'field': 'weight', 'listing_value': '13.15',
+                                     'evidence': 'Weight: 13.15 g.', 'outcome': 'different'}]}
+        checks.run_once(stuff.open_db_connection, lambda _: ('available', TEXT), analyze)
+        self.assertEqual(self.state()['check']['state'], 'pending')
+        self.assertEqual(self.state()['check']['differences'], [])
+
+    def test_read_and_write_authorization_csrf_and_stale_versions(self):
+        path = f'/coins/{self.id}/original-listing'
+        self.assertEqual(self.client.get(path, headers={'Cf-Access-Authenticated-User-Email':'outsider@example.com'}).status_code, 403)
+        self.assertEqual(self.client.post(path+'/review', data={'action':'dismiss'}).status_code, 403)
+        self.assertEqual(self.post(dict(action='dismiss', check_token='stale')).status_code, 409)
+        with patch.object(stuff, 'TENANT_CATEGORIES', {'banknotes'}):
+            self.assertEqual(self.get(path).status_code, 403)
+        self.assertEqual(self.get('/coins/missing/original-listing').status_code, 404)
+
+    def test_worker_caches_and_deduplicates_checks(self):
+        sources.add_source(self.db, 'coins', self.id, URL)
+        self.db.commit()
+        with patch.object(sources, 'check_page', return_value='available') as fetch:
+            self.assertTrue(stuff._original_listing_service.work_once())
+            self.assertFalse(stuff._original_listing_service.work_once())
+            self.assertEqual(fetch.call_count, 1)
+        self.assertIsNotNone(self.state()['link'])
+
+    def test_comparison_opt_in_required(self):
+        self.available()
+        self.assertIsNone(self.state()['check'])
+        with patch.dict(os.environ, ORIGINAL_LISTING_AI_CHECKS='1'):
+            self.assertEqual(self.state()['check']['state'], 'pending')
+
+    def test_foreign_keys_remove_sources_and_checks(self):
+        self.available()
+        checks.ensure(self.db, 'coins', self.id, URL)
+        self.db.execute('DELETE FROM coins WHERE id=?', (self.id,))
+        self.db.commit()
+        self.assertFalse(self.db.execute('SELECT * FROM coin_original_listings WHERE coin_id=?', (self.id,)).fetchone())
+        self.assertFalse(self.db.execute('SELECT * FROM original_listing_checks WHERE coin_id=?', (self.id,)).fetchone())
+
+    def test_pdf_archives_attach_once_to_both_categories(self):
+        for category in ('coins','banknotes'):
+            archives.enqueue(self.db,category,self.id,URL,'VCoins Original Listing','listing')
+        self.db.commit()
+        with patch.object(archives,'fetch_bytes',return_value=(HTML.encode(),'text/html',URL)) as fetch:
+            self.assertTrue(archives.run_once(stuff.open_db_connection,stuff.UPLOAD_FOLDER,stuff._pdf_fonts))
+            self.assertFalse(archives.run_once(stuff.open_db_connection,stuff.UPLOAD_FOLDER,stuff._pdf_fonts))
+            self.assertEqual(fetch.call_count,1)
+        docs = self.db.execute('SELECT category,title,filename FROM record_documents WHERE record_id=?',(self.id,)).fetchall()
+        self.assertEqual(len(docs),2)
+        self.assertEqual(docs[0]['filename'],docs[1]['filename'])
+        import pypdfium2
+        pdf = pypdfium2.PdfDocument(str(Path(stuff.UPLOAD_FOLDER)/docs[0]['filename']))
+        text = ''.join(pdf[i].get_textpage().get_text_range() for i in range(len(pdf)))
+        self.assertIn('Weight: 13.15 g.',text)
+        self.assertIn('VCoins Original Listing',text)
+        pdf.close()
+
+    def test_existing_invoice_reused_without_duplication(self):
+        filename = 'invoice-test.pdf'
+        Path(stuff.UPLOAD_FOLDER).mkdir(exist_ok=True,parents=True)
+        (Path(stuff.UPLOAD_FOLDER)/filename).write_bytes(b'%PDF-1.4 existing invoice')
+        self.db.execute("INSERT INTO record_documents (id,category,record_id,title,filename) VALUES (?,?,?,?,?)",
+                        (self.id,'coins',self.id,'Invoice',filename))
+        archives.enqueue(self.db,'coins',self.id,'/uploads/'+filename,'CNG Invoice','invoice')
+        self.db.commit()
+        archives.run_once(stuff.open_db_connection,stuff.UPLOAD_FOLDER,stuff._pdf_fonts)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM record_documents WHERE record_id=?',(self.id,)).fetchone()[0],1)
+        self.assertEqual((Path(stuff.UPLOAD_FOLDER)/filename).read_bytes(),b'%PDF-1.4 existing invoice')
+
+    def test_pdf_does_not_archive_a_removed_listing_or_login_page(self):
+        archives.enqueue(self.db,'coins',self.id,URL,'VCoins Original Listing','listing')
+        self.db.commit()
+        with patch.object(archives,'fetch_bytes',return_value=(b'<h1>Sign in to your account</h1>','text/html',URL)):
+            archives.run_once(stuff.open_db_connection,stuff.UPLOAD_FOLDER,stuff._pdf_fonts)
+        self.assertFalse(self.db.execute('SELECT * FROM record_documents WHERE record_id=?',(self.id,)).fetchone())
+        self.assertFalse(self.db.execute('SELECT filename FROM purchase_source_archives WHERE url=?',(URL,)).fetchone()[0])
+
+    def test_source_archive_hosts_and_unsafe_redirects(self):
+        self.assertTrue(archives.safe_remote(URL))
+        for url in ('http://127.0.0.1/invoice.pdf','https://evil.test/invoice.pdf',
+                    'https://www.vcoins.com:8443/invoice.pdf','https://user@www.vcoins.com/invoice.pdf'):
+            self.assertFalse(archives.safe_remote(url))
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

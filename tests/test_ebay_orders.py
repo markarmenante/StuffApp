@@ -20,6 +20,7 @@ sys.path.insert(0, REPO)
 os.chdir(REPO)
 os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuffapp-ebay-tests-')
 os.environ['EBAY_SYNC_WORKER'] = '0'
+os.environ['ORIGINAL_LISTING_WORKER'] = '0'
 os.environ.pop('ANTHROPIC_API_KEY', None)
 for key in ('EBAY_CLIENT_ID', 'EBAY_CLIENT_SECRET', 'EBAY_RUNAME'):
     os.environ.pop(key, None)
@@ -392,7 +393,7 @@ class WebTests(unittest.TestCase):
             self.assertIn(b'Refunded order; purchase match unconfirmed', page.data)
             detail = self.get('/coins/coin-review-test')
             self.assertEqual(detail.status_code, 200)
-            self.assertIn(b'<label for="coinReviewReason">Review Reason</label>', detail.data)
+            self.assertIn(b'role="status">Review Reason</span>', detail.data)
             self.assertIn(b'<textarea id="coinReviewReason" rows="3" readonly>', detail.data)
             self.assertIn(b'Source: &lt;purchase confirmation&gt;', detail.data)
             self.assertNotIn(b'Source: <purchase confirmation>', detail.data)
@@ -402,7 +403,7 @@ class WebTests(unittest.TestCase):
             self.assertIn(b'href="https://www.ebay.com/itm/144277439666" target="_blank" rel="noopener noreferrer">eBay listing</a>', detail.data)
             self.assertIn(b'Invoice &lt;original&gt;', detail.data)
             self.assertNotIn(b'Unsafe source', detail.data)
-            self.assertLess(detail.data.index(b'>eBay listing</a>'), detail.data.index(b'>Invoice &lt;original&gt;</a>'))
+            self.assertLess(detail.data.index(b'>Invoice &lt;original&gt;</a>'), detail.data.index(b'id="coinReviewReason"'))
             with self.app.app_context():
                 self.assertEqual(self.stuff.get_db().execute("SELECT status FROM coins WHERE id='coin-review-test'").fetchone()[0], 'Own')
         finally:
@@ -445,7 +446,7 @@ class WebTests(unittest.TestCase):
     def test_mark_reviewed_persists_preserves_evidence_and_undoes(self):
         path, token, original = self.review_action_fixture()
         detail = self.get(path)
-        self.assertIn(b'data-review-action="dismiss">Mark Reviewed', detail.data)
+        self.assertIn(b'data-listing-action="dismiss" >Mark Reviewed', detail.data)
         self.assertIn(token.encode(), detail.data)
         with self.client.session_transaction(base_url='https://localhost') as session:
             csrf = session['ebay_csrf']
@@ -456,6 +457,8 @@ class WebTests(unittest.TestCase):
             self.assertEqual(result.json, {'dismissed': True})
             self.assertEqual(result.headers['Cache-Control'], 'no-store')
         self.assertNotIn(b'id="coinReviewReason"', self.get(path).data)
+        self.assertIn(b'role="status">Marked reviewed</span>', self.get(path).data)
+        self.assertIn(b'href="/uploads/invoice.pdf"', self.get(path).data)
         self.assertNotIn(b'class="purchase-review-pill"', self.get('/coins?era=all').data)
         with self.app.app_context():
             db = self.stuff.get_db()
