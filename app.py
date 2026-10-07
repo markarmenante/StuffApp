@@ -25842,6 +25842,8 @@ def banknote_lookup_specs(record_id):
             # Preserve the existing pasted-invoice path; a linked listing alone is not proof of payment.
             if not quoted and str(value).lower() not in stored_dealer_text.lower():
                 return False
+            if quoted and field == 'purchase_date':
+                return str(value)[:4] in normalized_quote
         if field in ('date_1', 'date_2'):
             try:
                 year = int(value)

@@ -147,6 +147,16 @@ class SourceCheckTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.json)
             self.assertNotIn('price', response.json['overwritten'])
 
+    def test_receipt_time_placed_verifies_purchase_date(self):
+        self.invoice('Order info. Time placed Oct 7, 2026 at 12:10 PM. Tonga 1 Pound. Unit price $485.00.')
+        with patch.object(stuff, 'fetch_banknote_specs', return_value={
+            'purchase_date': '2026-10-07',
+            'purchase_evidence': {'purchase_date': 'Time placed Oct 7, 2026 at 12:10 PM'},
+        }), patch.object(stuff, 'ensure_country_history'):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['filled']['purchase_date'], '2026-10-07')
+
 
 if __name__ == '__main__':
     unittest.main()
