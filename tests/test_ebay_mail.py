@@ -81,11 +81,11 @@ class PurchasesTests(unittest.TestCase):
         self.post(observed_at='2026-10-06T00:00:00Z')
         self.assertEqual(self.db.execute('SELECT delivery_status FROM ebay_order_items').fetchone()[0], 'Ordered')
 
-    def test_rejects_legacy_auth_wrong_account_and_bad_batches(self):
+    def test_rejects_legacy_auth_wrong_account_and_bad_envelopes(self):
         self.assertEqual(self.client.post('/ebay/today', json={'source':'ebay_purchases'}).status_code, 401)
         self.assertEqual(self.post(source='email', events=[]).status_code, 410)
-        self.assertEqual(self.post([purchase(), purchase(item_id='bad')]).status_code, 400)
-        self.assertEqual(self.post([purchase(), purchase()]).status_code, 400)
+        self.assertEqual(self.post(items=[]).status_code, 400)
+        self.assertEqual(self.post(items='unreadable').status_code, 400)
         self.assertEqual(self.post(observed_at='2099-01-01T00:00:00Z').status_code, 400)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0], 0)
         self.post()
@@ -93,6 +93,54 @@ class PurchasesTests(unittest.TestCase):
         self.db.execute('UPDATE ebay_mail_connection SET enabled=0')
         self.db.commit()
         self.assertEqual(self.post().status_code, 409)
+
+    def test_bad_orders_and_duplicate_identities_do_not_block_good_orders(self):
+        for bad in (purchase(item_id='bad'), purchase(seller=''), purchase(ordered_date='invalid'),
+                    purchase(delivery_text='Delivered on invalid')):
+            with self.subTest(bad=bad):
+                good = purchase(order_id='19-15170-60765')
+                result = self.post([purchase(), bad, good]).json
+                self.assertTrue(result['ok'])
+                self.assertEqual(result['skipped'][0]['order_id'], purchase()['order_id'])
+                self.assertEqual(result['items_accepted'], 1)
+                self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items WHERE order_id=?',
+                                                (purchase()['order_id'],)).fetchone()[0], 0)
+        result = self.post([purchase(), purchase(), purchase(order_id='20-15170-60765')]).json
+        self.assertEqual(result['skipped'][0]['reason'], 'Duplicate purchase identity')
+        self.assertEqual(result['items_accepted'], 1)
+
+    def test_skipped_existing_order_is_unchanged_while_other_orders_update(self):
+        self.post()
+        before = tuple(self.db.execute('SELECT * FROM ebay_order_items').fetchone())
+        response = self.post([purchase(seller='', status_text='Shipped'),
+                              purchase(order_id='19-15170-60765', status_text='Shipped')],
+                             observed_at='2026-10-07T07:00:00Z')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(tuple(self.db.execute('SELECT * FROM ebay_order_items WHERE order_id=?',
+                                              (purchase()['order_id'],)).fetchone()), before)
+        self.assertEqual(self.db.execute("SELECT delivery_status FROM ebay_order_items WHERE order_id='19-15170-60765'").fetchone()[0], 'Shipped')
+
+    def test_ambiguous_stored_identity_skips_only_its_order(self):
+        self.post()
+        row = dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone())
+        row['line_key'] = 'duplicate-existing-line'
+        self.db.execute('INSERT INTO ebay_order_items (' + ','.join(row) + ') VALUES (' + ','.join('?' for _ in row) + ')', tuple(row.values()))
+        self.db.commit()
+        result = self.post([purchase(status_text='Shipped'), purchase(order_id='19-15170-60765')],
+                           observed_at='2026-10-07T07:00:00Z').json
+        self.assertEqual(result['items_accepted'], 1)
+        self.assertIn('Ambiguous stored', result['skipped'][0]['reason'])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM ebay_order_items WHERE delivery_status='Delivered'").fetchone()[0], 3)
+
+    def test_all_skipped_is_explicit_and_partial_sets_do_not_infer_new_links(self):
+        result = self.post([None, purchase(seller='')]).json
+        self.assertEqual(result['items_accepted'], 0)
+        self.assertEqual(len(result['skipped']), 2)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0], 0)
+        result = self.post(skipped=[dict(order_id='19-15170-60765', reason='Unreadable fields: seller')]).json
+        self.assertEqual(result['items_seen'], 1)
+        self.assertEqual(result['matched'], 0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0], 0)
 
     def test_multi_quantity_and_repeat_purchases_do_not_auto_match(self):
         self.post([purchase(quantity=2)])

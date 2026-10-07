@@ -86,14 +86,41 @@ def validate_mail(raw):
     return result
 
 
-def apply_purchases(db, items, observed):
+def validate_purchases(raw):
+    items, skipped, seen = [], {}, set()
+    for index, item in enumerate(raw):
+        order_id = item.get('order_id') if isinstance(item, dict) else None
+        if not isinstance(order_id, str) or not re.fullmatch(r'\d{2}-\d{5}-\d{5}', order_id):
+            order_id = None
+        try:
+            evidence = validate_purchase(item)
+            key = (evidence['order_id'], evidence['item_id'])
+            if key in seen:
+                raise ValueError('Duplicate purchase identity')
+            seen.add(key)
+            items.append(evidence)
+        except ValueError as exc:
+            skipped.setdefault(order_id or 'row:' + str(index),
+                               dict(order_id=order_id, reason=str(exc)))
+    # A bad line holds the entire order, including valid sibling items.
+    return [i for i in items if i['order_id'] not in skipped], list(skipped.values())
+
+
+def apply_purchases(db, items, observed, auto_match=True):
     totals = dict(items_seen=0, matched=0, updated=0)
+    existing, skipped = {}, {}
     for evidence in items:
+        key = (evidence['order_id'], evidence['item_id'])
         rows = db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
-                          (evidence['order_id'], evidence['item_id'])).fetchall()
+                          key).fetchall()
         if len(rows) > 1:
-            raise ValueError('Ambiguous stored purchase identity; review required')
-        old = rows[0] if rows else None
+            skipped[evidence['order_id']] = dict(order_id=evidence['order_id'],
+                reason='Ambiguous stored purchase identity; review required')
+        existing[key] = rows[0] if rows else None
+    for evidence in items:
+        if evidence['order_id'] in skipped:
+            continue
+        old = existing[(evidence['order_id'], evidence['item_id'])]
         key = old['line_key'] if old else 'purchases:' + evidence['order_id'] + ':' + evidence['item_id']
         seen = db.execute('SELECT observed_at FROM ebay_purchase_observations WHERE line_key=?', (key,)).fetchone()
         if seen and seen['observed_at'] >= observed:
@@ -109,10 +136,14 @@ def apply_purchases(db, items, observed):
                        'ON CONFLICT(line_key) DO UPDATE SET observed_at=excluded.observed_at, '
                        'status_text=excluded.status_text,delivery_text=excluded.delivery_text',
                        (key, observed, evidence['status_text'], evidence['delivery_text']))
-    result = ebay.apply_items(db, [], source='Today: eBay Purchases')
-    totals['matched'] += result['matched']
-    totals['updated'] += result['updated']
-    return totals
+    # Missing orders could conceal repeat purchases. Update existing links, but
+    # do not infer new collection matches from an incomplete order set.
+    if auto_match and not skipped:
+        result = ebay.apply_items(db, [], source='Today: eBay Purchases')
+        totals['matched'] += result['matched']
+        totals['updated'] += result['updated']
+    return dict(totals, skipped=list(skipped.values()),
+                items_accepted=sum(i['order_id'] not in skipped for i in items))
 
 
 def register(app, get_db):
@@ -139,9 +170,7 @@ def register(app, get_db):
                 raw = payload.get('items')
                 if not observed or not isinstance(raw, list) or not 1 <= len(raw) <= 2000:
                     raise ValueError('Invalid Purchases snapshot')
-                items = [validate_purchase(i) for i in raw]
-                if len({(i['order_id'], i['item_id']) for i in items}) != len(items):
-                    raise ValueError('Duplicate purchase identity')
+                items, skipped = validate_purchases(raw)
             else:
                 raw = payload.get('events')
                 if not isinstance(raw, list) or len(raw) > 100:
@@ -166,7 +195,9 @@ def register(app, get_db):
                     db.rollback()
                     return jsonify(error='eBay account does not match this connection'), 409
                 db.execute('INSERT OR IGNORE INTO ebay_purchase_account VALUES (1,?)', (account,))
-                result = apply_purchases(db, items, observed)
+                result = apply_purchases(db, items, observed,
+                    auto_match=not skipped and not payload.get('skipped'))
+                result['skipped'] = skipped + result['skipped']
             else:
                 added = 0
                 for item in items:

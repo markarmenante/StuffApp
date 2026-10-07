@@ -4,10 +4,17 @@ eBay shipment status comes from the signed-in **Purchases** panel in Chrome,
 not email. Today opens its own background tab, reads all pages in the default
 purchase-history period (maximum 40 pages), and closes only that tab. Chrome
 must allow JavaScript from Apple Events and automation from Today/node. Missing
-login, unreadable rows or incomplete pagination cause no partial update.
+login or incomplete pagination cause no partial update. An unreadable order
+is skipped, including its sibling items, without blocking other orders.
+Its previous data stays unchanged. Today records skipped order/page references
+and reasons in its local sync status; the receiver also reports per-order
+validation and stored-identity failures. An all-skipped run is not success.
 Duplicate purchase identities are held for review without blocking other orders.
 The first authenticated snapshot binds the eBay username;
 subsequent snapshots must match it and any configured API buyer account.
+When a check skips orders, valid purchases still import and existing linked
+shipment statuses update. New automatic collection matches wait for a complete
+order set or manual review: a skipped order might hide a repeat purchase.
 
 The authenticated `POST /ebay/today` bridge accepts `source: ebay_purchases`
 with account, observation time and structured purchased items. Item/order IDs,
