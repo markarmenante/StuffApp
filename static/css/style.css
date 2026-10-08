@@ -1390,8 +1390,8 @@ input[type="date"] { -webkit-appearance: none; }
 .coin-purchase .dcell input,
 .coin-purchase .dcell select { text-align: center; }
 .coin-purchase.purchase-with-marketplace { grid-template-columns: minmax(0, 1.5fr) repeat(4, minmax(0, 1fr)); }
-.coin-purchase .purchase-order-cell { padding-bottom: 13px; }
-.purchase-order-numbers { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 8px; min-height: 19px; font-size: 14px; line-height: 1.35; }
+.coin-purchase .date-overlay-input { height: 1.35em; }
+.purchase-order-numbers { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 8px; min-height: 1.35em; padding-right: 56px; font-size: 14px; line-height: 1.35; }
 .purchase-order-numbers a { text-decoration: underline; overflow-wrap: anywhere; }
 .detail-page-coins .purchase-order-numbers { font-size: 13px; }
 @media (max-width: 640px) {
