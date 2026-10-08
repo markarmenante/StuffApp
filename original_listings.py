@@ -470,7 +470,7 @@ def register(app, get_db, connect, can_see, require_owner, analyze, upload_folde
                 for row in get_db().execute("SELECT coin_id,banknote_id,result FROM original_listing_checks "
                                              "WHERE state='checked' AND dismissed=0"):
                     reasons = [c['label'] + ': ' + (c['stored'] or 'Missing') + ' / listing: ' + c['listed']
-                               for c in json.loads(row['result'] or '[]') if c['outcome'] != 'match']
+                               for c in listing_checks.differences(json.loads(row['result'] or '[]'))]
                     g.listing_review_reasons[(('coins' if row['coin_id'] else 'banknotes'),
                                               row['coin_id'] or row['banknote_id'])] = '; '.join(reasons)
             return g.listing_review_reasons.get((category, record_id))

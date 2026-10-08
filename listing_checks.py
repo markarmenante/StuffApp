@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import time
+import unicodedata
 import uuid
 
 COMMON_FIELDS = ('denomination', 'date_1', 'date_2', 'grade', 'grading_authority',
@@ -26,7 +27,17 @@ def display(value):
 
 
 def normalized(value):
-    return ' '.join(display(value).split()).casefold()
+    return ' '.join(unicodedata.normalize('NFKC', display(value)).split()).casefold()
+
+
+def same_value(stored, listed):
+    return bool(normalized(stored)) and normalized(stored) == normalized(listed)
+
+
+def differences(comparisons):
+    # Also suppress identical-value warnings in checks saved before validation was tightened.
+    return [c for c in comparisons if c['outcome'] != 'match'
+            and not same_value(c.get('stored'), c.get('listed'))]
 
 
 def validate_result(category, record, page_text, result):
@@ -47,7 +58,7 @@ def validate_result(category, record, page_text, result):
         stored = display(record.get(field))
         if outcome == 'missing' and stored:
             raise ValueError('Stored field is not missing')
-        if outcome == 'different' and normalized(stored) == normalized(value):
+        if same_value(stored, value):
             outcome = 'match'
         seen.add(field)
         if field == 'price' and (outcome == 'uncertain'
@@ -81,8 +92,7 @@ def report(db, category, record_id):
     if not row:
         return None
     comparisons = json.loads(row['result'] or '[]')
-    differences = [c for c in comparisons if c['outcome'] != 'match']
-    return dict(state=row['state'], dismissed=bool(row['dismissed']), differences=differences,
+    return dict(state=row['state'], dismissed=bool(row['dismissed']), differences=differences(comparisons),
                 compared=len(comparisons), token=token(row), checked_at=row['checked_at'])
 
 

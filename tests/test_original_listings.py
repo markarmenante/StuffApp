@@ -448,6 +448,38 @@ class ListingTests(unittest.TestCase):
                               'evidence': 'Order total paid: $45', 'outcome': 'different'}]})
         self.assertEqual(result[0]['outcome'], 'different')
 
+    def test_identical_values_override_uncertain_and_different_verdicts(self):
+        for outcome in ('uncertain', 'different'):
+            for value in ('Kroton', ' KROTON\u00a0'):
+                with self.subTest(outcome=outcome, value=value):
+                    result = checks.validate_result('coins', {'mint': 'Kroton'}, 'BRUTTIUM, Kroton.',
+                        {'comparisons': [{'field': 'mint', 'listing_value': value,
+                                          'evidence': 'BRUTTIUM, Kroton.', 'outcome': outcome}]})
+                    self.assertEqual(result[0]['outcome'], 'match')
+
+    def test_saved_identical_warnings_hidden_in_detail_and_list_both_categories(self):
+        for category, field in (('coins', 'mint'), ('banknotes', 'country')):
+            self.available(category)
+            checks.ensure(self.db, category, self.id, URL)
+            key = 'coin_id' if category == 'coins' else 'banknote_id'
+            result = [dict(field=field, label='Place', stored='Kroton', listed='Kroton',
+                           evidence='BRUTTIUM, Kroton.', outcome='uncertain')]
+            self.db.execute(f"UPDATE original_listing_checks SET state='checked',result=? WHERE {key}=?",
+                            (json.dumps(result), self.id))
+            self.db.commit()
+            state = self.state(category)
+            self.assertEqual(state['check']['differences'], [])
+            self.assertEqual(state['check']['compared'], 1)
+            self.assertNotIn(b'listing: Kroton', self.get(f'/{category}/{self.id}').data)
+            with stuff.app.test_request_context():
+                helpers = {}
+                stuff.app.update_template_context(helpers)
+                self.assertFalse(helpers['listing_review_reason'](category, self.id))
+            result.append(dict(field='weight', stored='7.71', listed='8.12', label='Weight',
+                               evidence='8.12 g', outcome='different'))
+            self.assertEqual([d['field'] for d in checks.differences(result)], ['weight'])
+        self.assertEqual(len(checks.differences([dict(stored='', listed='Kroton', outcome='missing')])), 1)
+
     def test_comparison_opt_in_required(self):
         self.available()
         self.assertIsNone(self.state()['check'])
