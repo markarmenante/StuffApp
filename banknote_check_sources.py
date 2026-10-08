@@ -11,6 +11,7 @@ import original_listings as listings
 import source_documents as archives
 import purchase_orders
 import listing_images
+import ebay_listing_captures
 
 
 def pdf_text(path):
@@ -209,7 +210,11 @@ def prepare(db, record, folder, fonts, category='banknotes'):
             images.update(found)
             warnings.extend(problems)
         try:
-            data, mime, final = archives.fetch_bytes(url, limit=2_000_000 if kind == 'listing' else 12_000_000)
+            captured_html = ebay_listing_captures.html(db, url) if kind == 'listing' else None
+            if captured_html:
+                data, mime, final = captured_html.encode(), 'text/html', url
+            else:
+                data, mime, final = archives.fetch_bytes(url, limit=2_000_000 if kind == 'listing' else 12_000_000)
             if data.startswith(b'%PDF-') and mime in ('application/pdf', 'application/octet-stream'):
                 # Keep image-only receipts too, but never claim their text was checked.
                 import tempfile

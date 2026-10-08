@@ -1248,6 +1248,22 @@ input[type="number"]::-webkit-outer-spin-button {
   text-decoration: none;
 }
 .dcell .text-link-preview { font-size: 14px; }
+.banknote-lettering-row .dcell textarea,
+.banknote-lettering-row .dcell .text-link-preview {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-transform: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+@media (max-width: 640px) {
+  .banknote-lettering-row .dcell textarea,
+  .banknote-lettering-row .dcell .text-link-preview { font-size: 16px; }
+}
 .detail-page-coins .dcell .markdown-note-preview,
 .detail-page-coins .dcell .text-link-preview { font-size: 13px; }
 textarea.results-raw { display: none !important; }

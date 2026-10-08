@@ -142,3 +142,10 @@ CREATE TABLE IF NOT EXISTS ebay_purchase_requests (
     message TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ebay_purchase_requests_pending ON ebay_purchase_requests(status, requested_at);
+CREATE TABLE IF NOT EXISTS ebay_listing_captures (
+    url TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    text TEXT NOT NULL,
+    images_json TEXT NOT NULL,
+    captured_at REAL NOT NULL
+);

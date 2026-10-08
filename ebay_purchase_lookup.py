@@ -5,6 +5,7 @@ import uuid
 
 from flask import abort, jsonify, request
 import ebay_mail
+import ebay_listing_captures
 
 TIMEOUT = 120
 
@@ -21,20 +22,27 @@ def expire(db):
 
 
 def ensure(db, note):
-    """Queue only missing entered eBay orders, not every ordinary Check."""
+    """Refresh missing orders and public listings through the signed-in browser."""
     note = dict(note)
     number = (note.get('order_number') or '').strip()
     if note.get('marketplace') not in (None, '', 'eBay') or not re.fullmatch(r'\d{2}-\d{5}-\d{5}', number):
         return None
     if not ebay_mail.configured():
         return None
-    cached = db.execute('SELECT i.attention,o.status_text FROM ebay_order_items i JOIN ebay_purchase_observations o '
+    cached = db.execute('SELECT i.item_id,i.quantity,i.attention,o.status_text FROM ebay_order_items i JOIN ebay_purchase_observations o '
                         'ON o.line_key=i.line_key WHERE i.order_id=?', (number,)).fetchall()
     # Older readers misclassified this normal new-order state. Refresh the
     # observation instead of preserving that historical warning indefinitely.
     if cached and not any(r['status_text'].lower() == 'order processing' and
                           r['attention'] == 'Order processing; shipment or delivery not confirmed' for r in cached):
-        return None
+        if len(cached) != 1 or cached[0]['quantity'] != 1 or ebay_listing_captures.html(
+                db, 'https://www.ebay.com/itm/' + cached[0]['item_id']):
+            return None
+        recent = db.execute('SELECT status,requested_at FROM ebay_purchase_requests WHERE order_id=?', (number,)).fetchone()
+        # A completed browser attempt may legitimately have no readable listing.
+        # Continue with available evidence instead of polling forever.
+        if recent and recent['status'] == 'done' and recent['requested_at'] > time.time() - 300:
+            return None
     enabled = db.execute('SELECT enabled FROM ebay_mail_connection WHERE id=1').fetchone()
     if enabled and not enabled[0]:
         return dict(status='failed', message='Purchase updates are paused. Resume them in eBay Orders before checking this order.')
@@ -95,6 +103,7 @@ def complete(db, payload):
         if result['skipped'] or result['items_accepted'] != len(items) or any(i['item_id'] not in stored for i in items):
             db.rollback()
             raise ValueError('Purchase identity could not be confirmed')
+        ebay_listing_captures.save(db, payload.get('listing'), items)
         status, message = 'done', 'Order found. Checking the purchased item...'
     db.execute('UPDATE ebay_purchase_requests SET status=?,message=? WHERE id=?', (status, message, row['id']))
     db.commit()

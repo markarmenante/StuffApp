@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from flask import Flask, abort
 import ebay_orders
 import ebay_purchase_lookup as lookup
+import ebay_listing_captures as captures
 
 
 class LookupTests(unittest.TestCase):
@@ -78,6 +79,36 @@ class LookupTests(unittest.TestCase):
         self.db.commit()
         retry = lookup.ensure(self.db, self.note)
         self.assertEqual(retry['status'], 'queued')
+
+    def test_public_listing_capture_is_bound_to_exact_single_item(self):
+        job = lookup.ensure(self.db, self.note)
+        self.post(action='claim')
+        listing = dict(url='https://www.ebay.com/itm/178536931638',
+                       title='French Antilles 10 Francs PMG 67 EPQ',
+                       text='Seller notes: French Antilles 10 Francs, certificate 1151490-008. <script>bad()</script>',
+                       images=['https://i.ebayimg.com/images/g/front/s-l1600.webp'])
+        for bad in (dict(listing, url='https://www.ebay.com/itm/178536931639'),
+                    dict(listing, images=['http://localhost/private']),
+                    dict(listing, images=['https://i.ebayimg.com@evil.example/image.jpg'])):
+            self.assertEqual(self.complete(job, listing=bad).status_code, 409)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0], 0)
+        self.assertEqual(self.complete(job, listing=listing).status_code, 200)
+        html = captures.html(self.db, listing['url'])
+        self.assertIn('&lt;script&gt;bad()', html)
+        self.assertNotIn('<script>bad()', html)
+        self.db.execute('UPDATE ebay_purchase_requests SET requested_at=?', (time.time()-400,))
+        self.db.commit()
+        self.assertIsNone(lookup.ensure(self.db, self.note))
+        self.db.execute('DELETE FROM ebay_listing_captures')
+        self.db.commit()
+        self.assertEqual(lookup.ensure(self.db, self.note)['status'], 'queued')
+
+    def test_public_capture_cannot_choose_a_multi_item_order(self):
+        job = lookup.ensure(self.db, self.note)
+        self.post(action='claim')
+        self.assertEqual(self.complete(job, items=[self.item(), self.item(item_id='178536931639')],
+                                       listing={}).status_code, 409)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0], 0)
 
     def test_auth_account_scope_pause_and_bad_results(self):
         self.assertEqual(self.client.post('/ebay/today/requests', json={'action':'claim'}).status_code, 401)

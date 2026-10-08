@@ -17,6 +17,7 @@ import app as stuff
 import banknote_check_sources as sources
 import original_listings
 import purchase_orders
+import ebay_listing_captures
 
 URL = 'https://www.ebay.com/itm/325643741723'
 HTML = '<title>Tonga original banknote</title><h1>Tonga 1 Pound 1966 PMG 67 EPQ</h1><p>Serial D/1 53153. Sold.</p>'
@@ -50,6 +51,7 @@ class SourceCheckTests(unittest.TestCase):
         self.db.execute('DELETE FROM original_listing_pages')
         self.db.execute('DELETE FROM ebay_order_items WHERE line_key LIKE ?', (self.id + '%',))
         self.db.execute('DELETE FROM original_image_assets')
+        self.db.execute('DELETE FROM ebay_listing_captures')
         self.db.commit()
         self.ctx.pop()
 
@@ -125,6 +127,26 @@ class SourceCheckTests(unittest.TestCase):
         self.assertIn('Tonga 1 Pound', sources.evidence_text(result))
         self.assertIn('synced purchase', sources.evidence_text(result))
         self.assertEqual(len(result['documents']), 1)
+
+    def test_browser_capture_imports_photos_and_pdf_without_server_listing_access(self):
+        self.blank()
+        self.order()
+        ebay_listing_captures.save(self.db, dict(url=URL, title='Tonga 1 Pound 1966 PMG 67 EPQ',
+            text='Tonga 1 Pound 1966 PMG 67 EPQ. Serial D/1 53153. Sold.',
+            images=['https://i.ebayimg.com/images/g/front/s-l1600.jpg',
+                    'https://i.ebayimg.com/images/g/back/s-l1600.jpg']),
+            [dict(item_id='325643741723', quantity=1)])
+        self.db.commit()
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('server denied')) as fetch, \
+                patch.object(sources.listing_images, 'download', side_effect=self.photo):
+            result = self.prepare()
+        self.assertNotIn(URL, [c.args[0] for c in fetch.call_args_list])
+        self.assertFalse(any('order.ebay.com' in c.args[0] for c in fetch.call_args_list))
+        self.assertEqual(set(result['images']), {'image_1', 'image_2'})
+        pdfs = [d for d in result['documents'] if d['filename'].endswith('.pdf')]
+        self.assertEqual(len(pdfs), 1)
+        self.assertIn('Serial D/1 53153', sources.pdf_text(Path(stuff.UPLOAD_FOLDER) / pdfs[0]['filename']))
+        self.assertIn('No readable invoice', ' '.join(result['warnings']))
 
     def test_blank_multi_item_order_is_not_selected(self):
         self.blank()
