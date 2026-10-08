@@ -515,6 +515,57 @@ class ListingTests(unittest.TestCase):
         self.assertEqual(self.db.execute('SELECT price FROM coins WHERE id=?', (self.id,)).fetchone()[0], 'EUR 58,500.00')
         self.assertEqual(self.db.execute("SELECT purchase_price FROM sale_plans WHERE category='coins' AND record_id=?", (self.id,)).fetchone()[0], 'EUR 58,500.00')
 
+    def test_authority_update_excludes_review_comment_but_preserves_review_evidence(self):
+        self.saved_suggestions()
+        self.db.execute('UPDATE coins SET authority=? WHERE id=?', ('Syracuse, Second Democracy', self.id))
+        row = self.db.execute('SELECT * FROM original_listing_checks WHERE coin_id=?', (self.id,)).fetchone()
+        comparisons = json.loads(row['result'])
+        authority = dict(field='authority', label='Authority', stored='Syracuse, Second Democracy',
+                         listed='Syracuse (no mention of Second Democracy)',
+                         evidence='Sicily, Syracuse. c. 460/450 BC', outcome='uncertain')
+        comparisons.append(authority)
+        self.db.execute('UPDATE original_listing_checks SET result=? WHERE coin_id=?',
+                        (json.dumps(comparisons), self.id))
+        self.db.commit()
+        state = self.state()
+        self.assertEqual(state['check']['differences'][-1]['update_value'], 'Syracuse')
+        self.assertEqual(state['check']['differences'][-1]['listed'], authority['listed'])
+        response = self.update_suggestion('coins', 'authority', state['check']['token'])
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.json['updated_fields']['authority'], 'Syracuse')
+        self.assertEqual(self.db.execute('SELECT authority FROM coins WHERE id=?', (self.id,)).fetchone()[0], 'Syracuse')
+        saved = json.loads(self.db.execute('SELECT result FROM original_listing_checks WHERE coin_id=?', (self.id,)).fetchone()[0])[-1]
+        self.assertEqual(saved['applied_value'], 'Syracuse')
+        self.assertEqual(saved['listed'], authority['listed'])
+        self.assertEqual(saved['evidence'], authority['evidence'])
+        self.assertEqual([c['field'] for c in self.state()['check']['differences']], ['date_1', 'slab_number', 'price'])
+
+    def test_authority_proposal_preserves_names_and_removes_only_review_annotations(self):
+        for listed, expected in (
+                ('Lampsakos (not explicitly stated as the issuing city authority)', 'Lampsakos'),
+                ('Athens (listed after Attica, not explicitly labeled as authority)', 'Athens'),
+                ('Kelenderis (no "civil issue" wording)', 'Kelenderis'),
+                ('Syracuse (Second Democracy) (not specified in the listing)', 'Syracuse (Second Democracy)'),
+                ('Alexander III (the Great)', 'Alexander III (the Great)'),
+                ('Elis (Olympia)', 'Elis (Olympia)'),
+                ('Hidrieus (or Idrieus), Satrap of Caria', 'Hidrieus (or Idrieus), Satrap of Caria'),
+                ('Trbbenimi (Dynasts of Lycia)', 'Trbbenimi (Dynasts of Lycia)'),
+                ('(no issuing authority stated)', None)):
+            with self.subTest(listed=listed):
+                self.assertEqual(checks.proposed_value('coins', dict(field='authority', listed=listed)), expected)
+        value = 'Syracuse (not under royal authority)'
+        self.assertEqual(checks.proposed_value('coins', dict(field='authority', listed=value, evidence=value)), value)
+
+    def test_clean_authority_matches_old_annotated_suggestion_without_rewriting_evidence(self):
+        listed = 'Syracuse (no mention of Second Democracy)'
+        row = dict(record_snapshot='{}', result=json.dumps([
+            dict(field='authority', stored='Syracuse, Second Democracy', listed=listed,
+                 evidence='Sicily, Syracuse. c. 460/450 BC', outcome='uncertain')]))
+        result = checks.current_comparisons('coins', dict(authority='Syracuse'), row)
+        self.assertEqual(result[0]['outcome'], 'match')
+        self.assertEqual(result[0]['listed'], listed)
+        self.assertEqual(checks.differences(result), [])
+
     def test_manually_corrected_price_removes_warning_and_old_token_is_rejected(self):
         state = self.saved_suggestions()
         self.db.execute('UPDATE coins SET price=? WHERE id=?', ('EUR 58,500 / $66,281', self.id))

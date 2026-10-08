@@ -45,6 +45,17 @@ def proposed_value(category, item):
     field, value = item.get('field'), display(item.get('listed')).strip()
     if field not in FIELDS[category] or not value or len(value) > 300:
         return None
+    if field == 'authority':
+        # Older checks mixed comparison commentary into the proposed authority.
+        def without_comment(match):
+            note = match[1].strip()
+            commentary = re.match(r'(?:no|not|listed|listing|source|stored|saved|uncertain|'
+                                  r'rather than|instead of|compared (?:with|to))\b', note, re.I)
+            quoted = normalized(match[0].strip()) in normalized(item.get('evidence'))
+            return '' if commentary and not quoted else match[0]
+
+        value = re.sub(r'\s*\(([^()]*)\)', without_comment, value).strip()
+        return value or None
     if field in ('date_1', 'date_2'):
         match = re.fullmatch(r'(-?\d{1,4})\s*(BC|BCE|AD|CE)?(?:\s*\([^\n]*\))?', value, re.I)
         if not match:
