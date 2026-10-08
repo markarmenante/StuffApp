@@ -1,6 +1,6 @@
 """Source-neutral order references from explicitly linked purchase evidence."""
 import re
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 import source_documents
 
@@ -56,6 +56,12 @@ def archive_order(url, title, kind):
         elif not parts.path.lower().endswith('.pdf'):
             return None
     reference_kind = 'invoice' if match['kind'].lower() == 'invoice' else 'order'
+    if provider == 'VCoins' and not local:
+        # Invoice and order pages share the verified internal order identifier.
+        language = parts.path.split('/')[1]
+        url = urlunsplit(('https', 'www.vcoins.com', f'/{language}/MyAccount/ShowOrder.aspx',
+                         urlencode({'IdOrder': ids[0]}), ''))
+        reference_kind = 'order'
     return dict(provider=provider, number=number, url=url, kind=reference_kind)
 
 

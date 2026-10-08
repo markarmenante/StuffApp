@@ -555,17 +555,28 @@ class ListingTests(unittest.TestCase):
 
     def test_vcoins_printed_number_not_internal_id_both_categories(self):
         url = 'https://www.vcoins.com/en/MyAccount/Invoice.aspx?IdOrder=332942'
+        order_url = 'https://www.vcoins.com/en/MyAccount/ShowOrder.aspx?IdOrder=332942'
         for category in ('coins', 'banknotes'):
             archives.enqueue(self.db, category, self.id, url, 'VCoins Invoice 315-155', 'invoice')
             self.db.commit()
             self.assertEqual(orders.purchase_orders(self.db, category, self.id),
-                             [dict(provider='VCoins', number='315-155', url=url, kind='invoice')])
+                             [dict(provider='VCoins', number='315-155', url=order_url, kind='order')])
             page = self.get(f'/{category}/{self.id}').data.decode()
-            self.assertIn('Open VCoins invoice 315-155', page)
+            self.assertIn('Open VCoins order 315-155', page)
+            self.assertIn(f'href="{order_url}"', page)
             self.assertIn('>315-155</a>', page)
             self.assertNotIn('>332942</a>', page)
             self.assertLess(page.index('name="vendor"'), page.index('id="orderNumberLabel"'))
             self.assertLess(page.index('id="orderNumberLabel"'), page.index('name="purchase_date"'))
+
+    def test_vcoins_order_link_uses_only_verified_order_id(self):
+        result = orders.archive_order(
+            'https://www.vcoins.com/fr/MyAccount/Invoice.aspx?IdOrder=332942&print=true#receipt',
+            'VCoins Invoice 315-155', 'invoice')
+        self.assertEqual(result, dict(provider='VCoins', number='315-155', kind='order',
+            url='https://www.vcoins.com/fr/MyAccount/ShowOrder.aspx?IdOrder=332942'))
+        self.assertEqual(orders.archive_order('/uploads/vcoins.pdf', 'VCoins Invoice 315-155', 'invoice'),
+            dict(provider='VCoins', number='315-155', kind='invoice', url='/uploads/vcoins.pdf'))
 
     def test_cng_and_other_supplier_invoice_documents(self):
         for category in ('coins', 'banknotes'):
