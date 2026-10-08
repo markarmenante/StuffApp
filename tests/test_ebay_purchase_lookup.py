@@ -69,6 +69,16 @@ class LookupTests(unittest.TestCase):
         self.db.commit()
         self.assertEqual(self.client.get(url).status_code, 404)
 
+    def test_old_processing_warning_requests_a_fresh_observation(self):
+        job = lookup.ensure(self.db, self.note)
+        self.post(action='claim')
+        self.assertEqual(self.complete(job).status_code, 200)
+        self.db.execute("UPDATE ebay_order_items SET attention='Order processing; shipment or delivery not confirmed'")
+        self.db.execute('UPDATE ebay_purchase_requests SET requested_at=?', (time.time()-20,))
+        self.db.commit()
+        retry = lookup.ensure(self.db, self.note)
+        self.assertEqual(retry['status'], 'queued')
+
     def test_auth_account_scope_pause_and_bad_results(self):
         self.assertEqual(self.client.post('/ebay/today/requests', json={'action':'claim'}).status_code, 401)
         job = lookup.ensure(self.db, self.note)

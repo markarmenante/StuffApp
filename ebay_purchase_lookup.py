@@ -28,8 +28,12 @@ def ensure(db, note):
         return None
     if not ebay_mail.configured():
         return None
-    if db.execute('SELECT 1 FROM ebay_order_items i JOIN ebay_purchase_observations o '
-                  'ON o.line_key=i.line_key WHERE i.order_id=? LIMIT 1', (number,)).fetchone():
+    cached = db.execute('SELECT i.attention,o.status_text FROM ebay_order_items i JOIN ebay_purchase_observations o '
+                        'ON o.line_key=i.line_key WHERE i.order_id=?', (number,)).fetchall()
+    # Older readers misclassified this normal new-order state. Refresh the
+    # observation instead of preserving that historical warning indefinitely.
+    if cached and not any(r['status_text'].lower() == 'order processing' and
+                          r['attention'] == 'Order processing; shipment or delivery not confirmed' for r in cached):
         return None
     enabled = db.execute('SELECT enabled FROM ebay_mail_connection WHERE id=1').fetchone()
     if enabled and not enabled[0]:
