@@ -24077,9 +24077,9 @@ def _trim_banknote_image(db, record_id, note, field, expect_aspect=None):
     """Trim one stored banknote slab photo down to the note, levelled;
     record the source for holder-label reading and explicit crop edits.
     Returns the new file name, or None when nothing was trimmed. Used
-    when an image arrives through upload or market Buy/Bought. Check
-    must never call this: re-detecting corners replaces an already good
-    upload crop (or a user's manual adjustment) with different geometry."""
+    when an image arrives through upload, market Buy/Bought, or Check's
+    initial listing import. Check must never re-crop existing photos,
+    including an upload crop or a user's manual adjustment."""
     fname = _coin_row_value(note, field)
     if not fname or not is_image_filter(fname):
         return None
@@ -24101,10 +24101,14 @@ def _trim_banknote_image(db, record_id, note, field, expect_aspect=None):
     new_name = f"{uuid.uuid4().hex}.jpg"
     with open(os.path.join(UPLOAD_FOLDER, new_name), 'wb') as fh:
         fh.write(trimmed)
+    # Detection can take time; a newer upload or manual crop must win.
+    saved = db.execute(f"UPDATE banknotes SET {field} = ?, updated_at = ? WHERE id = ? AND {field} = ?",
+                       (new_name, datetime.utcnow().isoformat(), record_id, fname)).rowcount
+    if not saved:
+        os.unlink(os.path.join(UPLOAD_FOLDER, new_name))
+        return None
     db.execute('INSERT OR REPLACE INTO trimmed_image_sources (trimmed, source, quad) VALUES (?, ?, ?)',
                (new_name, source, json.dumps(trim_meta['quad']) if trim_meta.get('quad') else None))
-    db.execute(f"UPDATE banknotes SET {field} = ?, updated_at = ? WHERE id = ?",
-               (new_name, datetime.utcnow().isoformat(), record_id))
     return new_name
 
 
@@ -25833,8 +25837,26 @@ def banknote_lookup_specs(record_id):
     if prepared.get('blocked'):
         return jsonify(error=prepared['blocked'], documents=prepared['documents'],
                        purchase_sources=dict(reports=prepared['reports'], warnings=prepared['warnings'])), 409
-    # Purchase-source imports may have filled empty photo slots. Scan those
-    # originals in this same Check, without touching existing/manual crops.
+    # Crop only the display copies just imported into previously empty slots.
+    # Documents and vision extraction retain the untouched listing originals.
+    imported_images = prepared.get('images', {})
+    for field in ('image_1', 'image_2'):
+        if field not in imported_images:
+            continue
+        current = db.execute('SELECT * FROM banknotes WHERE id=?', (record_id,)).fetchone()
+        if not note[field] and current[field] and imported_images[field] == '/uploads/' + current[field]:
+            try:
+                _trim_banknote_image(db, record_id, current, field, _banknote_expect_aspect(current))
+                db.commit()
+            except Exception:
+                db.rollback()
+                app.logger.exception('Banknote Check could not crop imported %s for %s', field, record_id)
+                prepared['warnings'].append('An imported photo could not be cropped; its original was retained.')
+        current = db.execute(f'SELECT {field} FROM banknotes WHERE id=?', (record_id,)).fetchone()
+        if current[field]:
+            imported_images[field] = '/uploads/' + current[field]
+        else:
+            imported_images.pop(field)
     note = dict(db.execute('SELECT * FROM banknotes WHERE id=?', (record_id,)).fetchone(),
                 _check_sources=prepared)
 

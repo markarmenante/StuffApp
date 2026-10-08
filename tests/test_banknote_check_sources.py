@@ -52,6 +52,7 @@ class SourceCheckTests(unittest.TestCase):
         self.db.execute('DELETE FROM ebay_order_items WHERE line_key LIKE ?', (self.id + '%',))
         self.db.execute('DELETE FROM original_image_assets')
         self.db.execute('DELETE FROM ebay_listing_captures')
+        self.db.execute('DELETE FROM trimmed_image_sources')
         self.db.commit()
         self.ctx.pop()
 
@@ -236,6 +237,92 @@ class SourceCheckTests(unittest.TestCase):
         self.assertEqual(set(response.json['images']), {'image_1', 'image_2'})
         self.assertEqual(len(response.json['documents']), 3)
         self.assertFalse(self.note()['country'])
+
+    def crop(self, raw, expect_aspect=None, meta=None):
+        from PIL import Image
+        meta['quad'] = [[20, 50], [380, 50], [380, 190], [20, 190]]
+        out = io.BytesIO()
+        Image.open(io.BytesIO(raw)).crop((20, 50, 380, 190)).save(out, format='JPEG')
+        return out.getvalue()
+
+    def check_imports(self):
+        with patch.object(sources.archives, 'fetch_bytes', return_value=(self.gallery().encode(), 'text/html', URL)), \
+                patch.object(sources.listing_images, 'download', side_effect=self.photo), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value={'country': 'Tonga'}), \
+                patch.object(stuff, 'ensure_country_history'):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 200, response.json)
+        return response.json
+
+    def test_check_crops_new_imports_once_and_preserves_document_originals(self):
+        from PIL import Image
+        self.add_listing()
+        with patch.object(stuff, '_trim_slabbed_note_image', side_effect=self.crop) as trim:
+            first = self.check_imports()
+            names = [self.note()[field] for field in ('image_1', 'image_2')]
+            second = self.check_imports()
+        self.assertEqual(trim.call_count, 2)
+        self.assertEqual(trim.call_args.kwargs['expect_aspect'], 150 / 80)
+        self.assertEqual(second['images'], {})
+        self.assertEqual(first['documents'], second['documents'])
+        folder = Path(stuff.UPLOAD_FOLDER)
+        for field, name, original in zip(('image_1', 'image_2'), names, ('front.png', 'back.png')):
+            self.assertEqual(first['images'][field], '/uploads/' + name)
+            self.assertEqual(self.note()[field], name)
+            with Image.open(folder / name) as image:
+                self.assertEqual(image.size, (360, 140))
+            source = stuff._banknote_vision_source(name, self.db)
+            self.assertNotEqual(source, name)
+            self.assertEqual((folder / source).read_bytes(), (folder / original).read_bytes())
+            self.assertTrue(self.db.execute('SELECT quad FROM trimmed_image_sources WHERE trimmed=?', (name,)).fetchone()['quad'])
+            self.assertTrue(any(d['filename'] == original for d in first['documents']))
+            with Image.open(folder / original) as image:
+                self.assertEqual(image.size, (400, 200))
+
+    def test_check_only_crops_empty_slot_beside_existing_manual_crop(self):
+        self.add_listing()
+        self.photo('https://i.ebayimg.com/images/g/front/s-l1600.jpg', stuff.UPLOAD_FOLDER)
+        folder = Path(stuff.UPLOAD_FOLDER)
+        manual = self.crop((folder / 'front.png').read_bytes(), meta={})
+        (folder / 'manual.jpg').write_bytes(manual)
+        self.db.execute("UPDATE banknotes SET image_1='manual.jpg' WHERE id=?", (self.id,))
+        self.db.execute("INSERT INTO trimmed_image_sources (trimmed,source,quad) VALUES ('manual.jpg','front.png','manual geometry')")
+        self.db.commit()
+        with patch.object(stuff, '_trim_slabbed_note_image', side_effect=self.crop) as trim:
+            result = self.check_imports()
+        self.assertEqual(trim.call_count, 1)
+        self.assertEqual(set(result['images']), {'image_2'})
+        self.assertEqual(self.note()['image_1'], 'manual.jpg')
+        self.assertEqual((folder / 'manual.jpg').read_bytes(), manual)
+        self.assertEqual(self.db.execute("SELECT quad FROM trimmed_image_sources WHERE trimmed='manual.jpg'").fetchone()['quad'], 'manual geometry')
+
+    def test_check_keeps_originals_when_crop_fails(self):
+        self.add_listing()
+        with patch.object(stuff, '_trim_slabbed_note_image', side_effect=[ValueError('detector unavailable'), None]):
+            result = self.check_imports()
+        folder = Path(stuff.UPLOAD_FOLDER)
+        for field, original in zip(('image_1', 'image_2'), ('front.png', 'back.png')):
+            self.assertEqual(result['images'][field], '/uploads/' + self.note()[field])
+            self.assertEqual((folder / self.note()[field]).read_bytes(), (folder / original).read_bytes())
+        self.assertEqual(len(result['documents']), 3)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM trimmed_image_sources').fetchone()[0], 0)
+
+    def test_manual_crop_during_check_wins_over_inflight_detection(self):
+        self.add_listing()
+        before = set(Path(stuff.UPLOAD_FOLDER).glob('*.jpg'))
+        def concurrent_crop(raw, **kwargs):
+            self.db.execute("UPDATE banknotes SET image_1='new-manual.jpg' WHERE id=?", (self.id,))
+            self.db.commit()
+            return self.crop(raw, **kwargs)
+        with patch.object(stuff, '_trim_slabbed_note_image', side_effect=concurrent_crop):
+            result = self.check_imports()
+        self.assertEqual(self.note()['image_1'], 'new-manual.jpg')
+        self.assertEqual(result['images']['image_1'], '/uploads/new-manual.jpg')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM trimmed_image_sources').fetchone()[0], 1)
+        crops = set(Path(stuff.UPLOAD_FOLDER).glob('*.jpg')) - before
+        mappings = {r[0] for r in self.db.execute('SELECT trimmed FROM trimmed_image_sources')}
+        self.assertIn(self.note()['image_2'], mappings)
+        self.assertEqual({p.name for p in crops}, {self.note()['image_2']})
 
     def test_source_only_record_can_reach_model(self):
         self.blank()
