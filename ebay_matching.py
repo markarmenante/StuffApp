@@ -140,19 +140,19 @@ def seller_key(value):
     return compact(value)
 
 
-def comparison(note, item, title, aliases):
+def comparison(note, item, title, aliases, *, allow_missing_identity=False):
     """Hard identity conflicts disqualify a pair, regardless of its score."""
     entered_order = (note.get('order_number') or '').strip()
     if note.get('marketplace') not in (None, '', 'eBay'):
         return None
     if entered_order and entered_order != item.get('order_id'):
         return None
-    if not country_matches(note.get('country'), title):
+    if (note.get('country') or not allow_missing_identity) and not country_matches(note.get('country'), title):
         return None
     denom = denominations(note.get('denomination'))
-    if not denom or not (denom & title['denominations']):
+    if (note.get('denomination') or not allow_missing_identity) and (not denom or not (denom & title['denominations'])):
         return None
-    evidence = ['Country', 'Denomination']
+    evidence = [label for field, label in (('country', 'Country'), ('denomination', 'Denomination')) if note.get(field)]
     if entered_order:
         evidence.append('Order number')
     serial = compact(note.get('serial_number'))

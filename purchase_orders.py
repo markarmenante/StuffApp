@@ -15,6 +15,8 @@ def order_reference(db, category, record):
     record = dict(record or {})
     saved = record.get('order_number')
     marketplace = record.get('marketplace') or ''
+    if not marketplace and category == 'banknotes' and re.fullmatch(r'\d{2}-\d{5}-\d{5}', saved or ''):
+        marketplace = 'eBay'
     linked = purchase_orders(db, category, record.get('id'))
     def same_provider(order):
         if marketplace == 'Direct':
@@ -47,23 +49,35 @@ def order_reference(db, category, record):
     return result
 
 
-def ebay_listing_for_order(db, category, record):
+def ebay_item_for_order(db, category, record):
     """An order narrows the search, but item identity and uniqueness still apply."""
     record = dict(record)
     number = (record.get('order_number') or '').strip()
     if category != 'banknotes' or record.get('marketplace') not in (None, '', 'eBay') or not number:
         return None
-    from ebay_matching import plan_matches
+    from ebay_matching import comparison, profile
     from ebay_orders import unverified_email_keys
     excluded = unverified_email_keys(db)
     items = [dict(r) for r in db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND ignored=0', (number,))
              if r['line_key'] not in excluded]
     links = [dict(r) for r in db.execute('SELECT * FROM banknote_ebay_links')]
-    matches, _ = plan_matches([record], items, links)
-    if len(matches) == 1:
-        item = next(item for item in items if item['line_key'] in matches)
-        return 'https://www.ebay.com/itm/' + item['item_id']
+    occupied = {link['line_key'] for link in links if link['banknote_id'] != record['id']}
+    bundle = re.compile(r'\b(?:lot|set|bundle|pair)\s*(?:of\s*)?[2-9]\d*\b|\bpair of\b'
+                        r'|\b[2-9]\d*\s+(?:consecutive\s+)?(?:serial\s+)?(?:notes|banknotes)\b', re.I)
+    candidates = [item for item in items if item['line_key'] not in occupied
+                  and item['quantity'] == 1 and not item['attention']
+                  and not bundle.search(item['title'])
+                  and comparison(record, item, profile(item['title']), set(),
+                                 allow_missing_identity=True)]
+    # A blank record cannot select one of several purchases just because a sibling is linked.
+    if len(candidates) == 1 and (len(items) == 1 or (record.get('country') and record.get('denomination'))):
+        return candidates[0]
     return None
+
+
+def ebay_listing_for_order(db, category, record):
+    item = ebay_item_for_order(db, category, record)
+    return 'https://www.ebay.com/itm/' + item['item_id'] if item else None
 
 
 def source_priority(provider, category='coins'):

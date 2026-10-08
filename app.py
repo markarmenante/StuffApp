@@ -19832,6 +19832,9 @@ def new_record(category):
             _graduate_watch_order_if_owned(data, data.get('status'))
             _apply_watch_actual_delivery_service_date(data)
 
+        if category == 'banknotes' and not data.get('property_name'):
+            data['property_name'] = 'Carpinteria'
+
         if category not in ('watches', 'coins', 'banknotes') and 'status' in {
             f['name'] for f in visible_fields(category)
         } and not (data.get('status') or '').strip():
@@ -25533,10 +25536,10 @@ def fetch_banknote_specs(note):
     # Images or a pasted dealer description are enough to identify a
     # note — the images-first flow (drop photos, hit Check) must work
     # on a brand-new record with no structured fields typed yet.
-    if not known and not description and not pedigree and not images:
+    if not known and not description and not pedigree and not images and not dict(note).get('_check_sources', {}).get('evidence'):
         raise RuntimeError(
             'Add the note images, the dealer description, or at least '
-            'one identifying field (country / denomination / Pick #) '
+            'one identifying field (country / denomination / Pick #), or a matched order number '
             'before running Check.')
 
     known_lines = '\n'.join(f'- {k}: {v}' for k, v in known.items()) or '(none entered)'
@@ -25820,7 +25823,13 @@ def banknote_lookup_specs(record_id):
         app.logger.exception('Banknote Check purchase-source preparation failed')
         prepared = dict(evidence=[], reports=[], documents=[],
                         warnings=['Purchase sources could not be loaded; listing and invoice fields are not verified.'])
-    note = dict(note, _check_sources=prepared)
+    if prepared.get('blocked'):
+        return jsonify(error=prepared['blocked'], documents=prepared['documents'],
+                       purchase_sources=dict(reports=prepared['reports'], warnings=prepared['warnings'])), 409
+    # Purchase-source imports may have filled empty photo slots. Scan those
+    # originals in this same Check, without touching existing/manual crops.
+    note = dict(db.execute('SELECT * FROM banknotes WHERE id=?', (record_id,)).fetchone(),
+                _check_sources=prepared)
 
     suggestions = {}
     lookup_error = None
@@ -25843,10 +25852,17 @@ def banknote_lookup_specs(record_id):
         if value not in (None, ''):
             suggestions[field] = value
 
+    purchase = prepared.get('purchase', {})
+    for field, value in purchase.items():
+        if value and suggestions.get(field) in (None, ''):
+            suggestions[field] = value
+
     if lookup_error and not any(
         suggestions.get(f) not in (None, '') for f in BANKNOTE_SPEC_FILLABLE
     ):
-        return jsonify({'error': lookup_error}), lookup_status
+        return jsonify({'error': lookup_error, 'images': prepared.get('images', {}),
+                        'documents': prepared['documents'],
+                        'purchase_sources': dict(reports=prepared['reports'], warnings=prepared['warnings'])}), lookup_status
 
     # Grading + date + purchase fields are dealer-authoritative: only
     # propose a value the dealer's own text backs (same principle as
@@ -25880,6 +25896,8 @@ def banknote_lookup_specs(record_id):
                           'pick_number'}
 
     def _grounded(field, value):
+        if field in ('vendor', 'purchase_date') and value == purchase.get(field):
+            return True
         if field in ('price', 'vendor', 'purchase_date') and prepared['evidence']:
             quotes = suggestions.get('purchase_evidence') or {}
             quote = quotes.get(field, '') if isinstance(quotes, dict) else ''
@@ -25888,7 +25906,8 @@ def banknote_lookup_specs(record_id):
             normalized_quote = ' '.join(quote.split())
             documents = prepared['evidence']
             if field in ('price', 'purchase_date'):
-                documents = [e for e in documents if e['kind'] in ('invoice', 'order')]
+                kinds = ('invoice', 'order', 'purchase') if field == 'purchase_date' else ('invoice', 'order')
+                documents = [e for e in documents if e['kind'] in kinds]
             quoted = len(normalized_quote) >= 5 and any(
                 normalized_quote in ' '.join(e['text'].split()) for e in documents)
             if field == 'price' and quoted:
@@ -26139,7 +26158,7 @@ def banknote_lookup_specs(record_id):
     return jsonify({
         'filled': filled,
         'overwritten': overwritten,
-        'images': {},
+        'images': prepared.get('images', {}),
         'sources': suggestions.get('sources', ''),
         'specs_searched_at': now,
         # The image/web lookup failed but the dealer-description parser
