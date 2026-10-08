@@ -1,0 +1,6 @@
+{% set marketplace_options = ['Direct', 'VCoins', 'CNG'] if category == 'coins' else ['Direct', 'eBay'] %}
+{% set saved_marketplace = val('marketplace') %}
+{% if saved_marketplace and saved_marketplace not in marketplace_options %}
+  {% set marketplace_options = marketplace_options + [saved_marketplace] %}
+{% endif %}
+{{ selcell('marketplace', 'Marketplace', marketplace_options) }}

@@ -76,6 +76,36 @@ set ORIGINAL_LISTING_WORKER=0 for isolated tests.
 
 Tests: python tests/test_original_listings.py.
 
+## Order numbers and coin purchase lookup
+
+Vendor and Marketplace are separate purchase attributes on coins and banknotes.
+The Marketplace selector offers Direct/VCoins/CNG for coins and Direct/eBay for
+banknotes, retaining any other already-stored supported marketplace. It saves
+independently through the existing autosave and create/edit flows. Never infer
+Marketplace from Vendor: Shanna Schmidt can sell directly or through VCoins.
+Blank means unknown, not Direct; user choices must not be overwritten by scans.
+
+Coins and banknotes share an **Order Number** field immediately after Vendor.
+It reads confirmed eBay associations and explicitly attached order/invoice
+sources, independent of review dismissal. VCoins uses the printed dealer order
+number (for example 315-155), never the internal IdOrder page identifier. CNG
+uses the invoice number, never CoinID, auction number or lot number. Hover text
+identifies the marketplace and whether the link is an order or an invoice.
+Local PDFs from other suppliers can provide a number with an explicit title
+such as `Dealer Name Invoice AB-123`. Exact online links take precedence over
+copies of the same document; numbers are de-duplicated within each supplier.
+Missing or speculative associations leave the field blank.
+
+When Marketplace has been explicitly chosen, use that purchase channel. Otherwise,
+when researching an unmatched coin purchase, check the owner's signed-in VCoins
+order history first, then CNG orders/invoices, then other evidenced sources.
+Do not infer a purchase from a similar public listing or an earlier pedigree
+auction. Confirm specimen identifiers and purchase evidence before attaching a
+source. The server cannot use the Mac's signed-in Chrome session: authenticated
+order discovery requires a local browser pass. Reuse the existing Chrome
+session and do not export its cookies. The field orders confirmed sources in
+the same VCoins, CNG, then eBay priority for coins; banknotes keep eBay first.
+
 The purchase-source pills remain in the **Marked reviewed** header after
 dismissal and reload. Saved invoice/receipt documents and verified order links
 remain accessible even when an original listing has been removed. Speculative

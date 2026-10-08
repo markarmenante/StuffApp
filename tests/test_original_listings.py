@@ -21,6 +21,7 @@ os.environ.pop('ANTHROPIC_API_KEY', None)
 import original_listings as sources
 import listing_checks as checks
 import source_documents as archives
+import purchase_orders as orders
 import app as stuff
 
 URL = 'https://www.vcoins.com/en/stores/dealer/123/product/silver_tetradrachm/123456/Default.aspx'
@@ -513,11 +514,12 @@ class ListingTests(unittest.TestCase):
             expected = [dict(number='23-15242-04872', url=order_url)]
             self.assertEqual(sources.ebay_purchase_orders(self.db, category, self.id), expected)
             page = self.get(f'/{category}/{self.id}').data.decode()
-            purchase = page.split('coin-purchase"', 1)[1].split('</a>', 1)[0]
+            purchase = page.split('purchase-with-marketplace"', 1)[1].split('</a>', 1)[0]
             self.assertLess(purchase.index('name="vendor"'), purchase.index('23-15242-04872'))
             self.assertIn('href="' + order_url + '"', purchase)
-            self.assertIn('eBay Order Number', page)
-            self.assertLess(page.index('id="ebayOrderLabel"'), page.index('name="purchase_date"'))
+            self.assertIn('Order Number', page)
+            self.assertNotIn('eBay Order Number', page)
+            self.assertLess(page.index('id="orderNumberLabel"'), page.index('name="purchase_date"'))
 
     def test_order_numbers_from_matched_purchase_and_exact_listing_deduplicate(self):
         order_url = 'https://order.ebay.com/ord/show?orderId=23-15242-04872'
@@ -550,6 +552,123 @@ class ListingTests(unittest.TestCase):
                     'https://www.vcoins.com/ord/show?orderId=23-15242-04872']:
             archives.enqueue(self.db, 'banknotes', self.id, url, 'Order receipt', 'order')
         self.assertEqual(sources.ebay_purchase_orders(self.db, 'banknotes', self.id), [])
+
+    def test_vcoins_printed_number_not_internal_id_both_categories(self):
+        url = 'https://www.vcoins.com/en/MyAccount/Invoice.aspx?IdOrder=332942'
+        for category in ('coins', 'banknotes'):
+            archives.enqueue(self.db, category, self.id, url, 'VCoins Invoice 315-155', 'invoice')
+            self.db.commit()
+            self.assertEqual(orders.purchase_orders(self.db, category, self.id),
+                             [dict(provider='VCoins', number='315-155', url=url, kind='invoice')])
+            page = self.get(f'/{category}/{self.id}').data.decode()
+            self.assertIn('Open VCoins invoice 315-155', page)
+            self.assertIn('>315-155</a>', page)
+            self.assertNotIn('>332942</a>', page)
+            self.assertLess(page.index('name="vendor"'), page.index('id="orderNumberLabel"'))
+            self.assertLess(page.index('id="orderNumberLabel"'), page.index('name="purchase_date"'))
+
+    def test_cng_and_other_supplier_invoice_documents(self):
+        for category in ('coins', 'banknotes'):
+            self.db.execute("INSERT INTO record_documents (id,category,record_id,title,filename) VALUES (?,?,?,?,?)",
+                            (category + self.id, category, self.id, 'CNG Invoice 431062', 'cng-invoice.pdf'))
+            archives.enqueue(self.db, category, self.id, '/uploads/dealer-invoice.pdf',
+                             'Example Dealer Invoice AB-123', 'invoice')
+            self.db.commit()
+            result = orders.purchase_orders(self.db, category, self.id)
+            self.assertEqual([o['number'] for o in result], ['431062', 'AB-123'])
+            self.assertEqual(result[0]['url'], '/uploads/cng-invoice.pdf')
+            self.assertIn('Open CNG invoice 431062', self.get(f'/{category}/{self.id}').data.decode())
+
+    def test_order_source_priority_and_duplicates(self):
+        entries = [
+            ('https://order.ebay.com/ord/show?orderId=23-15242-04872', 'eBay Order 23-15242-04872', 'order'),
+            ('/uploads/cng.pdf', 'CNG Invoice 431062', 'invoice'),
+            ('/uploads/vcoins.pdf', 'VCoins Invoice 315-155', 'invoice'),
+            ('https://www.vcoins.com/en/MyAccount/Invoice.aspx?IdOrder=332942', 'VCoins Invoice 315-155', 'invoice'),
+            ('https://www.vcoins.com/en/MyAccount/ShowOrder.aspx?IdOrder=332942', 'VCoins Order 315-155', 'order')]
+        for category in ('coins', 'banknotes'):
+            for url, title, kind in entries:
+                archives.enqueue(self.db, category, self.id, url, title, kind)
+        result = orders.purchase_orders(self.db, 'coins', self.id)
+        self.assertEqual([o['provider'] for o in result], ['VCoins', 'CNG', 'eBay'])
+        self.assertIn('/ShowOrder.aspx?', result[0]['url'])
+        self.assertEqual([o['provider'] for o in orders.purchase_orders(self.db, 'banknotes', self.id)],
+                         ['eBay', 'VCoins', 'CNG'])
+
+    def test_same_number_different_supplier_is_not_collapsed(self):
+        archives.enqueue(self.db, 'coins', self.id, '/uploads/cng.pdf', 'CNG Invoice 431062', 'invoice')
+        archives.enqueue(self.db, 'coins', self.id, '/uploads/dealer.pdf', 'Dealer Invoice 431062', 'invoice')
+        self.assertEqual(len(orders.purchase_orders(self.db, 'coins', self.id)), 2)
+
+    def test_order_numbers_reject_listing_lot_generic_and_unsafe_sources(self):
+        invalid = [
+            ('https://www.cngcoins.com/Coin.aspx?CoinID=394565', 'CNG Invoice 577810'),
+            ('https://www.cngcoins.com/Lot.aspx?LOT_ID=431062', 'CNG Invoice 431062'),
+            ('https://www.vcoins.com/en/MyAccount.aspx', 'VCoins Order 315-155'),
+            ('https://www.vcoins.com/en/MyAccount/ShowOrder.aspx?IdOrder=332942', 'VCoins Order 332942'),
+            ('https://www.vcoins.com/en/MyAccount/ShowOrder.aspx?IdOrder=1&IdOrder=2', 'VCoins Order 315-155'),
+            ('https://www.vcoins.com/en/MyAccount/Invoice.aspx?IdOrder=332942', 'CNG Invoice 431062'),
+            ('https://evil.test/invoice.pdf', 'CNG Invoice 431062'),
+            ('https://www.vcoins.com:8443/en/MyAccount/Invoice.aspx?IdOrder=1', 'VCoins Order 315-155'),
+            ('/uploads/../private.pdf', 'CNG Invoice 431062'),
+            ('/uploads/cng.pdf', 'CNG invoice item 577810'),
+            ('/uploads/possible.pdf', 'Possible CNG Invoice 431062')]
+        for url, title in invalid:
+            self.assertIsNone(orders.archive_order(url, title, 'invoice'), (url, title))
+        self.assertIsNone(orders.archive_order('/uploads/x.pdf', 'CNG Invoice 431062', 'listing'))
+
+    def test_shared_order_field_does_not_promote_uncertain_review_sources(self):
+        self.db.execute('INSERT INTO coin_purchase_reviews VALUES (?,?,?)', (self.id, 'Possible order match', 'today'))
+        self.db.execute('INSERT INTO coin_purchase_review_sources VALUES (?,?,?,?)',
+                        (self.id, 'https://www.vcoins.com/en/MyAccount/ShowOrder.aspx?IdOrder=332942',
+                         'VCoins order 315-155', 0))
+        self.assertEqual(orders.purchase_orders(self.db, 'coins', self.id), [])
+        self.assertEqual(orders.purchase_orders(self.db, 'coins', None), [])
+        self.assertEqual(orders.purchase_orders(self.db, 'watches', self.id), [])
+
+    def test_marketplace_is_independent_of_vendor_and_unknown_by_default(self):
+        for category, choices in [('coins', ('Direct', 'VCoins', 'CNG')), ('banknotes', ('Direct', 'eBay'))]:
+            self.db.execute(f"UPDATE {category} SET vendor='Shanna Schmidt',price=6750 WHERE id=?", (self.id,))
+            self.db.commit()
+            self.assertIsNone(self.db.execute(f'SELECT marketplace FROM {category} WHERE id=?', (self.id,)).fetchone()[0])
+            for choice in (*choices, ''):
+                response = self.client.post(f'/{category}/{self.id}/save-field', base_url='https://localhost',
+                                            json={'field': 'marketplace', 'value': choice})
+                self.assertEqual(response.status_code, 200, response.data)
+                row = self.db.execute(f'SELECT vendor,marketplace,price FROM {category} WHERE id=?', (self.id,)).fetchone()
+                self.assertEqual(tuple(row), ('Shanna Schmidt', choice or None, 6750))
+                page = self.get(f'/{category}/{self.id}').data.decode()
+                self.assertIn('name="marketplace"', page)
+                if choice:
+                    self.assertIn(f'value="{choice}" selected', page)
+            self.assertEqual(self.client.post(f'/{category}/{self.id}/save-field', base_url='https://localhost',
+                             json={'field': 'marketplace', 'value': 'Shanna Schmidt'}).status_code, 400)
+
+    def test_marketplace_options_and_legacy_source_preserved(self):
+        for category, choices in [('coins', ['', 'Direct', 'VCoins', 'CNG']), ('banknotes', ['', 'Direct', 'eBay'])]:
+            field = next(f for f in stuff.FIELDS[category] if f['name'] == 'marketplace')
+            self.assertEqual(field['options'], choices)
+        self.db.execute("UPDATE coins SET marketplace='eBay' WHERE id=?", (self.id,))
+        self.db.commit()
+        self.assertIn('value="eBay" selected', self.get(f'/coins/{self.id}').data.decode())
+
+    def test_marketplace_create_full_edit_and_constraint(self):
+        for category in ('coins', 'banknotes'):
+            form = {'vendor': 'Shanna Schmidt', 'marketplace': 'Direct', 'owner': 'Mark', 'status': 'Own'}
+            response = self.client.post(f'/{category}/new', base_url='https://localhost', data=form)
+            self.assertEqual(response.status_code, 302, response.data)
+            created = self.db.execute(f"SELECT id FROM {category} WHERE vendor='Shanna Schmidt' AND marketplace='Direct'").fetchone()[0]
+            try:
+                choice = 'VCoins' if category == 'coins' else 'eBay'
+                response = self.client.post(f'/{category}/{created}', base_url='https://localhost', data=dict(form, marketplace=choice))
+                self.assertEqual(response.status_code, 302, response.data)
+                self.assertEqual(self.db.execute(f'SELECT marketplace FROM {category} WHERE id=?', (created,)).fetchone()[0], choice)
+                with self.assertRaises(sqlite3.IntegrityError):
+                    self.db.execute(f"UPDATE {category} SET marketplace='Not a source' WHERE id=?", (created,))
+                self.db.rollback()
+            finally:
+                self.db.execute(f'DELETE FROM {category} WHERE id=?', (created,))
+                self.db.commit()
 
 
 if __name__ == '__main__':

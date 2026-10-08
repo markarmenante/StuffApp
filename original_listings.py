@@ -17,6 +17,7 @@ from flask import Blueprint, abort, jsonify, g, request, session, url_for
 from ebay_orders import banknote_deliveries, csrf_token, listing_id, review_digest, safe_review_source_url, now_iso
 import listing_checks
 import source_documents
+import purchase_orders
 
 TABLES = {'coins': ('coin_original_listings', 'coin_id', 'coin_references'),
           'banknotes': ('banknote_original_listings', 'banknote_id', 'note_references')}
@@ -474,7 +475,7 @@ def register(app, get_db, connect, can_see, require_owner, analyze, upload_folde
                                               row['coin_id'] or row['banknote_id'])] = '; '.join(reasons)
             return g.listing_review_reasons.get((category, record_id))
         return {'original_listing': service.lookup, 'listing_review_reason': review_reason,
-                'ebay_purchase_orders': lambda category, record_id: ebay_purchase_orders(get_db(), category, record_id)}
+                'purchase_orders': lambda category, record_id: purchase_orders.purchase_orders(get_db(), category, record_id)}
 
     app.register_blueprint(bp)
     return service

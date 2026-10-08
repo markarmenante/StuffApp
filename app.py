@@ -723,6 +723,9 @@ def normalize_field_value(table, field_name, value):
         return _normalize_four_digit_year(value)
     if table in ('coins', 'banknotes') and field_name in ('date_1', 'date_2'):
         return _normalize_coin_year_input(value)
+    if table in ('coins', 'banknotes') and field_name == 'marketplace':
+        return {'direct': 'Direct', 'ebay': 'eBay', 'vcoins': 'VCoins', 'cng': 'CNG'}.get(
+            str(value).strip().lower(), value)
     if field_name == 'status' and value.strip().lower() == 'owned':
         return 'Own'
     if table == 'coins' and field_name == 'grade':
@@ -1527,6 +1530,8 @@ FIELDS = {
         {'name': 'print_field',     'label': 'Print Field',       'type': 'text'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
+        {'name': 'marketplace',     'label': 'Marketplace',       'type': 'select',
+         'options': ['', 'Direct', 'VCoins', 'CNG']},
         {'name': 'purchase_date',   'label': 'Purchase Date',     'type': 'date'},
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property_name',   'label': 'Property',          'type': 'text'},
@@ -1582,6 +1587,8 @@ FIELDS = {
         {'name': 'condition',       'label': 'Historical Context, Notes', 'type': 'textarea'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
+        {'name': 'marketplace',     'label': 'Marketplace',       'type': 'select',
+         'options': ['', 'Direct', 'eBay']},
         {'name': 'purchase_date',   'label': 'Purchase Date',     'type': 'date'},
         {'name': 'owner',           'label': 'Owner',             'type': 'text'},
         {'name': 'property_name',   'label': 'Property',          'type': 'text'},
@@ -5853,6 +5860,8 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN slab_number TEXT',
         'ALTER TABLE coins ADD COLUMN grade_condition TEXT',
         'ALTER TABLE coins ADD COLUMN grade_modifier TEXT',
+        "ALTER TABLE coins ADD COLUMN marketplace TEXT CHECK (marketplace IS NULL OR marketplace IN ('Direct','eBay','VCoins','CNG'))",
+        "ALTER TABLE banknotes ADD COLUMN marketplace TEXT CHECK (marketplace IS NULL OR marketplace IN ('Direct','eBay','VCoins','CNG'))",
         'ALTER TABLE vehicles ADD COLUMN auto_title TEXT',
         'ALTER TABLE vehicles ADD COLUMN insurance_label TEXT',
         'ALTER TABLE users ADD COLUMN row_filters TEXT',
@@ -19761,6 +19770,8 @@ def new_record(category):
     table = cat_info['table']
 
     if request.method == 'POST':
+        if category in ('coins', 'banknotes') and request.form.get('marketplace', '').strip().lower() not in ('', 'direct', 'ebay', 'vcoins', 'cng'):
+            return jsonify(error='Unknown marketplace'), 400
         record_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
         data = {'id': record_id, 'created_at': now, 'updated_at': now}
@@ -20104,6 +20115,8 @@ def detail_view(category, record_id):
     if request.method == 'POST':
         now = datetime.utcnow().isoformat()
         updates = {'updated_at': now}
+        if category in ('coins', 'banknotes') and request.form.get('marketplace', '').strip().lower() not in ('', 'direct', 'ebay', 'vcoins', 'cng'):
+            return jsonify(error='Unknown marketplace'), 400
 
         for field in visible_fields(category):
             fname = field['name']
@@ -20641,6 +20654,9 @@ def save_field(category, record_id):
     field = valid_fields[field_name]
     if field.get('readonly') or field['type'] == 'file':
         return jsonify({'error': 'Field not auto-saveable'}), 400
+    if field_name == 'marketplace' and category in ('coins', 'banknotes'):
+        if (value is not None and not isinstance(value, str)) or str(value or '').strip().lower() not in ('', 'direct', 'ebay', 'vcoins', 'cng'):
+            return jsonify(error='Unknown marketplace'), 400
 
     # Row-filter guard. Two checks:
     #   (1) The user must already be allowed to see the existing row.
