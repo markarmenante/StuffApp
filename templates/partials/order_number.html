@@ -1,10 +1,12 @@
+{% if not is_hidden_field(category, 'order_number') %}
+{% set order = order_reference(category, r if r and not is_new else none) %}
 <div class="dcell purchase-order-cell">
-  <div class="purchase-order-numbers" aria-labelledby="orderNumberLabel">
-    {% for order in purchase_orders(category, r['id'] if r and not is_new else none) %}
-    <a href="{{ order.url }}" target="_blank" rel="noopener noreferrer"
-       title="{{ order.provider }} {{ order.kind }} {{ order.number }}"
-       aria-label="Open {{ order.provider }} {{ order.kind }} {{ order.number }}">{{ order.number }}</a>
-    {% endfor %}
-  </div>
+  <input type="text" name="order_number" value="{{ order.number }}" maxlength="80"
+         autocomplete="off" spellcheck="false" aria-labelledby="orderNumberLabel">
+  <a class="purchase-order-link" {% if order.url %}href="{{ order.url }}"{% else %}hidden{% endif %}
+     target="_blank" rel="noopener noreferrer"
+     title="Open {{ order.provider }} {{ order.kind }} {{ order.number }}"
+     aria-label="Open {{ order.provider }} {{ order.kind }} {{ order.number }}">&#8599;</a>
   <span class="clabel" id="orderNumberLabel">Order Number</span>
 </div>
+{% endif %}

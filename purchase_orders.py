@@ -5,6 +5,67 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 import source_documents
 
 
+def valid_number(value):
+    return value is None or (isinstance(value, str) and (not value.strip() or bool(
+        re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9 ._/#-]{0,79}', value.strip()))))
+
+
+def order_reference(db, category, record):
+    """Prefer the entered number; never manufacture a marketplace's internal ID."""
+    record = dict(record or {})
+    saved = record.get('order_number')
+    marketplace = record.get('marketplace') or ''
+    linked = purchase_orders(db, category, record.get('id'))
+    def same_provider(order):
+        if marketplace == 'Direct':
+            return order['provider'] not in ('VCoins', 'CNG', 'eBay')
+        return not marketplace or order['provider'] == marketplace
+    if saved is None:
+        choices = [o for o in linked if same_provider(o)]
+        return choices[0] if len(choices) == 1 else dict(number='', url=None, provider=marketplace, kind='order')
+    number = saved.strip()
+    result = dict(number=number, url=None, provider=marketplace, kind='order')
+    if not number:
+        return result
+    matches = [o for o in linked if o['number'].casefold() == number.casefold()
+               and same_provider(o)]
+    if len(matches) == 1:
+        return matches[0]
+    if marketplace == 'eBay' and re.fullmatch(r'\d{2}-\d{5}-\d{5}', number):
+        return dict(result, url='https://order.ebay.com/ord/show?orderId=' + number)
+    if marketplace in ('VCoins', 'CNG'):
+        for row in db.execute("SELECT url,title,kind FROM purchase_source_archives WHERE kind IN ('order','invoice')"):
+            order = archive_order(row['url'], row['title'], row['kind'])
+            if order and order['provider'] == marketplace and order['number'].casefold() == number.casefold():
+                matches.append(order)
+        remote = {o['url']: o for o in matches if not o['url'].startswith('/uploads/')}
+        if len(remote) == 1:
+            return next(iter(remote.values()))
+        local = {o['url']: o for o in matches}
+        if len(local) == 1:
+            return next(iter(local.values()))
+    return result
+
+
+def ebay_listing_for_order(db, category, record):
+    """An order narrows the search, but item identity and uniqueness still apply."""
+    record = dict(record)
+    number = (record.get('order_number') or '').strip()
+    if category != 'banknotes' or record.get('marketplace') not in (None, '', 'eBay') or not number:
+        return None
+    from ebay_matching import plan_matches
+    from ebay_orders import unverified_email_keys
+    excluded = unverified_email_keys(db)
+    items = [dict(r) for r in db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND ignored=0', (number,))
+             if r['line_key'] not in excluded]
+    links = [dict(r) for r in db.execute('SELECT * FROM banknote_ebay_links')]
+    matches, _ = plan_matches([record], items, links)
+    if len(matches) == 1:
+        item = next(item for item in items if item['line_key'] in matches)
+        return 'https://www.ebay.com/itm/' + item['item_id']
+    return None
+
+
 def source_priority(provider, category='coins'):
     preferred = ('VCoins', 'CNG', 'eBay') if category == 'coins' else ('eBay', 'VCoins', 'CNG')
     return preferred.index(provider) if provider in preferred else len(preferred)

@@ -83,6 +83,9 @@ def candidate(db, category, record):
     record = dict(record)
     _, _, reference = TABLES[category]
     groups = []
+    entered_order_listing = purchase_orders.ebay_listing_for_order(db, category, record)
+    if entered_order_listing:
+        groups.append([entered_order_listing])
     if category == 'banknotes':
         groups.append(['https://www.ebay.com/itm/' + r['item_id'] for r in db.execute(
             'SELECT i.item_id FROM banknote_ebay_links l JOIN ebay_order_items i ON i.line_key=l.line_key '
@@ -323,6 +326,9 @@ class ListingService:
         if pending:
             self.wake.set()
         links = purchase_links(db, category, record['id'], link)
+        entered_order = purchase_orders.order_reference(db, category, record)
+        if dict(record).get('order_number') and entered_order['url'] and not any(s['url'] == entered_order['url'] for s in links):
+            links.append(dict(url=entered_order['url'], label=f"{entered_order['provider']} {entered_order['kind'].title()} {entered_order['number']}"))
         delivery = banknote_deliveries(db, record['id']).get(record['id']) if category == 'banknotes' else None
         review = delivery['review'] if delivery else manual_review(db, category, record['id'])
         if category == 'banknotes' and review:
@@ -331,6 +337,9 @@ class ListingService:
         if os.environ.get('ORIGINAL_LISTING_ARCHIVES') == '1':
             if link:
                 source_documents.enqueue(db, category, record['id'], link['url'], link['label'], 'listing')
+            if dict(record).get('order_number') and entered_order['url']:
+                source_documents.enqueue(db, category, record['id'], entered_order['url'],
+                    f"{entered_order['provider']} {entered_order['kind'].title()} {entered_order['number']}", entered_order['kind'])
             for source in links:
                 if re.search(r'invoice|receipt', source['label'], re.I):
                     source_documents.enqueue(db, category, record['id'], source['url'], source['label'], 'invoice')
@@ -498,6 +507,7 @@ def register(app, get_db, connect, can_see, require_owner, analyze, upload_folde
                                               row['coin_id'] or row['banknote_id'])] = '; '.join(reasons)
             return g.listing_review_reasons.get((category, record_id))
         return {'original_listing': service.lookup, 'listing_review_reason': review_reason,
+                'order_reference': lambda category, record: purchase_orders.order_reference(get_db(), category, record),
                 'purchase_orders': lambda category, record_id: purchase_orders.purchase_orders(get_db(), category, record_id)}
 
     app.register_blueprint(bp)

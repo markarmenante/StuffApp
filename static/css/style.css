@@ -1391,15 +1391,13 @@ input[type="date"] { -webkit-appearance: none; }
 .coin-purchase .dcell select { text-align: center; }
 .coin-purchase.purchase-with-marketplace { grid-template-columns: minmax(0, 1.5fr) repeat(4, minmax(0, 1fr)); }
 .coin-purchase .date-overlay-input { height: 1.35em; }
-.purchase-order-numbers { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 8px; min-height: 1.35em; padding-right: 56px; font-size: 14px; line-height: 1.35; }
-.purchase-order-numbers a { text-decoration: underline; overflow-wrap: anywhere; }
-.detail-page-coins .purchase-order-numbers { font-size: 13px; }
+.purchase-order-cell input { padding-left: 20px; padding-right: 56px; }
+.purchase-order-link { position: absolute; left: 3px; top: 0; width: 22px; height: 22px; text-align: center; line-height: 22px; font-size: 16px; }
+.purchase-order-link[hidden] { display: none; }
 @media (max-width: 640px) {
   .dgrid.coin-purchase.purchase-with-marketplace { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .coin-purchase.purchase-with-marketplace .dcell { min-width: 0; }
   .coin-purchase.purchase-with-marketplace .dcell:last-child { grid-column: 1 / -1; }
-  .purchase-order-numbers { font-size: 16px; }
-  .detail-page-coins .purchase-order-numbers { font-size: 15px; }
 }
 .coin-reference-source-row .dcell {
   border-bottom: none;

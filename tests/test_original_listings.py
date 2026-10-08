@@ -766,7 +766,7 @@ class ListingTests(unittest.TestCase):
             page = self.get(f'/{category}/{self.id}').data.decode()
             self.assertIn('Open VCoins order 315-155', page)
             self.assertIn(f'href="{order_url}"', page)
-            self.assertIn('>315-155</a>', page)
+            self.assertIn('name="order_number" value="315-155"', page)
             self.assertNotIn('>332942</a>', page)
             self.assertLess(page.index('name="vendor"'), page.index('id="orderNumberLabel"'))
             self.assertLess(page.index('id="orderNumberLabel"'), page.index('name="purchase_date"'))
@@ -790,7 +790,55 @@ class ListingTests(unittest.TestCase):
             result = orders.purchase_orders(self.db, category, self.id)
             self.assertEqual([o['number'] for o in result], ['431062', 'AB-123'])
             self.assertEqual(result[0]['url'], '/uploads/cng-invoice.pdf')
+            self.db.execute(f"UPDATE {category} SET marketplace='CNG' WHERE id=?", (self.id,))
+            self.db.commit()
             self.assertIn('Open CNG invoice 431062', self.get(f'/{category}/{self.id}').data.decode())
+
+    def test_order_number_is_editable_saved_and_clearable_both_categories(self):
+        url = 'https://order.ebay.com/ord/show?orderId=23-15242-04872'
+        for category in ('coins', 'banknotes'):
+            archives.enqueue(self.db, category, self.id, url, 'eBay Order Receipt', 'order')
+            self.db.execute(f"UPDATE {category} SET marketplace='eBay' WHERE id=?", (self.id,))
+            self.db.commit()
+            path = f'/{category}/{self.id}/save-field'
+            response = self.client.post(path, base_url='https://localhost', json=dict(field='order_number', value=' 12-34567-89012 '))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json['order_reference']['url'], 'https://order.ebay.com/ord/show?orderId=12-34567-89012')
+            self.assertEqual(self.db.execute(f'SELECT order_number FROM {category} WHERE id=?', (self.id,)).fetchone()[0], '12-34567-89012')
+            self.assertTrue('name="order_number" value="12-34567-89012"' in self.get(f'/{category}/{self.id}').data.decode())
+            response = self.client.post(path, base_url='https://localhost', json=dict(field='order_number', value=''))
+            self.assertEqual(response.json['order_reference']['number'], '')
+            self.assertIsNone(response.json['order_reference']['url'])
+            self.assertTrue('name="order_number" value=""' in self.get(f'/{category}/{self.id}').data.decode())
+
+    def test_order_number_rejects_invalid_values_without_changes(self):
+        for value in ([], {}, 123, 'x' * 81, 'https://example.com/order', '123\n456', '<script>'):
+            response = self.client.post(f'/coins/{self.id}/save-field', base_url='https://localhost', json=dict(field='order_number', value=value))
+            self.assertEqual(response.status_code, 400, value)
+        self.assertIsNone(self.db.execute('SELECT order_number FROM coins WHERE id=?', (self.id,)).fetchone()[0])
+
+    def test_pasted_vcoins_number_resolves_known_order_not_printed_internal_id(self):
+        url = 'https://www.vcoins.com/en/MyAccount/Invoice.aspx?IdOrder=332942'
+        self.db.execute("INSERT INTO purchase_source_archives (url,title,kind) VALUES (?,'VCoins Invoice 315-155','invoice')", (url,))
+        reference = orders.order_reference(self.db, 'coins', dict(id=self.id, marketplace='VCoins', order_number='315-155'))
+        self.assertEqual(reference['url'], url.replace('Invoice.aspx', 'ShowOrder.aspx'))
+        for number in ('332942', '315-156'):
+            self.assertIsNone(orders.order_reference(self.db, 'coins', dict(id=self.id, marketplace='VCoins', order_number=number))['url'])
+
+    def test_direct_order_number_does_not_reuse_ebay_link(self):
+        archives.enqueue(self.db, 'banknotes', self.id, 'https://order.ebay.com/ord/show?orderId=23-15242-04872', 'eBay Order Receipt', 'order')
+        for marketplace in ('Direct', 'VCoins', 'CNG'):
+            self.assertIsNone(orders.order_reference(self.db, 'banknotes', dict(id=self.id, marketplace=marketplace, order_number='23-15242-04872'))['url'])
+
+    def test_exact_order_narrows_listing_search_and_rejects_multi_item_ambiguity(self):
+        self.db.execute("UPDATE banknotes SET marketplace='eBay',order_number='12-34567-89012',denomination='2 Dollars' WHERE id=?", (self.id,))
+        self.db.execute("INSERT INTO ebay_order_items (line_key,order_id,item_id,title,quantity,delivery_status,last_seen) VALUES (?,'12-34567-89012','123456789012','Canada 2 Dollars',1,'Ordered','now')", (self.id,))
+        self.db.commit()
+        record = self.db.execute('SELECT * FROM banknotes WHERE id=?', (self.id,)).fetchone()
+        self.assertEqual(sources.candidate(self.db, 'banknotes', record), 'https://www.ebay.com/itm/123456789012')
+        self.db.execute("INSERT INTO ebay_order_items (line_key,order_id,item_id,title,quantity,delivery_status,last_seen) VALUES (?,'12-34567-89012','123456789013','Canada 2 Dollars',1,'Ordered','now')", (self.id + '-two',))
+        self.assertIsNone(sources.candidate(self.db, 'banknotes', record))
+        self.db.execute('DELETE FROM ebay_order_items WHERE line_key IN (?,?)', (self.id, self.id + '-two'))
 
     def test_order_source_priority_and_duplicates(self):
         entries = [

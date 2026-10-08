@@ -142,12 +142,19 @@ def seller_key(value):
 
 def comparison(note, item, title, aliases):
     """Hard identity conflicts disqualify a pair, regardless of its score."""
+    entered_order = (note.get('order_number') or '').strip()
+    if note.get('marketplace') not in (None, '', 'eBay'):
+        return None
+    if entered_order and entered_order != item.get('order_id'):
+        return None
     if not country_matches(note.get('country'), title):
         return None
     denom = denominations(note.get('denomination'))
     if not denom or not (denom & title['denominations']):
         return None
     evidence = ['Country', 'Denomination']
+    if entered_order:
+        evidence.append('Order number')
     serial = compact(note.get('serial_number'))
     explicit_serial = re.search(r'\b(?:s/n|sn[#:]|serial(?:\s+number)?[:#]?)\s*([a-z]{0,3}[/ ]?\d{4,}[a-z*]?)\b', item['title'], re.I)
     if serial and explicit_serial:
@@ -205,11 +212,11 @@ def comparison(note, item, title, aliases):
     purchase = distance is not None and distance <= 3
     if purchase:
         evidence.append('Purchase date')
-    if distance is not None and distance > 14 and not identity:
+    if distance is not None and distance > 14 and not identity and not entered_order:
         return None
-    automatic = identity or catalog or (family and grade_match and (year or seller_match or purchase)) or (
+    automatic = bool(entered_order) or identity or catalog or (family and grade_match and (year or seller_match or purchase)) or (
         grade_match and year and seller_match and purchase)
-    if not (identity or catalog or family or (year and (grade_match or seller_match or purchase))):
+    if not (entered_order or identity or catalog or family or (year and (grade_match or seller_match or purchase))):
         return None
     return {'banknote_id': note['id'], 'cat_id': note.get('cat_id'),
             'label': ' '.join(str(note.get(k) or '') for k in ('cat_id', 'country', 'denomination', 'date_1')).strip(),

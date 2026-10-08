@@ -27,16 +27,19 @@ def price(value):
 
 
 def evidence(coin, order, item, listing, sku):
+    entered_order = (coin.get('order_number') or '').strip()
+    if entered_order and entered_order.casefold() != order['columns'][1].strip().casefold():
+        return None
     name = dealer(coin.get('vendor'))
-    if not name or SequenceMatcher(None, name, dealer(order['columns'][2])).ratio() < .80:
+    if (not name and not entered_order) or (name and SequenceMatcher(None, name, dealer(order['columns'][2])).ratio() < .80):
         return None
     try:
         date = datetime.strptime(order['columns'][0], '%m/%d/%Y').date()
         stored = datetime.strptime(coin.get('purchase_date'), '%Y-%m-%d').date()
     except (ValueError, TypeError):
-        return None
-    gap = abs((date - stored).days)
-    if gap > 7:
+        date, stored = None, None
+    gap = abs((date - stored).days) if date and stored else None
+    if not entered_order and (gap is None or gap > 7):
         return None
 
     text = ' '.join(str(coin.get(key) or '') for key in ('description', 'coin_references'))
@@ -74,7 +77,8 @@ def evidence(coin, order, item, listing, sku):
     if not strong_identity and ((weight_gap is not None and weight_gap > .03)
                                 or (size_gap is not None and size_gap > 1)):
         return None
-    return dict(coin=coin, reason='Vendor, date within seven days and ' + ', '.join(metrics),
+    basis = 'Order number and ' if entered_order else 'Vendor, date within seven days and '
+    return dict(coin=coin, reason=basis + ', '.join(metrics),
                 metrics=metrics, sku=sku, date_gap=gap, same_weight=same_weight,
                 same_size=same_size, source_description=source)
 

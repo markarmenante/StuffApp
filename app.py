@@ -12,6 +12,7 @@ import market_scan as market_runtime
 import market_colonial
 import banknote_catalog
 import ebay_orders
+import purchase_orders
 import original_listings
 import listing_checks
 import banknote_check_sources
@@ -1531,6 +1532,7 @@ FIELDS = {
         {'name': 'print_field',     'label': 'Print Field',       'type': 'text'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
+        {'name': 'order_number',    'label': 'Order Number',      'type': 'text'},
         {'name': 'marketplace',     'label': 'Marketplace',       'type': 'select',
          'options': ['', 'Direct', 'VCoins', 'CNG']},
         {'name': 'purchase_date',   'label': 'Purchase Date',     'type': 'date'},
@@ -1588,6 +1590,7 @@ FIELDS = {
         {'name': 'condition',       'label': 'Historical Context, Notes', 'type': 'textarea'},
         {'name': 'price',           'label': 'Price',             'type': 'number'},
         {'name': 'vendor',          'label': 'Vendor',            'type': 'text'},
+        {'name': 'order_number',    'label': 'Order Number',      'type': 'text'},
         {'name': 'marketplace',     'label': 'Marketplace',       'type': 'select',
          'options': ['', 'Direct', 'eBay']},
         {'name': 'purchase_date',   'label': 'Purchase Date',     'type': 'date'},
@@ -5861,6 +5864,8 @@ def init_db():
         'ALTER TABLE coins ADD COLUMN slab_number TEXT',
         'ALTER TABLE coins ADD COLUMN grade_condition TEXT',
         'ALTER TABLE coins ADD COLUMN grade_modifier TEXT',
+        'ALTER TABLE coins ADD COLUMN order_number TEXT',
+        'ALTER TABLE banknotes ADD COLUMN order_number TEXT',
         "ALTER TABLE coins ADD COLUMN marketplace TEXT CHECK (marketplace IS NULL OR marketplace IN ('Direct','eBay','VCoins','CNG'))",
         "ALTER TABLE banknotes ADD COLUMN marketplace TEXT CHECK (marketplace IS NULL OR marketplace IN ('Direct','eBay','VCoins','CNG'))",
         'ALTER TABLE vehicles ADD COLUMN auto_title TEXT',
@@ -19773,6 +19778,8 @@ def new_record(category):
     if request.method == 'POST':
         if category in ('coins', 'banknotes') and request.form.get('marketplace', '').strip().lower() not in ('', 'direct', 'ebay', 'vcoins', 'cng'):
             return jsonify(error='Unknown marketplace'), 400
+        if category in ('coins', 'banknotes') and not purchase_orders.valid_number(request.form.get('order_number')):
+            return jsonify(error='Enter an order number of up to 80 characters, not a web address.'), 400
         record_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
         data = {'id': record_id, 'created_at': now, 'updated_at': now}
@@ -19818,7 +19825,7 @@ def new_record(category):
                     if m:
                         val = m.group(1)
                 val = normalize_field_value(table, fname, val)
-                data[fname] = val if val else None
+                data[fname] = val if val or fname == 'order_number' else None
 
         if category == 'watches':
             _apply_watch_order_form_fields(data, request.form)
@@ -20118,6 +20125,8 @@ def detail_view(category, record_id):
         updates = {'updated_at': now}
         if category in ('coins', 'banknotes') and request.form.get('marketplace', '').strip().lower() not in ('', 'direct', 'ebay', 'vcoins', 'cng'):
             return jsonify(error='Unknown marketplace'), 400
+        if category in ('coins', 'banknotes') and not purchase_orders.valid_number(request.form.get('order_number')):
+            return jsonify(error='Enter an order number of up to 80 characters, not a web address.'), 400
 
         for field in visible_fields(category):
             fname = field['name']
@@ -20143,7 +20152,7 @@ def detail_view(category, record_id):
                 elif field['type'] == 'number' or fname in ('beat', 'reserve', 'value'):
                     val = val.replace('$', '').replace(',', '').strip()
                 val = normalize_field_value(table, fname, val)
-                updates[fname] = val if val else None
+                updates[fname] = val if val or fname == 'order_number' else None
 
         if category == 'watches':
             _apply_watch_order_form_fields(updates, request.form)
@@ -20680,6 +20689,8 @@ def save_field(category, record_id):
     if field_name == 'marketplace' and category in ('coins', 'banknotes'):
         if (value is not None and not isinstance(value, str)) or str(value or '').strip().lower() not in ('', 'direct', 'ebay', 'vcoins', 'cng'):
             return jsonify(error='Unknown marketplace'), 400
+    if field_name == 'order_number' and category in ('coins', 'banknotes') and not purchase_orders.valid_number(value):
+        return jsonify(error='Enter an order number of up to 80 characters, not a web address.'), 400
 
     # Row-filter guard. Two checks:
     #   (1) The user must already be allowed to see the existing row.
@@ -20784,7 +20795,7 @@ def save_field(category, record_id):
 
     now = datetime.utcnow().isoformat()
     db.execute(f"UPDATE {table} SET {field_name} = ?, updated_at = ? WHERE id = ?",
-               [value if value != '' else None, now, record_id])
+               [value if value != '' or field_name == 'order_number' else None, now, record_id])
     if category in SELL_PANEL_CATEGORIES and field_name == 'price':
         # price mirrors into the sale plan's purchase price.
         _sale_plan_upsert(db, category, record_id, 'sell_purchase_price',
@@ -20852,6 +20863,9 @@ def save_field(category, record_id):
     if category == 'banknotes' and field_name == 'country' and value:
         ensure_country_history(value)
     response = {'ok': True}
+    if category in ('coins', 'banknotes') and field_name in ('order_number', 'marketplace'):
+        purchase_row = db.execute(f'SELECT * FROM {table} WHERE id=?', (record_id,)).fetchone()
+        response['order_reference'] = purchase_orders.order_reference(db, category, purchase_row)
     if listing_update:
         updated = db.execute(f'SELECT * FROM {table} WHERE id=?', (record_id,)).fetchone()
         response['listing'] = _original_listing_service.lookup(category, updated)

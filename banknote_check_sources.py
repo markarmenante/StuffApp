@@ -6,6 +6,7 @@ import uuid
 
 import original_listings as listings
 import source_documents as archives
+import purchase_orders
 
 
 def pdf_text(path):
@@ -68,6 +69,10 @@ def prepare(db, record, folder, fonts):
     record_id = record['id']
     evidence, reports, warnings = [], [], []
     sources = []
+    order = purchase_orders.order_reference(db, 'banknotes', record)
+    if record.get('order_number') and order['url'] and not order['url'].startswith('/uploads/'):
+        sources.append(dict(url=order['url'], kind=order['kind'],
+                            title=f"{order['provider']} {order['kind'].title()} {order['number']}"))
     row = db.execute('SELECT url FROM banknote_original_listings WHERE banknote_id=?', (record_id,)).fetchone()
     url = row['url'] if row else listings.candidate(db, 'banknotes', record)
     if url:

@@ -4926,6 +4926,18 @@ document.querySelectorAll('.comp-item').forEach(item => {
         .then(r => r.json())
         .then(d => {
           if (d.ok) {
+            if (d.order_reference) {
+              const link = form.querySelector('.purchase-order-link');
+              const order = d.order_reference;
+              if (link) {
+                link.hidden = !order.url;
+                if (order.url) link.href = order.url;
+                else link.removeAttribute('href');
+                link.title = `Open ${order.provider} ${order.kind} ${order.number}`;
+                link.setAttribute('aria-label', link.title);
+              }
+              document.dispatchEvent(new CustomEvent('purchase-sources-updated'));
+            }
             if (Object.prototype.hasOwnProperty.call(d, 'provenance_purchase')) {
               document.dispatchEvent(new CustomEvent('record-purchase-saved', {
                 detail: {purchase: d.provenance_purchase, updatedAt: d.purchase_updated_at},
@@ -4946,6 +4958,11 @@ document.querySelectorAll('.comp-item').forEach(item => {
     }).catch(err => console.warn('Auto-save failed:', err));
   }
   window.saveField = saveField;
+  const orderInput = form.querySelector('[name="order_number"]');
+  orderInput?.addEventListener('input', () => {
+    const link = form.querySelector('.purchase-order-link');
+    if (link) { link.hidden = true; link.removeAttribute('href'); }
+  });
 
   // Banknotes: Scan button in the Serial # cell. The server reads the
   // serial off the note's photos and stores it itself, so the input is
@@ -7632,6 +7649,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 
   async function flushCoinResearchInputFields() {
     if (typeof window.saveField !== 'function') return;
+    await flushPurchaseOrderFields();
     const fields = [
       'region', 'authority', 'denomination', 'metal', 'mint',
       'date_1', 'date_1_text', 'date_2', 'date_2_text',
@@ -7647,6 +7665,15 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     await Promise.all(saves);
   }
 
+  async function flushPurchaseOrderFields() {
+    for (const name of ['order_number', 'marketplace']) {
+      const input = document.querySelector(`#mainForm [name="${name}"]`);
+      if (!input) continue;
+      const result = await window.saveField(name, input.value);
+      if (!result?.ok) throw new Error(result?.error || 'Could not save the order details. Try again before checking.');
+    }
+  }
+
   // Push the form's current non-empty values to the server before a
   // Check runs. Check reads the SERVER row, so a just-pasted
   // description whose blur-save is still in flight (or never fired --
@@ -7654,6 +7681,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   // the lookup. Non-empty only: this can add, never erase.
   async function flushCheckInputFields() {
     if (typeof window.saveField !== 'function') return;
+    await flushPurchaseOrderFields();
     const fieldsByCategory = {
       coins: [
         'region', 'authority', 'denomination', 'metal', 'mint',

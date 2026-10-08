@@ -27,6 +27,15 @@ def order(**changes):
 
 
 class IdentityTests(unittest.TestCase):
+    def test_entered_order_narrows_candidates_but_keeps_identity_guards(self):
+        auto, _ = self.plan(notes=[note(order_number='12-34567-89012', marketplace='eBay', purchase_date='2020-01-01')],
+            orders=[order(ordered_at='2026-01-01'), order(line_key='o2', item_id='999999999999', order_id='99-99999-99999')])
+        self.assertEqual(list(auto), ['o1'])
+        self.assertIn('Order number', auto['o1']['evidence'])
+        for changes in (dict(denomination='5 Dollars'), dict(country='France'), dict(marketplace='Direct')):
+            auto, _ = self.plan(notes=[note(order_number='12-34567-89012', **changes)])
+            self.assertFalse(auto)
+
     def plan(self, notes=None, orders=None, links=None, sources=None):
         return matching.plan_matches(notes or [note()], orders or [order()], links or [], sources)
 

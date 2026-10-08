@@ -74,6 +74,15 @@ class SourceCheckTests(unittest.TestCase):
         self.assertEqual(result['evidence'], [])
         self.assertEqual(len(result['warnings']), 2)
 
+    def test_pasted_order_is_first_source_for_check(self):
+        self.db.execute("UPDATE banknotes SET marketplace='eBay',order_number='12-34567-89012' WHERE id=?", (self.id,))
+        self.db.commit()
+        self.add_listing()
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('sign in')) as fetch:
+            result = self.prepare()
+        self.assertEqual(fetch.call_args_list[0].args[0], 'https://order.ebay.com/ord/show?orderId=12-34567-89012')
+        self.assertIn('12-34567-89012', ' '.join(result['warnings']))
+
     def test_live_listing_pdf_attaches_once_and_check_refetches(self):
         self.add_listing()
         with patch.object(sources.archives, 'fetch_bytes', return_value=(HTML.encode(), 'text/html', URL)) as fetch:

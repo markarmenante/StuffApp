@@ -15,13 +15,14 @@ async function page(replies, initial = state(), ownership = 'Ordered') {
   let changeStatus;
   const events = {};
   const element = () => ({dataset: {}, textContent: '', hidden: false,
-    replaceChildren() {}, append() {}, setAttribute() {}, addEventListener(_, fn) { click = fn; }});
-  const selectors = ['title', 'reasons', 'progress', 'error', 'action'];
+    replaceChildren() {}, append() {}, setAttribute() {}, addEventListener() {}});
+  const selectors = ['title', 'reasons', 'progress', 'price', 'error', 'action'];
   const elements = Object.fromEntries(selectors.map(name => [`[data-listing-${name}]`, element()]));
+  elements['[data-listing-action]'].addEventListener = (_, fn) => { click = fn; };
   elements['[data-purchase-links]'] = element();
   elements['[data-listing-initial]'] = {textContent: JSON.stringify(initial)};
   const panel = {dataset: {url: '/banknotes/test/original-listing', csrf: 'old-session'},
-    querySelector: key => elements[key]};
+    querySelector: key => elements[key], querySelectorAll: () => []};
   const badge = element(), requests = [];
   const statusSelect = {value: ownership, addEventListener(_, fn) { changeStatus = fn; }};
   const queue = [response(200, {...initial, csrf_token: 'initial-session'}), ...replies];

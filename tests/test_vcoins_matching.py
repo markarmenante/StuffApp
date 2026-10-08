@@ -80,3 +80,24 @@ class VCoinsMatchingTests(unittest.TestCase):
     def test_multi_quantity_is_not_assigned_to_one_coin(self):
         self.order['items'][0]['quantity'] = 2
         self.assertFalse(self.matches())
+
+    def test_entered_order_narrows_similar_orders_without_date(self):
+        other = copy.deepcopy(self.order)
+        other['columns'][1] = '45-124'
+        self.coin.update(order_number='45-123', purchase_date=None)
+        matches = self.matches(orders=[self.order, other])
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]['order']['columns'][1], '45-123')
+        self.assertIn('Order number', matches[0]['candidates'][0]['reason'])
+
+    def test_entered_order_still_requires_item_identity(self):
+        self.coin.update(order_number='45-123', price=None)
+        self.assertFalse(self.matches())
+        self.coin.update(price=3750, weight=99)
+        self.order['items'][0]['title'] += ' (7.71g)'
+        self.assertFalse(self.matches())
+
+    def test_entered_order_multi_item_ambiguity_is_not_guessed(self):
+        self.coin['order_number'] = '45-123'
+        self.order['items'].append(dict(self.order['items'][0]))
+        self.assertFalse(self.matches())
