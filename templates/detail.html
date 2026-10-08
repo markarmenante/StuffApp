@@ -7715,27 +7715,52 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const ctl = new AbortController();
     const timeoutId = setTimeout(() => ctl.abort(), 280000);
     let resp;
+    let data;
+    const summary = document.getElementById('banknoteCheckSources');
+    const orderInputs = () => ['order_number', 'marketplace'].map(name =>
+      document.querySelector(`#mainForm [name="${name}"]`)?.value || '').join('|');
+    const enteredOrder = orderInputs();
+    const sourceStatus = message => {
+      if (summary) { summary.textContent = message; summary.hidden = !message; }
+    };
     try {
-      resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Accept': 'application/json' },
-        signal: ctl.signal,
-      });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (orderInputs() !== enteredOrder) throw new Error('Order details changed. Press Check again for the new order.');
+        resp = await fetch(url, {
+          method: 'POST', headers: { 'Accept': 'application/json' }, signal: ctl.signal,
+        });
+        data = await resp.json().catch(() => ({}));
+        if (resp.status !== 202 || !data.purchase_refresh) break;
+        const refresh = data.purchase_refresh;
+        const statusUrl = new URL(refresh.url, location.origin);
+        if (statusUrl.origin !== location.origin || !statusUrl.pathname.includes('/purchase-refresh/'))
+          throw new Error('Invalid purchase refresh URL.');
+        sourceStatus(refresh.message);
+        const deadline = Date.now() + 125000;
+        let finished = false;
+        while (Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          if (orderInputs() !== enteredOrder) throw new Error('Order details changed. Press Check again for the new order.');
+          const statusResponse = await fetch(statusUrl, {signal: ctl.signal, cache: 'no-store'});
+          const status = await statusResponse.json().catch(() => ({}));
+          if (!statusResponse.ok) throw new Error('The order changed or its lookup expired. Press Check again.');
+          sourceStatus(status.message);
+          if (status.status === 'failed') throw new Error(status.message);
+          if (status.status === 'done') { finished = true; break; }
+        }
+        if (!finished) throw new Error('The Mac purchase reader did not respond. Keep Today and signed-in Chrome open, then try Check again.');
+        if (attempt === 1) throw new Error('The order could not be refreshed. Try Check again.');
+      }
+    } catch (error) {
+      sourceStatus(error.message || 'Purchase check could not finish.');
+      throw error;
     } finally {
       clearTimeout(timeoutId);
     }
-    const data = await resp.json().catch(() => ({}));
     if (data.purchase_sources) {
-      const summary = document.getElementById('banknoteCheckSources');
-      if (summary) {
-        summary.textContent = [...data.purchase_sources.reports, ...data.purchase_sources.warnings].join('\n');
-        summary.hidden = !summary.textContent;
-      }
+      sourceStatus([...data.purchase_sources.reports, ...data.purchase_sources.warnings].join('\n'));
       document.dispatchEvent(new CustomEvent('banknote-check-documents', {detail: data.documents || []}));
       document.dispatchEvent(new CustomEvent('purchase-sources-updated'));
-      if (data.purchase_sources.warnings.length) {
-        alert('Purchase source check:\n\n' + data.purchase_sources.warnings.join('\n\n'));
-      }
     }
 
     // Show newly imported listing photos even if the field lookup failed.
@@ -7754,7 +7779,10 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       img.src = url;
     });
 
-    if (!resp.ok) throw new Error(data.error || 'Lookup failed');
+    if (!resp.ok) {
+      sourceStatus(data.error || 'Lookup failed');
+      throw new Error(data.error || 'Lookup failed');
+    }
 
     const filled = data.filled || {};
     const overwritten = data.overwritten || {};

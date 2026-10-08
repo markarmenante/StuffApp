@@ -15,6 +15,13 @@ def configured():
     return len(os.environ.get('STUFFAPP_TODAY_TOKEN', '')) >= 32
 
 
+def authenticate():
+    secret = os.environ.get('STUFFAPP_TODAY_TOKEN', '')
+    supplied = request.headers.get('Authorization', '')
+    if not configured() or not hmac.compare_digest(supplied.encode(), ('Bearer ' + secret).encode()):
+        abort(401)
+
+
 def text(raw, key, limit, pattern=None, empty=False):
     value = raw.get(key)
     if not isinstance(value, str) or len(value) > limit or (not empty and not value.strip()):
@@ -64,7 +71,7 @@ def validate_purchase(raw):
     elif status in ('shipped', 'in transit', 'out for delivery'):
         result['delivery_status'] = 'Shipped'
         # Observation time is not a shipping time. Leave the latter unknown.
-    elif not refunded and status not in ('awaiting shipment', 'paid', 'order placed', 'ordered', 'tracking available'):
+    elif not refunded and status not in ('awaiting shipment', 'paid', 'order placed', 'ordered', 'tracking available', 'order processing'):
         result['attention'] = result['status_text'] + '; shipment or delivery not confirmed'
     if refunded:
         result['attention'] = result['status_text']
@@ -161,15 +168,35 @@ def apply_purchases(db, items, observed, auto_match=True):
                 items_accepted=sum(i['order_id'] not in skipped for i in items))
 
 
+def purchase_snapshot(payload):
+    account = text(payload, 'account', 100, r'[\w.%-]+').lower()
+    observed = ebay.timestamp(payload.get('observed_at'), observed=True)
+    raw = payload.get('items')
+    if not observed or not isinstance(raw, list) or not 1 <= len(raw) <= 2000:
+        raise ValueError('Invalid Purchases snapshot')
+    items, skipped = validate_purchases(raw)
+    return account, observed, items, skipped
+
+
+def check_account(db, account):
+    db.execute('INSERT OR IGNORE INTO ebay_mail_connection (id) VALUES (1)')
+    if not db.execute('SELECT enabled FROM ebay_mail_connection WHERE id=1').fetchone()[0]:
+        raise ValueError('Today purchase updates are paused in StuffApp')
+    if db.execute('SELECT 1 FROM ebay_deleted_accounts WHERE identity_hash=?', (ebay.digest(account),)).fetchone():
+        raise ValueError('This eBay account was removed; updates are stopped')
+    owner = db.execute('SELECT account_name FROM ebay_purchase_account WHERE id=1').fetchone()
+    api_owner = db.execute('SELECT account_name FROM ebay_connection WHERE id=1').fetchone()
+    if any(r and r[0].lower() != account for r in (owner, api_owner)):
+        raise ValueError('eBay account does not match this connection')
+    db.execute('INSERT OR IGNORE INTO ebay_purchase_account VALUES (1,?)', (account,))
+
+
 def register(app, get_db):
     bp = Blueprint('ebay_mail', __name__)
 
     @bp.post('/ebay/today')
     def receive():
-        secret = os.environ.get('STUFFAPP_TODAY_TOKEN', '')
-        supplied = request.headers.get('Authorization', '')
-        if not configured() or not hmac.compare_digest(supplied.encode(), ('Bearer ' + secret).encode()):
-            abort(401)
+        authenticate()
         if request.content_length is None or request.content_length > 2 * 1024 * 1024:
             abort(413)
         payload = request.get_json(silent=True)
@@ -180,12 +207,7 @@ def register(app, get_db):
             return jsonify(error='eBay email updates are retired. Use eBay Purchases.'), 410
         try:
             if source == 'ebay_purchases':
-                account = text(payload, 'account', 100, r'[\w.%-]+').lower()
-                observed = ebay.timestamp(payload.get('observed_at'), observed=True)
-                raw = payload.get('items')
-                if not observed or not isinstance(raw, list) or not 1 <= len(raw) <= 2000:
-                    raise ValueError('Invalid Purchases snapshot')
-                items, skipped = validate_purchases(raw)
+                account, observed, items, skipped = purchase_snapshot(payload)
             else:
                 raw = payload.get('events')
                 if not isinstance(raw, list) or len(raw) > 100:
@@ -201,15 +223,7 @@ def register(app, get_db):
                 db.rollback()
                 return jsonify(error='Today purchase updates are paused in StuffApp'), 409
             if source == 'ebay_purchases':
-                if db.execute('SELECT 1 FROM ebay_deleted_accounts WHERE identity_hash=?', (ebay.digest(account),)).fetchone():
-                    db.rollback()
-                    return jsonify(error='This eBay account was removed; updates are stopped'), 409
-                owner = db.execute('SELECT account_name FROM ebay_purchase_account WHERE id=1').fetchone()
-                api_owner = db.execute('SELECT account_name FROM ebay_connection WHERE id=1').fetchone()
-                if any(r and r[0].lower() != account for r in (owner, api_owner)):
-                    db.rollback()
-                    return jsonify(error='eBay account does not match this connection'), 409
-                db.execute('INSERT OR IGNORE INTO ebay_purchase_account VALUES (1,?)', (account,))
+                check_account(db, account)
                 result = apply_purchases(db, items, observed,
                     auto_match=not skipped and not payload.get('skipped'))
                 result['skipped'] = skipped + result['skipped']

@@ -25816,6 +25816,13 @@ def banknote_lookup_specs(record_id):
     if not note:
         return jsonify({'error': 'Banknote not found'}), 404
 
+    refresh = ebay_purchase_lookup.ensure(db, note)
+    if refresh:
+        if refresh['status'] in ('queued', 'reading'):
+            refresh['url'] = url_for('banknote_purchase_refresh', record_id=record_id, request_id=refresh['id'])
+            return jsonify(purchase_refresh=refresh), 202
+        return jsonify(error=refresh['message']), 409
+
     try:
         prepared = banknote_check_sources.prepare(db, note, UPLOAD_FOLDER, _pdf_fonts)
     except Exception:
@@ -28521,7 +28528,7 @@ def _upload_visible_to_current_user(filename):
 # Endpoints that everyone gets to hit regardless of category access.
 # Uploaded files and generated thumbnails are NOT exempt: the route
 # handlers enforce category + row-filter access before serving bytes.
-_AUTH_EXEMPT_ENDPOINTS = {'static', 'healthz', 'ebay_public.account_deletion', 'ebay_public.privacy', 'ebay_mail.receive'}
+_AUTH_EXEMPT_ENDPOINTS = {'static', 'healthz', 'ebay_public.account_deletion', 'ebay_public.privacy', 'ebay_mail.receive', 'ebay_purchase_requests'}
 
 
 @app.before_request
@@ -40520,6 +40527,8 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 _ebay_order_sync = ebay_orders.register(
     app, get_db, open_db_connection, require_owner, DATA_DIR)
+import ebay_purchase_lookup
+ebay_purchase_lookup.register(app, get_db, require_owner)
 def _compare_original_listing(category, record, url, page_text, purchase_sources=()):
     import anthropic
     api_key = _require_anthropic_key()

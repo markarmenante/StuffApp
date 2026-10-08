@@ -134,3 +134,11 @@ CREATE TABLE IF NOT EXISTS merchant_purchase_notices (
     observed_at TEXT NOT NULL,
     evidence TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ebay_purchase_requests (
+    id TEXT PRIMARY KEY,
+    order_id TEXT NOT NULL UNIQUE,
+    requested_at REAL NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('queued','reading','done','failed')),
+    message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ebay_purchase_requests_pending ON ebay_purchase_requests(status, requested_at);
