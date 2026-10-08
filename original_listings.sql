@@ -59,3 +59,27 @@ CREATE TABLE IF NOT EXISTS banknote_source_archives (
     PRIMARY KEY(banknote_id,url)
 );
 CREATE INDEX IF NOT EXISTS banknote_source_archive_url ON banknote_source_archives(url);
+
+CREATE TABLE IF NOT EXISTS original_image_assets (
+    url TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    width INTEGER NOT NULL CHECK(width > 0),
+    height INTEGER NOT NULL CHECK(height > 0),
+    saved_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS original_listing_image_sources (
+    listing_url TEXT NOT NULL REFERENCES purchase_source_archives(url) ON DELETE CASCADE,
+    image_url TEXT NOT NULL REFERENCES original_image_assets(url),
+    position INTEGER NOT NULL CHECK(position >= 0),
+    PRIMARY KEY(listing_url,image_url)
+);
+CREATE INDEX IF NOT EXISTS original_listing_image_asset ON original_listing_image_sources(image_url);
+CREATE TABLE IF NOT EXISTS original_listing_image_scans (
+    url TEXT PRIMARY KEY REFERENCES purchase_source_archives(url) ON DELETE CASCADE,
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+    next_attempt REAL NOT NULL DEFAULT 0,
+    lease_until REAL NOT NULL DEFAULT 0,
+    completed_at REAL
+);
+CREATE INDEX IF NOT EXISTS original_listing_image_due ON original_listing_image_scans(completed_at,next_attempt,lease_until);

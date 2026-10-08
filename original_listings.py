@@ -18,6 +18,7 @@ from ebay_orders import banknote_deliveries, csrf_token, listing_id, review_dige
 import listing_checks
 import source_documents
 import purchase_orders
+import listing_images
 
 TABLES = {'coins': ('coin_original_listings', 'coin_id', 'coin_references'),
           'banknotes': ('banknote_original_listings', 'banknote_id', 'note_references')}
@@ -387,6 +388,7 @@ class ListingService:
                         worked = listing_checks.run_once(self.connect, fetch_listing, self.analyze) or worked
                     if os.environ.get('ORIGINAL_LISTING_ARCHIVES') == '1':
                         worked = source_documents.run_once(self.connect, self.upload_folder, self.fonts) or worked
+                        worked = listing_images.run_once(self.connect, self.upload_folder) or worked
                     if worked:
                         time.sleep(0.3)
                         continue

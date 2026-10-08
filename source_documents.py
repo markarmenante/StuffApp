@@ -139,6 +139,7 @@ def source_pdf(html, url, title, fonts):
 
 
 def attach_saved(db):
+    import listing_images
     for category, (table, key) in TABLES.items():
         for row in db.execute(f'SELECT l.{key} AS record_id,a.* FROM {table} l '
                                'JOIN purchase_source_archives a ON a.url=l.url '
@@ -154,6 +155,8 @@ def attach_saved(db):
                 db.execute(f'UPDATE {category} SET updated_at=? WHERE id=?',
                            (datetime.now(timezone.utc).isoformat(),row['record_id']))
             db.execute(f'UPDATE {table} SET attached=1 WHERE {key}=? AND url=?', (row['record_id'],row['url']))
+            if row['kind'] == 'listing':
+                listing_images.attach_saved(db, category, row['record_id'], row['url'])
 
 
 def run_once(connect, upload_folder, fonts):
