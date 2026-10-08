@@ -5,6 +5,7 @@
 {% set _needs_review = (_manual and not _manual.dismissed) or (_check and _check.differences and not _check.dismissed) %}
 {% set _reviewed = not _needs_review and ((_manual and _manual.dismissed) or (_check and _check.dismissed)) %}
 <section data-original-listing data-url="{{ url_for('original_listings.status', category=category, record_id=r['id']) }}"
+         data-update-url="{{ url_for('save_field', category=category, record_id=r['id']) }}"
          {% if _is_owner %}data-csrf="{{ coin_review_csrf_token() }}"{% endif %}
          {% if not (_original.links or _manual or _check) %}hidden{% endif %}>
   <div class="section-bar coin-review-toolbar">
@@ -23,9 +24,10 @@
     </nav>
     <textarea id="coinReviewReason" rows="3" readonly>{{ _manual.reason }}</textarea>
     {% endif %}
-    {% if _check and not _check.dismissed %}{% for item in _check.differences %}<p><strong>{{ item.label }}</strong>: {{ item.stored or 'Missing' }}; listing: {{ item.listed }}</p>{% endfor %}{% endif %}
+    {% if _check and not _check.dismissed %}{% for item in _check.differences %}<p class="listing-review-change"><span><strong>{{ item.label }}</strong>: {{ item.stored or 'Missing' }}; {{ item.source_label or 'listing' }}: {{ item.listed }}</span></p>{% endfor %}{% endif %}
   </div>
   <p data-listing-progress class="listing-check-status" role="status"></p>
+  <p data-listing-price class="listing-check-status" role="status" hidden></p>
   <p data-listing-error class="coin-review-error" role="alert" hidden></p>
   <script type="application/json" data-listing-initial>{{ _original|tojson }}</script>
 </section>

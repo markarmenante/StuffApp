@@ -64,9 +64,28 @@
     if (check && !check.dismissed) {
       for (const item of differences) {
         const line = document.createElement('p');
+        line.className = 'listing-review-change';
+        const description = document.createElement('span');
         const label = document.createElement('strong'); label.textContent = item.label + ': ';
-        line.append(label, `${item.stored || 'Missing'}; listing: ${item.listed}`);
+        description.append(label, `${item.stored || 'Missing'}; ${item.source_label || 'listing'}: ${item.listed}`);
+        line.append(description);
         line.title = item.evidence;
+        if (button) {
+          const actions = document.createElement('span');
+          actions.className = 'listing-change-actions';
+          for (const action of ['update', 'dismiss']) {
+            const control = document.createElement('button');
+            control.type = 'button'; control.className = 'purchase-review-action';
+            control.textContent = action === 'update' ? 'Update' : 'Dismiss';
+            control.dataset.field = item.field; control.dataset.changeAction = action;
+            control.disabled = busy || (action === 'update' && item.update_value == null);
+            control.title = action === 'update' ? (item.update_value == null ? 'Edit this ambiguous value manually'
+              : `Update ${item.label} to ${item.update_value}`) : `Dismiss ${item.label} without changing the record`;
+            control.setAttribute('aria-label', `${control.textContent} ${item.label}`);
+            actions.append(control);
+          }
+          line.append(actions);
+        }
         reasons.append(line);
       }
     }
@@ -81,6 +100,11 @@
       : check?.state === 'pending' ? 'Checking original listing...'
       : check?.state === 'failed' ? 'Listing comparison could not be completed.' : '';
     progress.hidden = !progress.textContent;
+    const priceStatus = panel.querySelector('[data-listing-price]');
+    priceStatus.textContent = check?.state === 'checked' ? (check.price?.outcome === 'match'
+      ? `Purchase price verified: ${check.price.listed} (${check.price.source_label}).`
+      : check.price ? '' : 'Purchase price has not been verified against an order or invoice.') : '';
+    priceStatus.hidden = !priceStatus.textContent;
   }
 
   async function refresh() {
@@ -98,15 +122,20 @@
       }
     } catch (_) { /* A background check must not interrupt editing. */ }
   }
-  button?.addEventListener('click', async () => {
+  async function submitAction(action, field) {
     if (busy) return;
     busy = true; button.disabled = true; error.hidden = true; clearTimeout(timer);
+    panel.querySelectorAll('[data-change-action]').forEach(control => { control.disabled = true; });
     try {
-      const body = new URLSearchParams({ action: button.dataset.listingAction, csrf_token: panel.dataset.csrf,
+      const body = new URLSearchParams({ action, csrf_token: panel.dataset.csrf,
         review_token: result.review?.token || '', check_token: result.check?.token || '' });
-      const submit = () => fetch(panel.dataset.url + '/review', {
+      if (field) body.set('field', field);
+      const updating = field && action === 'update';
+      const submit = () => fetch(updating ? panel.dataset.updateUrl : panel.dataset.url + '/review', {
         method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(15000),
-        body,
+        headers: updating ? {'Content-Type': 'application/json'} : {},
+        body: updating ? JSON.stringify({field, listing_check_token: body.get('check_token'),
+          csrf_token: body.get('csrf_token')}) : body,
       });
       let response = await submit();
       let data = await response.json().catch(() => ({}));
@@ -130,13 +159,32 @@
         data = await response.json().catch(() => ({}));
       }
       if (!response.ok) throw new Error(data.error || 'Could not confirm the review. Reload and try again.');
-      render(data);
+      if (updating) {
+        for (const [name, value] of Object.entries(data.updated_fields || {})) {
+          const text = ['date_1', 'date_2'].includes(name) && Number(value) < 0
+            ? `${Math.abs(Number(value))} BC` : String(value ?? '');
+          document.querySelectorAll(`#mainForm [name="${CSS.escape(name)}"]`).forEach(input => {
+            input.value = text;
+          });
+        }
+        if (Object.prototype.hasOwnProperty.call(data, 'provenance_purchase')) {
+          document.dispatchEvent(new CustomEvent('record-purchase-saved', {
+            detail: {purchase: data.provenance_purchase, updatedAt: data.purchase_updated_at},
+          }));
+        }
+      }
+      render(updating ? data.listing : data);
     } catch (err) {
       error.textContent = err.message || 'Could not confirm the review.';
       error.hidden = false;
     } finally {
-      busy = false; button.disabled = false;
+      busy = false; button.disabled = false; render(result);
     }
+  }
+  button?.addEventListener('click', () => submitAction(button.dataset.listingAction));
+  reasons.addEventListener('click', event => {
+    const control = event.target.closest('[data-change-action]');
+    if (control && !control.disabled) submitAction(control.dataset.changeAction, control.dataset.field);
   });
   render(result);
   document.addEventListener('purchase-sources-updated', () => { attempts = 0; clearTimeout(timer); refresh(); });

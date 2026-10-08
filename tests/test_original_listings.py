@@ -457,6 +457,125 @@ class ListingTests(unittest.TestCase):
                                           'evidence': 'BRUTTIUM, Kroton.', 'outcome': outcome}]})
                     self.assertEqual(result[0]['outcome'], 'match')
 
+    def saved_suggestions(self, category='coins'):
+        self.available(category)
+        self.db.execute(f'UPDATE {category} SET date_1=-219,price=65800 WHERE id=?', (self.id,))
+        record = self.db.execute(f'SELECT * FROM {category} WHERE id=?', (self.id,)).fetchone()
+        checks.ensure(self.db, category, self.id, URL)
+        result = [dict(field='date_1', label='Date from', stored='-219', listed='221 BC (start of 221-205 BC)',
+                       evidence='221-205 BC', outcome='different'),
+                  dict(field='slab_number', label='Certificate', stored='', listed='6030743-005',
+                       evidence='Certificate 6030743-005', outcome='missing'),
+                  dict(field='price', label='Price', stored='65800.0', listed='EUR 58,500.00',
+                       evidence='Octodrachm EUR 58,500.00', outcome='different', source_label='VCoins Order 239-5192')]
+        key = 'coin_id' if category == 'coins' else 'banknote_id'
+        self.db.execute(f"UPDATE original_listing_checks SET state='checked',result=?,record_snapshot=? WHERE {key}=?",
+                        (json.dumps(result), json.dumps(checks.snapshot(category, record)), self.id))
+        self.db.commit()
+        return self.state(category)
+
+    def update_suggestion(self, category, field, token, **kwargs):
+        self.get(f'/{category}/{self.id}')
+        with self.client.session_transaction(base_url='https://localhost') as session:
+            csrf = session['ebay_csrf']
+        return self.client.post(f'/{category}/{self.id}/save-field', base_url='https://localhost', json=dict(
+            field=field, listing_check_token=token, csrf_token=csrf, **kwargs))
+
+    def test_individual_dismiss_preserves_facts_and_other_warnings(self):
+        for category in ('coins', 'banknotes'):
+            state = self.saved_suggestions(category)
+            before = dict(self.db.execute(f'SELECT * FROM {category} WHERE id=?', (self.id,)).fetchone())
+            response = self.post(dict(action='dismiss', field='slab_number', check_token=state['check']['token']), category)
+            self.assertEqual(response.status_code, 200)
+            after = self.state(category)
+            self.assertEqual([c['field'] for c in after['check']['differences']], ['date_1', 'price'])
+            self.assertEqual(before, dict(self.db.execute(f'SELECT * FROM {category} WHERE id=?', (self.id,)).fetchone()))
+            self.assertEqual(self.post(dict(action='dismiss', field='date_1',
+                                           check_token=state['check']['token']), category).status_code, 409)
+
+    def test_update_uses_saved_suggestion_not_client_value_both_categories(self):
+        for category in ('coins', 'banknotes'):
+            state = self.saved_suggestions(category)
+            response = self.update_suggestion(category, 'date_1', state['check']['token'], value='2026')
+            self.assertEqual(response.status_code, 200, response.data)
+            row = self.db.execute(f'SELECT * FROM {category} WHERE id=?', (self.id,)).fetchone()
+            self.assertEqual(row['date_1'], -221)
+            self.assertEqual(row['date_1_text'], '221 BC')
+            self.assertEqual(row['price'], 65800)
+            self.assertEqual([c['field'] for c in self.state(category)['check']['differences']], ['slab_number', 'price'])
+            next_state = self.state(category)
+            self.assertEqual(self.update_suggestion(category, 'slab_number', next_state['check']['token']).status_code, 200)
+            self.assertEqual(self.db.execute(f'SELECT slab_number FROM {category} WHERE id=?', (self.id,)).fetchone()[0], '6030743-005')
+
+    def test_update_price_uses_native_currency_and_updates_custody(self):
+        state = self.saved_suggestions()
+        response = self.update_suggestion('coins', 'price', state['check']['token'])
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.json['provenance_purchase']['price'], 'EUR 58,500.00')
+        self.assertEqual(self.db.execute('SELECT price FROM coins WHERE id=?', (self.id,)).fetchone()[0], 'EUR 58,500.00')
+        self.assertEqual(self.db.execute("SELECT purchase_price FROM sale_plans WHERE category='coins' AND record_id=?", (self.id,)).fetchone()[0], 'EUR 58,500.00')
+
+    def test_manually_corrected_price_removes_warning_and_old_token_is_rejected(self):
+        state = self.saved_suggestions()
+        self.db.execute('UPDATE coins SET price=? WHERE id=?', ('EUR 58,500 / $66,281', self.id))
+        self.db.commit()
+        response = self.update_suggestion('coins', 'price', state['check']['token'])
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.state()['check']['price']['outcome'], 'match')
+        self.assertEqual([c['field'] for c in self.state()['check']['differences']], ['date_1', 'slab_number'])
+        self.assertEqual(self.db.execute('SELECT price FROM coins WHERE id=?', (self.id,)).fetchone()[0], 'EUR 58,500 / $66,281')
+
+    def test_update_requires_csrf_and_rejects_unknown_or_ambiguous_fields(self):
+        state = self.saved_suggestions()
+        response = self.client.post('/coins/' + self.id + '/save-field', base_url='https://localhost',
+                                    json=dict(field='price', listing_check_token=state['check']['token']))
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.update_suggestion('coins', 'vendor', state['check']['token']).status_code, 409)
+        self.assertIsNone(checks.proposed_value('coins', dict(field='date_1', listed='221-205 BC')))
+        self.assertIsNone(checks.proposed_value('coins', dict(field='weight', listed='about 8 or 9 g')))
+        self.assertEqual(checks.proposed_value('coins', dict(field='weight', listed='27.79 g')), '27.79')
+
+    def test_order_price_compares_currency_not_current_dollar_conversion(self):
+        title = 'Coin, Egypt, Ptolemy IV, Octodrachm'
+        quote = '1 ' + title + ' EUR 58,500.00'
+        source = dict(url='https://www.vcoins.com/en/MyAccount/ShowOrder.aspx?IdOrder=312614',
+                      title='VCoins Order 239-5192', text='Order total: EUR 62,850.00\n' + quote)
+        result = dict(comparisons=[dict(field='price', listing_value='EUR 58,500.00', evidence=quote,
+                       source_url=source['url'], item_title=title, outcome='match')])
+        for stored, expected in ((65800, 'different'), (58500, 'different'), ('EUR 58,500 / $66,281', 'match'),
+                                 ('EUR 58.500,00', 'match'), ('EUR 57,500', 'different')):
+            comparison = checks.validate_result('coins', dict(price=stored), title + ' Price US$65,922.92',
+                                                result, [source], stuff._parse_price_amount)
+            self.assertEqual(comparison[0]['outcome'], expected)
+            self.assertEqual(comparison[0]['source_label'], source['title'])
+
+    def test_order_total_and_wrong_item_are_not_accepted_as_item_price(self):
+        title = 'Coin, Egypt, Ptolemy IV, Octodrachm'
+        for quote, identity, value in ((title + ' Order total EUR 62,850.00', title, 'EUR 62,850.00'),
+                                      ('Lydia Alyattes third stater EUR 4,350.00', 'Lydia Alyattes third stater', 'EUR 4,350.00')):
+            source = dict(url='https://www.vcoins.com/en/MyAccount/ShowOrder.aspx?IdOrder=312614', title='Order', text=quote)
+            with self.assertRaises(ValueError):
+                checks.validate_result('coins', dict(price=65800), title,
+                    dict(comparisons=[dict(field='price', listing_value=value, evidence=quote, outcome='different',
+                                           source_url=source['url'], item_title=identity)]), [source], stuff._parse_price_amount)
+
+    def test_worker_reads_linked_receipt_and_validates_price(self):
+        self.available()
+        checks.ensure(self.db, 'coins', self.id, URL)
+        order = 'https://www.vcoins.com/en/MyAccount/ShowOrder.aspx?IdOrder=312614'
+        archives.enqueue(self.db, 'coins', self.id, order, 'VCoins Order 239-5192', 'order')
+        self.db.execute('UPDATE purchase_source_archives SET filename=? WHERE url=?', ('receipt.pdf', order))
+        self.db.commit()
+        title = 'Coin, Egypt, Ptolemy IV, Octodrachm'
+        quote = title + ' EUR 58,500.00'
+        analyze = Mock(return_value=dict(comparisons=[dict(field='price', listing_value='EUR 58,500.00',
+            evidence=quote, outcome='different', source_url=order, item_title=title)]))
+        with patch('banknote_check_sources.pdf_text', return_value=quote):
+            checks.run_once(stuff.open_db_connection, lambda _: ('available', title), analyze,
+                            stuff.UPLOAD_FOLDER, stuff._parse_price_amount)
+        self.assertEqual(analyze.call_args.args[4][0]['text'], quote)
+        self.assertEqual(self.state()['check']['price']['listed'], 'EUR 58,500.00')
+
     def test_saved_identical_warnings_hidden_in_detail_and_list_both_categories(self):
         for category, field in (('coins', 'mint'), ('banknotes', 'country')):
             self.available(category)

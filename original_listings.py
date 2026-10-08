@@ -289,10 +289,11 @@ def ebay_purchase_orders(db, category, record_id):
 
 
 class ListingService:
-    def __init__(self, app, get_db, connect, analyze, upload_folder, fonts):
+    def __init__(self, app, get_db, connect, analyze, upload_folder, fonts, parse_price=None):
         self.app, self.get_db, self.connect = app, get_db, connect
         self.analyze = analyze
         self.upload_folder, self.fonts = upload_folder, fonts
+        self.parse_price = parse_price
         self.wake = threading.Event()
 
     def lookup(self, category, record):
@@ -317,7 +318,7 @@ class ListingService:
                 if os.environ.get('ORIGINAL_LISTING_AI_CHECKS') == '1':
                     listing_checks.ensure(db, category, record['id'], row['url'])
                     db.commit()
-        check = listing_checks.report(db, category, record['id'])
+        check = listing_checks.report(db, category, record['id'], self.parse_price)
         pending = bool(row and row['next_check_at'] <= now)
         if pending:
             self.wake.set()
@@ -385,7 +386,8 @@ class ListingService:
                 try:
                     worked = self.work_once()
                     if os.environ.get('ORIGINAL_LISTING_AI_CHECKS') == '1':
-                        worked = listing_checks.run_once(self.connect, fetch_listing, self.analyze) or worked
+                        worked = listing_checks.run_once(self.connect, fetch_listing, self.analyze,
+                                                        self.upload_folder, self.parse_price) or worked
                     if os.environ.get('ORIGINAL_LISTING_ARCHIVES') == '1':
                         worked = source_documents.run_once(self.connect, self.upload_folder, self.fonts) or worked
                         worked = listing_images.run_once(self.connect, self.upload_folder) or worked
@@ -399,8 +401,8 @@ class ListingService:
         threading.Thread(target=run, name='original-listing-checks', daemon=True).start()
 
 
-def register(app, get_db, connect, can_see, require_owner, analyze, upload_folder, fonts):
-    service = ListingService(app, get_db, connect, analyze, upload_folder, fonts)
+def register(app, get_db, connect, can_see, require_owner, analyze, upload_folder, fonts, parse_price=None):
+    service = ListingService(app, get_db, connect, analyze, upload_folder, fonts, parse_price)
     bp = Blueprint('original_listings', __name__)
 
     @bp.get('/<category>/<record_id>/original-listing')
@@ -440,7 +442,21 @@ def register(app, get_db, connect, can_see, require_owner, analyze, upload_folde
             db.rollback()
             abort(404)
         current = manual_review(db, category, record_id)
-        check = listing_checks.report(db, category, record_id)
+        check = listing_checks.report(db, category, record_id, parse_price)
+        field = request.form.get('field')
+        if field:
+            if (not check or check['state'] != 'checked' or check['dismissed']
+                    or not hmac.compare_digest(check['token'], request.form.get('check_token', ''))):
+                db.rollback()
+                return jsonify(error='The review changed. Reload before dismissing this item.'), 409
+            if action != 'dismiss' or not any(c['field'] == field for c in check['differences']):
+                db.rollback()
+                return jsonify(error='This review item is no longer pending.'), 409
+            listing_checks.resolve(db, category, record_id, field, 'dismissed')
+            db.commit()
+            response = jsonify(service.lookup(category, record))
+            response.headers['Cache-Control'] = 'no-store'
+            return response
         for name, value in (('review_token', current), ('check_token', check)):
             if not hmac.compare_digest((value['token'] if value else '').encode(),
                                        request.form.get(name, '').encode()):
@@ -469,10 +485,15 @@ def register(app, get_db, connect, can_see, require_owner, analyze, upload_folde
         def review_reason(category, record_id):
             if 'listing_review_reasons' not in g:
                 g.listing_review_reasons = {}
-                for row in get_db().execute("SELECT coin_id,banknote_id,result FROM original_listing_checks "
+                for row in get_db().execute("SELECT * FROM original_listing_checks "
                                              "WHERE state='checked' AND dismissed=0"):
-                    reasons = [c['label'] + ': ' + (c['stored'] or 'Missing') + ' / listing: ' + c['listed']
-                               for c in listing_checks.differences(json.loads(row['result'] or '[]'))]
+                    item_category = 'coins' if row['coin_id'] else 'banknotes'
+                    item_id = row['coin_id'] or row['banknote_id']
+                    record = get_db().execute(f'SELECT * FROM {item_category} WHERE id=?', (item_id,)).fetchone()
+                    comparisons = listing_checks.current_comparisons(item_category, record, row, parse_price)
+                    reasons = [c['label'] + ': ' + (c['stored'] or 'Missing') + ' / '
+                               + c.get('source_label', 'listing') + ': ' + c['listed']
+                               for c in listing_checks.differences(comparisons)]
                     g.listing_review_reasons[(('coins' if row['coin_id'] else 'banknotes'),
                                               row['coin_id'] or row['banknote_id'])] = '; '.join(reasons)
             return g.listing_review_reasons.get((category, record_id))

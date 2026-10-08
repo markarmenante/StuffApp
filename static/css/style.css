@@ -4268,6 +4268,11 @@ input[type="date"] { -webkit-appearance: none; }
 .listing-review-reasons { padding:6px 12px; font-size:13px; line-height:1.45; overflow-wrap:anywhere; }
 .listing-review-reasons textarea { display:block; width:100%; box-sizing:border-box; font:inherit; letter-spacing:0; color:var(--text); background:transparent; border:0; padding:0; resize:vertical; }
 .listing-review-reasons p { margin:4px 0; }
+.listing-review-change { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; }
+.listing-review-change > span:first-child { min-width:0; }
+.listing-change-actions { display:inline-flex; flex:0 0 auto; gap:6px; }
+.listing-change-actions .purchase-review-action { padding:2px 10px; font-size:12px; }
+.listing-change-actions [data-change-action="dismiss"] { background:#fff; border-color:#aaa; color:#555; }
 @media (max-width:640px) { .listing-review-reasons { font-size:15px; } }
 .listing-check-status { margin:6px 12px; font-size:12px; color:#555; }
 .ebay-ordered { background:#fff5cb; border-color:#dfc467; color:#70520a; }
