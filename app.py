@@ -22047,6 +22047,7 @@ BANKNOTE_COLONY_PINS = {
 }
 
 BANKNOTE_SPELLING_PINS = {
+    'british west africa': ('Lagos', 6.52, 3.38),
     'danzig': ('Danzig (Gdańsk)', 54.35, 18.65),
     'west germany': ('Bonn', 50.73, 7.10),
     'federal republic of germany': ('Bonn', 50.73, 7.10),
@@ -22788,6 +22789,7 @@ BANKNOTE_STATE_NAMES = {
 # state it is, so its year need not decide. Checked before the key
 # bands, like BANKNOTE_SPELLING_PINS. (native, english) pairs.
 BANKNOTE_STATE_SPELLINGS = {
+    'british west africa': (None, 'British West Africa'),
     'danzig': ('Freie Stadt Danzig', 'Free City of Danzig'),
     'free city of danzig': ('Freie Stadt Danzig', 'Free City of Danzig'),
     'west germany': ('Bundesrepublik Deutschland',
@@ -25897,7 +25899,7 @@ def banknote_lookup_specs(record_id):
 
     purchase = prepared.get('purchase', {})
     for field, value in purchase.items():
-        if value and suggestions.get(field) in (None, ''):
+        if value and (field == 'price' or suggestions.get(field) in (None, '')):
             suggestions[field] = value
 
     if lookup_error and not any(
@@ -25939,7 +25941,7 @@ def banknote_lookup_specs(record_id):
                           'pick_number'}
 
     def _grounded(field, value):
-        if field in ('vendor', 'purchase_date') and value == purchase.get(field):
+        if field in ('vendor', 'purchase_date', 'price') and value == purchase.get(field):
             return True
         if field in ('price', 'vendor', 'purchase_date') and prepared['evidence']:
             quotes = suggestions.get('purchase_evidence') or {}

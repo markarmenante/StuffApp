@@ -443,6 +443,22 @@ class CatalogueTests(unittest.TestCase):
             self.assertEqual(stuff._banknote_pin(alias, 1936)['city'], 'Hanoi')
             self.assertEqual(stuff._banknote_state_name(alias, 1936)['native'], 'Indochine française')
 
+    def test_british_west_africa_origin_is_lagos_not_britain(self):
+        from unittest.mock import patch
+        for country in ('British West Africa', 'British West Africa (Nigeria)'):
+            self.assertEqual(stuff._banknote_pin(country, 1918),
+                             {'city': 'Lagos', 'latlng': [6.52, 3.38]})
+            self.assertEqual(stuff._banknote_state_name(country, 1918),
+                             {'native': None, 'english': 'British West Africa', 'span': None})
+        self.add('lagos', 'British West Africa', 1918, 'West African Currency Board')
+        with patch.object(stuff, 'render_template', wraps=stuff.render_template) as render:
+            page = stuff.app.test_client().get('/banknotes/lagos')
+        self.assertEqual(page.status_code, 200)
+        origin = render.call_args.kwargs['banknote_origin']
+        self.assertIsNone(origin['geo_query'])
+        self.assertEqual(origin['pin']['city'], 'Lagos')
+        self.assertEqual(origin['state']['english'], 'British West Africa')
+
     def test_startup_migration_reseeds_and_preserves_alias(self):
         self.add('french', 'Indochina', 1940, 'Banque de l’Indochine')
         self.add('british', 'Australia', 2025)

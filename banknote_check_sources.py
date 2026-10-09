@@ -4,6 +4,7 @@ import re
 import time
 import uuid
 import shutil
+from decimal import Decimal
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
@@ -37,6 +38,40 @@ def pdf_text(path):
         if len(result) < 40:
             raise ValueError('PDF has no readable text; a text-readable invoice is needed')
         return result
+
+
+def ebay_receipt_unit_price(text, item):
+    """Read only an explicit unit price in the exact purchased item's receipt block."""
+    if item['quantity'] != 1 or item['attention']:
+        return None
+    if re.search(r'\b(refund\w*|cancelled|canceled|discount\w*|coupon\w*)\b', text, re.I):
+        return None
+    order_ids = set(re.findall(r'\b\d{2}-\d{5}-\d{5}\b', text))
+    if order_ids != {item['order_id']}:
+        return None
+    prices = []
+    for block in re.split(r'\bItem info\b', text, flags=re.I)[1:]:
+        identity = re.search(r'\bItem number:\s*(\d{10,14})\b', block, re.I)
+        if not identity or identity[1] != item['item_id']:
+            continue
+        # eBay puts the price before the item number; payment totals and
+        # recommendations after it are not evidence of this item's cost.
+        matches = re.findall(
+            r'(?<![A-Za-z])Unit price\s+(US\s*\$|USD|\$|EUR|\u20ac|GBP|\u00a3)\s*'
+            r'((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})(?![\d.,])',
+            block[:identity.start()], re.I)
+        if len(matches) != 1:
+            return None
+        currency, raw = matches[0]
+        amount = Decimal(raw.replace(',', ''))
+        if amount <= 0:
+            return None
+        symbol = {'EUR': '\u20ac', 'GBP': '\u00a3'}.get(currency.upper(), currency)
+        if symbol.upper() == 'USD' or '$' in symbol:
+            symbol = '$'
+        digits = f'{amount:,.2f}'
+        prices.append(symbol + (digits[:-3] if digits.endswith('.00') else digits))
+    return prices[0] if len(prices) == 1 else None
 
 
 def save_pdf(db, record_id, url, title, kind, pdf, folder, category='banknotes'):
@@ -287,6 +322,16 @@ def prepare(db, record, folder, fonts, category='banknotes'):
             reports.append(title + ': saved PDF checked.')
         except Exception:
             warnings.append(title + ': PDF text could not be read; its fields are not verified.')
+    if item:
+        receipt = db.execute('SELECT filename FROM purchase_source_archives WHERE url=? AND kind IN (\'order\',\'invoice\')',
+                             ('https://order.ebay.com/ord/show?orderId=' + item['order_id'],)).fetchone()
+        if receipt and receipt['filename']:
+            for source in evidence:
+                if source['url'] == '/uploads/' + receipt['filename']:
+                    price = ebay_receipt_unit_price(source['text'], item)
+                    if price:
+                        purchase['price'] = price
+                        reports.append('Exact item unit price verified against the saved eBay receipt; shipping and tax excluded.')
     if not any(e['kind'] in ('order', 'invoice') for e in evidence):
         warnings.append('No readable invoice or order receipt found. Purchase amount and date are not verified against a receipt.')
     return dict(evidence=evidence, reports=reports, warnings=warnings,

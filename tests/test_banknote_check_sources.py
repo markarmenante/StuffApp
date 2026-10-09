@@ -129,6 +129,58 @@ class SourceCheckTests(unittest.TestCase):
         self.assertIn('synced purchase', sources.evidence_text(result))
         self.assertEqual(len(result['documents']), 1)
 
+    def receipt_text(self, price='$1,095.00'):
+        return ('Order number 12-34567-89012\nItem info\nTonga 1 Pound 1966\n'
+                f'{price}Unit price {price}\nItem number: 325643741723\n'
+                'Payment summary\nTax $84.86\nOrder total $1,179.86')
+
+    def test_receipt_unit_price_requires_exact_order_item_and_explicit_currency(self):
+        self.order()
+        item = purchase_orders.ebay_item_for_order(self.db, 'banknotes', self.note())
+        self.assertEqual(sources.ebay_receipt_unit_price(self.receipt_text(), item), '$1,095')
+        self.assertEqual(sources.ebay_receipt_unit_price(self.receipt_text('EUR 479.50'), item), '\u20ac479.50')
+        for text in (
+                self.receipt_text().replace('12-34567-89012', '12-34567-89013'),
+                self.receipt_text().replace('325643741723', '325643741724'),
+                self.receipt_text().replace('Unit price', 'Order total'),
+                self.receipt_text().replace('Unit price $1,095.00', 'Unit price 1095.00'),
+                self.receipt_text('CA$1,095.00'), self.receipt_text('EUR 1.095,00'),
+                self.receipt_text() + '\nPartially refunded',
+                self.receipt_text() + '\nCoupon $10.00',
+                self.receipt_text() + self.receipt_text()):
+            self.assertIsNone(sources.ebay_receipt_unit_price(text, item), text)
+        other = 'Item info\nOther note\nUnit price $55.00\nItem number: 325643741724\n'
+        self.assertEqual(sources.ebay_receipt_unit_price(other + self.receipt_text(), item), '$1,095')
+
+    def test_saved_exact_receipt_proposes_price_even_when_model_misses_it(self):
+        self.blank()
+        self.order()
+        out = io.BytesIO()
+        from reportlab.pdfgen.canvas import Canvas
+        canvas = Canvas(out)
+        for pos, line in enumerate(self.receipt_text().splitlines()):
+            canvas.drawString(35, 750 - pos * 15, line)
+        canvas.save()
+        sources.save_pdf(self.db, self.id,
+                         'https://order.ebay.com/ord/show?orderId=12-34567-89012',
+                         'eBay Order Receipt 12-34567-89012', 'order', out.getvalue(), stuff.UPLOAD_FOLDER)
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('No network')), \
+                patch.object(stuff.ebay_purchase_lookup, 'ensure', return_value={}), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value={'price': '$1,179.86'}):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['filled']['price'], '$1,095')
+        self.assertIsNone(self.note()['price'])
+        self.db.execute("UPDATE banknotes SET price='$999' WHERE id=?", (self.id,))
+        self.db.commit()
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('No network')), \
+                patch.object(stuff.ebay_purchase_lookup, 'ensure', return_value={}), \
+                patch.object(stuff, 'fetch_banknote_specs', side_effect=RuntimeError('Unavailable')):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['overwritten']['price'], {'current': '$999', 'new': '$1,095'})
+        self.assertEqual(self.note()['price'], '$999')
+
     def test_browser_capture_imports_photos_and_pdf_without_server_listing_access(self):
         self.blank()
         self.order()
