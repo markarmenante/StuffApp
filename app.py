@@ -15859,6 +15859,7 @@ VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VE
 {grade_rules}
 
 LIVENESS: every item must be purchasable now. An auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. For FIXED-PRICE dealer stock (VCoins stores, Shanna Schmidt, Harlan J. Berk, Roma's shop, the Nomos and CNG shops, Baldwin's, Forum, MA-Shops, eBay Buy It Now) return the item page whenever the search result shows it offered at a price and nothing says sold, reserved or archived — the scan opens every page itself afterwards and drops the ones that have ended, so you do not have to prove it; put in `live_evidence` what the result showed ("$1,850 — Add to cart", "Buy It Now, 2 available", "bidding ends 2026-10-03"). eBay is the exception: its search results keep ended items for months, so the scan must independently read the exact item's page and confirm its own buy/bid controls before recommending it. Search snippets, `live_evidence`, an asserted active status, a familiar seller, and a future `closes` date cannot override an unreadable, blocked, sold or ended eBay page. Quote only live wording you actually saw on that exact item, never controls on similar-item recommendations. Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). Skip anything the holdings already contain unless it is a clear grade upgrade (say so in `why`).
+EXACT AUCTION LINKS: use a verified individual lot page, never the auction house homepage, auction index, catalogue, calendar or live-bidding landing page. A sale number, future sale date or general bidding controls do not identify the particular coin or banknote. Follow the actual lot link; never guess a URL or assume an internal sale ID equals the auction number. If the exact lot link cannot be found, omit the candidate.
 
 COLONIAL ELIGIBILITY: Collection group is not colonial status. For colonial recommendations, use the actual issue period before independence, not merely an old printed series date. Exclude independent Commonwealth/Republic/successor-bank issues and ambiguous transition years. Include issuer. For undated notes and reissues provide issue_year_start, issue_year_end and issue_date_source (a corroborating catalogue or issuing-bank URL); never invent them. Domestic US large-size themes remain separate. EXCEPTION explicitly requested by Mark: genuine Philippine VICTORY series notes remain wanted after independence, including Roxas signature varieties and Central Bank of the Philippines Victory overprints. Identify the actual Philippine Victory catalogue number, issuer and series; label these accurately as Victory or post-independence Victory-CBP, never automatically colonial.
 
@@ -16576,6 +16577,15 @@ def _market_listing_url_problem(url):
             return 'Search or category page, not an exact eBay item'
         return ''
     query = {k.lower(): v for k, v in parse_qsl(parsed.query)}
+    # An auction ID identifies a sale, not one of its lots. Explicit lot
+    # queries and nested lot paths remain valid on auction catalogue sites.
+    route = re.sub(r'^/[a-z]{2,3}(?=/)', '', path)
+    auction_index = re.fullmatch(
+        r'/(?:auctions?|catalogues?|catalogs?|calendar|upcoming-auctions|livebidding)'
+        r'(?:\.(?:aspx?|php|html?))?(?:/[^/]+)?', route)
+    lot_query = any(query.get(k) for k in ('coinid', 'lotid', 'itemid', 'productid', 'lot'))
+    if auction_index and not lot_query:
+        return 'Auction or catalogue page, not an exact lot'
     # ID-bearing dealer URLs (including CNG CoinID and MA-Shops id)
     # remain intact; generic query/search paths do not identify a lot.
     identity = any(query.get(k) for k in ('coinid', 'lotid', 'itemid', 'productid', 'id'))
@@ -16723,7 +16733,9 @@ def _market_listing_probe(url, page=None):
     if heading:
         from html import unescape
         out['title'] = unescape(re.sub(r'<[^>]+>', ' ', heading.group(1))).strip()
-        if re.search(r'\bsearch results\b|^all products$|^inventory$|^shop$', out['title'], re.I):
+        auction_heading = (re.match(r'^(?:(?:current|upcoming|live|past|our|all|web)\s+)*auctions?\b', out['title'], re.I)
+                           and not re.search(r'\blot\s*(?:no\.?\s*|#\s*)?\d+\b', out['title'], re.I))
+        if auction_heading or re.search(r'\bsearch results\b|^all products$|^inventory$|^shop$', out['title'], re.I):
             out['state'], out['why'] = 'invalid', 'Inventory heading instead of an item title'
             return out
     # The page was readable: remember its photos for a candidate the
@@ -16742,7 +16754,9 @@ def _market_listing_probe(url, page=None):
     # The head of the page carries the state banner; the tail carries
     # "similar sold items" blocks that would false-alarm on 'sold '.
     head = re.split(r'similar items|you may also like|related products|recommended for you', text[:60_000], maxsplit=1)[0]
-    ended = [m for m in _MARKET_ENDED_PAGE_MARKERS if m in head]
+    # Auction fee terms mention "winning bids" even before bidding ends.
+    ended = [m for m in _MARKET_ENDED_PAGE_MARKERS if m in head
+             and (m != 'winning bid' or re.search(r'\bwinning bid\b', head))]
     live = [m for m in _MARKET_LIVE_PAGE_MARKERS if m in head]
     buyable = any(m in head for m in _MARKET_BUY_MARKERS)
     if ended and ('sold ' not in ended or len(ended) > 1 or not live):
