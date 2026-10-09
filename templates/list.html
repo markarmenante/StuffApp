@@ -314,38 +314,39 @@
       {% endif %}
     </div>
   {% else %}
-  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None, dot='1' if dot else None, history=None if show_history else '0') }}">
+  {% set _detail_url = url_for('detail_view', category=category, record_id=row['id'], q=q or None, filter=coin_filter or None, at=at_property or None, dot='1' if dot else None, history=None if show_history else '0') %}
+  <div class="item-row" id="item-{{ row['id'] }}" data-href="{{ _detail_url }}">
   {% endif %}
 
     <!-- Thumbnail -->
     {% if category != 'persons' and not _market %}
-    <div class="item-thumb"
+    <a class="item-thumb" href="{{ _detail_url }}"
          data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
-         title="Drop an image here to upload">
+         title="Open item details" aria-label="Open item details">
       {% set img = row[cat_info.image_field] if cat_info.image_field else none %}
       {% if img and img|is_image %}
         <img src="{{ url_for('file_thumb', filename=img) }}" alt="" loading="lazy">
       {% else %}
         <span class="no-img">{{ cat_info.icon }}</span>
       {% endif %}
-    </div>
+    </a>
     {% endif %}
 
     {# Reverse thumbnail — coins and banknotes. Hidden on mobile to keep the
        row tight. Has its own upload-url + data-field so dropping on it goes
        to image_2, not image_1. #}
     {% if category in ('coins', 'banknotes') and not _market %}
-    <div class="item-thumb item-thumb-rev"
+    <a class="item-thumb item-thumb-rev" href="{{ _detail_url }}"
          data-upload-url="{{ url_for('upload_image', category=category, record_id=row['id']) }}"
          data-field="image_2"
-         title="Drop the reverse image here">
+         title="Open item details" aria-label="Open item details from reverse image">
       {% set img2 = row['image_2'] %}
       {% if img2 and img2|is_image %}
         <img src="{{ url_for('file_thumb', filename=img2) }}" alt="" loading="lazy">
       {% else %}
         <span class="no-img">{{ cat_info.icon }}</span>
       {% endif %}
-    </div>
+    </a>
     {% endif %}
 
     <!-- Body -->
@@ -1209,12 +1210,10 @@ window.shareCardRow = async function (ev, btn) {
     var rowFileBtn = row.querySelector('.row-upload-btn input[type=file]');
     var firstThumb = row.querySelector('.item-thumb[data-upload-url]');
 
-    // Click anywhere on the row -> navigate to the detail page (the per-
-    // thumb drop handlers below stop propagation only on drag events,
-    // so click still bubbles up here). Wired unconditionally — categories
-    // without a thumbnail (e.g. persons) still need this to work.
+    // Native thumbnail links handle keyboard and modified clicks themselves.
+    // The rest of each row still opens the same record, even without a photo.
     row.addEventListener('click', function(e) {
-      if (e.target.closest('.row-upload-btn, .coin-tray-toggle, .market-actions')) return;
+      if (e.target.closest('a[href], .row-upload-btn, .coin-tray-toggle, .market-actions')) return;
       if (row.dataset.external) {
         window.open(row.dataset.href, '_blank', 'noopener');
         return;
