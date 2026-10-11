@@ -98,7 +98,7 @@ class FeedTests(unittest.TestCase):
             from flask import render_template
             html=render_template('partials/market_ebay_feed.html',market_personal_feed=observed)
         self.assertIn('Sponsored module unavailable',html)
-        self.assertIn('Collection match incomplete',html)
+        self.assertIn('Collection check incomplete',html)
         self.assertIn('eBay Watched',html)
         self.assertNotIn('market-buy',html)
 
@@ -180,7 +180,7 @@ class FeedTests(unittest.TestCase):
         self.db.execute('INSERT INTO banknotes('+','.join(values)+') VALUES('+','.join('?' for _ in values)+')',list(values.values()))
         self.db.commit()
 
-    def test_all_sources_get_linked_exact_and_possible_matches_excluding_sold(self):
+    def test_catalogue_reference_determines_duplicates_regardless_of_serial_or_certificate(self):
         self.note('exact',slab_number='123-456',serial_number='A99')
         self.note('type',status='Ordered')
         self.note('sold',status='Sold')
@@ -190,14 +190,68 @@ class FeedTests(unittest.TestCase):
         for source in ('colonial-british','ebay-personalized','sources'):
             copy=dict(item,theme=source)
             stuff._market_owned_match(self.db,'banknotes',copy)
-            self.assertEqual([(x['id'],x['kind']) for x in copy['collection_matches']],[('exact','exact'),('type','possible')])
+            self.assertEqual([(x['id'],x['kind']) for x in copy['collection_matches']],[('exact','catalogue'),('type','catalogue')])
             self.assertEqual(copy['collection_matches'][0]['url'],'/banknotes/exact')
         item.update(slab_number='',serial_number='A99')
-        self.assertEqual(stuff._market_collection_matches(self.db,item)[0]['kind'],'exact')
+        self.assertEqual(stuff._market_collection_matches(self.db,item)[0]['kind'],'catalogue')
         item.update(serial_number='',country='Unknown',pick_number='',listing_url=URL)
         self.db.execute('INSERT INTO original_listing_pages(url,vendor,item_key) VALUES(?,?,?)',(URL,'eBay','ebay:123456789012'))
         self.db.execute('INSERT INTO banknote_original_listings(banknote_id,url) VALUES(?,?)',('exact',URL));self.db.commit()
         self.assertEqual(stuff._market_collection_matches(self.db,item)[0]['kind'],'listing')
+
+    def test_reference_aliases_namespaces_varieties_and_missing_reference(self):
+        ref=stuff._market_catalog_references
+        for value in ('Fr.35','FR35','Friedberg 035','Fr # 35'):
+            self.assertEqual(ref(dict(pick_number=value)),{'friedberg:35'})
+        for value in ('P-96a','Pick 96A','P96a','SCWPM P96a'):
+            self.assertEqual(ref(dict(pick_number=value)),{'pick:96a'})
+        for value in ('TBB B123','Banknote Book B123','B123'):
+            self.assertEqual(ref(dict(pick_number=value)),{'tbb:123'})
+        self.assertEqual(ref(dict(pick_number='Pick A1; P-S123')) ,{'pick:a1','pick:s123'})
+        for title in ('PMG65EPQ', 'PMG 65', 'PCGS64', 'Price 64', 'PMG64NET', 'France 1944 PMG65', 'Pickett 1944'):
+            self.assertEqual(list(stuff._MARKET_REFERENCE_RE.finditer(title)),[],title)
+        self.note('ref',country='United States of America',pick_number='Fr.35',serial_number='A123',slab_number='999')
+        self.note('other-ref',country='Ceylon',pick_number='',other_catalog='TBB B123')
+        self.note('variety',pick_number='P-96a')
+        for source in ('sources','ebay-personalized','colonial-british'):
+            item=dict(country='United States',pick_number='FR35',serial_number='different',slab_number='different',theme=source)
+            self.assertEqual(stuff._market_collection_matches(self.db,item)[0]['kind'],'catalogue')
+        self.assertEqual(stuff._market_collection_matches(self.db,dict(country='Ceylon',other_catalog='B123'))[0]['id'],'other-ref')
+        for item in (dict(country='United States',pick_number='Fr35a'),dict(country='United States',pick_number='P35'),
+                     dict(country='Philippines',pick_number='P96b'),dict(country='Philippines',pick_number='',denomination='5 Pesos',date_1=1944,serial_number='A123',slab_number='999')):
+            self.assertEqual(stuff._market_collection_matches(self.db,item),[])
+        self.assertTrue(stuff._market_collection_check_incomplete(dict(country='Philippines',pick_number='')))
+
+    def test_noncirculating_and_net_filters_apply_to_observed_cards_and_saved_actions(self):
+        issue=stuff._market_banknote_issue_problem
+        excluded=('SPECIMEN','Proof','remainder','essai','colour trial','replica','fantasy','unissued','non-circulating','not issued for circulation','PMG64NET','PMG 64 NET','NET')
+        for text in excluded:
+            self.assertTrue(issue(dict(title=TITLE+' '+text)),text)
+        for text in ('Gem UNC issued note','not a specimen','not a specimen or proof','non-specimen','no NET designation','not NET','net price $150','proof of authenticity','https://dealer.net/item'):
+            self.assertFalse(issue(dict(title=TITLE+' '+text)),text)
+        self.assertTrue(issue(dict(title=TITLE,designation='NET')))
+        self.assertFalse(issue(dict(title=TITLE,grade='UNC 64',price='net price $150')))
+        ident=self.claimed();payload=observation(ident)
+        payload['items']=[]
+        for index,label in enumerate(('Gem UNC issued note','SPECIMEN','Proof','PMG64NET','Pick 96s')):
+            number=str(123456789020+index)
+            payload['items'].append(dict(item_id=number,listing_url='https://www.ebay.com/itm/'+number,
+                title=TITLE+' '+label,price='$150',image_url='',sources=['watched'],source_label='Watchlist',live_state='unknown'))
+        self.assertEqual(self.post(payload).status_code,200)
+        self.assertEqual([c['title'] for c in stuff._market_personal_feed(self.db,[])['cards']],[TITLE+' Gem UNC issued note'])
+        self.assertEqual(stuff._market_personal_feed(self.db,[])['excluded_count'],4)
+        self.db.execute("INSERT INTO market_scans(id,category,status,started_at) VALUES ('issue-scan','banknotes','done',datetime('now'))")
+        for index,label in enumerate(('SPECIMEN','Proof','PMG64NET')):
+            item=dict(title=TITLE+' '+label,country='Philippines',pick_number='P96',listing_url='https://dealer.example/item',verified=True)
+            self.db.execute("INSERT INTO market_scan_items(id,scan_id,category,status,payload,created_at) VALUES (?,'issue-scan','banknotes','new',?,datetime('now'))",('excluded'+str(index),json.dumps(item)))
+        self.db.commit()
+        for index in range(3):
+            route='/banknotes/market/excluded'+str(index)
+            self.assertEqual(self.client.get(route+'/listing').status_code,410)
+            for bought in (False,True):
+                self.assertEqual(self.client.post(route+'/buy',json=dict(bought=bought,location='Home')).status_code,409)
+        self.assertEqual(stuff._market_items(self.db,'banknotes'),[])
+        self.assertEqual(self.db.execute('SELECT count(*) FROM banknotes').fetchone()[0],0)
 
     def test_unverified_personal_cards_remain_visible_without_purchase_actions(self):
         ident=self.claimed(); payload=observation(ident)
@@ -220,7 +274,7 @@ class FeedTests(unittest.TestCase):
         self.assertNotIn('✓ live',html)
         self.assertEqual(stuff._market_personal_feed(self.db,[dict(listing_url=URL)])['cards'],[])
 
-    def test_model_cannot_invent_personal_urls_or_prove_exact_identifiers(self):
+    def test_model_cannot_invent_personal_urls(self):
         ident=self.claimed(); self.assertEqual(self.post(observation(ident)).status_code,200)
         observed=feed.get_result(self.db,ident)
         valid=dict(listing_url=URL,title=TITLE,slab_number='123456',serial_number='A99999')
@@ -233,19 +287,6 @@ class FeedTests(unittest.TestCase):
             items,error,note=stuff._market_ebay_source('fixture',('','','','',''))
         self.assertEqual([i['listing_url'] for i in items],[URL])
         self.assertEqual(items[0]['discovery_sources'],['sponsored','watched'])
-        self.note('claimed-cert',slab_number='123456')
-        item=dict(valid,country='Philippines',pick_number='P-96',denomination='5 Pesos',grading_authority='PMG')
-        self.assertEqual(stuff._market_collection_matches(self.db,item)[0]['kind'],'possible')
-        pr=dict(state='live',status=200,length=50,challenged=False,final=URL,why='Buy it now',identity_text=TITLE)
-        with patch.object(stuff,'_market_listing_state',side_effect=lambda url: (setattr(stuff._MARKET_LAST_PROBE,'probe',pr) or 'live')):
-            checked=stuff._market_verify_live([item])[0]
-        self.assertEqual(checked['observed_identifiers'],[])
-        pr['identity_text']=TITLE+' Certification number 123456; serial number A99999'
-        with patch.object(stuff,'_market_listing_state',side_effect=lambda url: (setattr(stuff._MARKET_LAST_PROBE,'probe',pr) or 'live')):
-            checked=stuff._market_verify_live([item])[0]
-        self.assertEqual(set(checked['observed_identifiers']),{'slab_number','serial_number'})
-        self.assertEqual(stuff._market_collection_matches(self.db,checked)[0]['kind'],'exact')
-
     def test_old_saved_candidates_refresh_warnings_and_render_links(self):
         self.note('existing')
         item=dict(title=TITLE,country='Philippines',denomination='5 Pesos',pick_number='P-96',date_1=1944,
@@ -257,7 +298,7 @@ class FeedTests(unittest.TestCase):
         self.db.execute("INSERT INTO market_scan_items(id,scan_id,category,status,payload,created_at) VALUES('candidate','scan','banknotes','new',?,?)",(json.dumps(item),feed.utc(time.time())))
         self.db.commit()
         html=self.client.get('/banknotes/market').get_data(as_text=True)
-        self.assertIn('Possible collection duplicate',html)
+        self.assertIn('Already in your collection',html)
         self.assertIn('/banknotes/existing',html)
         self.assertIn('eBay Watched',html);self.assertIn('eBay Sponsored',html)
         self.db.execute("UPDATE banknotes SET status='Sold'");self.db.commit()

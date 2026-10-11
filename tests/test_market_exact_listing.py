@@ -26,7 +26,8 @@ class ExactListingTests(unittest.TestCase):
         self.assertNotEqual(canonical_url('https://cngcoins.com/Coin.aspx?CoinID=4321'),canonical_url('https://cngcoins.com/Coin.aspx?CoinID=4322'))
 
     def test_dealer_inventory_file_and_woocommerce_categories_are_not_items(self):
-        invalid=('https://sanchezcurrency.com/current-inventory/',
+        invalid=('https://sanchezcurrency.com/us-large-size-notes.html',
+                 'https://sanchezcurrency.com/current-inventory/',
                  'https://sanchezcurrency.com/current-inventory.html',
                  'https://sanchezcurrency.com/product-category/large-size-legal-tender-notes/?id=35',
                  'https://dealer.test/inventory.htm','https://dealer.test/shop.php')

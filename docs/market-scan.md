@@ -172,17 +172,27 @@ scan request. Raw pages, cookies, credentials, addresses and payment details are
 not transferred. Bounded main-item listing text may accompany an exact read.
 The existing scan model shapes only observed URLs; unknown fields remain unknown.
 
+Issued-for-circulation notes only: specimens, proofs, remainders, essais, trials,
+replicas, fantasies and other non-issued/non-circulating notes are excluded, as
+are **NET grading designations**. This common rule applies before model shaping,
+to observed watched/sponsored cards, to ordinary candidates, to old saved rows,
+and at View/Buy/Bought actions. Explicit denials such as “not a specimen” do not
+trigger it. An issued note graded UNC is eligible; “net price” and `.net` web
+addresses are not NET grading designations. Coin rules are unchanged.
+
 All banknote candidate sources, including existing saved scans, check Own/Ordered
-holdings and show matching collection links. Same certificate or same issue and
-serial can produce an exact specimen warning only when the identifier is
-corroborated by observed listing text. Same eBay purchase-listing associations
-are explicitly labeled as listing links, since multi-quantity listings need not
-identify one specimen. Same country/catalogue, or denomination with year/series,
-produces a **possible collection duplicate** warning. Sold/gifted/lost holdings do
-not count. Observed cards without enough identity information disclose an
-incomplete collection check; absence of a match is not a guarantee of novelty.
+holdings and show matching collection links. **A matching Pick or other catalogue
+reference determines “Already in your collection.”** Serial numbers, grading
+certificates and grade differences do not affect this decision (Mark, 2026-10-11).
+The matcher normalizes case, spacing and catalogue aliases (Pick/P, Friedberg/Fr,
+TBB/B), preserves variety suffixes and catalogue namespaces, and scopes references
+by country. It reads both `pick_number` and `other_catalog`. A same eBay purchase
+listing is separately labelled as a linked listing. Sold/gifted/lost holdings do
+not count. Missing country or catalogue reference produces an incomplete-check
+notice; denomination/year similarity alone is not a duplicate verdict, and absence
+of a match is not a guarantee of novelty.
 
 `tests/test_market_ebay_feed.py` covers authentication, Gerri isolation, request
 claims/expiry, account mismatch, strict listing identity, duplicate source labels,
 source availability, fresh browser proof, observed-card visibility without
-purchase controls, invented model URLs, and exact/possible collection warnings.
+purchase controls, invented model URLs, and reference-based collection warnings.

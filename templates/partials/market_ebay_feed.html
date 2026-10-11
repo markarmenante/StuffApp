@@ -2,6 +2,7 @@
   <div class="banknote-group-heading">
     <h2 id="marketPersonalTitle">Your eBay watched and sponsored items</h2>
     <p>Observed {{ market_personal_feed.observed_date }}. These are your eBay cards; availability and collection eligibility may still need checking. Sponsored placement does not affect ranking.</p>
+    {% if market_personal_feed.excluded_count %}<p>{{ market_personal_feed.excluded_count }} specimen, proof, other non-issued or NET-designated cards excluded by your collection rules.</p>{% endif %}
     {% for source, state in market_personal_feed.sources.items() %}
     {% if state.status != 'ok' %}<p role="status">{{ 'Watched' if source == 'watched' else 'Sponsored similar-to-watched' }}: {{ state.message or state.status }}</p>{% endif %}
     {% endfor %}
@@ -18,8 +19,8 @@
           <div class="idr market-tags">
             {% if 'watched' in card.sources %}<span class="market-tag">eBay Watched</span>{% endif %}
             {% if 'sponsored' in card.sources %}<span class="market-tag">eBay Sponsored · similar to watched</span>{% endif %}
-            {% for match in card.collection_matches %}<span class="market-tag market-tag-owned">{{ 'Listing already linked to your collection' if match.kind == 'listing' else 'Possible collection duplicate' }}{% if match.status == 'Ordered' %} (ordered){% endif %}: <a href="{{ match.url }}" target="_blank" rel="noopener">{{ match.label }}</a> — {{ match.reason }}</span>{% endfor %}
-            {% if card.collection_check_incomplete %}<span class="market-tag">Collection match incomplete — card details are insufficient</span>{% endif %}
+            {% for match in card.collection_matches %}<span class="market-tag market-tag-owned">{{ 'Already in your collection' if match.kind == 'catalogue' else 'Listing already linked to your collection' }}{% if match.status == 'Ordered' %} (ordered){% endif %}: <a href="{{ match.url }}" target="_blank" rel="noopener">{{ match.label }}</a> — {{ match.reason }}</span>{% endfor %}
+            {% if card.collection_check_incomplete %}<span class="market-tag">Collection check incomplete — catalogue reference or country missing</span>{% endif %}
           </div>
           <div class="market-actions"><a class="market-btn" href="{{ card.listing_url }}" target="_blank" rel="noopener">Open eBay to check</a></div>
         </div>
@@ -28,6 +29,6 @@
     {% endfor %}
   </div>
   {% elif market_personal_feed.sources.watched.status == 'ok' and market_personal_feed.sources.sponsored.status == 'ok' %}
-  <p>All observed cards are already shown in the checked candidates below, or eBay returned no cards.</p>
+  <p>After your collection rules are applied, any remaining observed cards are already shown in the checked candidates below.</p>
   {% endif %}
 </section>
