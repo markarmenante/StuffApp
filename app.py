@@ -6194,6 +6194,7 @@ def init_db():
         except ValueError:
             key = row['listing_url']
         db.execute('UPDATE market_scan_items SET canonical_url=? WHERE id=?', [key, row['id']])
+    market_runtime.init_dismissals(db)
     db.execute('CREATE INDEX IF NOT EXISTS idx_market_identity ON market_scan_items(category, canonical_url)')
     db.execute('CREATE INDEX IF NOT EXISTS idx_market_latest ON market_scans(category, started_at)')
     db.commit()
@@ -16920,6 +16921,8 @@ def _market_normalize_item(db, category, raw):
     problem = _market_listing_url_problem(url)
     if problem:
         return _market_drop(raw, problem)
+    if market_runtime.is_dismissed(db, category, url):
+        return _market_drop(raw, 'listing deleted from recommendations')
     host = re.sub(r'^https?://(www\.)?', '', url).split('/')[0].lower()
     if any(h in host for h in ('google.', 'bing.', 'duckduckgo')):
         return _market_drop(raw, 'search-engine URL')
@@ -17800,9 +17803,16 @@ def _market_ebay_source(api_key, inputs):
     cards, states = result
     excluded = sum(bool(_market_banknote_issue_problem(c)) for c in cards)
     cards = [c for c in cards if not _market_banknote_issue_problem(c)]
+    conn = open_db_connection()
+    try:
+        deleted = market_runtime.dismissed_keys(conn, 'banknotes')
+    finally:
+        conn.close()
+    suppressed = sum(market_runtime.canonical_url(c['listing_url']) in deleted for c in cards)
+    cards = [c for c in cards if market_runtime.canonical_url(c['listing_url']) not in deleted]
     errors = [f"eBay {kind}: {state['message'] or state['status']}" for kind, state in states.items() if state['status'] != 'ok']
     unknown = sum(c['live_state'] == 'unknown' for c in cards)
-    notes = f"eBay browser: {len(cards)} observed listings after exclusions; {unknown} awaiting exact-listing verification; {excluded} excluded non-issued/NET cards"
+    notes = f"eBay browser: {len(cards)} observed listings after exclusions; {unknown} awaiting exact-listing verification; {excluded} excluded non-issued/NET cards; {suppressed} previously deleted listings omitted"
     if not cards:
         return [], '; '.join(errors) or None, notes
     import anthropic
@@ -18109,8 +18119,13 @@ def _market_items(db, category, earlier=False):
             "ORDER BY rank", [category]).fetchall()
     out = []
     owned_rows = _market_owned_banknote_rows(db) if category == 'banknotes' else []
+    deleted = market_runtime.dismissed_keys(db, category)
     for r in rows:
+        key = market_runtime.listing_key(r)
+        if key in deleted and not earlier:
+            continue
         item = json.loads(r['payload'])
+        item['canonical_url'] = key
         if category == 'banknotes':
             item['collection_matches'] = _market_collection_matches(db, item, owned_rows)
             item['collection_check_incomplete'] = _market_collection_check_incomplete(item)
@@ -18131,7 +18146,7 @@ def _market_items(db, category, earlier=False):
         item['empire'] = _market_colonial_empire(item)
         item['issue_label'] = market_colonial.victory_label(item) or ('United States issue' if _canonical_banknote_country(item.get('country')) == 'United States of America' else '')
         item['id'] = r['id']
-        item['status'] = r['status']
+        item['status'] = 'dismissed' if key in deleted else r['status']
         item['scanned_at'] = (r['created_at'] or '')[:10]
         out.append(item)
     db.commit()
@@ -18156,12 +18171,14 @@ def _market_personal_feed(db, visible_items):
     known_countries = sorted({name for r in rows if r.get('country') for name in banknote_catalog.country_spellings(r['country']) if len(name) > 2}, key=len, reverse=True)
     displayed = {market_runtime.canonical_url(i.get('listing_url')) for i in visible_items}
     cards = []
+    deleted = market_runtime.dismissed_keys(db, 'banknotes')
     excluded_count = 0
     for card in market_ebay_feed.cards(db, latest['id']):
         if _market_banknote_issue_problem(card):
             excluded_count += 1
             continue
-        if market_runtime.canonical_url(card['listing_url']) in displayed:
+        card['canonical_url'] = market_runtime.canonical_url(card['listing_url'])
+        if card['canonical_url'] in displayed or card['canonical_url'] in deleted:
             continue
         title = card['title']
         country = next((c for c in known_countries if re.search(r'(?<![a-z])' + re.escape(c) + r'(?![a-z])', title, re.I)), '')
@@ -18449,6 +18466,8 @@ def market_item_buy(category, item_id):
     row = _market_item_or_404(db, category, item_id)
     item = json.loads(row['payload'])
     request_data = request.get_json(silent=True) or {}
+    if category == 'banknotes' and row['status'] != 'ordered' and request_data.get('bought') is not True and (row['status'] == 'dismissed' or market_runtime.is_dismissed(db, category, item.get('listing_url'))):
+        return jsonify({'ok': False, 'error': 'This recommendation was deleted. Use Bought in Earlier candidates only for a purchase already made.'}), 409
     problem = _market_action_problem(db, row, item, already_paid=request_data.get('bought') is True or row['status'] == 'ordered')
     if problem:
         return jsonify({'ok': False, 'error': 'Offer unavailable: ' + problem}), 409
@@ -18491,10 +18510,32 @@ def market_item_dismiss(category, item_id):
         return jsonify({'error': 'Unknown category'}), 400
     _market_require_owner()
     db = get_db()
-    _market_item_or_404(db, category, item_id)
-    db.execute("UPDATE market_scan_items SET status = 'dismissed' WHERE id = ? AND status != 'ordered'", [item_id])
-    db.commit()
-    return jsonify({'ok': True})
+    row = _market_item_or_404(db, category, item_id)
+    if category == 'banknotes':
+        key = market_runtime.listing_key(row)
+        if not key:
+            return jsonify({'ok': False, 'error': 'This candidate has no listing to delete.'}), 409
+        market_runtime.dismiss_listing(db, category, key)
+    else:
+        key = market_runtime.listing_key(row)
+        db.execute("UPDATE market_scan_items SET status = 'dismissed' WHERE id = ? AND status != 'ordered'", [item_id])
+        db.commit()
+    return jsonify({'ok': True, 'canonical_url': key})
+
+
+@app.route('/banknotes/market/ebay-feed/<item_id>/dismiss', methods=['POST'])
+def market_ebay_item_dismiss(item_id):
+    _market_require_owner()
+    if not market_ebay_feed.enabled() or not re.fullmatch(r'\d{9,15}', item_id):
+        abort(404)
+    db = get_db()
+    url = 'https://www.ebay.com/itm/' + item_id
+    # Resolve a card from the signed-in account's fresh observation. Never accept
+    # an arbitrary client URL; repeated deletes still work after evidence expires.
+    if not market_runtime.is_dismissed(db, 'banknotes', url) and not market_ebay_feed.recent_card(db, url, max_age=86400):
+        abort(404)
+    key = market_runtime.dismiss_listing(db, 'banknotes', url)
+    return jsonify({'ok': True, 'canonical_url': key})
 
 
 

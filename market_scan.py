@@ -52,6 +52,69 @@ def canonical_url(url):
     return urlunsplit((p.scheme.lower(), host, p.path.rstrip('/') or '/', urlencode(query), ''))
 
 
+def listing_key(row):
+    """Resolve legacy payload-only rows as well as indexed candidate rows."""
+    data = dict(row)
+    url = data.get('listing_url')
+    if not url and data.get('payload'):
+        try:
+            url = json.loads(data['payload']).get('listing_url')
+        except (TypeError, ValueError, AttributeError):
+            pass
+    try:
+        return canonical_url(url or data.get('canonical_url')) if url or data.get('canonical_url') else ''
+    except ValueError:
+        return ''
+
+
+def init_dismissals(db):
+    """Decisions outlive the prunable candidate and browser-evidence records."""
+    db.execute("""CREATE TABLE IF NOT EXISTS market_dismissals (
+        category TEXT NOT NULL, canonical_url TEXT NOT NULL,
+        dismissed_at TEXT NOT NULL, PRIMARY KEY(category,canonical_url))""")
+    # Preserve every historical dismissal still present when upgrading. Already
+    # pruned historical rows cannot be recovered. This migration is idempotent.
+    for row in db.execute("SELECT * FROM market_scan_items WHERE category='banknotes' AND status='dismissed'").fetchall():
+        key = listing_key(row)
+        if key:
+            db.execute('INSERT OR IGNORE INTO market_dismissals VALUES(?,?,?)',
+                       ['banknotes', key, row['created_at'] or datetime.utcnow().isoformat()])
+
+
+def dismissed_keys(db, category):
+    if category != 'banknotes':
+        return set()
+    return {r[0] for r in db.execute('SELECT canonical_url FROM market_dismissals WHERE category=?', [category])}
+
+
+def is_dismissed(db, category, url):
+    return bool(category == 'banknotes' and db is not None and db.execute(
+        'SELECT 1 FROM market_dismissals WHERE category=? AND canonical_url=?',
+        [category, canonical_url(url)]).fetchone())
+
+
+def dismiss_listing(db, category, url):
+    """Serialize a durable listing decision with progressive scan publication."""
+    key = canonical_url(url)
+    if not key or category != 'banknotes':
+        raise ValueError('An exact banknote listing is required')
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        db.execute('INSERT OR IGNORE INTO market_dismissals VALUES(?,?,?)',
+                   [category, key, datetime.utcnow().isoformat()])
+        # Include older rows that predate the canonical_url column, but preserve
+        # Ordered records and the collection even if this URL appears twice.
+        ids = [r['id'] for r in db.execute("SELECT * FROM market_scan_items WHERE category=? AND status!='ordered'", [category])
+               if listing_key(r) == key]
+        db.executemany("UPDATE market_scan_items SET status='dismissed',canonical_url=? WHERE id=?", [(key, i) for i in ids])
+        db.execute("UPDATE market_scans SET revision=revision+1, item_count=(SELECT count(*) FROM market_scan_items WHERE scan_id=market_scans.id AND status='new') WHERE category=?", [category])
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return key
+
+
 _CURRENT = ContextVar('market_scan_context', default=None)
 _SOURCE = ContextVar('market_scan_source', default='processing')
 _DISCOVERY = ContextVar('market_scan_discovery', default=False)
@@ -423,6 +486,8 @@ class MarketRepository:
             saved = []
             for item in items:
                 key = canonical_url(item['listing_url'])
+                if is_dismissed(db, self.category, item['listing_url']):
+                    continue
                 # Reuse earlier live candidates' IDs so actions in an already
                 # open tab remain valid. Never resurrect a dismissed/bought lot.
                 row = db.execute("SELECT * FROM market_scan_items WHERE category=? AND canonical_url=? ORDER BY CASE WHEN status IN ('ordered','dismissed') THEN 0 ELSE 1 END, created_at DESC LIMIT 1", [self.category, key]).fetchone()
@@ -437,7 +502,7 @@ class MarketRepository:
                     db.execute("INSERT INTO market_scan_items(scan_id,score,title,listing_url,venue,price,price_usd,grade_numeric,designation,closes,theme,payload,created_at,canonical_url,id,category,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new')", data + [ident, self.category])
             rows = db.execute("SELECT id FROM market_scan_items WHERE category=? AND status='new' ORDER BY score DESC, grade_numeric DESC, id", [self.category]).fetchall()
             db.executemany('UPDATE market_scan_items SET rank=? WHERE id=?', [(n, r['id']) for n, r in enumerate(rows, 1)])
-            db.execute('UPDATE market_scans SET revision=revision+1, item_count=(SELECT count(*) FROM market_scan_items WHERE scan_id=?) WHERE id=?', [self.scan_id, self.scan_id])
+            db.execute("UPDATE market_scans SET revision=revision+1, item_count=(SELECT count(*) FROM market_scan_items WHERE scan_id=? AND (category!='banknotes' OR status='new')) WHERE id=?", [self.scan_id, self.scan_id])
 
         return saved
 
@@ -448,8 +513,10 @@ class MarketRepository:
     def finish(self, summary, errors, metrics, failed=False):
         with self.transaction() as db:
             # A partial/empty scan must not sweep away the previous useful list.
-            count = db.execute('SELECT count(*) FROM market_scan_items WHERE scan_id=?', [self.scan_id]).fetchone()[0]
+            count = db.execute("SELECT count(*) FROM market_scan_items WHERE scan_id=? AND (category!='banknotes' OR status='new')", [self.scan_id]).fetchone()[0]
             if not errors and count:
                 db.execute("UPDATE market_scan_items SET status='superseded' WHERE category=? AND status='new' AND scan_id!=?", [self.category, self.scan_id])
+            if self.category == 'banknotes':
+                init_dismissals(db)
             db.execute("DELETE FROM market_scan_items WHERE category=? AND status IN ('superseded','dismissed') AND created_at<?", [self.category, (datetime.utcnow() - timedelta(days=60)).isoformat()])
             db.execute('UPDATE market_scans SET status=?,finished_at=?,summary=?,error=?,progress=?,revision=revision+1,item_count=? WHERE id=?', ['failed' if failed else 'done', datetime.utcnow().isoformat(), summary, '; '.join(errors)[:1000] or None, json.dumps(metrics), count, self.scan_id])

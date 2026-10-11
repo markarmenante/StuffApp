@@ -306,7 +306,7 @@
   {% if _market %}
   {# A market row opens the listing in a new tab; its thumbnail is the
      seller's photo (no upload targets here). #}
-  <div class="item-row market-row" id="item-{{ row['id'] }}" data-href="{{ url_for('market_item_listing', category=category, item_id=row['id']) }}" data-external="1">
+  <div class="item-row market-row" id="item-{{ row['id'] }}" data-listing-key="{{ row['canonical_url'] or '' }}" data-href="{{ url_for('market_item_listing', category=category, item_id=row['id']) }}" data-external="1">
     <div class="item-thumb market-thumb" title="Open the listing">
       {% if row['image_url'] %}
         <img src="{{ row['image_url'] }}" alt="" loading="lazy" referrerpolicy="no-referrer"
@@ -801,7 +801,7 @@
           <button type="button" class="market-btn market-buy market-bought" data-id="{{ row['id'] }}" data-bought="1"
                   title="Already paid on the seller's site — file this as an Ordered {{ cat_info.singular|lower }} without opening the listing">Bought</button>
           {% if not market_earlier %}
-          <button type="button" class="market-btn market-dismiss" data-id="{{ row['id'] }}" title="Hide this candidate">✕</button>
+          <button type="button" class="market-btn market-dismiss{% if category == 'banknotes' %} market-delete{% endif %}" data-id="{{ row['id'] }}" data-dismiss-url="{{ url_for('market_item_dismiss', category=category, item_id=row['id']) }}" title="{{ 'Delete this recommendation and do not recommend this listing again' if category == 'banknotes' else 'Hide this candidate' }}">{{ 'Delete' if category == 'banknotes' else '✕' }}</button>
           {% endif %}
         </div>
       </div>
@@ -855,15 +855,23 @@
   let revision = {{ market_scan['revision'] if market_scan else 0 }};
   let scanId = {{ (market_scan['id'] if market_scan else '')|tojson }};
   let actionBusy = false;
+  let actionGeneration = 0;
+  let refreshRequest = 0;
+  const dismissedKeys = new Set();
   const earlier = {{ market_earlier|default(false)|tojson }};
   async function refreshCandidates(nextRevision) {
     if (earlier || actionBusy || document.querySelector('.location-choice-backdrop')) return false;
+    const generation = actionGeneration;
+    const requestId = ++refreshRequest;
     const response = await fetch(window.location.href, {cache: 'no-store'});
     if (!response.ok) throw new Error('Could not refresh candidates');
     const page = new DOMParser().parseFromString(await response.text(), 'text/html');
     const fresh = page.getElementById('marketResults');
     const current = document.getElementById('marketResults');
-    if (fresh && current && !actionBusy && !document.querySelector('.location-choice-backdrop')) {
+    if (fresh && current && generation === actionGeneration && requestId === refreshRequest && !actionBusy && !document.querySelector('.location-choice-backdrop')) {
+      fresh.querySelectorAll('[data-listing-key]').forEach(row => {
+        if (dismissedKeys.has(row.dataset.listingKey)) row.remove();
+      });
       current.replaceChildren(...fresh.childNodes);
       const oldCount = document.querySelector('.list-count, .list-cat-title-count');
       const newCount = page.querySelector('.list-count, .list-cat-title-count');
@@ -976,20 +984,50 @@
       const btn = ev.target.closest('.market-dismiss');
       if (!btn || actionBusy) return;
       actionBusy = true;
+      actionGeneration += 1;
       ev.preventDefault(); ev.stopPropagation();
       const row = btn.closest('.item-row');
-      fetch({{ url_for('market_item_dismiss', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), { method: 'POST' })
-        .then(r => r.json())
+      let deleted = false;
+      btn.disabled = true;
+      row?.querySelector('.market-action-feedback')?.remove();
+      fetch(btn.dataset.dismissUrl, { method: 'POST' })
+        .then(async response => {
+          const data = await response.json();
+          if (!response.ok || !data || !data.ok) throw new Error('Delete failed');
+          return data;
+        })
         .then(d => {
-          if (d && d.ok && row) {
-            row.remove();
-            const count = document.querySelectorAll('.market-row').length;
-            const label = document.querySelector('.list-count, .list-cat-title-count');
-            if (label) label.textContent = count + (CAT === 'coins' ? ' Coins' : '');
+          deleted = true;
+          actionGeneration += 1;
+          const key = d.canonical_url || row?.dataset.listingKey;
+          if (key) {
+            dismissedKeys.add(key);
+            document.querySelectorAll('#marketResults [data-listing-key]').forEach(candidate => {
+              if (candidate.dataset.listingKey === key) candidate.remove();
+            });
+          }
+          row?.remove();
+          const count = document.querySelectorAll('.market-row').length;
+          const label = document.querySelector('.list-count, .list-cat-title-count');
+          if (label) label.textContent = count + (CAT === 'coins' ? ' Coins' : '');
+          setStatus(CAT === 'banknotes' ? 'Deleted. This listing will no longer be recommended.' : 'Candidate hidden.');
+        })
+        .catch(() => {
+          const message = 'Could not delete this recommendation. Please try again.';
+          setStatus(message);
+          if (row) {
+            const feedback = document.createElement('p');
+            feedback.className = 'market-action-feedback';
+            feedback.setAttribute('role', 'alert');
+            feedback.textContent = message;
+            row.querySelector('.market-meta')?.appendChild(feedback);
           }
         })
-        .catch(() => { setStatus('Could not dismiss this candidate; please try again.'); })
-        .finally(() => { actionBusy = false; });
+        .finally(() => {
+          actionBusy = false;
+          btn.disabled = false;
+          if (deleted) refreshCandidates(revision).catch(() => {});
+        });
   });
   document.addEventListener('click', ev => {
     const row = ev.target.closest('.market-row');

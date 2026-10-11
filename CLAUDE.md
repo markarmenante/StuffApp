@@ -6,6 +6,15 @@
 session's opening context. Keep it the first section of this file, and
 fold new standing instructions in here — nowhere else.)
 
+- **Banknote recommendation deletion** (2026-10-11): keep a visible Delete
+  control on current recommendations and watched/sponsored cards. Deleting a
+  recommendation must permanently suppress that exact listing across future
+  scans, feed refreshes, restarts and devices, using the hosted database. Match
+  eBay item IDs across tracking URLs and regional domains; do not suppress other
+  listings solely because they share a Pick/catalogue reference. Preserve the
+  collection, Ordered records and explicitly labelled Earlier history/Bought
+  recovery. The eBay discovery connection remains read-only; deletion does not
+  unwatch or change the eBay account. See `docs/market-scan.md`.
 - **Commit and push directly to `main`.** No draft-PR round-trips — `main` is
   the deploy branch; Railway auto-deploys it.
 - **Shared connections and pathways** (2026-10-04): read this repo's

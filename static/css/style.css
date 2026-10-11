@@ -4050,6 +4050,15 @@ input[type="date"] { -webkit-appearance: none; }
 .market-buy:hover { background: #0050c0; }
 .market-buy:disabled { opacity: .5; cursor: default; }
 .market-dismiss { width: 26px; padding: 0; }
+.market-delete { width: auto; padding: 0 12px; }
+.market-dismiss:disabled { opacity: .5; cursor: default; }
+.market-personal-feed .market-actions { flex-wrap: wrap; }
+.market-personal-row .item-body { min-width: 0; flex: 1; }
+.market-personal-row .item-body, .market-personal-row .idr,
+.market-personal-row .idr span, .market-personal-row .market-tag {
+  min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
+}
+.market-action-feedback { color: var(--text-secondary); font-size: 12px; }
 
 /* ── COLLECTION ANALYSIS (Watches / Coins / Banknotes) ── */
 .analysis-pill { margin-right: 2px; }

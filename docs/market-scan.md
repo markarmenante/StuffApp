@@ -43,9 +43,34 @@ newer scan. Existing undecided candidates remain visible during discovery.
 Only a successful, nonempty scan with no source errors supersedes old
 undecided candidates. Partial, failed, or empty scans retain them.
 
-The existing 60-day prune of dismissed/superseded candidates still applies.
-An expired dismissed record can therefore appear again in a later scan.
-Ordered records are not pruned by the scan.
+Banknote current candidates and observed watched/sponsored cards have **Delete**.
+It permanently suppresses that exact listing from all recommendation sources,
+without changing the eBay watchlist, collection or Ordered records. Another
+listing with the same catalogue reference remains eligible. The decision lives
+in `market_dismissals`, keyed by category and canonical listing URL, on the hosted
+collection database, so it survives browsers/devices, restarts and all source
+refreshes. Current views, personal-source model input and final transactional
+publication consult it; a batch already running cannot resurrect a deleted item.
+The deletion transaction marks all matching non-ordered candidate rows dismissed
+and advances scan revisions. UI refreshes started before deletion cannot put the
+card back; errors leave it visible and retryable.
+
+The existing 60-day prune of dismissed/superseded candidate history still applies,
+and personal evidence expires after 24 hours. Neither removes the suppression
+record. Startup and pre-prune migration preserve existing retained banknote
+dismissals, including legacy payload-only rows; dismissals already pruned before
+this upgrade cannot be recovered. Earlier candidates remain explicitly labelled
+Dismissed with historical View and Bought recovery, without recommendation Buy
+or Delete controls. Filing a purchase through Bought does not erase suppression.
+Ordered records are not pruned. Coin dismissal behavior is unchanged.
+
+`POST /banknotes/market/<candidate_id>/dismiss` saves the candidate's listing
+identity. `POST /banknotes/market/ebay-feed/<ebay_item_id>/dismiss` resolves an
+account-bound observed card instead of accepting an arbitrary URL; a known prior
+deletion remains idempotent after its snapshot expires. Both require the existing
+app-owner authorization and cross-site write guard, and return the canonical URL
+for removal of duplicate visible occurrences. These are app actions, not
+bridge-token endpoints. The personal-card action is available only on web.
 
 ## Budgets and concurrency
 
@@ -196,3 +221,8 @@ of a match is not a guarantee of novelty.
 claims/expiry, account mismatch, strict listing identity, duplicate source labels,
 source availability, fresh browser proof, observed-card visibility without
 purchase controls, invented model URLs, and reference-based collection warnings.
+
+`tests/test_market_dismissal.py` verifies permanent decisions across regional URLs,
+watched/sponsored/ordinary sources, concurrent publication, source and candidate
+pruning, database reopen, migration, owner/tenant/CSRF guards, no unnecessary model
+work, and preserved collection/Ordered/Bought history.
