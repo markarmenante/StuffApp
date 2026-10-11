@@ -247,7 +247,7 @@ html = client.get('/banknotes/market').get_data(as_text=True)
 assert 'Collection</a>' in html and 'pill active market-pill' in html and 'class="toolbar-btn add"' not in html
 assert 'market-row' in html and 'Sarawak 1 Dollar 1935 PMG 65 EPQ' in html
 assert 'Choice UNC 65</span>' in html and '65 65' not in html
-assert 'British colonial' in html and 'New source' in html and 'You have P ' in html
+assert 'British colonial' in html and 'New source' in html and 'Possible collection duplicate' in html
 assert 'View listing' in html and 'class="market-btn market-buy"' in html
 assert 'Scanned ' in html
 list_html = client.get('/banknotes').get_data(as_text=True)

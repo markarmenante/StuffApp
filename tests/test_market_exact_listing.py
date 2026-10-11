@@ -25,6 +25,33 @@ class ExactListingTests(unittest.TestCase):
         self.assertIn('CoinID=4321',canonical_url('https://cngcoins.com/Coin.aspx?CoinID=4321&utm_source=test'))
         self.assertNotEqual(canonical_url('https://cngcoins.com/Coin.aspx?CoinID=4321'),canonical_url('https://cngcoins.com/Coin.aspx?CoinID=4322'))
 
+    def test_dealer_inventory_file_and_woocommerce_categories_are_not_items(self):
+        invalid=('https://sanchezcurrency.com/current-inventory/',
+                 'https://sanchezcurrency.com/current-inventory.html',
+                 'https://sanchezcurrency.com/product-category/large-size-legal-tender-notes/?id=35',
+                 'https://dealer.test/inventory.htm','https://dealer.test/shop.php')
+        html='<h1>Current Inventory</h1><article>Fr.35 PMG65 $3010 Buy Now</article><article>Fr.96 PMG64 $12750 Buy Now</article>'
+        for url in invalid:
+            self.assertTrue(stuff._market_listing_url_problem(url),url)
+            self.assertEqual(stuff._market_listing_probe(url,PageResult(200,html,url,False))['state'],'invalid')
+        product='https://sanchezcurrency.com/product/fr-96-1869-10-legal-tender-pmg-64-epq/'
+        self.assertFalse(stuff._market_listing_url_problem(product))
+        self.assertEqual(stuff._market_listing_probe(product,PageResult(200,html,product,False))['state'],'invalid')
+        self.assertEqual(stuff._market_listing_probe(product,PageResult(200,html,invalid[0],False))['state'],'invalid')
+        with stuff.app.app_context():
+            db=stuff.get_db()
+            db.execute("INSERT INTO market_scans(id,category,status,started_at) VALUES ('dealer-scan','banknotes','done',datetime('now'))")
+            item={'title':'Fr.35 1880 $1 PMG65 EPQ','country':'United States of America','listing_url':invalid[0],'verified':True}
+            db.execute("INSERT INTO market_scan_items(id,scan_id,category,status,payload,created_at) VALUES ('dealer-index','dealer-scan','banknotes','new',?,datetime('now'))",(json.dumps(item),))
+            db.commit()
+            client=stuff.app.test_client()
+            self.assertEqual(client.get('/banknotes/market/dealer-index/listing').status_code,410)
+            self.assertEqual(client.post('/banknotes/market/dealer-index/buy',json={'location':'Home'}).status_code,409)
+            self.assertNotIn('dealer-index',[i['id'] for i in stuff._market_items(db,'banknotes')])
+            saved=db.execute("SELECT status,payload FROM market_scan_items WHERE id='dealer-index'").fetchone()
+            self.assertEqual(saved['status'],'unavailable')
+            self.assertIn('inventory',json.loads(saved['payload'])['unavailable_reason'].lower())
+
     def test_redirect_search_different_item_and_challenge(self):
         self.assertEqual(probe(final=SEARCH)['state'],'invalid')
         self.assertEqual(probe(final='https://ebay.com/itm/123')['state'],'invalid')

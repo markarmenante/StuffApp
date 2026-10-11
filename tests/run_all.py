@@ -16,6 +16,7 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_ebay_orders.py', 'test_ebay_m
          'test_banknote_image_quality.py',
          'test_market_bought.py',
          'test_market_presentation.py',
+         'test_market_ebay_feed.py',
          'test_market_exact_listing.py',
          'test_market_colonial.py',
          'test_market_ebay_liveness.py',

@@ -14,9 +14,11 @@ and replaces only its results area when the persisted revision changes. It
 keeps the location picker and active Buy/Bought/dismiss requests intact. Progress
 shows completed sources and candidate count, using the server's start time.
 
-eBay candidates require a live verdict from a readable exact listing page.
-Search snippets, model-written live evidence and future closing dates cannot
-override a challenge, HTTP error or timeout. Older unverified eBay candidates
+eBay buy candidates require a live verdict from a readable exact listing page.
+A fresh exact-item observation from the authenticated signed-in browser may resolve
+a server-side challenge, but never override an ended or invalid listing. Search
+snippets, model-written live evidence and future closing dates cannot establish
+availability. Older unverified eBay candidates
 move to Earlier candidates; Buy and View listing recheck current availability.
 Bought can still file a purchase already made. Other unreadable venues retain
 the existing unverified state.
@@ -31,6 +33,8 @@ or photographs for the market list.
 Canonical URLs remove known tracking parameters and fragments, preserve
 identity parameters such as CNG `CoinID`, and recognize eBay item IDs across
 regional domains. Different listings with the same title remain distinct.
+
+Dealer inventory and product-category URLs, including HTML/PHP inventory pages, cannot serve as exact offers. The same guard hides older invalid cards and blocks their View/Buy actions.
 
 Candidates reuse an existing ID when rediscovered. Transactions check the
 latest scan generation before writing. Updates cannot resurrect dismissed or
@@ -133,3 +137,52 @@ Use controlled sources for regression and browser tests. Do not trigger a full
 paid production scan merely to validate code. After an authorized deployment,
 use naturally requested scans to compare first-candidate time, final duration,
 source yield, retries, and candidate quality before changing budgets further.
+
+
+## Personal eBay sources and collection warnings (2026-10-11)
+
+Every Banknotes Market Scan requests a fresh read of the existing signed-in eBay
+browser through Today's separate discovery reader. It includes Watched cards and
+only Sponsored cards actually observed in “Similar to what you've watched.” This
+is separate from the Purchases shipment bridge: no watchlist, account, order,
+purchase or collection ownership changes are performed by the discovery reader.
+
+The request uses the existing `STUFFAPP_TODAY_TOKEN` configuration on **web only**.
+`POST /banknotes/market/ebay-feed/request` uses the same bridge token to request a fresh read-only snapshot without a paid scan; it reuses any pending request.
+`GET /banknotes/market/ebay-feed` claims a queued request; `POST` to the same route
+accepts its bounded snapshot. Gerri cannot expose the endpoint or request this
+source. Requests expire after three minutes; the scan waits at most 110 seconds.
+Snapshots must match the linked buyer and contain fresh, exact eBay item IDs.
+Cards are deduplicated by item ID across eBay regions and tracking URLs, retaining
+both source labels when the same item is watched and sponsored. Partial pages,
+missing sign-in, unavailable recommendation modules and blocked exact listings
+are reported separately instead of claimed as complete coverage.
+
+The observed cards appear in **Your eBay watched and sponsored items**, including
+cards whose exact listing is unreadable. This section shows observed prices and
+source labels, an explicit availability state, and an **Open eBay to check** link.
+It has no Buy/Bought controls. A card becomes a normal banknote buy candidate
+only after the existing grade, collection scope and exact-listing liveness checks.
+Sponsored placement never adds score or establishes quality, rarity or value.
+Observed cards already present as checked candidates are not repeated.
+
+Exact browser liveness observations expire after ten minutes; the displayed
+source snapshot expires after 24 hours. Old source rows are pruned on the next
+scan request. Raw pages, cookies, credentials, addresses and payment details are
+not transferred. Bounded main-item listing text may accompany an exact read.
+The existing scan model shapes only observed URLs; unknown fields remain unknown.
+
+All banknote candidate sources, including existing saved scans, check Own/Ordered
+holdings and show matching collection links. Same certificate or same issue and
+serial can produce an exact specimen warning only when the identifier is
+corroborated by observed listing text. Same eBay purchase-listing associations
+are explicitly labeled as listing links, since multi-quantity listings need not
+identify one specimen. Same country/catalogue, or denomination with year/series,
+produces a **possible collection duplicate** warning. Sold/gifted/lost holdings do
+not count. Observed cards without enough identity information disclose an
+incomplete collection check; absence of a match is not a guarantee of novelty.
+
+`tests/test_market_ebay_feed.py` covers authentication, Gerri isolation, request
+claims/expiry, account mismatch, strict listing identity, duplicate source labels,
+source availability, fresh browser proof, observed-card visibility without
+purchase controls, invented model URLs, and exact/possible collection warnings.

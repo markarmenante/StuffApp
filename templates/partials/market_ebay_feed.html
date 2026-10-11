@@ -1,0 +1,33 @@
+<section class="market-personal-feed" aria-labelledby="marketPersonalTitle">
+  <div class="banknote-group-heading">
+    <h2 id="marketPersonalTitle">Your eBay watched and sponsored items</h2>
+    <p>Observed {{ market_personal_feed.observed_date }}. These are your eBay cards; availability and collection eligibility may still need checking. Sponsored placement does not affect ranking.</p>
+    {% for source, state in market_personal_feed.sources.items() %}
+    {% if state.status != 'ok' %}<p role="status">{{ 'Watched' if source == 'watched' else 'Sponsored similar-to-watched' }}: {{ state.message or state.status }}</p>{% endif %}
+    {% endfor %}
+  </div>
+  {% if market_personal_feed.cards %}
+  <div class="item-list item-list-banknotes">
+    {% for card in market_personal_feed.cards %}
+    <div class="item-row">
+      {% if card.image_url %}<a class="item-thumb market-thumb" href="{{ card.listing_url }}" target="_blank" rel="noopener" aria-label="Open eBay listing"><img src="{{ card.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer"></a>{% endif %}
+      <div class="item-body">
+        <div class="item-line1"><a class="item-brand" href="{{ card.listing_url }}" target="_blank" rel="noopener">{{ card.title }}</a></div>
+        <div class="market-meta">
+          <div class="idr market-line"><span class="market-price">{{ card.price or 'Price not shown' }}</span><span class="market-tag">{{ card.availability_label }}</span></div>
+          <div class="idr market-tags">
+            {% if 'watched' in card.sources %}<span class="market-tag">eBay Watched</span>{% endif %}
+            {% if 'sponsored' in card.sources %}<span class="market-tag">eBay Sponsored · similar to watched</span>{% endif %}
+            {% for match in card.collection_matches %}<span class="market-tag market-tag-owned">{{ 'Listing already linked to your collection' if match.kind == 'listing' else 'Possible collection duplicate' }}{% if match.status == 'Ordered' %} (ordered){% endif %}: <a href="{{ match.url }}" target="_blank" rel="noopener">{{ match.label }}</a> — {{ match.reason }}</span>{% endfor %}
+            {% if card.collection_check_incomplete %}<span class="market-tag">Collection match incomplete — card details are insufficient</span>{% endif %}
+          </div>
+          <div class="market-actions"><a class="market-btn" href="{{ card.listing_url }}" target="_blank" rel="noopener">Open eBay to check</a></div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif market_personal_feed.sources.watched.status == 'ok' and market_personal_feed.sources.sponsored.status == 'ok' %}
+  <p>All observed cards are already shown in the checked candidates below, or eBay returned no cards.</p>
+  {% endif %}
+</section>

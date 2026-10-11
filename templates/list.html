@@ -253,7 +253,9 @@
 </div>
 
 <!-- List -->
-{% if _market %}<div id="marketResults" aria-live="polite">{% endif %}
+{% if _market %}<div id="marketResults" aria-live="polite">
+{% if market_personal_feed %}{% include 'partials/market_ebay_feed.html' %}{% endif %}
+{% endif %}
 {% if _analysis %}
   {% include 'partials/analysis.html' %}
 {% elif rows %}
@@ -779,7 +781,12 @@
           {% if _rarity and (row['grade_numeric'] or 0) < 64 %}<span class="market-tag market-tag-rare">Rarity: {{ _rarity }}</span>{% endif %}
           {% if row['new_source'] %}<span class="market-tag market-tag-new">New source</span>{% endif %}
           {% if row['archive_note'] %}<span class="market-tag market-tag-archive" title="acsearch.info, queried during the scan: how often the type trades, where this grade sits, and this coin's own prior sales{% if row['archive'] and row['archive']['type_url'] %} — click to open the archive query{% endif %}">{% if row['archive'] and row['archive']['type_url'] %}<a href="{{ row['archive']['type_url'] }}" target="_blank" rel="noopener">{{ row['archive_note'] }}</a>{% else %}{{ row['archive_note'] }}{% endif %}</span>{% endif %}
-          {% if row['owned'] %}<span class="market-tag market-tag-owned">You have {{ row['owned'] }}</span>{% endif %}
+          {% if 'watched' in (row['discovery_sources'] or []) %}<span class="market-tag">eBay Watched</span>{% endif %}
+          {% if 'sponsored' in (row['discovery_sources'] or []) %}<span class="market-tag" title="Paid placement; sponsorship does not affect collection fit or ranking">eBay Sponsored · similar to watched</span>{% endif %}
+          {% for match in row['collection_matches'] or [] %}
+          <span class="market-tag market-tag-owned">{{ 'Already in your collection' if match['kind'] == 'exact' else ('Listing already linked to your collection' if match['kind'] == 'listing' else 'Possible collection duplicate') }}{% if match['status'] == 'Ordered' %} (ordered){% endif %}: <a href="{{ match['url'] }}" target="_blank" rel="noopener">{{ match['label'] }}</a> — {{ match['reason'] }}</span>
+          {% endfor %}
+          {% if row['owned'] and not row['collection_matches'] %}<span class="market-tag market-tag-owned">You have {{ row['owned'] }}</span>{% endif %}
           {% set _fair = row['fair']|market_copy %}
           {% if _fair %}<span class="market-fair">{{ _fair }}</span>{% endif %}
         </div>
