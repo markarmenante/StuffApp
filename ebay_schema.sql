@@ -149,3 +149,13 @@ CREATE TABLE IF NOT EXISTS ebay_listing_captures (
     images_json TEXT NOT NULL,
     captured_at REAL NOT NULL
 );
+
+-- Authenticated exact-order unit-price evidence; never a listing asking price.
+CREATE TABLE IF NOT EXISTS ebay_purchase_prices (
+    line_key TEXT PRIMARY KEY REFERENCES ebay_order_items(line_key) ON DELETE CASCADE,
+    currency TEXT NOT NULL CHECK (currency IN ('$','USD','EUR','GBP')),
+    unit_amount_minor INTEGER NOT NULL CHECK (unit_amount_minor > 0),
+    source_url TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    evidence TEXT NOT NULL
+);

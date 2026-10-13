@@ -11,6 +11,7 @@ import time
 import market_scan as market_runtime
 import market_colonial
 import market_ebay_feed
+import market_grouping
 import banknote_catalog
 import ebay_orders
 import purchase_orders
@@ -13219,7 +13220,7 @@ results_markdown rules:
         elif orig_price is not None:
             value = orig_price
             fallback_note = (f"_No consensus or WatchCharts median found — defaulted to "
-                             f"original purchase price (${orig_price:,.0f})._")
+                             f"original purchase price ({currency_filter(orig_price)})._")
 
     # Models sometimes emit HTML entities (&#39;, &amp;, etc.) in JSON string
     # values. Decode them once so the downstream format_results filter only
@@ -13305,7 +13306,7 @@ results_markdown rules:
         elif orig_price is not None:
             value = orig_price
             fallback_note = (f"_No consensus or WatchCharts median found — defaulted to "
-                             f"original purchase price (${orig_price:,.0f})._")
+                             f"original purchase price ({currency_filter(orig_price)})._")
 
     import html as _html
     results_md = _html.unescape(data.get('results_markdown') or '').strip()
@@ -15288,7 +15289,7 @@ def _market_paid_text(price):
     strings in their own currency ("$1,250", "CHF 900", "€1.200 / $1,300"),
     though older rows hold a bare number; a number reads as US dollars."""
     if isinstance(price, (int, float)):
-        return f"${price:,.0f}"
+        return currency_filter(price)
     return str(price).strip()
 
 
@@ -17775,9 +17776,11 @@ class _CoinMarketPolicy(_MarketPolicy):
 def _market_ebay_source(api_key, inputs):
     """Obtain fresh browser cards, then shape only those exact observations."""
     ctx = market_runtime.current()
+    if ctx and getattr(ctx, 'skip_ebay', False):
+        return [], 'eBay personalized sources skipped while the browser session is unavailable.', ''
     conn = open_db_connection()
     try:
-        ident = market_ebay_feed.queue(conn)
+        ident = getattr(ctx, 'ebay_request_id', None) or market_ebay_feed.queue(conn)
     finally:
         conn.close()
     if not ident:
@@ -17887,7 +17890,7 @@ class _BanknoteMarketPolicy(_MarketPolicy):
 _MARKET_POLICIES = {'coins': _CoinMarketPolicy(), 'banknotes': _BanknoteMarketPolicy()}
 
 
-def _run_market_scan(category, scan_id):
+def _run_market_scan(category, scan_id, ebay_request_id=None, skip_ebay=False):
     """Shared progressive scan: sources -> checked candidates -> optional context."""
     repo = market_runtime.MarketRepository(open_db_connection, category, scan_id)
     ctx = None
@@ -17903,6 +17906,8 @@ def _run_market_scan(category, scan_id):
         try:
             themes = policy.themes(db)
             ctx = market_runtime.ScanContext.configured(len(themes))
+            ctx.ebay_request_id = ebay_request_id
+            ctx.skip_ebay = skip_ebay
             ctx.fetcher = market_runtime.FetchService(ctx, _market_transport)
             policy.prepare(db, ctx)
             profile = _market_profile_text()
@@ -18153,6 +18158,18 @@ def _market_items(db, category, earlier=False):
     return out
 
 
+def _market_group_rows(category, rows, observed=False):
+    def note_type(row):
+        # Market titles carry the printed type when the structured fields do
+        # not. Use the existing class rules on a display-only copy.
+        fields = dict(row)
+        fields['description'] = ' '.join(str(row.get(k) or '') for k in ('title', 'description'))
+        found = _us_note_class(fields)
+        return found['name'] if found else ''
+    return market_grouping.group_rows(rows, category,
+        coin_fields=canonicalize_coin_fields, note_type=note_type, observed=observed)
+
+
 def _market_personal_feed(db, visible_items):
     """Observed personal cards remain visible when live eligibility is unknown."""
     if not market_ebay_feed.enabled():
@@ -18186,6 +18203,7 @@ def _market_personal_feed(db, visible_items):
         if not country and re.search(r'\b(?:fr\.?|friedberg)\s*[.#]?\s*\d', references, re.I):
             country = 'United States of America'
         identity = dict(country=country, pick_number=references, listing_url=card['listing_url'])
+        card['country'] = country  # display grouping reuses the same observed identity
         card['collection_matches'] = _market_collection_matches(db, identity, rows)
         card['collection_check_incomplete'] = _market_collection_check_incomplete(identity)
         card['observed_date'] = market_ebay_feed.utc(latest['observed_at'])[:16].replace('T', ' ') + ' UTC'
@@ -18193,7 +18211,7 @@ def _market_personal_feed(db, visible_items):
             ('Availability unverified' if card['live_state'] != 'live' or not card['listing_checked_at'] or
              card['listing_checked_at'] < time.time() - market_ebay_feed.FRESH_SECONDS else 'Listing observed live; eligibility not confirmed'))
         cards.append(card)
-    return dict(cards=cards, excluded_count=excluded_count, sources=json.loads(latest['source_status']),
+    return dict(cards=_market_group_rows('banknotes', cards, observed=True), excluded_count=excluded_count, sources=json.loads(latest['source_status']),
                 observed_date=market_ebay_feed.utc(latest['observed_at'])[:16].replace('T', ' ') + ' UTC')
 
 
@@ -18214,7 +18232,7 @@ def market_view(category):
     cat_info = CATEGORIES[category]
     scan = _market_reap_orphan(db, category, _market_latest_scan(db, category))
     earlier = request.args.get('earlier') == '1'
-    items = _market_items(db, category, earlier=earlier)
+    items = _market_group_rows(category, _market_items(db, category, earlier=earlier))
     running = bool(scan and scan['status'] == 'running')
     # First visit (or a stale scan older than 12 hours with nothing left
     # to act on) starts a scan by itself; the page polls until it lands.
@@ -18253,6 +18271,8 @@ def market_view(category):
                            market_mode=True,
                            market_personal_feed=_market_personal_feed(db, items) if category == 'banknotes' and not earlier else None,
                            market_scan=scan,
+                           market_ebay_session=market_ebay_feed.session_status(db) if category == 'banknotes' else None,
+                           market_ebay_enabled=category == 'banknotes' and market_ebay_feed.enabled(),
                            market_running=running,
                            market_autoscan=autoscan,
                            market_earlier=earlier,
@@ -18265,26 +18285,79 @@ def market_view(category):
                            market_locations=property_choices_for_category(category))
 
 
+@app.route('/banknotes/market/ebay-session')
+def market_ebay_session():
+    _market_require_owner()
+    if not market_ebay_feed.enabled():
+        abort(404)
+    response = jsonify(ok=True, session=market_ebay_feed.session_status(get_db(), request.args.get('request_id')))
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
+
+
+@app.route('/banknotes/market/ebay-session/cancel', methods=['POST'])
+def market_ebay_session_cancel():
+    _market_require_owner()
+    if not market_ebay_feed.enabled():
+        abort(404)
+    db = get_db()
+    ident = (request.get_json(silent=True) or {}).get('request_id')
+    db.execute("UPDATE ebay_market_requests SET status='expired' WHERE id=? AND id IN (SELECT request_id FROM ebay_market_sessions WHERE scan_id IS NULL)", (ident,))
+    db.commit()
+    return jsonify(ok=True)
+
+
 @app.route('/<category>/market/scan', methods=['POST'])
 def market_scan_start(category):
     if category not in MARKET_SCAN_CATEGORIES:
         return jsonify({'error': 'Unknown category'}), 400
     _market_require_owner()
     db = get_db()
+    data = request.get_json(silent=True) or {}
+    ebay_request_id = None
+    skip_ebay = data.get('skip_ebay') is True
     with _MARKET_SCAN_LOCK:
         if category in _MARKET_SCAN_INFLIGHT:
             scan = _market_latest_scan(db, category)
             return jsonify({'ok': True, 'running': True,
                             'scan_id': scan['id'] if scan else None})
+        if category == 'banknotes' and market_ebay_feed.enabled() and not skip_ebay:
+            ebay_request_id = data.get('ebay_request_id')
+            if not ebay_request_id:
+                try:
+                    db.execute('BEGIN IMMEDIATE')
+                    ident = market_ebay_feed.prepare_session(db)
+                    db.commit()
+                except ValueError as exc:
+                    db.rollback()
+                    return jsonify(ok=False, error=str(exc)), 409
+                return jsonify(ok=True, waiting_for_ebay=True, session=market_ebay_feed.session_status(db, ident)), 202
+            state = market_ebay_feed.session_status(db, ebay_request_id)
+            if not state or state['state'] != 'ready':
+                return jsonify(ok=False, error='The eBay session is not ready. Retry or continue without personalized eBay sources.'), 409
+            if state['scan_id']:
+                return jsonify(ok=True, running=True, scan_id=state['scan_id'])
         _MARKET_SCAN_INFLIGHT.add(category)
     scan_id = str(uuid.uuid4())
     db.execute("INSERT INTO market_scans (id, category, started_at, status) "
                "VALUES (?, ?, ?, 'running')",
                [scan_id, category, datetime.utcnow().isoformat()])
+    if ebay_request_id:
+        consumed = db.execute("UPDATE ebay_market_sessions SET scan_id=? WHERE request_id=? AND scan_id IS NULL "
+                              "AND state='ready' AND request_id IN (SELECT id FROM ebay_market_requests WHERE status='done' AND expires_at>?)",
+                              (scan_id, ebay_request_id, time.time())).rowcount
+        if not consumed:
+            db.rollback()
+            with _MARKET_SCAN_LOCK:
+                _MARKET_SCAN_INFLIGHT.discard(category)
+            state = market_ebay_feed.session_status(db, ebay_request_id)
+            if state and state['scan_id']:
+                return jsonify(ok=True, running=True, scan_id=state['scan_id'])
+            return jsonify(ok=False, error='The eBay check was cancelled or expired. Start a new scan.'), 409
     db.commit()
     with _MARKET_SCAN_LOCK:
         _MARKET_SCAN_ACTIVE_IDS[category] = scan_id
-    threading.Thread(target=_run_market_scan, args=(category, scan_id),
+    threading.Thread(target=_run_market_scan, args=(category, scan_id, ebay_request_id, skip_ebay),
                      daemon=True).start()
     return jsonify({'ok': True, 'running': True, 'scan_id': scan_id})
 
@@ -26392,6 +26465,9 @@ def banknote_lookup_specs(record_id):
     ).strip():
         filled['condition'] = hc.strip()
     for f in BANKNOTE_SPEC_FILLABLE:
+        if f == 'price' and (prepared.get('purchase_price_blocked') or
+                             (prepared.get('purchase_price_fill_only') and str(note.get('price') or '').strip())):
+            continue
         v = _coerce_banknote_spec(f, suggestions.get(f))
         if v in (None, ''):
             continue
@@ -27743,9 +27819,8 @@ def _graduate_watch_order_status(db, record_id):
 
 @app.template_filter('currency')
 def currency_filter(value):
-    """Format as $1,234 by default. Already-formatted strings carrying
-    a currency prefix round-trip unchanged so the user's chosen
-    currency stays put. Empty -> empty, garbage -> str."""
+    """Format money without rounding away cents. Prefixed amounts round-trip
+    unchanged so the user's chosen currency stays put. Empty -> empty."""
     if value is None or value == '':
         return ''
     s = str(value).strip()
@@ -27754,7 +27829,8 @@ def currency_filter(value):
     if _CURRENCY_PREFIX_RE.match(s):
         return s
     try:
-        return f"${float(s.replace(',', '').replace('$', '')):,.0f}"
+        digits = f"{float(s.replace(',', '').replace('$', '')):,.2f}"
+        return '$' + (digits[:-3] if digits.endswith('.00') else digits)
     except (ValueError, TypeError):
         return s
 
@@ -33560,11 +33636,7 @@ def record_print_pdf(category, record_id):
             story.append(tbl)
 
         # Date | Price | Vendor | Value
-        price_v = _val('price')
-        try:
-            price_v = '${:,.0f}'.format(float(price_v)) if price_v else ''
-        except (TypeError, ValueError):
-            pass
+        price_v = currency_filter(_val('price'))
         value_v = _val('value')
         try:
             value_v = '${:,.0f}'.format(float(value_v)) if value_v else ''
@@ -34149,7 +34221,9 @@ def _format_report_value(field_name, value):
     separator). Everything else passes through unchanged."""
     if value is None:
         return ''
-    if field_name in ('price', 'value'):
+    if field_name == 'price':
+        return currency_filter(value)
+    if field_name == 'value':
         try:
             return '${:,.0f}'.format(float(value))
         except (TypeError, ValueError):
@@ -34161,10 +34235,7 @@ def _format_money(value):
     """Compact money formatter for HTML report views."""
     if value is None or value == '':
         return ''
-    try:
-        return '${:,.0f}'.format(float(str(value).replace(',', '').replace('$', '')))
-    except (TypeError, ValueError):
-        return str(value).strip()
+    return currency_filter(value)
 
 
 def _format_percent(value):

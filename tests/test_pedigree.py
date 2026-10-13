@@ -249,6 +249,11 @@ def fake_model_call(kind, category, prompt, images):
 
 
 stuffapp._pedigree_model_call = fake_model_call
+# This test exercises storage and polling with synthetic research. Keep the
+# archive boundary synthetic too; live archive delays exceed its five-second
+# polling budget and make an otherwise offline regression intermittent.
+stuffapp._provenance_archive_sweep = lambda *args, **kwargs: {
+    'candidates': [], 'keyed': False, 'status': 'synthetic archive'}
 
 
 def run_job(category, record_id, kind):

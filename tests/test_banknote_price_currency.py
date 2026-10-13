@@ -48,6 +48,19 @@ for text in ('C$80', 'C$80 / $58', 'NZ$120', 'S$40 / $30', 'A$200', 'CHF 900 / $
     assert stuffapp._normalize_price_input(text) == text, text
     assert stuffapp.currency_filter(text) == text, text
 assert stuffapp._normalize_price_input('80') == '80'
+# Purchase amounts remain exact through Check normalization, inputs, lists,
+# reports and scan purchase history, including older numeric database values.
+for raw in (599.89, '599.89', '$599.89'):
+    assert stuffapp.currency_filter(raw) == '$599.89', raw
+    assert stuffapp._format_report_value('price', raw) == '$599.89', raw
+    assert stuffapp._format_money(raw) == '$599.89', raw
+    assert stuffapp._market_paid_text(raw) == ('$599.89' if not isinstance(raw, str) else raw), raw
+assert stuffapp.currency_filter(599.10) == '$599.10'
+assert stuffapp.currency_filter(600) == '$600'
+assert stuffapp._format_report_value('price', '€599.89') == '€599.89'
+assert stuffapp._format_money('CHF 599.89') == 'CHF 599.89'
+assert stuffapp._format_purchase_price('$599.89') == '$599.89'
+assert stuffapp._normalize_price_input('$599.89') == '$599.89'
 print('FORMAT OK')
 
 

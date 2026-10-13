@@ -10,7 +10,9 @@
   {% if market_personal_feed.cards %}
   <div class="item-list item-list-banknotes">
     {% for card in market_personal_feed.cards %}
-    <div class="item-row market-personal-row" data-listing-key="{{ card.canonical_url }}">
+    {% set market_group = card.get('_market_group') %}
+    {% include 'partials/market_group_heading.html' %}
+    <div class="item-row market-personal-row"{% if market_group %} data-market-group="{{ market_group.key }}"{% endif %} data-listing-key="{{ card.canonical_url }}">
       {% if card.image_url %}<a class="item-thumb market-thumb" href="{{ card.listing_url }}" target="_blank" rel="noopener" aria-label="Open eBay listing"><img src="{{ card.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer"></a>{% endif %}
       <div class="item-body">
         <div class="item-line1"><a class="item-brand" href="{{ card.listing_url }}" target="_blank" rel="noopener">{{ card.title }}</a></div>

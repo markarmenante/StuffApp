@@ -6,6 +6,7 @@ import uuid
 from flask import abort, jsonify, request
 import ebay_mail
 import ebay_listing_captures
+import ebay_purchase_prices
 
 TIMEOUT = 120
 
@@ -35,8 +36,12 @@ def ensure(db, note):
     # observation instead of preserving that historical warning indefinitely.
     if cached and not any(r['status_text'].lower() == 'order processing' and
                           r['attention'] == 'Order processing; shipment or delivery not confirmed' for r in cached):
-        if len(cached) != 1 or cached[0]['quantity'] != 1 or ebay_listing_captures.html(
-                db, 'https://www.ebay.com/itm/' + cached[0]['item_id']):
+        needs_price = ('price' in note and not str(note.get('price') or '').strip() and len(cached) == 1
+                       and not db.execute('SELECT 1 FROM ebay_purchase_prices p JOIN ebay_order_items i '
+                                          'ON i.line_key=p.line_key WHERE i.order_id=? AND i.item_id=?',
+                                          (number, cached[0]['item_id'])).fetchone())
+        if len(cached) != 1 or cached[0]['quantity'] != 1 or (not needs_price and ebay_listing_captures.html(
+                db, 'https://www.ebay.com/itm/' + cached[0]['item_id'])):
             return None
         recent = db.execute('SELECT status,requested_at FROM ebay_purchase_requests WHERE order_id=?', (number,)).fetchone()
         # A completed browser attempt may legitimately have no readable listing.
@@ -104,6 +109,7 @@ def complete(db, payload):
             db.rollback()
             raise ValueError('Purchase identity could not be confirmed')
         ebay_listing_captures.save(db, payload.get('listing'), items)
+        ebay_purchase_prices.save(db, payload.get('receipt'), items, row['requested_at'])
         status, message = 'done', 'Order found. Checking the purchased item...'
     db.execute('UPDATE ebay_purchase_requests SET status=?,message=? WHERE id=?', (status, message, row['id']))
     db.commit()

@@ -528,5 +528,101 @@ class SourceCheckTests(unittest.TestCase):
         self.assertEqual(response.json['filled']['purchase_date'], '2026-10-07')
 
 
+    def authenticated_price(self, price='$1,095.00', unit_amount='1095.00'):
+        import ebay_purchase_prices
+        import time
+        item = dict(purchase_orders.ebay_item_for_order(self.db, 'banknotes', self.note()))
+        evidence = self.receipt_text(price).replace('Unit price ' + price, 'Unit price USD ' + price.lstrip('$'))
+        ebay_purchase_prices.save(self.db, dict(
+            order_id=item['order_id'], item_id=item['item_id'], quantity=1,
+            url='https://order.ebay.com/ord/show?orderId=' + item['order_id'],
+            currency='USD', unit_amount=unit_amount, evidence=evidence,
+            observed_at=sources.datetime.now(sources.timezone.utc).isoformat()), [item], time.time() - 1)
+        self.db.commit()
+
+    def test_authenticated_receipt_fills_blank_when_model_misses_price_without_writing_it(self):
+        self.blank()
+        self.order()
+        self.authenticated_price()
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('No network')), \
+                patch.object(stuff.ebay_purchase_lookup, 'ensure', return_value=None), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value={}):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['filled']['price'], '$1,095')
+        self.assertNotIn('price', response.json['overwritten'])
+        self.assertIsNone(self.note()['price'])
+
+    def test_authenticated_receipt_does_not_propose_replacing_populated_price_even_if_model_does(self):
+        self.order()
+        self.authenticated_price()
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('No network')), \
+                patch.object(stuff.ebay_purchase_lookup, 'ensure', return_value=None), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value={
+                    'price': '$1,095', 'purchase_evidence': {'price': 'Unit price USD 1,095.00'}}):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertNotIn('price', response.json['filled'])
+        self.assertNotIn('price', response.json['overwritten'])
+        self.assertEqual(self.note()['price'], '$485')
+
+    def test_authenticated_receipt_is_labeled_observation_and_not_invented_saved_pdf(self):
+        self.blank()
+        self.order()
+        self.authenticated_price()
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('No network')):
+            result = self.prepare()
+        receipt = next(e for e in result['evidence'] if e.get('authenticated'))
+        self.assertEqual(receipt['kind'], 'order')
+        self.assertFalse(receipt['saved'])
+        self.assertEqual(receipt['url'], 'https://order.ebay.com/ord/show?orderId=12-34567-89012')
+        self.assertEqual(result['purchase']['price'], '$1,095')
+        self.assertTrue(result['purchase_price_fill_only'])
+        self.assertIn('authenticated order observation', sources.evidence_text(result))
+        self.assertFalse(any('No readable invoice' in w for w in result['warnings']))
+        self.assertEqual(result['documents'], [])
+
+    def test_authenticated_receipt_does_not_override_a_conflicting_linked_listing(self):
+        self.blank()
+        self.order()
+        self.authenticated_price()
+        original_listings.add_source(self.db, 'banknotes', self.id, 'https://www.ebay.com/itm/325643741724')
+        self.db.commit()
+        with patch.object(sources.archives, 'fetch_bytes') as fetch:
+            result = self.prepare()
+        self.assertTrue(result['blocked'])
+        self.assertEqual(result['purchase'], {})
+        self.assertEqual(result['evidence'], [])
+        self.assertFalse(fetch.called)
+        self.assertIsNone(self.note()['price'])
+
+
+    def test_disagreeing_saved_and_authenticated_receipts_do_not_propose_a_price(self):
+        self.blank()
+        self.order()
+        self.authenticated_price(price='$599.89', unit_amount='599.89')
+        out = io.BytesIO()
+        from reportlab.pdfgen.canvas import Canvas
+        canvas = Canvas(out)
+        for pos, line in enumerate(self.receipt_text('$1,095.00').splitlines()):
+            canvas.drawString(35, 750 - pos * 15, line)
+        canvas.save()
+        sources.save_pdf(self.db, self.id,
+                         'https://order.ebay.com/ord/show?orderId=12-34567-89012',
+                         'eBay Order Receipt 12-34567-89012', 'order', out.getvalue(), stuff.UPLOAD_FOLDER)
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('No network')), \
+                patch.object(stuff.ebay_purchase_lookup, 'ensure', return_value=None), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value={
+                    'price': '$1,095', 'purchase_evidence': {'price': 'Unit price $1,095.00'}}):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertNotIn('price', response.json['filled'])
+        self.assertNotIn('price', response.json['overwritten'])
+        self.assertIn('vendor', response.json['filled'])
+        self.assertIsNone(self.note()['price'])
+        self.assertTrue(any('conflict' in warning.lower() or 'disagree' in warning.lower()
+                            for warning in response.json['purchase_sources']['warnings']))
+
+
 if __name__ == '__main__':
     unittest.main()

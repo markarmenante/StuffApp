@@ -13,6 +13,7 @@ import source_documents as archives
 import purchase_orders
 import listing_images
 import ebay_listing_captures
+import ebay_purchase_prices
 
 
 def pdf_text(path):
@@ -164,6 +165,8 @@ def prepare(db, record, folder, fonts, category='banknotes'):
     record_id = record['id']
     evidence, reports, warnings = [], [], []
     images, purchase = {}, {}
+    amount = None
+    price_blocked = False
     sources = []
     order = purchase_orders.order_reference(db, category, record)
     item = purchase_orders.ebay_item_for_order(db, category, record)
@@ -173,6 +176,13 @@ def prepare(db, record, folder, fonts, category='banknotes'):
         evidence.append(dict(title='eBay Purchases ' + item['order_id'], kind='purchase',
                              url='https://order.ebay.com/ord/show?orderId=' + item['order_id'], text=text, saved=True))
         reports.append('Exact purchased item identified from eBay Purchases.')
+        amount = ebay_purchase_prices.for_item(db, item)
+        if amount:
+            evidence.append(dict(title='Authenticated eBay order unit price', kind='order',
+                                 url=amount['source_url'], text=amount['evidence'], saved=False, authenticated=True))
+            if not str(record.get('price') or '').strip():
+                purchase['price'] = amount['price']
+            reports.append('Exact item unit price read from the signed-in order; shipping and tax excluded. Existing purchase prices are retained.')
     elif record.get('order_number') and order['provider'] == 'eBay':
         warnings.append('This order has not been uniquely matched in the synced eBay Purchases. Sync Purchases or add the exact item listing; multi-item orders need identifying details.')
     if record.get('order_number') and order['url'] and not order['url'].startswith('/uploads/'):
@@ -330,14 +340,20 @@ def prepare(db, record, folder, fonts, category='banknotes'):
                 if source['url'] == '/uploads/' + receipt['filename']:
                     price = ebay_receipt_unit_price(source['text'], item)
                     if price:
-                        purchase['price'] = price
-                        reports.append('Exact item unit price verified against the saved eBay receipt; shipping and tax excluded.')
+                        if amount and price != amount['price']:
+                            price_blocked = True
+                            purchase.pop('price', None)
+                            warnings.append('The saved receipt and authenticated order disagree on the item unit price; purchase price was not changed.')
+                        elif not price_blocked:
+                            purchase['price'] = price
+                            reports.append('Exact item unit price verified against the saved eBay receipt; shipping and tax excluded.')
     if not any(e['kind'] in ('order', 'invoice') for e in evidence):
         warnings.append('No readable invoice or order receipt found. Purchase amount and date are not verified against a receipt.')
     return dict(evidence=evidence, reports=reports, warnings=warnings,
-                documents=[dict(d) for d in docs], images=images, purchase=purchase)
+                documents=[dict(d) for d in docs], images=images, purchase=purchase,
+                purchase_price_fill_only=bool(amount), purchase_price_blocked=price_blocked)
 
 
 def evidence_text(prepared):
-    return '\n\n'.join(f"SOURCE: {e['title']} ({'synced purchase' if e['kind'] == 'purchase' else 'saved PDF' if e['saved'] else 'live source'})\nURL: {e['url']}\n{e['text']}"
+    return '\n\n'.join(f"SOURCE: {e['title']} ({'synced purchase' if e['kind'] == 'purchase' else 'authenticated order observation' if e.get('authenticated') else 'saved PDF' if e['saved'] else 'live source'})\nURL: {e['url']}\n{e['text']}"
                        for e in prepared.get('evidence', []))

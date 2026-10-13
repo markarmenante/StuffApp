@@ -4181,7 +4181,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // Price-field formatter — accept multi-currency input ("eur 10000",
   // "chf 1000", "yen 50000", "usd 10,000", "$50000", "€500", "A$200")
   // and reformat on blur with the matching prefix and thousands
-  // separators (no decimals). Non-USD entries also get a " / $X,XXX"
+  // separators while preserving cents. Non-USD entries also get a " / $X,XXX"
   // USD conversion appended, fetched from /fx-rate using the row's
   // transaction date. Default currency is USD when no prefix is
   // detected. The formatted string round-trips through autosave +
@@ -4319,7 +4319,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
     const meta = detectCurrency(raw);
     const num = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
     if (!isFinite(num)) return;
-    const formatted = Math.round(num).toLocaleString('en-US');
+    // Keep the receipt's cents: Check and blur both persist this value.
+    const formatted = num.toLocaleString('en-US', {
+      minimumFractionDigits: Number.isInteger(num) ? 0 : 2, maximumFractionDigits: 2,
+    });
     el.value = meta.prefix + formatted;
     applyUsdConversion(el, dateOverride);
     syncLinkedPurchaseField(el);

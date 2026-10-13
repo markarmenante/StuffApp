@@ -17,7 +17,7 @@
 // Bump on every shipped change to invalidate old caches: a stale CSS
 // entry from before the random→asset_v cache-buster fix would otherwise
 // linger and keep rendering the un-styled page offline.
-const VERSION = 'v6';
+const VERSION = 'v7';
 const SHELL_CACHE = `stuffapp-shell-${VERSION}`;
 const DATA_CACHE  = `stuffapp-data-${VERSION}`;
 
@@ -62,6 +62,7 @@ self.addEventListener('activate', (event) => {
 const NO_CACHE_PATHS = [
   '/admin', '/sweep', '/files-status', '/admin/export',
   '/sw.js', '/banknotes/ebay', '/ebay',
+  '/banknotes/market/ebay-session', '/banknotes/market/ebay-feed',
 ];
 
 function shouldNotCache(url) {

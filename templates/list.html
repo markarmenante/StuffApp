@@ -253,6 +253,16 @@
 </div>
 
 <!-- List -->
+{% if _market and market_ebay_enabled and not market_earlier %}
+<section id="marketEbaySession" class="market-session" hidden aria-label="eBay session">
+  <p id="marketEbaySessionMessage" role="status"></p>
+  <div class="market-session-actions">
+    <button type="button" class="toolbar-btn pill" id="marketEbayRetry" hidden>Retry eBay</button>
+    <button type="button" class="toolbar-btn pill" id="marketEbaySkip">Continue without eBay</button>
+    <button type="button" class="toolbar-btn pill" id="marketEbayCancel">Cancel scan</button>
+  </div>
+</section>
+{% endif %}
 {% if _market %}<div id="marketResults" aria-live="polite">
 {% if market_personal_feed %}{% include 'partials/market_ebay_feed.html' %}{% endif %}
 {% endif %}
@@ -272,6 +282,10 @@
   {% set _us_panels = series_panels(rows) if category == 'banknotes' and show_history else {} %}
   {% set _bn_groups = banknote_grouping(rows) if category == 'banknotes' and not _market and not _analysis else {} %}
   {% for row in rows %}
+  {% if _market %}
+    {% set market_group = row.get('_market_group') %}
+    {% include 'partials/market_group_heading.html' %}
+  {% endif %}
   {% set _bn_group = _bn_groups.get(row['id']) %}
   {% if _bn_group and _bn_group.heading %}
   <div class="banknote-group-heading" data-banknote-group="{{ _bn_group.key }}">
@@ -306,7 +320,7 @@
   {% if _market %}
   {# A market row opens the listing in a new tab; its thumbnail is the
      seller's photo (no upload targets here). #}
-  <div class="item-row market-row" id="item-{{ row['id'] }}" data-listing-key="{{ row['canonical_url'] or '' }}" data-href="{{ url_for('market_item_listing', category=category, item_id=row['id']) }}" data-external="1">
+  <div class="item-row market-row" id="item-{{ row['id'] }}"{% if market_group %} data-market-group="{{ market_group.key }}"{% endif %} data-listing-key="{{ row['canonical_url'] or '' }}" data-href="{{ url_for('market_item_listing', category=category, item_id=row['id']) }}" data-external="1">
     <div class="item-thumb market-thumb" title="Open the listing">
       {% if row['image_url'] %}
         <img src="{{ row['image_url'] }}" alt="" loading="lazy" referrerpolicy="no-referrer"
@@ -859,6 +873,25 @@
   let refreshRequest = 0;
   const dismissedKeys = new Set();
   const earlier = {{ market_earlier|default(false)|tojson }};
+  function syncMarketGroups(root = document.getElementById('marketResults')) {
+    if (!root) return;
+    root.querySelectorAll('.item-list').forEach(list => {
+      const counts = new Map();
+      [...list.children].forEach(row => {
+        if (row.matches('.item-row[data-market-group]')) {
+          const key = row.dataset.marketGroup;
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+      });
+      [...list.children].forEach(heading => {
+        if (!heading.matches('[data-market-group-heading]')) return;
+        const count = counts.get(heading.dataset.marketGroupHeading) || 0;
+        if (!count) { heading.remove(); return; }
+        const label = heading.querySelector('.market-group-count');
+        if (label) label.textContent = count + (count === 1 ? ' listing' : ' listings');
+      });
+    });
+  }
   async function refreshCandidates(nextRevision) {
     if (earlier || actionBusy || document.querySelector('.location-choice-backdrop')) return false;
     const generation = actionGeneration;
@@ -872,6 +905,7 @@
       fresh.querySelectorAll('[data-listing-key]').forEach(row => {
         if (dismissedKeys.has(row.dataset.listingKey)) row.remove();
       });
+      syncMarketGroups(fresh);
       current.replaceChildren(...fresh.childNodes);
       const oldCount = document.querySelector('.list-count, .list-cat-title-count');
       const newCount = page.querySelector('.list-count, .list-cat-title-count');
@@ -908,16 +942,84 @@
       }
     } catch (_) { setTimeout(poll, 8000); }
   }
-  function startScan() {
+  const sessionUrl = {{ url_for('market_ebay_session')|tojson }};
+  const sessionCancelUrl = {{ url_for('market_ebay_session_cancel')|tojson }};
+  const sessionPanel = document.getElementById('marketEbaySession');
+  const sessionMessage = document.getElementById('marketEbaySessionMessage');
+  const sessionRetry = document.getElementById('marketEbayRetry');
+  let sessionRequest = null, sessionTimer = null, sessionGeneration = 0;
+  function showSession(state) {
+    sessionRequest = state.request_id;
+    if (sessionPanel) sessionPanel.hidden = false;
+    if (sessionMessage) sessionMessage.textContent = state.message || 'Checking eBay on your Mac…';
+    if (sessionRetry) sessionRetry.hidden = state.active;
+    setStatus(state.active ? 'Waiting for eBay on your Mac…' : 'eBay is unavailable');
+    if (rescan) rescan.disabled = true;
+  }
+  async function waitForSession(initial) {
+    clearTimeout(sessionTimer);
+    const generation = ++sessionGeneration;
+    showSession(initial);
+    async function check() {
+      if (generation !== sessionGeneration) return;
+      try {
+        const response = await fetch(sessionUrl + '?request_id=' + encodeURIComponent(initial.request_id), {cache:'no-store'});
+        const result = await response.json();
+        if (!response.ok || !result.ok || !result.session) throw new Error('Session unavailable');
+        if (generation !== sessionGeneration) return;
+        const state = result.session;
+        showSession(state);
+        if (state.state === 'ready') {
+          // The backend validates freshness/account and consumes this request once.
+          sessionRequest = null;
+          if (sessionPanel) sessionPanel.hidden = true;
+          await startScan({ebay_request_id:state.request_id});
+        } else if (state.active) sessionTimer = setTimeout(check, 3000);
+      } catch (_) {
+        if (generation !== sessionGeneration) return;
+        if (sessionMessage) sessionMessage.textContent = 'Waiting for the connection to your Mac. No scan has started yet.';
+        sessionTimer = setTimeout(check, 5000);
+      }
+    }
+    sessionTimer = setTimeout(check, 500);
+  }
+  async function startScan(options = {}) {
     setStatus('Starting scan…');
     if (rescan) rescan.disabled = true;
-    fetch(scanUrl, { method: 'POST' }).then(r => r.json()).then(d => {
-      if (d && d.ok) { polling = Date.now(); poll(); }
-      else { setStatus('Scan could not start'); if (rescan) rescan.disabled = false; }
-    }).catch(() => { setStatus('Scan could not start'); if (rescan) rescan.disabled = false; });
+    try {
+      const response = await fetch(scanUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(options)});
+      const d = await response.json();
+      if (!response.ok || !d?.ok) throw new Error(d?.error || 'Scan could not start');
+      if (d.waiting_for_ebay) { waitForSession(d.session); return; }
+      polling = Date.now(); poll();
+    } catch (error) {
+      setStatus(error.message || 'Scan could not start');
+      if (rescan) rescan.disabled = false;
+    }
   }
-  if (rescan) rescan.addEventListener('click', startScan);
-  {% if market_running %}polling = Date.now(); poll();{% elif market_autoscan %}startScan();{% endif %}
+  async function cancelSession() {
+    ++sessionGeneration;
+    clearTimeout(sessionTimer);
+    const id = sessionRequest;
+    const response = await fetch(sessionCancelUrl, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:id})});
+    if (!response.ok) throw new Error('Could not cancel the eBay check. Please retry.');
+    sessionRequest = null;
+    if (sessionPanel) sessionPanel.hidden = true;
+    if (rescan) rescan.disabled = false;
+  }
+  document.getElementById('marketEbayCancel')?.addEventListener('click', async () => {
+    try {await cancelSession();setStatus('Scan cancelled.');} catch(error) {setStatus(error.message);}
+  });
+  document.getElementById('marketEbaySkip')?.addEventListener('click', async () => {
+    try {await cancelSession();await startScan({skip_ebay:true});} catch(error) {setStatus(error.message);}
+  });
+  sessionRetry?.addEventListener('click', () => { ++sessionGeneration; clearTimeout(sessionTimer); startScan(); });
+  if (rescan) rescan.addEventListener('click', () => startScan());
+  const initialSession = {{ market_ebay_session|default(none)|tojson }};
+  {% if market_running %}polling = Date.now(); poll();{% else %}
+  if (!earlier && initialSession && !initialSession.scan_id && (initialSession.active || initialSession.state === 'ready')) waitForSession(initialSession);
+  {% if market_autoscan %}else startScan();{% endif %}
+  {% endif %}
 
   // Buy: the same Location picker the add form requires, then file the
   // item as Ordered (with the listing's photos), open the listing to pay
@@ -1007,6 +1109,7 @@
             });
           }
           row?.remove();
+          syncMarketGroups();
           const count = document.querySelectorAll('.market-row').length;
           const label = document.querySelector('.list-count, .list-cat-title-count');
           if (label) label.textContent = count + (CAT === 'coins' ? ' Coins' : '');

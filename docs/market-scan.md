@@ -28,6 +28,27 @@ Coin archive enrichment runs after candidates are visible, for at most another
 metadata-only provenance results; it does not download full lot descriptions
 or photographs for the market list.
 
+## Market grouping
+
+Both Market Scan pages gather similar listings into visible sections. Banknotes
+use the country spelling aliases and complete series label, with the existing US
+note-type rules separating same-year classes such as Silver Certificates and
+Federal Reserve Notes. Series suffixes remain distinct. Coins use the existing
+catalogue-region normalization, including the separate island headings.
+
+Groups follow the first appearance in the existing ranked results; listings
+retain their rank order within each group. This is display-only metadata on
+copies: persisted ranks, catalogue references, eligibility, ownership warnings,
+dismissals and per-listing actions remain unchanged. Current and Earlier market
+views use the same grouping. Collection lists are unchanged.
+
+Watched/sponsored cards are grouped independently in their existing observed
+section. They reuse the country already identified for collection checks and
+only explicitly named series in card titles. A bare year is not treated as a
+series. Missing data reads “Series not specified”, “Other banknote listings” or
+“Region not specified”; it does not trigger enrichment or a new scan. Grouping
+never upgrades an observed card into a verified recommendation.
+
 ## Identity and decisions
 
 Canonical URLs remove known tracking parameters and fragments, preserve
@@ -226,3 +247,29 @@ purchase controls, invented model URLs, and reference-based collection warnings.
 watched/sponsored/ordinary sources, concurrent publication, source and candidate
 pruning, database reopen, migration, owner/tenant/CSRF guards, no unnecessary model
 work, and preserved collection/Ordered/Bought history.
+
+
+## eBay session recovery
+
+Banknotes Scan/Rescan first checks the already linked eBay buyer through Today's
+existing Mac bridge. A working session is reused. If sign-in or an eBay security
+check is required, Today opens the fixed Watchlist URL once in the Mac's default
+browser and the page waits up to ten minutes. The current adapter reads Chrome,
+which is the designated Mac's default; unsupported browser sessions, wrong
+accounts and unavailable Automation access remain explicit failures.
+
+No model scan runs during this preflight. After the bound account and fresh
+snapshot are confirmed, the requested scan resumes once with that same snapshot.
+Refreshing the page preserves an active wait. Cancel prevents late readiness
+from starting the scan; Retry creates a new terminal-request replacement;
+Continue without eBay starts the scan with personalized sources explicitly
+skipped. Chrome's normal saved session may sign in directly. Password, 2FA and
+CAPTCHA prompts require completion in the opened tab; no credentials are read
+or challenge bypass is attempted. This is a host browser connection, so the Mac
+must be awake and Today online even when the scan starts on another device.
+
+`ebay_market_sessions` is a one-to-one extension of the existing feed request,
+with bounded retry/claim timestamps and an atomic consumed scan ID. Bridge token
+and web-only tenant gates are unchanged. Coins use public sources rather than
+this Banknotes personal feed. Regression coverage is in
+`tests/test_market_ebay_session.py`; browser fixtures never execute paid models.

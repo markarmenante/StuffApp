@@ -44,7 +44,7 @@ assert 'Interrupted' in html and 'the scan was interrupted' in html, html[:2000]
 assert '<h3>Scanning the market…</h3>' not in html
 # The page does not resume polling: the template's own resume line is
 # gone (the same call inside startScan() is the Rescan button's).
-assert "addEventListener('click', startScan);\n  polling = Date.now(); poll();" not in html
+assert "\n  polling = Date.now(); poll();" not in html
 
 # 3. A scan genuinely in flight is left running.
 seed_running('live-1')
@@ -55,7 +55,7 @@ try:
     assert st['status'] == 'running', st
     html = client.get('/coins/market').get_data(as_text=True)
     assert '<h3>Scanning the market…</h3>' in html
-    assert "addEventListener('click', startScan);\n  polling = Date.now(); poll();" in html
+    assert "\n  polling = Date.now(); poll();" in html
 finally:
     with stuffapp._MARKET_SCAN_LOCK:
         stuffapp._MARKET_SCAN_INFLIGHT.discard('coins')

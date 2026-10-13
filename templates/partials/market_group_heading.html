@@ -1,0 +1,6 @@
+{% if market_group and market_group.heading %}
+<div class="market-group-heading" data-market-group-heading="{{ market_group.key }}">
+  <h2>{{ market_group.title }}</h2>
+  <span class="market-group-count">{{ market_group.count }} {{ 'listing' if market_group.count == 1 else 'listings' }}</span>
+</div>
+{% endif %}

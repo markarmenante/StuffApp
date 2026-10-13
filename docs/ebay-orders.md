@@ -133,6 +133,35 @@ Login-required HTML invoices need a signed-in browser capture, never a saved
 login/error page. Archives and item associations are separate normalized tables;
 existing Documents entries are retained, and repeat checks do not add duplicates.
 
+### Exact paid item amount during Check (2026-10-13)
+
+When an entered order has no cached purchase identity, original listing, or paid
+amount for a blank price, Check can queue one read through Today's existing
+web-only authenticated bridge. For a unique quantity-one item, the Mac reads the
+exact order's item card and verifies the same Purchases account before and after
+navigation. Only the explicit **Unit price** and its displayed currency, exact
+order/item IDs, quantity and observation time are transferred. No order totals,
+tax, shipping, financing, payment methods, addresses or entire receipt page are
+sent. Ambiguous items, currencies, refunds/discounts and unreadable layouts do
+not produce a paid-price observation.
+
+`ebay_purchase_prices` stores this minimal evidence by the existing order-item
+key; it survives request expiry and is removed with that integration item.
+The receiver checks the claimed request, account, exact identity, fresh timestamp
+and literal unit-price evidence in the same transaction as the purchase snapshot.
+A bare `$` preserves that exact display symbol without claiming USD or converting
+it. The Check source report calls this an authenticated order observation, not a
+saved PDF. A cached listing alone cannot prevent this recovery when price is
+blank; completed attempts without readable evidence have a five-minute cooldown.
+
+The deterministic amount fills only a blank price; a populated price is retained.
+Check normalization, the editable field, collection displays and purchase-price
+reports preserve cents (for example `$599.89`, never `$600`). Separate estimated
+values or optional converted-value annotations are not proof of the amount paid.
+Tests cover the authenticated receiver and Check source/apply paths with no paid
+model call: `test_ebay_purchase_lookup.py`, `test_banknote_check_sources.py`, and
+`test_banknote_price_currency.py`.
+
 The retired eBay-email protocol returns HTTP 410. Old email-only statuses are
 shown as Unverified until Purchases confirms them. Newer snapshots can correct
 old email conclusions; older/replayed snapshots do not overwrite newer ones.

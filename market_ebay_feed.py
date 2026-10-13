@@ -15,6 +15,7 @@ from flask import abort, jsonify, request
 import ebay_mail
 
 REQUEST_SECONDS = 180
+SESSION_SECONDS = 600
 FRESH_SECONDS = 600
 KINDS = ('watched', 'sponsored')
 
@@ -29,6 +30,13 @@ def init_schema(db):
             id TEXT PRIMARY KEY, requested_at REAL NOT NULL, expires_at REAL NOT NULL,
             status TEXT NOT NULL CHECK(status IN ('queued','reading','done','expired')),
             expected_account TEXT, observed_at REAL, source_status TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS ebay_market_sessions (
+            request_id TEXT PRIMARY KEY REFERENCES ebay_market_requests(id) ON DELETE CASCADE,
+            state TEXT NOT NULL DEFAULT 'checking' CHECK(state IN ('checking','sign_in_required','challenge_required','ready','unavailable')),
+            message TEXT NOT NULL DEFAULT '', retry_after REAL NOT NULL DEFAULT 0,
+            open_reserved INTEGER NOT NULL DEFAULT 0 CHECK(open_reserved IN (0,1)),
+            claimed_at REAL, scan_id TEXT UNIQUE REFERENCES market_scans(id) ON DELETE SET NULL
         );
         CREATE TABLE IF NOT EXISTS ebay_market_cards (
             request_id TEXT NOT NULL REFERENCES ebay_market_requests(id) ON DELETE CASCADE,
@@ -86,18 +94,92 @@ def expected_account(db):
     return accounts[0] if accounts else None
 
 
-def queue(db):
+def queue(db, recover_session=False):
     if not enabled():
         return None
     now = time.time()
     db.execute("DELETE FROM ebay_market_card_sources WHERE request_id IN (SELECT id FROM ebay_market_requests WHERE requested_at<?)", (now - 86400,))
     db.execute("DELETE FROM ebay_market_cards WHERE request_id IN (SELECT id FROM ebay_market_requests WHERE requested_at<?)", (now - 86400,))
+    db.execute('DELETE FROM ebay_market_sessions WHERE request_id IN (SELECT id FROM ebay_market_requests WHERE requested_at<?)', (now - 86400,))
     db.execute('DELETE FROM ebay_market_requests WHERE requested_at<?', (now - 86400,))
     ident = uuid.uuid4().hex
     db.execute('INSERT INTO ebay_market_requests(id,requested_at,expires_at,status,expected_account) VALUES(?,?,?,?,?)',
-               (ident, now, now + REQUEST_SECONDS, 'queued', expected_account(db)))
+               (ident, now, now + (SESSION_SECONDS if recover_session else REQUEST_SECONDS), 'queued', expected_account(db)))
+    if recover_session:
+        db.execute('INSERT INTO ebay_market_sessions(request_id) VALUES(?)', (ident,))
     db.commit()
     return ident
+
+
+
+def prepare_session(db):
+    """Coalesce explicit owner requests; no browser or model action runs here."""
+    account = expected_account(db)
+    db.execute("UPDATE ebay_market_requests SET status='expired' WHERE status IN ('queued','reading') AND expected_account IS NOT ? AND id IN (SELECT request_id FROM ebay_market_sessions)", (account,))
+    row = db.execute("SELECT r.id FROM ebay_market_requests r JOIN ebay_market_sessions s ON s.request_id=r.id "
+                     "WHERE r.status IN ('queued','reading') AND r.expires_at>? ORDER BY r.requested_at DESC LIMIT 1", (time.time(),)).fetchone()
+    return row['id'] if row else queue(db, recover_session=True)
+
+
+def session_status(db, ident=None):
+    if not enabled():
+        return None
+    where, params = ('WHERE r.id=?', (ident,)) if ident else ('ORDER BY r.requested_at DESC LIMIT 1', ())
+    row = db.execute('SELECT r.*,s.state,s.message,s.scan_id FROM ebay_market_requests r '
+                     'JOIN ebay_market_sessions s ON s.request_id=r.id ' + where, params).fetchone()
+    if not row:
+        return None
+    state, message = row['state'], row['message']
+    active = row['status'] in ('queued', 'reading') and row['expires_at'] > time.time()
+    if (row['status'] == 'expired' and state != 'unavailable') or (row['expires_at'] <= time.time() and not row['scan_id']):
+        state, message = 'unavailable', 'The eBay session check expired. Retry when the Mac is online and eBay is signed in.'
+    try:
+        if row['expected_account'] != expected_account(db):
+            state, message, active = 'unavailable', 'The linked eBay account changed. Start a new session check.', False
+    except ValueError:
+        state, message, active = 'unavailable', 'The linked eBay accounts disagree. Personalized sources remain unavailable.', False
+    return dict(request_id=row['id'], state=state, message=message or 'Checking eBay on your Mac…',
+                active=active, expires_at=utc(row['expires_at']), scan_id=row['scan_id'])
+
+
+def finish_session_attempt(db, payload):
+    """A waiting attempt never becomes a successful or empty feed."""
+    ident = payload.get('request_id') if isinstance(payload, dict) else None
+    if not isinstance(ident, str):
+        return False
+    row = db.execute('SELECT r.*,s.request_id FROM ebay_market_requests r JOIN ebay_market_sessions s ON s.request_id=r.id WHERE r.id=?', (ident,)).fetchone()
+    if not row:
+        return False
+    if row['expected_account'] != expected_account(db):
+        raise ValueError('The linked eBay account changed during the session check.')
+    if row['status'] != 'reading' or row['expires_at'] <= time.time():
+        raise ValueError('The eBay session request is no longer active.')
+    session = payload.get('session')
+    if not isinstance(session, dict) or session.get('state') not in ('ready', 'sign_in_required', 'challenge_required', 'unavailable'):
+        raise ValueError('The browser did not report a supported session check.')
+    state = session['state']
+    if state == 'ready':
+        if not payload.get('account') or payload.get('account', '').lower() != row['expected_account']:
+            raise ValueError('The browser account does not match the linked account.')
+        return False  # Complete validates and stores the observed snapshot first.
+    if payload.get('items') or payload.get('account'):
+        raise ValueError('An unavailable session cannot supply personalized cards.')
+    messages = {
+        'sign_in_required': 'eBay is open in the default browser on your Mac. Complete sign-in there; this scan will continue automatically.',
+        'challenge_required': 'eBay needs a security check in the default browser on your Mac. Complete it there; this scan will continue automatically.',
+        'unavailable': 'The Mac could not verify eBay. Keep Today online with Chrome as the default browser and its existing Automation access enabled, then retry.'}
+    message = messages[state]
+    if state == 'unavailable':
+        message = {
+            'wrong_account': 'The browser is signed in to a different eBay account. Switch to the account already linked to Purchases, then retry.',
+            'unsupported_browser': 'This Mac’s existing eBay reader supports Chrome. Set Chrome as the Mac’s default browser, then retry; other browser sessions cannot be read by this connection.',
+            'unbound_account': 'Connect the existing eBay Purchases account before using personalized market sources.',
+        }.get(session.get('reason'), message)
+    waiting = state in ('sign_in_required', 'challenge_required')
+    db.execute('UPDATE ebay_market_sessions SET state=?,message=?,retry_after=?,claimed_at=NULL WHERE request_id=?',
+               (state, message, time.time() + 8, ident))
+    db.execute('UPDATE ebay_market_requests SET status=? WHERE id=?', ('queued' if waiting else 'expired', ident))
+    return True
 
 
 def cards(db, ident):
@@ -262,17 +344,29 @@ def register(app, get_db):
         try:
             db.execute("UPDATE ebay_market_requests SET status='expired' WHERE status IN ('queued','reading') AND expires_at<?", (time.time(),))
             if request.method == 'GET':
-                row = db.execute("SELECT * FROM ebay_market_requests WHERE status='queued' ORDER BY requested_at LIMIT 1").fetchone()
+                db.execute("UPDATE ebay_market_requests SET status='queued' WHERE status='reading' AND expires_at>? AND id IN "
+                           "(SELECT request_id FROM ebay_market_sessions WHERE claimed_at<?)", (time.time(), time.time()-120))
+                row = db.execute("SELECT r.* FROM ebay_market_requests r LEFT JOIN ebay_market_sessions s ON s.request_id=r.id "
+                                 "WHERE r.status='queued' AND (s.request_id IS NULL OR s.retry_after<=?) ORDER BY r.requested_at LIMIT 1", (time.time(),)).fetchone()
                 data = None
                 if row:
                     db.execute("UPDATE ebay_market_requests SET status='reading' WHERE id=?", (row['id'],))
                     data = dict(id=row['id'], requested_at=utc(row['requested_at']), expires_at=utc(row['expires_at']))
+                    session = db.execute('SELECT * FROM ebay_market_sessions WHERE request_id=?', (row['id'],)).fetchone()
+                    if session:
+                        data['session_recovery'] = dict(open_browser=not bool(session['open_reserved']))
+                        db.execute('UPDATE ebay_market_sessions SET open_reserved=1,claimed_at=? WHERE request_id=?', (time.time(),row['id']))
                 account = row['expected_account'] if row else expected_account(db)
                 db.commit()
                 return jsonify(request=data, expected_account=account)
             if request.content_length is None or request.content_length > 1024 * 1024:
                 abort(413)
-            count = complete(db, request.get_json(silent=True))
+            payload = request.get_json(silent=True)
+            if finish_session_attempt(db, payload):
+                db.commit()
+                return jsonify(ok=True, pending=True, items_accepted=0)
+            count = complete(db, payload)
+            db.execute("UPDATE ebay_market_sessions SET state='ready',message='eBay is signed in. Continuing the requested scan.' WHERE request_id=?", (payload['request_id'],))
             db.commit()
             return jsonify(ok=True, items_accepted=count)
         except ValueError as exc:
