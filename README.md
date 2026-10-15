@@ -113,3 +113,46 @@ Run `python tests/run_all.py` for the Python regressions. The optional browser
 regression is `node tests/test_purchase_status_browser.cjs`; its header documents
 Python, Playwright and browser configuration. It uses isolated fixtures and
 intercepts all requests, without changing live records or posting feedback.
+
+
+### Catalogue audit maintenance
+
+`banknote_catalog_audit.py` is a standalone maintenance worker; it never imports
+or initializes the Flask app. `init` creates a consistent private database backup
+and immutable per-note baseline. `collect` researches public catalogue types using
+only country, catalogue reference, denomination, issuer and issue year. It sends no
+collection identifiers, photographs or specimen/purchase data. Missing references
+need a locally reviewed public query override. Existing runtime model configuration
+is reused; collection concurrency is bounded at four workers.
+
+Research and writes are separate. Raw responses, actual search/citation evidence,
+prompt/source hashes and per-note proposals are journaled privately. Collection
+resumes completed work; `revalidate` can salvage a completed response with improved
+validation without another provider request. Uncertain fields are held individually,
+and unknown values never clear saved information implicitly.
+
+`supplement --research <file>` records independently verified facts that a provider
+omitted or left unresolved. It reads only the private run files, validates their hashes
+and an explicit per-field source excerpt, then retains both the previous proposal and
+the new candidate in an append-only research journal. Provider evidence remains
+unchanged; independent evidence is labelled separately. A supplement never changes
+the database or approves the physical identity, and requires fresh normal approval
+before any candidate can be applied. Explicit date clears must identify `clear_fields`
+and include the supported paired date display.
+
+`apply` requires an explicit approval file with exact proposed values and a stated
+review basis. An unchanged full saved catalogue identity can support type enrichment;
+additional equivalent references require a source crosswalk preserving the full
+namespace and variety suffix. Changes to existing identity/reference/date data need
+local specimen evidence. Independently retrieved reviewer sources must include their
+actual excerpt, retrieval date and explicit review, and remain in the approval audit.
+Model-declared new URLs cannot grant themselves this status.
+
+Before each write the worker checks the owner/service tenant and the complete saved
+row against its baseline. Only approved catalogue/type fields can change; purchase,
+status, grade, serial, certification and image data remain protected. Existing personal
+history notes are fill-only. A transactional change journal supports explicit `rollback`,
+which refuses to overwrite subsequent user edits. The tool has no scheduled execution
+or automatic apply. Run `python banknote_catalog_audit.py --help` for command options;
+`python tests/test_banknote_catalog_audit.py` exercises the workflow with isolated
+fixtures and mocked provider requests, and is included in `tests/run_all.py`.
