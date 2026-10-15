@@ -171,3 +171,93 @@ The live B362 record retained its Puerto Rico narrative on 2026-09-20; the list
 only exposed a generic United States label. Its saved history was corrected to
 acknowledge the early mainland release and shipments through April 1949, with
 the source linked. No individual circulation provenance is inferred.
+
+## State treasury notes and federal coin-note history
+
+The generic words “Treasury Note” do not identify the United States federal
+Treasury (Coin) Note class. That history is selected only for an 1890 or 1891
+series/date and a compatible federal issuer; a supplied state, territorial,
+Confederate or obsolete-bank authority is not treated as the federal Treasury.
+An unknown date does not borrow the 1890 redemption clause.
+
+A positively identified Commonwealth of Virginia / Virginia Treasury issue in
+1861–1865 receives state treasury history under its saved issuer and year,
+including notes filed under either United States or Confederate States. State
+is a separate issue type: the subnational Virginia obligation is not a national
+Confederate or federal US issue. Check proposes State for a known Virginia note
+and classification saves normalize generic National/blank values to State;
+custom types and unrelated field saves are preserved. Sovereign governments,
+central banks and names merely containing “State” or “État” are not inferred to
+be subnational issuers. The existing startup migration explicitly skips this
+new type normalization, so existing records require a reviewed save. This
+corrects the 1862 $100 Virginia note’s displayed history without rewriting its
+country, issuer, date, CR-6 reference, images, purchase facts or saved notes.
+No display-number migration or record renumbering accompanies this history fix.
+
+Sources:
+
+- [Virginia General Assembly — Acts passed in 1861, chapter 6, March 14, pp. 29–30](https://archive.org/details/actsofgeneralas00virg)
+  is the original state treasury-note authorization: state defence financing,
+  the Commonwealth’s faith pledged for redemption, and receipt for state taxes
+  and dues. It establishes the separate Virginia obligation, not a Confederate
+  national obligation; it is not presented as the specific authorization of
+  every later denomination or variety.
+- [Library of Virginia — Government Work](https://old.lva.virginia.gov/exhibits/destiny/work/government.htm)
+  documents the continuing state Treasury’s production of Virginia currency in
+  1861–1864. Joining the Confederacy did not end the state’s own Treasury,
+  expenses or obligations. The panel explains that distinction rather than
+  treating the Commonwealth as the Confederate national issuer.
+- [Emory / Digital Library of Georgia — Virginia $10, October 15, 1862](https://dlg.usg.edu/record/geusc_139x0k6f6s-cor_235gb5mmq3-cor)
+  identifies Virginia as creator while grouping the note under Confederate
+  currency. The 1862 $10 and $100 note faces preserved on B412/B411 provide
+  the direct evidence for the Commonwealth pledge and taxes/public-dues wording.
+- [Smithsonian — Virginia $100, 1862, object nmah_1762087](https://americanhistory.si.edu/collections/object/nmah_1762087)
+  identifies the October 15, 1862 issue and Keatinge & Ball as maker. This is
+  distinct from the Smithsonian’s national Confederate $100 object nmah_1211831.
+- [Newman Numismatic Portal — Virginia Treasury $100 Cr. 6](https://nnp.wustl.edu/library/ImageDetail/599348)
+  corroborates the exact catalogue identity and printer. Its institutional
+  record reproduces an auction description; the Smithsonian object and
+  Virginia archive provide the primary institutional evidence.
+- [Bureau of Engraving and Printing — History](https://www.bep.gov/currency/history)
+  dates the first federal Treasury Coin Notes to 1890; its
+  [Currency Notes publication, p. 5](https://www.govinfo.gov/content/pkg/GOVPUB-T18-PURL-LPS66873/pdf/GOVPUB-T18-PURL-LPS66873.pdf)
+  identifies Series 1890 and 1891 and the July 14, 1890 authorization.
+
+Regression coverage includes the Virginia history panel, legitimate federal
+1890/1891 issues, incompatible dates, other treasury authorities, and unchanged
+saved record fields after history rendering.
+
+
+## Portraits and design: exact Virginia Cr. 6 reference
+
+Check now distinguishes multiple named portraits from allegorical figures and
+keeps their left/center/right positions in the short description. The former
+90-character instruction could omit secondary figures; the prompt now allows
+up to 240 characters and does not invent a reverse when only the face is known.
+
+The 1862 Virginia $100 Cr. 6 has a deterministic type-reference safeguard, gated
+by all four of issuer, year, denomination and explicit Cr. 6 catalogue number
+(including VA CR-6 / VACR6). Virginia location, printer, denomination alone or
+an ambiguous P-6 cannot trigger it; the $10 Cr. 11 is excluded. A proposed
+conflicting catalogue identity holds this fallback for review. It adds reviewed
+suggestions for Portrait and Short Description, not an automatic record edit.
+The original reverse description is retained; no reverse is guessed. The source
+attribution is shown in Check and cannot supply purchase price, grade or other
+personal facts.
+
+[Heritage lot 95435](https://currency.ha.com/itm/obsoletes-by-state/virginia/richmond-va-commonwealth-of-virginia-100-oct-15-1862-cr-6-pmg-about-uncirculated-50/a/62324-95435.s)
+identifies Governor John Letcher in the center, Washington at left, a Native
+American figure at right, and two orange C protectors. The
+[Newman collection catalogue record](https://nnp.wustl.edu/library/ImageDetail/599348)
+corroborates the same Cr. 6 layout (describing the protectors as red). The app
+labels the unnamed female figure as an allegorical Native American maiden,
+not an identified historical woman. These are catalogue observations of the
+type, not the user's own grade, price or provenance.
+
+
+The same Heritage catalogue identifies this as the largest denomination of the
+Commonwealth’s second and final emission, intended to redeem earlier
+interest-bearing Treasury notes. Check offers that source-backed fact only in
+an empty Historical Context field; existing historical notes and the saved
+series label remain unchanged. It is a type-level fact, not evidence of this
+individual note’s circulation or redemption.

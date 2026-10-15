@@ -110,6 +110,44 @@ solid_bar = neutral_holder()
 ImageDraw.Draw(solid_bar).rectangle((85, 55, 1540, 250), fill=(50, 75, 60))
 assert stuffapp._warm_paper_on_light_holder_quad(solid_bar) is None
 
+# A pale green PMG panel can carry text without any dark rectangular
+# frame. Virginia 1862: the reverse is unprinted, and the front's paper
+# rim is much narrower than the detector's old deep margin sample.
+def pale_label_holder(blank=False, text=True):
+    img = neutral_holder(label=False)
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((85, 55, 1540, 250), fill=(226, 237, 227))
+    if text:
+        for x in (130, 540, 1100):
+            for y in (85, 115, 145):
+                draw.rectangle((x, y, x + 150, y + 8), fill=(35, 40, 35))
+    paper_quad = [(220, 300), (1400, 315), (1395, 855), (215, 840)]
+    draw.polygon(paper_quad, fill=(232, 223, 185))
+    if blank:
+        # Faint show-through does not supply a dense engraving anchor.
+        draw.ellipse((600, 430, 950, 720), outline=(216, 207, 173), width=2)
+    else:
+        # Warm dark engraving reaches within three pixels of the rim;
+        # the full paper outline must survive without an inward shave.
+        draw.polygon([(224, 304), (1397, 319), (1392, 851), (219, 836)],
+                     fill=(95, 85, 65))
+    return img
+
+
+for blank in (False, True):
+    img = pale_label_holder(blank=blank)
+    meta = {}
+    with patch.object(stuffapp, '_trim_note_v2', side_effect=AssertionError('model fallback')), \
+            patch.object(stuffapp, '_trim_note_cv_cascade', side_effect=AssertionError('ink fallback')):
+        output = stuffapp._trim_slabbed_note_image(encoded(img), meta=meta)
+    assert output and meta['engine'] == 'paper-boundary', (blank, meta)
+    assert all(math.dist(a, b) < 5 for a, b in zip(meta['quad'],
+               [(220, 300), (1400, 315), (1395, 855), (215, 840)])), meta
+    assert all(abs(a - b) < 5 for a, b in
+               zip(Image.open(io.BytesIO(output)).size, (1180, 540)))
+assert stuffapp._warm_paper_on_light_holder_quad(pale_label_holder(text=False)) is None, \
+    'A plain pale panel must not count as a grading label'
+
 # Screenshot uploads with alpha are flattened to JPEG before detection.
 # Exercise that saved-image format too, including chroma subsampling.
 for quality in (80, 90, 95):

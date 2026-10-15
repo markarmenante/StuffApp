@@ -889,4 +889,38 @@ assert stuffapp._v2_validator_may_waive(
 assert stuffapp._v2_validator_may_waive([])
 print('V2 WAIVE-GATE ASSERTIONS PASSED')
 
+# A failed seeded crop must not escape its own safety gates by falling
+# through to the older detector. This occurs when flash glare joins a
+# grading label to the paper in the threshold mask (1935A $1, 2026-10-15).
+from unittest.mock import patch
+
+unsafe = Image.new('RGB', (1040, 580), PAPER)
+ImageDraw.Draw(unsafe).rectangle((995, 0, 1039, 579), fill=(20, 20, 20))
+unsafe_bytes = stuffapp._encode_trimmed_note(unsafe)
+with patch.object(stuffapp, '_warm_paper_on_light_holder_quad', return_value=None), \
+        patch.object(stuffapp, '_trim_v2_enabled', return_value=True), \
+        patch.object(stuffapp, '_trim_note_v2', return_value=('fail', None)), \
+        patch.object(stuffapp, '_trim_note_cv_cascade', return_value=unsafe_bytes), \
+        patch.object(stuffapp, '_refine_rectified_paper_edges', return_value=None), \
+        patch.object(stuffapp, '_shave_dark_border', return_value=None), \
+        patch.object(stuffapp, '_vision_crop_verdict', return_value=True) as verdict:
+    assert stuffapp._trim_slabbed_note_image(buf.getvalue()) is None, \
+        'A visible dark holder band is not waivable even after fallback'
+    verdict.assert_not_called()
+
+# A texture-only uncertain fallback needs the same affirmative validation
+# as a v2 candidate. No-key/API-unavailable must not silently approve it.
+plain = stuffapp._encode_trimmed_note(Image.new('RGB', (1040, 580), PAPER))
+with patch.object(stuffapp, '_warm_paper_on_light_holder_quad', return_value=None), \
+        patch.object(stuffapp, '_trim_v2_enabled', return_value=True), \
+        patch.object(stuffapp, '_trim_note_v2', return_value=('fail', None)), \
+        patch.object(stuffapp, '_trim_note_cv_cascade', return_value=plain), \
+        patch.object(stuffapp, '_refine_rectified_paper_edges', return_value=None), \
+        patch.object(stuffapp, '_shave_dark_border', return_value=None), \
+        patch.object(stuffapp, '_vision_crop_verdict', return_value=None) as verdict:
+    assert stuffapp._trim_slabbed_note_image(buf.getvalue()) is None
+    verdict.return_value = True
+    assert stuffapp._trim_slabbed_note_image(buf.getvalue()) is not None
+print('SEEDED-FALLBACK SAFETY ASSERTIONS PASSED')
+
 print('ALL NOTE-TRIM ASSERTIONS PASSED')

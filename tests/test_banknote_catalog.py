@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuff-catalog-test-')
@@ -242,6 +243,352 @@ class CatalogueTests(unittest.TestCase):
         self.assertNotIn(label, client.get('/banknotes/silver').get_data(as_text=True))
         row = self.db.execute("SELECT * FROM banknotes WHERE id='legal'").fetchone()
         self.assertEqual(stuff._us_note_class(row)['name'], 'United States Note (Legal Tender Note)')
+
+    def test_virginia_treasury_history_never_uses_federal_coin_note_panel(self):
+        self.add('virginia1862', 'United States of America', 1862,
+                 'Commonwealth of Virginia (Virginia Treasury)')
+        self.db.execute("UPDATE banknotes SET denomination='$100', series='Series of 1862', "
+                        "pick_number='VA CR-6', description='Virginia Treasury Note', "
+                        "printer='Keatinge & Ball', condition='Existing historical notes', "
+                        "price='$450.25', image_1='preserved-front.jpg', image_2='preserved-back.jpg' "
+                        "WHERE id='virginia1862'")
+        self.db.commit()
+        row = self.db.execute("SELECT * FROM banknotes WHERE id='virginia1862'").fetchone()
+        before = dict(row)
+        self.assertIsNone(stuff._us_note_class(row))
+        panel = stuff._series_panel_for_row(row)
+        self.assertEqual(panel['title'], 'Commonwealth of Virginia (Virginia Treasury)')
+        self.assertEqual(panel['title_span'], '1862')
+        self.assertEqual(panel['note_type'], 'Virginia state treasury note')
+        self.assertEqual(panel['era']['label'], 'Virginia Civil War finance')
+        self.assertIn('Commonwealth of Virginia', panel['era']['body'])
+        self.assertIn('own state government, Treasury', panel['era']['body'])
+        self.assertIn('state taxes and other public dues', panel['era']['body'])
+        self.assertIsNone(panel['note_class'])
+        self.assertIsNone(panel['clause'])
+        self.assertIsNone(panel['denoms'])
+        with stuff.app.test_request_context('/'):
+            html = stuff.render_template('partials/series_panel.html', _panel=panel)
+        self.assertNotIn('Sherman', html)
+        self.assertNotIn('1890', html)
+        self.assertNotIn('Treasury (Coin) Note', html)
+        self.assertIn('Virginia state treasury note', html)
+        grouped = stuff.series_panels([row])
+        self.assertEqual(grouped['virginia1862']['panel']['note_type'], 'Virginia state treasury note')
+        after = dict(self.db.execute("SELECT * FROM banknotes WHERE id='virginia1862'").fetchone())
+        self.assertEqual(before, after)
+
+    def test_virginia_state_history_preserves_confederate_country_grouping(self):
+        for country in ('Confederate States of America', 'Confederate States', 'Virginia'):
+            row = {'country': country, 'issuer': 'Commonwealth of Virginia (Treasury)',
+                   'date_1': 1862, 'series': 'October 15, 1862',
+                   'denomination': '$10', 'pick_number': 'Cr. 11', 'issue_type': 'National'}
+            original = dict(row)
+            with self.subTest(country=country):
+                panel = stuff._series_panel_for_row(row)
+                self.assertEqual(panel['note_type'], 'Virginia state treasury note')
+                self.assertEqual(panel['title'], row['issuer'])
+                self.assertEqual(panel['year'], 1862)
+                self.assertIsNone(panel['note_class'])
+                self.assertNotEqual(panel['country_key'], 'us')
+                self.assertEqual(row, original)
+
+    def test_state_issue_normalization_preserves_country_and_custom_types(self):
+        for country in ('United States of America', 'Confederate States of America'):
+            existing = dict(country=country, issuer='Commonwealth of Virginia (Treasury)',
+                            date_1=1862, issue_type='National')
+            for proposed in ('National', ''):
+                fields = {'issue_type': proposed}
+                stuff.canonicalize_banknote_fields(fields, existing)
+                self.assertEqual(fields, {'issue_type': 'State'})
+            self.assertEqual(existing['country'], country)
+            fields = dict(existing)
+            stuff.canonicalize_banknote_fields(fields)
+            self.assertEqual(fields['country'], country)
+            self.assertEqual(fields['issue_type'], 'State')
+            for field, value in (('grade', 'VF'), ('image_1', 'new.jpg'), ('price', '$450')):
+                changes = {field: value}
+                stuff.canonicalize_banknote_fields(changes, existing)
+                self.assertEqual(changes, {field: value})
+            for custom in ('Specimen', 'Private / Scrip', 'Military / Occupation'):
+                changes = {'issue_type': custom}
+                stuff.canonicalize_banknote_fields(changes, existing)
+                self.assertEqual(changes, {'issue_type': custom})
+        self.assertIn('State', stuff.VALUE_LISTS['banknote_issue_type'])
+        self.assertEqual(stuff._coerce_banknote_spec('issue_type', 'state'), 'State')
+
+    def test_state_normalization_does_not_reclassify_sovereigns_or_banks(self):
+        for country, issuer, year in (
+                ('France', "Banque de l'État", 1862),
+                ('France', 'Banque de France', 1862),
+                ('United States of America', 'Bank of Virginia', 1862),
+                ('United States of America', 'Bank of the Commonwealth of Virginia', 1862),
+                ('United States of America', 'Commonwealth of Virginia', 1891),
+                ('United States of America', 'United States Treasury', 1891),
+                ('Confederate States of America', 'Confederate States Treasury', 1862)):
+            fields = dict(country=country, issuer=issuer, date_1=year, issue_type='National')
+            before = dict(fields)
+            stuff.canonicalize_banknote_fields(fields)
+            self.assertEqual(fields, before)
+
+    def test_startup_does_not_apply_state_type_or_renumber_notes(self):
+        self.add('B411', 'United States of America', 1862, 'Commonwealth of Virginia (Treasury)')
+        self.add('B412', 'Confederate States of America', 1862, 'Commonwealth of Virginia (Treasury)')
+        self.db.execute("UPDATE banknotes SET issue_type='National', denomination='$10', "
+                        "banknote_id='preserved-' || id")
+        self.db.commit()
+        before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        with patch.object(stuff, '_renumber_banknotes') as renumber:
+            stuff._migrate_canonicalize_us_banknotes(self.db)
+        renumber.assert_not_called()
+        self.assertEqual(before, {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')})
+
+    def test_check_proposes_state_for_known_virginia_without_saving_or_refiling(self):
+        for ident, country in (('B411', 'United States of America'),
+                               ('B412', 'Confederate States of America')):
+            self.add(ident, country, 1862, 'Commonwealth of Virginia (Treasury)')
+            self.db.execute("UPDATE banknotes SET cat_id=id, issue_type='National', denomination='$10', "
+                            "size_width=150,size_height=70 WHERE id=?", (ident,))
+        self.db.commit()
+        client = stuff.app.test_client()
+        prepared = dict(evidence=[], reports=[], documents=[], warnings=[], images={})
+        for ident in ('B411', 'B412'):
+            before = dict(self.db.execute('SELECT * FROM banknotes WHERE id=?', (ident,)).fetchone())
+            with patch.object(stuff.banknote_check_sources, 'prepare', return_value=prepared), \
+                    patch.object(stuff, 'fetch_banknote_specs', return_value={'issue_type': 'National'}), \
+                    patch.object(stuff, 'ensure_country_history'):
+                response = client.post('/banknotes/' + ident + '/lookup-specs')
+            self.assertEqual(response.status_code, 200, response.get_json())
+            data = response.get_json()
+            self.assertEqual(data['overwritten']['issue_type'], {'current': 'National', 'new': 'State'})
+            self.assertNotIn('country', data['overwritten'])
+            self.assertNotIn('country', data['filled'])
+            after = dict(self.db.execute('SELECT * FROM banknotes WHERE id=?', (ident,)).fetchone())
+            after['specs_searched_at'] = before['specs_searched_at']
+            self.assertEqual(after, before)
+            response = client.post('/banknotes/' + ident + '/apply-lookup-specs',
+                                   json={'updates': {'issue_type': 'National'}})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()['values'], {'issue_type': 'State'})
+            saved = dict(self.db.execute('SELECT * FROM banknotes WHERE id=?', (ident,)).fetchone())
+            self.assertEqual(saved['country'], before['country'])
+            self.assertEqual(saved['issue_type'], 'State')
+
+    def test_virginia_cr6_design_matches_catalogue_and_preserves_reverse(self):
+        base = dict(country='Confederate States of America', issuer='Commonwealth of Virginia (Treasury)',
+                    date_1=1862, denomination='$100', pick_number='Cr. 6')
+        for reference in ('Cr. 6', 'VA CR-6', 'VACR6', 'Criswell 6'):
+            for denomination in ('$100', '100 Dollars', '100 USD'):
+                with self.subTest(reference=reference, denomination=denomination):
+                    evidence = catalog.design_reference(dict(base, pick_number=reference,
+                                                              denomination=denomination))
+                    self.assertIn('John Letcher, Governor of Virginia', evidence['fields']['official'])
+                    self.assertIn('George Washington', evidence['fields']['official'])
+                    self.assertIn('allegorical Native American maiden', evidence['fields']['official'])
+                    self.assertIn('John Letcher center; George Washington left', evidence['fields']['obv_rev'])
+                    self.assertIn('maiden right; orange C protectors', evidence['fields']['obv_rev'])
+                    self.assertNotIn('Rev:', evidence['fields']['obv_rev'])
+                    self.assertEqual(set(evidence['fields']), {'official', 'obv_rev', 'history_context'})
+                    self.assertIn('second and final emission', evidence['fields']['history_context'])
+        prior = 'Obv: three portraits / Rev: Blank, with collector annotations'
+        evidence = catalog.design_reference(dict(base, obv_rev=prior))
+        self.assertTrue(evidence['fields']['obv_rev'].endswith('/ Rev: Blank, with collector annotations'))
+
+    def test_virginia_design_rejects_wrong_or_ambiguous_type(self):
+        base = dict(country='United States of America', issuer='Commonwealth of Virginia (Treasury)',
+                    date_1=1862, denomination='$100', pick_number='VA CR-6')
+        for changes in ({'denomination':'$10'}, {'date_1':1861}, {'date_1':None},
+                        {'issuer':'Confederate States Treasury'}, {'issuer':'Bank of Virginia'},
+                        {'issuer':''}, {'country':'France'}, {'pick_number':'P-6'},
+                        {'pick_number':'Cr. 16'}, {'pick_number':'Cr. 6a'},
+                        {'pick_number':'Cr. 6; Cr. 11'}, {'pick_number':''}):
+            with self.subTest(changes=changes):
+                self.assertIsNone(catalog.design_reference(dict(base, **changes)))
+        self.assertIsNone(catalog.design_reference(dict(base, denomination='$10', pick_number='Cr. 11')))
+        self.assertIsNone(catalog.design_reference({'description':'Virginia 1862 $100 Cr. 6'}))
+
+    def test_check_recovers_catalogued_portraits_without_mutating_record(self):
+        self.add('B411', 'Confederate States of America', 1862, 'Commonwealth of Virginia (Treasury)')
+        self.db.execute("UPDATE banknotes SET cat_id='B411', issue_type='State', denomination='$100', "
+                        "pick_number='VA CR-6', official='Governor portrait', "
+                        "obv_rev='Obv: Portraits / Rev: Blank', size_width=194,size_height=79, "
+                        "price='$450.25', grade='VF', condition='Preserved historical notes' WHERE id='B411'")
+        self.db.commit()
+        before = dict(self.db.execute("SELECT * FROM banknotes WHERE id='B411'").fetchone())
+        client = stuff.app.test_client()
+        for model_failed in (False, True):
+            prepared = dict(evidence=[], reports=[], documents=[], warnings=[], images={})
+            model = (patch.object(stuff, 'fetch_banknote_specs', side_effect=RuntimeError('Unavailable'))
+                     if model_failed else patch.object(stuff, 'fetch_banknote_specs', return_value={
+                         'official':'George Washington', 'obv_rev':'Obv: Portrait', 'sources':'Image read'}))
+            with patch.object(stuff.banknote_check_sources, 'prepare', return_value=prepared), \
+                    model, patch.object(stuff, 'ensure_country_history'):
+                response = client.post('/banknotes/B411/lookup-specs')
+            self.assertEqual(response.status_code, 200, response.get_json())
+            data = response.get_json()
+            self.assertIn('John Letcher, Governor of Virginia', data['overwritten']['official']['new'])
+            self.assertIn('allegorical Native American maiden', data['overwritten']['official']['new'])
+            self.assertIn('George Washington left', data['overwritten']['obv_rev']['new'])
+            self.assertTrue(data['overwritten']['obv_rev']['new'].endswith('/ Rev: Blank'))
+            self.assertIn('https://nnp.wustl.edu/library/ImageDetail/599348', data['sources'])
+            self.assertIn('type-design references, not this purchase or grade', data['sources'])
+            for field in ('country','price','grade','pick_number','condition'):
+                self.assertNotIn(field, data['overwritten'])
+                self.assertNotIn(field, data['filled'])
+            self.assertEqual(bool(data['lookup_error']), model_failed)
+            after = dict(self.db.execute("SELECT * FROM banknotes WHERE id='B411'").fetchone())
+            after['specs_searched_at'] = before['specs_searched_at']
+            self.assertEqual(after, before)
+
+    def test_cr6_catalogue_history_is_only_proposed_into_blank_notes(self):
+        self.add('B411', 'Confederate States of America', 1862, 'Commonwealth of Virginia (Treasury)')
+        self.db.execute("UPDATE banknotes SET denomination='$100', pick_number='VACR6', "
+                        "size_width=194,size_height=79 WHERE id='B411'")
+        self.db.commit()
+        prepared = dict(evidence=[], reports=[], documents=[], warnings=[], images={})
+        with patch.object(stuff.banknote_check_sources, 'prepare', return_value=prepared), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value={}), \
+                patch.object(stuff, 'ensure_country_history'):
+            response = stuff.app.test_client().post('/banknotes/B411/lookup-specs')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertIn('second and final emission', data['filled']['condition'])
+        self.assertIn('redeem earlier interest-bearing', data['filled']['condition'])
+        self.assertNotIn('series', data['filled'])
+        self.assertNotIn('series', data['overwritten'])
+        self.assertIsNone(self.db.execute("SELECT condition FROM banknotes WHERE id='B411'").fetchone()[0])
+
+    def test_check_holds_portrait_reference_when_proposed_identity_conflicts(self):
+        self.add('B411', 'Confederate States of America', 1862, 'Commonwealth of Virginia (Treasury)')
+        self.db.execute("UPDATE banknotes SET denomination='$100', pick_number='VACR6', "
+                        "size_width=194,size_height=79 WHERE id='B411'")
+        self.db.commit()
+        prepared = dict(evidence=[], reports=[], documents=[], warnings=[], images={})
+        with patch.object(stuff.banknote_check_sources, 'prepare', return_value=prepared), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value={'denomination':'$10'}), \
+                patch.object(stuff, 'ensure_country_history'):
+            response = stuff.app.test_client().post('/banknotes/B411/lookup-specs')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertNotIn('official', data['filled'])
+        self.assertNotIn('obv_rev', data['filled'])
+        self.assertTrue(any('portrait reference was not applied' in text
+                            for text in data['purchase_sources']['warnings']))
+
+    def test_catalogue_reference_rejects_malformed_identity_without_truncating(self):
+        base = dict(country='Confederate States', issuer='Commonwealth of Virginia (Treasury)',
+                    date_1=1862, denomination='$100', pick_number='VACR6')
+        bad = ({'issuer':123}, {'issuer':['Commonwealth of Virginia']},
+               {'date_1':float('inf')}, {'date_1':float('-inf')}, {'date_1':float('nan')},
+               {'date_1':1862.9}, {'date_1':True}, {'date_1':[]},
+               {'denomination':[]}, {'denomination':True}, {'denomination':float('inf')},
+               {'country':['Confederate States']}, {'pick_number':['VACR6']},
+               {'other_catalog':{'reference':'Cr. 6'}})
+        for changes in bad:
+            with self.subTest(changes=changes):
+                self.assertIsNone(catalog.design_reference(dict(base, **changes)))
+        for value in (100, 100.0):
+            self.assertIsNotNone(catalog.design_reference(dict(base, denomination=value)))
+        for year in (1862, 1862.0, '1862'):
+            self.assertIsNotNone(catalog.design_reference(dict(base, date_1=year)))
+        for year in (1862.9, float('inf'), float('nan'), True, []):
+            self.assertIsNone(stuff._coerce_banknote_spec('date_1', year))
+
+    def test_check_rejects_malformed_catalogue_identity_without_500(self):
+        self.add('B411', 'Confederate States of America', 1862, 'Commonwealth of Virginia (Treasury)')
+        self.db.execute("UPDATE banknotes SET denomination='$100', pick_number='VACR6', "
+                        "size_width=194,size_height=79 WHERE id='B411'")
+        self.db.commit()
+        client = stuff.app.test_client()
+        for malformed in ({'issuer':123}, {'issuer':['Virginia']},
+                          {'date_1':float('inf')}, {'date_1':float('nan')},
+                          {'date_1':1862.9}, {'date_1':True},
+                          {'country':['Confederate States']}, {'denomination':[]}):
+            prepared = dict(evidence=[], reports=[], documents=[], warnings=[], images={})
+            with self.subTest(malformed=malformed), \
+                    patch.object(stuff.banknote_check_sources, 'prepare', return_value=prepared), \
+                    patch.object(stuff, 'fetch_banknote_specs', return_value=dict(malformed)), \
+                    patch.object(stuff, 'ensure_country_history'):
+                response = client.post('/banknotes/B411/lookup-specs')
+            self.assertEqual(response.status_code, 200, response.get_json())
+            data = response.get_json()
+            self.assertNotIn('official', data['filled'])
+            self.assertNotIn('obv_rev', data['filled'])
+            self.assertTrue(any('portrait reference was not applied' in text
+                                for text in data['purchase_sources']['warnings']))
+            for field in malformed:
+                self.assertNotIn(field, data['filled'])
+                self.assertNotIn(field, data['overwritten'])
+
+    def test_catalogue_front_preserves_new_reverse_and_saved_reverse_precedence(self):
+        self.add('B411', 'Confederate States of America', 1862, 'Commonwealth of Virginia (Treasury)')
+        self.db.execute("UPDATE banknotes SET denomination='$100', pick_number='VACR6', "
+                        "size_width=194,size_height=79 WHERE id='B411'")
+        self.db.commit()
+        for saved, expected in (('', 'Rev: Blank'),
+                                ('Obv: Portraits / Rev: Collector notation', 'Rev: Collector notation')):
+            self.db.execute("UPDATE banknotes SET obv_rev=? WHERE id='B411'", (saved,))
+            self.db.commit()
+            prepared = dict(evidence=[], reports=[], documents=[], warnings=[], images={})
+            with patch.object(stuff.banknote_check_sources, 'prepare', return_value=prepared), \
+                    patch.object(stuff, 'fetch_banknote_specs', return_value={
+                        'obv_rev':'Obv: Portraits / Rev: Blank', 'sources':'Reverse read from original photo',
+                        'denomination':100.0}), \
+                    patch.object(stuff, 'ensure_country_history'):
+                response = stuff.app.test_client().post('/banknotes/B411/lookup-specs')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            proposed = (data['overwritten']['obv_rev']['new'] if saved else data['filled']['obv_rev'])
+            self.assertIn('John Letcher center; George Washington left', proposed)
+            self.assertTrue(proposed.endswith('/ ' + expected), proposed)
+            self.assertEqual(self.db.execute("SELECT obv_rev FROM banknotes WHERE id='B411'").fetchone()[0], saved)
+
+    def test_federal_coin_note_history_requires_compatible_date_and_issuer(self):
+        for year in (1890, 1891):
+            for issuer in ('United States Treasury', 'U.S. Treasury',
+                           'Department of the Treasury', ''):
+                row = {'country': 'United States', 'date_1': year,
+                       'series': 'Series of ' + str(year), 'issuer': issuer,
+                       'description': 'Treasury Note'}
+                with self.subTest(year=year, issuer=issuer):
+                    self.assertEqual(stuff._us_note_class(row)['name'], 'Treasury (Coin) Note')
+                    self.assertEqual(stuff._series_panel_for_row(row)['clause']['span'], '1890–1891')
+        for year in (1862, 1873, 1900, None):
+            row = {'country': 'United States', 'date_1': year,
+                   'issuer': 'United States Treasury', 'description': 'Treasury Note'}
+            with self.subTest(year=year):
+                self.assertIsNone(stuff._us_note_class(row))
+
+    def test_state_territory_and_obsolete_treasuries_do_not_claim_federal_history(self):
+        for issuer in ('Commonwealth of Virginia', 'Virginia Treasury',
+                       'Virginia Treasury (United States)', 'State of South Carolina',
+                       'Territory of Arizona', 'Treasury of the Hawaiian Kingdom',
+                       'Confederate States of America', 'Treasury of the Philippines',
+                       'Bank of Virginia'):
+            for year in (1862, 1890, 1891):
+                row = {'country': 'United States', 'date_1': year,
+                       'series': 'Series of ' + str(year), 'issuer': issuer,
+                       'description': 'Treasury Note'}
+                with self.subTest(issuer=issuer, year=year):
+                    self.assertIsNone(stuff._us_note_class(row))
+        row = {'country': 'United States', 'date_1': 1891,
+               'issuer': 'United States Treasury', 'description': 'Treasury Note',
+               'condition': 'Previously stored with an incorrect Virginia comparison.'}
+        self.assertEqual(stuff._us_note_class(row)['name'], 'Treasury (Coin) Note')
+
+    def test_virginia_history_requires_the_state_issuer_and_civil_war_date(self):
+        for issuer, year in (('Bank of Virginia', 1862),
+                             ('United States Treasury', 1862),
+                             ('Confederate States of America', 1862),
+                             ('Commonwealth of Virginia', 1776),
+                             ('Commonwealth of Virginia', 1891),
+                             ('', 1862)):
+            row = {'country': 'United States', 'issuer': issuer, 'date_1': year}
+            panel = stuff._series_panel_for_row(row)
+            self.assertNotEqual((panel or {}).get('note_type'), 'Virginia state treasury note')
+        row = {'country': 'United States', 'issuer': 'Federal Reserve Bank of Richmond, Virginia',
+               'date_1': 1918, 'series': 'Federal Reserve Bank Note Series of 1918'}
+        self.assertEqual(stuff._us_note_class(row)['name'], 'Federal Reserve Bank Note')
 
     def test_periods_and_issuer_precedence(self):
         cases = [

@@ -121,6 +121,14 @@ input[type="number"]::-webkit-outer-spin-button {
 .nav-admin:hover { color: var(--text); background: rgba(0,0,0,.07); }
 .nav-admin.active { background: var(--nav-active-bg); color: var(--text); }
 
+/* The Files action downloads immediately; its adjacent arrow only changes
+   the remembered destination. Keep both keyboard and touch accessible. */
+.nav-files-group { display: flex; align-items: stretch; }
+.nav-files-folder { min-width: 28px; border: 0; border-right: 1px solid var(--nav-border); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 18px; }
+.nav-files-folder:hover { background: rgba(0,0,0,.07); }
+.nav-files-folder:focus-visible { outline: 2px solid var(--blue); outline-offset: -3px; }
+@media (pointer: coarse) { .nav-files-folder { min-width: 44px; } }
+
 /* Files-export busy state on the nav icon — pulsing icon while the
    server is building the zip. Anchor disabled (pointer-events) so a
    second click doesn't kick off another build. */
@@ -3085,7 +3093,7 @@ input[type="date"] { -webkit-appearance: none; }
      folder picker, neither of which works in iOS Safari. Admin actions
      are one-shot maintenance flows that the user runs from a desktop;
      no value cluttering the phone nav with them. */
-  .nav-export, .nav-sweep, .nav-admin { display: none !important; }
+  .nav-files-group, .nav-export, .nav-sweep, .nav-admin { display: none !important; }
 
   .list-toolbar {
     flex-wrap: wrap;

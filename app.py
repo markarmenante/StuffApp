@@ -226,7 +226,7 @@ VALUE_LISTS = {
     # Notgeld is cataloged by locality, not national authority — the
     # issue-type axis separates national issues from emergency money
     # (and drives the list filter pill, like coins' Ancient/Modern).
-    'banknote_issue_type': ['National','Notgeld','Military / Occupation','Colonial','Private / Scrip','Specimen'],
+    'banknote_issue_type': ['National','State','Notgeld','Military / Occupation','Colonial','Private / Scrip','Specimen'],
     'clasp_type': ['Tang','Fold Over','Butterfly','Velcro'],
     'pen_type':      ['Fountain Pen', 'Ball Point', 'Roller Ball', 'Mechanical Pencil'],
     'pen_action':    ['Cap', 'Click', 'Twist'],
@@ -813,7 +813,7 @@ def _mentions_manchukuo(text):
     return any(m in t for m in _MANCHUKUO_ISSUER_MARKS)
 
 
-def canonicalize_banknote_fields(fields, existing=None):
+def canonicalize_banknote_fields(fields, existing=None, *, normalize_state_issue=True):
     """Row-aware canonicalization applied on every banknote save: fold US
     country spellings to one, and — only for US notes — put dollar
     denominations in '$N' form so they sort as a single block. Mutates and
@@ -877,6 +877,17 @@ def canonicalize_banknote_fields(fields, existing=None):
         # the Bank of China joined it in 1995: a blank issuer is the BNU.
         if ck == 'macau' and year and year < 1995 and not (issuer or '').strip():
             fields['issuer'] = 'Banco Nacional Ultramarino'
+    # State here means a subnational government, not a sovereign state's
+    # central bank. Correct only positively identified Virginia wartime
+    # issues and only when classification fields are being saved. Do not
+    # change custom types, unrelated field saves, or historical country filing.
+    if normalize_state_issue and {'country', 'issuer', 'date_1', 'series', 'issue_type'} & fields.keys():
+        context = {key: fields.get(key, _row_get(existing, key))
+                   for key in ('country', 'issuer', 'date_1', 'series')}
+        issue_type = fields.get('issue_type', _row_get(existing, 'issue_type'))
+        if ((issue_type or '').strip() in ('', 'National')
+                and banknote_catalog.virginia_treasury_history(issuer, _note_year(context))):
+            fields['issue_type'] = 'State'
     if _country_key(country) == 'us' and 'denomination' in fields:
         fields['denomination'] = _canonical_us_denomination(fields['denomination'])
     return fields
@@ -1113,7 +1124,9 @@ def _migrate_canonicalize_us_banknotes(db):
         fields = {'country': r['country'], 'denomination': r['denomination']}
         for c in extra:
             fields[c] = r[c]
-        canonicalize_banknote_fields(fields, existing=r)
+        # New State classification belongs to intake/reviewed saves, not a
+        # startup rewrite or a trigger for display-number resequencing.
+        canonicalize_banknote_fields(fields, existing=r, normalize_state_issue=False)
         moved = {c: fields[c] for c in ('country', 'denomination', 'issue_type', 'issuer')
                  if c in fields and c in cols and fields[c] != r[c]}
         if moved:
@@ -4707,6 +4720,11 @@ def _us_note_class(row):
         ).lower()
         text = f'{haystack} {extra}' if extra.strip() else haystack
         if text.strip() and re.search(note_class['pattern'], text):
+            if (note_class['name'] == 'Treasury (Coin) Note'
+                    and not banknote_catalog.treasury_coin_note_eligible(
+                        _row_get(row, 'country'), _note_year(row),
+                        _row_get(row, 'issuer'))):
+                continue
             return note_class
     return None
 
@@ -5522,15 +5540,34 @@ def _series_panel_for_row(row):
     note's times, with monetary policy in the foreground only where it was
     the event (Weimar, the pengő, the 1944 drachma, Zimbabwe). Returns None
     when there is nothing useful to say."""
-    country_key = _country_key(_row_get(row, 'country'))
+    country = _row_get(row, 'country') or ''
+    country_key = _country_key(country)
+    year = _note_year(row)
+    issuer = (_row_get(row, 'issuer') or '').strip()
+    series_raw = (_row_get(row, 'series') or '').strip()
+    # A Virginia state obligation stays the same issue whether the
+    # collector files it under the United States or Confederate States.
+    # Retain that saved grouping; do not borrow either national history.
+    state_history = banknote_catalog.virginia_treasury_history(issuer, year)
+    if state_history:
+        return {
+            'country_key': country_key or _country_slug(country) or 'virginia',
+            'title': issuer,
+            'title_span': str(year),
+            'denoms': None,
+            'note_type': 'Virginia state treasury note',
+            'series': series_raw,
+            'year': year,
+            'note_class': None,
+            'clause': None,
+            'previous_clause': None,
+            'era': state_history,
+        }
     if country_key is None:
         return None
 
-    year = _note_year(row)
-
     if country_key == 'us':
         note_class = _us_note_class(row)
-        series_raw = (_row_get(row, 'series') or '').strip()
         # Era placement lands on the issue's actual start year —
         # _series_year maps 'Fourth Issue' to 1869, not the Act date the
         # note carries. Year-labeled fractionals ('1874') resolve to
@@ -11143,8 +11180,9 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
       crop more than 8% off the sheet's long:short ratio is wrong.
     - vision verdict: the model looks at the finished crop and answers
       only "is this exactly a full note, margins intact, no backdrop?"
-      When the model is unavailable, the CV result ships as it always
-      did before the vision era.
+      Legacy mode retains its no-validator fallback. When the seeded
+      pipeline runs first, its hard geometry gates also apply to the
+      fallback, and uncertain texture needs affirmative validation.
 
     Returns JPEG bytes, or None when there is nothing to do or the
     result did not validate — well-trimmed notes pass through
@@ -11171,13 +11209,15 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
     # Seeded geometry pipeline first when enabled: 'ok' ships its crop,
     # 'noop' means the frame already is the note (store nothing), and
     # only a genuine failure falls through to the detector cascade.
+    v2_failed = False
     if _trim_v2_enabled():
         v2_status, v2_out = _trim_note_v2(img, expect_aspect, meta=meta)
         if v2_status == 'ok':
             return v2_out
         if v2_status == 'noop':
             return None
-        app.logger.info('trim: v2 pipeline passed — running the cascade')
+        v2_failed = True
+        app.logger.info('trim: v2 found no accepted crop — running the cascade')
     cascade_steps = []
     out = _trim_note_cv_cascade(img, expect_aspect=expect_aspect,
                                 steps=cascade_steps)
@@ -11265,7 +11305,20 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
                 '%.2f — skipped', *cand.size,
                 _aspect_off(cand.size, expect_aspect) * 100, expect_aspect)
             continue
+        # Falling back must not bypass the seeded pipeline's safety
+        # gates. Glare can merge a PMG label with the sheet; another
+        # detector may return that same clipped/holder-filled rectangle.
+        # Texture-only uncertainty still needs affirmative validation,
+        # exactly as it does in v2, rather than an unavailable verdict.
+        failed = _note_crop_metrics(cand, expect_aspect) if v2_failed else []
+        if failed and not _v2_validator_may_waive(failed):
+            app.logger.info('trim: fallback candidate rejected: %s', '; '.join(failed))
+            continue
         verdict = _vision_crop_verdict(cand)
+        if failed and verdict is None:
+            app.logger.info('trim: uncertain fallback was not validated: %s',
+                            '; '.join(failed))
+            continue
         if verdict is False:
             vetoes += 1
             app.logger.info('trim: vision validator vetoed candidate '
@@ -11428,9 +11481,15 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
             warm_in = pin[:, 0] - pin[:, 2]
             warm_out = pout[:, 0] - pout[:, 2]
             cool_surround &= bool(np.median(warm_out) <= -2)
+            # Some issued notes have only a 2–3px paper rim before
+            # the engraved frame. Judge that rim itself, not the deeper
+            # transition sample (which legitimately lands on printing).
+            rim_offset = max(1.0, 0.003 * min(lengths))
+            rim_points = np.rint(samples + rim_offset * normal).astype(int)
+            rim = rgb[rim_points[:, 1], rim_points[:, 0]].astype(float)
             cream_margins &= bool(np.mean(
-                (np.abs(pin[:, 0] - pin[:, 1]) < 30) &
-                (pin.mean(axis=1) > 130)) >= 0.85)
+                (np.abs(rim[:, 0] - rim[:, 1]) < 30) &
+                (rim.mean(axis=1) > 130)) >= 0.85)
             if (np.mean(warm_in > 12) < 0.75 or
                     np.mean(warm_out < 10) < 0.85 or
                     np.median(warm_out) > 6 or
@@ -11447,9 +11506,9 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
 def _neutral_holder_has_label(rgb, quad):
     """Independent holder evidence for a cream sheet on neutral plastic.
 
-    A grading label is a broad, shallow framed rectangle, separated from
-    the paper and aligned with its width. A rule, text fragments, the
-    note itself or a blank surround do not qualify.
+    A grading label is a broad, shallow framed rectangle or pale green
+    printed panel, separated from the paper and aligned with its width.
+    A rule, text fragments, a plain bar, or blank surround do not qualify.
     """
     import cv2
     import numpy as np
@@ -11462,29 +11521,53 @@ def _neutral_holder_has_label(rgb, quad):
     if stop < height * 0.12:
         return False
     gray = cv2.cvtColor(rgb[:stop], cv2.COLOR_RGB2GRAY)
-    mask = (gray < 150).astype(np.uint8) * 255
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
-                                   cv2.CHAIN_APPROX_SIMPLE)
     tangent = pts[1] - pts[0]
     inward = np.array([-tangent[1], tangent[0]])
     inward /= np.linalg.norm(inward)
-    for contour in contours:
+
+    def is_label(contour, require_text=False):
         x, y, w, h = cv2.boundingRect(contour)
         rect = cv2.minAreaRect(contour)
         rw, rh = sorted(rect[1], reverse=True)
         if rh < 1:
-            continue
+            return False
         separation = max(np.dot(p - pts[0], inward) for p in cv2.boxPoints(rect))
         if (rw < width * 0.8 or not height * 0.12 <= rh <= height * 0.65
                 or rw / rh < 3.5 or y + h >= stop
                 or not -height * 0.25 <= separation <= -4
                 or abs((x + w / 2) - (left + right) / 2) > width * 0.1
                 or cv2.contourArea(contour) < rw * rh * 0.85):
-            continue
-        # A solid bar is not a label; its framed interior must be light.
+            return False
         inset = max(2, int(h * 0.12))
         interior = gray[y + inset:y + h - inset, x + inset:x + w - inset]
-        if interior.size and np.mean(interior > 170) >= 0.5:
+        if not interior.size or np.mean(interior > 170) < 0.5:
+            return False
+        if require_text:
+            # Newer PMG labels are pale green panels without a dark
+            # outline. A plain coloured bar is not holder evidence:
+            # require dark text/marks in multiple parts of the panel.
+            panels = np.array_split(interior, 4, axis=1)
+            if sum(np.mean(panel < 100) >= 0.01 for panel in panels) < 2:
+                return False
+        return True
+
+    mask = (gray < 150).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    if any(is_label(contour) for contour in contours):
+        return True
+    label_rgb = rgb[:stop].astype(np.int16)
+    for green in (3, 5):
+        mask = ((label_rgb[:, :, 1] - label_rgb[:, :, 0] >= green) &
+                (label_rgb[:, :, 1] - label_rgb[:, :, 2] >= green) &
+                (gray > 140)).astype(np.uint8) * 255
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
+                                np.ones((11, 11), np.uint8))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
+                                np.ones((5, 5), np.uint8))
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        if any(is_label(contour, require_text=True) for contour in contours):
             return True
     return False
 
@@ -26123,9 +26206,9 @@ Rules:
 Target fields:
 - country: issuing country as commonly catalogued (e.g. "Iran", "Germany"). Notes of the Central Bank of Manchou (Manchukuo, 1932–45) are "Manchukuo", not China; Japanese military yen and the Japanese-sponsored banks of occupied China (Federal Reserve Bank of China, Central Reserve Bank, Mengchiang Bank, Hua Hsing) stay "China" with issue_type "Military / Occupation".
 - municipality: the issuing town / locality for notgeld, emergency, or municipal issues (e.g. "Bielefeld") — usually printed prominently on the note itself. Null for national issues.
-- issue_type: EXACTLY one of [{issue_types}]. German/Austrian emergency money is "Notgeld"; state or central-bank issues are "National". Null if unclear.
+- issue_type: EXACTLY one of [{issue_types}]. German/Austrian emergency money is "Notgeld"; sovereign national-government or central-bank issues are "National". Issues of a subnational state government, such as the Commonwealth of Virginia treasury notes, are "State". A state treasury note is not a national Confederate or United States federal Treasury (Coin) Note merely because it says Treasury. Virginia state notes may be catalogued under United States or Confederate States; retain that existing broader country grouping when supported, with the precise issuing state in issuer. A sovereign government or a bank whose name contains State/État is not automatically a subnational State issue. Null if unclear.
 - issuer: the issuing bank or authority (e.g. "Bank Melli Iran (National Bank)", "Stadt Bielefeld").
-- official: the person portrayed or the ruler under whom the note was issued, as "Name" or "Name, role" (e.g. "Muhammad Reza Shah Pahlavi"). Null if none.
+- official: every identifiable person portrayed, with full names and supported roles, separated by semicolons (e.g. "John Letcher, Governor of Virginia; George Washington"). Check the exact catalogue type and dealer description for secondary portraits, not just the central portrait or issuing ruler. Distinguish allegorical figures from real people explicitly (e.g. "allegorical Native American maiden"); never invent a personal identity for an unnamed representation. A ruler is included only when actually portrayed or explicitly relevant to the issue. Null if unsupported.
 - denomination: face value with currency (e.g. "100 Rials", "50 Pfennig").
 - series: the series / set name or year designation if catalogued — notgeld was often issued in themed sets (e.g. "Series 1928", "Leinen-Ausgabe"). Null if not stated.
 - pick_number: ALL catalogue references for this note in one comma-separated list, verbatim as cited — the Pick number formatted "P-<number><letter>" (e.g. "P-67", "P-102a"); for United States federal issues the Friedberg number ("Fr#248" — a grading label's attribution goes here verbatim); plus TBB and specialist catalogues (Grabowski/Mehl, Rosenberg, Lamb, Funck, Menzel, Tieste — e.g. "Grabowski Bi.7.5"). Null if none.
@@ -26152,7 +26235,7 @@ Target fields:
 - vendor: the dealer or auction house THIS note was purchased from, only when the material on file identifies it — an explicit "purchased from X" / vendor / seller line, an invoice, or the pasted listing's own branding or letterhead (a Stack's Bowers inventory page means vendor "Stack's Bowers"; a Heritage lot page means "Heritage Auctions"). A firm merely mentioned in the pedigree ("ex Spink sale") is prior provenance, not the vendor — when in doubt, null.
 - price: the price PAID for this note, only when the material on file states it ("My Cost", "purchase price", "paid", an invoice total, "purchased for $X"). Keep the currency exactly as stated — "$1,234", "€1,234.56", "£850", "CHF 1,200", "A$2,000" — never convert it or assume dollars. This is never a catalog value, estimate, or price guide figure.
 - purchase_date: the date THIS note was purchased, as "YYYY-MM-DD", only when the material on file states it ("Purchase Date July 11th, 2026" → "2026-07-11"). Null otherwise.
-- obv_rev: one very short line naming the main obverse and reverse designs, format "Obv: ... / Rev: ..." (e.g. "Obv: young Shah portrait / Rev: Abadan Refinery"), under 90 characters, from the note images or the dealer text. Null if you cannot tell.
+- obv_rev: a concise line describing the observed or exact-catalogue-confirmed design, format "Obv: ... / Rev: ..." when both sides are supported. Preserve meaningful left/center/right portrait positions and distinguishing protectors or vignettes; allow up to 240 characters rather than dropping secondary portraits. Use the note images, dealer text or a matched catalogue type. Omit an unsupported side rather than guessing a blank reverse. Null if you cannot tell.
 
 Reply with ONLY a JSON object, no prose, no code fences. Use null when a value is not supported:
 {{
@@ -26253,10 +26336,9 @@ def _coerce_banknote_spec(field, raw):
              'private': 'private / scrip'}.get(v, v)
         return allowed.get(v)
     if field in ('date_1', 'date_2'):
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return None
+        return banknote_catalog.exact_year(raw)
+    if field in ('country', 'issuer', 'official', 'obv_rev', 'denomination') and not isinstance(raw, str):
+        return None
     if field in ('size_width', 'size_height', 'grade_numeric'):
         if isinstance(raw, str):
             m = re.match(r'^\s*(-?\d+(?:[.,]\d+)?)', raw)
@@ -26424,6 +26506,42 @@ def banknote_lookup_specs(record_id):
     for field, value in _banknote_description_fields(note).items():
         if value not in (None, ''):
             suggestions[field] = value
+
+    # An exact catalogue match supplies design details even when the model
+    # misses secondary portraits. A conflicting proposed type is held for
+    # review; do not attach this type's design to another note. Purchase and
+    # grading facts are never taken from the reference catalogue.
+    design = banknote_catalog.design_reference(note)
+    if design:
+        proposed_identity = dict(note)
+        for key in ('country', 'issuer', 'date_1', 'denomination', 'pick_number', 'other_catalog'):
+            if suggestions.get(key) not in (None, ''):
+                proposed_identity[key] = suggestions[key]
+        # A saved reverse takes precedence. If it is absent, retain the
+        # new image/text-read reverse from this Check instead of losing it
+        # when the verified catalogue front is overlaid.
+        saved_reverse = re.search(r'(?:^|/)\s*Rev(?:erse)?\s*:',
+                                  str(note.get('obv_rev') or ''), re.I)
+        if not saved_reverse and isinstance(suggestions.get('obv_rev'), str):
+            proposed_identity['obv_rev'] = suggestions['obv_rev']
+        proposed_design = banknote_catalog.design_reference(proposed_identity)
+        if proposed_design:
+            suggestions.update(proposed_design['fields'])
+            source_text = suggestions.get('sources')
+            source_text = source_text if isinstance(source_text, str) else ''
+            suggestions['sources'] = (source_text.strip() + '\n' + design['source']).strip()
+        else:
+            prepared['warnings'].append(
+                'The proposed catalogue identity conflicts with the saved Virginia $100 Cr. 6; '
+                'its portrait reference was not applied. Review the issuer, date, denomination and catalogue number.')
+
+    # A known Virginia state obligation cannot become National because
+    # the model read the generic word Treasury. This is a review proposal,
+    # not a record write; preserve the user's country filing and custom type.
+    if (banknote_catalog.virginia_treasury_history(note.get('issuer'), _note_year(note))
+            and _coerce_banknote_spec('issue_type', suggestions.get('issue_type')) in (None, 'National')
+            and (note.get('issue_type') or '').strip() in ('', 'National', 'State')):
+        suggestions['issue_type'] = 'State'
 
     purchase = prepared.get('purchase', {})
     for field, value in purchase.items():

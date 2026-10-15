@@ -5,6 +5,7 @@ issuer and date remain separate facts. See docs/banknote-catalog.md for sources,
 transition-year limitations and the explicitly requested Philippine exception.
 """
 import re
+import math
 import unicodedata
 from functools import lru_cache
 
@@ -80,6 +81,154 @@ def canonical_country(value):
     if 'manchukuo' in key or 'manchoukuo' in key:
         return 'Manchukuo'
     return _ALIAS_LOOKUP.get(key, value)
+
+
+# A generic "Treasury Note" label also occurs on state, territorial and
+# Confederate paper. The federal coin-note class belongs to the 1890/1891
+# series only (BEP currency history); do not infer it from that phrase alone.
+_FEDERAL_TREASURY_ISSUERS = frozenset({
+    'unitedstates', 'unitedstatesofamerica', 'unitedstatestreasury',
+    'unitedstatesofamericatreasury', 'ustreasury', 'treasuryoftheunitedstates',
+    'unitedstatesdepartmentofthetreasury', 'departmentofthetreasury',
+    'treasurydepartment', 'bureauofengravingandprinting',
+})
+
+
+def treasury_coin_note_eligible(country, year, issuer):
+    """Require the federal series period and a compatible issuing authority.
+
+    A missing issuer can use a dated, explicitly named coin-note type. A
+    supplied issuer must identify the federal Treasury, not merely mention
+    the United States in a state/territory name or a narrative comparison.
+    """
+    if year not in (1890, 1891):
+        return False
+    country = canonical_country(country) or ''
+    if country and not country.lower().startswith('united states'):
+        return False
+    issuer = (issuer or '').strip()
+    if not issuer:
+        return True
+    # Location notes after a known issuer do not change its authority.
+    base = re.sub(r'\s*\([^)]*\)\s*$', '', issuer).strip()
+    base = re.sub(r'^the\s+', '', base, flags=re.I)
+    return fold(base) in _FEDERAL_TREASURY_ISSUERS
+
+
+def virginia_treasury_history(issuer, year):
+    """State history for a positively identified Civil War Virginia treasury.
+
+    A Richmond location, a Virginia bank or a Confederate national issuer
+    alone cannot identify the Commonwealth's separate obligation. Source:
+    https://old.lva.virginia.gov/exhibits/destiny/work/government.htm
+    """
+    if year is None or not 1861 <= year <= 1865:
+        return None
+    if not re.search(r'^\s*(?:the )?(?:commonwealth of virginia|state of virginia|'
+                     r'virginia (?:state )?treasury|'
+                     r'treasury of (?:the commonwealth of )?virginia)\b',
+                     issuer or '', re.I):
+        return None
+    return {
+        'label': 'Virginia Civil War finance',
+        'span': '1861–1865',
+        'body': ('After joining the Confederacy, the Commonwealth of Virginia '
+                 'retained its own state government, Treasury and expenses. '
+                 'It issued its own obligations to help finance wartime needs, '
+                 'alongside Confederate national currency. The 1862 Virginia '
+                 'notes pledged the Commonwealth’s credit and were receivable '
+                 'for state taxes and other public dues. Virginia was therefore '
+                 'the issuer; Confederate States describes the wider historical '
+                 'grouping. These state obligations were separate from '
+                 'Confederate national notes and United States federal issues.'),
+    }
+
+
+
+# Type-level design evidence, not personal provenance or a grading opinion.
+# Heritage's original lot description supplies the full name, layout and
+# orange protectors; NNP independently preserves the same Cr. 6 layout.
+_VIRGINIA_CR6_DESIGN_SOURCE = (
+    'Virginia 1862 $100 Cr. 6 design: Heritage Auctions lot 95435 '
+    '(John Letcher center, Washington left, Native American figure right, orange C protectors): '
+    'https://currency.ha.com/itm/obsoletes-by-state/virginia/'
+    'richmond-va-commonwealth-of-virginia-100-oct-15-1862-cr-6-pmg-about-uncirculated-50/'
+    'a/62324-95435.s ; '
+    'NNP / Heritage catalogue corroboration: https://nnp.wustl.edu/library/ImageDetail/599348 . '
+    'These are type-design references, not this purchase or grade.'
+)
+
+
+
+def exact_year(value):
+    """A finite integral year; never truncate a model's fraction or boolean."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if math.isfinite(value) and value.is_integer() else None
+    if isinstance(value, str) and re.fullmatch(r'[+-]?\d{1,6}', value.strip()):
+        return int(value.strip())
+    return None
+
+
+def design_reference(row):
+    """Known type design only when issuer, year, denomination and catalog agree.
+
+    A date/denomination or a Virginia location alone cannot distinguish this
+    state issue from national Confederate notes. Do not derive an identity
+    from historical prose, related listings, a printer or an ambiguous P-6.
+    """
+    def value(key):
+        return row[key] if row is not None and key in row.keys() else None
+    year = exact_year(value('date_1'))
+    for key in ('issuer', 'country', 'pick_number', 'other_catalog'):
+        if value(key) is not None and not isinstance(value(key), str):
+            return None
+    if year != 1862 or not virginia_treasury_history(value('issuer'), year):
+        return None
+    denomination = value('denomination')
+    if isinstance(denomination, bool):
+        return None
+    if isinstance(denomination, (int, float)):
+        if denomination != 100:
+            return None
+    elif not (isinstance(denomination, str) and re.fullmatch(
+            r'(?:\$|US\s*\$|USD\s*)?100(?:\s*(?:dollars?|USD))?',
+            denomination.strip(), re.I)):
+        return None
+    catalogs = ' '.join(value(key) or '' for key in ('pick_number', 'other_catalog'))
+    refs = re.findall(r'\b(?:VA[\s.-]*)?(?:cr(?:iswell)?\.?\s*[-#]?\s*)(\d+[a-z]?)\b', catalogs, re.I)
+    if {ref.lower() for ref in refs} != {'6'}:
+        return None
+    country = canonical_country(str(value('country') or '')) or ''
+    if country and country.lower() not in ('united states of america',
+                                           'confederate states',
+                                           'confederate states of america', 'virginia'):
+        return None
+    front = ('Obv: John Letcher center; George Washington left; '
+             'allegorical Native American maiden right; orange C protectors.')
+    # The catalogue establishes the front. Keep an already transcribed
+    # reverse instead of silently discarding it or inventing a blank back.
+    reverse = re.search(r'(?:^|/)\s*(Rev(?:erse)?\s*:.*)$',
+                        str(value('obv_rev') or ''), re.I | re.S)
+    if reverse:
+        front += ' / ' + reverse.group(1).strip()
+    return {
+        'fields': {
+            'official': ('John Letcher, Governor of Virginia; George Washington; '
+                         'allegorical Native American maiden'),
+            'obv_rev': front,
+            'history_context': (
+                'The October 15, 1862 $100 Virginia Treasury note (Cr. 6) was '
+                'the largest denomination in the Commonwealth’s second and '
+                'final emission, intended to redeem earlier interest-bearing '
+                'Treasury notes. It was a Virginia state obligation, distinct '
+                'from Confederate national currency.'),
+        },
+        'source': _VIRGINIA_CR6_DESIGN_SOURCE,
+    }
 
 
 def country_spellings(value):

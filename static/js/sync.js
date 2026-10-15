@@ -117,12 +117,14 @@
     });
   }
 
+  let _knownHandle = null;
+
   async function _loadHandle() {
     const db = await _openDB();
     return new Promise((resolve) => {
       const tx  = db.transaction(STORE, 'readonly');
       const req = tx.objectStore(STORE).get(KEY);
-      req.onsuccess = () => resolve(req.result || null);
+      req.onsuccess = () => { _knownHandle = req.result || null; resolve(_knownHandle); };
       req.onerror   = () => resolve(null);
     });
   }
@@ -132,28 +134,37 @@
     return handle ? handle.name : null;
   }
 
-  async function _getOrPickDirectory(forcePrompt) {
-    const previous = await _loadHandle();
-    if (!forcePrompt && previous && previous.name === 'StuffFiles') {
-      try {
-        let perm = await previous.queryPermission({mode: 'readwrite'});
-        if (perm !== 'granted') {
-          perm = await previous.requestPermission({mode: 'readwrite'});
-        }
-        if (perm === 'granted') return previous;
-      } catch (_) { /* Moved, deleted or revoked: choose again. */ }
-    }
-    const picked = await window.showDirectoryPicker({
-      mode: 'readwrite',
-      id: 'stufffiles',
-      startIn: previous || 'documents',
+  async function _pickDirectory(previousPromise) {
+    // Call the browser picker before awaiting IndexedDB. An explicit folder
+    // change must keep the click's transient user activation, even on a slow DB.
+    const pickedPromise = window.showDirectoryPicker({
+      mode: 'readwrite', id: 'stufffiles', startIn: _knownHandle || 'documents',
     });
+    const [picked, previous] = await Promise.all([pickedPromise, previousPromise]);
     // The archive's StuffFiles prefix is stripped during extraction. Never
     // scatter category folders directly into Documents, Downloads or iCloud.
     const destination = picked.name === 'StuffFiles' ? picked
       : await picked.getDirectoryHandle('StuffFiles', {create: true});
     await _saveHandle(destination, previous);
+    _knownHandle = destination;
     return destination;
+  }
+
+  async function _getOrPickDirectory() {
+    const previous = await _loadHandle();
+    if (previous && previous.name === 'StuffFiles') {
+      let permission;
+      try { permission = await previous.queryPermission({mode: 'readwrite'}); }
+      catch (_) { return _pickDirectory(Promise.resolve(previous)); }
+      if (permission === 'granted') return previous;
+      permission = await previous.requestPermission({mode: 'readwrite'});
+      if (permission === 'granted') return previous;
+      // A denial is not consent to immediately show another picker. Keep the
+      // saved handle and checkpoints, and let the UI offer an explicit retry.
+      throw Object.assign(new Error('Folder access was not granted. Choose your StuffFiles folder to reconnect it.'),
+        {name: 'FolderPermissionError'});
+    }
+    return _pickDirectory(Promise.resolve(previous));
   }
 
   async function _ensurePath(rootHandle, relPath) {
@@ -168,7 +179,7 @@
   // Public: pop the picker even if a handle is already saved (so the
   // user can re-target after moving folders).
   async function pickFolder() {
-    return await _getOrPickDirectory(true);
+    return _pickDirectory(_loadHandle());
   }
 
   // Public: download the export zip and extract it into the saved
@@ -189,7 +200,7 @@
     if (typeof fflate === 'undefined') {
       throw new Error('fflate not loaded.');
     }
-    const dir = await _getOrPickDirectory(false);
+    const dir = await _getOrPickDirectory();
 
     // Incremental: send the timestamp of the last successful syncDown
     // so the server only ships records modified since then, plus a
@@ -729,7 +740,7 @@
     }
     const BATCH_FILES = 20;
     const BATCH_BYTES = 25 * 1024 * 1024;  // 25 MB per POST max
-    const dir = await _getOrPickDirectory(false);
+    const dir = await _getOrPickDirectory();
 
     const handles = [];
     async function walk(handle, prefix) {

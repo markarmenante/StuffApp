@@ -64,12 +64,18 @@ June 2026. This Flask app is the only StuffApp.
 
 ### Files download destination
 
-Click **Files** to see the remembered destination, then **Choose folder…** to
-select an existing `StuffFiles` folder (normally in iCloud Drive on a Mac).
-Selecting its parent uses or creates a `StuffFiles` child. Folder selection is
-saved independently of downloading; close the dialog to finish setting it
-without starting an export. The browser stores this choice per site/profile,
-not on the Railway server. The app cannot silently choose an absolute Mac path.
+Click **Files** to download straight into the previously selected `StuffFiles`
+folder. With existing browser permission, no destination dialog is shown.
+On first use the browser asks for a folder; choose an existing `StuffFiles`
+folder (normally in iCloud Drive on a Mac). Selecting its parent uses or creates
+a `StuffFiles` child. If permission has expired, grant access when asked; a denial
+keeps the old destination and offers an explicit reconnect instead of downloading.
+
+Use the small arrow beside **Files** (**Change Files folder**) to change the
+folder explicitly. Folder selection is saved independently of downloading;
+close the settings dialog to finish without starting an export. The browser
+stores this choice per site/profile, not on the Railway server. The app cannot
+silently choose an absolute Mac path.
 
 Changing the destination resets both the incremental-download checkpoint and
 Sweep's local upload fingerprints in the same transaction as the folder handle.
@@ -78,8 +84,11 @@ keeps its existing checkpoint. Existing files in the former folder are untouched
 Failed file writes no longer advance the successful-download checkpoint.
 
 Browsers without the directory API still download a zip using their own download
-settings; the Files dialog explains that fallback. Test directory/checkpoint
+settings without an extra app dialog. Test directory/checkpoint
 behavior with `node tests/test_files_directory.js` in addition to the Python suite.
+The optional `node tests/test_files_download_browser.cjs` covers the actual Files
+controls in isolated Chromium with synthetic handles and mocked exports (set
+`PLAYWRIGHT_MODULE` and `BROWSER_CHANNEL` if required by the local runtime).
 
 History toggle scroll restoration is covered by `node tests/test_banknote_history_position.js`.
 

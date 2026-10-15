@@ -114,6 +114,7 @@
        plus row filters, so non-owner users can keep their own iCloud
        StuffFiles tree in sync without needing Admin access. #}
     {% if current_user and allowed_cats %}
+    <div class="nav-files-group">
     <a href="{{ url_for('admin_export_files') }}"
        class="nav-item nav-export" id="navExportLink"
        title="Download + auto-extract into your StuffFiles folder. iOS / Safari: gets a zip you save manually."
@@ -121,6 +122,10 @@
       <span class="icon" id="navExportIcon">⬇</span>
       <span class="lbl" id="navExportLabel">Files</span>
     </a>
+    <button type="button" class="nav-files-folder" id="navFilesFolder"
+       aria-label="Change Files folder" title="Change Files folder"
+       onclick="return openFilesFolderSettings(event)">⌄</button>
+    </div>
     <a href="{{ url_for('sweep_files') }}"
        class="nav-item nav-sweep {% if current_category == '__sweep__' %}active{% endif %}"
        id="navSweepLink"
@@ -144,7 +149,7 @@
 <!-- Toast for export progress / completion -->
 <div id="exportToast" class="export-toast" hidden></div>
 <dialog id="filesDownloadDialog" class="files-download-dialog" aria-labelledby="filesDownloadTitle">
-  <h2 id="filesDownloadTitle">Download Files</h2>
+  <h2 id="filesDownloadTitle">Files folder</h2>
   <div id="filesFolderOptions">
     <p>Destination: <strong id="filesFolderName">Checking saved folder…</strong></p>
     <p>Choose your existing <b>StuffFiles</b> folder in iCloud Drive. If you choose a parent folder, a StuffFiles folder will be used or created inside it.</p>
@@ -427,13 +432,15 @@ function _busy(link, iconId, labelId, busyIcon, busyText) {
     } else { // 'cancel'
       if (toast) { toast.textContent = msg || 'Cancelled.'; toast.className = 'export-toast'; }
     }
-    setTimeout(() => {
+    const restore = () => {
       icon.textContent  = origIcon;
       label.textContent = origLabel;
       link.classList.remove('busy');
       link.dataset.busy = '';
       if (toast) toast.hidden = true;
-    }, state === 'err' ? 5000 : 3500);
+    };
+    if (state === 'setup') restore();
+    else setTimeout(restore, state === 'err' ? 5000 : 3500);
   }
   return {progress, done};
 }
@@ -442,14 +449,21 @@ function filesCanUseFolder() {
   return !!(window.showDirectoryPicker && window.StuffSync && window.fflate);
 }
 
-async function openFilesDownload(ev) {
-  ev.preventDefault();
-  if (document.getElementById('navExportLink').dataset.busy) return false;
+let filesFolderChangeBusy = false;
+
+function openFilesDownload(ev) {
+  return startExport(ev, document.getElementById('navExportLink'));
+}
+
+async function openFilesFolderSettings(ev, message = '') {
+  if (ev) ev.preventDefault();
+  if (filesFolderChangeBusy || document.getElementById('navExportLink').dataset.busy ||
+      document.getElementById('navSweepLink')?.dataset.busy) return false;
   const dialog = document.getElementById('filesDownloadDialog');
   const supported = filesCanUseFolder();
   document.getElementById('filesFolderOptions').hidden = !supported;
   document.getElementById('filesZipHelp').hidden = supported;
-  document.getElementById('filesFolderStatus').textContent = '';
+  document.getElementById('filesFolderStatus').textContent = message;
   const start = document.getElementById('filesDownloadStart');
   start.textContent = supported ? 'Download to StuffFiles' : 'Download zip';
   start.disabled = supported;
@@ -471,6 +485,8 @@ async function openFilesDownload(ev) {
 }
 
 async function chooseFilesFolder(button) {
+  if (filesFolderChangeBusy) return;
+  filesFolderChangeBusy = true;
   button.disabled = true;
   const status = document.getElementById('filesFolderStatus');
   status.textContent = '';
@@ -482,6 +498,7 @@ async function chooseFilesFolder(button) {
   } catch (err) {
     status.textContent = err.name === 'AbortError' ? 'Folder selection cancelled; previous destination kept.' : 'Could not select folder: ' + err.message;
   } finally {
+    filesFolderChangeBusy = false;
     button.disabled = false;
   }
 }
@@ -499,12 +516,13 @@ function downloadFilesToFolder(ev) {
 //     drags the zip into their StuffFiles folder and unzips manually.
 async function startExport(ev, link) {
   ev.preventDefault();
+  if (filesFolderChangeBusy) return false;
   const ui = _busy(link, 'navExportIcon', 'navExportLabel', '⏳', 'Building');
   if (!ui) return false;
 
   if (window.showDirectoryPicker && window.StuffSync && window.fflate) {
     try {
-      ui.progress('Pick (or confirm) your StuffFiles folder…');
+      ui.progress('Downloading to your StuffFiles folder…');
       const result = await window.StuffSync.syncDown(ui.progress);
       let msg = `Synced ${result.written}/${result.total} files into ${result.folderName}.`;
       if (result.purged) {
@@ -524,10 +542,13 @@ async function startExport(ev, link) {
         msg += ` (warning: ${result.error} — see console)`;
       }
       ui.done(state, msg);
-      reloadAfterExport();
+      if (!result.error) reloadAfterExport();
     } catch (err) {
       if (err && err.name === 'AbortError') {
         ui.done('cancel', 'Cancelled.');
+      } else if (['FolderPermissionError', 'SecurityError', 'NotAllowedError'].includes(err?.name)) {
+        ui.done('setup');
+        await openFilesFolderSettings(null, 'Folder access is needed. Choose your StuffFiles folder, then download.');
       } else {
         ui.done('err', 'Sync failed: ' + (err.message || err));
       }

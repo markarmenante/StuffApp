@@ -37,7 +37,7 @@ function setup(old, selected, options={}) {
   const window={async showDirectoryPicker(opts) {picks.push(opts);if(options.cancel) throw Object.assign(Error('cancel'),{name:'AbortError'});return selected;}};
   const context={window, indexedDB:{open() {const req={};setImmediate(()=>{req.result=db;req.onsuccess();});return req;}},
     console:{warn(){},log(){}},Uint8Array,TextDecoder,Date, confirm:()=>false,
-    fetch:async url=>{urls.push(url);return {ok:true,body:{getReader:()=>({read:async()=>({done:true})})}};},
+    fetch:async url=>{urls.push(url);return {ok:!options.failFetch,status:options.failFetch?503:200,body:{getReader:()=>({read:async()=>({done:true})})}};},
     fflate:{UnzipInflate:class{},Unzip:class {register(){} push(data,last) {
       if (!last) return;
       const file={name:'StuffFiles/Banknotes/example.txt',start(){this.ondata(null,new Uint8Array([79,75]),true);}};
@@ -79,4 +79,37 @@ function setup(old, selected, options={}) {
   t=setup(failed,failed);result=await t.api.syncDown();assert.match(result.error,/could not be saved/);
   assert.equal(t.data.get(LAST),'2026-09-01');assert.equal(result.written,0);
   console.log('Failed file write: checkpoint not advanced');
+
+  const granted=dir('StuffFiles');let permissionPrompts=0;
+  granted.requestPermission=async()=>{permissionPrompts++;return 'granted';};
+  t=setup(granted,granted);await t.api.syncDown();
+  assert.equal(t.picks.length,0);assert.equal(permissionPrompts,0);
+  console.log('Granted folder: immediate download without destination or permission prompt');
+
+  const prompt=dir('StuffFiles');prompt.queryPermission=async()=> 'prompt';
+  prompt.requestPermission=async()=>{permissionPrompts++;return 'granted';};
+  t=setup(prompt,prompt);await t.api.syncDown();
+  assert.equal(permissionPrompts,1);assert.equal(t.picks.length,0);
+  console.log('Expired permission: renew access to the same folder');
+
+  const denied=dir('StuffFiles');denied.queryPermission=async()=> 'denied';
+  denied.requestPermission=async()=> 'denied';
+  t=setup(denied,parent);await assert.rejects(t.api.syncDown(),{name:'FolderPermissionError'});
+  assert.equal(t.urls.length,0);assert.equal(t.picks.length,0);
+  assert.equal(t.data.get(KEY),denied);assert.equal(t.data.get(LAST),'2026-09-01');
+  console.log('Denied permission: no second picker, download, or checkpoint change');
+
+  t=setup(null,parent);await t.api.syncDown();assert.equal(t.picks.length,1);
+  assert.equal(t.urls[0],'/export-files');
+  console.log('First setup: pick a destination once, then download immediately');
+
+  t=setup(old,parent);const selecting=t.api.pickFolder();
+  assert.equal(t.picks.length,1,'Explicit picker must run before asynchronous IndexedDB returns');
+  await selecting;
+  console.log('Explicit folder change: picker retains original click activation');
+
+  t=setup(old,old,{failFetch:true});await assert.rejects(t.api.syncDown(),/HTTP 503/);
+  assert.equal(t.data.get(LAST),'2026-09-01');
+  console.log('Server failure: checkpoint not advanced');
+
 })().catch(err=>{console.error(err);process.exit(1);});
