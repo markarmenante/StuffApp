@@ -82,3 +82,25 @@ settings; the Files dialog explains that fallback. Test directory/checkpoint
 behavior with `node tests/test_files_directory.js` in addition to the Python suite.
 
 History toggle scroll restoration is covered by `node tests/test_banknote_history_position.js`.
+
+### Purchase status and banknote feedback
+
+Ordinary collection items share one status control: **Ordered → Shipped →
+Delivered → Owned**. Linked eBay shipping evidence supplies a banknote's current
+pending phase. **Owned — visually inspected** is an explicit owner action;
+shipping updates never mark a record Owned. The watch ordering workflow and
+property statuses remain separate. Pending phases remain included in collection
+coverage, duplicate checks and reports, and each can be filtered in the list.
+
+After an owner manually moves a pending banknote to Owned, StuffApp opens a
+feedback preparation page for its uniquely linked eBay purchase. It provides
+Positive/five-star guidance and the exact comment **“Banknote as described. Very
+smooth transaction.”** The eBay connection is read-only: the owner copies the
+comment, opens the exact order, and submits through eBay's Leave feedback action.
+An ambiguous or missing purchase match produces an explanation rather than an
+unrelated order link. A blocked popup leaves a link on the saved banknote page.
+
+Run `python tests/run_all.py` for the Python regressions. The optional browser
+regression is `node tests/test_purchase_status_browser.cjs`; its header documents
+Python, Playwright and browser configuration. It uses isolated fixtures and
+intercepts all requests, without changing live records or posting feedback.

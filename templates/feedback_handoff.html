@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>eBay seller feedback — StuffApp</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f6f7f5; color: #233329; font: 16px/1.55 system-ui, sans-serif; }
+    main { max-width: 660px; margin: 40px auto; padding: 28px; background: white; border: 1px solid #dce3dc; border-radius: 16px; }
+    h1 { margin: 18px 0 8px; font-size: 28px; line-height: 1.2; }
+    h2 { font-size: 18px; overflow-wrap: anywhere; }
+    a { color: #245d3d; }
+    .meta { color: #5c675f; overflow-wrap: anywhere; }
+    .rating { background: #edf6ef; padding: 14px 18px; border-radius: 10px; }
+    .stars { color: #986b09; white-space: nowrap; }
+    label { display: block; font-weight: 650; margin: 22px 0 8px; }
+    textarea { width: 100%; padding: 12px; border: 1px solid #aebcaf; border-radius: 8px; font: inherit; line-height: 1.5; resize: vertical; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+    .button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 9px 16px; border: 1px solid #245d3d; border-radius: 24px; background: #245d3d; color: white; text-decoration: none; font: inherit; font-weight: 650; cursor: pointer; }
+    button.button { background: white; color: #245d3d; }
+    :focus-visible { outline: 3px solid #4781ba; outline-offset: 3px; }
+    [role="status"] { min-height: 24px; margin: 6px 0; color: #425248; }
+    @media (max-width: 700px) { main { margin: 12px; padding: 20px; } h1 { font-size: 25px; } }
+  </style>
+</head>
+<body>
+<main>
+  <a href="{{ record_url }}">← Back to banknote</a>
+  <h1>eBay seller feedback</h1>
+  {% if feedback.state == 'ready' %}
+  <h2>{{ feedback.item_title or 'Your banknote purchase' }}</h2>
+  <p class="meta">{% if feedback.seller %}Seller: {{ feedback.seller }}<br>{% endif %}Order {{ feedback.order_id }} · Item {{ feedback.item_id }}</p>
+  <div class="rating"><strong>Positive</strong> · <span class="stars" aria-label="5 out of 5 stars">★★★★★</span><br>Choose the highest rating for each seller rating eBay offers.</div>
+  <label for="feedback-comment">Your comment</label>
+  <textarea id="feedback-comment" rows="3" readonly>{{ feedback.comment }}</textarea>
+  <div class="actions">
+    <button class="button" type="button" id="copy-comment">Copy comment</button>
+    <a class="button" id="open-ebay-order" href="{{ feedback.order_url }}" target="_blank" rel="noopener noreferrer">Open eBay order</a>
+  </div>
+  <p role="status" id="copy-status" aria-live="polite"></p>
+  <p>On eBay, choose <strong>Leave feedback</strong> for this item, select the ratings, paste your comment, and submit.</p>
+  <p class="meta">Your banknote is Owned. This page prepares your feedback; eBay confirms when it has been submitted. If eBay already has your feedback, you do not need to submit it again.</p>
+  <script>
+  (() => {
+    const button = document.getElementById('copy-comment');
+    const comment = document.getElementById('feedback-comment');
+    const status = document.getElementById('copy-status');
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(comment.value);
+        status.textContent = 'Comment copied. Paste it into eBay feedback.';
+      } catch (_) {
+        comment.focus(); comment.select();
+        status.textContent = 'Select and copy the comment above, then paste it into eBay feedback.';
+      } finally { button.disabled = false; }
+    });
+  })();
+  </script>
+  {% else %}
+  <p role="status">{{ feedback.message }}</p>
+  <p class="meta">Your saved collection status is unchanged. No feedback has been submitted by StuffApp.</p>
+  {% endif %}
+</main>
+</body>
+</html>

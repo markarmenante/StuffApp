@@ -29,6 +29,31 @@ HTML = '<html><title>Silver coin</title><h1>Ancient silver tetradrachm</h1><p>We
 TEXT = 'Ancient silver tetradrachm. Weight: 13.15 g. Sold.'
 
 
+class PurchaseHeader(HTMLParser):
+    def __init__(self, text):
+        super().__init__()
+        self.controls = []
+        self.review = None
+        self.active = False
+        self.feed(text)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if 'data-purchase-status-control' in attrs:
+            self.controls.append(dict(attrs=attrs, text=''))
+            self.active = True
+        if 'data-purchase-status-review' in attrs:
+            self.review = attrs
+
+    def handle_data(self, text):
+        if self.active:
+            self.controls[-1]['text'] += text
+
+    def handle_endtag(self, tag):
+        if tag == 'button':
+            self.active = False
+
+
 class ListingTests(unittest.TestCase):
     def setUp(self):
         self.client = stuff.app.test_client()
@@ -195,7 +220,12 @@ class ListingTests(unittest.TestCase):
         self.assertIn('href="' + source['url'] + '"', page)
         self.assertNotIn('href="https://www.ebay.com/mye/myebay/purchase"', page)
         self.assertIn('Refunded; delivery not confirmed</textarea>', page)
-        self.assertIn('Refunded \u00b7 Review', page)
+        header = PurchaseHeader(page)
+        self.assertEqual(header.controls[0]['text'], 'Ordered ▾')
+        self.assertNotIn('hidden', header.review)
+        self.assertEqual(header.review['title'], 'Refunded; delivery not confirmed')
+        self.assertEqual(state['lifecycle']['status'], 'Ordered')
+        self.assertTrue(state['lifecycle']['attention'])
         self.assertIn('Please Review', self.get('/banknotes').data.decode())
         data = dict(action='dismiss', review_token=state['review']['token'], check_token='')
         response = self.post(data, 'banknotes')
@@ -203,12 +233,16 @@ class ListingTests(unittest.TestCase):
         self.assertTrue(response.json['review']['dismissed'])
         self.assertFalse(response.json['delivery']['attention'])
         self.assertEqual(response.json['delivery']['status'], 'Refunded')
+        self.assertFalse(response.json['lifecycle']['attention'])
+        self.assertEqual(response.json['lifecycle']['status'], 'Ordered')
         page = self.get('/banknotes/' + self.id).data.decode()
         self.assertIn('Marked reviewed', page)
         self.assertIn('eBay Order 10-15260-84325', page)
         self.assertIn(source, response.json['links'])
         self.assertNotIn('id="coinReviewReason"', page)
-        self.assertNotIn('Refunded \u00b7 Review', page)
+        header = PurchaseHeader(page)
+        self.assertEqual(header.controls[0]['text'], 'Ordered ▾')
+        self.assertIn('hidden', header.review)
         listing = self.get('/banknotes').data.decode()
         self.assertNotIn('Please Review', listing)
         self.assertNotIn('Refunded \u00b7 Review', listing)
@@ -291,45 +325,34 @@ class ListingTests(unittest.TestCase):
                          headers={'Cf-Access-Authenticated-User-Email': 'outsider@example.com'}).status_code, 403)
         self.assertEqual(self.post(dict(action='dismiss', review_token='stale'), 'banknotes').status_code, 409)
 
-    def test_banknote_header_hides_only_redundant_delivery_labels(self):
-        class BadgeParser(HTMLParser):
-            attrs = None
-            text = ''
-            active = False
-            def handle_starttag(self, tag, attrs):
-                if 'data-delivery-badge' in dict(attrs):
-                    self.attrs = dict(attrs)
-                    self.active = True
-            def handle_data(self, data):
-                if self.active:
-                    self.text += data
-            def handle_endtag(self, tag):
-                if tag == 'a':
-                    self.active = False
-
+    def test_banknote_header_has_one_effective_phase_and_separate_review_attention(self):
         self.banknote_order('', 'Awaiting shipment')
-        for ownership, shipping, attention, hidden, label in [
-            ('Own', 'Delivered', '', True, 'Delivered'),
-            ('Ordered', 'Ordered', '', True, 'Ordered'),
-            ('Ordered', 'Shipped', '', False, 'Shipped'),
-            ('Ordered', 'Delivered', '', False, 'Delivered'),
-            ('Sold', 'Delivered', '', False, 'Delivered'),
-            ('Own', 'Delivered', 'Partially refunded', False, 'Please Review'),
-            ('Ordered', 'Ordered', 'Check the order', False, 'Please Review'),
+        for ownership, shipping, attention, label in [
+            ('Own', 'Delivered', '', 'Owned'),
+            ('Ordered', 'Ordered', '', 'Ordered'),
+            ('Ordered', 'Shipped', '', 'Shipped'),
+            ('Ordered', 'Delivered', '', 'Delivered'),
+            ('Shipped', 'Ordered', '', 'Ordered'),
+            ('Delivered', 'Shipped', '', 'Shipped'),
+            ('Sold', 'Delivered', '', 'Sold'),
+            ('Own', 'Delivered', 'Partially refunded', 'Owned'),
+            ('Ordered', 'Ordered', 'Check the order', 'Ordered'),
         ]:
             with self.subTest(ownership=ownership, shipping=shipping, attention=attention):
                 self.db.execute('UPDATE banknotes SET status=? WHERE id=?', (ownership, self.id))
                 self.db.execute('UPDATE ebay_order_items SET delivery_status=?,attention=? WHERE line_key=?',
                                 (shipping, attention, self.id))
                 self.db.commit()
-                parser = BadgeParser()
                 html = self.get('/banknotes/' + self.id).data.decode()
-                parser.feed(html)
-                self.assertIsNotNone(parser.attrs)
-                self.assertEqual('hidden' in parser.attrs, hidden)
-                self.assertEqual(parser.text, label)
-                self.assertEqual('purchase-review-pill' in parser.attrs['class'], bool(attention))
-                self.assertIn('id="statusFlipPill"', html)
+                parser = PurchaseHeader(html)
+                self.assertEqual(len(parser.controls), 1)
+                self.assertEqual(parser.controls[0]['text'], label + ' ▾')
+                self.assertNotIn('data-delivery-badge', html)
+                self.assertEqual('hidden' not in parser.review, bool(attention))
+                self.assertEqual(parser.review['title'], attention)
+                state = self.state('banknotes')['lifecycle']
+                self.assertEqual(state['label'], label)
+                self.assertEqual(state['attention'], bool(attention))
                 self.assertEqual(self.db.execute('SELECT status FROM banknotes WHERE id=?',
                                                 (self.id,)).fetchone()[0], ownership)
 

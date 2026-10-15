@@ -1,0 +1,13 @@
+<button type="button" id="statusFlipPill"
+        class="coin-lookup-btn status-flip-pill purchase-status-pill phase-{{ _purchase_state.status|lower }}"
+        data-purchase-status-control
+        data-url="{{ url_for('purchase_status', category=category, record_id=r['id']) }}"
+        data-category="{{ category }}"
+        data-csrf="{{ coin_review_csrf_token() }}"
+        aria-haspopup="menu" aria-expanded="false"
+        title="Ordered → Shipped → Delivered → Owned. Mark Owned only after visual inspection."
+        {% if not current_user or current_user.role != 'owner' %}disabled{% endif %}>{{ _purchase_state.label }} ▾</button>
+{% if category == 'banknotes' %}<a class="purchase-review-pill" data-purchase-status-review
+   href="{{ url_for('ebay.dashboard') }}#note-{{ r['id'] }}"
+   title="{{ _purchase_state.review_reason }}" {% if not _purchase_state.attention %}hidden{% endif %}>Please Review</a>{% endif %}
+<script type="application/json" data-purchase-status-initial>{{ _purchase_state|tojson }}</script>

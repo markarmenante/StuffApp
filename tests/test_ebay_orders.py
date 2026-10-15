@@ -358,8 +358,20 @@ class WebTests(unittest.TestCase):
             for url in ('/banknotes', '/banknotes/refund-test', '/banknotes/ebay'):
                 page = self.get(url)
                 self.assertEqual(page.status_code, 200)
-                self.assertIn(b'ebay-refunded', page.data)
                 self.assertIn(b'Refunded', page.data)
+                if url == '/banknotes/ebay':
+                    self.assertIn(b'ebay-refunded', page.data)
+                else:
+                    self.assertIn(b'Please Review', page.data)
+                    self.assertIn(b'Purchase status: Refunded.', page.data)
+                    if url.endswith('/refund-test'):
+                        self.assertIn(b'data-purchase-status-control', page.data)
+                        self.assertIn('Owned ▾'.encode(), page.data)
+            with self.app.app_context():
+                db = self.stuff.get_db()
+                self.assertEqual(db.execute("SELECT status FROM banknotes WHERE id='refund-test'").fetchone()[0], 'Own')
+                self.assertEqual(db.execute('SELECT status_text FROM ebay_purchase_observations WHERE line_key=?',
+                                            (item['line_key'],)).fetchone()[0], 'Refunded')
         finally:
             with self.app.app_context():
                 db = self.stuff.get_db()

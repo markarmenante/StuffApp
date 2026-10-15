@@ -11,6 +11,7 @@
   const statusSelect = document.querySelector('#mainForm select[name="status"]');
   let result = JSON.parse(panel.querySelector('[data-listing-initial]').textContent);
   let attempts = 0, busy = false, timer;
+  let resultRevision = window.purchaseStatusRevision || 0;
 
   function renderDelivery(delivery) {
     if (!deliveryBadge || !delivery) return;
@@ -25,14 +26,15 @@
   }
   statusSelect?.addEventListener('change', () => renderDelivery(result.delivery));
 
-  function render(data) {
-    result = data;
+  function render(data, revision = resultRevision) {
+    result = data; resultRevision = revision;
     if (data.csrf_token) panel.dataset.csrf = data.csrf_token;
     const review = data.review, check = data.check;
     const differences = check?.differences || [];
     const needsReview = (review && !review.dismissed) || (differences.length > 0 && !check.dismissed);
     const reviewed = !needsReview && (review?.dismissed || check?.dismissed);
-    renderDelivery(data.delivery);
+    if (data.lifecycle) document.dispatchEvent(new CustomEvent('purchase-lifecycle-updated', {detail: {lifecycle: data.lifecycle, revision}}));
+    else renderDelivery(data.delivery);
     panel.hidden = !(data.links?.length || review || check);
     title.textContent = needsReview ? 'Review Reason' : reviewed ? 'Marked reviewed' : 'Purchase sources';
     links.replaceChildren();
@@ -109,6 +111,7 @@
 
   async function refresh() {
     if (busy) return;
+    const revision = window.purchaseStatusRevision || 0;
     try {
       const response = await fetch(panel.dataset.url, {
         credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000),
@@ -116,7 +119,7 @@
       if (!response.ok || busy) return;
       const data = await response.json();
       if (busy) return;
-      render(data);
+      render(data, revision);
       if ((data.pending || data.archive_pending || data.check?.state === 'pending') && ++attempts < 40) {
         timer = window.setTimeout(refresh, 5000);
       }
@@ -124,6 +127,7 @@
   }
   async function submitAction(action, field) {
     if (busy) return;
+    const revision = window.purchaseStatusRevision || 0;
     busy = true; button.disabled = true; error.hidden = true; clearTimeout(timer);
     panel.querySelectorAll('[data-change-action]').forEach(control => { control.disabled = true; });
     try {
@@ -150,7 +154,7 @@
         // Renew only the session token; never acknowledge evidence the user has not seen.
         if ((current.review?.token || '') !== body.get('review_token') ||
             (current.check?.token || '') !== body.get('check_token')) {
-          render(current);
+          render(current, revision);
           throw new Error('The review changed. Check the updated details before confirming it.');
         }
         panel.dataset.csrf = current.csrf_token;
@@ -173,7 +177,7 @@
           }));
         }
       }
-      render(updating ? data.listing : data);
+      render(updating ? data.listing : data, revision);
     } catch (err) {
       error.textContent = err.message || 'Could not confirm the review.';
       error.hidden = false;

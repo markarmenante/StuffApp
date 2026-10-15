@@ -339,7 +339,7 @@ def listing_candidates(db):
     """Only purchase-source links, never comparison or historical references."""
     candidates = defaultdict(set)
     notes = db.execute("SELECT id, description, note_references FROM banknotes "
-                       "WHERE status IS NULL OR status IN ('','Own','Owned','Ordered')").fetchall()
+                       "WHERE status IS NULL OR status IN ('','Own','Owned','Ordered','Shipped','Delivered')").fetchall()
     eligible = {r['id'] for r in notes}
     for row in notes:
         for line in (row['description'] or '').splitlines():
@@ -685,7 +685,7 @@ def register(app, get_db, open_db, require_owner, data_dir):
         for row in db.execute('SELECT * FROM ebay_item_tracking ORDER BY carrier,tracking_number'):
             tracking[row['line_key']].append(dict(row))
         notes = db.execute("SELECT id,cat_id,country,denomination,date_1,serial_number FROM banknotes "
-                           "WHERE (status IS NULL OR status IN ('','Own','Owned','Ordered')) AND id NOT IN "
+                           "WHERE (status IS NULL OR status IN ('','Own','Owned','Ordered','Shipped','Delivered')) AND id NOT IN "
                            "(SELECT banknote_id FROM banknote_ebay_links) ORDER BY country,denomination").fetchall()
         events = db.execute('SELECT e.*,b.cat_id,b.country,b.denomination FROM ebay_status_events e '
                             'JOIN banknotes b ON b.id=e.banknote_id ORDER BY e.id DESC LIMIT 50').fetchall()
@@ -803,7 +803,7 @@ def register(app, get_db, open_db, require_owner, data_dir):
         item = db.execute('SELECT * FROM ebay_order_items WHERE line_key=?', (key,)).fetchone()
         if not item or item['quantity'] != 1:
             abort(400, description='Only a single-note order item can be matched.')
-        note = db.execute("SELECT id FROM banknotes WHERE id=? AND (status IS NULL OR status IN ('','Own','Owned','Ordered'))", (note_id,)).fetchone()
+        note = db.execute("SELECT id FROM banknotes WHERE id=? AND (status IS NULL OR status IN ('','Own','Owned','Ordered','Shipped','Delivered'))", (note_id,)).fetchone()
         if not note or db.execute('SELECT 1 FROM banknote_ebay_links WHERE banknote_id=? OR line_key=?', (note_id, key)).fetchone():
             abort(409, description='That banknote or order is already matched. Refresh and review the matches.')
         db.execute('INSERT INTO banknote_ebay_links (banknote_id,line_key,matched_by,matched_at) VALUES (?,?,?,?)',

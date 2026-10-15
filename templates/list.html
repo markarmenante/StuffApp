@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'partials/purchase_status_badge.html' import purchase_status_badge %}
 {% block title %}{{ cat_info.name }} — StuffApp{% endblock %}
 
 {% block content %}
@@ -225,12 +226,12 @@
   {%- set _st_hist = (None if show_history else '0') if category == 'banknotes' else None -%}
   {%- set _st_labels = [] -%}
   {%- for _s in status_cycle -%}
-    {%- set _ = _st_labels.append('Commissioned' if category == 'watches' and _s == 'ordered' else _s|capitalize) -%}
+    {%- set _ = _st_labels.append('Commissioned' if category == 'watches' and _s == 'ordered' else ('Owned' if _s == 'own' and category != 'watches' else _s|capitalize)) -%}
   {%- endfor -%}
   {%- set _st_next_param = ('all' if status_default_own else None) if _st_next == 'all' else _st_next -%}
   <a href="{{ url_for('list_view', category=category, q=q or None, filter=_st_next_param, history=_st_hist) }}"
      class="toolbar-btn pill {% if status_current != 'all' %}active{% endif %}"
-     title="Cycle status: {{ _st_labels | join(' → ') }}">{{ 'Status: All' if status_current == 'all' else ('Commissioned' if category == 'watches' and status_current == 'ordered' else status_current | capitalize) }}</a>
+     title="Cycle status: {{ _st_labels | join(' → ') }}">{{ 'Status: All' if status_current == 'all' else ('Commissioned' if category == 'watches' and status_current == 'ordered' else ('Owned' if status_current == 'own' and category != 'watches' else status_current | capitalize)) }}</a>
   {% endif %}
   {# Every list carries the search bar in its sticky toolbar — even the
      short ones — so the subheading reads the same across categories. #}
@@ -282,6 +283,7 @@
   {% set _us_panels = series_panels(rows) if category == 'banknotes' and show_history else {} %}
   {% set _bn_groups = banknote_grouping(rows) if category == 'banknotes' and not _market and not _analysis else {} %}
   {% for row in rows %}
+  {% set _row_lifecycle = purchase_lifecycle(category, row) if not _market else none %}
   {% if _market %}
     {% set market_group = row.get('_market_group') %}
     {% include 'partials/market_group_heading.html' %}
@@ -374,6 +376,7 @@
           <span class="item-brand">{{ row['brand'] or '—' }}</span>
           <span class="item-model">{{ row['model'] or '' }}</span>
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['metal'] %}<span>{{ row['metal'] }}</span>{% endif %}
@@ -417,6 +420,7 @@
           {% set _purchase_review = coin_purchase_review(row['id']) or listing_review_reason(category, row['id']) %}
           {% if _purchase_review %}<span class="purchase-review-pill" title="{{ _purchase_review }}">Please Review</span>{% endif %}
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['metal'] %}<span>{{ row['metal'] }}</span>{% endif %}
@@ -461,21 +465,15 @@
         <div class="item-line1">
           <span class="item-brand">{{ row['country'] or row['municipality'] or row['issuer'] or '—' }}</span>
           {% set _delivery = banknote_delivery(row['id']) %}
-          {% set _listing_review = listing_review_reason(category, row['id']) or (_delivery.review.reason if _delivery and _delivery.attention else none) %}
+          {% set _listing_review = listing_review_reason(category, row['id']) or (_row_lifecycle.review_reason if _row_lifecycle and _row_lifecycle.attention else none) %}
           {% if _listing_review %}<span class="purchase-review-pill" title="{{ _listing_review }}">Please Review</span>{% endif %}
           {% if row['denomination'] %}<span class="item-model">{{ row['denomination'] }}</span>{% endif %}
-          {% set _ownership = (row['status'] or '')|trim %}
-          {% set _refund = _delivery and _delivery.status in ('Refunded', 'Cancelled') %}
-          {% if _ownership|lower not in ('', 'own', 'owned') or _refund %}
-          {% set delivery = _delivery if _ownership|lower == 'ordered' or _refund else none %}
-          {% set _status = delivery.status if delivery else _ownership %}
-          <span class="banknote-status-badge ebay-delivery-badge ebay-{{ _status|lower }}"
-                title="{% if delivery %}eBay shipping progress{% if delivery.manual %} · manual correction{% endif %}{% if delivery.attention %} · review needed{% endif %}{% else %}Collection status{% endif %}">{{ _status }}{% if delivery and delivery.attention %} · Review{% endif %}</span>
-          {% endif %}
+          {{ purchase_status_badge(_row_lifecycle, true) }}
         </div>
         {% if _bn_group %}<div class="banknote-period{% if _bn_group.uncertain %} needs-review{% endif %}">{{ _bn_group.period }}</div>{% endif %}
         {% set _distribution = banknote_distribution_callout(row) %}
         {% if _distribution %}<div class="banknote-distribution-label">{{ _distribution.label }}</div>{% endif %}
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['municipality'] and row['country'] %}<span>{{ row['municipality'] }}</span>{% endif %}
@@ -509,6 +507,7 @@
           <span class="item-brand">{{ row['make'] or '—' }}</span>
           <span class="item-model">{{ row['model'] or '' }}</span>
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['digital_film'] %}<span>{{ row['digital_film'] }}</span>{% endif %}
@@ -531,6 +530,7 @@
           <span class="item-brand">{{ row['make'] or '—' }}</span>
           <span class="item-model">{{ row['model'] or '' }}</span>
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['mount'] %}<span>{{ row['mount'] }}</span>{% endif %}
@@ -552,6 +552,7 @@
           <span class="item-brand">{{ row['make'] or '—' }}</span>
           <span class="item-model">{{ row['model'] or '' }}</span>
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['type'] %}<span>{{ row['type'] }}</span>{% endif %}
@@ -568,6 +569,7 @@
           <span class="item-brand">{{ row['artist'] or '—' }}</span>
         </div>
         {% if row['title'] %}<div class="art-title">{{ row['title'] }}</div>{% endif %}
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['medium'] %}<span>{{ row['medium'] }}</span>{% endif %}
@@ -589,6 +591,7 @@
           <span class="item-brand">{{ row['make'] or '—' }}</span>
           <span class="item-model">{{ row['model'] or '' }}</span>
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['year'] %}<span><span class="lbl">Yr</span> {{ row['year'] }}</span>{% endif %}
@@ -639,6 +642,7 @@
           <span class="item-brand">{{ row['make'] or '—' }}</span>
           <span class="item-model">{{ row['model'] or '' }}</span>
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           {% if row['type'] %}<div class="idr"><span>{{ row['type'] }}</span></div>{% endif %}
           {% if row['serial_number'] %}
@@ -655,6 +659,7 @@
           <span class="item-brand">{{ row['make'] or '—' }}</span>
           <span class="item-model">{{ row['model'] or '' }}</span>
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr">
             {% if row['caliber'] %}<span>{{ row['caliber'] }}</span>{% endif %}
@@ -691,6 +696,7 @@
             </svg>
           </button>
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           {% if row['number'] %}<div class="idr"><span>{{ row['number']|card_number }}</span></div>{% endif %}
           <div class="idr">
@@ -707,6 +713,7 @@
         <div class="item-line1">
           <span class="item-brand">{{ row['name'] or '—' }}</span>
         </div>
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           {% if row['address'] %}<div class="idr property-address-row"><span>{{ row['address'] }}</span></div>{% endif %}
           {# Show the first row of the alarm-codes table (Code column).
@@ -741,6 +748,7 @@
           <span class="item-brand">{{ row['name'] or '—' }}</span>
         </div>
         {% if row['home_address'] %}
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           <div class="idr person-addr-block"><span>{{ row['home_address'] }}</span></div>
         </div>
@@ -753,6 +761,7 @@
           <span class="item-model">{{ row['type'] or '' }}</span>
         </div>
         {% if row['description'] or row['property'] or row['location'] %}
+        {% if category != 'banknotes' %}{{ purchase_status_badge(_row_lifecycle) }}{% endif %}
         <div class="item-detail-rows">
           {% if row['description'] %}
           <div class="idr"><span>{{ row['description'] }}</span></div>

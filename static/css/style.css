@@ -4351,3 +4351,27 @@ input[type="date"] { -webkit-appearance: none; }
 .market-session p { margin: 0 0 10px; overflow-wrap: anywhere; }
 .market-session-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .market-session-actions button { max-width: 100%; white-space: normal; }
+
+/* A single purchase phase; Owned is the owner's inspection decision. */
+.purchase-status-pill { border-radius: 999px; min-height: 30px; }
+.purchase-status-pill.phase-ordered { background:#fff3b0; border-color:#d9b23a; color:#6b5410; }
+.purchase-status-pill.phase-shipped { background:#e9f2ff; border-color:#8eb2e3; color:#244f85; }
+.purchase-status-pill.phase-delivered { background:#eaf6ed; border-color:#9ac8a6; color:#306942; }
+.purchase-status-pill.phase-own { background:#d9f0df; border-color:#5b9e6c; color:#245b33; }
+.purchase-status-pill.phase-sold, .purchase-status-pill.phase-loaned,
+.purchase-status-pill.phase-gifted, .purchase-status-pill.phase-consigned,
+.purchase-status-pill.phase-lost { background:#eee; border-color:#bbb; color:#555; }
+.purchase-status-pill:active:not(:disabled) { transform:translateY(1px); box-shadow:inset 0 1px 3px #0002; }
+.purchase-status-pill[aria-busy="true"] { opacity:.65; cursor:progress; }
+.purchase-status-menu { max-height:calc(100dvh - 16px); overflow-y:auto; position:fixed; z-index:10020; width:285px; max-width:calc(100vw - 16px); padding:7px; background:#fff; border:1px solid #d2d7dc; border-radius:12px; box-shadow:0 8px 26px #0003; }
+.purchase-status-menu[hidden], .purchase-status-notice[hidden], [data-purchase-status-review][hidden], [data-purchase-feedback-link][hidden] { display:none; }
+.purchase-status-menu p { margin:4px 5px 8px; font-size:11px; line-height:1.5; color:#65717b; }
+.purchase-status-menu button { display:block; width:100%; padding:10px; border:0; border-radius:6px; background:transparent; text-align:left; font:inherit; font-size:14px; color:#273943; cursor:pointer; }
+.purchase-status-menu button:hover:not(:disabled), .purchase-status-menu button:focus-visible { background:#eaf2fb; outline:2px solid #729ec8; outline-offset:-2px; }
+.purchase-status-menu button[aria-checked="true"] { background:#eff4f0; color:#326a43; font-weight:600; }
+.purchase-status-menu button:last-child { border-top:1px solid #e6e8ea; margin-top:5px; border-radius:0 0 6px 6px; }
+.purchase-status-notice { position:fixed; bottom:16px; right:16px; z-index:10010; max-width:min(480px,calc(100vw - 32px)); padding:14px 40px 14px 16px; border:1px solid #91b69b; border-radius:10px; background:#f4fbf6; color:#274d31; box-shadow:0 4px 22px #0002; font-size:14px; line-height:1.5; }
+.purchase-status-notice.is-error { background:#fff7f4; border-color:#d9a18c; color:#832e17; }
+.purchase-status-notice a { display:block; margin-top:6px; font-weight:600; }
+.purchase-status-notice button { position:absolute; top:7px; right:7px; border:0; background:none; color:inherit; font-size:22px; cursor:pointer; }
+.purchase-status-badge { margin:2px 0; font-size:12px; }

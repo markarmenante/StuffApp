@@ -225,7 +225,7 @@ def comparison(note, item, title, aliases, *, allow_missing_identity=False):
 
 def plan_matches(notes, orders, links, purchase_links=None):
     """Two-way uniqueness includes owned notes and already-linked purchases."""
-    notes = [dict(n) for n in notes if (n.get('status') or 'Own') in ('Own', 'Owned', 'Ordered')]
+    notes = [dict(n) for n in notes if (n.get('status') or 'Own') in ('Own', 'Owned', 'Ordered', 'Shipped', 'Delivered')]
     by_note = {n['id']: n for n in notes}
     by_order = {o['line_key']: o for o in orders}
     aliases = set()

@@ -1,0 +1,4 @@
+{% macro purchase_status_badge(state, banknote=false) -%}
+{% if state and state.status != 'Own' %}<span class="{% if banknote %}banknote-status-badge {% endif %}purchase-status-badge ebay-delivery-badge ebay-{{ state.status|lower }}"
+      title="{{ 'eBay shipping progress' if state.source == 'eBay' else 'Purchase status' }}{% if state.source == 'manual' %} · manual correction{% endif %}{% if state.status == 'Delivered' %} · awaiting visual inspection{% endif %}">{{ state.label }}</span>{% endif %}
+{%- endmacro %}

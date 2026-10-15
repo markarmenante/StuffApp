@@ -1,61 +1,75 @@
-"""Art and Vehicles lists open on Own; their status pill rotates
-Own -> Ordered -> All -> Own with All as an explicit ?filter=all, and
-the other status-bearing lists keep All as their bare default.
+"""Phase filters retain Owned defaults and expose every pending phase."""
+from html.parser import HTMLParser
+import os
+from pathlib import Path
+import sys
+import tempfile
+import types
+from urllib.parse import parse_qs, urlsplit
 
-Run: .venv/bin/python tests/test_status_default_own.py
-"""
-import os, sys, tempfile
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-os.chdir(REPO)
-sys.path.insert(0, REPO)
-os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuffapp-status-')
-
+REPO=Path(__file__).resolve().parents[1]
+os.chdir(REPO);sys.path.insert(0,str(REPO))
+os.environ['DATA_DIR']=tempfile.mkdtemp(prefix='stuffapp-status-')
+os.environ['EBAY_SYNC_WORKER']='0';os.environ['ORIGINAL_LISTING_WORKER']='0'
+os.environ.pop('ANTHROPIC_API_KEY',None)
+sys.modules['dotenv']=types.SimpleNamespace(load_dotenv=lambda **kwargs: None)
 import app as stuffapp
+client=stuffapp.app.test_client()
 
-client = stuffapp.app.test_client()
+class StatusPill(HTMLParser):
+    def __init__(self,text):
+        super().__init__();self.label='';self.href=None;self.title='';self.active=False;self.feed(text)
+    def handle_starttag(self,tag,attrs):
+        attrs=dict(attrs)
+        if tag=='a' and attrs.get('title','').startswith('Cycle status:'):
+            self.href=attrs['href'];self.title=attrs['title'];self.active=True
+    def handle_endtag(self,tag):
+        if tag=='a':self.active=False
+    def handle_data(self,text):
+        if self.active:self.label+=text
 
 with stuffapp.app.app_context():
-    db = stuffapp.get_db()
-    db.execute("INSERT INTO art (id, title, status) VALUES (9101, 'Owned Piece', 'Own')")
-    db.execute("INSERT INTO art (id, title, status) VALUES (9102, 'Ordered Piece', 'Ordered')")
-    db.execute("INSERT INTO art (id, title, status) VALUES (9103, 'Sold Piece', 'Sold')")
+    db=stuffapp.get_db()
+    for i,status in enumerate(('Own','Ordered','Shipped','Delivered','Sold')):
+        db.execute('INSERT INTO art(id,title,status) VALUES (?,?,?)',(str(i),'Fixture '+status+' Piece',status))
     db.commit()
 
+def page(path):
+    response=client.get(path)
+    assert response.status_code==200,(path,response.status_code)
+    text=response.get_data(as_text=True)
+    return text,StatusPill(text)
 
-def html(path):
-    r = client.get(path)
-    assert r.status_code == 200, (path, r.status_code)
-    return r.get_data(as_text=True)
+def next_filter(pill):
+    return parse_qs(urlsplit(pill.href).query).get('filter',[None])[0]
 
+# Existing default remains Owned. Every next link is verified through the full cycle.
+for phase,label,next_phase in [(None,'Owned','ordered'),('ordered','Ordered','shipped'),
+                              ('shipped','Shipped','delivered'),('delivered','Delivered','all'),
+                              ('all','Status: All','own'),('own','Owned','ordered')]:
+    text,pill=page('/art'+('?filter='+phase if phase else ''))
+    assert pill.label==label,(phase,pill.label)
+    assert next_filter(pill)==next_phase,(phase,pill.href)
+    for status in ('Own','Ordered','Shipped','Delivered','Sold'):
+        visible=('Fixture '+status+' Piece') in text
+        assert visible==(phase=='all' or status.lower()==(phase or 'own')),(phase,status,visible)
 
-# Fresh visit: Own only, pill reads Own and links to Ordered.
-h = html('/art')
-assert 'Owned Piece' in h and 'Ordered Piece' not in h and 'Sold Piece' not in h
-assert '>Own</a>' in h, 'pill should read Own on a fresh visit'
-assert '/art?filter=ordered' in h, 'Own stop should link to Ordered'
+# A search still bypasses Owned default and can recover sold records.
+text,_=page('/art?q_art=Fixture Sold')
+assert 'Fixture Sold Piece' in text
 
-# Ordered stop links to the explicit All stop.
-h = html('/art?filter=ordered')
-assert 'Ordered Piece' in h and 'Owned Piece' not in h
-assert '/art?filter=all' in h, 'Ordered stop should link to ?filter=all'
+# All-first collections rotate through all four acquisition phases.
+for phase,label,next_phase in [(None,'Status: All','ordered'),('ordered','Ordered','shipped'),
+                              ('shipped','Shipped','delivered'),('delivered','Delivered','own'),
+                              ('own','Owned',None)]:
+    _,pill=page('/cameras'+('?filter='+phase if phase else ''))
+    assert (pill.label,next_filter(pill))==(label,next_phase),(phase,pill.label,pill.href)
+_,pill=page('/vehicles?filter=delivered')
+assert next_filter(pill)=='all'
 
-# All stop shows everything and links back to Own.
-h = html('/art?filter=all')
-assert 'Owned Piece' in h and 'Ordered Piece' in h and 'Sold Piece' in h
-assert 'Status: All' in h
-assert '/art?filter=own' in h, 'All stop should link back to Own'
-
-# A search bypasses the default so sold pieces are findable.
-h = html('/art?q_art=Sold')
-assert 'Sold Piece' in h
-
-# Categories not in STATUS_DEFAULT_OWN keep All as the bare default.
-h = html('/cameras')
-assert 'Status: All' in h and '/cameras?filter=own' in h
-
-# Vehicles (already default-own) now has a reachable All stop.
-h = html('/vehicles?filter=ordered')
-assert '/vehicles?filter=all' in h
-
-print('STATUS DEFAULT OWN OK')
+# Watches retain Commissioned/Purchased semantics and the old filter sequence.
+for phase,label,next_phase in [(None,'Status: All','own'),('own','Own','ordered'),('ordered','Commissioned',None)]:
+    _,pill=page('/watches'+('?filter='+phase if phase else ''))
+    assert (pill.label,next_filter(pill))==(label,next_phase),(phase,pill.label,pill.href)
+    assert 'Shipped' not in pill.title and 'Delivered' not in pill.title
+print('STATUS FILTER CYCLES OK: effective phases, Owned defaults, All and watch workflow preserved')

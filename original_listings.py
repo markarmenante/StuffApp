@@ -18,6 +18,7 @@ from ebay_orders import banknote_deliveries, csrf_token, listing_id, review_dige
 import listing_checks
 import source_documents
 import purchase_orders
+import purchase_lifecycle
 import listing_images
 
 TABLES = {'coins': ('coin_original_listings', 'coin_id', 'coin_references'),
@@ -352,7 +353,8 @@ class ListingService:
             if archive_pending:
                 self.wake.set()
         return dict(link=link, links=links, pending=pending, archive_pending=archive_pending,
-                    check=check, review=review, delivery=delivery)
+                    check=check, review=review, delivery=delivery,
+                    lifecycle=purchase_lifecycle.resolve(category, record, delivery))
 
     def work_once(self):
         db = self.connect()

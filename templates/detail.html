@@ -2,6 +2,8 @@
 {% block title %}{{ record[cat_info.label_field] if record else 'New' }} — StuffApp{% endblock %}
 
 {% set r = record %}
+{% set _supports_purchase = category in ['coins', 'banknotes', 'cameras', 'lenses', 'pens', 'art', 'items', 'vehicles', 'recordings', 'audio', 'rifles'] %}
+{% set _purchase_state = purchase_lifecycle(category, r) if r and not is_new else none %}
 {% macro val(field) %}{{ (r[field] if r and field in r.keys() and r[field] is not none else '') }}{% endmacro %}
 {% macro cell(field, label, colspan=1, rows=1) %}
 {% if not is_hidden_field(category, field) %}
@@ -45,7 +47,7 @@
   {% set _v = _vraw if _vraw else (new_default if is_new else '') %}
   <select name="{{ field }}">
     <option value="">{{ empty_label }}</option>
-    {% for o in opts %}<option value="{{ o }}" {{ 'selected' if _v == o }}>{{ o }}</option>{% endfor %}
+    {% for o in opts %}<option value="{{ o }}" {{ 'selected' if _v == o }}>{{ 'Owned' if field == 'status' and _supports_purchase and o == 'Own' else o }}</option>{% endfor %}
   </select>
   <span class="clabel">{{ label }}</span>
 </div>
@@ -249,11 +251,15 @@
         String(d.getDate()).padStart(2, '0');
       saleDate.dispatchEvent(new Event('change', {bubbles: true}));
     }
-    if (sel) sel.addEventListener('change', function () {
-      var sold = this.value === 'Sold';
+    function syncSalesTerms() {
+      var sold = sel && sel.value === 'Sold';
       if (terms) terms.style.display = sold ? '' : 'none';
       if (sold) seedSaleDate();
-    });
+    }
+    if (sel) {
+      sel.addEventListener('change', syncSalesTerms);
+      sel.addEventListener('purchase-status-saved', syncSalesTerms);
+    }
     if (sel && sel.value === 'Sold') {
       document.addEventListener('DOMContentLoaded', seedSaleDate);
     }
@@ -431,33 +437,21 @@
       data-category="{{ category }}"
       data-is-new="{{ 'true' if is_new else 'false' }}">
 
+  {% if _purchase_state %}
+  <aside class="purchase-status-notice" data-purchase-status-notice hidden aria-live="polite">
+    <span data-purchase-status-message></span>
+    <a data-purchase-feedback-link hidden target="_blank" rel="noopener">Open eBay feedback</a>
+    <button type="button" data-purchase-status-dismiss aria-label="Dismiss status message">×</button>
+  </aside>
+  {% endif %}
   <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
   <div class="detail-nav-overlay">
-    {% if category == 'banknotes' and not is_new %}
-      {% set delivery = banknote_delivery(r['id']) %}
-      {% if delivery %}
-        {% set _ownership = (r['status'] or 'Own')|trim|lower %}
-        {% set _duplicate_delivery = delivery.status|lower == _ownership or (delivery.status == 'Delivered' and _ownership in ('own', 'owned')) %}
-        {% if current_user and current_user.role == 'owner' %}
-        <a href="{{ url_for('ebay.dashboard') }}#note-{{ r['id'] }}"
-           class="{{ 'purchase-review-pill' if _duplicate_delivery and delivery.attention else 'ebay-delivery-badge ebay-' ~ delivery.status|lower }}"
-           data-delivery-badge data-ownership-status="{{ r['status'] or 'Own' }}"
-           {% if _duplicate_delivery and not delivery.attention %}hidden{% endif %}
-           title="eBay shipping progress — separate from collection ownership">{% if _duplicate_delivery and delivery.attention %}Please Review{% else %}{{ delivery.status }}{% if delivery.attention %} · Review{% endif %}{% endif %}</a>
-        {% else %}<span class="ebay-delivery-badge ebay-{{ delivery.status|lower }}" {% if _duplicate_delivery %}hidden{% endif %}>{{ delivery.status }}</span>{% endif %}
-      {% endif %}
-    {% endif %}
     {%- set _has_status_field = (fields | selectattr('name', 'equalto', 'status') | list) | length > 0 -%}
-    {% if _has_status_field and not is_new %}
-    {# Quick status pill, every category alike: each click advances the
-       Status select to its next option (Own → Ordered → Sold → … → Own),
-       covering every status the category offers. Yellow while Ordered,
-       gray for other non-Own states, green once Own. The setup JS
-       removes it only when the Status select has nothing to cycle to. #}
+    {% if _purchase_state and _has_status_field %}
+    {% include 'partials/purchase_status_control.html' %}
+    {% elif _has_status_field and not is_new %}
     {%- set _flip_status = val('status') or 'Own' -%}
-    <button type="button"
-            id="statusFlipPill"
-            class="coin-lookup-btn status-flip-pill{% if _flip_status == 'Ordered' %} ordered{% endif %}"
+    <button type="button" id="statusFlipPill" class="coin-lookup-btn status-flip-pill{% if _flip_status == 'Ordered' %} ordered{% endif %}"
             title="Click to flip status">{{ 'Commissioned' if category == 'watches' and _flip_status == 'Ordered' else _flip_status }}</button>
     {% endif %}
     {% if not is_new %}
@@ -1270,7 +1264,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <select name="status" class="status-select {{ 'status-ordered' if _s=='Ordered' }}"
               onchange="this.classList.toggle('status-ordered', this.value==='Ordered')">
         <option value=""></option>
-        {% for s in vlists.coin_status %}<option value="{{ s }}" {{ 'selected' if _s==s }}>{{ s }}</option>{% endfor %}
+        {% for s in vlists.coin_status %}<option value="{{ s }}" {{ 'selected' if _s==s }}>{{ 'Owned' if s == 'Own' else s }}</option>{% endfor %}
       </select>
       <span class="blabel">Status</span>
     </div>
@@ -1894,7 +1888,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <select name="status" class="status-select {{ 'status-ordered' if _s=='Ordered' }}"
               onchange="this.classList.toggle('status-ordered', this.value==='Ordered')">
         <option value=""></option>
-        {% for s in vlists.coin_status %}<option value="{{ s }}" {{ 'selected' if _s==s }}>{{ s }}</option>{% endfor %}
+        {% for s in vlists.coin_status %}<option value="{{ s }}" {{ 'selected' if _s==s }}>{{ 'Owned' if s == 'Own' else s }}</option>{% endfor %}
       </select>
       <span class="blabel">Status</span>
     </div>
@@ -2024,7 +2018,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ notescell('notes','Notes') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.camera_status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.camera_status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ 'Owned' if _supports_purchase and s == 'Own' else s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
@@ -2111,7 +2105,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ notescell('notes','Notes') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ 'Owned' if _supports_purchase and s == 'Own' else s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
@@ -2174,7 +2168,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ 'Owned' if _supports_purchase and s == 'Own' else s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
@@ -2596,7 +2590,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status">{% for s in ['','Own','Ordered'] %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.recording_status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ 'Owned' if _supports_purchase and s == 'Own' else s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
@@ -2925,7 +2919,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ 'Owned' if _supports_purchase and s == 'Own' else s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
@@ -2986,7 +2980,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
   <div class="detail-bottom">
     <div class="bottom-cell"><select name="property"><option value=""></option>{% for o in vlists.property %}<option value="{{ o }}" {{ 'selected' if val('property')==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Location</span></div>
-    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
+    <div class="bottom-cell"><select name="status"><option value=""></option>{% for s in vlists.status %}<option value="{{ s }}" {{ 'selected' if val('status')==s }}>{{ 'Owned' if _supports_purchase and s == 'Own' else s }}</option>{% endfor %}</select><span class="blabel">Status</span></div>
     {% if current_user and current_user.role == 'owner' %}
     <div class="bottom-cell">{% set _ow = val('owner') if val('owner') else ('Mark' if is_new else '') %}<select name="owner"><option value=""></option>{% for o in vlists.owner %}<option value="{{ o }}" {{ 'selected' if _ow==o }}>{{ o }}</option>{% endfor %}</select><span class="blabel">Owner</span></div>
     {% endif %}
@@ -4535,7 +4529,8 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (sellStatus && canonicalStatus) {
       sellStatus.addEventListener('change', () => {
         canonicalStatus.value = sellStatus.value;
-        saveField('status', sellStatus.value);
+        if (document.querySelector('[data-purchase-status-control]')) canonicalStatus.dispatchEvent(new Event('change', {bubbles: true}));
+        else saveField('status', sellStatus.value);
       });
       canonicalStatus.addEventListener('change', () => {
         if (canonicalStatus.value === 'Own' || canonicalStatus.value === 'Sold') {
@@ -5238,6 +5233,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
   // Selects — save on change
   form.querySelectorAll('select[name]').forEach(el => {
+    if (el.name === 'status' && document.querySelector('[data-purchase-status-control]')) return;
     el.addEventListener('change', () => saveField(el.name, el.value));
   });
 
@@ -8440,6 +8436,10 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 })();
 </script>
 
+{% if _purchase_state %}
+<script src="{{ url_for('static', filename='js/purchase-status.js') }}?v={{ asset_v('js/purchase-status.js') }}"></script>
+{% endif %}
+
 {# ── Floating-nav status cycle pill ──────────────────────────────
    One-click status advance for any category with a Status select:
    each click moves to the select's next non-blank option, wrapping
@@ -8450,7 +8450,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 <script>
 (function setupStatusFlipPill() {
   const pill = document.getElementById('statusFlipPill');
-  if (!pill) return;
+  if (!pill || pill.hasAttribute('data-purchase-status-control')) return;
   const statusSelect = document.querySelector('#mainForm select[name="status"]');
   if (!statusSelect) { pill.remove(); return; }
   // Same pill on every category: cycle through every status the

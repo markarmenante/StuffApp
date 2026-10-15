@@ -15,6 +15,8 @@ import market_grouping
 import banknote_catalog
 import ebay_orders
 import purchase_orders
+import purchase_lifecycle as purchase_states
+import banknote_feedback
 import original_listings
 import listing_checks
 import banknote_check_sources
@@ -2132,6 +2134,9 @@ def visible_fields(category):
     forms render or validation runs so a hidden field is invisible end
     to end (no render, no save, no clear)."""
     fields = FIELDS.get(category) or []
+    if category in purchase_states.SUPPORTED_CATEGORIES:
+        fields = [dict(f, options=purchase_states.options(f.get('options', [])))
+                  if f['name'] == 'status' else f for f in fields]
     hidden = HIDE_FIELDS.get(category)
     if not hidden:
         return fields
@@ -8728,10 +8733,8 @@ def current_vlists(category=None):
       * 'items_owner' lists every household member (first word of
         each user's display_name), with the current user first so
         they're the default, plus 'Jointly' as a tail option.
-      * 'items_status' is the simplified status set used by items
-        ('Own', 'Sold', 'Gifted', 'Lost') — no 'Loaned'/'Ordered'/
-        'Consigned' since those concepts don't apply to general
-        household inventory.
+      * 'items_status' includes purchase progress plus the household
+        inventory's existing Sold/Gifted/Lost dispositions.
     """
     if category == 'items':
         me = current_owner_name()
@@ -8766,9 +8769,13 @@ def current_vlists(category=None):
             **VALUE_LISTS,
             'property': property_choices_for_category(category),
             'items_owner': items_owner,
-            'items_status': ['Own', 'Sold', 'Gifted', 'Lost'],
+            'items_status': purchase_states.options(['Own', 'Sold', 'Gifted', 'Lost'])[1:],
         }
-    return {**VALUE_LISTS, 'property': property_choices_for_category(category)}
+    result = {**VALUE_LISTS, 'property': property_choices_for_category(category)}
+    if category in purchase_states.SUPPORTED_CATEGORIES:
+        for key in ('status', 'coin_status', 'camera_status', 'recording_status'):
+            result[key] = purchase_states.options(result[key])[1:]
+    return result
 
 
 def get_typeahead(table, *fields, owner_filter=None):
@@ -12316,14 +12323,10 @@ for _group in banknote_catalog.GROUP_BY_KEY.values():
         'BANKNOTE_GROUP(country, date_1, issuer, series) = ?', [_group['rank']])
 
 
-# Lifecycle-status axis, every status-bearing item category alike
-# (properties keep their own compound status+type filter above). Each
-# canonical status becomes a filter key. The default list (no filter)
-# shows every status, and the toolbar renders one pill that rotates
-# All -> Own -> Ordered -> All (STATUS_PILL_CYCLE; 'all' is the
-# no-filter stop) — see list_view and list.html. The remaining status
-# keys stay reachable by URL.
-STATUS_CYCLE_ORDER = ('own', 'ordered', 'sold', 'loaned', 'gifted',
+# Status filters share the purchase-phase projection used by the interface.
+# Ordinary physical collections rotate All/Ordered/Shipped/Delivered/Owned;
+# watches retain their own workflow and properties their compound filters.
+STATUS_CYCLE_ORDER = ('own', 'ordered', 'shipped', 'delivered', 'sold', 'loaned', 'gifted',
                       'consigned', 'lost')
 STATUS_PILL_CYCLE = ('all', 'own', 'ordered')
 # Categories whose fresh visit (no ?filter=, no search) shows Own rather
@@ -12342,6 +12345,11 @@ STATUS_FILTER_KEYS = set(STATUS_CYCLE_ORDER) | {'no_longer_owned'}
 for _cat in STATUS_CYCLE_CATEGORIES:
     _cat_filters = CATEGORY_FILTERS.setdefault(_cat, {})
     for _status in STATUS_CYCLE_ORDER:
+        if _cat in purchase_states.SUPPORTED_CATEGORIES:
+            _cat_filters[_status] = (purchase_states.status_sql(_cat) + " = ?", [_status])
+            continue
+        if _status in ('shipped', 'delivered'):
+            continue
         # Own also takes blank statuses (boot backfills them to Own).
         _pred = f"({_own_status_predicate()} OR TRIM(COALESCE(status,'')) = '')" \
             if _status == 'own' \
@@ -15037,16 +15045,16 @@ def list_view(category):
     # Split the compound properties filter into its two axes for the template.
     prop_status, prop_type = _split_property_filter(coin_filter) \
         if category == 'properties' else (None, None)
-    # Status pill: a fixed All -> Own -> Ordered rotation. All (the
-    # default, no filter) shows every status; Own and Ordered narrow
-    # to that status. STATUS_DEFAULT_OWN categories open on Own and
-    # rotate Own -> Ordered -> All, with All spelled ?filter=all so
-    # the link doesn't fall back onto the Own default.
+    # All shows every disposition; individual phases use effective status.
+    # Art/vehicles retain their Owned default and explicit All stop.
     status_cycle, status_current = [], 'all'
     status_default_own = category in STATUS_DEFAULT_OWN
     if category in STATUS_CYCLE_CATEGORIES:
         status_cycle = list(STATUS_PILL_CYCLE_OWN_FIRST
                             if status_default_own else STATUS_PILL_CYCLE)
+        if category in purchase_states.SUPPORTED_CATEGORIES:
+            status_cycle = (['own', 'ordered', 'shipped', 'delivered', 'all'] if status_default_own
+                            else ['all', 'ordered', 'shipped', 'delivered', 'own'])
         if coin_filter in status_cycle:
             status_current = coin_filter
     has_in_service = False
@@ -15185,7 +15193,7 @@ def _market_holdings_summary(db, category, limit_chars=6000):
         rows = db.execute(
             "SELECT country, denomination, series, date_1_text, date_1, "
             "pick_number, grade_numeric, grade_modifier FROM banknotes "
-            "WHERE status IS NULL OR status IN ('Own', 'Ordered') "
+            "WHERE status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', '') "
             "ORDER BY NATION_NAME(country) COLLATE NODIACRITIC, date_1").fetchall()
         groups = {}
         for r in rows:
@@ -15206,7 +15214,7 @@ def _market_holdings_summary(db, category, limit_chars=6000):
     else:
         rows = db.execute(
             "SELECT region, authority, denomination, mint, date_1_text, date_1, "
-            "grade FROM coins WHERE status IS NULL OR status IN ('Own', 'Ordered') "
+            "grade FROM coins WHERE status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', '') "
             "ORDER BY region, date_1").fetchall()
         groups = {}
         for r in rows:
@@ -15232,7 +15240,7 @@ def _market_denomination_coverage(db, category, limit_chars=3000):
     if category == 'banknotes':
         rows = db.execute(
             "SELECT country, series, issuer, date_1, denomination FROM banknotes "
-            "WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall()
+            "WHERE status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', '')").fetchall()
         for r in rows:
             series = (r['series'] or '').strip() or (r['issuer'] or '').strip() \
                 or (f"{(r['date_1'] // 10) * 10}s" if r['date_1'] else '')
@@ -15243,7 +15251,7 @@ def _market_denomination_coverage(db, category, limit_chars=3000):
     else:
         rows = db.execute(
             "SELECT region, authority, denomination FROM coins "
-            "WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall()
+            "WHERE status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', '')").fetchall()
         for r in rows:
             key = (r['region'] or r['authority'] or 'Unknown').strip()
             denom = (r['denomination'] or '').strip()
@@ -15359,7 +15367,7 @@ def _banknote_wantlist_open(db):
     try:
         rows = db.execute(
             "SELECT country, date_1 FROM banknotes "
-            "WHERE (status IS NULL OR status IN ('Own', 'Ordered')) "
+            "WHERE (status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', '')) "
             "AND country IS NOT NULL AND TRIM(country) != ''").fetchall()
     except sqlite3.Error:
         rows = []
@@ -15565,7 +15573,7 @@ def _banknote_us_friedberg_held(db):
     try:
         rows = db.execute(
             "SELECT country, pick_number, other_catalog, description FROM banknotes "
-            "WHERE (status IS NULL OR status IN ('Own', 'Ordered'))").fetchall()
+            "WHERE (status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', ''))").fetchall()
     except sqlite3.Error:
         rows = []
     held = set()
@@ -15642,7 +15650,7 @@ def _banknote_obsolete_states_held(db):
     try:
         rows = db.execute(
             "SELECT country, issuer, municipality, pick_number, other_catalog, date_1 FROM banknotes "
-            "WHERE (status IS NULL OR status IN ('Own', 'Ordered'))").fetchall()
+            "WHERE (status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', ''))").fetchall()
     except sqlite3.Error:
         rows = []
     names_to_code = {v.lower(): k for k, v in _OBSOLETE_STATE_NAMES.items()}
@@ -17075,7 +17083,10 @@ def _market_normalize_item(db, category, raw):
 
 def _market_owned_banknote_rows(db):
     rows = {r['id']: dict(r) for r in db.execute("SELECT * FROM banknotes WHERE "
-        "LOWER(TRIM(COALESCE(status,''))) IN ('','own','owned','ordered')")}
+        "LOWER(TRIM(COALESCE(status,''))) IN ('','own','owned','ordered','shipped','delivered')")}
+    deliveries = ebay_orders.banknote_deliveries(db)
+    for row in rows.values():
+        row['_purchase_status'] = purchase_states.resolve('banknotes', row, deliveries.get(row['id']))['status']
     links = ebay_orders.listing_candidates(db)
     for link in db.execute('SELECT l.banknote_id,i.item_id FROM banknote_ebay_links l '
                            'JOIN ebay_order_items i ON i.line_key=l.line_key'):
@@ -17163,7 +17174,7 @@ def _market_collection_matches(db, item, rows=None):
                           '(' + str(row.get('pick_number') or row.get('other_catalog')) + ')' if row.get('pick_number') or row.get('other_catalog') else '',
                           row.get('grading_authority'), row.get('grade')) if x)
         found.append(dict(id=row['id'], label=label, reason=reason, kind=kind,
-                          status='Ordered' if str(row.get('status') or '').lower() == 'ordered' else 'Own',
+                          status=row.get('_purchase_status') or purchase_states.canonical(row.get('status')),
                           url='/banknotes/' + row['id']))
     found.sort(key=lambda x: (x['kind'] != 'catalogue', x['label']))
     return found
@@ -18673,9 +18684,10 @@ _NOT_INDEPENDENT = ()
 
 
 def _analysis_active_rows(db, table):
-    return db.execute(
-        f"SELECT * FROM {table} WHERE status IS NULL OR status IN ('Own', 'Ordered')"
-    ).fetchall()
+    predicate = ("LOWER(TRIM(COALESCE(status,''))) IN ('','own','owned','ordered','shipped','delivered')"
+                 if table in purchase_states.SUPPORTED_CATEGORIES
+                 else "status IS NULL OR status IN ('Own', 'Ordered')")
+    return db.execute(f"SELECT * FROM {table} WHERE {predicate}").fetchall()
 
 
 def _watch_is_independent(brand):
@@ -20116,7 +20128,7 @@ def _analysis_computed_gaps(db, category, limit=40):
     if category == 'coins':
         rows = db.execute(
             "SELECT region, authority, mint, denomination, description, date_1 FROM coins "
-            "WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall()
+            "WHERE status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', '')").fetchall()
         blob = '\n'.join(
             ' '.join(str(r[k] or '') for k in ('region', 'authority', 'mint', 'denomination', 'description'))
             for r in rows if _coin_is_ancient_greek(r)).lower()
@@ -20126,7 +20138,7 @@ def _analysis_computed_gaps(db, category, limit=40):
     if category == 'banknotes':
         rows = db.execute(
             "SELECT country, issue_type FROM banknotes "
-            "WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall()
+            "WHERE status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', '')").fetchall()
         held = {(r['country'] or '').strip().lower() for r in rows}
         held_keys = set()
         for r in rows:
@@ -20155,7 +20167,7 @@ def _analysis_computed_gaps(db, category, limit=40):
         # Military and occupation money held, by (authority, territory).
         held_mil = set()
         for r in db.execute(
-                "SELECT * FROM banknotes WHERE status IS NULL OR status IN ('Own', 'Ordered')").fetchall():
+                "SELECT * FROM banknotes WHERE status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', '')").fetchall():
             auth = _banknote_military(r)
             if auth:
                 held_mil.add((auth.lower(), _bn_country_label(r['country']).lower()))
@@ -20548,6 +20560,32 @@ def detail_view(category, record_id):
     next_id = all_ids[idx + 1] if idx < len(all_ids) - 1 else None
 
     if request.method == 'POST':
+        prior_lifecycle = None
+        if category in purchase_states.SUPPORTED_CATEGORIES:
+            db.execute('BEGIN IMMEDIATE')
+            record = db.execute(f'SELECT * FROM {table} WHERE id=?', (record_id,)).fetchone()
+            if record is None or not _user_can_see_row(category, record):
+                db.rollback()
+                abort(404)
+            prior_lifecycle = purchase_states.for_record(db, category, record)
+            target = purchase_states.canonical(request.form.get('status', record['status']))
+            if target == 'Own' and prior_lifecycle['status'] in purchase_states.PENDING:
+                db.rollback()
+                return jsonify(error='Confirm visual inspection with the purchase status control before marking Owned.',
+                               code='inspection_required', lifecycle=prior_lifecycle), 409
+            if target not in (purchase_states.canonical(record['status']), prior_lifecycle['status']):
+                require_owner()
+                # Existing-record status changes normally use the controller.
+                # An old full-form echo must not undo a newer inspection.
+                expected = request.form.get('expected_status')
+                if not isinstance(expected, str) or not expected.strip() or purchase_states.canonical(expected) != prior_lifecycle['status']:
+                    db.rollback()
+                    return jsonify(error='The purchase status changed. Reload before saving this form.',
+                                   code='status_changed', lifecycle=prior_lifecycle), 409
+                allowed_statuses = _row_filter_for_category(g.get('current_user'), category).get('status')
+                if allowed_statuses and target not in allowed_statuses:
+                    db.rollback()
+                    return jsonify(error='Cannot set status outside your allowed values.'), 403
         now = datetime.utcnow().isoformat()
         updates = {'updated_at': now}
         if category in ('coins', 'banknotes') and request.form.get('marketplace', '').strip().lower() not in ('', 'direct', 'ebay', 'vcoins', 'cng'):
@@ -20580,6 +20618,15 @@ def detail_view(category, record_id):
                     val = val.replace('$', '').replace(',', '').strip()
                 val = normalize_field_value(table, fname, val)
                 updates[fname] = val if val or fname == 'order_number' else None
+
+        if prior_lifecycle:
+            target = purchase_states.canonical(request.form.get('status', record['status']))
+            # A full-form echo of the raw/effective value is not an override.
+            if 'status' not in request.form or target in (purchase_states.canonical(record['status']), prior_lifecycle['status']):
+                updates.pop('status', None)
+            else:
+                updates['status'] = target
+                purchase_states.set_manual_delivery(db, category, record, target, prior_lifecycle['status'])
 
         if category == 'watches':
             _apply_watch_order_form_fields(updates, request.form)
@@ -21062,6 +21109,74 @@ def persons_medication_ingredients(record_id):
     return jsonify({'ok': True, 'updates': updates, 'errors': errors})
 
 
+@app.template_global('purchase_lifecycle')
+def purchase_lifecycle(category, row):
+    delivery = None
+    if category == 'banknotes':
+        if 'ebay_deliveries' not in g:
+            g.ebay_deliveries = ebay_orders.banknote_deliveries(get_db())
+        delivery = g.ebay_deliveries.get(row['id'])
+    return purchase_states.resolve(category, row, delivery)
+
+
+def _save_purchase_status(category, record_id, data, dedicated=True):
+    require_owner()
+    if category not in purchase_states.SUPPORTED_CATEGORIES:
+        return jsonify(error='This category has its own status workflow.'), 400
+    if not isinstance(data, dict):
+        return jsonify(error='Expected a status update.'), 400
+    raw_target = data.get('status') if dedicated else data.get('value')
+    if not isinstance(raw_target, str) or not raw_target.strip():
+        return jsonify(error='Choose a purchase status.'), 400
+    target = purchase_states.canonical(raw_target)
+    allowed = purchase_states.VALUES if dedicated else (*purchase_states.VALUES, 'Sold', 'Loaned', 'Gifted', 'Consigned', 'Lost')
+    if target not in allowed:
+        return jsonify(error='Unknown purchase status.'), 400
+    if dedicated and not isinstance(data.get('expected_status'), str):
+        return jsonify(error='Reload the record before changing its status.'), 400
+    db = get_db()
+    table = CATEGORIES[category]['table']
+    db.execute('BEGIN IMMEDIATE')
+    row = db.execute(f'SELECT * FROM {table} WHERE id=?', (record_id,)).fetchone()
+    if row is None:
+        db.rollback()
+        return jsonify(error='Record not found.'), 404
+    if not _user_can_see_row(category, row):
+        db.rollback()
+        return jsonify(error='Forbidden'), 403
+    state = purchase_states.for_record(db, category, row)
+    allowed_statuses = _row_filter_for_category(g.get('current_user'), category).get('status')
+    if allowed_statuses and target not in allowed_statuses:
+        db.rollback()
+        return jsonify(error='Cannot set status outside your allowed values.'), 403
+    if 'expected_status' in data and purchase_states.canonical(data['expected_status']) != state['status']:
+        db.rollback()
+        return jsonify(error='The purchase status changed. Review the current status and try again.', lifecycle=state), 409
+    if target == state['status']:
+        db.rollback()
+        return jsonify(ok=True, lifecycle=state)
+    inspected_transition = target == 'Own' and state['status'] in purchase_states.PENDING
+    if inspected_transition and data.get('inspected') is not True:
+        db.rollback()
+        return jsonify(error='Visually inspect this purchase before marking it Owned.',
+                       code='inspection_required', lifecycle=state), 409
+    purchase_states.set_manual_delivery(db, category, row, target, state['status'])
+    db.execute(f'UPDATE {table} SET status=?,updated_at=? WHERE id=?',
+               (target, datetime.utcnow().isoformat(), record_id))
+    db.commit()
+    g.pop('ebay_deliveries', None)
+    updated = db.execute(f'SELECT * FROM {table} WHERE id=?', (record_id,)).fetchone()
+    response = dict(ok=True, lifecycle=purchase_states.for_record(db, category, updated))
+    if inspected_transition:
+        response['feedback'] = banknote_feedback.handoff(db, category, updated)
+    return jsonify(response)
+
+
+@app.post('/<category>/<record_id>/purchase-status')
+def purchase_status(category, record_id):
+    return _save_purchase_status(category, record_id, request.get_json(silent=True))
+
+
 @app.route('/<category>/<record_id>/save-field', methods=['POST'])
 def save_field(category, record_id):
     """Auto-save a single field via JSON fetch."""
@@ -21137,6 +21252,9 @@ def save_field(category, record_id):
             return jsonify({
                 'error': f'Cannot set {field_name} outside your allowed values'
             }), 403
+
+    if field_name == 'status' and category in purchase_states.SUPPORTED_CATEGORIES:
+        return _save_purchase_status(category, record_id, data, dedicated=False)
 
     if category == 'watches' and field_name in ('order_purchase_price',
                                                 'order_deposit',
@@ -29664,8 +29782,8 @@ def _banknote_report_sections(db, query=None):
     one per country / colony as stored. `query` is the Banknotes list's
     own state — {'q', 'dot', 'filter', 'at'} — so the report covers
     exactly the notes the list shows (a search for "United States"
-    reports those notes); with no status filter, Own and Ordered notes
-    only, as before."""
+    reports those notes); with no status filter, owned notes and all
+    pending purchase phases remain included."""
     query = query or {}
     sql, params = build_search_query('banknotes', query.get('q') or '', dot=bool(query.get('dot')),
                                      coin_filter=query.get('filter') or None,
@@ -29674,7 +29792,7 @@ def _banknote_report_sections(db, query=None):
     # no request context — so no per-user row filter here.
     rows = db.execute(sql, params).fetchall()
     if not query.get('filter'):
-        rows = [r for r in rows if (r['status'] or 'Own') in ('Own', 'Ordered')]
+        rows = [r for r in rows if purchase_states.held(r['status'])]
     sections = []
     for r in rows:
         country = (r['country'] or '').strip() or 'Unattributed'
@@ -40976,6 +41094,7 @@ _ebay_order_sync = ebay_orders.register(
 import ebay_purchase_lookup
 ebay_purchase_lookup.register(app, get_db, require_owner)
 market_ebay_feed.register(app, get_db)
+banknote_feedback.register(app, get_db, require_owner, _user_can_see_row)
 def _compare_original_listing(category, record, url, page_text, purchase_sources=()):
     import anthropic
     api_key = _require_anthropic_key()

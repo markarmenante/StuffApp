@@ -17,7 +17,7 @@
 // Bump on every shipped change to invalidate old caches: a stale CSS
 // entry from before the random→asset_v cache-buster fix would otherwise
 // linger and keep rendering the un-styled page offline.
-const VERSION = 'v7';
+const VERSION = 'v8';
 const SHELL_CACHE = `stuffapp-shell-${VERSION}`;
 const DATA_CACHE  = `stuffapp-data-${VERSION}`;
 
@@ -66,6 +66,8 @@ const NO_CACHE_PATHS = [
 ];
 
 function shouldNotCache(url) {
+  if (/^\/banknotes\/[^/]+\/feedback(?:\/|$)/.test(url.pathname)) return true;
+  if (/^\/[^/]+\/[^/]+\/purchase-status(?:\/|$)/.test(url.pathname)) return true;
   if (/^\/(coins|banknotes)\/[^/]+\/original-listing(?:\/|$)/.test(url.pathname)) return true;
   return NO_CACHE_PATHS.some(p => url.pathname === p ||
                                    url.pathname.startsWith(p + '/'));
