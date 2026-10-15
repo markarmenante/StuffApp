@@ -31058,8 +31058,7 @@ def watches_needing_relocation():
                 return
             label_safe = _safe_path(label)[0]
             ext = os.path.splitext(fname)[1] or ''
-            leaf = (f'{ident_safe} — {label_safe}{ext}'
-                    if label_safe else f'{ident_safe}{ext}')
+            leaf = _export_leaf_name(ident_safe, label_safe, ext)
             files.append({
                 'label':    label_safe or label,
                 'old_path': f'StuffFiles/Watches/No longer Owned/{brand_safe}/{leaf}',
@@ -32579,6 +32578,29 @@ def _safe_path(*parts):
     return out
 
 
+def _export_leaf_name(ident, label, ext, number=1):
+    """Keep normal export names exact; cap only leaves over 255 UTF-8 bytes.
+
+    Long leaves retain their leading identifier, extension and a stable digest
+    of the full name. Keep the snapshot marker recognizable by Sweep. The
+    complete document title stays in the row and its _data.json snapshot.
+    """
+    import hashlib
+    suffix = f' ({number})' if number > 1 else ''
+    stem = f'{ident} — {label}' if label else ident
+    name = f'{stem}{suffix}{ext}'
+    if len(name.encode('utf-8')) <= 255:
+        return name
+    digest = hashlib.sha256(unicodedata.normalize('NFC', f'{stem}{ext}').encode('utf-8')).hexdigest()[:12]
+    tail = f'~{digest}' + (' — _data' if label == '_data' else '') + suffix + ext
+    prefix = ident if label == '_data' else stem
+    # Decode only complete code points; no replacement characters or split
+    # multibyte sequences. Reserve the digest, collision suffix and extension.
+    budget = 255 - len(tail.encode('utf-8'))
+    prefix = prefix.encode('utf-8')[:max(0, budget)].decode('utf-8', errors='ignore').rstrip(' .')
+    return prefix + tail
+
+
 def _record_tombstone(db, category, row, label, filename):
     """Record a server-side delete so the next incremental syncDown can
     remove the matching local file from the user's StuffFiles folder.
@@ -33056,14 +33078,14 @@ def admin_export_files():
     def _next_unique(base_dir, ident, label, ext):
         """Avoid name collisions when two items in the same folder render
         to the same '<ident> — <label>.<ext>'. Suffix with -2, -3, ..."""
-        cand = f'{ident} — {label}{ext}' if label else f'{ident}{ext}'
+        cand = _export_leaf_name(ident, label, ext)
         full = f'{base_dir}/{cand}'
         if full not in seen_paths:
             seen_paths.add(full)
             return cand
         n = 2
         while True:
-            cand = f'{ident} — {label} ({n}){ext}' if label else f'{ident} ({n}){ext}'
+            cand = _export_leaf_name(ident, label, ext, n)
             full = f'{base_dir}/{cand}'
             if full not in seen_paths:
                 seen_paths.add(full)
@@ -33288,10 +33310,12 @@ def admin_export_files():
             ext = ''
             if '.' in filename:
                 ext = '.' + filename.rsplit('.', 1)[-1]
-            base = f'{ident} — {label}{ext}' if label else f'{ident}{ext}'
-            path = f'StuffFiles/{cat_label}/{group}/{base}'
+            label = _safe_path(label)[0] if label else ''
+            paths = [f'StuffFiles/{cat_label}/{group}/'
+                     + _export_leaf_name(ident, label, ext, n) for n in range(1, 9)]
             tomb_entries.append({
-                'path':       path,
+                'path':       paths[0],
+                'variants':   paths[1:],
                 'category':   t['category'],
                 'filename':   filename,
                 'deleted_at': t['deleted_at'],
@@ -33495,6 +33519,45 @@ def _build_record_index(db, category):
         # same record collapse onto the same first-empty slot.
         out.append((_norm(g_raw), _norm(i_raw), dict(row)))
     return out
+
+
+def _short_export_labels(db, category, row, basename, snapshot=None):
+    """Resolve a shortened export leaf to full labels, without guessing.
+
+    Compare the complete deterministic filename against this visible row's
+    fixed slots/documents (and an uploaded snapshot during a restore). A
+    shortened label must never become a second document or a false deletion.
+    """
+    plan = EXPORT_LAYOUT[category]
+    sources = [row] + ([snapshot] if isinstance(snapshot, dict) else [])
+    idents = {_safe_path(plan['ident'](source))[0] for source in sources}
+    pairs = {('_data', '.json')}
+    for source in sources:
+        for field, default, title_field in plan['files']:
+            filename = str(_g(source, field) or '').strip()
+            if filename:
+                label = str(_g(source, title_field) or '').strip() if title_field else ''
+                pairs.add((label or default, os.path.splitext(filename)[1]))
+    doc_sets = [_docs_load(db, CATEGORIES[category]['table'], _g(row, 'id'), col) or []
+                for col in DOC_SETS_BY_CATEGORY.get(category, {}).values()]
+    if isinstance(snapshot, dict):
+        doc_sets += [docs for _, docs in _snapshot_document_sets(snapshot, category)]
+    for docs in doc_sets:
+        for n, doc in enumerate(docs, 1):
+            filename = str(doc.get('filename') or '').strip()
+            if filename:
+                pairs.add((str(doc.get('title') or '').strip() or f'Doc {n}',
+                           os.path.splitext(filename)[1]))
+    labels = set()
+    normalized = unicodedata.normalize('NFC', basename)
+    for label, ext in pairs:
+        safe_label = _safe_path(label)[0]
+        for ident in idents:
+            for number in range(1, 9):
+                candidate = _export_leaf_name(ident, safe_label, ext, number)
+                if unicodedata.normalize('NFC', candidate) == normalized:
+                    labels.add(label)
+    return labels
 
 
 def _parse_sweep_path(rel_path):
@@ -36974,6 +37037,26 @@ def sweep_files():
                 # tripping UnboundLocalError.
                 target_label = _norm(parsed['label'])
 
+            if re.search(r'~[0-9a-f]{12}', parsed['original_basename']):
+                candidates = matches if cat_id_match else [entry for entry in idx if entry[0] == target_group]
+                aliases = []
+                for entry in candidates:
+                    candidate_row = entry[2]
+                    snapshot = record_state.get(_g(candidate_row, 'id'), {}).get('snapshot')
+                    for full_label in _short_export_labels(db, cat, candidate_row,
+                                                          parsed['original_basename'], snapshot):
+                        aliases.append((entry, full_label))
+                if len(aliases) == 1:
+                    entry, full_label = aliases[0]
+                    parsed['ident'] = plan['ident'](entry[2])
+                    parsed['label'] = full_label
+                    target_ident, target_label = entry[1], _norm(full_label)
+                    matches = [entry]
+                elif not _is_data_snapshot_path(rel):
+                    report['skipped'].append({'file': rel, 'reason':
+                        'shortened export name is missing or ambiguous in the saved metadata; no file changed'})
+                    continue
+
             # ─── Per-row data snapshot branch ─────────────────────────
             # Files named "<ident> — _data.json" carry the row's column
             # data (written by admin_export_files). Process them here
@@ -37136,6 +37219,7 @@ def sweep_files():
                 _restore_snapshot_child_tables(
                     db, cat, new_row['id'], data_obj, now,
                 )
+                _track_snapshot(cat, new_row, data_obj)
                 g_norm = _norm(plan['group'](new_row))
                 i_norm = _norm(plan['ident'](new_row))
                 indexes[cat].append((g_norm, i_norm, new_row))

@@ -467,7 +467,12 @@
           if (!path) continue;
           let canonicalRemoved = false;
           let variantRemoved = 0;
-          for (const variant of expandVariants(path)) {
+          // New exports supply exact bounded collision names. Older exports
+          // still use the historical client-side suffix expansion.
+          const variants = Array.isArray(t.variants)
+            ? [path, ...t.variants.filter(p => typeof p === 'string').map(p => p.replace(/^StuffFiles\//, ''))]
+            : expandVariants(path);
+          for (const variant of new Set(variants)) {
             try {
               await tryRemove(variant);
               if (variant === path) {

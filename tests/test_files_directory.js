@@ -189,5 +189,21 @@ async function disk() {
   assert.equal(t.data.get(LAST),'2026-09-01');
   console.log('Many failures: diagnostic count is accurate and retained details are bounded');
 
+  const removed=[];const tombRoot=dir('StuffFiles');
+  const tombDir=await (await tombRoot.getDirectoryHandle('Coins')).getDirectoryHandle('Sicily');
+  tombDir.removeEntry=async name=>removed.push(name);
+  t=setup(tombRoot,tombRoot);t.context.window.confirm=()=>true;
+  t.context.fflate={UnzipInflate:class{},Unzip:class{register(){}push(data,last){if(!last)return;
+    const manifest={tombstones:[{path:'StuffFiles/Coins/Sicily/C512 short~123456789abc.pdf',
+      variants:['StuffFiles/Coins/Sicily/C512 shorter~123456789abc (2).pdf']}]};
+    const file={name:'StuffFiles/_tombstones.json',start(){this.ondata(null,new Uint8Array(Buffer.from(JSON.stringify(manifest))),true);}};
+    this.onfile(file);
+  }}};
+  result=await t.api.syncDown();
+  assert.deepEqual(removed,['C512 short~123456789abc.pdf','C512 shorter~123456789abc (2).pdf']);
+  assert.equal(result.tombstoneApplied,1);assert.equal(result.error,null);
+  console.log('Bounded tombstone variants: use exact server paths, never guessed longer names');
+
+
 
 })().catch(err=>{console.error(err);process.exit(1);});
