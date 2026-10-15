@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 REPO = Path(__file__).resolve().parents[1]
@@ -28,7 +29,7 @@ class LeafTests(unittest.TestCase):
         self.assertEqual(len(raw), 256)
         self.assertEqual(len(raw.encode('utf-8')), 258)
         leaf = stuff._export_leaf_name(IDENT, TITLE, '.pdf')
-        self.assertLessEqual(len(leaf.encode('utf-8')), 255)
+        self.assertLessEqual(len(leaf.encode('utf-8')), 240)
         self.assertTrue(leaf.startswith(IDENT + ' — '))
         self.assertTrue(leaf.endswith('.pdf'))
         self.assertRegex(leaf, r'~[0-9a-f]{12}\.pdf$')
@@ -41,28 +42,46 @@ class LeafTests(unittest.TestCase):
                                   ('Item', '', '.jpg')]:
             expected = f'{ident} — {label}{ext}' if label else ident + ext
             self.assertEqual(stuff._export_leaf_name(ident, label, ext), expected)
-        exact = 'a' * 251 + '.pdf'
-        self.assertEqual(stuff._export_leaf_name('a' * 251, '', '.pdf'), exact)
-        self.assertEqual(len(exact.encode()), 255)
-        self.assertLessEqual(len(stuff._export_leaf_name('a' * 251, '', '.pdf', 2).encode()), 255)
+        exact = 'a' * 236 + '.pdf'
+        self.assertEqual(stuff._export_leaf_name('a' * 236, '', '.pdf'), exact)
+        self.assertEqual(len(exact.encode()), 240)
+        self.assertLessEqual(len(stuff._export_leaf_name('a' * 236, '', '.pdf', 2).encode()), 240)
+
+    def test_chromium_swap_names_fit_filesystem_limit(self):
+        # Native filenames can fit while createWritable fails: Chromium appends
+        # .crswap, or .1.crswap ... .99.crswap for existing swap collisions.
+        for size in (241, 245, 248, 249, 255, 258):
+            ident = 'C512 ' + 'a' * (size - len('C512 .pdf'))
+            leaf = stuff._export_leaf_name(ident, '', '.pdf')
+            self.assertLessEqual(len(leaf.encode()), 240)
+            self.assertTrue(leaf.startswith('C512 '))
+            self.assertTrue(leaf.endswith('.pdf'))
+            for suffix in ('.crswap', '.1.crswap', '.99.crswap'):
+                self.assertLessEqual(len((leaf + suffix).encode()), 255)
+        leaf = stuff._export_leaf_name(IDENT, TITLE, '.pdf', 8)
+        with tempfile.TemporaryDirectory(prefix='stuff-files-swap-') as directory:
+            for suffix in ('', '.crswap', '.99.crswap'):
+                path = Path(directory) / (leaf + suffix)
+                path.write_bytes(b'synthetic swap contents')
+                self.assertEqual(path.read_bytes(), b'synthetic swap contents')
 
     def test_unicode_suffixes_are_unique_stable_and_valid_utf8(self):
         labels = ['説明é' * 100 + tail for tail in ['alpha', 'beta']]
         names = [stuff._export_leaf_name('B123 Example', label, '.pdf') for label in labels]
         self.assertNotEqual(*names)
         for label, name in zip(labels, names):
-            self.assertLessEqual(len(name.encode()), 255)
+            self.assertLessEqual(len(name.encode()), 240)
             self.assertNotIn('\ufffd', name)
             self.assertEqual(name, stuff._export_leaf_name('B123 Example', label, '.pdf'))
             self.assertTrue(name.startswith('B123 '))
         variants = [stuff._export_leaf_name(IDENT, TITLE, '.pdf', n) for n in range(1, 9)]
         self.assertEqual(len(set(variants)), 8)
-        self.assertTrue(all(len(name.encode()) <= 255 for name in variants))
+        self.assertTrue(all(len(name.encode()) <= 240 for name in variants))
         self.assertTrue(variants[1].endswith(' (2).pdf'))
 
     def test_long_identifier_snapshot_marker_survives(self):
         leaf = stuff._export_leaf_name('B456 ' + 'Very long note ' * 80, '_data', '.json')
-        self.assertLessEqual(len(leaf.encode()), 255)
+        self.assertLessEqual(len(leaf.encode()), 240)
         self.assertTrue(leaf.startswith('B456 '))
         self.assertTrue(leaf.endswith(' — _data.json'))
         self.assertTrue(stuff._is_data_snapshot_path(leaf))
@@ -108,7 +127,7 @@ class RoundTripTests(unittest.TestCase):
         expected = 'StuffFiles/Coins/Sicily/' + stuff._export_leaf_name(IDENT, TITLE, '.pdf')
         self.assertIn(expected, archive)
         self.assertIn('StuffFiles/Coins/Sicily/' + IDENT + ' — Receipt.pdf', archive)
-        self.assertTrue(all(len(Path(name).name.encode()) <= 255 for name in archive))
+        self.assertTrue(all(len(Path(name).name.encode()) <= 240 for name in archive))
         snapshot_path = 'StuffFiles/Coins/Sicily/' + IDENT + ' — _data.json'
         snapshot = json.loads(archive[snapshot_path])
         self.assertEqual([d['title'] for d in snapshot['record_documents']['main']], self.titles)
@@ -128,6 +147,26 @@ class RoundTripTests(unittest.TestCase):
             self.assertEqual([(d['title'], d['filename']) for d in current],
                              [(d['title'], d['filename']) for d in self.docs])
 
+    def test_legacy_255_byte_export_sweep_does_not_propose_deletions(self):
+        current_leaf = stuff._export_leaf_name
+        with patch.object(stuff, '_export_leaf_name',
+                          side_effect=lambda *args, **kwargs: current_leaf(*args, max_bytes=255)):
+            archive = self.export()
+        legacy = 'StuffFiles/Coins/Sicily/' + current_leaf(IDENT, TITLE, '.pdf', max_bytes=255)
+        self.assertIn(legacy, archive)
+        self.assertGreater(len(Path(legacy).name.encode()), 240)
+        response = self.client.post('/sweep', data={
+            'files': [(io.BytesIO(value), name) for name, value in archive.items()
+                      if name.startswith('StuffFiles/Coins/Sicily/')],
+            'sync_deletes': 'preview',
+        }, headers={'Accept': 'application/json'})
+        self.assertEqual(response.status_code, 200)
+        report = response.get_json()
+        self.assertEqual(report['deleted'], [], report)
+        self.assertEqual(sum('already in' in entry['reason'] for entry in report['skipped']), len(self.docs), report)
+        self.assertEqual([(d['title'], d['filename']) for d in stuff._docs_load(self.db, 'coins', 'fixture-coin')],
+                         [(d['title'], d['filename']) for d in self.docs])
+
     def test_deleted_long_document_tombstone_matches_export_and_collision_names(self):
         archive = self.export()
         leaf = stuff._export_leaf_name(IDENT, TITLE, '.pdf')
@@ -138,11 +177,32 @@ class RoundTripTests(unittest.TestCase):
         manifest = json.loads(self.export()['StuffFiles/_tombstones.json'])
         entry = manifest['tombstones'][0]
         self.assertEqual(entry['path'], exported)
-        self.assertEqual(entry['variants'], ['StuffFiles/Coins/Sicily/' +
-            stuff._export_leaf_name(IDENT, TITLE, '.pdf', n) for n in range(2, 9)])
-        self.assertTrue(all(len(Path(name).name.encode()) <= 255 for name in [entry['path'], *entry['variants']]))
+        expected = list(dict.fromkeys('StuffFiles/Coins/Sicily/' +
+            stuff._export_leaf_name(IDENT, TITLE, '.pdf', n, max_bytes=limit)
+            for limit in (240, 255) for n in range(1, 9)))
+        self.assertEqual([entry['path'], *entry['variants']], expected)
+        self.assertTrue(all(len(Path(name).name.encode()) <= 240 for name in expected[:8]))
+        self.assertTrue(all(len(Path(name).name.encode()) <= 255 for name in expected))
         row = self.db.execute('SELECT label FROM tombstones').fetchone()
         self.assertEqual(row['label'], TITLE)
+
+    def test_tombstone_keeps_old_245_byte_unshortened_name(self):
+        title = 'Legacy ' + 'x' * (245 - len((IDENT + ' — Legacy .pdf').encode()))
+        old_leaf = stuff._export_leaf_name(IDENT, title, '.pdf', max_bytes=255)
+        self.assertEqual(len(old_leaf.encode()), 245)
+        self.assertNotIn('~', old_leaf)
+        new_leaf = stuff._export_leaf_name(IDENT, title, '.pdf')
+        self.assertNotEqual(new_leaf, old_leaf)
+        stuff._docs_update(self.db, 'coins', 'fixture-coin',
+                           [{'title': title, 'filename': self.docs[0]['filename']}])
+        self.db.commit()
+        response = self.client.post('/coins/fixture-coin/documents/main/0/delete')
+        self.assertEqual(response.status_code, 200)
+        entry = json.loads(self.export()['StuffFiles/_tombstones.json'])['tombstones'][0]
+        paths = [entry['path'], *entry['variants']]
+        self.assertEqual(entry['path'], 'StuffFiles/Coins/Sicily/' + new_leaf)
+        self.assertIn('StuffFiles/Coins/Sicily/' + old_leaf, entry['variants'])
+        self.assertEqual(len(paths), len(set(paths)))
 
     def test_long_identifier_sweep_resolves_exact_snapshot_and_full_title(self):
         self.db.execute("UPDATE coins SET authority=? WHERE id='fixture-coin'", ('Long authority ' * 40,))
@@ -193,7 +253,7 @@ class RoundTripTests(unittest.TestCase):
         for n in (1, 2):
             name = 'StuffFiles/Coins/Sicily/' + stuff._export_leaf_name(IDENT, TITLE, '.pdf', n)
             self.assertIn(name, archive)
-            self.assertLessEqual(len(Path(name).name.encode()), 255)
+            self.assertLessEqual(len(Path(name).name.encode()), 240)
         self.assertEqual(set(archive), set(self.export()))
 
     def test_unknown_short_name_never_creates_a_new_document(self):

@@ -32578,9 +32578,11 @@ def _safe_path(*parts):
     return out
 
 
-def _export_leaf_name(ident, label, ext, number=1):
-    """Keep normal export names exact; cap only leaves over 255 UTF-8 bytes.
+def _export_leaf_name(ident, label, ext, number=1, *, max_bytes=240):
+    """Keep normal export names exact; cap only leaves over 240 UTF-8 bytes.
 
+    Reserve 15 bytes below the filesystem limit for Chromium's temporary
+    .crswap / .99.crswap suffix when createWritable opens the exported file.
     Long leaves retain their leading identifier, extension and a stable digest
     of the full name. Keep the snapshot marker recognizable by Sweep. The
     complete document title stays in the row and its _data.json snapshot.
@@ -32589,14 +32591,14 @@ def _export_leaf_name(ident, label, ext, number=1):
     suffix = f' ({number})' if number > 1 else ''
     stem = f'{ident} — {label}' if label else ident
     name = f'{stem}{suffix}{ext}'
-    if len(name.encode('utf-8')) <= 255:
+    if len(name.encode('utf-8')) <= max_bytes:
         return name
     digest = hashlib.sha256(unicodedata.normalize('NFC', f'{stem}{ext}').encode('utf-8')).hexdigest()[:12]
     tail = f'~{digest}' + (' — _data' if label == '_data' else '') + suffix + ext
     prefix = ident if label == '_data' else stem
     # Decode only complete code points; no replacement characters or split
     # multibyte sequences. Reserve the digest, collision suffix and extension.
-    budget = 255 - len(tail.encode('utf-8'))
+    budget = max_bytes - len(tail.encode('utf-8'))
     prefix = prefix.encode('utf-8')[:max(0, budget)].decode('utf-8', errors='ignore').rstrip(' .')
     return prefix + tail
 
@@ -33311,8 +33313,12 @@ def admin_export_files():
             if '.' in filename:
                 ext = '.' + filename.rsplit('.', 1)[-1]
             label = _safe_path(label)[0] if label else ''
-            paths = [f'StuffFiles/{cat_label}/{group}/'
-                     + _export_leaf_name(ident, label, ext, n) for n in range(1, 9)]
+            # New writes use 240 bytes, but an explicit app deletion must also
+            # remove exact names previously exported with the 255-byte limit.
+            paths = list(dict.fromkeys(
+                f'StuffFiles/{cat_label}/{group}/'
+                + _export_leaf_name(ident, label, ext, n, max_bytes=max_bytes)
+                for max_bytes in (240, 255) for n in range(1, 9)))
             tomb_entries.append({
                 'path':       paths[0],
                 'variants':   paths[1:],
@@ -33554,9 +33560,13 @@ def _short_export_labels(db, category, row, basename, snapshot=None):
         safe_label = _safe_path(label)[0]
         for ident in idents:
             for number in range(1, 9):
-                candidate = _export_leaf_name(ident, safe_label, ext, number)
-                if unicodedata.normalize('NFC', candidate) == normalized:
-                    labels.add(label)
+                # Accept exact names from the short-lived 255-byte export too.
+                # Otherwise an unchanged old folder could look locally deleted.
+                for max_bytes in (240, 255):
+                    candidate = _export_leaf_name(ident, safe_label, ext, number,
+                                                  max_bytes=max_bytes)
+                    if unicodedata.normalize('NFC', candidate) == normalized:
+                        labels.add(label)
     return labels
 
 
