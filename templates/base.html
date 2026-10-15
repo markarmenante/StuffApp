@@ -147,7 +147,7 @@
 </nav>
 
 <!-- Toast for export progress / completion -->
-<div id="exportToast" class="export-toast" hidden></div>
+<div id="exportToast" class="export-toast" style="overflow-wrap:anywhere" hidden></div>
 <dialog id="filesDownloadDialog" class="files-download-dialog" aria-labelledby="filesDownloadTitle">
   <h2 id="filesDownloadTitle">Files folder</h2>
   <div id="filesFolderOptions">
@@ -536,10 +536,16 @@ async function startExport(ev, link) {
       }
       // Partial-success path: writes landed but something later (a
       // single unreadable iCloud-stub mid-walk, etc.) hit an uncaught
-      // error. Show what completed plus a hint to check the console.
+      // error. Show what completed and a bounded plain-text file detail.
       const state = result.error ? 'err' : 'ok';
       if (result.error) {
-        msg += ` (warning: ${result.error} — see console)`;
+        msg += ` ${result.error}`;
+        const failures = Array.isArray(result.failedFiles) ? result.failedFiles.slice(0, 2) : [];
+        for (const failure of failures) {
+          msg += ` Failed: ${String(failure.path || '').slice(0, 240)} — ${String(failure.reason || '').slice(0, 160)}.`;
+        }
+        const more = (result.failedFileCount || 0) - failures.length;
+        if (more > 0) msg += ` And ${more} more file${more === 1 ? '' : 's'}.`;
       }
       ui.done(state, msg);
       if (!result.error) reloadAfterExport();

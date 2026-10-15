@@ -1,11 +1,13 @@
 """Banknote historical collection ordering and monetary-era regressions."""
 import os, sys, sqlite3, tempfile
+from unittest.mock import patch
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(REPO)
 sys.path.insert(0, REPO)
 # Point the app at a throwaway DB so import-time hooks can't touch anything real.
 os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuffapp-test-')
+os.environ.pop('ANTHROPIC_API_KEY', None)
 
 import app as stuffapp
 
@@ -534,3 +536,88 @@ rows_us = [{'id': 'u1', 'country': 'United States of America', 'issuer': '', 'se
 pl = stuffapp.series_panels(rows_us)
 assert pl['u1']['panel']['series_list'] == ['Series of 1935A'], pl['u1']['panel']['series_list']
 print('COLONIAL-PERIOD ASSERTIONS PASSED')
+
+
+# Symbol and written denominations must share a family. Explicit currency
+# names win over ambiguous symbols, and annotations do not define currency.
+for text, family, amount in (
+        ('$100', 'dollar', 100), ('10 Dollars', 'dollar', 10),
+        ('US$10', 'dollar', 10), ('USD 10', 'dollar', 10),
+        ('50 Cents', 'dollar', .5), ('50¢', 'dollar', .5),
+        ('150 cents', 'dollar', 1.5), ('$0.50', 'dollar', .5),
+        ('£1', 'pound', 1), ('GBP 1', 'pound', 1),
+        ('30 Shillings', 'pound', 1.5), ('1/2 Pound', 'pound', .5),
+        ('150 Pfennig', 'mark', 1.5), ('1 Million Mark', 'mark', 1e6),
+        ('$10 Pesos', 'peso', 10), ('10 Roepiah ($ equivalent)', 'roepiah', 10)):
+    assert stuffapp._denom_currency(text) == family, text
+    assert stuffapp._denom_amount(text) == amount, text
+for text in ('', None, 'Unknown cents', 'Unknown Dollars'):
+    assert stuffapp._denom_amount(text) == stuffapp._DENOM_VALUE_LAST, text
+print('DENOMINATION FAMILY AND AMOUNT ASSERTIONS PASSED')
+
+# The reported Virginia pair has the same country/issuer/date but different
+# series wording. Neither the '$' spelling nor the raw series can put 100
+# before 10. Year remains the stronger key, and subunits compare by worth.
+with stuffapp.app.app_context():
+    full_db = stuffapp.get_db()
+    full_db.execute('DELETE FROM banknotes')
+    fixtures = [
+        # id, saved denomination, series, year, permanent catalogue ID
+        ('va100', '$100', None, 1862, 'B411'),
+        ('va10', '10 Dollars', 'Oct. 15, 1862', 1862, 'B412'),
+        ('va2', '$2', 'Series of 1862', 1862, 'B413'),
+        ('va150c', '150 Cents', '1862 Issue', 1862, 'B414'),
+        ('va1', '1 Dollar', None, 1862, 'B415'),
+        ('va50c', '50¢', 'Treasury Issue of 1862', 1862, 'B416'),
+        ('vaold', '$500', 'Series of 1861', 1861, 'B417'),
+        ('vanew', '1 Cent', 'Series of 1863', 1863, 'B418'),
+    ]
+    for ident, denomination, series, year, cat_id in fixtures:
+        full_db.execute(
+            'INSERT INTO banknotes (id, country, issuer, series, date_1, '
+            'denomination, cat_id, banknote_id, status, issue_type) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (ident, 'Confederate States', 'Commonwealth of Virginia (Treasury)',
+             series, year, denomination, cat_id, 'P 999', 'Own', 'State'))
+    # Mark the prior release as applied and replay only the new position
+    # migration. Existing startup canonicalization has nothing to change here.
+    full_db.execute("INSERT OR IGNORE INTO migration_state (key, applied_at) "
+                    "VALUES ('banknote_display_number_v26', '2026-10-15')")
+    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v27'")
+    full_db.commit()
+    before = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
+    with patch.object(stuffapp, 'ensure_country_history'):
+        stuffapp.init_db()
+    expected = ['vaold', 'va50c', 'va1', 'va150c', 'va2', 'va10', 'va100', 'vanew']
+    ordered = full_db.execute('SELECT * FROM banknotes ORDER BY '
+                              + stuffapp.CATEGORY_ORDER_BY['banknotes']).fetchall()
+    assert [r['id'] for r in ordered] == expected, [r['id'] for r in ordered]
+    assert [r['banknote_id'] for r in ordered] == [f'P {i:03d}' for i in range(1, 9)]
+    for row in ordered:
+        for field, value in before[row['id']].items():
+            if field != 'banknote_id':
+                assert row[field] == value, (row['id'], field, value, row[field])
+    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v27'").fetchone()
+    migrated = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
+    with patch.object(stuffapp, '_renumber_banknotes') as renumber:
+        stuffapp.init_db()
+    renumber.assert_not_called()
+    assert migrated == {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
+    # Exercise the real list query/template with History both visible/hidden,
+    # and the historical-group filter. No model or production data is used.
+    with patch.object(stuffapp, 'ensure_country_history'):
+        client = stuffapp.app.test_client()
+        fixture_group = 'heritage_' + stuffapp.banknote_catalog.classify(
+            'Confederate States', 1862, 'Commonwealth of Virginia (Treasury)')['key']
+        for history in ('0', '1'):
+            for group in ('', fixture_group):
+                response = client.get('/banknotes', query_string={'history': history, 'filter': group})
+                assert response.status_code == 200, response.status_code
+                html = response.get_data(as_text=True)
+                offsets = [html.index('id="item-' + ident + '"') for ident in expected]
+                assert offsets == sorted(offsets), (history, group, offsets)
+    # The report consumes the same ordering, so export/print cannot disagree.
+    sections = stuffapp._banknote_report_sections(full_db)
+    report_ids = [row['id'] for _, _, rows in sections for row in rows]
+    assert report_ids == expected, report_ids
+print('VIRGINIA DENOMINATION LIST, REPORT AND MIGRATION ASSERTIONS PASSED')

@@ -53,6 +53,16 @@ currency area in the French collection family; qualifiers such as “(Senegal)�
 are preserved. New Hebrides belongs to the joint-administration group. Italian
 Somaliland's 1950–1960 issues explicitly identify the UN trusteeship.
 
+Within an existing country/issuer era and series-year group, denominations
+sort by numeric value, including equivalent symbols and written units. For
+example, 50 cents, $1, 150 cents, 10 Dollars and $100 appear in that order.
+Dollar and pound symbols and their USD/GBP labels use the same currency family
+as the written denomination; an explicit currency name still wins when a
+symbol is ambiguous (such as $10 Pesos). Separate currency families remain
+separate, and the existing historical groups and chronology take priority.
+Migration v27 refreshes display positions (P numbers) without rewriting saved
+denominations or permanent B numbers.
+
 ## Spelling and preservation
 
 The canonical numismatic spelling is **French Indo-China**. “Indochina,”

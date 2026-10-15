@@ -2214,15 +2214,12 @@ def _nodiacritic_collation(a, b):
 
 # Denominations are free text ('50 Pfennig', '1 Million Mark'), so a
 # plain text sort would read 1, 10, 100, 2 and would file Mark ahead of
-# Pfennig. These helpers split a denomination into the three parts the
-# note list sorts on: the currency family ('mark'), the worth of its
-# unit within that family (Pfennig 0.01 sorts ahead of Mark 1.0), and
-# the number itself (1 Million -> 1000000).
-#
-# Subunit -> main unit, so the small change leads: cent before dollar,
-# pfennig before mark. Unlisted currencies fall back to their own name
-# as the family at unit 1.0, which keeps them grouped and alphabetical
-# rather than silently mis-sorted.
+# Pfennig. These helpers identify the currency family ('mark') and
+# compare the value in that family's base unit: 50 Pfennig = 0.5 Mark,
+# 1 Mark = 1, 150 Pfennig = 1.5. Symbol and written denominations share
+# a family, so '$100' does not precede '10 Dollars' by spelling alone.
+# Unlisted currencies keep their own family at unit 1.0; distinct
+# currencies are never compared as if they had an exchange rate.
 _CURRENCY_UNITS = {
     # German mark (the bulk of the Notgeld)
     'pfennig': ('mark', 0.01), 'pfennige': ('mark', 0.01),
@@ -2238,6 +2235,7 @@ _CURRENCY_UNITS = {
     # US / dollar
     'cent': ('dollar', 0.01), 'cents': ('dollar', 0.01),
     'dollar': ('dollar', 1.0), 'dollars': ('dollar', 1.0),
+    'usd': ('dollar', 1.0),
     # Franc (French and Swiss)
     'centime': ('franc', 0.01), 'centimes': ('franc', 0.01),
     'rappen': ('franc', 0.01),
@@ -2247,6 +2245,7 @@ _CURRENCY_UNITS = {
     'penny': ('pound', 1 / 240), 'pence': ('pound', 1 / 240),
     'shilling': ('pound', 1 / 20), 'shillings': ('pound', 1 / 20),
     'pound': ('pound', 1.0), 'pounds': ('pound', 1.0),
+    'gbp': ('pound', 1.0),
     # Others that turn up in the collection
     'kopek': ('ruble', 0.01), 'kopeks': ('ruble', 0.01),
     'ruble': ('ruble', 1.0), 'rubles': ('ruble', 1.0),
@@ -2323,11 +2322,13 @@ def _denom_value(text):
 def _denom_lookup(text):
     """(family, unit worth) for a denomination's currency. Unknown
     currencies become their own family at unit 1.0; blank sorts last."""
-    s = _strip_diacritics(text)
-    # Drop parenthetical translations unless the text is nothing else.
-    bare = _DENOM_PAREN_RE.sub(' ', s)
+    # Keep symbols until after checking explicit currency names; the
+    # ASCII fold drops cents/pounds signs, and '$10 Pesos' must stay peso.
+    original = str(text or '')
+    bare = _DENOM_PAREN_RE.sub(' ', original)
     if bare.strip():
-        s = bare
+        original = bare
+    s = _strip_diacritics(original)
     s = _DENOM_FRACTION_RE.sub(' ', s)
     s = _DENOM_NUMBER_RE.sub(' ', s)
     words = [w.strip('.,-/') for w in s.split()]
@@ -2335,6 +2336,11 @@ def _denom_lookup(text):
     for w in words:
         if w in _CURRENCY_UNITS:
             return _CURRENCY_UNITS[w]
+    for symbol, family, unit in (('$', 'dollar', 1.0),
+                                  ('¢', 'dollar', 0.01),
+                                  ('£', 'pound', 1.0)):
+        if symbol in original:
+            return family, unit
     # Unknown currency: fold a trailing plural 's' so '2 Rupees' and
     # '1 Rupee' land in ONE family instead of two adjacent ones.
     folded = [w[:-1] if len(w) > 3 and w.endswith('s') else w
@@ -2345,14 +2351,23 @@ def _denom_lookup(text):
 def _denom_currency(text):
     """Currency family of a denomination: '1 Million Mark' and
     '50 Pfennig' both -> 'mark', so a town's German notes group
-    together before splitting by unit."""
+    together before comparing their base-unit amounts."""
     return _denom_lookup(text)[0]
 
 
 def _denom_unit(text):
     """Worth of the denomination's unit within its family: Pfennig
-    0.01, Mark 1.0. Sorting on this puts the change before the note."""
+    0.01, Mark 1.0. Used to compare subunits with the main currency."""
     return _denom_lookup(text)[1]
+
+
+def _denom_amount(text):
+    """Comparable amount within one currency: 150 cents -> 1.5 dollars.
+    Unreadable values stay last rather than shrinking with a subunit."""
+    value = _denom_value(text)
+    if value == _DENOM_VALUE_LAST:
+        return _DENOM_VALUE_LAST
+    return value * _denom_unit(text)
 
 
 # A note's series is a free-text label ('Series of 1896 (Educational
@@ -5806,13 +5821,15 @@ def _configure_db_connection(db):
     db.create_function('NODIA', 1, _strip_diacritics,
                        deterministic=True)
     # DENOM_* — split a banknote denomination into currency family,
-    # unit worth, and number for the note list's ORDER BY (see
+    # unit worth, number and base-unit amount for the list's ORDER BY (see
     # CATEGORY_ORDER_BY['banknotes']).
     db.create_function('DENOM_CURRENCY', 1, _denom_currency,
                        deterministic=True)
     db.create_function('DENOM_UNIT', 1, _denom_unit,
                        deterministic=True)
     db.create_function('DENOM_VALUE', 1, _denom_value,
+                       deterministic=True)
+    db.create_function('DENOM_AMOUNT', 1, _denom_amount,
                        deterministic=True)
     # SERIES_YEAR(series) — the issue-year pulled from a series label, so
     # the note list groups by year regardless of label wording.
@@ -6749,9 +6766,11 @@ def init_db():
     # generic US filing and into the British North America collection block.
     # v25: colony name precedes era/year, keeping a colony's issues together.
     # v26: confirmed New Jersey colonial issues use New Jersey Colony.
+    # v27: symbol/written denominations share a currency family and
+    # compare numeric base-unit amounts within the existing era/year.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v26',),
+        ('banknote_display_number_v27',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6759,7 +6778,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v26', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v27', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -12718,11 +12737,11 @@ CATEGORY_ORDER_BY = {
     # VI before Elizabeth II — with the series label's year only as a
     # fallback; US notes keep the series-label year first ('Series of
     # 1896 (Educational Series)' -> 1896) because their panels are
-    # series-based (see _note_primary_year). Denomination is three keys:
-    # currency family, then unit worth (Pfennig before Mark, cent before
-    # dollar), then the number — so a group reads 1, 2, 10 Rupees rather
-    # than 1, 10, 2 by text. date_1 is a final tiebreak. Blanks sort
-    # last per level.
+    # series-based (see _note_primary_year). Denominations sort by
+    # currency family, then numeric value in that currency's base unit:
+    # 50 cents, 1 Dollar, 150 cents, 10 Dollars, $100. The original unit
+    # only breaks equal-amount ties; date_1 is the final tiebreak.
+    # Blanks sort last per level.
     # WWII emergency issues (HAWAII overprint, North Africa yellow seal)
     # file as ONE block at 1942, their wartime year, rather than
     # scattering through the 1934/1935 runs by series year. The
@@ -12748,8 +12767,8 @@ CATEGORY_ORDER_BY = {
                   f"CASE WHEN {_US_EMERGENCY_SQL_CALL} THEN 'zzz' ELSE "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') END COLLATE NODIACRITIC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
+                  "DENOM_AMOUNT(denomination) ASC, "
                   "DENOM_UNIT(denomination) ASC, "
-                  "DENOM_VALUE(denomination) ASC, "
                   "COALESCE(date_1, 99999) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
                 "COALESCE(NULLIF(description, ''), 'zzz') COLLATE NODIACRITIC"),
@@ -38047,8 +38066,9 @@ def _renumber_banknotes(db):
     digits so the text sorts in list order) — notes have no
     property/era partition the way coins do, so there's a single
     sequence rather than a group each.
-    Ordering is CATEGORY_ORDER_BY['banknotes'] (country, municipality,
-    issuer, date_1), the same ORDER BY the list view uses, so the
+    Ordering is CATEGORY_ORDER_BY['banknotes'] (historical group,
+    country, era/year, municipality and denomination), the same ORDER BY
+    the list view uses, so the
     Display Number always runs in the order the list shows. cat_id is
     untouched: that one is assigned once and stays with the note.
     Caller is responsible for commit — we stay inside the surrounding

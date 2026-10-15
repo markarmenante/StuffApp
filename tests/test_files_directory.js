@@ -44,7 +44,39 @@ function setup(old, selected, options={}) {
       this.onfile(file);
     }}}
   };
-  vm.runInNewContext(source,context);return {api:window.StuffSync,data,urls,picks};
+  vm.runInNewContext(source,context);return {api:window.StuffSync,data,urls,picks,context};
+}
+// A controlled decoder lets the real queue receive complete, partial, empty,
+// and failed files before a stream failure. The disk mock commits only on close,
+// like FileSystemWritableFileStream; abort preserves the previous file.
+function stream(t, entries, {networkFailure=false, decodeFailure=false}={}) {
+  let reads=0, emitted=false;
+  t.context.fetch=async()=>({ok:true,body:{getReader:()=>({read:async()=>{
+    if (!reads++) return {done:false,value:new Uint8Array([1])};
+    if (networkFailure) throw Error('Synthetic network interruption');
+    return {done:true};
+  }})}});
+  t.context.fflate={UnzipInflate:class{},Unzip:class{register(){}push(data,last){
+    if (!emitted) {emitted=true;for(const entry of entries){
+      const file={name:'StuffFiles/Banknotes/'+entry.name,start(){
+        this.ondata(entry.error || null,new Uint8Array(entry.empty?[]:[79,75]),entry.complete!==false);
+      }};this.onfile(file);
+    }}
+    if (decodeFailure && last) throw Error('Synthetic invalid ZIP');
+  }}};
+}
+async function disk() {
+  const root=dir('StuffFiles'),category=await root.getDirectoryHandle('Banknotes');
+  const state={locks:new Set(),committed:new Map([['partial.txt','old bytes']]),events:[],abortFailures:0};
+  category.getFileHandle=async name=>({async createWritable(){
+    if (state.locks.has(name)) throw Error('File still locked');
+    state.locks.add(name);state.events.push('open:'+name);let bytes='';
+    return {async write(data){await new Promise(resolve=>setTimeout(resolve,5));bytes+=Buffer.from(data).toString();state.events.push('write:'+name);},
+      async close(){state.committed.set(name,bytes);state.locks.delete(name);state.events.push('close:'+name);},
+      async abort(){if(state.abortFailures-->0)throw Error('Synthetic abort failure');state.locks.delete(name);state.events.push('abort:'+name);}
+    };
+  }});
+  return {root,state};
 }
 (async()=>{
   const old=dir('StuffFiles'), parent=dir('iCloud Drive');
@@ -111,5 +143,51 @@ function setup(old, selected, options={}) {
   t=setup(old,old,{failFetch:true});await assert.rejects(t.api.syncDown(),/HTTP 503/);
   assert.equal(t.data.get(LAST),'2026-09-01');
   console.log('Server failure: checkpoint not advanced');
+
+  let d=await disk();t=setup(d.root,d.root);
+  stream(t,[{name:'complete.txt'},{name:'partial.txt',complete:false}],{networkFailure:true});
+  result=await t.api.syncDown();
+  assert.equal(result.written,1);assert.equal(result.total,2);assert.match(result.error,/network interruption/);
+  assert.equal(d.state.locks.size,0);assert.equal(d.state.committed.get('complete.txt'),'OK');
+  assert.equal(d.state.committed.get('partial.txt'),'old bytes');
+  assert.equal(result.failedFileCount,1);assert.equal(result.failedFiles[0].path,'Banknotes/partial.txt');
+  assert.equal(t.data.get(LAST),'2026-09-01');
+  const settledEvents=d.state.events.length;await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(d.state.events.length,settledEvents,'No disk activity may continue after syncDown returns');
+  stream(t,[{name:'complete.txt'},{name:'partial.txt'}]);result=await t.api.syncDown();
+  assert.equal(result.written,2);assert.equal(result.error,null);assert.equal(d.state.locks.size,0);
+  assert.equal(d.state.committed.get('partial.txt'),'OK');assert.notEqual(t.data.get(LAST),'2026-09-01');
+  console.log('Network failure: queued files finish, partial writer aborts, immediate retry succeeds');
+
+  d=await disk();t=setup(d.root,d.root);
+  stream(t,[{name:'partial.txt',complete:false}],{decodeFailure:true});
+  result=await t.api.syncDown();assert.match(result.error,/invalid ZIP/);assert.equal(d.state.locks.size,0);
+  assert.equal(d.state.committed.get('partial.txt'),'old bytes');assert.equal(t.data.get(LAST),'2026-09-01');
+  console.log('ZIP failure: partial writer is aborted before returning');
+
+  d=await disk();d.state.abortFailures=1;t=setup(d.root,d.root);
+  stream(t,[{name:'partial.txt',complete:false}],{networkFailure:true});
+  result=await t.api.syncDown();assert.match(result.error,/network interruption/);assert.match(result.error,/Close this tab before retrying/);
+  assert.equal(t.data.get(LAST),'2026-09-01');
+  console.log('Abort failure: never claims release or success; gives a safe retry instruction');
+
+
+  d=await disk();t=setup(d.root,d.root);stream(t,[{name:'partial.txt',complete:false}]);
+  result=await t.api.syncDown();assert.match(result.error,/every file was complete/);
+  assert.equal(d.state.locks.size,0);assert.equal(result.written,0);assert.equal(result.failedFileCount,1);
+  console.log('Missing final file marker: incomplete data never advances checkpoint');
+
+  d=await disk();t=setup(d.root,d.root);stream(t,[{name:'empty.txt',empty:true}]);
+  result=await t.api.syncDown();assert.equal(result.written,1);assert.equal(result.total,1);
+  assert.equal(result.error,null);assert.equal(d.state.committed.get('empty.txt'),'');assert.equal(d.state.locks.size,0);
+  console.log('Empty file: closed and counted as a successful write');
+
+  d=await disk();t=setup(d.root,d.root);
+  stream(t,Array.from({length:8},(_,i)=>({name:'bad-'+i+'-'+('x'.repeat(500))+'.txt',error:Error('disk unavailable\n'+('z'.repeat(500)))})));
+  result=await t.api.syncDown();assert.equal(result.written,0);assert.equal(result.failedFileCount,8);
+  assert.equal(result.failedFiles.length,5);assert(result.failedFiles.every(f=>f.path.length<=240&&f.reason.length<=160&&!/[\r\n]/.test(f.reason)));
+  assert.equal(t.data.get(LAST),'2026-09-01');
+  console.log('Many failures: diagnostic count is accurate and retained details are bounded');
+
 
 })().catch(err=>{console.error(err);process.exit(1);});

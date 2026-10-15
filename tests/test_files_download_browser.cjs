@@ -27,7 +27,7 @@ const os=require('node:os');
     async queryPermission(){return options.permission || 'granted';},
     async requestPermission(){fixture.permissions++;fixture.permissionActivation.push(navigator.userActivation.isActive);if(options.securityError)throw Object.assign(Error('Fresh click required'),{name:'SecurityError'});return options.renew || options.permission || 'granted';},
     async getDirectoryHandle(name){if(!this.children.has(name))this.children.set(name,dir(name));return this.children.get(name);},
-    async getFileHandle(name){if(options.failWrite)throw Error('Synthetic disk unavailable');const file={name,kind:'file',async createWritable(){return{async write(){fixture.writes++;},async close(){},async abort(){}};}};this.children.set(name,file);return file;},
+    async getFileHandle(name){if(options.failWrite)throw Error(options.failWriteMessage || 'Synthetic disk unavailable');const file={name,kind:'file',async createWritable(){return{async write(){fixture.writes++;},async close(){},async abort(){}};}};this.children.set(name,file);return file;},
     async *entries(){yield* this.children.entries();}};}
    const old=options.first?null:dir('StuffFiles'),selected=dir('StuffFiles');
    const data=fixture.data=new Map([['StuffFilesDir',old],['StuffFilesLastSyncAt','2026-09-01'],['StuffFilesSyncState',{old:'fingerprint'}]]);
@@ -87,6 +87,14 @@ const os=require('node:os');
   for(const kind of ['failWrite','failFetch'])await run(kind+': visible failure retains checkpoint, no success reload',async()=>{const t=await setup({[kind]:true});try{
    await t.page.locator('#navExportLink').click();await t.page.locator('#exportToast.err').waitFor();
    const state=await t.state();assert.equal(state.checkpoint,'2026-09-01');assert.equal(state.reloads,0);assert.equal(state.writes,0);assert.equal(t.exports(),1);
+  }finally{await t.close();}});
+  await run('failed file details are readable plain text, never executable markup',async()=>{const t=await setup({failWrite:true,failWriteMessage:'<img src=x onerror="window.fixtureInjected=true"> Synthetic disk failure'});try{
+   await t.page.locator('#navExportLink').click();await t.page.locator('#exportToast.err').waitFor();
+   const toast=t.page.locator('#exportToast');assert.match(await toast.innerText(),/Banknotes\/example.txt/);
+   assert.match(await toast.innerText(),/<img src=x/);assert.equal(await toast.locator('img').count(),0);
+   assert.equal(await t.page.evaluate(()=>!!window.fixtureInjected),false);assert.equal((await t.state()).reloads,0);
+   assert.equal(await toast.evaluate(e=>e.scrollWidth<=e.clientWidth),true);
+   await t.page.screenshot({path:path.join(artifacts,'files-failure-detail.png')});
   }finally{await t.close();}});
   await run('cancelled first selection: no download or changed checkpoint',async()=>{const t=await setup({first:true,cancel:true});try{
    await t.page.locator('#navExportLink').click();await t.page.waitForFunction(()=>document.getElementById('exportToast').textContent==='Cancelled.');

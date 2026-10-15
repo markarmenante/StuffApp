@@ -257,6 +257,23 @@
     let purged = 0;
     let purgedDirs = 0;
     let staleCount = 0;
+    // Keep the queue and open file state outside the stream try block. A
+    // network/ZIP error must settle queued writes and release partial writers
+    // before returning; otherwise a retry can race the previous download.
+    let writeChain = Promise.resolve();
+    const unfinishedFiles = new Set();
+    const failedFiles = [];
+    let failedFileCount = 0;
+    const detailText = (value, max) => String(value || '').replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, max);
+    const recordFileFailure = (file, error) => {
+      if (file.failed) return;
+      file.failed = true;
+      failedFileCount++;
+      if (failedFiles.length < 5) {
+        failedFiles.push({path: detailText(file.path, 240),
+          reason: detailText(error?.message || error || 'Could not save file.', 160)});
+      }
+    };
     try {
     // Stream the response body through fflate.Unzip — chunks of the
     // zip flow in, decompressed file chunks come out via onfile/ondata
@@ -271,7 +288,6 @@
     // the OOM version (mod the OOM). Instead we track in-flight
     // write bytes and only block when over the high-water mark, so
     // network reads race ahead while writes drain in the background.
-    let writeChain = Promise.resolve();
     let pendingBytes = 0;
     const HIGH_WATER = 64 * 1024 * 1024;  // ~64 MB queued max
 
@@ -319,6 +335,8 @@
 
       let writer = null;
       let aborted = false;
+      const pendingFile = {path: rel, writer: null, failed: false};
+      unfinishedFiles.add(pendingFile);
 
       file.ondata = (err, data, final) => {
         const chunkBytes = data ? data.length : 0;
@@ -331,10 +349,12 @@
               const [parent, fname] = await _ensurePath(dir, rel);
               const fileHandle = await parent.getFileHandle(fname, {create: true});
               writer = await fileHandle.createWritable();
+              pendingFile.writer = writer;
             }
             if (chunkBytes) await writer.write(data);
             if (final) {
               await writer.close();
+              unfinishedFiles.delete(pendingFile);
               written++;
               if (written % 25 === 0) {
                 progress && progress(`Wrote ${written} files…`);
@@ -344,9 +364,13 @@
             // Best-effort: skip a file we can't write rather than
             // aborting the whole sync. Surface the count at the end.
             aborted = true;
+            recordFileFailure(pendingFile, e);
             console.warn('Skipped', rel, e);
             if (writer) {
-              try { await writer.abort(); } catch (_) {}
+              try { await writer.abort(); unfinishedFiles.delete(pendingFile); }
+              catch (_) { /* The final cleanup retries before returning. */ }
+            } else {
+              unfinishedFiles.delete(pendingFile);
             }
           } finally {
             if (chunkBytes) pendingBytes -= chunkBytes;
@@ -383,6 +407,9 @@
       }
     }
     await writeChain;
+    if (unfinishedFiles.size) {
+      throw new Error('Download ended before every file was complete. Retry the download.');
+    }
     progress && progress(`Wrote ${written}/${total} files…`);
 
     // Apply server-side deletions captured in _tombstones.json. These
@@ -642,6 +669,28 @@
       // the success toast instead of clobbering the result.
       syncError = e && (e.message || String(e));
       console.warn('[StuffSync] uncaught syncDown error:', e);
+    } finally {
+      // Completed files can finish even after the network fails. Drain first
+      // so counts are final and a queued callback cannot open a new writer
+      // after this cleanup has already run.
+      try { await writeChain; }
+      catch (e) { syncError = syncError || (e?.message || String(e)); }
+      let cleanupFailed = false;
+      for (const file of unfinishedFiles) {
+        recordFileFailure(file, 'Download stopped before this file was complete.');
+        if (file.writer) {
+          try { await file.writer.abort(); }
+          catch (e) {
+            cleanupFailed = true;
+            console.warn('[StuffSync] incomplete file cleanup failed', file.path, e);
+          }
+        }
+      }
+      unfinishedFiles.clear();
+      if (cleanupFailed) {
+        syncError = (syncError ? syncError + ' ' : '') +
+          'An incomplete file could not be released. Close this tab before retrying.';
+      }
     }
 
     if (!syncError && written !== total) {
@@ -660,7 +709,7 @@
             stale: staleCount, purged, purgedDirs,
             tombstoneApplied, tombstoneFailed,
             since: lastSyncAt || null, syncedAt: newSyncAt,
-            error: syncError};
+            error: syncError, failedFileCount, failedFiles};
   }
 
   // Read a single iCloud-aware file. macOS keeps iCloud Drive files as
