@@ -20,6 +20,7 @@ import banknote_feedback
 import original_listings
 import listing_checks
 import banknote_check_sources
+import banknote_photo_sides
 from datetime import datetime, date, timedelta
 from flask import (Flask, g, render_template, request, redirect, url_for,
                    flash, send_from_directory, abort, jsonify, Response,
@@ -16441,6 +16442,8 @@ def _market_page_image_urls(listing_url, html=None):
             return []
         if _market_listing_url_problem(getattr(_MARKET_LAST_URL, 'final', listing_url)):
             return []
+        if market_runtime.canonical_url(getattr(_MARKET_LAST_URL, 'final', listing_url)) != market_runtime.canonical_url(listing_url):
+            return []
     found = []
 
     def add(u):
@@ -16461,7 +16464,92 @@ def _market_page_image_urls(listing_url, html=None):
     # Drop obvious non-photos (logos, icons, sprites) and keep the first
     # few distinct files: obverse, reverse, holder.
     keep = [u for u in found if not re.search(r'logo|icon|sprite|avatar|badge|placeholder|pixel|1x1|\.svg', u, re.IGNORECASE)]
-    return keep[:4]
+    return keep[:banknote_photo_sides.MAX_GALLERY]
+
+
+def _classify_banknote_listing_photos(photos):
+    """One bounded, image-only side check; no web tools or purchase/private facts."""
+    import anthropic
+    content = banknote_photo_sides.vision_content(photos, UPLOAD_FOLDER)
+    api_key = _require_anthropic_key()
+    client = anthropic.Anthropic(api_key=api_key, timeout=35.0, max_retries=0)
+    response = client.messages.create(
+        model=anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL'),
+        max_tokens=5000, messages=[{'role': 'user', 'content': content}])
+    if response.stop_reason != 'end_turn':
+        raise ValueError('Photograph classification did not complete')
+    return parse_model_json_object(_message_text(response))
+
+
+def _market_store_banknote_images(item):
+    """Archive the exact gallery and choose verified sides, never its first two."""
+    from pathlib import Path
+    from io import BytesIO
+    import hashlib
+    import shutil
+    from PIL import Image
+    assets = []
+    # Reuse exact browser-captured galleries when eBay blocks the server.
+    # Search/card thumbnails alone do not establish gallery membership.
+    exact = original_listings.exact_listing(item.get('listing_url'))
+    url = exact[0] if exact else item.get('listing_url')
+    try:
+        db = get_db()
+        captured = banknote_check_sources.ebay_listing_captures.html(db, url)
+        cached = [dict(a) for a in db.execute(
+            'SELECT s.position,a.* FROM original_listing_image_sources s '
+            'JOIN original_image_assets a ON a.url=s.image_url WHERE s.listing_url=? ORDER BY s.position', (url,))]
+    except RuntimeError:  # Standalone test/helper call without a Flask context.
+        captured, cached = None, []
+    urls = _market_page_image_urls(url, html=captured)
+    cached_by_url = {a['url']: a for a in cached}
+    if not urls:
+        urls = [a['url'] for a in cached]
+
+    deadline = time.monotonic() + 35
+    for position, url in enumerate(urls[:banknote_photo_sides.MAX_GALLERY]):
+        if time.monotonic() > deadline:
+            break
+        cached_asset = cached_by_url.get(url)
+        if cached_asset:
+            try:
+                path = banknote_photo_sides._file(UPLOAD_FOLDER, cached_asset['filename'])
+                if hashlib.sha256(path.read_bytes()).hexdigest() == cached_asset['sha256']:
+                    assets.append(dict(cached_asset, position=position))
+                    continue
+            except (OSError, ValueError):
+                pass
+        data, ext = _market_fetch_image(url)
+        if not data:
+            continue
+        try:
+            with Image.open(BytesIO(data)) as image:
+                width, height = image.size
+                if min(width, height) < 120 or width * height > 50_000_000:
+                    continue
+                image.verify()
+            digest = hashlib.sha256(data).hexdigest()
+            filename = 'listing_image_' + digest + '.' + ext
+            path = Path(UPLOAD_FOLDER) / filename
+            if not path.exists():
+                path.write_bytes(data)
+            elif hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                continue
+            assets.append(dict(url=url, filename=filename, sha256=digest, width=width,
+                               height=height, saved_at=time.time(), position=position))
+        except Exception:
+            continue
+    item['_listing_photo_assets'] = assets
+    selection = banknote_photo_sides.select(assets, UPLOAD_FOLDER, _classify_banknote_listing_photos)
+    stored = {}
+    for field, asset in selection['images'].items():
+        source = Path(UPLOAD_FOLDER) / asset['filename']
+        filename = uuid.uuid4().hex + source.suffix
+        shutil.copyfile(source, Path(UPLOAD_FOLDER) / filename)
+        stored[field] = filename
+    if selection['warnings']:
+        app.logger.warning('market buy image: gallery sides unverified; original photos retained')
+    return stored
 
 
 def _market_store_images(item, category=None):
@@ -16471,6 +16559,8 @@ def _market_store_images(item, category=None):
     first (full-size where the CDN allows); when they are missing or
     fail, the listing page is read for its photos. Every attempt is
     logged so a photo-less record can be traced."""
+    if category == 'banknotes':
+        return _market_store_banknote_images(item)
     from io import BytesIO
     from werkzeug.datastructures import FileStorage
     title = str(item.get('title') or '')[:60]
@@ -18589,6 +18679,12 @@ def _market_create_record(db, category, item, location=None, images=None):
                list(data.values()))
     if category == 'banknotes':
         _renumber_banknotes(db)
+        assets = item.get('_listing_photo_assets') or []
+        exact = original_listings.exact_listing(item['listing_url'])
+        if assets and exact and original_listings.add_source(db, category, record_id, exact[0]):
+            banknote_check_sources.archives.enqueue(db, category, record_id, exact[0],
+                                                   'Original Listing', 'listing')
+            banknote_check_sources.listing_images.save(db, exact[0], assets)
     return record_id
 
 
@@ -26473,7 +26569,9 @@ def banknote_lookup_specs(record_id):
         return jsonify(error=refresh['message']), 409
 
     try:
-        prepared = banknote_check_sources.prepare(db, note, UPLOAD_FOLDER, _pdf_fonts)
+        prepared = banknote_check_sources.prepare(
+            db, note, UPLOAD_FOLDER, _pdf_fonts, classify_photos=_classify_banknote_listing_photos,
+            vision_source=lambda name: _banknote_vision_source(name, db))
     except Exception:
         db.rollback()
         app.logger.exception('Banknote Check purchase-source preparation failed')

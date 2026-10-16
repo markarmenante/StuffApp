@@ -42,6 +42,9 @@ class SourceCheckTests(unittest.TestCase):
                         "VALUES (?,'Tonga','1 Pound','$485',150,80)", (self.id,))
         self.db.commit()
         self.client = stuff.app.test_client()
+        classifier = patch.object(stuff, '_classify_banknote_listing_photos', side_effect=self.classify)
+        classifier.start()
+        self.addCleanup(classifier.stop)
 
     def tearDown(self):
         self.db.rollback()
@@ -60,7 +63,8 @@ class SourceCheckTests(unittest.TestCase):
         return self.db.execute('SELECT * FROM banknotes WHERE id=?', (self.id,)).fetchone()
 
     def prepare(self):
-        return sources.prepare(self.db, self.note(), stuff.UPLOAD_FOLDER, stuff._pdf_fonts)
+        return sources.prepare(self.db, self.note(), stuff.UPLOAD_FOLDER, stuff._pdf_fonts,
+                               classify_photos=self.classify, vision_source=lambda name:stuff._banknote_vision_source(name,self.db))
 
     def add_listing(self):
         original_listings.add_source(self.db, 'banknotes', self.id, URL)
@@ -109,9 +113,140 @@ class SourceCheckTests(unittest.TestCase):
         import hashlib
         filename = ('front' if '/front/' in url else 'back') + '.png'
         path = Path(folder) / filename
-        Image.new('RGB', (400, 200), '#418050').save(path)
+        Image.new('RGB', (400, 200), '#418050' if filename == 'front.png' else '#805041').save(path)
         return dict(url=url, filename=filename, sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                     width=400, height=200, saved_at=1)
+
+    def classify(self, photos):
+        from PIL import Image
+        readings = []
+        selected = {}
+        for photo in photos:
+            with Image.open(Path(stuff.UPLOAD_FOLDER) / photo['filename']) as image:
+                red, green, blue = image.convert('RGB').getpixel((0, 0))
+            side = 'front' if green > red else 'back'
+            readings.append(dict(id=photo['id'],side=side,confidence='high',complete_note=True,
+                                 same_note=True,reason='Synthetic distinct note designs'))
+            if photo['gallery']:
+                selected.setdefault(side,photo['id'])
+        return dict(photos=readings,front=selected.get('front'),back=selected.get('back'),
+                    pair_verified=bool(selected.get('front') and selected.get('back')),pair_reason='Synthetic opposite sides')
+
+    def four_photos(self):
+        sources.archives.enqueue(self.db,'banknotes',self.id,URL,'Original Listing','listing')
+        from PIL import Image
+        import hashlib
+        assets=[]
+        for index,color in enumerate(('#418050','#518060','#805041','#906051')):
+            filename=f'four-{index}.png'
+            path=Path(stuff.UPLOAD_FOLDER)/filename
+            Image.new('RGB',(400,200),color).save(path)
+            assets.append(dict(url=f'https://i.ebayimg.com/images/g/four{index}/s-l1600.jpg',
+                               filename=filename,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                               width=400,height=200,saved_at=1,position=index))
+        return assets
+
+    def select_saved(self,classifier=None):
+        return sources.listing_photos(self.db,'banknotes',self.id,URL,stuff.UPLOAD_FOLDER,
+                                      classify_photos=classifier or self.classify,
+                                      vision_source=lambda name:stuff._banknote_vision_source(name,self.db))
+
+    def test_four_gallery_views_choose_front_and_later_back(self):
+        self.add_listing()
+        assets=self.four_photos()
+        sources.listing_images.save(self.db,URL,assets);self.db.commit()
+        seen=[]
+        def classify(photos):
+            seen.append(len(photos));return self.classify(photos)
+        images,warnings=self.select_saved(classify)
+        self.assertEqual(seen,[4])
+        self.assertEqual(set(images),{'image_1','image_2'})
+        folder=Path(stuff.UPLOAD_FOLDER)
+        self.assertEqual((folder/self.note()['image_1']).read_bytes(),(folder/assets[0]['filename']).read_bytes())
+        self.assertEqual((folder/self.note()['image_2']).read_bytes(),(folder/assets[2]['filename']).read_bytes())
+        before=dict(self.note())
+        self.assertEqual(self.select_saved()[0],{})
+        self.assertEqual(dict(self.note()),before)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM record_documents WHERE record_id=?',(self.id,)).fetchone()[0],4)
+
+    def test_route_uses_later_reverse_even_if_catalogue_lookup_fails(self):
+        import json
+        self.add_listing();assets=self.four_photos()
+        html=HTML+'<script type="application/ld+json">'+json.dumps({'@type':'Product','image':[a['url'] for a in assets]})+'</script>'
+        before=dict(self.note())
+        seen=[]
+        def classify(photos):
+            seen.append(len(photos));return self.classify(photos)
+        with patch.object(sources.archives,'fetch_bytes',return_value=(html.encode(),'text/html',URL)), \
+                patch.object(sources.listing_images,'download',side_effect=lambda url,folder:next(a for a in assets if a['url']==url)), \
+                patch.object(stuff,'_classify_banknote_listing_photos',side_effect=classify), \
+                patch.object(stuff,'_trim_slabbed_note_image',return_value=None), \
+                patch.object(stuff,'fetch_banknote_specs',side_effect=RuntimeError('Catalogue provider unavailable')), \
+                patch.object(stuff,'ensure_country_history'):
+            response=self.client.post('/banknotes/'+self.id+'/lookup-specs')
+        self.assertIn(response.status_code,(200,503),response.json)
+        self.assertEqual(seen,[4])
+        self.assertEqual(set(response.json['images']),{'image_1','image_2'})
+        after=dict(self.note());folder=Path(stuff.UPLOAD_FOLDER)
+        self.assertEqual((folder/after['image_2']).read_bytes(),(folder/assets[2]['filename']).read_bytes())
+        self.assertEqual(len(response.json['documents']),5)
+        for field in before:
+            if field not in ('image_1','image_2','updated_at'):
+                self.assertEqual(after[field],before[field],field)
+
+    def test_cached_front_does_not_classify_before_complete_live_gallery(self):
+        import json
+        self.add_listing();assets=self.four_photos()
+        sources.listing_images.save(self.db,URL,assets[:1]);self.db.commit()
+        html=HTML+'<script type="application/ld+json">'+json.dumps({'@type':'Product','image':[a['url'] for a in assets]})+'</script>'
+        seen=[]
+        def classify(photos):
+            seen.append(len(photos));return self.classify(photos)
+        with patch.object(sources.archives,'fetch_bytes',return_value=(html.encode(),'text/html',URL)), \
+                patch.object(sources.listing_images,'download',side_effect=lambda url,folder:next(a for a in assets if a['url']==url)):
+            result=sources.prepare(self.db,self.note(),stuff.UPLOAD_FOLDER,stuff._pdf_fonts,classify_photos=classify)
+        self.assertEqual(seen,[4])
+        self.assertEqual(set(result['images']),{'image_1','image_2'})
+
+    def test_occupied_duplicate_pair_warned_without_any_replacement(self):
+        self.add_listing();assets=self.four_photos()
+        sources.listing_images.save(self.db,URL,assets)
+        self.db.execute('UPDATE banknotes SET image_1=?,image_2=? WHERE id=?',(assets[0]['filename'],assets[1]['filename'],self.id));self.db.commit()
+        before=dict(self.note());images,warnings=self.select_saved()
+        self.assertEqual(images,{})
+        self.assertEqual(dict(self.note()),before)
+        self.assertTrue(any('could not both be confirmed' in warning for warning in warnings))
+
+    def test_concurrent_photo_or_listing_change_wins(self):
+        self.add_listing();assets=self.four_photos()
+        sources.listing_images.save(self.db,URL,assets);self.db.commit()
+        def changed(photos):
+            self.db.execute("UPDATE banknotes SET image_1='new-user-photo.png' WHERE id=?",(self.id,));self.db.commit()
+            return self.classify(photos)
+        images,warnings=self.select_saved(changed)
+        self.assertEqual(images,{})
+        self.assertEqual(self.note()['image_1'],'new-user-photo.png')
+        self.assertFalse(self.note()['image_2'])
+        self.assertTrue(any('changed while' in warning for warning in warnings))
+        self.db.execute('UPDATE banknotes SET image_1=NULL WHERE id=?',(self.id,));self.db.commit()
+        def relinked(photos):
+            other='https://www.ebay.com/itm/325643741724'
+            self.db.execute('INSERT OR IGNORE INTO original_listing_pages (url,vendor,item_key) VALUES (?,?,?)',(other,'eBay','325643741724'))
+            self.db.execute('UPDATE banknote_original_listings SET url=? WHERE banknote_id=?',(other,self.id));self.db.commit()
+            return self.classify(photos)
+        images,warnings=self.select_saved(relinked)
+        self.assertEqual(images,{})
+        self.assertFalse(self.note()['image_1']);self.assertFalse(self.note()['image_2'])
+
+    def test_classifier_failure_still_attaches_every_original(self):
+        self.add_listing();assets=self.four_photos()
+        sources.listing_images.save(self.db,URL,assets);self.db.commit()
+        def fail(photos):
+            raise RuntimeError('No provider key')
+        images,warnings=self.select_saved(fail)
+        self.assertEqual(images,{})
+        self.assertTrue(warnings)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM record_documents WHERE record_id=?',(self.id,)).fetchone()[0],4)
 
     def gallery(self):
         return HTML + '''<script type="application/ld+json">{"@type":"Product","image":[

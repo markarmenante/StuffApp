@@ -194,8 +194,16 @@ with stuffapp.app.app_context():
     assert images and images[0]['media_type'] == 'image/webp'
 
 # Market acquisitions use the same source-preservation rule for notes.
+def classify_market_front(photos):
+    return dict(
+        photos=[dict(id=photo['id'], side='front', confidence='high',
+                     complete_note=True, same_note=True, reason='Synthetic complete front')
+                for photo in photos],
+        front=photos[0]['id'], back=None, pair_verified=False, pair_reason='')
+
 with patch.object(stuffapp, '_market_fetch_image', return_value=(raw, 'webp')), \
-        patch.object(stuffapp, '_market_page_image_urls', return_value=[]):
+        patch.object(stuffapp, '_market_page_image_urls', return_value=['https://dealer.example/front.webp']), \
+        patch.object(stuffapp, '_classify_banknote_listing_photos', side_effect=classify_market_front):
     stored = stuffapp._market_store_images({
         'title': 'Test banknote', 'listing_url': 'https://dealer.example/note',
         'image_urls': ['https://dealer.example/front.webp'],

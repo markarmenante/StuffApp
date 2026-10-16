@@ -12,6 +12,7 @@ import original_listings as listings
 import source_documents as archives
 import purchase_orders
 import listing_images
+import banknote_photo_sides
 import ebay_listing_captures
 import ebay_purchase_prices
 
@@ -105,8 +106,9 @@ def save_pdf(db, record_id, url, title, kind, pdf, folder, category='banknotes')
     return filename
 
 
-def listing_photos(db, category, record_id, url, folder, html=None, final=None):
-    """Keep originals in Documents; fill only empty display-photo slots."""
+def listing_photos(db, category, record_id, url, folder, html=None, final=None,
+                   classify_photos=None, vision_source=None):
+    """Keep every original and occupied slot; fill empty slots with verified sides."""
     if category not in archives.TABLES:
         raise ValueError('Unsupported category')
     warnings = []
@@ -131,16 +133,28 @@ def listing_photos(db, category, record_id, url, folder, html=None, final=None):
                 warnings.append('An original listing image could not be downloaded.')
         listing_images.save(db, url, assets)
     listing_images.attach_saved(db, category, record_id, url)
-    photos = db.execute('SELECT s.position,a.filename FROM original_listing_image_sources s '
+    photos = db.execute('SELECT s.position,a.* FROM original_listing_image_sources s '
                        'JOIN original_image_assets a ON a.url=s.image_url WHERE s.listing_url=? '
                        'ORDER BY s.position', (url,)).fetchall()
     images = {}
-    for photo in photos:
-        if photo['position'] not in (0, 1):
+    before = db.execute(f'SELECT image_1,image_2 FROM {category} WHERE id=?', (record_id,)).fetchone()
+    if not before:
+        db.commit()
+        return images, warnings
+    before = dict(before)
+    # Release the archive write lock before the bounded vision request.
+    db.commit()
+    if category == 'banknotes':
+        selection = banknote_photo_sides.select([dict(p) for p in photos], folder, classify_photos,
+                                                existing=before, resolve_original=vision_source)
+        warnings.extend(selection['warnings'])
+        chosen = selection['images']
+    else:
+        chosen = {'image_' + str(p['position'] + 1): dict(p) for p in photos if p['position'] in (0, 1)}
+    for field, photo in chosen.items():
+        if before[field]:
             continue
-        field = 'image_' + str(photo['position'] + 1)
-        current = db.execute(f'SELECT {field} FROM {category} WHERE id=?', (record_id,)).fetchone()
-        if not current or current[field] or Path(photo['filename']).name != photo['filename']:
+        if Path(photo['filename']).name != photo['filename']:
             continue
         source = Path(folder) / photo['filename']
         if not source.is_file():
@@ -148,17 +162,25 @@ def listing_photos(db, category, record_id, url, folder, html=None, final=None):
         filename = uuid.uuid4().hex + source.suffix
         destination = Path(folder) / filename
         shutil.copyfile(source, destination)
-        saved = db.execute(f"UPDATE {category} SET {field}=?,updated_at=? WHERE id=? AND ({field} IS NULL OR {field}='')",
-                           (filename, datetime.now(timezone.utc).isoformat(), record_id)).rowcount
+        # Both slot values and the exact listing association must still match.
+        table, key, _ = listings.TABLES[category]
+        saved = db.execute(f"UPDATE {category} SET {field}=?,updated_at=? WHERE id=? "
+                           f"AND image_1 IS ? AND image_2 IS ? AND EXISTS(SELECT 1 FROM {table} "
+                           f"WHERE {key}=? AND url=?)",
+                           (filename, datetime.now(timezone.utc).isoformat(), record_id,
+                            before['image_1'], before['image_2'], record_id, url)).rowcount
         if saved:
             images[field] = '/uploads/' + filename
+            before[field] = filename
         else:
             destination.unlink(missing_ok=True)
+            warnings.append('Photos changed while Check was examining the gallery; the newer photos were retained.')
+            break
     db.commit()
     return images, warnings
 
 
-def prepare(db, record, folder, fonts, category='banknotes'):
+def prepare(db, record, folder, fonts, category='banknotes', classify_photos=None, vision_source=None):
     if category not in archives.TABLES:
         raise ValueError('Unsupported category')
     record = dict(record)
@@ -250,10 +272,7 @@ def prepare(db, record, folder, fonts, category='banknotes'):
             if not saved or not saved['filename'] or not (Path(folder) / saved['filename']).is_file():
                 warnings.append(title + ': PDF not yet available from the signed-in browser. Check will not retry private order pages or bypass access limits.')
             continue
-        if kind == 'listing':
-            found, problems = listing_photos(db, category, record_id, url, folder)
-            images.update(found)
-            warnings.extend(problems)
+        photos_loaded = False
         try:
             captured_html = ebay_listing_captures.html(db, url) if kind == 'listing' else None
             if captured_html:
@@ -289,7 +308,9 @@ def prepare(db, record, folder, fonts, category='banknotes'):
                 db.execute("UPDATE original_listing_pages SET state='available',checked_at=?,next_check_at=? WHERE url=?",
                            (now, now + listings.FRESH_SECONDS, url))
                 try:
-                    found, problems = listing_photos(db, category, record_id, url, folder, html, final)
+                    found, problems = listing_photos(db, category, record_id, url, folder, html, final,
+                                                     classify_photos, vision_source)
+                    photos_loaded = True
                     images.update(found)
                     warnings.extend(problems)
                 except Exception:
@@ -307,6 +328,11 @@ def prepare(db, record, folder, fonts, category='banknotes'):
         except Exception:
             db.rollback()
             warnings.append(title + ': live source could not be read; any saved PDF will be checked below.')
+        if kind == 'listing' and not photos_loaded:
+            found, problems = listing_photos(db, category, record_id, url, folder,
+                                             classify_photos=classify_photos, vision_source=vision_source)
+            images.update(found)
+            warnings.extend(problems)
 
     docs = db.execute("SELECT title,filename FROM record_documents WHERE category=? AND record_id=? "
                       "AND doc_set='main' ORDER BY position,created_at,id", (category, record_id)).fetchall()

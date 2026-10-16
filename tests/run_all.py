@@ -8,6 +8,7 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_ebay_orders.py', 'test_ebay_m
          'test_banknote_similar.py',
          'test_ebay_purchase_lookup.py',
          'test_banknote_check_sources.py',
+         'test_banknote_photo_sides.py',
          'test_banknote_price_currency.py',
          'test_banknote_status_badge.py',
          'test_purchase_lifecycle.py',

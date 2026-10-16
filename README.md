@@ -156,3 +156,33 @@ which refuses to overwrite subsequent user edits. The tool has no scheduled exec
 or automatic apply. Run `python banknote_catalog_audit.py --help` for command options;
 `python tests/test_banknote_catalog_audit.py` exercises the workflow with isolated
 fixtures and mocked provider requests, and is included in `tests/run_all.py`.
+
+### Banknote listing photos
+
+Check examines the exact listing's available gallery (up to 24 original photos)
+with one bounded image-only side-classification call. Gallery order does not
+imply front/back: two obverse close-ups or holder views cannot fill both slots.
+Only a high-confidence, complete view is eligible, and a selected pair must be
+confirmed as opposite sides of the same note. Collages, holder-only photos,
+other notes and uncertain views are not assigned. A confirmed blank reverse is
+valid. No purchase, order, owner or other collection text goes into this call;
+it uses the existing note-vision model configuration and no web-search tools.
+
+For supported exact-listing sources, original gallery files remain attached in
+Documents. Every occupied image
+slot and manual crop is preserved. When only one slot is empty, the saved
+original is also examined before filling its partner. An uncertain or duplicate
+existing pair produces a warning for manual correction rather than replacing
+photos. The final write checks both original filenames and the listing link
+again, so an edit made during classification wins. Only newly imported display
+copies are cropped; original files and existing crop mappings are retained.
+
+Banknote Buy/Bought uses the same selector and keeps the exact gallery originals.
+It reuses the signed-in browser's saved listing capture or archived gallery when
+the server cannot read eBay. Search thumbnails and recommendation images alone
+are not a verified gallery. Other dealer URL shapes can retain downloaded
+originals on disk without a Documents attachment through the current source
+registry. Coin photo behavior is unchanged. Missing model
+access or inconclusive evidence leaves the affected slot empty; Check can retry.
+Tests: `test_banknote_photo_sides.py`, `test_banknote_check_sources.py`, and
+`test_market_images.py`.

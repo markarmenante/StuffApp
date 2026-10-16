@@ -22,9 +22,35 @@ PAGES = {
 stuffapp._market_fetch_page = lambda url, limit=0: PAGES.get(url, (None, ''))
 stuffapp._market_transport = lambda url, limit, timeout: stuffapp.market_runtime.PageResult(
     *PAGES.get(url, (None, '')), url)
-import base64
-PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
-PHOTOS = {'https://i.ebayimg.com/obv.png': PNG, 'https://i.ebayimg.com/rev.png': PNG}
+from io import BytesIO
+from PIL import Image
+
+def photo_bytes(color):
+    buf = BytesIO()
+    Image.new('RGB', (400, 200), color).save(buf, format='PNG')
+    return buf.getvalue()
+
+PHOTOS = {'https://i.ebayimg.com/obv.png': photo_bytes('red'),
+          'https://i.ebayimg.com/rev.png': photo_bytes('blue')}
+PAGES['https://www.stacksbowers.com/lot/sarawak'] = (200,
+    '<html><head><script type="application/ld+json">' +
+    json.dumps({'@type': 'Product', 'image': list(PHOTOS)}) +
+    '</script></head><body>Sarawak 1 Dollar 1935 PMG 65 EPQ. Buy Now.</body></html>')
+
+def classify_photos(photos):
+    readings, selected = [], {}
+    for photo in photos:
+        with Image.open(os.path.join(stuffapp.UPLOAD_FOLDER, photo['filename'])) as image:
+            red, _, blue = image.convert('RGB').getpixel((0, 0))
+        side = 'front' if red > blue else 'back'
+        readings.append(dict(id=photo['id'], side=side, confidence='high',
+                             complete_note=True, same_note=True, reason='Synthetic distinct design'))
+        if photo['gallery']:
+            selected.setdefault(side, photo['id'])
+    return dict(photos=readings, front=selected.get('front'), back=selected.get('back'),
+                pair_verified=True, pair_reason='Synthetic opposite sides of this note')
+
+stuffapp._classify_banknote_listing_photos = classify_photos
 stuffapp._market_fetch_image = lambda url, limit=0: ((PHOTOS[url], 'png') if url in PHOTOS else (None, None))
 stuffapp.app.config['TESTING'] = True
 with stuffapp.app.app_context():
