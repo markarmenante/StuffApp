@@ -39,6 +39,11 @@ period labels. Rhodesian UDI is identified as an unrecognized administration.
 All Philippine issues remain together under United States as explicitly
 requested, including Spanish, American, Commonwealth, Japanese occupation and
 Republic issues. This is a collection choice, not a claim of continuous US rule.
+Confederate States and Confederate States of America also file in this US
+collection family, after domestic US notes and before Philippine notes. Their
+stored country and issuer identities remain unchanged; the period label keeps
+Confederate obligations distinct from US federal issues. Migration v28 refreshes
+display positions only, preserving permanent catalogue IDs and purchase data.
 Occupation issuers elsewhere take precedence over territorial filing: Japanese
 issues in Burma, Malaya, Netherlands Indies, China and French Indo-China move to
 the Japanese group. Metropolitan Japanese, French, German, Italian, etc. national

@@ -83,6 +83,9 @@ def canonical_country(value):
     return _ALIAS_LOOKUP.get(key, value)
 
 
+_CONFEDERATE_COUNTRIES = frozenset({'confederatestates', 'confederatestatesofamerica'})
+
+
 # A generic "Treasury Note" label also occurs on state, territorial and
 # Confederate paper. The federal coin-note class belongs to the 1890/1891
 # series only (BEP currency history); do not infer it from that phrase alone.
@@ -540,6 +543,8 @@ def classify(country, date=None, issuer=None, series=None):
         return result('us', 'Puerto Rico — United States territory')
     if colonial_country:
         return result('british', 'British North America — colonial issue')
+    if fold(country) in _CONFEDERATE_COUNTRIES:
+        return result('us', 'Confederate States issue — separate from US federal issues')
     if country == 'United States of America':
         return result('us', 'United States issue')
     colonial_america = country in {'New Jersey', 'Pennsylvania Colony'} or (country.startswith('United States (') and 'colonial' in country.lower())
@@ -576,6 +581,8 @@ def row_classification(row):
 def sort_country(country, date=None, issuer=None, series=None):
     # Domestic US issues lead their requested Philippine collection family.
     canonical = canonical_country(country) or 'zzz'
+    if fold(canonical) in _CONFEDERATE_COUNTRIES:
+        return '0 United States Confederate States'
     colony = american_colonial_country(canonical, date, issuer, series)
     if colony:
         # Keep each colony together before sorting its eras and issue dates.

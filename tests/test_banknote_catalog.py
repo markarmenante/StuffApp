@@ -15,6 +15,45 @@ import app as stuff
 class CatalogueTests(unittest.TestCase):
     WATER_WORKS = 'Mayor, Aldermen, and Commonalty of the City of New-York (Water Works)'
 
+    def test_confederate_issues_join_us_family_and_resequence_once(self):
+        notes = [
+            ('independent', 'Austria', 1922, ''),
+            ('philippine', 'Philippines', 1944, 'The Japanese Government'),
+            ('confederate', 'Confederate States of America', 1864, 'Confederate States Treasury'),
+            ('virginia', 'Confederate States', 1862, 'Commonwealth of Virginia (Treasury)'),
+            ('federal', 'United States of America', 1918, 'Federal Reserve Bank'),
+        ]
+        for args in notes:
+            self.add(*args)
+        for country in ('Confederate States', 'Confederate States of America'):
+            info = catalog.classify(country, 1862)
+            self.assertEqual((info['key'], info['country']), ('us', country))
+            self.assertIn('Confederate', info['period'])
+        self.db.execute("UPDATE banknotes SET banknote_id='P 999', cat_id='B777', price='$42', denomination='$5'")
+        self.db.execute("INSERT OR IGNORE INTO migration_state(key, applied_at) VALUES('banknote_display_number_v27', '2026-10-16')")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v28'")
+        self.db.commit()
+        before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
+        stuff.init_db()
+        rows = self.db.execute('SELECT * FROM banknotes ORDER BY ' + stuff.CATEGORY_ORDER_BY['banknotes']).fetchall()
+        self.assertEqual([r['id'] for r in rows], ['federal', 'virginia', 'confederate', 'philippine', 'independent'])
+        self.assertEqual([r['banknote_id'] for r in rows], [f'P {i:03d}' for i in range(1, 6)])
+        for row in rows:
+            self.assertEqual({k: v for k, v in dict(row).items() if k != 'banknote_id'},
+                             {k: v for k, v in before[row['id']].items() if k != 'banknote_id'})
+        with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
+            stuff.init_db()
+        renumber.assert_not_called()
+        for history in ('0', '1'):
+            html = stuff.app.test_client().get('/banknotes', query_string={
+                'filter': 'heritage_us', 'history': history}).get_data(as_text=True)
+            for ident in ('federal', 'virginia', 'confederate', 'philippine'):
+                self.assertIn('item-' + ident, html)
+            self.assertNotIn('item-independent', html)
+        sections = stuff._banknote_report_sections(self.db)
+        self.assertEqual([r['id'] for _, _, group in sections for r in group],
+                         ['federal', 'virginia', 'confederate', 'philippine', 'independent'])
+
     def test_american_colonies_precede_generic_us_classification(self):
         for year in (1774, 1775, 1776):
             for country in ('USA', 'United States of America', 'New York', 'New York Colony'):
@@ -185,7 +224,7 @@ class CatalogueTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET issue_type='National', denomination='$1' WHERE id='us1918'")
         self.db.execute("UPDATE banknotes SET status='Ordered' WHERE id IN ('pa1776','ct1776')")
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v27'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v28'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -958,7 +997,7 @@ class CatalogueTests(unittest.TestCase):
         self.add('colonial', 'United States (Colonial - Pennsylvania)', 1772,
                  'Province of Pennsylvania')
         self.add('ny', 'United States of America', 1776, self.WATER_WORKS)
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v27'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v28'")
         self.db.commit()
         stuff.init_db()
         row = self.db.execute("SELECT country,banknote_id FROM banknotes WHERE id='french'").fetchone()

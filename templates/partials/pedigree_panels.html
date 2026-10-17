@@ -15,7 +15,8 @@
 
 <!-- Provenance & Pedigree — collapsible. Open by default for coins;
      collapsed by default for banknotes (Mark, 2026-09-18). -->
-<details class="pdg-collapsible" id="pdgProvenanceWrap"{% if category == 'coins' %} open{% endif %}>
+{% if category == 'coins' %}
+<details class="pdg-collapsible" id="pdgProvenanceWrap" open>
 <summary class="section-bar pdg-collapsible-bar">Provenance &amp; Pedigree</summary>
 <div class="pdg-panel" id="pdgProvenance">
   <div class="pdg-head">
@@ -67,6 +68,7 @@
   </div>
 </div>
 </details>
+{% endif %}
 
 <!-- Rarity & Population -->
 <div class="section-bar">Rarity &amp; Population</div>
@@ -169,6 +171,7 @@
   // ── Provenance chain ────────────────────────────────────────────
   function renderEvents(events, purchase) {
     const tbody = $('pdgEvents');
+    if (!tbody) return;
     const rows = (events || []).slice();
     if (purchase) rows.push(purchase);
     tbody.innerHTML = rows.map(ev => {
@@ -217,7 +220,7 @@
     el.textContent = msg; el.style.display = '';
   }
 
-  $('pdgEvents').addEventListener('click', async (e) => {
+  $('pdgEvents')?.addEventListener('click', async (e) => {
     const btn = e.target.closest('.pdg-del');
     if (!btn) return;
     e.preventDefault();
@@ -248,10 +251,10 @@
       ['pdgAddDate','pdgAddHouse','pdgAddSale','pdgAddLot','pdgAddPrice','pdgAddUrl','pdgAddNotes'].forEach(id => { $(id).value = ''; });
     } catch (err) { showError('pdgProvError', 'Could not add: ' + err.message); }
   }
-  $('pdgAddBtn').addEventListener('click', addEvent);
+  $('pdgAddBtn')?.addEventListener('click', addEvent);
   // Enter inside the add row adds the event; it must not submit the
   // record's own Save form that this panel sits inside.
-  $('pdgAdd').addEventListener('keydown', (e) => {
+  $('pdgAdd')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addEvent(); }
   });
 

@@ -6769,9 +6769,10 @@ def init_db():
     # v26: confirmed New Jersey colonial issues use New Jersey Colony.
     # v27: symbol/written denominations share a currency family and
     # compare numeric base-unit amounts within the existing era/year.
+    # v28: Confederate issues join the US collection family, before Philippines.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v27',),
+        ('banknote_display_number_v28',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6779,7 +6780,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v27', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v28', datetime.utcnow().isoformat()),
         )
         db.commit()
 

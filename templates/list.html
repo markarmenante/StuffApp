@@ -59,9 +59,11 @@
      for the whole category (every coin / note with its chain of custody
      and earliest documented date; every one with its census standing). #}
   {% if category in ('coins', 'banknotes') and not at_property and not _market and not _analysis %}
+  {% if category == 'coins' %}
   <a href="{{ url_for('pedigree_overview', category=category, kind='provenance') }}"
      class="toolbar-btn pill pedigree-pill"
      title="Provenance & pedigree — the sale history of each {{ 'coin' if category == 'coins' else 'note' }}, its earliest documented appearance, and the import-restriction position">Provenance</a>
+  {% endif %}
   <a href="{{ url_for('pedigree_overview', category=category, kind='rarity') }}"
      class="toolbar-btn pill pedigree-pill"
      title="Rarity & population — {{ 'PMG / PCGS census by Pick number and grade' if category == 'banknotes' else 'specimens recorded, rarity ratings and die-study placement' }}">Rarity</a>

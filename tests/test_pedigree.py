@@ -174,6 +174,9 @@ r = client.get('/banknotes/b1')
 assert r.status_code == 200, r.status_code
 html = r.get_data(as_text=True)
 assert 'Census &amp; rarity' in html and 'pdgRarResearch' in html
+assert 'Provenance &amp; Pedigree' not in html
+assert 'id="pdgProvenanceWrap"' not in html and 'id="pdgEvents"' not in html
+assert 'id="pdgProvResearch"' not in html
 assert 'id="pdgRarRegradeRow"' not in html
 start = html.index('<details class="pdg-research-details">')
 end = html.index('</details>', start)
@@ -186,6 +189,9 @@ assert r.status_code == 200 and 'pdgData' not in r.get_data(as_text=True)
 r = client.get('/coins')
 assert '/coins/pedigree/provenance' in r.get_data(as_text=True)
 assert '/coins/pedigree/rarity' in r.get_data(as_text=True)
+r = client.get('/banknotes')
+assert '/banknotes/pedigree/provenance' not in r.get_data(as_text=True)
+assert '/banknotes/pedigree/rarity' in r.get_data(as_text=True)
 r = client.get('/watches')
 assert '/watches/pedigree/' not in r.get_data(as_text=True)
 print('panels render OK')
@@ -254,6 +260,7 @@ stuffapp._pedigree_model_call = fake_model_call
 # polling budget and make an otherwise offline regression intermittent.
 stuffapp._provenance_archive_sweep = lambda *args, **kwargs: {
     'candidates': [], 'keyed': False, 'status': 'synthetic archive'}
+stuffapp._rarity_archive_sweep = lambda *args, **kwargs: {'lots': [], 'status': ''}
 
 
 def run_job(category, record_id, kind):
