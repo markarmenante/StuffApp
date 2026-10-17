@@ -220,6 +220,17 @@ evidence for cropping to an interior coloured design. Regression:
 upload round-trip, original preservation). Check still never re-trims
 stored photos or overwrites a manual crop.
 
+Tight black-backdrop scans (2026-10-17): a pale sheet occupying over 85% of
+its photo can retain a thin seller backdrop that general holder detectors
+reject as nearly full-frame. A narrow paper-boundary path requires a complete
+quadrilateral and pale paper against near-black background on all four sides.
+It preserves white margins, renders once from the original without an inward
+shave, and records the source quad. Dark designs and printed borders on a full
+sheet do not justify a crop. Existing photos and manual crops remain unchanged
+by Check; this path applies when a new image arrives. Regression coverage is
+in `tests/test_banknote_image_quality.py`.
+
+
 ## Collection report (banknotes)
 
 The Report pill on the Banknotes list (owner only; Mark, 2026-09-12)

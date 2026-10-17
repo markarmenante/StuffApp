@@ -190,6 +190,8 @@ def prepare(db, record, folder, fonts, category='banknotes', classify_photos=Non
     amount = None
     price_blocked = False
     sources = []
+    source_failures = {}
+    verified_listing_urls = set()
     order = purchase_orders.order_reference(db, category, record)
     item = purchase_orders.ebay_item_for_order(db, category, record)
     if item:
@@ -268,9 +270,9 @@ def prepare(db, record, folder, fonts, category='banknotes', classify_photos=Non
             parts.hostname == 'order.ebay.com' or
             (parts.hostname in ('www.vcoins.com', 'vcoins.com') and '/myaccount/' in parts.path.lower()))
         if private_order:
-            saved = db.execute('SELECT filename FROM purchase_source_archives WHERE url=?', (url,)).fetchone()
-            if not saved or not saved['filename'] or not (Path(folder) / saved['filename']).is_file():
-                warnings.append(title + ': PDF not yet available from the signed-in browser. Check will not retry private order pages or bypass access limits.')
+            # A saved PDF is optional when the authenticated order already
+            # supplies the item amount. Missing receipt evidence is reported
+            # once below; never imply that an observation is a saved PDF.
             continue
         photos_loaded = False
         try:
@@ -325,9 +327,11 @@ def prepare(db, record, folder, fonts, category='banknotes', classify_photos=Non
                 continue
             evidence.append(dict(title=title, kind=kind, url=url, text=text, saved=False))
             reports.append(title + ': live source checked; PDF in Documents.')
+            if kind == 'listing':
+                verified_listing_urls.add(url)
         except Exception:
             db.rollback()
-            warnings.append(title + ': live source could not be read; any saved PDF will be checked below.')
+            source_failures[url] = title + ': source could not be read.'
         if kind == 'listing' and not photos_loaded:
             found, problems = listing_photos(db, category, record_id, url, folder,
                                              classify_photos=classify_photos, vision_source=vision_source)
@@ -356,6 +360,10 @@ def prepare(db, record, folder, fonts, category='banknotes', classify_photos=Non
             kind = 'invoice' if re.search(r'invoice|receipt|\border\b', title, re.I) else 'document'
             evidence.append(dict(title=title, kind=kind, url='/uploads/' + filename, text=text, saved=True))
             reports.append(title + ': saved PDF checked.')
+            for archived in db.execute('SELECT url,kind FROM purchase_source_archives WHERE filename=?', (filename,)):
+                source_failures.pop(archived['url'], None)
+                if archived['kind'] == 'listing':
+                    verified_listing_urls.add(archived['url'])
         except Exception:
             warnings.append(title + ': PDF text could not be read; its fields are not verified.')
     if item:
@@ -373,11 +381,13 @@ def prepare(db, record, folder, fonts, category='banknotes', classify_photos=Non
                         elif not price_blocked:
                             purchase['price'] = price
                             reports.append('Exact item unit price verified against the saved eBay receipt; shipping and tax excluded.')
+    warnings.extend(source_failures.values())
     if not any(e['kind'] in ('order', 'invoice') for e in evidence):
         warnings.append('No readable invoice or order receipt found. Purchase amount and date are not verified against a receipt.')
     return dict(evidence=evidence, reports=reports, warnings=warnings,
                 documents=[dict(d) for d in docs], images=images, purchase=purchase,
-                purchase_price_fill_only=bool(amount), purchase_price_blocked=price_blocked)
+                purchase_price_fill_only=bool(amount), purchase_price_blocked=price_blocked,
+                verified_listing_urls=sorted(verified_listing_urls))
 
 
 def evidence_text(prepared):

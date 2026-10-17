@@ -7856,9 +7856,15 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       }
     }
     if (data.purchase_sources) {
-      sourceStatus([...data.purchase_sources.reports, ...data.purchase_sources.warnings].join('\n'));
+      // A finished Check replaces earlier progress/failures. Keep current
+      // warnings visible; routine source reports stay out of the form.
+      sourceStatus((data.purchase_sources.warnings || []).join('\n'));
       document.dispatchEvent(new CustomEvent('banknote-check-documents', {detail: data.documents || []}));
-      document.dispatchEvent(new CustomEvent('purchase-sources-updated'));
+      document.dispatchEvent(new CustomEvent('purchase-sources-updated', {detail: {
+        listingFailureResolved: resp.ok && !data.lookup_error && data.listing_failure_resolved === true,
+      }}));
+    } else if (resp.ok && !data.lookup_error) {
+      sourceStatus('');
     }
 
     // Show newly imported listing photos even if the field lookup failed.

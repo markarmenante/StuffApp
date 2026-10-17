@@ -10,7 +10,7 @@
   const deliveryBadge = document.querySelector('[data-delivery-badge]');
   const statusSelect = document.querySelector('#mainForm select[name="status"]');
   let result = JSON.parse(panel.querySelector('[data-listing-initial]').textContent);
-  let attempts = 0, busy = false, timer;
+  let attempts = 0, busy = false, timer, refreshGeneration = 0;
   let resultRevision = window.purchaseStatusRevision || 0;
 
   function renderDelivery(delivery) {
@@ -112,13 +112,14 @@
   async function refresh() {
     if (busy) return;
     const revision = window.purchaseStatusRevision || 0;
+    const generation = refreshGeneration;
     try {
       const response = await fetch(panel.dataset.url, {
         credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000),
       });
       if (!response.ok || busy) return;
       const data = await response.json();
-      if (busy) return;
+      if (busy || generation !== refreshGeneration) return;
       render(data, revision);
       if ((data.pending || data.archive_pending || data.check?.state === 'pending') && ++attempts < 40) {
         timer = window.setTimeout(refresh, 5000);
@@ -191,6 +192,13 @@
     if (control && !control.disabled) submitAction(control.dataset.changeAction, control.dataset.field);
   });
   render(result);
-  document.addEventListener('purchase-sources-updated', () => { attempts = 0; clearTimeout(timer); refresh(); });
+  document.addEventListener('purchase-sources-updated', event => {
+    refreshGeneration++;
+    if (event?.detail?.listingFailureResolved && result.check?.state === 'failed' && !result.check.differences?.length) {
+      render({...result, check: null});
+      error.textContent = ''; error.hidden = true;
+    }
+    attempts = 0; clearTimeout(timer); refresh();
+  });
   refresh();
 })();

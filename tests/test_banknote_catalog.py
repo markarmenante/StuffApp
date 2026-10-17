@@ -543,6 +543,128 @@ class CatalogueTests(unittest.TestCase):
             self.assertTrue(proposed.endswith('/ ' + expected), proposed)
             self.assertEqual(self.db.execute("SELECT obv_rev FROM banknotes WHERE id='B411'").fetchone()[0], saved)
 
+    def signature_identity(self):
+        return dict(country='British Honduras',
+                    issuer='Government of British Honduras (Commissioners of Currency)',
+                    denomination='1 Dollar', date_1='1964', pick_number='P-28b')
+
+    def signature_note(self, signatures=''):
+        identity = self.signature_identity()
+        self.add('honduras', identity['country'], identity['date_1'], identity['issuer'])
+        self.db.execute("UPDATE banknotes SET denomination=?,pick_number=?,signatures=?, "
+                        "size_width=165,size_height=63,price='$260.00',serial_number='G/4 123456' "
+                        "WHERE id='honduras'", (identity['denomination'], identity['pick_number'], signatures))
+        self.db.commit()
+
+    def signature_check(self, suggestions=None, failed=False):
+        prepared = dict(evidence=[], reports=[], documents=[], warnings=[], images={})
+        model = (patch.object(stuff, 'fetch_banknote_specs', side_effect=RuntimeError('Unavailable'))
+                 if failed else patch.object(stuff, 'fetch_banknote_specs', return_value=suggestions or {}))
+        with patch.object(stuff.banknote_check_sources, 'prepare', return_value=prepared), \
+                model, patch.object(stuff, 'ensure_country_history'):
+            return stuff.app.test_client().post('/banknotes/honduras/lookup-specs')
+
+    def test_exact_1964_honduras_signature_reference(self):
+        base = self.signature_identity()
+        for reference in ('P-28b', 'P#28b', 'Pick 28b', 'P28b', 'P-28b; Pick 28b',
+                          'P-28b, TBB B127', 'TBB #B127; P-28b'):
+            for denomination in ('1 Dollar', '$1', '1Dollar', 1, 1.0):
+                with self.subTest(reference=reference, denomination=denomination):
+                    result = catalog.signature_reference(dict(base, pick_number=reference,
+                                                               denomination=denomination,
+                                                               other_catalog='TBB B127'))
+                    self.assertEqual(set(result['fields']), {'signatures'})
+                    self.assertEqual(result['fields']['signatures'],
+                        'Henry Edney Conrad Cain; Rafael Aloysius Fonseca; Henry Ignatius Melhado')
+                    self.assertIn('https://en.numista.com/202483', result['source'])
+                    self.assertIn('lots 2349–2351', result['source'])
+        self.assertIsNotNone(catalog.signature_reference(dict(base, date_1=1964.0,
+            issuer='Board of Commissioners of Currency')))
+
+    def test_signature_reference_requires_every_identity_field(self):
+        base = self.signature_identity()
+        for changes in ({'country':'Belize'}, {'country':'British Guiana'}, {'country':''},
+                        {'issuer':'Government of British Guiana'}, {'issuer':'Bank of British Honduras'},
+                        {'issuer':''}, {'denomination':'5 Dollars'}, {'denomination':'1 Pound'},
+                        {'date_1':1961}, {'date_1':1965}, {'date_1':None}, {'date_2':1969},
+                        {'pick_number':'P-28'}, {'pick_number':'P-28a'}, {'pick_number':'28b'},
+                        {'pick_number':'P-28b / 28c'}, {'pick_number':'P-28b, 28c'},
+                        {'pick_number':'P-28b, possibly 28c'}, {'pick_number':'P-28b?'},
+                        {'pick_number':'P-28b; P-28c'}, {'other_catalog':'P-28c'},
+                        {'pick_number':''}):
+            with self.subTest(changes=changes):
+                self.assertIsNone(catalog.signature_reference(dict(base, **changes)))
+        self.assertIsNone(catalog.signature_reference({'description':'British Honduras 1964 $1 P-28b'}))
+
+    def test_signature_reference_rejects_malformed_identity(self):
+        base = self.signature_identity()
+        for changes in ({'country':['British Honduras']}, {'issuer':123},
+                        {'date_1':1964.9}, {'date_1':True}, {'date_1':float('nan')},
+                        {'date_1':float('inf')}, {'date_2':[]}, {'denomination':True},
+                        {'denomination':[]}, {'pick_number':['P-28b']}, {'other_catalog':{}}):
+            with self.subTest(changes=changes):
+                self.assertIsNone(catalog.signature_reference(dict(base, **changes)))
+
+    def test_check_offers_catalogue_signatures_without_writing_saved_fields(self):
+        self.signature_note()
+        for failed in (False, True):
+            before = dict(self.db.execute("SELECT * FROM banknotes WHERE id='honduras'").fetchone())
+            response = self.signature_check(failed=failed)
+            self.assertEqual(response.status_code, 200, response.get_json())
+            data = response.get_json()
+            expected = catalog.signature_reference(before)['fields']['signatures']
+            self.assertEqual(data['filled'], {'signatures':expected})
+            self.assertEqual(data['overwritten'], {})
+            self.assertIn('dated catalogue signature reference', data['sources'])
+            self.assertEqual(bool(data['lookup_error']), failed)
+            after = dict(self.db.execute("SELECT * FROM banknotes WHERE id='honduras'").fetchone())
+            after['specs_searched_at'] = before['specs_searched_at']
+            self.assertEqual(after, before)
+        applied = stuff.app.test_client().post('/banknotes/honduras/apply-lookup-specs',
+                                               json={'updates':{'signatures':expected}})
+        self.assertEqual(applied.status_code, 200, applied.get_json())
+        self.assertEqual(self.db.execute("SELECT signatures FROM banknotes WHERE id='honduras'").fetchone()[0], expected)
+
+    def test_saved_signature_stays_until_reviewed_change_applied(self):
+        self.signature_note('Collector transcription')
+        data = self.signature_check().get_json()
+        self.assertEqual(data['overwritten']['signatures']['current'], 'Collector transcription')
+        self.assertIn('Henry Edney Conrad Cain', data['overwritten']['signatures']['new'])
+        self.assertNotIn('signatures', data['filled'])
+        self.assertEqual(self.db.execute("SELECT signatures FROM banknotes WHERE id='honduras'").fetchone()[0],
+                         'Collector transcription')
+
+    def test_signature_fallback_respects_direct_image_or_dealer_suggestion(self):
+        self.signature_note()
+        data = self.signature_check({'signatures':'Direct image transcription', 'sources':'Original photo'}).get_json()
+        self.assertEqual(data['filled']['signatures'], 'Direct image transcription')
+        self.assertEqual(data['sources'], 'Original photo')
+        self.db.execute("UPDATE banknotes SET description='Signatures: Dealer transcription' WHERE id='honduras'")
+        self.db.commit()
+        data = self.signature_check().get_json()
+        self.assertEqual(data['filled']['signatures'], 'Dealer transcription')
+        self.assertNotIn('Numista dated', data['sources'])
+
+    def test_conflicting_proposed_identity_withholds_signature_fallback(self):
+        self.signature_note()
+        for changes in ({'date_1':1961}, {'denomination':'5 Dollars'}, {'country':'Belize'},
+                        {'issuer':'Government of British Guiana'}, {'pick_number':'P-28c'},
+                        {'date_2':1969}, {'issuer':[]}):
+            with self.subTest(changes=changes):
+                response = self.signature_check(changes)
+                self.assertEqual(response.status_code, 200, response.get_json())
+                data = response.get_json()
+                self.assertNotIn('signatures', data['filled'])
+                self.assertNotIn('signatures', data['overwritten'])
+                self.assertTrue(any('signature reference was not applied' in warning
+                                    for warning in data['purchase_sources']['warnings']))
+        # Model-only changes cannot upgrade a positively different saved issue.
+        self.db.execute("UPDATE banknotes SET date_1='1961' WHERE id='honduras'")
+        self.db.commit()
+        data = self.signature_check({'date_1':1964}).get_json()
+        self.assertNotIn('signatures', data['filled'])
+        self.assertNotIn('signatures', data['overwritten'])
+
     def test_federal_coin_note_history_requires_compatible_date_and_issuer(self):
         for year in (1890, 1891):
             for issuer in ('United States Treasury', 'U.S. Treasury',

@@ -1,5 +1,7 @@
 """Explicit Check reads exact sources, archives PDFs once, and does not invent paid amounts."""
 import io
+import json
+import time
 import os
 from pathlib import Path
 import sys
@@ -16,6 +18,7 @@ os.environ.pop('ANTHROPIC_API_KEY', None)
 import app as stuff
 import banknote_check_sources as sources
 import original_listings
+import listing_checks
 import purchase_orders
 import ebay_listing_captures
 
@@ -91,8 +94,8 @@ class SourceCheckTests(unittest.TestCase):
         with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('sign in')) as fetch:
             result = self.prepare()
         self.assertEqual([c.args[0] for c in fetch.call_args_list], [URL])
-        self.assertIn('12-34567-89012', ' '.join(result['warnings']))
-        self.assertIn('signed-in browser', ' '.join(result['warnings']))
+        self.assertIn('No readable invoice', ' '.join(result['warnings']))
+        self.assertNotIn('PDF not yet available', ' '.join(result['warnings']))
 
     def order(self, suffix='', title='Tonga 1 Pound 1966 PMG 67 EPQ', **values):
         self.db.execute("UPDATE banknotes SET order_number='12-34567-89012' WHERE id=?", (self.id,))
@@ -627,7 +630,7 @@ class SourceCheckTests(unittest.TestCase):
         with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('sign in')):
             result = self.prepare()
         self.assertTrue(result['evidence'][0]['saved'])
-        self.assertIn('live source could not be read', ' '.join(result['warnings']))
+        self.assertIn('source could not be read', ' '.join(result['warnings']))
         self.assertNotIn('No readable invoice', ' '.join(result['warnings']))
 
     def test_search_or_login_page_is_not_archived(self):
@@ -747,6 +750,7 @@ class SourceCheckTests(unittest.TestCase):
         self.assertIn('authenticated order observation', sources.evidence_text(result))
         self.assertFalse(any('No readable invoice' in w for w in result['warnings']))
         self.assertEqual(result['documents'], [])
+        self.assertFalse(any('PDF not yet available' in w for w in result['warnings']))
 
     def test_authenticated_receipt_does_not_override_a_conflicting_linked_listing(self):
         self.blank()
@@ -788,6 +792,102 @@ class SourceCheckTests(unittest.TestCase):
         self.assertIsNone(self.note()['price'])
         self.assertTrue(any('conflict' in warning.lower() or 'disagree' in warning.lower()
                             for warning in response.json['purchase_sources']['warnings']))
+
+
+    def failed_listing(self):
+        self.add_listing()
+        listing_checks.ensure(self.db, 'banknotes', self.id, URL)
+        self.db.execute("UPDATE original_listing_checks SET state='failed',result=NULL,attempts=1 WHERE banknote_id=?", (self.id,))
+        self.db.commit()
+
+    def successful_check(self, **lookup):
+        with patch.object(sources.archives, 'fetch_bytes', return_value=(HTML.encode(), 'text/html', URL)), \
+                patch.object(stuff.ebay_purchase_lookup, 'ensure', return_value=None), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value=lookup), \
+                patch.object(stuff, 'ensure_country_history'):
+            return self.client.post('/banknotes/' + self.id + '/lookup-specs')
+
+    def test_successful_check_clears_same_source_failure_and_preserves_manual_crops(self):
+        self.failed_listing()
+        self.db.execute("UPDATE banknotes SET image_1='manual-front.jpg',image_2='manual-back.jpg' WHERE id=?", (self.id,))
+        self.db.commit()
+        with patch.object(stuff, '_trim_banknote_image', side_effect=AssertionError('Must not recrop')):
+            response = self.successful_check()
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertTrue(response.json['listing_failure_resolved'])
+        self.assertIsNotNone(response.json['specs_searched_at'])
+        self.assertIsNone(listing_checks.report(self.db, 'banknotes', self.id))
+        self.assertEqual((self.note()['image_1'], self.note()['image_2']), ('manual-front.jpg', 'manual-back.jpg'))
+        # Rendering/status reads do not recreate the resolved failure.
+        listing_checks.ensure(self.db, 'banknotes', self.id, URL)
+        self.db.commit()
+        self.assertIsNone(listing_checks.report(self.db, 'banknotes', self.id))
+        with patch.object(original_listings, 'fetch_listing', side_effect=AssertionError('Resolved failure must not retry')) as fetch:
+            self.assertFalse(listing_checks.run_once(stuff.open_db_connection, fetch, None))
+
+    def test_partial_or_unreadable_source_does_not_clear_failure(self):
+        self.failed_listing()
+        with patch.object(sources.archives, 'fetch_bytes', return_value=(HTML.encode(), 'text/html', URL)), \
+                patch.object(stuff.ebay_purchase_lookup, 'ensure', return_value=None), \
+                patch.object(stuff, 'fetch_banknote_specs', side_effect=RuntimeError('Model unavailable')):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(listing_checks.report(self.db, 'banknotes', self.id)['state'], 'failed')
+        self.db.execute('DELETE FROM record_documents WHERE record_id=?', (self.id,))
+        self.db.execute('UPDATE purchase_source_archives SET filename=NULL')
+        self.db.commit()
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('Sign in')), \
+                patch.object(stuff.ebay_purchase_lookup, 'ensure', return_value=None), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value={}):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json['listing_failure_resolved'])
+        self.assertEqual(listing_checks.report(self.db, 'banknotes', self.id)['state'], 'failed')
+        self.assertIn('source could not be read', ' '.join(response.json['purchase_sources']['warnings']))
+
+    def test_success_keeps_genuine_listing_discrepancies(self):
+        self.failed_listing()
+        comparison = dict(field='grade', label='Grade', stored='EF', listed='VF', evidence='Grade VF', outcome='different')
+        self.db.execute("UPDATE original_listing_checks SET state='checked',result=? WHERE banknote_id=?", (json.dumps([comparison]), self.id))
+        self.db.commit()
+        response = self.successful_check()
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json['listing_failure_resolved'])
+        check = listing_checks.report(self.db, 'banknotes', self.id)
+        self.assertFalse(check['dismissed'])
+        self.assertEqual(check['differences'][0]['listed'], 'VF')
+
+    def test_failure_resolution_is_bound_to_source_order_and_empty_failure_only(self):
+        self.failed_listing()
+        before = dict(self.note())
+        self.assertFalse(listing_checks.clear_failed_after_check(self.db, 'banknotes', before, ['https://www.ebay.com/itm/325643741724']))
+        self.db.execute("UPDATE banknotes SET order_number='98-76543-21098' WHERE id=?", (self.id,))
+        self.assertFalse(listing_checks.clear_failed_after_check(self.db, 'banknotes', before, [URL]))
+        self.db.execute("UPDATE banknotes SET order_number=NULL WHERE id=?", (self.id,))
+        self.db.execute("UPDATE original_listing_checks SET result=? WHERE banknote_id=?", (json.dumps([dict(field='grade', label='Grade', stored='EF', listed='VF', outcome='different')]), self.id))
+        self.assertFalse(listing_checks.clear_failed_after_check(self.db, 'banknotes', before, [URL]))
+        self.db.rollback()
+
+    def test_late_failed_background_comparison_cannot_restore_resolved_notice(self):
+        self.failed_listing()
+        self.db.execute("UPDATE original_listing_pages SET state='available',checked_at=? WHERE url=?", (time.time(), URL))
+        self.db.commit()
+        def fetched(url):
+            self.assertTrue(listing_checks.clear_failed_after_check(self.db, 'banknotes', self.note(), [URL]))
+            self.db.commit()
+            raise ValueError('An older comparison failed after the explicit Check')
+        self.assertTrue(listing_checks.run_once(stuff.open_db_connection, fetched, None))
+        self.assertIsNone(listing_checks.report(self.db, 'banknotes', self.id))
+
+    def test_readable_saved_listing_resolves_live_failure_without_claiming_live_access(self):
+        self.add_listing()
+        sources.save_pdf(self.db, self.id, URL, 'Original listing', 'listing', make_pdf('Tonga 1 Pound 1966. Original listing details from the seller.'), stuff.UPLOAD_FOLDER)
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('Sign in')):
+            result = self.prepare()
+        self.assertEqual(result['verified_listing_urls'], [URL])
+        self.assertTrue(any(e['saved'] for e in result['evidence']))
+        self.assertFalse(any('source could not be read' in w for w in result['warnings']))
+        self.assertFalse(any('live source checked' in r for r in result['reports']))
 
 
 if __name__ == '__main__':

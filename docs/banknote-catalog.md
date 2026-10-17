@@ -271,3 +271,22 @@ interest-bearing Treasury notes. Check offers that source-backed fact only in
 an empty Historical Context field; existing historical notes and the saved
 series label remain unchanged. It is a type-level fact, not evidence of this
 individual note’s circulation or redemption.
+
+
+## Signatures: dated British Honduras Pick 28b variety
+
+Check can fill a missed signature combination for the Government of British
+Honduras $1 dated 1964, explicitly identified as Pick 28b. The exact 1 April
+1964 variety names Henry Edney Conrad Cain, Rafael Aloysius Fonseca and Henry
+Ignatius Melhado. [Numista's dated variety table](https://en.numista.com/202483)
+provides the full names; [Noonans, 31 May 2022, lots 2349–2351](https://www.noonans.co.uk/auctions/calendar/647/download-pdf/)
+corroborates the date, denomination, Pick number and Cain/Fonseca/Melhado set.
+The 1961 Pick 28b rows have Parcher/Cottrell/Melhado instead, so Pick 28b alone
+cannot establish the signatures.
+
+This finite reference requires a consistent saved country, issuer, denomination,
+year and unambiguous Pick variety. A conflicting proposed identity withholds it,
+and direct image/dealer signature suggestions take precedence. It supplies only
+Signatures through the existing fill/review flow, with source attribution; the
+lookup does not write the saved signature field or infer specimen facts. The
+model prompt also requires the dated variety instead of the entire series' list.

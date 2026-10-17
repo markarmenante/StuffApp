@@ -161,6 +161,64 @@ for quality in (80, 90, 95):
     assert all(abs(a - b) <= 8 for a, b in
                zip(Image.open(io.BytesIO(output)).size, (1180, 540)))
 
+# A seller's already-tight photo can retain only a thin black backdrop.
+# Its paper occupies >90% of the frame, beyond the general holder area cap.
+def tight_dark_scan(ink=(38, 100, 64), paper=(238, 237, 232), background=(22, 23, 22)):
+    img = Image.new('RGB', (1280, 560), background)
+    draw = ImageDraw.Draw(img)
+    quad = [(18, 17), (1262, 14), (1259, 544), (16, 542)]
+    draw.polygon(quad, fill=paper)
+    draw.polygon([(36, 36), (1242, 33), (1239, 523), (35, 522)], fill=ink)
+    # Dense dark engraving remains part of the note, not background.
+    for x in range(70, 1210, 14):
+        draw.line((x, 80, x, 480), fill=(180, 184, 142), width=2)
+    return img, quad
+
+
+for ink in ((38, 100, 64), (20, 20, 20)):
+    photo, paper_quad = tight_dark_scan(ink)
+    for fmt in ('PNG', 'WEBP', 'JPEG'):
+        raw_tight = encoded(photo, fmt)
+        meta = {}
+        with patch.object(stuffapp, '_trim_note_v2', side_effect=AssertionError('model fallback')), \
+                patch.object(stuffapp, '_trim_note_cv_cascade', side_effect=AssertionError('design fallback')):
+            output = stuffapp._trim_slabbed_note_image(raw_tight, meta=meta)
+        assert output and meta['engine'] == 'paper-on-dark-backdrop', (ink, fmt, meta)
+        assert all(math.dist(a, b) < 3 for a, b in zip(meta['quad'], paper_quad)), meta
+        crop = Image.open(io.BytesIO(output))
+        assert abs(crop.width - 1244) <= 3 and abs(crop.height - 528) <= 3, crop.size
+        # Each genuine white margin survives, including dark-note designs.
+        for point in ((crop.width // 2, 5), (crop.width // 2, crop.height - 6),
+                      (5, crop.height // 2), (crop.width - 6, crop.height // 2)):
+            assert min(crop.getpixel(point)) > 180, (fmt, point, crop.getpixel(point))
+        assert stuffapp._paper_on_dark_backdrop_quad(crop) is None, 'Never re-trim a finished paper outline'
+        assert JpegImagePlugin.get_sampling(crop) == 0
+        assert min(crop.getpixel((crop.width // 2, crop.height // 2))) < 120, 'Do not erase dark engraving'
+
+photo, _ = tight_dark_scan()
+assert stuffapp._paper_on_dark_backdrop_quad(photo, expect_aspect=1.5) is None
+# A coloured design or printed black border on a full sheet is not a backdrop.
+full_sheet = Image.new('RGB', (1280, 560), (238, 237, 232))
+ImageDraw.Draw(full_sheet).rectangle((15, 15, 1265, 545), outline=(15, 15, 15), width=10)
+assert stuffapp._paper_on_dark_backdrop_quad(full_sheet) is None
+ImageDraw.Draw(full_sheet).rectangle((35, 35, 1245, 525), fill=(50, 100, 65))
+assert stuffapp._paper_on_dark_backdrop_quad(full_sheet) is None
+# Dark paper, a dark frame with a bright portrait, and gray backgrounds lack
+# four independently supported pale paper margins on a near-black surround.
+assert stuffapp._paper_on_dark_backdrop_quad(tight_dark_scan(paper=(110, 100, 80))[0]) is None
+assert stuffapp._paper_on_dark_backdrop_quad(tight_dark_scan(background=(100, 100, 100))[0]) is None
+portrait = Image.new('RGB', (1280, 560), (25, 25, 25))
+ImageDraw.Draw(portrait).ellipse((50, 30, 1230, 530), fill=(230, 225, 210))
+assert stuffapp._paper_on_dark_backdrop_quad(portrait) is None
+# A sheet touching the photo edge has no evidence of backdrop on that side.
+edge_cut = photo.crop((18, 0, photo.width, photo.height))
+assert stuffapp._paper_on_dark_backdrop_quad(edge_cut) is None
+one_gray_edge = photo.copy()
+ImageDraw.Draw(one_gray_edge).rectangle((1263, 0, 1279, 559), fill=(100, 100, 100))
+assert stuffapp._paper_on_dark_backdrop_quad(one_gray_edge) is None
+# Broader holder shots retain their existing detector path.
+assert stuffapp._paper_on_dark_backdrop_quad(holder(background=(20, 20, 20))) is None
+
 # Preserve native crop dimensions, even beyond the general photo resize cap.
 large = Image.new('RGB', (3600, 1600), (225, 215, 185))
 result = Image.open(io.BytesIO(stuffapp._encode_trimmed_note(large)))
@@ -192,6 +250,29 @@ with stuffapp.app.app_context():
     assert abs(saved.width - 1180) <= 8 and abs(saved.height - 540) <= 8, saved.size
     images = stuffapp._load_vision_images([(source, 'holder')])
     assert images and images[0]['media_type'] == 'image/webp'
+
+# The same upload path records a tight scan's original and exact source quad.
+with stuffapp.app.app_context():
+    db = stuffapp.get_db()
+    db.execute("INSERT INTO banknotes (id) VALUES ('tight-quality')")
+    db.commit()
+tight_raw = encoded(tight_dark_scan()[0])
+response = client.post('/banknotes/tight-quality/upload-image', data={
+    'field': 'image_1', 'image': (io.BytesIO(tight_raw), 'tight-original.webp'),
+})
+assert response.status_code == 200, response.get_json()
+with stuffapp.app.app_context():
+    db = stuffapp.get_db()
+    name = db.execute("SELECT image_1 FROM banknotes WHERE id='tight-quality'").fetchone()[0]
+    source = stuffapp._banknote_vision_source(name, db)
+    assert source != name and source.endswith('.webp')
+    with open(os.path.join(stuffapp.UPLOAD_FOLDER, source), 'rb') as f:
+        assert f.read() == tight_raw, 'Keep every original pixel and paper margin recoverable'
+    mapping = db.execute('SELECT quad FROM trimmed_image_sources WHERE trimmed=?', (name,)).fetchone()
+    import json
+    assert len(json.loads(mapping['quad'])) == 4
+    saved = Image.open(os.path.join(stuffapp.UPLOAD_FOLDER, name))
+    assert abs(saved.width - 1244) <= 3 and abs(saved.height - 528) <= 3, saved.size
 
 # Market acquisitions use the same source-preservation rule for notes.
 def classify_market_front(photos):

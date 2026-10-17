@@ -43,7 +43,7 @@ async function page(replies, initial = state(), ownership = 'Ordered') {
   await new Promise(setImmediate);
   return {panel, badge, requests, click, events, setOwnership(value) { statusSelect.value = value; changeStatus(); },
     button: elements['[data-listing-action]'],
-    title: elements['[data-listing-title]'], error: elements['[data-listing-error]']};
+    title: elements['[data-listing-title]'], error: elements['[data-listing-error]'], progress: elements['[data-listing-progress]']};
 }
 
 (async () => {
@@ -69,6 +69,33 @@ async function page(replies, initial = state(), ownership = 'Ordered') {
     assert.equal(ui.button.disabled, false);
   }
   console.log('Expired sessions renew once; dismiss/undo preserve the original evidence and action.');
+
+  const failed = state({review: null, check: {state: 'failed', differences: []}});
+  let releaseOld;
+  const oldReply = new Promise(resolve => { releaseOld = resolve; });
+  const recovered = await page([oldReply, response(200, state({review: null}))], failed);
+  assert.match(recovered.progress.textContent, /could not be completed/);
+  recovered.events['purchase-sources-updated']();
+  recovered.events['purchase-sources-updated']({detail: {listingFailureResolved: true}});
+  await new Promise(setImmediate);
+  assert.equal(recovered.progress.hidden, true);
+  releaseOld(response(200, failed));
+  await new Promise(setImmediate);
+  assert.equal(recovered.progress.hidden, true, 'An older response cannot restore a resolved failure');
+  assert.notEqual(recovered.title.textContent, 'Marked reviewed');
+
+  const difference = state({review: null, check: {state: 'checked', compared: 1, dismissed: false,
+    differences: [{field: 'grade', label: 'Grade', stored: 'EF', listed: 'VF'}]}});
+  const stillDifferent = await page([response(200, difference)], difference);
+  stillDifferent.events['purchase-sources-updated']({detail: {listingFailureResolved: true}});
+  await new Promise(setImmediate);
+  assert.equal(stillDifferent.title.textContent, 'Review Reason');
+  const stillFailed = await page([response(200, failed)], failed);
+  stillFailed.events['purchase-sources-updated']({detail: {listingFailureResolved: false}});
+  await new Promise(setImmediate);
+  assert.match(stillFailed.progress.textContent, /could not be completed/);
+  console.log('Successful Check clears only resolved failures; current differences and late-response ordering remain safe.');
+
 
   for (const changed of [state({review: {...state().review, token: 'evidence-2'}}),
                          state({check: {token: 'new-listing-check', differences: []}})]) {

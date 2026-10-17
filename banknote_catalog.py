@@ -173,6 +173,75 @@ def exact_year(value):
     return None
 
 
+
+# Pick 28b spans several dated signature combinations: the 1961 issue has
+# Parcher/Cottrell/Melhado. Only this positively identified 1964 issue is covered.
+_BRITISH_HONDURAS_1964_SIGNATURE_SOURCE = (
+    'British Honduras Government $1, 1 April 1964, Pick 28b signatures: '
+    'Henry Edney Conrad Cain; Rafael Aloysius Fonseca; Henry Ignatius Melhado. '
+    'Numista dated 1964-Apr-01 variety: https://en.numista.com/202483 ; '
+    'Noonans 31 May 2022, lots 2349–2351 (Cain/Fonseca/Melhado, Pick 28b): '
+    'https://www.noonans.co.uk/auctions/calendar/647/download-pdf/ . '
+    'This is a dated catalogue signature reference, not a transcription of this specimen.'
+)
+
+
+def signature_reference(row):
+    """Signatures for a verified dated variety, never a whole-series name list."""
+    def value(key):
+        return row[key] if row is not None and key in row.keys() else None
+    for key in ('country', 'issuer', 'pick_number', 'other_catalog'):
+        if value(key) is not None and not isinstance(value(key), str):
+            return None
+    if (value('country') or '').strip().lower() != 'british honduras':
+        return None
+    issuer = re.sub(r'^the\s+', '', (value('issuer') or '').strip(), flags=re.I)
+    if fold(issuer) not in {
+        'governmentofbritishhonduras',
+        'governmentofbritishhondurascommissionersofcurrency',
+        'governmentofbritishhondurasboardofcommissionersofcurrency',
+        'boardofcommissionersofcurrency', 'commissionersofcurrency',
+    }:
+        return None
+    if exact_year(value('date_1')) != 1964:
+        return None
+    if value('date_2') not in (None, '') and exact_year(value('date_2')) != 1964:
+        return None
+    denomination = value('denomination')
+    if isinstance(denomination, bool):
+        return None
+    if isinstance(denomination, (int, float)):
+        if denomination != 1:
+            return None
+    elif not (isinstance(denomination, str) and re.fullmatch(
+            r'(?:\$|BH\s*\$)?\s*1(?:\.0+)?(?:\s*dollars?)?',
+            denomination.strip(), re.I)):
+        return None
+    refs = []
+    for key in ('pick_number', 'other_catalog'):
+        for part in re.split(r'[,;]', value(key) or ''):
+            part = part.strip()
+            if re.search(r'(?<!\w)(?:pick|p)\s*[-.#]?\s*\d', part, re.I):
+                # Reject alternatives, uncertain attributions, missing variety
+                # suffixes and references embedded in unrelated prose.
+                if not re.fullmatch(r'(?:pick|p)\s*[-.#]?\s*28b', part, re.I):
+                    return None
+                refs.append('28b')
+            elif re.fullmatch(r'(?:TBB\s*#?\s*)?B127', part, re.I):
+                # The app stores cross-references in the same catalogue field.
+                # This series' verified TBB number is not a competing Pick.
+                continue
+            elif part and (key == 'pick_number' or re.fullmatch(r'\d+[a-z]*', part, re.I)):
+                return None
+    if not refs:
+        return None
+    return {
+        'fields': {'signatures': ('Henry Edney Conrad Cain; Rafael Aloysius Fonseca; '
+                                  'Henry Ignatius Melhado')},
+        'source': _BRITISH_HONDURAS_1964_SIGNATURE_SOURCE,
+    }
+
+
 def design_reference(row):
     """Known type design only when issuer, year, denomination and catalog agree.
 

@@ -176,10 +176,34 @@ def ensure(db, category, record_id, url):
                f"WHERE {key}=? AND url<>?", (url, record_id, url))
 
 
+def clear_failed_after_check(db, category, record, source_urls):
+    """A successful explicit Check supersedes an old failure for the same source.
+
+    Keep genuine comparison results and manual review reasons. Reuse dismissal
+    only for the empty failure notice; do not claim that a comparison matched.
+    Cancelling its lease also prevents an older background attempt reviving it.
+    """
+    if category != 'banknotes' or not source_urls:
+        return False
+    record = dict(record)
+    placeholders = ','.join('?' for _ in source_urls)
+    changed = db.execute(
+        "UPDATE original_listing_checks SET dismissed=1,lease_until=0 "
+        "WHERE banknote_id=? AND state='failed' AND dismissed=0 "
+        "AND COALESCE(result,'[]') IN ('','[]') "
+        f"AND url IN ({placeholders}) "
+        "AND EXISTS(SELECT 1 FROM banknote_original_listings l "
+        "WHERE l.banknote_id=original_listing_checks.banknote_id AND l.url=original_listing_checks.url) "
+        "AND EXISTS(SELECT 1 FROM banknotes n WHERE n.id=original_listing_checks.banknote_id "
+        "AND n.order_number IS ? AND n.marketplace IS ?)",
+        (record['id'], *source_urls, record.get('order_number'), record.get('marketplace'))).rowcount
+    return bool(changed)
+
+
 def report(db, category, record_id, parse_price=None):
     key = 'coin_id' if category == 'coins' else 'banknote_id'
     row = db.execute(f'SELECT * FROM original_listing_checks WHERE {key}=?', (record_id,)).fetchone()
-    if not row:
+    if not row or (row['state'] == 'failed' and row['dismissed']):
         return None
     record = db.execute(f'SELECT * FROM {category} WHERE id=?', (record_id,)).fetchone()
     if not record:
@@ -210,7 +234,7 @@ def run_once(connect, fetch_page, analyze, upload_folder=None, parse_price=None)
         lease = now + 300
         db.execute('BEGIN IMMEDIATE')
         row = db.execute("SELECT c.* FROM original_listing_checks c JOIN original_listing_pages p ON p.url=c.url "
-                         "WHERE c.state IN ('pending','failed') AND c.attempts<3 AND c.next_attempt<=? "
+                         "WHERE c.state IN ('pending','failed') AND c.dismissed=0 AND c.attempts<3 AND c.next_attempt<=? "
                          "AND c.lease_until<? AND p.state='available' AND p.checked_at>=? "
                          "ORDER BY c.next_attempt LIMIT 1", (now, now, now - 86400)).fetchone()
         if not row:

@@ -19,7 +19,8 @@ const path = require('node:path');
     <form id="mainForm" data-category="banknotes"><input name="order_number" value="12-34567-89012"><input name="marketplace" value="eBay"><textarea name="description">Keep my entered details</textarea></form>
     <button class="coin-spec-check-btn" data-spec-url="/banknotes/fixture/lookup-specs">Check</button><button id="banknoteCheckCancel" hidden style="display:none">Cancel check</button>
     <p id="banknoteCheckSources" role="status" hidden></p><script>
-    window.alerts=[];window.alert=s=>alerts.push(s);window.applies=[];window.reviewCalls=[];
+    window.alerts=[];window.alert=s=>alerts.push(s);window.applies=[];window.reviewCalls=[];window.sourceEvents=[];
+    document.addEventListener("purchase-sources-updated", event=>sourceEvents.push(event.detail));
     const ensureCoinSpecUrl=async()=>{},flushCheckInputFields=async()=>{},coinLookupFailureMessage=e=>e.message;
     const applyLookupUpdates=async(...args)=>{applies.push(args);return{updated:true,values:args[1]}};
     const applyCoinLookupValues=values=>{window.appliedValues=values};
@@ -143,6 +144,26 @@ const path = require('node:path');
         const t = await setup(opts);
         try { await tick(t.page); await t.finish(); assert(t.lookupCount() <= 2); assert.equal(await t.page.evaluate(() => applies.length), 0); assert.equal(await t.page.evaluate(() => alerts.length), 1); }
         finally { await t.close(); }
+      }
+    });
+    await run('successful Check clears old progress quietly, including legacy responses, and keeps current warnings', async () => {
+      for (const example of [
+        { data: { purchase_sources: { reports: ['Exact order read. Optional receipt PDF is not saved.'], warnings: [] }, listing_failure_resolved: true }, hidden: true, resolved: true },
+        { data: {}, hidden: true },
+        { data: { purchase_sources: { reports: ['Routine source details'], warnings: ['The receipt and order disagree on the unit price.'] } }, hidden: false, resolved: false },
+        { data: { purchase_sources: { reports: [], warnings: ['Current source could not be verified.'] }, lookup_error: 'Image lookup unavailable', listing_failure_resolved: true }, hidden: false, resolved: false, partial: true },
+      ]) {
+        const t = await setup({ states: [snapshot('done')], resumed: { json: { filled: {}, overwritten: {}, specs_searched_at: '2026-10-17T16:00:00', ...example.data } } });
+        try {
+          await tick(t.page); await t.finish();
+          assert.equal(await t.page.locator('#banknoteCheckSources').isHidden(), example.hidden);
+          const text = await t.page.locator('#banknoteCheckSources').textContent();
+          assert(!text.includes('Routine source') && !text.includes('Optional receipt PDF') && !text.includes('Order found'));
+          if (example.resolved !== undefined) assert.equal(await t.page.evaluate(() => sourceEvents.at(-1)?.listingFailureResolved), example.resolved);
+          if (example.data.purchase_sources?.warnings.length) assert.equal(text, example.data.purchase_sources.warnings.join('\n'));
+          assert.equal(await t.page.evaluate(() => alerts.length), example.partial ? 1 : 0);
+          assert.deepEqual(t.errors, []);
+        } finally { await t.close(); }
       }
     });
     await run('unsafe status URL is rejected before polling or exposing cancellation', async () => {

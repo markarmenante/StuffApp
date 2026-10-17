@@ -11226,6 +11226,18 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
             app.logger.info('trim: full paper boundary %dx%d -> %dx%d',
                             w, h, *rect[0].size)
             return _encode_trimmed_note(rect[0])
+    # A tight seller scan can still carry a thin black backdrop. Its paper
+    # covers more than the general holder detectors' area cap, so recognize
+    # four explicit paper edges before the near-full-frame no-op gates.
+    paper_quad = _paper_on_dark_backdrop_quad(img, expect_aspect)
+    if paper_quad is not None:
+        rect = _rectify_note_quad(img, paper_quad)
+        if rect is not None:
+            if meta is not None:
+                meta['engine'] = 'paper-on-dark-backdrop'
+                meta['quad'] = [[round(x, 1), round(y, 1)] for x, y in paper_quad]
+            app.logger.info('trim: tight paper boundary %dx%d -> %dx%d', w, h, *rect[0].size)
+            return _encode_trimmed_note(rect[0])
     # Seeded geometry pipeline first when enabled: 'ok' ships its crop,
     # 'noop' means the frame already is the note (store nothing), and
     # only a genuine failure falls through to the detector cascade.
@@ -11413,6 +11425,84 @@ def _encode_trimmed_note(crop):
     crop.save(out, format='JPEG', quality=BANKNOTE_IMAGE_JPEG_QUALITY,
               subsampling=0, optimize=True, progressive=True)
     return out.getvalue()
+
+
+def _paper_on_dark_backdrop_quad(img, expect_aspect=None):
+    """A nearly full-frame sheet with four pale paper edges on a black backdrop.
+
+    General holder detectors deliberately reject frame-filling components.
+    This narrow exception needs a complete paper outline and a strong dark-to-
+    pale transition on every side, so it cannot target a coloured engraving
+    inside white paper. Keep the measured paper boundary without inward shave.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+    rgb = np.asarray(img.convert('RGB'))
+    h, w = rgb.shape[:2]
+    if w < 240 or h < 120:
+        return None
+    scale = min(1.0, 1600.0 / max(w, h))
+    small = (cv2.resize(rgb, (round(w * scale), round(h * scale)),
+                        interpolation=cv2.INTER_AREA) if scale < 1 else rgb)
+
+    def pale_mask(arr):
+        return (cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY) > 140).astype(np.uint8) * 255
+
+    mask = pale_mask(small)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:3]:
+        area = cv2.contourArea(contour)
+        if not 0.85 <= area / mask.size <= 0.985:
+            continue
+        poly = cv2.approxPolyDP(contour, 0.01 * cv2.arcLength(contour, True), True)
+        if len(poly) != 4 or not cv2.isContourConvex(poly):
+            continue
+        if area / max(1, cv2.contourArea(poly)) < 0.98:
+            continue
+        pts = poly.reshape(4, 2).astype(float) / scale
+        sums, diffs = pts.sum(axis=1), pts[:, 0] - pts[:, 1]
+        quad = tuple(tuple(point) for point in (pts[sums.argmin()], pts[diffs.argmax()],
+                                               pts[sums.argmax()], pts[diffs.argmin()]))
+        quad = _cv_refine_quad(rgb, quad, pale_mask) or quad
+        pts = np.asarray(quad)
+        lengths = [np.linalg.norm(pts[(i + 1) % 4] - pts[i]) for i in range(4)]
+        if min(lengths) < 80 or not (0.95 < lengths[0] / lengths[2] < 1.05
+                                     and 0.95 < lengths[1] / lengths[3] < 1.05):
+            continue
+        aspect = (lengths[0] + lengths[2]) / (lengths[1] + lengths[3])
+        if not 1.4 < aspect < 3.5 or (expect_aspect and abs(aspect / expect_aspect - 1) > 0.08):
+            continue
+        centre = pts.mean(axis=0)
+        supported = True
+        for i in range(4):
+            a, b = pts[i], pts[(i + 1) % 4]
+            tangent = b - a
+            normal = np.array([-tangent[1], tangent[0]]) / lengths[i]
+            if np.dot(centre - (a + b) / 2, normal) < 0:
+                normal = -normal
+            samples = a + np.linspace(0.08, 0.92, 100)[:, None] * tangent
+            # Sample the paper rim itself, not the printing deeper inside it.
+            inside = np.concatenate([np.rint(samples + offset * normal).astype(int) for offset in (1.5, 3.0)])
+            outside = np.rint(samples - max(3.0, 0.006 * min(lengths)) * normal).astype(int)
+            if any((points[:, 0] < 0).any() or (points[:, 0] >= w).any() or
+                   (points[:, 1] < 0).any() or (points[:, 1] >= h).any()
+                   for points in (inside, outside)):
+                supported = False
+                break
+            pin = rgb[inside[:, 1], inside[:, 0]].astype(float)
+            pout = rgb[outside[:, 1], outside[:, 0]].astype(float)
+            paper = (pin.mean(axis=1) > 150) & (np.ptp(pin, axis=1) < 60)
+            dark = pout.mean(axis=1) < 65
+            if (paper.mean() < 0.90 or dark.mean() < 0.90 or
+                    np.median(pin.mean(axis=1)) - np.median(pout.mean(axis=1)) < 100):
+                supported = False
+                break
+        if supported:
+            return quad
+    return None
 
 
 def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
@@ -26329,7 +26419,7 @@ Target fields:
 - pick_number: ALL catalogue references for this note in one comma-separated list, verbatim as cited — the Pick number formatted "P-<number><letter>" (e.g. "P-67", "P-102a"); for United States federal issues the Friedberg number ("Fr#248" — a grading label's attribution goes here verbatim); plus TBB and specialist catalogues (Grabowski/Mehl, Rosenberg, Lamb, Funck, Menzel, Tieste — e.g. "Grabowski Bi.7.5"). Null if none.
 - printer: the printing firm (e.g. "Harrison & Sons", "Thomas De La Rue"; notgeld was often locally printed).
 - other_catalog: additional catalog references, when explicitly stated; do not duplicate references already in pick_number.
-- signatures: signature combination as stated or visible (e.g. "Nasser-Emami").
+- signatures: signature combination as stated or visible (e.g. "Nasser-Emami"). If unreadable or unstated, use only the exact dated catalogue variety after matching country, issuer, denomination, issue date and catalogue number. A Pick number can span different signature combinations; never copy the whole series signature list. Expand names only when the dated entry verifies them and cite that source. Leave null when the dated variety is ambiguous.
 - serial_number: THIS note's serial number, from the images or the text; else null.
 - watermark: watermark description if stated or catalogued (e.g. "Young Shah portrait"). Grading-service labels often print it outright ("Wmk: Man's Head") — read it off the holder label when present.
 - material: EXACTLY one of [{materials}]; null if unknown.
@@ -26568,6 +26658,7 @@ def banknote_lookup_specs(record_id):
             return jsonify(purchase_refresh=refresh), 202
         return jsonify(error=refresh['message']), 409
 
+    source_record = dict(note)
     try:
         prepared = banknote_check_sources.prepare(
             db, note, UPLOAD_FOLDER, _pdf_fonts, classify_photos=_classify_banknote_listing_photos,
@@ -26651,6 +26742,25 @@ def banknote_lookup_specs(record_id):
             prepared['warnings'].append(
                 'The proposed catalogue identity conflicts with the saved Virginia $100 Cr. 6; '
                 'its portrait reference was not applied. Review the issuer, date, denomination and catalogue number.')
+
+    # A saved, positively identified dated variety may fill a signature the
+    # image/dealer lookup missed. A proposed change of identity must agree;
+    # a model's new year cannot turn an earlier issue into this signature set.
+    signature = banknote_catalog.signature_reference(note)
+    if signature and suggestions.get('signatures') in (None, ''):
+        signature_identity = dict(note)
+        for key in ('country', 'issuer', 'date_1', 'date_2', 'denomination', 'pick_number', 'other_catalog'):
+            if suggestions.get(key) not in (None, ''):
+                signature_identity[key] = suggestions[key]
+        if banknote_catalog.signature_reference(signature_identity):
+            suggestions.update(signature['fields'])
+            source_text = suggestions.get('sources')
+            source_text = source_text if isinstance(source_text, str) else ''
+            suggestions['sources'] = (source_text.strip() + '\n' + signature['source']).strip()
+        else:
+            prepared['warnings'].append(
+                'The proposed identity conflicts with the saved 1964 British Honduras $1 Pick 28b; '
+                'its signature reference was not applied. Review the issuer, date, denomination and catalogue number.')
 
     # A known Virginia state obligation cannot become National because
     # the model read the generic word Treasury. This is a review proposal,
@@ -26919,7 +27029,10 @@ def banknote_lookup_specs(record_id):
     # Only stamp a fully successful run: a partial (description-only)
     # result keeps the Check button un-done so a retry isn't skipped.
     now = None
+    listing_failure_resolved = False
     if not lookup_error:
+        listing_failure_resolved = original_listings.listing_checks.clear_failed_after_check(
+            db, 'banknotes', source_record, prepared.get('verified_listing_urls', []))
         now = datetime.utcnow().isoformat()
         db.execute("UPDATE banknotes SET specs_searched_at = ? WHERE id = ?",
                    (now, record_id))
@@ -26972,6 +27085,7 @@ def banknote_lookup_specs(record_id):
         'images': prepared.get('images', {}),
         'sources': suggestions.get('sources', ''),
         'specs_searched_at': now,
+        'listing_failure_resolved': listing_failure_resolved,
         # The image/web lookup failed but the dealer-description parser
         # still produced fields — tell the user the scan was partial so
         # a rerun isn't skipped ("it already ran") by mistake.
