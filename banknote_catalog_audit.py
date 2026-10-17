@@ -5,6 +5,13 @@ No app import, dotenv loading, startup migrations, provider writes or image edit
 init/collect/report never change the source database. apply/rollback require an
 explicit JSON manifest and use a per-run transaction ledger in the same database.
 All run files contain private collection data and are created mode 0600/0700.
+
+Initialize additions-only research with ``init --fill-missing-only``. Subsequent
+commands inherit the saved policy: only None/empty/whitespace fields may be
+filled, existing history covers its alias, and a single dated issue does not
+need an end date. Exact variety/source approval is still required. Applied
+field/source links append to existing Reference Notes in the same guarded
+transaction and rollback journal. Omit the option for legacy correction audits.
 """
 from __future__ import annotations
 import argparse
@@ -34,8 +41,9 @@ TYPE_FIELDS = ALLOWED - {'pick_number'}
 IDENTITY_FIELDS = ('country', 'denomination', 'issuer', 'series', 'date_1',
                    'date_1_text', 'date_2', 'date_2_text', 'pick_number', 'other_catalog')
 ISSUE_TYPES = {'National', 'State', 'Notgeld', 'Military / Occupation', 'Colonial', 'Private / Scrip', 'Specimen'}
-MATERIALS = {'Paper', 'Cotton', 'Polymer', 'Cardboard', 'Silk', 'Leather', 'Hybrid'}
+MATERIALS = {'Paper', 'Cotton', 'Polymer', 'Cardboard', 'Silk', 'Leather', 'Hybrid', 'Silver'}
 LEDGER = 'catalogue_audit_changes'
+SOURCE_NOTES = 'note_references_research'
 
 
 def now():
@@ -148,7 +156,7 @@ def source_manifest(db, rows, folder):
     return result
 
 
-def initialize(database, run, expected_owner, uploads=None):
+def initialize(database, run, expected_owner, uploads=None, fill_missing_only=False):
     run = private_dir(run)
     with run_lock(run):
         if (run / 'manifest.json').exists():
@@ -184,7 +192,7 @@ def initialize(database, run, expected_owner, uploads=None):
         manifest = {'version': VERSION, 'run_id': run.name, 'created_at': now(),
                     'database': str(Path(database).resolve()), 'uploads': str(folder),
                     'tenant': identity, 'baseline_sha256': digest(baseline), 'count': len(rows),
-                    'model': None, 'prompt_version': VERSION}
+                    'model': None, 'prompt_version': VERSION, 'fill_missing_only': bool(fill_missing_only)}
         save_json(run / 'manifest.json', manifest)
         return {'run_id': run.name, 'count': len(rows), 'baseline_sha256': manifest['baseline_sha256']}
 
@@ -195,6 +203,8 @@ def checked_run(run, expected_owner):
     baseline = load_json(run / 'baseline.json')
     if manifest.get('version') != VERSION or digest(baseline) != manifest['baseline_sha256']:
         raise ValueError('Run version or baseline integrity check failed')
+    if not isinstance(manifest.get('fill_missing_only', False), bool):
+        raise ValueError('Invalid fill-missing-only run mode')
     db = connect(manifest['database'])
     try:
         if tenant(db, expected_owner) != manifest['tenant']:
@@ -273,6 +283,88 @@ def reference_key(value, catalogue_hint=None):
 def reference_namespace(value, catalogue_hint=None):
     key = reference_key(value, catalogue_hint)
     return key.split(':', 1)[0] if ':' in key else None
+
+
+def is_blank(value):
+    """Only absent or whitespace text is blank; zero and Unknown are values."""
+    return value is None or isinstance(value, str) and not value.strip()
+
+
+def missing_fields(row):
+    fields = {field for field in ALLOWED if is_blank(row.get(field))}
+    # An absent end date normally means one dated issue, not an incomplete
+    # series lifespan. Research it only when a stored date display has a range.
+    if (is_blank(row.get('date_2')) and is_blank(row.get('date_2_text'))
+            and not re.search(r'\b\d{4}\s*[-–—/]\s*\d{2,4}\b', str(row.get('date_1_text') or ''))):
+        fields -= {'date_2', 'date_2_text'}
+    if any(not is_blank(row.get(field)) for field in ('condition', 'history_context')):
+        fields -= {'condition', 'history_context'}
+    return fields
+
+
+def validate_missing_updates(row, updates):
+    if any(field not in missing_fields(row) or is_blank(value) for field, value in updates.items()):
+        raise ValueError('Fill-missing-only may fill blank catalogue fields only; existing values and history are preserved')
+    if {'condition', 'history_context'} <= updates.keys():
+        raise ValueError('Fill-missing-only must not add duplicate historical narratives')
+
+
+def missing_only_proposal(row, proposal):
+    """Keep rejected research visible without making occupied fields selectable."""
+    allowed = missing_fields(row)
+    proposal = json.loads(json.dumps(proposal))
+    updates = proposal.get('updates', {})
+    # One narrative is enough. The normal Check UI uses condition for history.
+    if 'condition' in updates and 'history_context' in updates:
+        allowed.discard('history_context')
+    for field in list(proposal.get('allowed_values', {})):
+        values = [v for v in proposal['allowed_values'][field] if not is_blank(v)] if field in allowed else []
+        if not values:
+            proposal['allowed_values'].pop(field)
+            updates.pop(field, None)
+            proposal.get('field_evidence', {}).pop(field, None)
+            proposal.setdefault('held', []).append({'field': field, 'support': 'not_eligible',
+                'reason': 'Fill-missing-only preserves occupied fields and existing historical narrative; no clearing'})
+        else:
+            proposal['allowed_values'][field] = values
+    # Numeric years may use an existing, matching plain-year display without
+    # rewriting it. ND, ranges and conflicting displays require a separate review.
+    for field in ('date_1', 'date_2'):
+        pair = {k: v for k, v in updates.items() if k in (field, field + '_text')}
+        if pair:
+            try:
+                validate_date_updates(row, pair, fill_missing_only=True)
+            except ValueError as error:
+                for name in pair:
+                    updates.pop(name)
+                    proposal.get('allowed_values', {}).pop(name, None)
+                    proposal.get('field_evidence', {}).pop(name, None)
+                    proposal.setdefault('held', []).append({'field': name, 'support': 'not_eligible', 'reason': str(error)})
+    if not proposal.get('allowed_values') and proposal.get('state') == 'proposed':
+        proposal['state'] = 'unresolved'
+    return proposal
+
+
+def source_notes_append(manifest, row, updates, proposal, item):
+    """Only validated source URLs, derived internally; preserve the entire prefix."""
+    if SOURCE_NOTES not in row:
+        raise ValueError('Fill-missing-only requires the existing Reference Notes column')
+    sources = reviewed_sources(proposal, item)
+    lines = ['Catalogue details added (' + manifest['run_id'] + ', ' + manifest['created_at'][:10] + '):']
+    for field in sorted(updates):
+        review = (item.get('research_review') or {}).get(field)
+        reviewed = (isinstance(review, dict) and review.get('value') == updates[field]
+                    and review.get('identity_verified') is True and review.get('source_url') in sources)
+        if reviewed:
+            reviewed_quote(review, sources)
+        urls = [review['source_url']] if reviewed else sorted({url
+            for proof in proposal.get('field_evidence', {}).get(field, []) for url in proof.get('source_urls', []) if url in sources})
+        if not urls:
+            raise ValueError('Every filled field requires a visible validated source')
+        lines.append(field.replace('_', ' ').capitalize() + ': ' + ' ; '.join(urls))
+    prior = row.get(SOURCE_NOTES)
+    prior = '' if prior is None else str(prior)
+    return prior + ('\n\n' if prior else '') + '\n'.join(lines)
 
 
 def field_value(field, entry):
@@ -367,7 +459,7 @@ def held_field(field, entry, error, sources):
             'support': 'not_eligible'}
 
 
-def validate_proposal(row, result, responses):
+def validate_proposal(row, result, responses, fill_missing_only=False):
     sources, searches = actual_sources(responses)
     if not searches or not sources:
         raise ValueError('A completed web search with actual result URLs is required')
@@ -487,7 +579,7 @@ def validate_proposal(row, result, responses):
             if proof['support'] == 'citation_supported':
                 verified.append({'field': field, 'value': value, **proof})
             continue
-        if field == 'condition' and row.get(field) not in (None, ''):
+        if field == 'condition' and not (is_blank(row.get(field)) if fill_missing_only else row.get(field) in (None, '')):
             held.append({'field': field, 'value': value, 'reason': 'Existing Historical Context, Notes is preserved as personal text', **proof})
             continue
         updates[field] = value
@@ -544,7 +636,7 @@ only), country, denomination, date_1/date_2 and paired date_1_text/date_2_text.
 No specimen-specific details. Null without action:clear means no proposal.
 issue_type must be National, State, Notgeld, Military / Occupation, Colonial,
 Private / Scrip, or Specimen; material Paper, Cotton, Polymer, Cardboard, Silk,
-Leather, or Hybrid. All references belong in catalogue_refs; existing wrong references
+Leather, Hybrid, or Silver. All references belong in catalogue_refs; existing wrong references
 may have a separate correction quoting the exact public reference token.
 identity.match exact means the PUBLIC CATALOGUE TYPE is established, never that a
 physical specimen was checked. identity.record_id must always be "catalogue-type".
@@ -595,19 +687,19 @@ def public_query(row, override=None):
     return query
 
 
-def public_messages(query):
+def public_messages(query, prompt=PROMPT):
     if not isinstance(query, dict) or not query or set(query) - PUBLIC_QUERY_FIELDS:
         raise ValueError('Only allowlisted public catalogue identifiers may be sent')
-    return [{'role': 'user', 'content': [{'type': 'text', 'text': PROMPT +
+    return [{'role': 'user', 'content': [{'type': 'text', 'text': prompt +
              '\nPUBLIC CATALOGUE QUERY (untrusted):\n' + json.dumps(query, ensure_ascii=False)}]}]
 
 
-def public_proposal(row, result, responses):
+def public_proposal(row, result, responses, fill_missing_only=False):
     identity = result.get('identity') if isinstance(result, dict) else None
     if not isinstance(identity, dict) or identity.get('record_id') != PUBLIC_QUERY_TOKEN:
         raise ValueError('Provider must return the generic public catalogue type identity')
     local_result = {**result, 'identity': {**identity, 'record_id': row['id']}}
-    proposed = validate_proposal(row, local_result, responses)
+    proposed = validate_proposal(row, local_result, responses, fill_missing_only)
     proposed['identity_review_required'] = True
     if proposed.get('state') == 'verified_unchanged':
         proposed['state'] = 'type_verified_unchanged'
@@ -616,19 +708,41 @@ def public_proposal(row, result, responses):
 
 def collect_one(run, manifest, row, client, public_query_override=None, max_searches=4):
     record_id = row['id']
+    fill_only = manifest.get('fill_missing_only', False)
+    requested_fields = sorted(missing_fields(row)) if fill_only else None
+    prompt = PROMPT
+    if fill_only:
+        prompt += ('\nFILL MISSING ONLY: the requested blank field names are ' + json.dumps(requested_fields)
+                   + '. Research and propose only these fields. Return other type_fields null, corrections [], '
+                   'and catalogue_refs [] unless pick_number is requested. Never clear values or propose corrections. '
+                   'If both history fields are requested, use condition only, with one supported narrative. '
+                   'Municipality is only the issuing locality of actual municipal/local currency (such as Notgeld), '
+                   'never a national-bank capital, Federal Reserve district, dateline or printer location. '
+                   'Official is the Portrait/Ruler field: sourced human figures, rulers or allegories only; '
+                   'never places, buildings, plants, coats of arms or no-portrait filler. '
+                   'Do not pad unknown or inapplicable fields; even None/no watermark needs explicit source evidence. '
+                   'date_2/date_2_text describe an actual issue-date range, never the whole series lifespan. '
+                   'A single dated issue has no end date; leave those fields null unless its own exact issue has a range.')
     attempt_id = uuid.uuid4().hex
     raw_dir = private_dir(Path(run) / 'raw' / record_id / attempt_id)
     result_path = Path(run) / 'notes' / (record_id + '.json')
     entry = {'record_id': record_id, 'attempt_id': attempt_id, 'started_at': now(),
              'baseline_record_sha256': digest(row), 'model': manifest['model'], 'state': 'running',
-             'prompt_sha256': hashlib.sha256(PROMPT.encode()).hexdigest(),
+             'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(),
              'worker_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
              'research_mode': 'public_reference_only', 'identity_scope': 'public_catalogue_type',
-             'physical_note_verified': False}
+             'physical_note_verified': False, 'fill_missing_only': fill_only}
     save_json(result_path, entry)
-    save_json(raw_dir / 'attempt.json', {**entry, 'prompt': PROMPT, 'max_searches': max_searches})
+    save_json(raw_dir / 'attempt.json', {**entry, 'prompt': prompt, 'max_searches': max_searches})
     responses = []
     try:
+        if fill_only and not requested_fields:
+            entry.update(state='no_missing_fields', updates={}, allowed_values={}, sources={})
+            entry['completed_at'] = now()
+            entry['proposal_sha256'] = digest(entry)
+            save_json(result_path, entry)
+            save_json(raw_dir / 'outcome.json', entry)
+            return entry['state']
         query = public_query(row, public_query_override)
         if query is None:
             entry.update(state='unresolved', reason='Public catalogue reference and country/issuer required; supply a locally reviewed public query override',
@@ -639,7 +753,7 @@ def collect_one(run, manifest, row, client, public_query_override=None, max_sear
             save_json(raw_dir / 'outcome.json', entry)
             return entry['state']
         save_json(raw_dir / 'public-query.json', query)
-        messages = public_messages(query)
+        messages = public_messages(query, prompt)
         for step in range(3):
             response = client.messages.create(model=manifest['model'], max_tokens=8192,
                 tools=[{'type': os.environ.get('ANTHROPIC_WEB_SEARCH_TOOL') or 'web_search_20250305',
@@ -670,7 +784,8 @@ def collect_one(run, manifest, row, client, public_query_override=None, max_sear
         if result is None:
             raise ValueError('Provider returned no complete catalogue JSON object')
         save_json(raw_dir / 'parsed.json', result)
-        entry.update(public_proposal(row, result, responses))
+        proposed = public_proposal(row, result, responses, fill_only)
+        entry.update(missing_only_proposal(row, proposed) if fill_only else proposed)
     except Exception as error:
         # Error bodies can contain private evidence. Persist locally, print only counts.
         entry.update(state='error', error_type=type(error).__name__, error=str(error)[:1500])
@@ -705,7 +820,10 @@ def collect(run, expected_owner, ids=None, limit=None, workers=1, retry_errors=F
             previous = load_json(path) if path.exists() else {}
             if previous and previous.get('state') not in ('running',) and not (retry_errors and previous.get('state') == 'error'):
                 continue
-            pending.append(row)
+            if manifest.get('fill_missing_only') and not missing_fields(row):
+                collect_one(run, manifest, row, None)
+            else:
+                pending.append(row)
         if limit is not None:
             pending = pending[:limit]
         if not pending:
@@ -754,7 +872,8 @@ def revalidate(run, expected_owner, ids):
                 continue
             result = load_json(raw_dir / 'parsed.json')
             entry = {k: v for k, v in previous.items() if k not in {'error', 'error_type', 'proposal_sha256'}}
-            entry.update(public_proposal(rows[record_id], result, responses))
+            proposed = public_proposal(rows[record_id], result, responses, manifest.get('fill_missing_only', False))
+            entry.update(missing_only_proposal(rows[record_id], proposed) if manifest.get('fill_missing_only') else proposed)
             entry.update(revalidated_at=now(), prior_proposal_sha256=previous.get('proposal_sha256'),
                          validator_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
             entry['proposal_sha256'] = digest(entry)
@@ -881,15 +1000,35 @@ def validate_public_identity_review(base, updates, proposal, item, sources=None)
             raise ValueError('Exact-reference crosswalk needs a specific supporting reason')
 
 
-def validate_date_updates(base, updates):
+def validate_date_updates(base, updates, fill_missing_only=False):
     """Validate the complete date pair; never guess or silently drop a display."""
     for year_field in ('date_1', 'date_2'):
         if year_field in updates and year_field + '_text' not in updates:
-            raise ValueError('A numeric year correction requires its paired date display text')
+            display = base.get(year_field + '_text')
+            consistent = (fill_missing_only and isinstance(display, str)
+                          and re.fullmatch(r'\d{4}', display.strip())
+                          and updates[year_field] == int(display.strip()))
+            if not consistent:
+                raise ValueError('A numeric year correction requires its paired consistent date display text')
     combined = {**base, **updates}
     for year_field in ('date_1', 'date_2'):
         display = combined.get(year_field + '_text')
         year = combined.get(year_field)
+        if fill_missing_only and year_field + '_text' in updates and year is not None:
+            display_text = str(display).strip()
+            years = {int(value) for value in re.findall(r'(?<!\d)\d{4}(?!\d)', display_text)}
+            # A shorthand range (1966–68) is not one unambiguous year. A
+            # complete, valid ISO-style calendar date is not a year range.
+            calendar_date = False
+            if re.fullmatch(r'\d{4}[-/]\d{2}[-/]\d{2}', display_text):
+                try:
+                    dt.date.fromisoformat(display_text.replace('/', '-'))
+                    calendar_date = True
+                except ValueError:
+                    pass
+            year_range = re.search(r'\b\d{4}\s*[-–—/]\s*\d{2,4}\b', display_text)
+            if years != {year} or year_range and not calendar_date:
+                raise ValueError('Filled date display must unambiguously match the saved numeric year')
         if (year_field + '_text' in updates and year is not None and isinstance(display, str)
                 and re.search(r'(?i)(?<!\w)(?:nd|n\.d\.|undated)(?!\w)', display)):
             raise ValueError('An undated display correction must explicitly clear the numeric year')
@@ -939,6 +1078,8 @@ def supplement(run, research):
             updates = item.get('updates')
             if not isinstance(updates, dict) or not updates or set(updates) - ALLOWED:
                 raise ValueError('Supplement includes unsafe or empty fields')
+            if manifest.get('fill_missing_only'):
+                validate_missing_updates(row, updates)
             clear_fields = item.get('clear_fields', [])
             if (not isinstance(clear_fields, list) or len(set(clear_fields)) != len(clear_fields)
                     or set(clear_fields) - {'date_1', 'date_2', 'date_1_text', 'date_2_text'}
@@ -955,7 +1096,7 @@ def supplement(run, research):
                 raise ValueError('Every supplement field needs an exact source review')
             proofs = {}
             for field, value in updates.items():
-                if field == 'condition' and row.get(field) not in (None, ''):
+                if field == 'condition' and not (is_blank(row.get(field)) if manifest.get('fill_missing_only') else row.get(field) in (None, '')):
                     raise ValueError('Existing Historical Context, Notes must never be overwritten by the catalogue audit')
                 checked = field_value(field, {'value': value, 'action': 'clear' if field in clear_fields else None})
                 if checked != value:
@@ -975,7 +1116,7 @@ def supplement(run, research):
                 proofs[field] = {'value': value, 'support': 'independent_research',
                                  'source_urls': [review['source_url']], 'reason': review_reason,
                                  'supporting_excerpts': [{'url': review['source_url'], 'excerpt': quote}]}
-            validate_date_updates(row, updates)
+            validate_date_updates(row, updates, manifest.get('fill_missing_only', False))
             # Deep copy preserves raw paths, original identity findings, errors,
             # model sources and previous independent chain without mutating input.
             after = json.loads(json.dumps(before))
@@ -1039,8 +1180,10 @@ def validate_approval(manifest, baseline, run, approval):
         updates = item.get('updates')
         if not isinstance(updates, dict) or not updates or set(updates) - ALLOWED:
             raise ValueError('Approval includes unsafe or empty fields')
+        if manifest.get('fill_missing_only'):
+            validate_missing_updates(base[record_id], updates)
         for field, value in updates.items():
-            if field == 'condition' and base[record_id].get(field) not in (None, ''):
+            if field == 'condition' and not (is_blank(base[record_id].get(field)) if manifest.get('fill_missing_only') else base[record_id].get(field) in (None, '')):
                 raise ValueError('Existing Historical Context, Notes must never be overwritten by the catalogue audit')
             if value not in proposal.get('allowed_values', {}).get(field, []):
                 raise ValueError('Approval does not match an evidenced proposal value')
@@ -1051,7 +1194,7 @@ def validate_approval(manifest, baseline, run, approval):
             raise ValueError('Identity review needs a specific supporting reason')
         if proposal.get('identity_scope') == 'public_catalogue_type':
             validate_public_identity_review(base[record_id], updates, proposal, item, sources)
-        validate_date_updates(base[record_id], updates)
+        validate_date_updates(base[record_id], updates, manifest.get('fill_missing_only', False))
         reviews = item.get('research_review') or {}
         for field, value in updates.items():
             proofs = proposal.get('field_evidence', {}).get(field, [])
@@ -1069,6 +1212,8 @@ def validate_approval(manifest, baseline, run, approval):
                     raise ValueError('An explicit per-field source research review is required')
                 reviewed_quote(review, sources)
                 text_value(review.get('reason'), 1800)
+        if manifest.get('fill_missing_only'):
+            updates = {**updates, SOURCE_NOTES: source_notes_append(manifest, base[record_id], updates, proposal, item)}
         prepared.append((record_id, base[record_id], updates, proposal['proposal_sha256']))
     return prepared
 
@@ -1106,6 +1251,11 @@ def apply(run, expected_owner, approval):
                     current = db.execute('SELECT * FROM banknotes WHERE id=?', (record_id,)).fetchone()
                     if current is None or dict(current) != old:
                         raise ValueError('Record changed since baseline; collect a new proposal before applying')
+                    if manifest.get('fill_missing_only'):
+                        validate_missing_updates(dict(current), {k: v for k, v in updates.items() if k != SOURCE_NOTES})
+                        prior_notes = current[SOURCE_NOTES] or ''
+                        if not updates.get(SOURCE_NOTES, '').startswith(str(prior_notes)):
+                            raise ValueError('Reference Notes append must preserve existing text')
                     fields = ','.join('"' + field + '"=?' for field in updates)
                     stamp = now()
                     db.execute(f'UPDATE banknotes SET {fields},updated_at=? WHERE id=?',
@@ -1194,6 +1344,7 @@ def main():
     parser.add_argument('--run-dir', required=True)
     parser.add_argument('--database', default='/data/stuffapp.db')
     parser.add_argument('--uploads')
+    parser.add_argument('--fill-missing-only', action='store_true', help='Initialize a blank-only run; later commands inherit its saved policy')
     parser.add_argument('--expected-owner-email', default=os.environ.get('STUFFAPP_OWNER_EMAIL'))
     parser.add_argument('--ids', help='Comma-separated record UUIDs; omitted means all baseline records')
     parser.add_argument('--limit', type=int)
@@ -1204,8 +1355,10 @@ def main():
     parser.add_argument('--approval', help='Protected explicit-approved JSON manifest')
     args = parser.parse_args()
     try:
+        if args.fill_missing_only and args.command != 'init':
+            raise ValueError('--fill-missing-only is set at init and inherited by every later command')
         if args.command == 'init':
-            result = initialize(args.database, args.run_dir, args.expected_owner_email, args.uploads)
+            result = initialize(args.database, args.run_dir, args.expected_owner_email, args.uploads, args.fill_missing_only)
         elif args.command == 'collect':
             if args.limit is not None and args.limit < 1:
                 raise ValueError('Limit must be positive')

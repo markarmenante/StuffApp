@@ -41,7 +41,7 @@ class AuditTests(unittest.TestCase):
         self.database = self.root/'stuffapp.db'
         self.env = patch.dict(os.environ, {'RAILWAY_SERVICE_NAME': 'web', 'STUFFAPP_OWNER_EMAIL': 'owner@example.test'})
         self.env.start()
-        columns = set(audit.ALLOWED) | set(audit.IDENTITY_FIELDS) | {'id','cat_id','updated_at','status','price','serial_number','grade','slab_number','owner','image_1','image_2','description','note_references','notes'}
+        columns = set(audit.ALLOWED) | set(audit.IDENTITY_FIELDS) | {audit.SOURCE_NOTES,'id','cat_id','updated_at','status','price','serial_number','grade','slab_number','owner','image_1','image_2','description','note_references','notes'}
         db = sqlite3.connect(self.database)
         db.execute('CREATE TABLE users(email TEXT,role TEXT)')
         db.execute("INSERT INTO users VALUES ('owner@example.test','owner')")
@@ -681,6 +681,201 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(len(journals), 2)
         self.assertTrue(any(j['before']==proposal and j['after']==first for j in journals))
         self.assertTrue(any(j['before']==first and j['after']==second for j in journals))
+
+
+
+    def start_fill_run(self, changes=None):
+        if changes:
+            db = sqlite3.connect(self.database)
+            db.execute('UPDATE banknotes SET ' + ','.join('"'+key+'"=?' for key in changes), list(changes.values()))
+            db.commit(); db.close()
+        self.run = self.root / 'fill-run'
+        audit.initialize(self.database, self.run, 'owner@example.test', fill_missing_only=True)
+        self.manifest, self.baseline = audit.checked_run(self.run, 'owner@example.test')
+        self.row = self.baseline['rows'][0]
+
+    def fill_proposal(self, result=None, quote=QUOTE):
+        proposed = audit.validate_proposal(self.row, result or result_for(self.row), [raw_response(quote=quote)], fill_missing_only=True)
+        entry = {'record_id': self.row['id'], 'baseline_record_sha256': audit.digest(self.row),
+                 **audit.missing_only_proposal(self.row, proposed)}
+        entry['proposal_sha256'] = audit.digest(entry)
+        audit.save_json(self.run/'notes'/'note-1.json', entry)
+        return entry
+
+    def test_fill_policy_persisted_and_blank_definition_preserves_manual_sentinels(self):
+        self.assertFalse(self.manifest['fill_missing_only'])
+        self.start_fill_run()
+        self.assertTrue(audit.load_json(self.run/'manifest.json')['fill_missing_only'])
+        for value in [None, '', ' \t\n']:
+            self.assertTrue(audit.is_blank(value))
+        for value in [0, 0.0, False, 'Unknown', 'None', 'Manual text']:
+            self.assertFalse(audit.is_blank(value))
+            with self.assertRaises(ValueError):
+                audit.validate_missing_updates({'printer': value}, {'printer': 'De La Rue'})
+        with self.assertRaises(ValueError): audit.validate_missing_updates({'printer': None}, {'printer': '  '})
+
+    def test_fill_proposals_exclude_occupied_values_enddate_and_duplicate_history(self):
+        self.start_fill_run({'printer': 'Unknown', 'watermark': '  '})
+        result = result_for(self.row)
+        result['type_fields'].update({'watermark': proof(value='Crown'), 'history_context': proof(value='New history'),
+                                     'date_2': proof(value=1968), 'country': proof(value='Fiji')})
+        proposal = self.fill_proposal(result)
+        self.assertEqual(proposal['updates'], {'watermark': 'Crown'})
+        self.assertEqual(set(proposal['allowed_values']), {'watermark'})
+        self.assertEqual(self.current(), self.row)
+        unsafe = self.proposal(result)
+        for updates in [{'printer': 'De La Rue'}, {'country': 'Fiji'}, {'date_2': 1968, 'date_2_text': '1968'},
+                        {'history_context': 'New history'}, {'watermark': None}]:
+            with self.subTest(updates=updates), self.assertRaises(ValueError):
+                audit.apply(self.run, 'owner@example.test', self.approval(unsafe, updates))
+        self.assertEqual(self.current(), self.row)
+
+    def test_fill_collection_revalidation_and_prompt_restrict_public_research(self):
+        self.start_fill_run({'printer': '  ', 'notes': 'PRIVATE-NOTES'})
+        result = result_for(self.row); result['identity']['record_id'] = audit.PUBLIC_QUERY_TOKEN
+        result['type_fields']['history_context'] = proof(value='Duplicate history')
+        calls = []
+        def create(**kwargs):
+            calls.append(kwargs)
+            return types.SimpleNamespace(model_dump=lambda **kwargs:raw_response(result))
+        client = types.SimpleNamespace(messages=types.SimpleNamespace(create=create))
+        self.assertEqual(audit.collect_one(self.run, self.manifest, self.row, client), 'proposed')
+        entry = audit.load_json(self.run/'notes'/'note-1.json')
+        self.assertEqual(entry['updates'], {'printer': 'De La Rue'})
+        prompt = audit.load_json(self.run/entry['raw_path']/'attempt.json')['prompt']
+        names = json.loads(prompt.split('requested blank field names are ')[1].split('. Research')[0])
+        self.assertIn('printer', names)
+        self.assertFalse({'history_context', 'condition', 'date_2', 'date_2_text', 'pick_number'} & set(names))
+        self.assertNotIn('PRIVATE-', json.dumps(calls))
+        self.assertIn('never the whole series lifespan', prompt)
+        audit.revalidate(self.run, 'owner@example.test', ['note-1'])
+        self.assertEqual(audit.load_json(self.run/'notes'/'note-1.json')['updates'], {'printer': 'De La Rue'})
+        self.assertEqual(len(calls), 1); self.assertEqual(self.current(), self.row)
+
+    def test_fill_skips_only_intentional_enddate_and_history_alias_blanks_without_provider(self):
+        values = {key: 'Saved value' for key in audit.ALLOWED}
+        values.update(date_1=1966, date_1_text='1966', date_2=None, date_2_text=None,
+                      size_width=150, size_height=80, history_context=None)
+        self.start_fill_run(values)
+        self.assertEqual(audit.missing_fields(self.row), set())
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': ''}):
+            self.assertEqual(audit.collect(self.run, 'owner@example.test')['states'], {'no_missing_fields': 1})
+        self.assertEqual(audit.report(self.run)['provider_calls_all_attempts'], 0)
+        self.assertEqual(self.current(), self.row)
+
+    def test_fill_sources_append_once_preserve_prefix_and_rollback_with_values(self):
+        prior = 'Manual source note.  \nKeep this exact whitespace.\n'
+        self.start_fill_run({audit.SOURCE_NOTES: prior})
+        proposal = self.fill_proposal(); approval = self.approval(proposal)
+        self.assertEqual(proposal['updates'], {'printer': 'De La Rue'})
+        self.assertEqual(audit.apply(self.run, 'owner@example.test', approval)['outcomes'][0]['state'], 'applied')
+        current = self.current()
+        self.assertTrue(current[audit.SOURCE_NOTES].startswith(prior + '\n\n'))
+        self.assertIn('Printer: ' + URL, current[audit.SOURCE_NOTES])
+        for key in self.row:
+            if key not in {'printer', audit.SOURCE_NOTES, 'updated_at'}:
+                self.assertEqual(current[key], self.row[key], key)
+        self.assertEqual(audit.apply(self.run, 'owner@example.test', approval)['outcomes'][0]['state'], 'already_applied')
+        self.assertEqual(self.current(), current)
+        rollback = {'run_id': self.manifest['run_id'], 'baseline_sha256': self.manifest['baseline_sha256'],
+                    'rollback_approved': True, 'record_ids': ['note-1']}
+        self.assertEqual(audit.rollback(self.run, 'owner@example.test', rollback)['outcomes'][0]['state'], 'rolled_back')
+        restored = self.current()
+        self.assertEqual(restored[audit.SOURCE_NOTES], prior)
+        self.assertEqual(restored['printer'], self.row['printer'])
+
+    def test_fill_transaction_rechecks_blank_policy_and_source_compare_and_set(self):
+        self.start_fill_run({audit.SOURCE_NOTES: 'Existing notes'})
+        proposal = self.fill_proposal(); approval = self.approval(proposal)
+        prepared = [('note-1', self.row, {'country': 'Fiji', audit.SOURCE_NOTES: 'Existing notes\nsource'}, proposal['proposal_sha256'])]
+        with patch.object(audit, 'validate_approval', return_value=prepared):
+            result = audit.apply(self.run, 'owner@example.test', approval)
+        self.assertEqual(result['outcomes'][0]['state'], 'conflict')
+        self.assertEqual(self.current(), self.row)
+        db = sqlite3.connect(self.database)
+        db.execute('UPDATE banknotes SET note_references_research=?', ('Later user source note',)); db.commit(); db.close()
+        self.assertEqual(audit.apply(self.run, 'owner@example.test', approval)['outcomes'][0]['state'], 'conflict')
+        self.assertEqual(self.current()[audit.SOURCE_NOTES], 'Later user source note')
+        self.assertIsNone(self.current()['printer'])
+
+    def test_fill_whitespace_history_is_eligible_but_alias_and_double_narrative_are_not(self):
+        self.start_fill_run({'condition': '  ', 'history_context': None})
+        result = result_for(self.row); result['catalogue_refs'] = []
+        result['type_fields'] = {'condition': proof(value='Supported historical narrative'),
+                                'history_context': proof(value='Another historical narrative')}
+        proposal = self.fill_proposal(result)
+        self.assertEqual(proposal['updates'], {'condition': 'Supported historical narrative'})
+        self.assertEqual(audit.apply(self.run, 'owner@example.test', self.approval(proposal))['outcomes'][0]['state'], 'applied')
+        self.assertIsNone(self.current()['history_context'])
+        with self.assertRaises(ValueError):
+            audit.validate_missing_updates({'condition': None, 'history_context': 'Manual history'}, {'condition': 'New'})
+        with self.assertRaises(ValueError):
+            audit.validate_missing_updates({'condition': None, 'history_context': None}, {'condition': 'One', 'history_context': 'Two'})
+
+    def test_fill_numeric_year_uses_existing_consistent_display_without_overwriting(self):
+        self.start_fill_run({'date_1': None, 'date_1_text': ' 1966 '})
+        result = result_for(self.row); result['catalogue_refs'] = []; result['type_fields'] = {'date_1': proof(value=1966)}
+        proposal = self.fill_proposal(result)
+        self.assertEqual(proposal['updates'], {'date_1': 1966})
+        self.assertEqual(audit.apply(self.run, 'owner@example.test', self.approval(proposal))['outcomes'][0]['state'], 'applied')
+        self.assertEqual(self.current()['date_1_text'], ' 1966 ')
+        for text in ['1967', 'ND (1960-1968)', '1960-1968']:
+            row = {**self.row, 'date_1_text': text}
+            validated = audit.validate_proposal(row, result, [raw_response()], fill_missing_only=True)
+            self.assertNotIn('date_1', audit.missing_only_proposal(row, validated)['allowed_values'])
+        self.assertNotIn('date_2', audit.missing_fields(self.row))
+        self.assertIn('date_2', audit.missing_fields({**self.row, 'date_1_text': '1966-1968'}))
+
+    def test_fill_supplement_and_public_identity_still_require_exact_review(self):
+        self.start_fill_run({'issuer': None})
+        result = result_for(self.row); result['type_fields']['issuer'] = proof(value='Government of Tonga')
+        proposal = self.public_entry(result)
+        for updates in [{'country': 'Fiji'}, {'printer': None}, {'history_context': 'Duplicate history'},
+                        {audit.SOURCE_NOTES: 'Arbitrary replacement'}]:
+            with self.subTest(updates=updates), self.assertRaises(ValueError):
+                audit.supplement(self.run, self.supplement_manifest(proposal, updates))
+        approval = self.approval(proposal, {'issuer': 'Government of Tonga'})
+        approval['records'][0]['identity_review'] = self.saved_basis()
+        with self.assertRaises(ValueError): audit.apply(self.run, 'owner@example.test', approval)
+        approval['records'][0]['identity_review'].update(review_basis='local_specimen_evidence', physical_note_verified=True)
+        self.assertEqual(audit.apply(self.run, 'owner@example.test', approval)['outcomes'][0]['state'], 'applied')
+
+
+
+    def test_fill_full_date_display_cannot_contradict_or_obscure_saved_year(self):
+        self.start_fill_run({'date_2': 1966, 'date_2_text': None})
+        for display in ['1 June 1967', '1966-1968', '1966–68', '1966/68', '1966-02-30', 'June 66', 'ND (1966)']:
+            result = result_for(self.row); result['catalogue_refs'] = []
+            result['type_fields'] = {'date_2_text': proof(value=display)}
+            proposal = self.fill_proposal(result)
+            self.assertNotIn('date_2_text', proposal['allowed_values'])
+            unsafe = self.proposal(result)
+            with self.subTest(display=display), self.assertRaises(ValueError):
+                audit.apply(self.run, 'owner@example.test', self.approval(unsafe))
+            self.assertEqual(self.current(), self.row)
+        for display in ['1966-06-01', '1966/06/01']:
+            audit.validate_date_updates(self.row, {'date_2_text': display}, fill_missing_only=True)
+        result['type_fields'] = {'date_2_text': proof(value='1 June 1966')}
+        proposal = self.fill_proposal(result)
+        self.assertEqual(audit.apply(self.run, 'owner@example.test', self.approval(proposal))['outcomes'][0]['state'], 'applied')
+        self.assertEqual(self.current()['date_2'], 1966)
+        self.assertEqual(self.current()['date_2_text'], '1 June 1966')
+
+
+
+    def test_fill_silver_material_is_supported_without_relaxing_closed_values(self):
+        self.start_fill_run()
+        quote = 'Exact catalogue commemorative note: material Silver, 99.9% purity, weight 5 grams.'
+        result = result_for(self.row); result['type_fields'] = {'material': proof(value='Silver')}
+        proposal = self.fill_proposal(result, quote)
+        self.assertEqual(proposal['updates'], {'material': 'Silver'})
+        approval = self.approval(proposal)
+        approval['records'][0]['research_review']['material']['supporting_quote'] = quote
+        self.assertEqual(audit.apply(self.run, 'owner@example.test', approval)['outcomes'][0]['state'], 'applied')
+        self.assertEqual(self.current()['material'], 'Silver')
+        self.assertEqual(self.current()['denomination'], self.row['denomination'])
+        result['type_fields']['material'] = proof(value='Plastic')
+        self.assertNotIn('material', self.fill_proposal(result)['allowed_values'])
 
 
 if __name__=='__main__':unittest.main()

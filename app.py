@@ -224,7 +224,7 @@ VALUE_LISTS = {
     # Paper-money adjectival grades, PMG/PCGS-Banknote style, best first.
     'banknote_grade': ['Superb Gem UNC','Gem UNC','Choice UNC','UNC','cAU','AU','aAU',
                        'cEF','EF','aEF','cVF','VF','aVF','F','VG','G','Fair','Poor'],
-    'banknote_material': ['Paper','Cotton','Polymer','Cardboard','Silk','Leather','Hybrid'],
+    'banknote_material': ['Paper','Cotton','Polymer','Cardboard','Silk','Leather','Hybrid','Silver'],
     # Notgeld is cataloged by locality, not national authority — the
     # issue-type axis separates national issues from emergency money
     # (and drives the list filter pill, like coins' Ancient/Modern).

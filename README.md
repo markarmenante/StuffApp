@@ -125,6 +125,14 @@ collection identifiers, photographs or specimen/purchase data. Missing reference
 need a locally reviewed public query override. Existing runtime model configuration
 is reused; collection concurrency is bounded at four workers.
 
+For an additions-only backfill, initialize a new run with `init --fill-missing-only`.
+The saved mode applies to all later commands: only absent or whitespace fields can
+be filled, and existing values (including zero and Unknown) stay unchanged. Existing
+history in either history field covers both aliases; a single dated issue does not
+need a series end date. Matching issue dates and exact variety evidence are still
+required. Approved additions append field/source links to Reference Notes in the
+same guarded transaction and rollback journal, preserving the earlier text.
+
 Research and writes are separate. Raw responses, actual search/citation evidence,
 prompt/source hashes and per-note proposals are journaled privately. Collection
 resumes completed work; `revalidate` can salvage a completed response with improved

@@ -54,6 +54,13 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual([r['id'] for _, _, group in sections for r in group],
                          ['federal', 'virginia', 'confederate', 'philippine', 'independent'])
 
+    def test_silver_material_choice_is_supported_by_check_without_opening_unknown_values(self):
+        self.assertIn('Silver', stuff.VALUE_LISTS['banknote_material'])
+        self.assertEqual(stuff._coerce_banknote_spec('material', ' silver '), 'Silver')
+        self.assertEqual(stuff._coerce_banknote_spec('material', 'Paper'), 'Paper')
+        self.assertIsNone(stuff._coerce_banknote_spec('material', 'Silver-plated plastic'))
+        self.assertIsNone(stuff._coerce_banknote_spec('material', {'value': 'Silver'}))
+
     def test_american_colonies_precede_generic_us_classification(self):
         for year in (1774, 1775, 1776):
             for country in ('USA', 'United States of America', 'New York', 'New York Colony'):
