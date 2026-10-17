@@ -50,7 +50,7 @@ def order_reference(db, category, record):
 
 
 def ebay_item_for_order(db, category, record):
-    """An order narrows the search, but item identity and uniqueness still apply."""
+    """Use the entered order; resolve multiple purchased items conservatively."""
     record = dict(record)
     number = (record.get('order_number') or '').strip()
     if category != 'banknotes' or record.get('marketplace') not in (None, '', 'eBay') or not number:
@@ -58,19 +58,25 @@ def ebay_item_for_order(db, category, record):
     from ebay_matching import comparison, profile
     from ebay_orders import unverified_email_keys
     excluded = unverified_email_keys(db)
-    items = [dict(r) for r in db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND ignored=0', (number,))
-             if r['line_key'] not in excluded]
+    order_items = [dict(r) for r in db.execute('SELECT * FROM ebay_order_items WHERE order_id=?', (number,))]
+    items = [item for item in order_items if not item['ignored'] and item['line_key'] not in excluded]
     links = [dict(r) for r in db.execute('SELECT * FROM banknote_ebay_links')]
     occupied = {link['line_key'] for link in links if link['banknote_id'] != record['id']}
     bundle = re.compile(r'\b(?:lot|set|bundle|pair)\s*(?:of\s*)?[2-9]\d*\b|\bpair of\b'
                         r'|\b[2-9]\d*\s+(?:consecutive\s+)?(?:serial\s+)?(?:notes|banknotes)\b', re.I)
-    candidates = [item for item in items if item['line_key'] not in occupied
-                  and item['quantity'] == 1 and not item['attention']
-                  and not bundle.search(item['title'])
-                  and comparison(record, item, profile(item['title']), set(),
-                                 allow_missing_identity=True)]
+    eligible = [item for item in items if item['line_key'] not in occupied
+                and item['quantity'] == 1 and not item['attention']
+                and not bundle.search(item['title'])]
+    # The entered order is authoritative for a single eligible purchased item.
+    # Stale catalogue fields must be reviewed against that source, not used to
+    # substitute a different order or veto its receipt and original listing.
+    if len(order_items) == 1:
+        return eligible[0] if len(eligible) == 1 else None
+    candidates = [item for item in eligible
+                  if comparison(record, item, profile(item['title']), set(),
+                                allow_missing_identity=True)]
     # A blank record cannot select one of several purchases just because a sibling is linked.
-    if len(candidates) == 1 and (len(items) == 1 or (record.get('country') and record.get('denomination'))):
+    if len(candidates) == 1 and (len(order_items) == 1 or (record.get('country') and record.get('denomination'))):
         return candidates[0]
     return None
 

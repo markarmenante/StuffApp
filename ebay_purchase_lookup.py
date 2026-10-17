@@ -9,17 +9,36 @@ import ebay_listing_captures
 import ebay_purchase_prices
 
 TIMEOUT = 120
+SESSION_TIMEOUT = 600
+SESSION_RETRY = 8
 
 
-def snapshot(row):
-    return {key: row[key] for key in ('id', 'order_id', 'status', 'message')}
+def session_for(db, request_id):
+    return db.execute('SELECT * FROM ebay_purchase_request_sessions WHERE request_id=?', (request_id,)).fetchone()
+
+
+def snapshot(row, session=None):
+    result = {key: row[key] for key in ('id', 'order_id', 'status', 'message')}
+    result['expires_at'] = session['expires_at'] if session else row['requested_at'] + TIMEOUT
+    if session:
+        if row['status'] in ('queued', 'reading') and session['state'] in ('sign_in_required', 'challenge_required'):
+            result['status'] = session['state']
+        elif row['status'] == 'failed' and session['state'] == 'cancelled':
+            result['status'] = 'cancelled'
+    return result
+
+
+def current_order(db, order_id):
+    return db.execute("SELECT 1 FROM banknotes WHERE order_number=? "
+                      "AND COALESCE(marketplace,'') IN ('','eBay') LIMIT 1", (order_id,)).fetchone()
 
 
 def expire(db):
     db.execute("UPDATE ebay_purchase_requests SET status='failed',message=? "
-               "WHERE status IN ('queued','reading') AND requested_at<?",
-               ('The Mac purchase reader did not finish. Keep Today and signed-in Chrome open, then try Check again.',
-                time.time() - TIMEOUT))
+               "WHERE status IN ('queued','reading') AND COALESCE("
+               "(SELECT expires_at FROM ebay_purchase_request_sessions s WHERE s.request_id=ebay_purchase_requests.id),"
+               "requested_at+?)<?",
+               ('The purchase check expired before it could finish. Press Check to try again.', TIMEOUT, time.time()))
 
 
 def ensure(db, note):
@@ -54,13 +73,17 @@ def ensure(db, note):
     expire(db)
     row = db.execute('SELECT * FROM ebay_purchase_requests WHERE order_id=?', (number,)).fetchone()
     if not row or (row['status'] not in ('queued', 'reading') and row['requested_at'] < time.time() - 15):
+        if row:
+            db.execute('DELETE FROM ebay_purchase_request_sessions WHERE request_id=?', (row['id'],))
         db.execute('INSERT INTO ebay_purchase_requests (id,order_id,requested_at,status,message) VALUES (?,?,?,?,?) '
                    'ON CONFLICT(order_id) DO UPDATE SET id=excluded.id,requested_at=excluded.requested_at, '
                    'status=excluded.status,message=excluded.message',
                    (uuid.uuid4().hex, number, time.time(), 'queued', 'Waiting for the Mac to read this order from eBay Purchases...'))
         row = db.execute('SELECT * FROM ebay_purchase_requests WHERE order_id=?', (number,)).fetchone()
+        db.execute('INSERT INTO ebay_purchase_request_sessions(request_id,expires_at) VALUES (?,?)',
+                   (row['id'], row['requested_at'] + SESSION_TIMEOUT))
     db.commit()
-    return snapshot(row)
+    return snapshot(row, session_for(db, row['id']))
 
 
 def claim(db):
@@ -68,12 +91,53 @@ def claim(db):
     expire(db)
     enabled = db.execute('SELECT enabled FROM ebay_mail_connection WHERE id=1').fetchone()
     row = None if enabled and not enabled[0] else db.execute(
-        "SELECT * FROM ebay_purchase_requests WHERE status='queued' ORDER BY requested_at LIMIT 1").fetchone()
+        "SELECT q.* FROM ebay_purchase_requests q LEFT JOIN ebay_purchase_request_sessions s ON s.request_id=q.id "
+        "WHERE q.status='queued' AND COALESCE(s.next_attempt_at,0)<=? ORDER BY q.requested_at LIMIT 1",
+        (time.time(),)).fetchone()
+    result = None
     if row:
-        db.execute("UPDATE ebay_purchase_requests SET status='reading',message=? WHERE id=?",
-                   ('Reading the exact order from eBay Purchases...', row['id']))
+        if not current_order(db, row['order_id']):
+            db.execute("UPDATE ebay_purchase_requests SET status='failed',message=? WHERE id=?",
+                       ('This purchase request no longer matches a banknote order.', row['id']))
+        else:
+            session = session_for(db, row['id'])
+            message = row['message'] if session and session['state'] != 'ready' else 'Reading the exact order from eBay Purchases...'
+            db.execute("UPDATE ebay_purchase_requests SET status='reading',message=? WHERE id=?", (message, row['id']))
+            result = dict(id=row['id'], order_id=row['order_id'],
+                          expires_at=session['expires_at'] if session else row['requested_at'] + TIMEOUT)
+            if session:
+                result['session_recovery'] = dict(open_browser=not bool(session['open_reserved']))
+                db.execute('UPDATE ebay_purchase_request_sessions SET open_reserved=1 WHERE request_id=?', (row['id'],))
     db.commit()
-    return dict(id=row['id'], order_id=row['order_id']) if row else None
+    return result
+
+
+def complete_session(db, row, payload):
+    session = payload.get('session')
+    if (not session_for(db, row['id']) or not isinstance(session, dict)
+            or set(session) - {'state', 'reason'} or any(k in payload for k in ('items', 'receipt', 'listing', 'error'))):
+        raise ValueError('Invalid purchase session outcome')
+    state, reason = session.get('state'), session.get('reason')
+    if (state not in ('sign_in_required', 'challenge_required', 'unavailable')
+            or reason not in (None, 'unsupported_browser', 'browser_access', 'wrong_account', 'expired')
+            or (state != 'unavailable' and reason is not None)):
+        raise ValueError('Invalid purchase session outcome')
+    messages = {
+        'sign_in_required': 'Sign in to eBay in the browser that opened. Check will continue automatically.',
+        'challenge_required': 'Complete the eBay verification in the browser that opened. Check will continue automatically.',
+        'unsupported_browser': 'Check needs the signed-in Chrome browser on the designated Mac. Its default browser is not supported.',
+        'browser_access': 'Check could not access Chrome on the designated Mac. Open Chrome and try Check again.',
+        'wrong_account': 'Chrome is signed in to a different eBay account. Sign in to the connected account, then try Check again.',
+        'expired': 'The purchase check expired before it could finish. Press Check to try again.',
+        'unavailable': 'Check could not open eBay on the designated Mac. Open Chrome and try Check again.',
+    }
+    message = messages[reason or state]
+    db.execute('UPDATE ebay_purchase_request_sessions SET state=?,reason=?,next_attempt_at=? WHERE request_id=?',
+               (state, reason, time.time() + SESSION_RETRY, row['id']))
+    db.execute('UPDATE ebay_purchase_requests SET status=?,message=? WHERE id=?',
+               ('failed' if state == 'unavailable' else 'queued', message, row['id']))
+    db.commit()
+    return dict(ok=True)
 
 
 def complete(db, payload):
@@ -86,6 +150,10 @@ def complete(db, payload):
     if not row or row['status'] != 'reading':
         db.rollback()
         raise ValueError('Purchase request expired or is no longer active')
+    if not current_order(db, row['order_id']):
+        raise ValueError('This purchase request no longer matches a banknote order')
+    if 'session' in payload:
+        return complete_session(db, row, payload)
     messages = {
         'not_found': 'This order was not found in the available eBay Purchases pages. Confirm the order number and signed-in account.',
         'unreadable': 'eBay did not provide readable details for this order. No item was selected; try Check again later.',
@@ -103,7 +171,11 @@ def complete(db, payload):
         if skipped or not items or any(i['order_id'] != row['order_id'] for i in items):
             db.rollback()
             raise ValueError('Purchase result must contain only the complete requested order')
-        result = ebay_mail.apply_purchases(db, items, observed, auto_match=False)
+        # The owner requested this exact order for a current banknote. Keep all
+        # its items even when the seller title lacks discovery words such as
+        # banknote or PMG; quantity and sibling checks still apply downstream.
+        result = ebay_mail.apply_purchases(db, items, observed, auto_match=False,
+                                          requested_order=row['order_id'])
         stored = {r[0] for r in db.execute('SELECT item_id FROM ebay_order_items WHERE order_id=?', (row['order_id'],))}
         if result['skipped'] or result['items_accepted'] != len(items) or any(i['item_id'] not in stored for i in items):
             db.rollback()
@@ -128,7 +200,30 @@ def register(app, get_db, require_owner):
                          "AND COALESCE(n.marketplace,'') IN ('','eBay')", (record_id, request_id)).fetchone()
         if not row:
             abort(404)
-        response = jsonify(snapshot(row))
+        response = jsonify(snapshot(row, session_for(db, row['id'])))
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+
+    @app.post('/banknotes/<record_id>/purchase-refresh/<request_id>/cancel')
+    def banknote_purchase_refresh_cancel(record_id, request_id):
+        require_owner()
+        db = get_db()
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('SELECT q.* FROM ebay_purchase_requests q JOIN banknotes n '
+                         'ON n.order_number=q.order_id WHERE n.id=? AND q.id=? '
+                         "AND COALESCE(n.marketplace,'') IN ('','eBay')", (record_id, request_id)).fetchone()
+        if not row:
+            db.rollback()
+            abort(404)
+        if row['status'] in ('queued', 'reading'):
+            db.execute("INSERT INTO ebay_purchase_request_sessions(request_id,expires_at,state) VALUES (?,?,'cancelled') "
+                       "ON CONFLICT(request_id) DO UPDATE SET state='cancelled'",
+                       (row['id'], row['requested_at'] + TIMEOUT))
+            db.execute("UPDATE ebay_purchase_requests SET status='failed',message=? WHERE id=?",
+                       ('Purchase check cancelled. Nothing was changed.', row['id']))
+        db.commit()
+        row = db.execute('SELECT * FROM ebay_purchase_requests WHERE id=?', (request_id,)).fetchone()
+        response = jsonify(snapshot(row, session_for(db, row['id'])))
         response.headers['Cache-Control'] = 'no-store'
         return response
 
@@ -143,11 +238,29 @@ def register(app, get_db, require_owner):
         db = get_db()
         try:
             if payload.get('action') == 'claim':
-                return jsonify(ok=True, request=claim(db))
+                claimed = claim(db)
+                account = db.execute('SELECT account_name FROM ebay_purchase_account WHERE id=1').fetchone()
+                if not account:
+                    account = db.execute('SELECT account_name FROM ebay_connection WHERE id=1').fetchone()
+                return jsonify(ok=True, request=claimed, expected_account=account[0] if account else None)
             if payload.get('action') == 'complete':
                 return jsonify(complete(db, payload))
         except ValueError as exc:
             db.rollback()
+            # Evidence is atomic: reject it all, then report only the failed
+            # attempt. Never leave a rejected completion looking like a slow
+            # Mac, or let an old request fail its replacement for this order.
+            request_id = payload.get('id')
+            if (payload.get('action') == 'complete' and isinstance(request_id, str)
+                    and re.fullmatch(r'[a-f0-9]{32}', request_id)):
+                message = ('The purchase evidence was rejected: ' + str(exc)[:200].rstrip('.')
+                           + '. Nothing was changed.')
+                db.execute("UPDATE ebay_purchase_requests SET status='failed',message=? "
+                           "WHERE id=? AND status='reading' AND COALESCE("
+                           "(SELECT expires_at FROM ebay_purchase_request_sessions s WHERE s.request_id=ebay_purchase_requests.id),"
+                           "requested_at+?)>=?",
+                           (message, request_id, TIMEOUT, time.time()))
+                db.commit()
             return jsonify(error=str(exc)), 409
         except Exception:
             db.rollback()

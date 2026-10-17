@@ -142,6 +142,16 @@ CREATE TABLE IF NOT EXISTS ebay_purchase_requests (
     message TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ebay_purchase_requests_pending ON ebay_purchase_requests(status, requested_at);
+-- One bounded browser-access attempt per explicit Check; legacy requests need no migration.
+CREATE TABLE IF NOT EXISTS ebay_purchase_request_sessions (
+    request_id TEXT PRIMARY KEY REFERENCES ebay_purchase_requests(id) ON DELETE CASCADE,
+    expires_at REAL NOT NULL,
+    open_reserved INTEGER NOT NULL DEFAULT 0 CHECK (open_reserved IN (0,1)),
+    next_attempt_at REAL NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'ready' CHECK (state IN ('ready','sign_in_required','challenge_required','unavailable','cancelled')),
+    reason TEXT
+);
+
 CREATE TABLE IF NOT EXISTS ebay_listing_captures (
     url TEXT PRIMARY KEY,
     title TEXT NOT NULL,

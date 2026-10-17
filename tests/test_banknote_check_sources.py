@@ -344,13 +344,44 @@ class SourceCheckTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET country='Tonga',denomination='1 Pound' WHERE id=?", (self.id,))
         self.assertEqual(purchase_orders.ebay_item_for_order(self.db, 'banknotes', self.note())['line_key'], self.id)
 
-    def test_wrong_identity_refund_quantity_or_bundle_is_not_imported(self):
+    def test_ignored_sibling_cannot_turn_multi_item_order_into_single_authority(self):
+        self.blank()
         self.order()
-        for changes in [dict(title='Canada 2 Dollars'), dict(attention='Refunded'), dict(quantity=2), dict(title='Tonga 1 Pound lot of 2 banknotes')]:
+        self.order('-two', 'Canada 2 Dollars 1954 PMG 64', ignored=1)
+        self.assertIsNone(purchase_orders.ebay_item_for_order(self.db, 'banknotes', self.note()))
+        self.db.execute("UPDATE banknotes SET country='Canada',denomination='2 Dollars',pick_number='P#99' WHERE id=?", (self.id,))
+        self.assertIsNone(purchase_orders.ebay_item_for_order(self.db, 'banknotes', self.note()))
+
+    def test_refund_quantity_or_bundle_is_not_imported(self):
+        self.order()
+        for changes in [dict(attention='Refunded'), dict(quantity=2), dict(title='Tonga 1 Pound lot of 2 banknotes')]:
             with self.subTest(changes=changes):
                 self.db.execute('UPDATE ebay_order_items SET ' + ','.join(k + '=?' for k in changes) + ' WHERE line_key=?', [*changes.values(), self.id])
                 self.assertIsNone(purchase_orders.ebay_item_for_order(self.db, 'banknotes', self.note()))
                 self.db.execute("UPDATE ebay_order_items SET title='Tonga 1 Pound 1966',attention='',quantity=1 WHERE line_key=?", (self.id,))
+
+    def test_entered_single_order_overrides_stale_catalogue_without_editing_fields(self):
+        self.order()
+        # A different order happens to match the stale collection description.
+        self.order('-other', 'Canada 2 Dollars 1954 PCGS 65 PPQ P#99', order_id='11-11111-11111')
+        self.db.execute("UPDATE banknotes SET country='Canada',denomination='2 Dollars',pick_number='P#99',price=NULL WHERE id=?", (self.id,))
+        self.db.commit()
+        selected = purchase_orders.ebay_item_for_order(self.db, 'banknotes', self.note())
+        self.assertEqual((selected['order_id'], selected['item_id']), ('12-34567-89012', '325643741723'))
+        self.assertEqual(purchase_orders.ebay_listing_for_order(self.db, 'banknotes', self.note()), URL)
+        self.authenticated_price()
+        before = dict(self.note())
+        with patch.object(sources.archives, 'fetch_bytes', side_effect=ValueError('No network')), \
+                patch.object(stuff.ebay_purchase_lookup, 'ensure', return_value=None), \
+                patch.object(stuff, 'fetch_banknote_specs', return_value={'country': 'Tonga', 'denomination': '1 Pound'}):
+            response = self.client.post('/banknotes/' + self.id + '/lookup-specs')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['filled']['price'], '$1,095')
+        self.assertEqual(response.json['overwritten']['country'], {'current': 'Canada', 'new': 'Tonga'})
+        self.assertEqual(response.json['overwritten']['denomination'], {'current': '2 Dollars', 'new': '1 Pound'})
+        for field in ('country', 'denomination', 'pick_number', 'price', 'order_number'):
+            self.assertEqual(self.note()[field], before[field], field)
+        self.assertEqual(purchase_orders.ebay_item_for_order(self.db, 'banknotes', self.note())['item_id'], '325643741723')
 
     def test_listing_images_are_documents_and_fill_empty_slots_once(self):
         self.add_listing()

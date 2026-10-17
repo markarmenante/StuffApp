@@ -118,7 +118,12 @@ def validate_purchases(raw):
     return [i for i in items if i['order_id'] not in skipped], list(skipped.values())
 
 
-def apply_purchases(db, items, observed, auto_match=True):
+def apply_purchases(db, items, observed, auto_match=True, requested_order=None):
+    # Explicit Check already has an owner-supplied exact order. Its titles need
+    # not match the discovery keyword filter, but no sibling order may enter.
+    if requested_order is not None and (auto_match or not items or
+            any(item['order_id'] != requested_order for item in items)):
+        raise ValueError('Purchase result must contain only the complete requested order')
     totals = dict(items_seen=0, matched=0, updated=0)
     existing, skipped = {}, {}
     for evidence in items:
@@ -150,7 +155,8 @@ def apply_purchases(db, items, observed, auto_match=True):
         item = {k: evidence[k] for k in ('order_id', 'item_id', 'title', 'seller', 'quantity',
                 'ordered_at', 'shipped_at', 'delivered_at', 'delivery_status', 'attention')}
         item.update(line_key=key, seller_key=old['seller_key'] if old else '', estimated_delivery=None, tracking=[])
-        result = ebay.apply_items(db, [item], source='Today: eBay Purchases', auto_match=False, authoritative=True)
+        result = ebay.apply_items(db, [item], source='Today: eBay Purchases', auto_match=False,
+                                 authoritative=True, requested_order=requested_order)
         for k in totals:
             totals[k] += result[k]
         if result['items_seen']:

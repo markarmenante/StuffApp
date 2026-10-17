@@ -516,6 +516,8 @@
             title="Check banknote fields against photos, original listing and invoice; save available source PDFs">
       ✓ Check
     </button>
+    <button type="button" id="banknoteCheckCancel" class="coin-lookup-btn"
+            hidden style="display:none" aria-label="Cancel purchase check">Cancel check</button>
     {% endif %}
     {% if not is_new %}
       {% if category == 'art' and _is_owner %}
@@ -7731,9 +7733,18 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const url = btn.dataset.specUrl;
     if (!url) throw new Error('No check URL after save');
     const ctl = new AbortController();
-    const timeoutId = setTimeout(() => ctl.abort(), 280000);
+    let timeoutId;
+    const setBudget = ms => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => ctl.abort(), Math.max(1, ms));
+    };
+    setBudget(280000);
     let resp;
     let data;
+    let statusUrl = null;
+    let cancelled = false;
+    let cancellation = null;
+    const cancelBtn = document.getElementById('banknoteCheckCancel');
     const summary = document.getElementById('banknoteCheckSources');
     const orderInputs = () => ['order_number', 'marketplace'].map(name =>
       document.querySelector(`#mainForm [name="${name}"]`)?.value || '').join('|');
@@ -7741,39 +7752,108 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const sourceStatus = message => {
       if (summary) { summary.textContent = message; summary.hidden = !message; }
     };
+    const checkOrder = () => {
+      if (orderInputs() !== enteredOrder) throw new Error('Order details changed. Press Check again for the new order.');
+    };
+    const cancel = () => {
+      if (cancelled || !statusUrl) return;
+      cancelled = true;
+      if (cancelBtn) { cancelBtn.disabled = true; cancelBtn.textContent = 'Cancelling…'; }
+      ctl.abort();
+      const cancelCtl = new AbortController();
+      const cancelTimeout = setTimeout(() => cancelCtl.abort(), 15000);
+      cancellation = (async () => {
+        try {
+          const response = await fetch(statusUrl.href + '/cancel', {
+            method: 'POST', headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+            body: '{}', signal: cancelCtl.signal,
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || result.status !== 'cancelled') throw new Error('Cancellation was not confirmed');
+          sourceStatus(result.message || 'Check cancelled. Your form has been kept.');
+        } catch {
+          sourceStatus('Stopped waiting. Cancellation was not confirmed; the purchase reader may still finish. Your form has been kept.');
+        } finally { clearTimeout(cancelTimeout); }
+      })();
+    };
+    const pause = ms => new Promise((resolve, reject) => {
+      const abort = () => { clearTimeout(timer); reject(new DOMException('The check stopped.', 'AbortError')); };
+      const timer = setTimeout(() => { ctl.signal.removeEventListener('abort', abort); resolve(); }, ms);
+      if (ctl.signal.aborted) abort();
+      else ctl.signal.addEventListener('abort', abort, { once: true });
+    });
+    const readSpecs = async () => {
+      checkOrder();
+      if (cancelled) throw new DOMException('Check cancelled.', 'CheckCancelled');
+      resp = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' }, signal: ctl.signal });
+      data = await resp.json().catch(() => ({}));
+      checkOrder();
+    };
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        if (orderInputs() !== enteredOrder) throw new Error('Order details changed. Press Check again for the new order.');
-        resp = await fetch(url, {
-          method: 'POST', headers: { 'Accept': 'application/json' }, signal: ctl.signal,
-        });
-        data = await resp.json().catch(() => ({}));
-        if (resp.status !== 202 || !data.purchase_refresh) break;
+      await readSpecs();
+      if (resp.status === 202 && data.purchase_refresh) {
         const refresh = data.purchase_refresh;
-        const statusUrl = new URL(refresh.url, location.origin);
-        if (statusUrl.origin !== location.origin || !statusUrl.pathname.includes('/purchase-refresh/'))
+        statusUrl = new URL(refresh.url, location.origin);
+        const recordUrl = new URL(url, location.origin);
+        const expectedPath = recordUrl.pathname.replace(/\/lookup-specs$/, '/purchase-refresh/') + refresh.id;
+        if (statusUrl.origin !== location.origin || statusUrl.pathname !== expectedPath || statusUrl.search || statusUrl.hash)
           throw new Error('Invalid purchase refresh URL.');
-        sourceStatus(refresh.message);
-        const deadline = Date.now() + 125000;
+        const waitStarted = Date.now();
+        const boundedExpiry = status => {
+          const expires = Number(status.expires_at) * 1000;
+          return Number.isFinite(expires) && expires > 0 ? Math.min(expires, waitStarted + 600000) : waitStarted + 125000;
+        };
+        let deadline = boundedExpiry(refresh);
+        const progress = status => {
+          deadline = Math.min(deadline, boundedExpiry(status));
+          sourceStatus(status.message || 'Reading this exact order from eBay Purchases…');
+          if (status.status === 'sign_in_required' || status.status === 'challenge_required') {
+            // Only a verified sign-in wait extends the ordinary Check budget.
+            // The server's original expiry remains fixed across retries.
+            setBudget(deadline - Date.now() + 5000);
+          }
+        };
+        progress(refresh);
+        if (cancelBtn) {
+          cancelBtn.hidden = false; cancelBtn.style.display = ''; cancelBtn.disabled = false;
+          cancelBtn.textContent = 'Cancel check'; cancelBtn.addEventListener('click', cancel);
+        }
         let finished = false;
         while (Date.now() < deadline) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          if (orderInputs() !== enteredOrder) throw new Error('Order details changed. Press Check again for the new order.');
-          const statusResponse = await fetch(statusUrl, {signal: ctl.signal, cache: 'no-store'});
+          await pause(Math.min(2000, deadline - Date.now()));
+          checkOrder();
+          const statusResponse = await fetch(statusUrl, { signal: ctl.signal, cache: 'no-store' });
           const status = await statusResponse.json().catch(() => ({}));
           if (!statusResponse.ok) throw new Error('The order changed or its lookup expired. Press Check again.');
-          sourceStatus(status.message);
-          if (status.status === 'failed') throw new Error(status.message);
+          if (status.id !== refresh.id || status.order_id !== refresh.order_id) throw new Error('The purchase request changed. Press Check again for this order.');
+          progress(status);
+          if (status.status === 'failed') throw new Error(status.message || 'This purchase check could not finish.');
+          if (status.status === 'cancelled') { cancelled = true; break; }
           if (status.status === 'done') { finished = true; break; }
+          if (!['queued', 'reading', 'sign_in_required', 'challenge_required'].includes(status.status)) throw new Error('The purchase reader returned an unknown state.');
         }
-        if (!finished) throw new Error('The Mac purchase reader did not respond. Keep Today and signed-in Chrome open, then try Check again.');
-        if (attempt === 1) throw new Error('The order could not be refreshed. Try Check again.');
+        if (cancelled) throw new DOMException('Check cancelled.', 'CheckCancelled');
+        if (!finished) throw new Error('This purchase check expired. Make sure the Today Mac is awake and connected, then press Check again.');
+        if (cancelBtn) { cancelBtn.hidden = true; cancelBtn.style.display = 'none'; }
+        // Resume the original exact-order Check once, with its normal AI budget.
+        setBudget(280000);
+        await readSpecs();
+        if (resp.status === 202) throw new Error('The order could not be refreshed. Press Check again.');
       }
     } catch (error) {
+      if (cancelled) {
+        if (cancellation) await cancellation;
+        throw new DOMException('Check cancelled.', 'CheckCancelled');
+      }
       sourceStatus(error.message || 'Purchase check could not finish.');
       throw error;
     } finally {
       clearTimeout(timeoutId);
+      if (cancelBtn) {
+        cancelBtn.removeEventListener('click', cancel);
+        cancelBtn.hidden = true; cancelBtn.style.display = 'none'; cancelBtn.disabled = false;
+        cancelBtn.textContent = 'Cancel check';
+      }
     }
     if (data.purchase_sources) {
       sourceStatus([...data.purchase_sources.reports, ...data.purchase_sources.warnings].join('\n'));
@@ -7912,7 +7992,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
           ignoreApplyFailure: true,
         });
       } catch (err) {
-        alert('Check failed: ' + coinLookupFailureMessage(err));
+        if (err?.name !== 'CheckCancelled') alert('Check failed: ' + coinLookupFailureMessage(err));
       } finally {
         btn.classList.remove('loading');
         btn.disabled = false;
@@ -7992,7 +8072,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
         // immediately (server has also persisted history_searched_at).
         if (data.searched_at) btn.classList.add('done');
       } catch (err) {
-        alert('Research failed: ' + coinLookupFailureMessage(err));
+        if (err?.name !== 'CheckCancelled') alert('Research failed: ' + coinLookupFailureMessage(err));
       } finally {
         btn.classList.remove('loading'); btn.disabled = false;
         btn.removeAttribute('aria-busy');

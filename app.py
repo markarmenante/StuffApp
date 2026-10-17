@@ -26563,7 +26563,7 @@ def banknote_lookup_specs(record_id):
 
     refresh = ebay_purchase_lookup.ensure(db, note)
     if refresh:
-        if refresh['status'] in ('queued', 'reading'):
+        if refresh['status'] in ('queued', 'reading', 'sign_in_required', 'challenge_required'):
             refresh['url'] = url_for('banknote_purchase_refresh', record_id=record_id, request_id=refresh['id'])
             return jsonify(purchase_refresh=refresh), 202
         return jsonify(error=refresh['message']), 409

@@ -6,6 +6,17 @@
 session's opening context. Keep it the first section of this file, and
 fold new standing instructions in here — nowhere else.)
 
+- **Purchase Check authority** (2026-10-17): the entered eBay order number is
+  the source of truth. Read that exact order, retaining purchased items even when
+  their titles lack the bulk banknote-discovery keywords. Preserve account,
+  exact-item, seller-suppression and price-evidence checks. Do not substitute a
+  similar listing; multi-item orders need exact item identification or selection.
+  Keep the item price and cents separate from tax, shipping and order totals.
+  When an explicit Check needs the local reader or browser, start/reuse the
+  authorized process and existing sign-in, show any required provider sign-in or
+  verification, and resume after confirmed readiness. Do not require the Today
+  browser window to stay open. The designated Mac must still be awake; never
+  automate passwords, verification codes, CAPTCHA or provider consent.
 - **Banknote recommendation deletion** (2026-10-11): keep a visible Delete
   control on current recommendations and watched/sponsored cards. Deleting a
   recommendation must permanently suppress that exact listing across future

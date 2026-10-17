@@ -427,13 +427,17 @@ def banknote_deliveries(db, record_id=None):
     return deliveries
 
 
-def apply_items(db, items, source='eBay', auto_match=True, authoritative=False):
+def apply_items(db, items, source='eBay', auto_match=True, authoritative=False, requested_order=None):
     """Caller owns the transaction; a partial network page never reaches here."""
+    if requested_order is not None and (not authoritative or auto_match or not items or
+            any(item['order_id'] != requested_order for item in items)):
+        raise ValueError('Purchase result must contain only the complete requested order')
     candidates = listing_candidates(db)
     linked = {r['line_key']: dict(r) for r in db.execute('SELECT * FROM banknote_ebay_links')}
     suppressed = {r[0] for r in db.execute('SELECT identity_hash FROM ebay_deleted_accounts')}
     relevant = [i for i in items if not ({i['seller_key'], digest(i['seller'].lower())} & suppressed)
-                and (i['line_key'] in linked or i['item_id'] in candidates or NOTE_WORDS.search(i['title']))]
+                and (i['line_key'] in linked or i['item_id'] in candidates or NOTE_WORDS.search(i['title'])
+                     or (requested_order is not None and i['order_id'] == requested_order))]
     now, updates, matches = now_iso(), 0, 0
     for item in relevant:
         old = db.execute('SELECT * FROM ebay_order_items WHERE line_key=?', (item['line_key'],)).fetchone()
