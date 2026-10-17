@@ -1608,12 +1608,12 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
     {{ cell('watermark','Watermark') }}
     <div class="dcell">
-      <input type="text" name="size_width" value="{{ '%.0f mm'|format(val('size_width')|float) if val('size_width') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
+      <input type="text" name="size_width" value="{{ '%g mm'|format(val('size_width')|float) if val('size_width') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
              {% if is_new and not val('size_width') %}placeholder="W"{% endif %}>
       <span class="clabel">W mm</span>
     </div>
     <div class="dcell">
-      <input type="text" name="size_height" value="{{ '%.0f mm'|format(val('size_height')|float) if val('size_height') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
+      <input type="text" name="size_height" value="{{ '%g mm'|format(val('size_height')|float) if val('size_height') else '' }}" class="coin-unit-input" data-suffix=" mm" style="text-align:center"
              {% if is_new and not val('size_height') %}placeholder="H"{% endif %}>
       <span class="clabel">H mm</span>
     </div>

@@ -61,6 +61,17 @@ class CatalogueTests(unittest.TestCase):
         self.assertIsNone(stuff._coerce_banknote_spec('material', 'Silver-plated plastic'))
         self.assertIsNone(stuff._coerce_banknote_spec('material', {'value': 'Silver'}))
 
+    def test_banknote_dimensions_render_fractional_millimetres_without_rounding(self):
+        self.add('fractional-size', 'United States of America', 1935)
+        self.db.execute("UPDATE banknotes SET size_width=156,size_height=66.3 WHERE id='fractional-size'")
+        self.db.commit()
+        response = stuff.app.test_client().get('/banknotes/fractional-size')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('name="size_width" value="156 mm"', html)
+        self.assertIn('name="size_height" value="66.3 mm"', html)
+        self.assertEqual(self.db.execute("SELECT size_height FROM banknotes WHERE id='fractional-size'").fetchone()[0], 66.3)
+
     def test_american_colonies_precede_generic_us_classification(self):
         for year in (1774, 1775, 1776):
             for country in ('USA', 'United States of America', 'New York', 'New York Colony'):
