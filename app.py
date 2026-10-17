@@ -11226,9 +11226,9 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
             app.logger.info('trim: full paper boundary %dx%d -> %dx%d',
                             w, h, *rect[0].size)
             return _encode_trimmed_note(rect[0])
-    # A tight seller scan can still carry a thin black backdrop. Its paper
-    # covers more than the general holder detectors' area cap, so recognize
-    # four explicit paper edges before the near-full-frame no-op gates.
+    # Four visible paper edges also identify the note inside a dark holder,
+    # even when the photo clips the holder/label. The same boundary handles
+    # tight seller scans before the near-full-frame no-op gates.
     paper_quad = _paper_on_dark_backdrop_quad(img, expect_aspect)
     if paper_quad is not None:
         rect = _rectify_note_quad(img, paper_quad)
@@ -11236,7 +11236,7 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
             if meta is not None:
                 meta['engine'] = 'paper-on-dark-backdrop'
                 meta['quad'] = [[round(x, 1), round(y, 1)] for x, y in paper_quad]
-            app.logger.info('trim: tight paper boundary %dx%d -> %dx%d', w, h, *rect[0].size)
+            app.logger.info('trim: dark-surround paper boundary %dx%d -> %dx%d', w, h, *rect[0].size)
             return _encode_trimmed_note(rect[0])
     # Seeded geometry pipeline first when enabled: 'ok' ships its crop,
     # 'noop' means the frame already is the note (store nothing), and
@@ -11428,12 +11428,13 @@ def _encode_trimmed_note(crop):
 
 
 def _paper_on_dark_backdrop_quad(img, expect_aspect=None):
-    """A nearly full-frame sheet with four pale paper edges on a black backdrop.
+    """A complete pale sheet on a black backdrop or inside a dark holder.
 
-    General holder detectors deliberately reject frame-filling components.
-    This narrow exception needs a complete paper outline and a strong dark-to-
-    pale transition on every side, so it cannot target a coloured engraving
-    inside white paper. Keep the measured paper boundary without inward shave.
+    The outer holder and label may be clipped; all four paper edges must be
+    visible. Require a complete outline and a strong dark-to-pale transition
+    on every side. A wider holder view also needs a separate printed label,
+    avoiding pale rectangular panels inside dark designs. Keep the measured
+    paper boundary without an inward shave.
     """
     try:
         import cv2
@@ -11455,7 +11456,7 @@ def _paper_on_dark_backdrop_quad(img, expect_aspect=None):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:3]:
         area = cv2.contourArea(contour)
-        if not 0.85 <= area / mask.size <= 0.985:
+        if not 0.20 <= area / mask.size <= 0.985:
             continue
         poly = cv2.approxPolyDP(contour, 0.01 * cv2.arcLength(contour, True), True)
         if len(poly) != 4 or not cv2.isContourConvex(poly):
@@ -11486,7 +11487,10 @@ def _paper_on_dark_backdrop_quad(img, expect_aspect=None):
             samples = a + np.linspace(0.08, 0.92, 100)[:, None] * tangent
             # Sample the paper rim itself, not the printing deeper inside it.
             inside = np.concatenate([np.rint(samples + offset * normal).astype(int) for offset in (1.5, 3.0)])
-            outside = np.rint(samples - max(3.0, 0.006 * min(lengths)) * normal).astype(int)
+            # A clear holder seam can brighten the first few pixels beyond
+            # the sheet. Sample just beyond that halo, still close enough to
+            # require dark backing along each complete visible paper edge.
+            outside = np.rint(samples - max(3.0, 0.010 * min(lengths)) * normal).astype(int)
             if any((points[:, 0] < 0).any() or (points[:, 0] >= w).any() or
                    (points[:, 1] < 0).any() or (points[:, 1] >= h).any()
                    for points in (inside, outside)):
@@ -11500,9 +11504,47 @@ def _paper_on_dark_backdrop_quad(img, expect_aspect=None):
                     np.median(pin.mean(axis=1)) - np.median(pout.mean(axis=1)) < 100):
                 supported = False
                 break
-        if supported:
+        if supported and (area / mask.size >= 0.85 or _dark_holder_has_label(rgb, quad)):
             return quad
     return None
+
+
+def _dark_holder_has_label(rgb, quad):
+    """A separate broad printed pale panel above the sheet, even if clipped.
+
+    Dark designs can contain pale rectangles; they do not independently
+    establish a holder. Require the panel's alignment, proportions, nearby
+    separation and text in multiple regions. A plain bar is insufficient.
+    """
+    import cv2
+    import numpy as np
+
+    pts = np.asarray(quad)
+    left, top = pts.min(axis=0)
+    right, bottom = pts.max(axis=0)
+    width, height = right - left, bottom - top
+    stop = int(top - 4)
+    if stop < height * 0.08:
+        return False
+    gray = cv2.cvtColor(rgb[:stop], cv2.COLOR_RGB2GRAY)
+    mask = cv2.morphologyEx((gray > 140).astype(np.uint8) * 255,
+                            cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if (w < width * 0.80 or not height * 0.08 <= h <= height * 0.65
+                or w / h < 3.5 or not 4 <= top - (y + h) <= height * 0.25
+                or abs((x + w / 2) - (left + right) / 2) > width * 0.15
+                or cv2.contourArea(contour) < w * h * 0.85):
+            continue
+        inset = max(2, int(h * 0.12))
+        inside = gray[y + inset:y + h - inset, x + inset:x + w - inset]
+        if not inside.size or np.mean(inside > 140) < 0.50:
+            continue
+        panels = np.array_split(inside, 4, axis=1)
+        if sum(0.01 <= np.mean(panel < 100) <= 0.40 for panel in panels) >= 2:
+            return True
+    return False
 
 
 def _warm_paper_on_light_holder_quad(img, expect_aspect=None):

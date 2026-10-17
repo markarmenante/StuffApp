@@ -216,8 +216,73 @@ assert stuffapp._paper_on_dark_backdrop_quad(edge_cut) is None
 one_gray_edge = photo.copy()
 ImageDraw.Draw(one_gray_edge).rectangle((1263, 0, 1279, 559), fill=(100, 100, 100))
 assert stuffapp._paper_on_dark_backdrop_quad(one_gray_edge) is None
-# Broader holder shots retain their existing detector path.
-assert stuffapp._paper_on_dark_backdrop_quad(holder(background=(20, 20, 20))) is None
+# Full paper edges also suffice inside a dark holder; the holder/label may
+# be clipped by the photograph while the whole sheet remains visible.
+def clipped_dark_holder(ink=(35, 65, 85), background=(22, 23, 22), label=True, paper=True):
+    img = Image.new('RGB', (1280, 1000), background)
+    draw = ImageDraw.Draw(img)
+    if label:
+        draw.rectangle((-30, 100, 1300, 280), fill=(220, 232, 222))
+        for x in (60, 480, 900):
+            for y in (140, 170, 200):
+                draw.rectangle((x, y, x + 190, y + 9), fill=(25, 35, 25))
+    quad = [(26, 310), (1148, 308), (1149, 922), (27, 924)]
+    if paper:
+        # Transparent holder seam reflects light just OUTSIDE the top paper
+        # edge. The crop must not move inward to evade this reflection.
+        draw.polygon([(26, 305), (1148, 303), (1148, 307), (26, 309)], fill=(110, 110, 110))
+        draw.polygon(quad, fill=(238, 237, 232))
+        draw.polygon([(45, 329), (1129, 327), (1130, 903), (46, 905)], fill=ink)
+        for x in range(65, 1110, 14):
+            draw.line((x, 355, x, 875), fill=(180, 184, 170), width=2)
+    return img, quad
+
+
+for ink in ((35, 65, 85), (20, 20, 20)):
+    for fmt in ('PNG', 'WEBP', 'JPEG'):
+        # Clip both the sides and top of the holder's label, keeping every
+        # paper edge. The label's shape is not the crop's authority.
+        photo, quad = clipped_dark_holder(ink)
+        photo = photo.crop((10, 180, 1240, 975))
+        expected = [(x - 10, y - 180) for x, y in quad]
+        meta = {}
+        with patch.object(stuffapp, '_trim_note_v2', side_effect=AssertionError('model fallback')), \
+                patch.object(stuffapp, '_trim_note_cv_cascade', side_effect=AssertionError('design fallback')):
+            output = stuffapp._trim_slabbed_note_image(encoded(photo, fmt), expect_aspect=1.83, meta=meta)
+        assert output and meta['engine'] == 'paper-on-dark-backdrop', (ink, fmt, meta)
+        assert all(math.dist(a, b) < 3 for a, b in zip(meta['quad'], expected)), meta
+        result = Image.open(io.BytesIO(output))
+        assert abs(result.width - 1122) <= 3 and abs(result.height - 614) <= 3, result.size
+        for point in ((result.width // 2, 5), (result.width // 2, result.height - 6),
+                      (5, result.height // 2), (result.width - 6, result.height // 2)):
+            assert min(result.getpixel(point)) > 180, (fmt, point, result.getpixel(point))
+        assert stuffapp._paper_on_dark_backdrop_quad(result) is None
+        assert JpegImagePlugin.get_sampling(result) == 0
+        assert min(result.getpixel((result.width // 2, result.height // 2))) < 120
+
+broad, _ = clipped_dark_holder()
+assert stuffapp._paper_on_dark_backdrop_quad(broad, expect_aspect=3.4) is None
+assert stuffapp._paper_on_dark_backdrop_quad(broad.crop((30, 0, 1280, 1000))) is None, 'Never invent a clipped paper edge'
+assert stuffapp._paper_on_dark_backdrop_quad(clipped_dark_holder(paper=False)[0]) is None, 'A clipped label is not the note'
+assert stuffapp._paper_on_dark_backdrop_quad(clipped_dark_holder(background=(110, 110, 110))[0]) is None
+assert stuffapp._paper_on_dark_backdrop_quad(clipped_dark_holder(background=(245, 245, 242))[0]) is None
+blank_bar, _ = clipped_dark_holder(paper=False, label=False)
+ImageDraw.Draw(blank_bar).rectangle((0, 100, 1279, 280), fill=(220, 232, 222))
+assert stuffapp._paper_on_dark_backdrop_quad(blank_bar) is None
+blank_label, _ = clipped_dark_holder()
+ImageDraw.Draw(blank_label).rectangle((0, 100, 1279, 280), fill=(220, 232, 222))
+assert stuffapp._paper_on_dark_backdrop_quad(blank_label) is None, 'A blank panel is not a printed holder label'
+fragments, _ = clipped_dark_holder(label=False)
+fragment_draw = ImageDraw.Draw(fragments)
+for x in (80, 480, 900):
+    fragment_draw.text((x, 220), 'Caption fragments', fill=(220, 232, 222))
+assert stuffapp._paper_on_dark_backdrop_quad(fragments) is None
+# A large pale inner panel in a dark printed note is indistinguishable
+# from a separate sheet without the independent holder label.
+assert stuffapp._paper_on_dark_backdrop_quad(clipped_dark_holder(label=False)[0]) is None
+inner_panel = Image.new('RGB', (1400, 750), (22, 23, 22))
+ImageDraw.Draw(inner_panel).rectangle((180, 120, 1220, 630), fill=(238, 237, 232))
+assert stuffapp._paper_on_dark_backdrop_quad(inner_panel) is None
 
 # Preserve native crop dimensions, even beyond the general photo resize cap.
 large = Image.new('RGB', (3600, 1600), (225, 215, 185))
@@ -251,28 +316,32 @@ with stuffapp.app.app_context():
     images = stuffapp._load_vision_images([(source, 'holder')])
     assert images and images[0]['media_type'] == 'image/webp'
 
-# The same upload path records a tight scan's original and exact source quad.
-with stuffapp.app.app_context():
-    db = stuffapp.get_db()
-    db.execute("INSERT INTO banknotes (id) VALUES ('tight-quality')")
-    db.commit()
-tight_raw = encoded(tight_dark_scan()[0])
-response = client.post('/banknotes/tight-quality/upload-image', data={
-    'field': 'image_1', 'image': (io.BytesIO(tight_raw), 'tight-original.webp'),
-})
-assert response.status_code == 200, response.get_json()
-with stuffapp.app.app_context():
-    db = stuffapp.get_db()
-    name = db.execute("SELECT image_1 FROM banknotes WHERE id='tight-quality'").fetchone()[0]
-    source = stuffapp._banknote_vision_source(name, db)
-    assert source != name and source.endswith('.webp')
-    with open(os.path.join(stuffapp.UPLOAD_FOLDER, source), 'rb') as f:
-        assert f.read() == tight_raw, 'Keep every original pixel and paper margin recoverable'
-    mapping = db.execute('SELECT quad FROM trimmed_image_sources WHERE trimmed=?', (name,)).fetchone()
-    import json
-    assert len(json.loads(mapping['quad'])) == 4
-    saved = Image.open(os.path.join(stuffapp.UPLOAD_FOLDER, name))
-    assert abs(saved.width - 1244) <= 3 and abs(saved.height - 528) <= 3, saved.size
+# The same upload path retains originals and exact geometry for both tight
+# scans and broader clipped holders; Check can still read the original label.
+for record_id, photo, expected_size in (
+        ('tight-quality', tight_dark_scan()[0], (1244, 528)),
+        ('clipped-quality', clipped_dark_holder()[0].crop((10, 180, 1240, 975)), (1122, 614))):
+    with stuffapp.app.app_context():
+        db = stuffapp.get_db()
+        db.execute("INSERT INTO banknotes (id) VALUES (?)", (record_id,))
+        db.commit()
+    original = encoded(photo)
+    response = client.post('/banknotes/' + record_id + '/upload-image', data={
+        'field': 'image_1', 'image': (io.BytesIO(original), 'holder-original.webp'),
+    })
+    assert response.status_code == 200, response.get_json()
+    with stuffapp.app.app_context():
+        db = stuffapp.get_db()
+        name = db.execute("SELECT image_1 FROM banknotes WHERE id=?", (record_id,)).fetchone()[0]
+        source = stuffapp._banknote_vision_source(name, db)
+        assert source != name and source.endswith('.webp')
+        with open(os.path.join(stuffapp.UPLOAD_FOLDER, source), 'rb') as f:
+            assert f.read() == original, 'Keep every original pixel and paper margin recoverable'
+        mapping = db.execute('SELECT quad FROM trimmed_image_sources WHERE trimmed=?', (name,)).fetchone()
+        import json
+        assert len(json.loads(mapping['quad'])) == 4
+        saved = Image.open(os.path.join(stuffapp.UPLOAD_FOLDER, name))
+        assert all(abs(actual - expected) <= 3 for actual, expected in zip(saved.size, expected_size)), saved.size
 
 # Market acquisitions use the same source-preservation rule for notes.
 def classify_market_front(photos):
