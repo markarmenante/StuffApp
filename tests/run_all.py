@@ -6,6 +6,7 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_ebay_orders.py', 'test_ebay_m
          'test_person_medications.py', 'test_property_people.py', 'test_files_export_names.py', 'test_note_trim.py',
          'test_trim_quad.py', 'test_sale_plans.py',
          'test_banknote_similar.py',
+         'test_banknote_printers.py',
          'test_ebay_purchase_lookup.py',
          'test_banknote_check_sources.py',
          'test_banknote_photo_sides.py',

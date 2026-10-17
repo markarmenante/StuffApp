@@ -13,6 +13,7 @@ import market_colonial
 import market_ebay_feed
 import market_grouping
 import banknote_catalog
+import banknote_printers
 import ebay_orders
 import purchase_orders
 import purchase_lifecycle as purchase_states
@@ -19758,7 +19759,7 @@ def _analysis_banknotes_profile(db):
             g['count'] += 1
             g['countries'].append(_bn_country_label(r['country']))
             g['issuers'].append(r['issuer'])
-            g['printers'].append(r['printer'])
+            g['printers'].append(banknote_printers.canonical_printer(r['printer']))
             y = _safe_int(r['date_1'])
             if y:
                 g['years'].append(y)
@@ -19822,6 +19823,7 @@ def _analysis_banknotes_profile(db):
             {'country': _bn_country_label(r['country']), 'denomination': r['denomination'], 'issuer': r['issuer'],
              'issue_type': r['issue_type'], 'series': r['series'], 'pick': r['pick_number'],
              'year': r['date_1_text'] or r['date_1'], 'printer': r['printer'],
+             'printer_group': banknote_printers.canonical_printer(r['printer']),
              'grade': _grade_label(r),
              'empire': _banknote_empire(r['country'], r['date_1'], r['issuer'], r['series']) if bucket == 'colonial' else None,
              'authority': _banknote_military(r) if bucket == 'military' else None,
@@ -19867,7 +19869,8 @@ def _analysis_banknotes_profile(db):
         'other_countries': _analysis_tally([_bn_country_label(r['country']) for r in other], 20),
         'other_types': _analysis_tally([r['issue_type'] for r in other]),
         'other_decades': _decades(other),
-        'printers': _analysis_tally([r['printer'] for r in rows], 10),
+        'printers': _analysis_tally([banknote_printers.canonical_printer(r['printer'])
+                                     for r in rows], 10),
         'grading': _analysis_tally([r['grading_authority'] for r in rows], 5),
         'graded': len(grades_all),
         'avg_grade': (sum(grades_all) / len(grades_all)) if grades_all else None,
@@ -19963,7 +19966,10 @@ _ANALYSIS_BRIEFS = {
         "authority, how it circulated and was redeemed, and what the held pieces show. "
         "For the other world notes: the themes that connect them (emergency and Notgeld, "
         "new-nation first issues, post-colonial successors to the colonial series held). "
-        "Throughout: the grading pattern as a matter of record (which grades, how many, "
+        "Printer tallies use canonical firm names; each piece's printer_group identifies "
+        "that same firm while printer preserves its original catalogue credit. Do not "
+        "count name, abbreviation or address variants in one printer_group as different "
+        "printers. Throughout: the grading pattern as a matter of record (which grades, how many, "
         "which services), printers and vignettes, rarities, and gaps a serious collector "
         "of colonial and occupation paper would notice."
     ),
