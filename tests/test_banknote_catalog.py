@@ -567,7 +567,8 @@ class CatalogueTests(unittest.TestCase):
     def test_exact_1964_honduras_signature_reference(self):
         base = self.signature_identity()
         for reference in ('P-28b', 'P#28b', 'Pick 28b', 'P28b', 'P-28b; Pick 28b',
-                          'P-28b, TBB B127', 'TBB #B127; P-28b'):
+                          'P-28b, TBB B127', 'TBB #B127; P-28b', 'P-28b, TBB# 127',
+                          'P-28b, TBB# 127 (type-level, per Numista)'):
             for denomination in ('1 Dollar', '$1', '1Dollar', 1, 1.0):
                 with self.subTest(reference=reference, denomination=denomination):
                     result = catalog.signature_reference(dict(base, pick_number=reference,
@@ -591,6 +592,11 @@ class CatalogueTests(unittest.TestCase):
                         {'pick_number':'P-28b / 28c'}, {'pick_number':'P-28b, 28c'},
                         {'pick_number':'P-28b, possibly 28c'}, {'pick_number':'P-28b?'},
                         {'pick_number':'P-28b; P-28c'}, {'other_catalog':'P-28c'},
+                        {'pick_number':'P-28b, TBB# 127 (possibly P-28c, per Numista)'},
+                        {'pick_number':'P-28b, TBB# 127 (type-level, per Numista), P-28c'},
+                        {'pick_number':'P-28b (possibly P-28c), TBB# 127 (type-level, per Numista)'},
+                        {'pick_number':'P-28b, TBB# 128 (type-level, per Numista)'},
+
                         {'pick_number':''}):
             with self.subTest(changes=changes):
                 self.assertIsNone(catalog.signature_reference(dict(base, **changes)))
@@ -624,6 +630,24 @@ class CatalogueTests(unittest.TestCase):
                                                json={'updates':{'signatures':expected}})
         self.assertEqual(applied.status_code, 200, applied.get_json())
         self.assertEqual(self.db.execute("SELECT signatures FROM banknotes WHERE id='honduras'").fetchone()[0], expected)
+
+    def test_annotated_tbb_reference_recovers_signatures_without_editing_catalogue(self):
+        self.signature_note()
+        reference = 'P-28b, TBB# 127 (type-level, per Numista)'
+        self.db.execute("UPDATE banknotes SET pick_number=? WHERE id='honduras'", (reference,))
+        self.db.commit()
+        before = dict(self.db.execute("SELECT * FROM banknotes WHERE id='honduras'").fetchone())
+        response = self.signature_check()
+        self.assertEqual(response.status_code, 200, response.get_json())
+        data = response.get_json()
+        self.assertEqual(set(data['filled']), {'signatures'})
+        self.assertIn('Henry Edney Conrad Cain', data['filled']['signatures'])
+        self.assertEqual(data['overwritten'], {})
+        after = dict(self.db.execute("SELECT * FROM banknotes WHERE id='honduras'").fetchone())
+        after['specs_searched_at'] = before['specs_searched_at']
+        self.assertEqual(after, before)
+        # The recognized annotation cannot weaken the date guard.
+        self.assertIsNone(catalog.signature_reference(dict(before, date_1=1961)))
 
     def test_saved_signature_stays_until_reviewed_change_applied(self):
         self.signature_note('Collector transcription')

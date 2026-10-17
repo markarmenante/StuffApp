@@ -219,7 +219,13 @@ def signature_reference(row):
         return None
     refs = []
     for key in ('pick_number', 'other_catalog'):
-        for part in re.split(r'[,;]', value(key) or ''):
+        # Check may annotate this verified cross-reference with its source.
+        # Strip only that exact TBB127 annotation before splitting its comma;
+        # never discard arbitrary qualifiers that could hide another Pick.
+        text = re.sub(r'(\bTBB\s*#?\s*B?\s*127)\s*'
+                      r'\(\s*type[- ]level\s*,\s*per\s+Numista\s*\)',
+                      r'\1', value(key) or '', flags=re.I)
+        for part in re.split(r'[,;]', text):
             part = part.strip()
             if re.search(r'(?<!\w)(?:pick|p)\s*[-.#]?\s*\d', part, re.I):
                 # Reject alternatives, uncertain attributions, missing variety
@@ -227,7 +233,7 @@ def signature_reference(row):
                 if not re.fullmatch(r'(?:pick|p)\s*[-.#]?\s*28b', part, re.I):
                     return None
                 refs.append('28b')
-            elif re.fullmatch(r'(?:TBB\s*#?\s*)?B127', part, re.I):
+            elif re.fullmatch(r'(?:TBB\s*#?\s*B?\s*|B\s*)127', part, re.I):
                 # The app stores cross-references in the same catalogue field.
                 # This series' verified TBB number is not a competing Pick.
                 continue

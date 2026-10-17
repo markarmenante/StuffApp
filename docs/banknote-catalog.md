@@ -290,3 +290,8 @@ and direct image/dealer signature suggestions take precedence. It supplies only
 Signatures through the existing fill/review flow, with source attribution; the
 lookup does not write the saved signature field or infer specimen facts. The
 model prompt also requires the dated variety instead of the entire series' list.
+
+The combined catalogue field also accepts the verified cross-reference spelling
+`P-28b, TBB# 127 (type-level, per Numista)`. Only this recognized TBB127 source
+annotation is ignored for matching; uncertain or competing Pick attributions
+still reject the fallback, and the saved catalogue text is never rewritten.
