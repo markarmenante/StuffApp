@@ -140,8 +140,9 @@ swaps the list for live buy candidates and reads "Collection" while
 showing them. A scan runs in a background thread (`_run_market_scan`;
 Cloudflare caps a request at 100 s) as several parallel web-search
 Claude calls, one per theme in `_MARKET_THEMES`: banknotes lead with
-colonial issues before independence (British, French, Italian,
-Portuguese, German), then denomination gaps in series held, the pattern
+colonial and dependent administrations worldwide, including Japanese and lesser-known
+issues, protectorates, mandates, trust territories and military occupations
+(see `docs/market-validation.md` for sourced eligibility), then denomination gaps in series held, the pattern
 of recent purchases, and a "new sources" theme that hunts venues Mark
 does not use yet; coins are ancient Greek only. Every call sees the
 fair-price profile, the holdings summary, denomination coverage and

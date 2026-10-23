@@ -799,7 +799,7 @@
         {% if _why %}<div class="idr market-why"><span>{{ _why }}</span></div>{% endif %}
         <div class="idr market-tags">
           {% if row['issue_label'] %}<span class="market-tag">{{ row['issue_label'] }}</span>{% endif %}
-          {% if row['empire'] %}<span class="market-tag market-tag-colonial">{{ row['empire'] }} colonial</span>{% endif %}
+          {% if row['empire'] and not row['issue_label'] %}<span class="market-tag market-tag-colonial">{{ row['empire'] }} colonial</span>{% endif %}
           {% set _fills = row['fills']|market_copy %}
           {% if _fills %}<span class="market-tag market-tag-fills">Fills: {{ _fills }}</span>{% endif %}
           {% set _rarity = row['rarity']|market_copy %}

@@ -39,25 +39,42 @@ which image-fetch step failed. No replacement live offer was invented.
 
 ## Colonial recommendations versus collection groups
 
-`market_colonial.py` is a conservative recommendation gate; it does not change
-collection grouping or holdings. It shares the finite territory periods in
-`banknote_catalog.py`, with stricter market boundaries. A British/Commonwealth
-or US/Philippines collection group is not proof of colonial administration.
-Domestic US notes remain eligible in their separate themes and are labelled
-United States issues. Independent successor issuers and post-colonial dates are
-excluded from colonial recommendations, including saved candidates. Unsupported
-territories, unknown dates and transition years are excluded pending evidence.
-A year alone never supplies an invented day/month cutoff. Multi-state currency
-boards use the earliest independence boundary conservatively; this can omit
-valid later issues until their territory and issuer are established.
+`market_colonial.py` separates recommendation eligibility from collection grouping
+and holdings. Search scope is worldwide: colonies, protectorates, mandates, trust
+territories, dependencies, condominiums, leased territories, client states and
+military occupations. No fixed empire, territory or want-list limits discovery.
+The legacy route shares territory periods in `banknote_catalog.py`, with stricter
+market boundaries. A British/Commonwealth or US/Philippines collection group is
+not proof of administration. Domestic US notes keep their separate themes;
+documented British-American colonial issues can use the sourced route below.
+Ordinary independent successor issues remain excluded, including saved candidates.
 
 For undated issues and reissues the scan must provide the actual issue-year
 range and a corroborating catalogue/issuing-bank source URL. The whole range
-must fall within confirmed administration years. Explicit later years or
-successor institutions in the title/series override a misleading old printed
-date. Source attribution is retained in the payload, not asserted as a new
-independent source audit. No colonial recommendation gate alters existing
-collection records.
+must fall within the administration years. Explicit later years or successor
+institutions in the title/series override a misleading old printed date.
+
+Additional territories, occupations and transition-year issues use an
+`administration` object: relationship `kind`, administration `name`, matching
+`territory`, ordered `year_start`/`year_end`, reference `source` URL and
+issue-specific `evidence` excerpt. The candidate also needs an issuer, catalogue
+identity, both actual issue years and an `issue_date_source` URL. The issue range
+must fit the administration range (inclusive only with this detailed evidence).
+Military occupation need not precede a country's original independence. Missing
+evidence remains excluded; a year alone never invents a day/month cutoff.
+
+Source attribution is retained in candidate JSON; these checks validate supplied
+evidence structure and consistency, not an independent audit of the cited source.
+Discovery must read real references and never invent URLs or history. Existing
+known-territory dates retain conservative boundaries when detailed evidence is
+absent. All sources, saved results, refreshed exact-listing titles and actions use
+the same gate. No eligibility rule alters existing collection records.
+
+Labels name the documented relationship (for example, “Japanese administration ·
+military occupation”); dependencies and occupations are not automatically called
+colonies. Supported administrations receive the same ranking priority. Specimens,
+proofs, remainders, replicas, counterfeits and propaganda overprints remain outside
+issued-currency recommendations; grade, live-listing and duplicate checks apply.
 
 **Mark's explicit exception:** genuine Philippine VICTORY notes remain wanted,
 including later signature varieties and Victory–Central Bank overprints after
@@ -73,6 +90,15 @@ exact listing, liveness and duplicate rules still apply.
 
 Evidence for represented issues and important boundaries:
 
+- [National Park Service: WWII currency](https://www.nps.gov/articles/000/currency-on-the-world-war-ii-home-front.htm)
+  distinguishes Japanese occupation currency in the Philippines from emergency,
+  propaganda, counterfeit and Victory issues.
+- [Bank of Korea museum](https://www.bok.or.kr/eng/bbs/B0000338/view.do?menuNo=400390&nttId=10085252&pageIndex=1)
+  identifies Bank of Joseon notes under Japanese occupation.
+- [US Currency history](https://www.uscurrency.gov/history) covers British-American
+  colonial notes and Allied military currency for occupied countries.
+- Smithsonian examples: [Italy, 1943](https://americanhistory.si.edu/collections/object/nmah_1519256)
+  and [Germany, 1944](https://americanhistory.si.edu/collections/nmah_1591210).
 - [US State Department: Philippines](https://history.state.gov/countries/philippines):
   independence 4 July 1946.
 - [BSP: English series](https://www.bsp.gov.ph/SitePages/CoinsAndNotes/EnglishSeries.aspx):

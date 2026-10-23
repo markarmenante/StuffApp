@@ -30,6 +30,21 @@ or photographs for the market list.
 
 ## Market grouping
 
+Banknote discovery covers colonial and dependent administrations worldwide,
+including Japanese issues, protectorates, mandates, trust territories,
+condominiums, leased territories, client states and military occupations.
+British and continental examples are illustrative. Dedicated Japanese and
+worldwide themes seek unlisted administrations; the historical 35-entry want-list
+is a priority aid, not a coverage boundary. Broad searches still seek missing
+issuers when want-list themes are present. All supported administrations have
+equal ranking priority; coins retain their ancient-Greek scope.
+
+New territories and occupation issues need issue-specific administration evidence
+under [market-validation.md](market-validation.md). Labels distinguish the actual
+relationship. The two additional themes use the existing global time, token,
+tool and concurrency caps; a scan is bounded discovery, not a guarantee to inspect
+every territory or listing. Collection and Ordered records are unchanged.
+
 Both Market Scan pages gather similar listings into visible sections. Banknotes
 use the country spelling aliases and complete series label, with the existing US
 note-type rules separating same-year classes such as Silver Certificates and

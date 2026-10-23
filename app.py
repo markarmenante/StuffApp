@@ -15937,27 +15937,51 @@ def _banknote_obsolete_theme(db):
 
 _MARKET_THEMES = {
     'banknotes': [
-        ('colonial-british', "TOP PRIORITY — British colonial issues before independence: "
+        ('colonial-british', "TOP PRIORITY — British colonial and dependent-territory issues WORLDWIDE. "
+                             "Search beyond this illustrative list; it is not a whitelist: "
                              "India, Ceylon, Burma, Malaya and the Straits Settlements, "
                              "Sarawak, British North Borneo, Hong Kong, Palestine, Cyprus, "
                              "Malta, East Africa, West Africa, Southern Rhodesia, British "
                              "Guiana, British Honduras, the Caribbean currency boards, "
-                             "Fiji, Mauritius and the other crown colonies and boards."),
-        ('colonial-continental', "TOP PRIORITY — French, Italian, Portuguese and German "
-                                 "colonial issues before independence: French Indochina, "
+                             "Fiji, Mauritius and the other crown colonies and boards. Include "
+                             "protectorates, mandates, trust territories, dependencies, leased "
+                             "territories and colonial America; distinguish each administration."),
+        ('colonial-continental', "TOP PRIORITY — French, Dutch, Belgian, Spanish, Portuguese, "
+                                 "Italian and German colonial administrations worldwide, with equal "
+                                 "priority. Examples, not a whitelist: French Indochina, "
                                  "AOF/AEF, Madagascar, Morocco, Tunisia, Algeria, French "
                                  "Somaliland, the Antilles; Italian East Africa, Somaliland, "
                                  "Tripolitania/Libya; Banco Nacional Ultramarino issues for "
                                  "Angola, Mozambique, Guiné, Cabo Verde, São Tomé, Macau, "
                                  "Timor, Portuguese India; German East Africa (incl. the "
                                  "WWI Tabora issues), Kamerun, New Guinea, South-West Africa. "
-                                 "Dutch (Netherlands Indies), Belgian Congo and Spanish "
-                                 "colonial issues come next."),
+                                 "Netherlands Indies, Curaçao, Suriname, Belgian Congo and Spanish "
+                                 "colonial issues. Search lesser-known territories beyond these examples, "
+                                 "including protectorates, mandates and joint administrations."),
+        ('colonial-japanese', "TOP PRIORITY — Japanese colonial, dependent-state and military "
+                              "occupation paper money: Taiwan, Korea/Chosen/Joseon, Manchukuo, "
+                              "occupied China, Philippines, Burma, Malaya, North Borneo, "
+                              "Netherlands Indies and Oceania, plus any other documented issuing "
+                              "territory. These are examples, not a whitelist. Distinguish civilian "
+                              "colonial banks, client-state issuers and Japanese invasion money. "
+                              "Identify the actual administration, issuer, catalogue type and issue "
+                              "period; exclude propaganda, counterfeits and later independent issues."),
+        ('colonial-worldwide', "TOP PRIORITY — OPEN-ENDED WORLDWIDE DISCOVERY: any colonial, "
+                               "protectorate, mandate, trust-territory, dependency, condominium, "
+                               "leased-territory, client-state or military-occupation issue, including "
+                               "administrations absent from all example lists and the fixed want-list. "
+                               "Seek lesser-known Danish and other administrations, joint territories "
+                               "such as New Hebrides, and Allied or other military occupation currency "
+                               "in Europe, Asia and elsewhere. Occupation issues need not predate a "
+                               "country's original independence. Attribute the precise relationship "
+                               "with issue-specific sources; a foreign printer or monarch alone is "
+                               "not evidence. Do not restrict discovery to already-held issuers."),
         ('analysis-gaps', "COLLECTION GAPS — work from COLLECTION ANALYSIS below: the "
                           "colonial territories, issuers and note classes the analysis says "
                           "a serious collector of colonial paper would notice missing, and "
                           "the computed list of empire territories the collection does not "
-                          "hold. Pre-independence issues, PMG/PCGS 64 EPQ or better where "
+                          "hold. Also discover colonial, dependent and occupation administrations "
+                          "beyond the analysis and fixed lists. PMG/PCGS 64 EPQ or better where "
                           "they exist; name the gap filled in `fills` and set `empire`."),
         ('denominations', "DENOMINATION GAPS: for the series and issuers listed under "
                           "DENOMINATION COVERAGE, find the denominations NOT yet held — "
@@ -15971,7 +15995,8 @@ _MARKET_THEMES = {
                     "(PNB, BPI, Treasury certificates, unoverprinted Victory Series). "
                     "Include genuine Philippine VICTORY series even after independence, including "
                     "Roxas varieties and Victory-CBP overprints; label their period accurately. "
-                    "Other Republic issues are not colonial; distinguish Japanese occupation."),
+                    "Ordinary independent Republic issues are not colonial; include documented "
+                    "Japanese occupation issues under their actual administration."),
         ('sources', "NEW SOURCES: find dealers, auction houses and marketplaces Mark "
                     "is NOT already using — anything beyond eBay, Heritage, Stack's "
                     "Bowers, Numista, MA-Shops, Banknote World, VCoins — that stock "
@@ -16053,6 +16078,10 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"series": str|null, "year": int|null, "pick_number": str|null, '
             '"other_catalog": str|null (other stated catalogue references), '
             '"issuer": str|null, "issue_year_start": int|null, "issue_year_end": int|null, "issue_date_source": str|null, '
+            '"administration": {"kind": "colony"|"protectorate"|"mandate"|"trust territory"|"dependency"|"condominium"|"military occupation"|"leased territory"|"client state", '
+            '"name": str (issuing administration), "territory": str (same territory as country), '
+            '"year_start": int, "year_end": int (documented administration years; for ongoing administrations use the current year), '
+            '"source": str (corroborating reference URL), "evidence": str (source excerpt identifying this issue and administration)}|null, '
             '"grading_authority": "PMG"|"PCGS"|"PCGS Currency"|"Legacy"|null, '
             '"grade_numeric": int|null, "grade": str, "designation": "EPQ"|"PPQ"|"★"|"", '
             '"price": str (as listed, with its currency, e.g. "$450" or "€1,200"), '
@@ -16060,8 +16089,7 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"closes": "YYYY-MM-DD"|"", "listing_url": str, '
             '"image_urls": [str] (the listing\'s own photos as direct image-file URLs, obverse/holder front first, then reverse/holder back; [] if none), '
             '"rarity": str, "fills": str (the gap it fills, or ""), '
-            '"empire": "British"|"French"|"Italian"|"Portuguese"|"German"|"Dutch"|"Belgian"|"Spanish"|"Japanese"|"US"|"" '
-            '(the colonial administration the note was issued under, if any), '
+            '"empire": str (administering power, e.g. British, French, Dutch, Japanese, Danish, Allied, or any other documented power; "" if none), '
             '"new_source": bool (a venue Mark is not already using), '
             '"live_evidence": str (what on the page proves it is live: "Buy It Now, 2 available", "bidding ends 2026-10-03 14:00 CT"), '
             '"why": str (one line), "fair": str (one line of fair-value evidence)}], '
@@ -16089,8 +16117,10 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"why": str, "fair": str}], '
             '"notes": str (when items is empty: what you searched and why nothing qualified; else "")}'
         )
-    scope = ('paper money — colonial issues before independence first (British, French, '
-             'Italian, Portuguese, German), US large-size type gaps and 1800s state obsolete '
+    scope = ('paper money — all colonial, protectorate, mandate, trust-territory, dependency, '
+             'condominium, leased-territory, client-state and military-occupation issues worldwide '
+             'first, without an empire or territory whitelist (including Japanese and lesser-known '
+             'administrations); US large-size type gaps and 1800s state obsolete '
              'notes (Mark, 2026-09-19), then the rest of the wanted list'
              if category == 'banknotes' else
              'ANCIENT GREEK coins only — archaic through Hellenistic, including the '
@@ -16114,7 +16144,7 @@ VENUES IN SCOPE — Mark's instruction of 2026-09-09 for Market Scan: {MARKET_VE
 LIVENESS: every item must be purchasable now. An auction lot must be in a sale that has NOT closed, and `closes` MUST carry its future closing date (an auction item with no `closes` is discarded). NEVER return a sold listing, an ended eBay item, a "prices realized" / "auction results" / archive page, a past sale's lot, or a price guide as an item — those are evidence for `fair` only. For FIXED-PRICE dealer stock (VCoins stores, Shanna Schmidt, Harlan J. Berk, Roma's shop, the Nomos and CNG shops, Baldwin's, Forum, MA-Shops, eBay Buy It Now) return the item page whenever the search result shows it offered at a price and nothing says sold, reserved or archived — the scan opens every page itself afterwards and drops the ones that have ended, so you do not have to prove it; put in `live_evidence` what the result showed ("$1,850 — Add to cart", "Buy It Now, 2 available", "bidding ends 2026-10-03"). eBay is the exception: its search results keep ended items for months, so the scan must independently read the exact item's page and confirm its own buy/bid controls before recommending it. Search snippets, `live_evidence`, an asserted active status, a familiar seller, and a future `closes` date cannot override an unreadable, blocked, sold or ended eBay page. Quote only live wording you actually saw on that exact item, never controls on similar-item recommendations. Give the direct listing URL (the item page, not a search page; for eBay the /itm/ page, never a sold/completed search). {duplicate_rule}
 EXACT AUCTION LINKS: use a verified individual lot page, never the auction house homepage, auction index, catalogue, calendar or live-bidding landing page. A sale number, future sale date or general bidding controls do not identify the particular coin or banknote. Follow the actual lot link; never guess a URL or assume an internal sale ID equals the auction number. If the exact lot link cannot be found, omit the candidate.
 
-COLONIAL ELIGIBILITY: Collection group is not colonial status. For colonial recommendations, use the actual issue period before independence, not merely an old printed series date. Exclude independent Commonwealth/Republic/successor-bank issues and ambiguous transition years. Include issuer. For undated notes and reissues provide issue_year_start, issue_year_end and issue_date_source (a corroborating catalogue or issuing-bank URL); never invent them. Domestic US large-size themes remain separate. EXCEPTION explicitly requested by Mark: genuine Philippine VICTORY series notes remain wanted after independence, including Roxas signature varieties and Central Bank of the Philippines Victory overprints. Identify the actual Philippine Victory catalogue number, issuer and series; label these accurately as Victory or post-independence Victory-CBP, never automatically colonial.
+ADMINISTRATION ELIGIBILITY: Collection group is not colonial status. Search ALL documented colonial, dependent and occupation administrations; examples and the fixed want-list are not limits. Use the actual issue period and relationship, not an old printed date, a foreign printer, later circulation or a country's modern name. Military occupation can follow independence. Include issuer and catalogue identity. For additional territories, occupation issues, or transition years, supply the complete administration object, both issue_year_start and issue_year_end, and issue_date_source. The source excerpt must identify this particular issue as belonging to that administration; cite an actual catalogue, museum, issuing-bank or authoritative historical reference URL, not a search page or a guessed link. The actual issue range must fit inside the sourced administration period. For known colonial issues without this evidence, conservative pre-independence boundaries still apply. Undated notes and reissues always need actual issue-year evidence. Exclude ordinary independent Commonwealth/Republic/successor-bank issues, propaganda notes, counterfeits, and unsupported claims; leave missing facts null, never invent them. Domestic US large-size themes remain separate, while documented British-American colonial issues are included. EXCEPTION explicitly requested by Mark: genuine Philippine VICTORY series notes remain wanted after independence, including Roxas signature varieties and Central Bank of the Philippines Victory overprints. Identify the actual Philippine Victory catalogue number, issuer and series; label these accurately as Victory or post-independence Victory-CBP, never automatically colonial.
 
 TONE (Mark's instruction, 2026-09-10): `why`, `fills`, `rarity` and `fair` are factual one-liners — what the piece is, its grade, its price, which gap it fills, and the evidence. No flattery, no "exactly the trophy-grade piece the collection needs", no reading of the collection or the collector; state facts and figures only. Keep purchase-button wording, financing language and search/price-extraction commentary in `live_evidence` only; it is internal verification data. Never repeat it in `why`, `fills`, `rarity` or `fair`. Retain concrete price caveats (buyer premium, shipping, estimates), dated comparable sales and attributed census evidence. If the price is unknown use "See listing" in `price`.
 
@@ -16753,6 +16783,7 @@ _MARKET_ENDED_TEXT_RE = re.compile(
 # Issued-for-circulation notes only, with no NET grading designation.
 _MARKET_UNISSUED_TERM = (r'specimens?|sp[eé]cimen|muestra|remainders?|proofs?|essais?|'
                         r'(?:colou?r[ -]*)?trials?|replicas?|reproductions?|fantasy|facsimiles?|'
+                        r'counterfeits?|propaganda[ -]+(?:notes?|overprints?)|'
                         r'test[ -]+notes?|unissued|non[ -]?issued|non[ -]?circulating|'
                         r'(?:not|never)[ -]+issued(?:[ -]+for[ -]+circulation)?|not[ -]+for[ -]+circulation')
 _MARKET_UNISSUED_TEXT_RE = re.compile(r'\b(?:' + _MARKET_UNISSUED_TERM + r')\b', re.I)
@@ -16761,6 +16792,12 @@ _MARKET_UNISSUED_PICK_RE = re.compile(r'\d[a-z]?[rs]\d*$', re.I)
 
 def _market_banknote_issue_problem(item):
     """Apply collection exclusions equally to discoveries, cards and actions."""
+    # A suggested slab grade ("raw, PMG 64 potential") is not a graded note,
+    # even if model extraction also supplied a grading authority and number.
+    holder_text = ' '.join(str(item.get(field) or '') for field in ('title', 'grade', 'description', 'listing_text'))
+    holder_text = re.sub(r'\b(?:not|never)\s+(?:a\s+)?(?:raw|ungraded|unslabbed)\b', '', holder_text, flags=re.I)
+    if re.search(r'\b(?:raw|ungraded|unslabbed)\b|\bnot\s+(?:(?:PMG|PCGS)\s+)?(?:graded|certified|slabbed)\b', holder_text, re.I):
+        return 'Ungraded / raw note; a suggested grading-service grade is not a holder'
     for field in ('title', 'grade', 'designation', 'series', 'rarity', 'fills', 'why', 'description', 'note_type', 'live_evidence', 'listing_text'):
         text = str(item.get(field) or '')
         # A denial does not identify a specimen: "not a specimen or proof".
@@ -16768,6 +16805,7 @@ def _market_banknote_issue_problem(item):
         denied += r'(?:\s*(?:,|/|or|and)\s*(?:an?\s+)?(?:' + _MARKET_UNISSUED_TERM + r')\b)*'
         text = re.sub(denied, '', text, flags=re.I)
         text = re.sub(r'\bproof\s+of\s+(?:purchase|authenticity|payment|ownership)\b', '', text, flags=re.I)
+        text = re.sub(r'\banti[- ]counterfeit(?:ing)?\b|\bcounterfeit\s+(?:protection|detection|prevention|deterrence)\b', '', text, flags=re.I)
         if _MARKET_UNISSUED_TEXT_RE.search(text):
             return 'Not an issued-for-circulation note (specimen, proof, remainder or other non-issued type)'
         # NET in a grading field is decisive; a net price or .net domain is not.
@@ -17214,7 +17252,8 @@ def _market_verify_live(items, workers=6):
             _market_drop(item, 'eBay availability could not be verified on the listing page')
             continue
         if 'country' in item:
-            issue_problem = _market_banknote_issue_problem(dict(item, title=pr.get('title') or item.get('title'), listing_text=pr.get('identity_text') or ''))
+            observed = dict(item, title=pr.get('title') or item.get('title'), listing_text=pr.get('identity_text') or '')
+            issue_problem = _market_banknote_issue_problem(observed) or market_colonial.problem(observed)
             if issue_problem:
                 _market_drop(item, issue_problem)
                 continue
@@ -17359,7 +17398,8 @@ def _market_normalize_item(db, category, raw):
         'why': str(raw.get('why') or '').strip()[:300],
         'fair': str(raw.get('fair') or '').strip()[:300],
         'theme': str(raw.get('theme') or '')[:40],
-        'empire': str(raw.get('empire') or '').strip()[:20],
+        'empire': str(raw.get('empire') or '').strip()[:80],
+        'administration': market_colonial.normalize_administration(raw.get('administration')),
         'issuer': str(raw.get('issuer') or '').strip()[:200],
         'issue_year_start': raw.get('issue_year_start'),
         'issue_year_end': raw.get('issue_year_end'),
@@ -17380,12 +17420,16 @@ def _market_normalize_item(db, category, raw):
             'pick_number': (str(raw.get('pick_number') or '').strip()[:60] or None),
             'other_catalog': str(raw.get('other_catalog') or '').strip()[:160],
         })
+        if _mentions_manchukuo(item['title']) and _country_key(item['country']) in ('china', None):
+            original_country = item['country']
+            item['country'] = 'Manchukuo'
+            admin = item['administration']
+            if original_country and _canonical_banknote_country(admin.get('territory')) == original_country:
+                admin['territory'] = 'Manchukuo'
         reason = market_colonial.problem(item)
         if reason:
             return _market_drop(raw, reason)
         item['empire'] = _market_colonial_empire(item)
-        if _mentions_manchukuo(item['title']) and _country_key(item['country']) in ('china', None):
-            item['country'] = 'Manchukuo'
         if not item['title']:
             item['title'] = ' '.join(x for x in (item['country'], item['denomination'], item['date_1_text']) if x)
     else:
@@ -17540,11 +17584,10 @@ def _market_score(category, item):
         score += 6
     if item.get('fills'):
         score += 10
-    empire = (item.get('empire') or '').lower()
-    if empire in ('british', 'french', 'italian', 'portuguese', 'german'):
-        score += 12   # Mark's first priority: pre-independence colonial paper
-    elif empire:
-        score += 6
+    if item.get('empire') or item.get('administration'):
+        # All supported colonial, dependent and occupation administrations
+        # share priority; obscure issuers must not rank below five empires.
+        score += 12 if category == 'banknotes' else 6
     if item.get('new_source'):
         score += 3
     if item.get('rarity'):
@@ -18206,12 +18249,8 @@ class _BanknoteMarketPolicy(_MarketPolicy):
     def themes(self, db):
         priority = _banknote_wantlist_themes(db) + _banknote_us_wantlist_themes(db)
         themes = priority + [_banknote_obsolete_theme(db)] + super().themes(db)
-        if priority:
-            themes = [(key, text + (
-                ' Other searches already cover missing colonial issuers in the want-list. '
-                'Focus this search on distinctive issues or upgrades from colonial issuers '
-                'already held; leave missing-issuer coverage to those priority searches.'
-                if key in ('colonial-british', 'colonial-continental') else '')) for key, text in themes]
+        # The historical 35-entry want-list supplies priorities, never the
+        # boundary of discovery. Broad themes must still find unlisted issuers.
         return themes
 
     def prepare(self, db, context):
@@ -18486,7 +18525,7 @@ def _market_items(db, category, earlier=False):
             db.execute("UPDATE market_scan_items SET status = 'superseded' WHERE id = ? AND status = 'new'", [r['id']])
             continue
         item['empire'] = _market_colonial_empire(item)
-        item['issue_label'] = market_colonial.victory_label(item) or ('United States issue' if _canonical_banknote_country(item.get('country')) == 'United States of America' else '')
+        item['issue_label'] = market_colonial.victory_label(item) or market_colonial.administration_label(item) or ('United States issue' if _canonical_banknote_country(item.get('country')) == 'United States of America' else '')
         item['id'] = r['id']
         item['status'] = 'dismissed' if key in deleted else r['status']
         item['scanned_at'] = (r['created_at'] or '')[:10]
@@ -18837,7 +18876,8 @@ def _market_action_problem(db, row, item, already_paid=False):
         else:
             problem = _market_listing_identity_problem(item, probe)
             if not problem and row['category'] == 'banknotes':
-                problem = _market_banknote_issue_problem(dict(item, title=probe.get('title') or item.get('title'), listing_text=probe.get('identity_text') or ''))
+                observed = dict(item, title=probe.get('title') or item.get('title'), listing_text=probe.get('identity_text') or '')
+                problem = _market_banknote_issue_problem(observed) or market_colonial.problem(observed)
             if not problem and _market_is_ebay(item.get('listing_url')) and probe['state'] != 'live':
                 # A transient block is not proof the item ended. Retain it
                 # for retries / Bought without advertising it as buyable.

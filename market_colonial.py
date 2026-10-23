@@ -1,9 +1,11 @@
-"""Conservative colonial offer eligibility, separate from collection filing.
+"""Colonial, dependent-territory and occupation offer eligibility.
 
 A historical collection family is never evidence that a later issue is colonial.
-Year boundaries deliberately exclude transition years; see docs/market-validation.md.
+Legacy year boundaries exclude transition years; sourced issue/administration
+evidence supports additional territories and periods. See docs/market-validation.md.
 """
 import re
+from urllib.parse import urlsplit
 import banknote_catalog as catalog
 
 # Reuse documented sovereign-period metadata, not collection-family membership.
@@ -41,10 +43,79 @@ SUCCESSOR = re.compile(
     r'central bank of the philippines|bangko sentral|republ(?:ic|ika).*philipp|'
     r'central bank of ceylon|reserve bank of (?:australia|new zealand|malawi)|'
     r'bank of canada|commonwealth of australia|dominion of canada|'
-    r'banque centrale|bceao|beac|banco nacional (?:de angola|da guine)|'
+    r'bceao|beac|banco nacional (?:de angola|da guine)|'
     r'banco de (?:mocambique|mozambique|cabo verde)|bank of mauritius|'
     r'bank of (?:jamaica|guyana)|central bank of (?:cyprus|malta)|'
     r'republic of (?:india|kenya|cuba)|independent republic',re.I)
+
+# This describes the relationship, not a whitelist of empires or territories.
+ADMINISTRATION_KINDS = {
+    'colony', 'protectorate', 'mandate', 'trust territory', 'dependency',
+    'condominium', 'military occupation', 'leased territory', 'client state',
+}
+SPECIAL_ISSUE = re.compile(
+    r'occupation|occupied|military currency|invasion (?:money|currency)|'
+    r'japanese government|gunpyo', re.I)
+
+
+def _year(value):
+    # Do not silently truncate fractions, booleans or an ambiguous date string.
+    text = str(value or '').strip()
+    return int(text) if re.fullmatch(r'(?:1[5-9]|20)\d{2}|2100', text) else None
+
+
+def _source(value):
+    try:
+        url = urlsplit(str(value or ''))
+        return url.scheme in ('http', 'https') and bool(url.hostname) and not url.username
+    except ValueError:
+        return False
+
+
+def normalize_administration(value):
+    """Keep bounded source attribution in the candidate JSON, never collection data."""
+    if not isinstance(value, dict):
+        return {}
+    result = {key: str(value.get(key) or '').strip()[:limit] for key, limit in (
+        ('kind', 40), ('name', 160), ('territory', 80), ('source', 1000), ('evidence', 1200))}
+    result['kind'] = result['kind'].lower()
+    result.update({key: value.get(key) for key in ('year_start', 'year_end')})
+    return result
+
+
+def _administration_problem(item, years):
+    admin = normalize_administration(item.get('administration'))
+    if admin.get('kind') not in ADMINISTRATION_KINDS or not admin.get('name'):
+        return 'Issuing administration and relationship are not established'
+    territory = catalog.canonical_country(admin.get('territory', ''))
+    if not territory or territory != catalog.canonical_country(str(item.get('country') or '')):
+        return 'Administration evidence does not identify this territory'
+    if not _source(admin.get('source')) or not admin.get('evidence'):
+        return 'Issuing administration has no corroborating source and issue evidence'
+    if not item.get('issuer') or not (item.get('pick_number') or item.get('other_catalog')):
+        return 'Administration evidence needs an issuer and catalogue identity for this issue'
+    start, end = (_year(admin.get(key)) for key in ('year_start', 'year_end'))
+    if start is None or end is None or start > end:
+        return 'Issuing administration period is not established'
+    if any(_year(item.get(key)) is None for key in ('issue_year_start', 'issue_year_end')):
+        return 'Additional administration needs a sourced actual issue-year range'
+    if min(years) < start or max(years) > end:
+        return 'Actual issue range falls outside the sourced administration period'
+    evidence = ' '.join(str(item.get(key) or '') for key in ('title', 'series', 'issuer'))
+    stated = [int(y) for y in re.findall(r'\b(?:1[5-9]\d{2}|20\d{2})\b', evidence)]
+    if stated and max(stated) > end:
+        return 'Title or series identifies an issue after the sourced administration'
+    return ''
+
+
+def administration_label(item):
+    admin = normalize_administration(item.get('administration'))
+    if admin.get('kind') in ADMINISTRATION_KINDS and admin.get('name'):
+        return f"{admin['name']} · {admin['kind']}"
+    country = catalog.canonical_country(str(item.get('country') or ''))
+    if country in DEPENDENCIES:
+        return f'{country} · dependency'
+    return ''
 
 
 def victory_label(item):
@@ -77,42 +148,48 @@ def victory_label(item):
 def problem(item):
     """Internal exclusion reason, or empty for a supported eligible issue.
 
-    Separate domestic-US/non-colonial themes remain eligible. Unknown colonial
-    administrations/dates/transition issues stay out until evidence is reviewed.
+    Separate domestic-US/non-colonial themes remain eligible. Additional
+    administrations need issue-specific source attribution, not a country guess.
     """
     country = catalog.canonical_country(str(item.get('country') or ''))
     theme = str(item.get('theme') or '')
-    if country == 'United States of America':
+    if country == 'United States of America' and not item.get('administration'):
         return 'Domestic US issue is not colonial' if theme.startswith(('colonial-', 'wantlist-british', 'wantlist-french', 'wantlist-other')) else ''
-    colonial = bool(item.get('empire')) or theme.startswith(('colonial-', 'wantlist-')) or theme == 'analysis-gaps'
+    evidence = ' '.join(str(item.get(k) or '') for k in ('title','issuer','series'))
+    special = bool(SPECIAL_ISSUE.search(evidence))
+    colonial = bool(item.get('empire') or item.get('administration')) or special or theme.startswith(('colonial-', 'wantlist-')) or theme == 'analysis-gaps'
     if not colonial:
         return ''
-    evidence = ' '.join(str(item.get(k) or '') for k in ('title','issuer','series'))
     if victory_label(item):
         return ''
     if SUCCESSOR.search(evidence):
         return 'Independent / successor issuer or series, not a colonial issue'
-    if country == 'Philippines':
-        if re.search(r'japan|occupation|central bank|overprint', evidence, re.I):
-            return 'Philippine occupation or overprinted issue needs separate administration evidence'
-    periods = PERIODS.get(country)
-    if not periods and country not in DEPENDENCIES:
-        return 'Colonial administration period not established for this territory'
     years = []
     for key in ('issue_year_start','issue_year_end'):
         value = item.get(key)
         if value is not None:
-            try: years.append(int(value))
-            except (ValueError,TypeError): return 'Issue-year range is not established'
-    if years and (not item.get('issue_date_source') or not str(item['issue_date_source']).startswith(('https://','http://'))):
+            year = _year(value)
+            if year is None:
+                return 'Issue-year range is not established'
+            years.append(year)
+    if len(years) == 2 and years[0] > years[1]:
+        return 'Issue-year range is reversed'
+    if years and not _source(item.get('issue_date_source')):
         return 'Actual issue-year range has no corroborating source'
     if not years:
         if re.search(r'\bN\.?D\.?\b|undated|reissue|overprint',evidence,re.I):
             return 'Undated / reissued note needs actual issue-year evidence'
-        try: years=[int(item.get('date_1'))]
-        except (ValueError,TypeError): return 'Colonial issue date is not established'
-    if min(years) < 1500 or max(years) > 2100:
-        return 'Colonial issue date is not established'
+        year = _year(item.get('date_1'))
+        if year is None:
+            return 'Colonial issue date is not established'
+        years = [year]
+    if item.get('administration'):
+        return _administration_problem(item, years)
+    if special or (country == 'Philippines' and re.search(r'japan|overprint', evidence, re.I)):
+        return 'Occupation or overprinted issue needs separate administration evidence'
+    periods = PERIODS.get(country)
+    if not periods and country not in DEPENDENCIES:
+        return 'Administration period not established; supply sourced issue and administration evidence'
     if periods:
         start,end=periods
         if min(years) <= start or max(years) >= end:
