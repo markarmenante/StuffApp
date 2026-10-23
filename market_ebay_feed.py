@@ -296,10 +296,13 @@ def complete(db, payload):
                     listing_text=text, live_state=live, listing_checked_at=checked,
                     sources=set(kinds))
         if number in clean:
+            saved_image = card['image_url'] or clean[number]['image_url']
             card['sources'].update(clean[number]['sources'])
             if card['live_state'] == 'unknown' and clean[number]['live_state'] != 'unknown':
                 saved_sources = card['sources']
                 card = dict(clean[number], sources=saved_sources)
+            # Keep a validated same-item thumbnail independently of live evidence.
+            card['image_url'] = card['image_url'] or saved_image
         clean[number] = card
     for card in clean.values():
         fields = ('item_id','title','listing_url','price','image_url','source_label','listing_text','live_state','listing_checked_at')

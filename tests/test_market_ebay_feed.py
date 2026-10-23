@@ -1,5 +1,6 @@
 """Personalized source evidence, account isolation, and collection warnings."""
 import json
+from itertools import product
 import os
 from pathlib import Path
 import sys
@@ -116,6 +117,88 @@ class FeedTests(unittest.TestCase):
         self.assertEqual(feed.live_probe(self.db,URL)['state'],'live')
         self.assertEqual(feed.live_probe(self.db,URL)['title'],TITLE+' Buy It Now')
         self.assertEqual(self.post(payload).status_code,409)
+
+    def test_duplicate_cards_preserve_images_and_live_evidence_in_both_orders(self):
+        images = ['https://i.ebayimg.com/images/g/watched/s-l500.jpg',
+                  'https://i.ebayimg.com/images/g/sponsored/s-l500.jpg']
+        for watched_live, sponsored_live, watched_image, sponsored_image, reverse in product((False, True), repeat=5):
+            with self.subTest(live=(watched_live, sponsored_live), images=(watched_image, sponsored_image), reverse=reverse):
+                ident = self.claimed(); payload = observation(ident)
+                base = payload['items'][0]
+                duplicates = [dict(base, sources=[source], source_label=source, price='$' + str(150 + index),
+                                   image_url=images[index] if has_image else '',
+                                   live_state='live' if is_live else 'unknown',
+                                   listing_text=TITLE + '\nBuy It Now\n' + source if is_live else '',
+                                   listing_checked_at=payload['observed_at'] if is_live else None)
+                              for index, (source, is_live, has_image) in enumerate(zip(
+                                  feed.KINDS, (watched_live, sponsored_live), (watched_image, sponsored_image)))]
+                payload['items'] = list(reversed(duplicates)) if reverse else duplicates
+                first, last = payload['items']
+                winner = first if first['live_state'] == 'live' and last['live_state'] == 'unknown' else last
+                expected_image = winner['image_url'] or first['image_url'] or last['image_url']
+                response = self.post(payload)
+                self.assertEqual(response.status_code, 200, response.json)
+                self.assertEqual(response.json['items_accepted'], 1)
+                cards, _ = feed.get_result(self.db, ident)
+                self.assertEqual(len(cards), 1)
+                card = cards[0]
+                self.assertEqual(card['image_url'], expected_image)
+                self.assertEqual(card['sources'], ['sponsored', 'watched'])
+                self.assertEqual(card['listing_url'], URL)
+                for field in ('live_state', 'listing_text', 'price', 'source_label'):
+                    self.assertEqual(card[field], winner[field], field)
+                self.assertEqual(card['listing_checked_at'], feed.timestamp(winner['listing_checked_at']))
+                probe = feed.live_probe(self.db, URL)
+                if watched_live or sponsored_live:
+                    self.assertEqual(probe['state'], 'live')
+                    self.assertEqual(probe['identity_text'], winner['listing_text'])
+                    self.assertEqual(probe['images'], [expected_image] if expected_image else [])
+                else:
+                    self.assertIsNone(probe)
+                observed = stuff._market_personal_feed(self.db, [])
+                with stuff.app.test_request_context():
+                    from flask import render_template
+                    html = render_template('partials/market_ebay_feed.html', market_personal_feed=observed)
+                self.assertEqual(html.count('<img '), 1 if expected_image else 0)
+                if expected_image:
+                    self.assertIn('src="' + expected_image + '"', html)
+                if not watched_live and not sponsored_live:
+                    self.assertIn('Availability unverified', html)
+
+    def test_duplicate_images_keep_the_cdn_allowlist(self):
+        valid = 'https://i.ebayimg.com/images/g/valid/s-l500.jpg'
+        invalid = ('https://i.ebayimg.com.evil.test/image.jpg',
+                   'https://i.ebayimg.com@evil.test/image.jpg',
+                   'http://i.ebayimg.com/image.jpg', 'data:image/png;base64,fixture')
+        for rejected, fallback, reverse in product(invalid, ('', valid), (False, True)):
+            with self.subTest(rejected=rejected, fallback=fallback, reverse=reverse):
+                ident = self.claimed(); payload = observation(ident)
+                base = payload['items'][0]
+                duplicates = [dict(base, sources=['watched'], image_url=rejected),
+                              dict(base, sources=['sponsored'], image_url=fallback, live_state='unknown',
+                                   listing_text='', listing_checked_at=None)]
+                payload['items'] = list(reversed(duplicates)) if reverse else duplicates
+                response = self.post(payload)
+                self.assertEqual(response.status_code, 200, response.json)
+                cards, _ = feed.get_result(self.db, ident)
+                self.assertEqual(cards[0]['image_url'], fallback)
+                self.assertEqual(cards[0]['live_state'], 'live')
+                self.assertEqual(feed.live_probe(self.db, URL)['images'], [fallback] if fallback else [])
+
+    def test_duplicate_image_never_replaces_ended_evidence(self):
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                ident = self.claimed(); payload = observation(ident)
+                base = payload['items'][0]
+                duplicates = [dict(base, sources=['watched'], live_state='ended', listing_text=TITLE + '\nEnded', image_url=''),
+                              dict(base, sources=['sponsored'], live_state='unknown', listing_text='', listing_checked_at=None)]
+                payload['items'] = list(reversed(duplicates)) if reverse else duplicates
+                self.assertEqual(self.post(payload).status_code, 200)
+                cards, _ = feed.get_result(self.db, ident)
+                self.assertEqual(cards[0]['image_url'], base['image_url'])
+                self.assertEqual(cards[0]['live_state'], 'ended')
+                self.assertEqual(feed.live_probe(self.db, URL)['state'], 'ended')
+                self.assertEqual(stuff._market_personal_feed(self.db, [])['cards'][0]['availability_label'], 'Listing ended')
 
     def test_wrong_account_spoofed_url_stale_and_unavailable_source_rejected(self):
         ident=self.claimed(); payload=observation(ident)
