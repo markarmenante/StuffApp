@@ -9,8 +9,6 @@
    class="toolbar-btn pill active" id="coinStatusFilter"
    title="Cycle status: All → Ordered → Owned">Status: {{ 'Owned' if status_current == 'own' else status_current|capitalize }}</a>
 <span class="coin-toolbar-separator" aria-hidden="true">|</span>
-<a href="{{ url_for('new_record', category='coins') }}" class="toolbar-btn add"
-   title="Add {{ cat_info.singular }}" aria-label="Add {{ cat_info.singular }}">+</a>
 {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
 <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}"
    class="toolbar-btn pill" id="coinCardsPrint"
@@ -28,3 +26,6 @@
 <a href="{{ url_for('pedigree_overview', category='coins', kind='rarity') }}"
    class="toolbar-btn pill pedigree-pill"
    title="Rarity &amp; population — specimens recorded, rarity ratings and die-study placement">Rarity</a>
+<span class="coin-toolbar-separator" aria-hidden="true">|</span>
+<a href="{{ url_for('new_record', category='coins') }}" class="toolbar-btn add"
+   title="Add {{ cat_info.singular }}" aria-label="Add {{ cat_info.singular }}">+</a>
