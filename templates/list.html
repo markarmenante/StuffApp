@@ -4,9 +4,9 @@
 
 {% block content %}
 <!-- Toolbar -->
-<div class="list-toolbar list-toolbar-{{ category }}{% if category == 'coins' and not at_property and not market_mode|default(false) and not analysis_mode|default(false) %} list-toolbar-coin-collection{% endif %}{% if market_mode|default(false) %} list-toolbar-market{% endif %}{% if at_property %} list-toolbar-at-prop{% endif %}">
-  {% if category == 'coins' %}
-  <span class="list-cat-title list-cat-title-count">{{ result_count }} Coins{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
+<div class="list-toolbar list-toolbar-{{ category }}{% if category in ('watches', 'coins', 'banknotes') and not at_property and not market_mode|default(false) and not analysis_mode|default(false) %} list-toolbar-collection{% endif %}{% if market_mode|default(false) %} list-toolbar-market{% endif %}{% if at_property %} list-toolbar-at-prop{% endif %}">
+  {% if category == 'coins' or (category in ('watches', 'banknotes') and not at_property and not market_mode|default(false) and not analysis_mode|default(false)) %}
+  <span class="list-cat-title list-cat-title-count">{{ result_count }} {{ cat_info.name }}{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
   {% else %}
   <span class="list-count">{{ result_count }}</span>
   <span class="list-cat-title">{{ cat_info.name }}{% if category == 'art' and art_price_total %} <span class="list-price-total">{{ art_price_total | currency }}</span>{% endif %}{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
@@ -17,8 +17,8 @@
      the ?at= param and would silently break the navigation chain. #}
   {%- set _market = market_mode|default(false) -%}
   {%- set _analysis = analysis_mode|default(false) -%}
-  {% if category == 'coins' and not at_property and not _market and not _analysis %}
-  {% include 'partials/coin_toolbar.html' %}
+  {% if category in ('watches', 'coins', 'banknotes') and not at_property and not _market and not _analysis %}
+  {% include 'partials/collection_toolbar.html' %}
   {% else %}
   {# Market Scan — coins and banknotes only. The pill swaps the list for
      live buy candidates and reads "Collection" while it is showing them;
@@ -57,31 +57,6 @@
        class="toolbar-btn pill analysis-pill"
        title="In-depth analysis of the collection — {{ 'the independent watchmakers' if category == 'watches' else ('the ancient Greek coinage' if category == 'coins' else 'colonial, United States and world notes') }}">Analysis</a>
     {% endif %}
-  {% endif %}
-  {# Provenance & Rarity — the two professional analyses, one page each
-     for the whole category (every coin / note with its chain of custody
-     and earliest documented date; every one with its census standing). #}
-  {% if category in ('coins', 'banknotes') and not at_property and not _market and not _analysis %}
-  {% if category == 'coins' %}
-  <a href="{{ url_for('pedigree_overview', category=category, kind='provenance') }}"
-     class="toolbar-btn pill pedigree-pill"
-     title="Provenance & pedigree — the sale history of each {{ 'coin' if category == 'coins' else 'note' }}, its earliest documented appearance, and the import-restriction position">Provenance</a>
-  {% endif %}
-  <a href="{{ url_for('pedigree_overview', category=category, kind='rarity') }}"
-     class="toolbar-btn pill pedigree-pill"
-     title="Rarity & population — {{ 'PMG / PCGS census by Pick number and grade' if category == 'banknotes' else 'specimens recorded, rarity ratings and die-study placement' }}">Rarity</a>
-  {% endif %}
-  {# Banknotes: the collection report PDF — the countries / colonies
-     in the list's order, each with its history, four notes to a page.
-     Built in the background; the pill polls and opens it. #}
-  {% if category == 'banknotes' and not at_property and not _market and not _analysis and g.current_user and g.current_user.role == 'owner' %}
-  <a class="toolbar-btn pill" href="{{ url_for('ebay.dashboard') }}"
-     title="eBay purchase, shipping and delivery updates">eBay Orders</a>
-  <button type="button" class="toolbar-btn pill" id="banknoteReport"
-          data-build-url="{{ url_for('banknote_report_build') }}"
-          data-status-url="{{ url_for('banknote_report_status') }}"
-          title="Build the collection report PDF of the notes shown — every country with its history, four notes to a page">Report</button>
-  <span class="market-status" id="banknoteReportStatus" role="status" hidden></span>
   {% endif %}
   {% if not at_property and not _market and not _analysis %}
   <a href="{{ url_for('new_record', category=category) }}"
@@ -124,41 +99,6 @@
      title="Collection report grouped by artist, with biographies and object notes (PDF)"
      target="_blank">Report</a>
   {% endif %}
-  {% if category == 'banknotes' and not at_property and not _market and not _analysis %}
-  {# History state rides along on every banknote pill so toggling a filter
-     doesn't silently switch the panels back on. Default (on) keeps URLs
-     clean by passing None. #}
-  {%- set _hist = None if show_history else '0' -%}
-  {# One pill cycling the type axis: All → US → Military → Notgeld. #}
-  {%- set _bn_next = 'military' if coin_filter == 'us' else ('notgeld' if coin_filter == 'military' else (None if coin_filter == 'notgeld' else 'us')) -%}
-  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=_bn_next, history=_hist) }}"
-     class="toolbar-btn pill {% if coin_filter in ('us', 'military', 'notgeld') %}active{% endif %}"
-     title="Cycle type: All → US → Military → Notgeld">{{ 'US' if coin_filter == 'us' else ('Military' if coin_filter == 'military' else ('Notgeld' if coin_filter == 'notgeld' else 'Type: All')) }}</a>
-  <form method="get" class="banknote-group-filter">
-    {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
-    {% if not show_history %}<input type="hidden" name="history" value="0">{% endif %}
-    <select id="banknote-group" name="filter" aria-label="Historical collection group" onchange="this.form.submit()">
-      <option value="">All historical groups</option>
-      {% for key, title, description in banknote_catalog_groups %}
-      <option value="heritage_{{ key }}" {% if coin_filter == 'heritage_' ~ key %}selected{% endif %}>{{ title }}</option>
-      {% endfor %}
-    </select>
-  </form>
-  {# Switches the historical/monetary-context panels on and off. #}
-  <a href="{{ url_for('list_view', category='banknotes', q=q or None, filter=coin_filter or None, history='0' if show_history else None) }}"
-     id="banknoteHistoryToggle"
-     class="toolbar-btn pill {% if show_history %}active{% endif %}"
-     title="Show or hide the historical context panels">History</a>
-  <a href="{{ url_for('banknotes_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
-     title="World distribution for the current filter — pins at the issuing city, or the era's principal city">Map</a>
-  {% endif %}
-  {% if category == 'watches' and not at_property and not _analysis %}
-  {% if has_in_service or coin_filter == 'in_service' %}
-  <a href="{{ url_for('list_view', category='watches', q=q or None, filter=None if coin_filter == 'in_service' else 'in_service') }}"
-     class="toolbar-btn pill {% if coin_filter == 'in_service' %}active{% endif %}"
-     title="Watches with an open service event">In Service</a>
-  {% endif %}
-  {% endif %}
   {# When the user came from the Property tab via ?at=, hide the
      redundant location pill — it targets the same filter, builds URLs
      without ?at=, and would silently break the
@@ -188,27 +128,7 @@
      class="toolbar-btn pill active"
      title="Toggle: Own ↔ Sold">{{ 'Own' if prop_status == 'own' else 'Sold' }}</a>
   {% endif %}
-  {# Status pill, every status-bearing category alike: rotates
-     All → Own → Ordered → All. All is the default (no filter) and
-     shows every status; Own and Ordered narrow to that status.
-     STATUS_DEFAULT_OWN categories (Art, Vehicles) open on Own and
-     rotate Own → Ordered → All, where All is an explicit ?filter=all.
-     Watches label the Ordered stop "Commissioned", matching the
-     detail page. Banknotes carry the history toggle along so cycling
-     doesn't silently flip the panels back on. #}
-  {% if status_cycle and status_cycle|length > 1 and not at_property and not _market and not _analysis %}
-  {%- set _st_idx = status_cycle.index(status_current) if status_current in status_cycle else 0 -%}
-  {%- set _st_next = status_cycle[(_st_idx + 1) % (status_cycle|length)] -%}
-  {%- set _st_hist = (None if show_history else '0') if category == 'banknotes' else None -%}
-  {%- set _st_labels = [] -%}
-  {%- for _s in status_cycle -%}
-    {%- set _ = _st_labels.append('Commissioned' if category == 'watches' and _s == 'ordered' else ('Owned' if _s == 'own' and category != 'watches' else _s|capitalize)) -%}
-  {%- endfor -%}
-  {%- set _st_next_param = ('all' if status_default_own else None) if _st_next == 'all' else _st_next -%}
-  <a href="{{ url_for('list_view', category=category, q=q or None, filter=_st_next_param, history=_st_hist) }}"
-     class="toolbar-btn pill {% if status_current != 'all' %}active{% endif %}"
-     title="Cycle status: {{ _st_labels | join(' → ') }}">{{ 'Status: All' if status_current == 'all' else ('Commissioned' if category == 'watches' and status_current == 'ordered' else ('Owned' if status_current == 'own' and category != 'watches' else status_current | capitalize)) }}</a>
-  {% endif %}
+  {% include 'partials/status_toolbar.html' %}
   {% endif %}
   {# Every list carries the search bar in its sticky toolbar — even the
      short ones — so the subheading reads the same across categories. #}
