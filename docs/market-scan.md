@@ -319,6 +319,15 @@ similarity alone cannot match a purchase. This avoids unrelated unreadable older
 orders blocking the new purchase. The existing buyer binding, browser queue and
 web-only tenant apply. No new credential or payment permissions are introduced.
 
+The explicit Buy/Bought action also authorizes the existing session-recovery flow.
+If Chrome is inactive or eBay needs sign-in or verification, the first capture
+attempt may open the fixed eBay Purchases page once on the designated Mac. Later
+attempts reuse that session and preserve its sign-in tab instead of opening more
+tabs. Passwords, verification codes, CAPTCHA and provider consent remain the
+owner's actions; the reader never enters credentials or submits payment. Capture
+resumes automatically when the existing session is ready, within the original
+24-hour expiry. An offline or powered-off Mac still has to come online.
+
 Only a unique, quantity-one, paid purchase supplies the order number. Ambiguous
 orders, repeat purchases, unreadable results, account changes and conflicting
 record edits are held for review. Existing entered order numbers, including an

@@ -76,7 +76,7 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(self.enqueue()['id'],pending['id'])
         job=self.claim()
         self.assertEqual(job['kind'],'market_purchase');self.assertEqual(job['listing_title'],TITLE)
-        self.assertNotIn('session_recovery',job)
+        self.assertEqual(job['session_recovery'],{'open_browser':True})
         self.assertIsNone(self.claim())
         before=dict(self.db.execute("SELECT * FROM banknotes WHERE id='note'").fetchone())
         response=self.complete(job)
@@ -110,6 +110,22 @@ class CaptureTests(unittest.TestCase):
         state=capture.state(self.db,'note')
         self.assertEqual(state['status'],'queued');self.assertIn('Sign in',state['message'])
         self.assertEqual(state['browser_state'],'sign_in_required')
+
+    def test_session_recovery_opens_purchases_once_and_preserves_expiry(self):
+        pending=self.enqueue();first=self.claim()
+        self.assertEqual(first['session_recovery'],{'open_browser':True})
+        response=self.post(action='complete',kind='market_purchase',id=first['id'],
+                           session={'state':'sign_in_required'})
+        self.assertEqual(response.status_code,200,response.json)
+        self.db.execute('UPDATE market_purchase_captures SET next_attempt_at=0');self.db.commit()
+        retry=self.claim()
+        self.assertEqual(retry['id'],first['id'])
+        self.assertEqual(retry['session_recovery'],{'open_browser':False})
+        self.assertEqual(retry['expires_at'],pending['expires_at'])
+        self.db.execute('UPDATE market_purchase_captures SET claimed_at=?',[time.time()-181]);self.db.commit()
+        recovered=self.claim()
+        self.assertEqual(recovered['session_recovery'],{'open_browser':False})
+        self.assertEqual(recovered['expires_at'],pending['expires_at'])
 
     def test_expiry_and_stale_reader_lease_recover_without_extending_deadline(self):
         pending=self.enqueue();job=self.claim()

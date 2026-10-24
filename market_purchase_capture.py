@@ -1,7 +1,8 @@
 """Capture one explicitly selected eBay purchase through the existing Today reader.
 
-The queue never submits checkout, opens a browser, or changes eBay. Only a fresh,
-complete Purchases search can link the selected exact item to its collection row.
+The queue never submits checkout or changes eBay. Existing session recovery may
+open Purchases after the explicit Buy/Bought action. Only a fresh, complete search
+can link the selected exact item to its collection row.
 """
 from datetime import datetime, timezone
 import re
@@ -199,7 +200,8 @@ def claim(db):
                    [now, 'Checking eBay Purchases for the paid order.', row['id']])
         db.commit()
         return dict(id=row['id'], kind='market_purchase', item_id=row['item_id'],
-                    listing_title=row['listing_title'], expires_at=row['expires_at'])
+                    listing_title=row['listing_title'], expires_at=row['expires_at'],
+                    session_recovery=dict(open_browser=row['attempts'] == 0))
     db.commit()
     return None
 
