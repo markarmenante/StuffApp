@@ -4,7 +4,7 @@
 
 {% block content %}
 <!-- Toolbar -->
-<div class="list-toolbar list-toolbar-{{ category }}{% if market_mode|default(false) %} list-toolbar-market{% endif %}{% if at_property %} list-toolbar-at-prop{% endif %}">
+<div class="list-toolbar list-toolbar-{{ category }}{% if category == 'coins' and not at_property and not market_mode|default(false) and not analysis_mode|default(false) %} list-toolbar-coin-collection{% endif %}{% if market_mode|default(false) %} list-toolbar-market{% endif %}{% if at_property %} list-toolbar-at-prop{% endif %}">
   {% if category == 'coins' %}
   <span class="list-cat-title list-cat-title-count">{{ result_count }} Coins{% if at_property %} <span style="font-weight:400;color:var(--text-secondary)">@ {{ at_property }}</span>{% endif %}</span>
   {% else %}
@@ -17,6 +17,9 @@
      the ?at= param and would silently break the navigation chain. #}
   {%- set _market = market_mode|default(false) -%}
   {%- set _analysis = analysis_mode|default(false) -%}
+  {% if category == 'coins' and not at_property and not _market and not _analysis %}
+  {% include 'partials/coin_toolbar.html' %}
+  {% else %}
   {# Market Scan — coins and banknotes only. The pill swaps the list for
      live buy candidates and reads "Collection" while it is showing them;
      pressing Collection returns to the normal list. #}
@@ -115,35 +118,6 @@
   {% if at_property and at_property_url %}
   <a class="list-at-back" href="{{ at_property_url }}" title="Back to {{ at_property }}">&larr; {{ at_property }}</a>
   {% endif %}
-  {% if category == 'coins' and not at_property and not _market and not _analysis %}
-  {% set _pgs = ((result_count + 41) // 42) if result_count else 0 %}
-  <a href="{{ url_for('coins_print_pdf', q=q or None, filter=coin_filter or None) }}"
-     class="toolbar-btn pill"
-     id="coinCardsPrint"
-     title="Print PDF cards (42 per page)"
-     target="_blank">Card - {{ _pgs }} pgs</a>
-  <button type="button" class="toolbar-btn pill coin-tray-clear" id="coinTrayClear" title="Clear selected coin cards">Clear</button>
-  {# Two independent selection pills:
-     location cycles CA -> NY -> All, period cycles Ancient -> Modern -> All.
-     The selected axes are still encoded in one filter param so existing
-     list/detail/print/map URLs keep working. #}
-  {%- set _coin_parts = (coin_filter or '').split('_') -%}
-  {%- set _coin_era = 'ancient' if 'ancient' in _coin_parts else ('modern' if 'modern' in _coin_parts else None) -%}
-  {%- set _coin_loc = 'ca' if 'ca' in _coin_parts else ('ny' if 'ny' in _coin_parts else None) -%}
-  {%- set _era_next = 'modern' if _coin_era == 'ancient' else (None if _coin_era == 'modern' else 'ancient') -%}
-  {%- set _loc_next = 'ny' if _coin_loc == 'ca' else (None if _coin_loc == 'ny' else 'ca') -%}
-  {%- set _era_filter = (_coin_loc ~ '_' ~ _era_next) if (_coin_loc and _era_next) else (_era_next or _coin_loc) -%}
-  {%- set _loc_filter = (_loc_next ~ '_' ~ _coin_era) if (_loc_next and _coin_era) else (_coin_era or _loc_next) -%}
-  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_loc_filter) }}"
-     class="toolbar-btn pill {% if _coin_loc %}active{% endif %}"
-     title="Cycle location: CA → NY → All">{{ 'CA' if _coin_loc == 'ca' else ('NY' if _coin_loc == 'ny' else 'Reg: All') }}</a>
-
-  <a href="{{ url_for('list_view', category='coins', q=q or None, filter=_era_filter) }}"
-     class="toolbar-btn pill {% if _coin_era %}active{% endif %}"
-     title="Cycle period: Ancient → Modern → All">{{ 'Ancient' if _coin_era == 'ancient' else ('Modern' if _coin_era == 'modern' else 'Era: All') }}</a>
-  <a href="{{ url_for('coins_map_view', filter=coin_filter or None) }}" class="toolbar-btn pill"
-     title="Mediterranean distribution for the current filter (default: date_1 &lt; 500)">Map</a>
-  {% endif %}
   {% if category == 'art' %}
   <a href="{{ url_for('art_report_pdf', q=q or None, filter=coin_filter or None, at=at_property or None) }}"
      class="toolbar-btn pill"
@@ -235,10 +209,12 @@
      class="toolbar-btn pill {% if status_current != 'all' %}active{% endif %}"
      title="Cycle status: {{ _st_labels | join(' → ') }}">{{ 'Status: All' if status_current == 'all' else ('Commissioned' if category == 'watches' and status_current == 'ordered' else ('Owned' if status_current == 'own' and category != 'watches' else status_current | capitalize)) }}</a>
   {% endif %}
+  {% endif %}
   {# Every list carries the search bar in its sticky toolbar — even the
      short ones — so the subheading reads the same across categories. #}
   {% if not _market and not _analysis %}
   <form class="search-form" method="get" action="{{ url_for('list_view', category=category) }}">
+    {% if category == 'coins' and coin_filter %}<input type="hidden" name="filter" value="{{ coin_filter }}">{% endif %}
     <div class="search-wrap">
       <button type="submit" title="Search">🔍</button>
       {# Per-category name so browser search-history is scoped to this
@@ -249,7 +225,7 @@
       <input type="text" name="q_{{ category }}" value="{{ q }}" placeholder="Search…"
              autocomplete="on"
              onfocus="this.select()" onclick="this.select()">
-      {% if q %}<a class="search-clear" href="{{ url_for('list_view', category=category) }}">×</a>{% endif %}
+      {% if q %}<a class="search-clear" href="{{ url_for('list_view', category=category, filter=coin_filter if category == 'coins' else None) }}">×</a>{% endif %}
     </div>
   </form>
   {% endif %}

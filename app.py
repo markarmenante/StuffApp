@@ -12597,10 +12597,11 @@ for _cat in STATUS_CYCLE_CATEGORIES:
 del _cat, _cat_filters, _status, _pred
 
 
-# Coin list filters are two independent axes encoded in one URL param:
-# era (ancient/modern/all) and location (ca/ny/all). The older
-# ca_ancient-style keys remain canonical for combined filters because
-# renumbering and existing links already use them.
+# Coin list filters keep home, era and purchase status independent while
+# sharing one URL param. Existing ca_ancient-style keys and links remain
+# valid; a status suffix adds the third axis (for example ca_ancient_own).
+COIN_STATUS_PILL_CYCLE = ('all', 'ordered', 'own')
+
 def _split_coin_filter(f):
     if not f or f == 'ordered':
         return None, None
@@ -12610,23 +12611,47 @@ def _split_coin_filter(f):
     return era, loc
 
 
-def _join_coin_filter(era, loc):
-    if loc and era:
-        return f'{loc}_{era}'
-    return era or loc or None
+def _coin_filter_status(f):
+    return next((part for part in (f or '').split('_')
+                 if part in ('ordered', 'own')), None)
+
+
+def _join_coin_filter(era, loc, status=None):
+    return '_'.join(part for part in (loc, era, status)
+                    if part and part != 'all') or None
+
+
+# All consumers (list, detail navigation, map and printable cards) already
+# use CATEGORY_FILTERS, so compose the existing predicates here rather than
+# teaching each route a different interpretation of the selected axes.
+for _coin_loc in (None, 'ca', 'ny'):
+    for _coin_era in (None, 'ancient', 'modern'):
+        _coin_base = _join_coin_filter(_coin_era, _coin_loc)
+        if not _coin_base:
+            continue
+        for _coin_status in COIN_STATUS_PILL_CYCLE[1:]:
+            _base_sql, _base_params = CATEGORY_FILTERS['coins'][_coin_base]
+            _status_sql, _status_params = CATEGORY_FILTERS['coins'][_coin_status]
+            CATEGORY_FILTERS['coins'][_join_coin_filter(
+                _coin_era, _coin_loc, _coin_status)] = (
+                    f'({_base_sql}) AND ({_status_sql})',
+                    list(_base_params) + list(_status_params))
+del _coin_loc, _coin_era, _coin_base, _coin_status
+del _base_sql, _base_params, _status_sql, _status_params
 
 
 def _coin_filter_label(f):
     if not f:
         return 'All Coins'
-    if f == 'ordered':
-        return 'Ordered'
     era, loc = _split_coin_filter(f)
+    status = _coin_filter_status(f)
     parts = []
     if loc:
         parts.append(loc.upper())
     if era:
         parts.append(era.title())
+    if status:
+        parts.append('Owned' if status == 'own' else 'Ordered')
     return ' '.join(parts) if parts else f
 
 
@@ -15215,6 +15240,11 @@ def list_view(category):
     dot = request.args.get('dot', '') == '1'
     raw_filter = request.args.get('filter')
     coin_filter = (raw_filter or '').strip() or None
+    # Older coin bookmarks may target a phase no longer offered by the
+    # toolbar. Show All rather than label a hidden status restriction All.
+    if category == 'coins' and coin_filter in STATUS_FILTER_KEYS \
+            and coin_filter not in COIN_STATUS_PILL_CYCLE:
+        coin_filter = None
     # Banknotes: the History pill switches the era/monetary-policy panels
     # on and off. On by default; ?history=0 hides them.
     show_history = request.args.get('history') != '0'
@@ -15296,6 +15326,18 @@ def list_view(category):
                             else ['all', 'ordered', 'shipped', 'delivered', 'own'])
         if coin_filter in status_cycle:
             status_current = coin_filter
+    coin_home_current = coin_era_current = None
+    coin_home_next_filter = coin_era_next_filter = coin_status_next_filter = None
+    if category == 'coins':
+        status_cycle = list(COIN_STATUS_PILL_CYCLE)
+        status_current = _coin_filter_status(coin_filter) or 'all'
+        coin_era_current, coin_home_current = _split_coin_filter(coin_filter)
+        home_next = {'ca': 'ny', 'ny': None, None: 'ca'}[coin_home_current]
+        era_next = {'ancient': 'modern', 'modern': None, None: 'ancient'}[coin_era_current]
+        status_next = status_cycle[(status_cycle.index(status_current) + 1) % len(status_cycle)]
+        coin_home_next_filter = _join_coin_filter(coin_era_current, home_next, status_current)
+        coin_era_next_filter = _join_coin_filter(era_next, coin_home_current, status_current)
+        coin_status_next_filter = _join_coin_filter(coin_era_current, coin_home_current, status_next)
     has_in_service = False
     if category == 'watches':
         has_in_service = db.execute(
@@ -15339,6 +15381,11 @@ def list_view(category):
                            status_cycle=status_cycle,
                            status_current=status_current,
                            status_default_own=status_default_own,
+                           coin_home_current=coin_home_current,
+                           coin_era_current=coin_era_current,
+                           coin_home_next_filter=coin_home_next_filter,
+                           coin_era_next_filter=coin_era_next_filter,
+                           coin_status_next_filter=coin_status_next_filter,
                            has_in_service=has_in_service,
                            watch_open_service_event_ids=watch_open_service_event_ids,
                            extra_fields=extra_fields,

@@ -209,10 +209,8 @@ input[type="number"]::-webkit-outer-spin-button {
   top: var(--nav-height);
   z-index: 90;
 }
-/* Coins carries the most pills (Market Scan, +, Card, Clear, Reg, Era,
-   Map, Status, search). It lays out like Banknotes — count on the left,
-   the controls grouped against the search bar on the right — and only
-   wraps when the window is too narrow for one row. */
+/* Keep the coin collection controls in reading and keyboard order;
+   wrap the same sequence when the window is too narrow for one row. */
 .list-toolbar-coins {
   flex-wrap: wrap;
   overflow: hidden;
@@ -220,6 +218,15 @@ input[type="number"]::-webkit-outer-spin-button {
 .list-toolbar-coins .list-cat-title {
   flex: 1 1 90px;
   min-width: 0;
+}
+.list-toolbar.list-toolbar-coin-collection .list-cat-title {
+  flex: 0 0 auto;
+}
+.list-toolbar-coin-collection .search-form { margin-left: auto; }
+.coin-toolbar-separator {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+  font-size: 16px;
 }
 .list-count { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-right: 6px; }
 .list-cat-title { font-size: 13px; font-weight: 600; flex: 1; }

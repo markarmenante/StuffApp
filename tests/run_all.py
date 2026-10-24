@@ -15,6 +15,7 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_ebay_orders.py', 'test_ebay_m
          'test_purchase_lifecycle.py',
          'test_banknote_feedback.py',
          'test_status_default_own.py',
+         'test_coin_filter_axes.py',
          'test_ebay_matching.py',
          'test_banknote_serial_scan.py',
          'test_country_history_placeholder.py',
