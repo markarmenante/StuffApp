@@ -1048,7 +1048,7 @@
         '  <div class="location-choice-title">' + (bought ? 'Bought ' : 'Buy ') + (title ? title.replace(/</g, '&lt;') : 'this ' + SINGULAR) + '</div>',
         '  <div class="location-choice-subtitle">' + (bought
             ? 'Where will it live? It is filed here as Ordered with the listing\'s photos; nothing opens.'
-            : 'Where will it live? The listing then opens in a new tab to pay there (PayPal or the seller\'s checkout), and it is filed here as Ordered.') + '</div>',
+            : 'Where will it live? The seller\'s order page opens in a new tab to pay there, and this item is filed as Ordered. eBay order numbers are captured from confirmed purchases.') + '</div>',
         '  <div class="location-choice-options"></div>',
         '  <div class="location-choice-options"><button type="button" class="location-choice-pill location-choice-cancel">Cancel</button></div>',
         '</div>'
@@ -1079,16 +1079,17 @@
         // Open the tab on the pick (a user gesture) so popup blockers
         // allow it — not for Bought, which was paid already.
         const tab = bought ? null : window.open('', '_blank');
+        if (tab) tab.opener = null;
         btn.disabled = true;
-        fetch({{ url_for('market_item_buy', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), {
+        fetch(btn.dataset.buyUrl || {{ url_for('market_item_buy', category=category, item_id='ITEM')|tojson }}.replace('ITEM', btn.dataset.id), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ location, bought })
         })
           .then(r => r.json())
           .then(d => {
             if (!d || !d.ok) throw new Error((d && d.error) || 'Could not file the record');
-            if (tab) tab.location = d.listing_url;
-            window.location = d.detail_url;
+            if (tab) tab.location = d.checkout_url || d.listing_url;
+            window.location = !bought && !tab ? (d.checkout_url || d.listing_url) : d.detail_url;
           })
           .catch(err => { if (tab) tab.close(); actionBusy = false; btn.disabled = false; alert(err.message || String(err)); });
       });

@@ -427,6 +427,50 @@ def banknote_deliveries(db, record_id=None):
     return deliveries
 
 
+def capture_linked_order_numbers(db):
+    """Fill untouched order fields only from uniquely linked, paid Purchases evidence.
+
+    NULL means no entered value; an empty string is an intentional owner clear.
+    Discovery cards, email and an unpaid order do not establish payment.
+    """
+    columns = {r['name'] for r in db.execute('PRAGMA table_info(banknotes)')}
+    if not {'order_number', 'marketplace'} <= columns:
+        return 0
+    confirmed = {'paid', 'awaiting shipment', 'order processing',
+                 'shipped', 'in transit', 'out for delivery', 'delivered'}
+    rows = db.execute("SELECT n.id,i.order_id,i.item_id,i.quantity,i.attention,i.ordered_at,o.status_text "
+                      "FROM banknotes n JOIN banknote_ebay_links l ON l.banknote_id=n.id "
+                      "JOIN ebay_order_items i ON i.line_key=l.line_key "
+                      "JOIN ebay_purchase_observations o ON o.line_key=i.line_key "
+                      "WHERE n.order_number IS NULL AND (n.marketplace IS NULL OR n.marketplace IN ('','eBay')) "
+                      "AND i.ignored=0").fetchall()
+    listing_counts = Counter(r['item_id'] for r in db.execute('SELECT item_id FROM ebay_order_items'))
+    capture_queue = bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_purchase_captures'").fetchone())
+    count = 0
+    for row in rows:
+        if capture_queue:
+            queued = db.execute('SELECT * FROM market_purchase_captures WHERE record_id=?',[row['id']]).fetchone()
+            if queued and not queued['already_paid']:
+                from zoneinfo import ZoneInfo
+                requested_day = datetime.fromtimestamp(queued['requested_at'],ZoneInfo('America/New_York')).date().isoformat()
+                if queued['item_id'] != row['item_id'] or not row['ordered_at'] or row['ordered_at'][:10] < requested_day:
+                    continue
+        if (row['status_text'].strip().lower() not in confirmed or row['attention']
+                or row['quantity'] != 1 or listing_counts[row['item_id']] != 1):
+            continue
+        if not re.fullmatch(r'\d{2}-\d{5}-\d{5}|\d{9,15}(?:-\d{9,15})?', row['order_id']):
+            continue
+        assignments = "order_number=?,marketplace='eBay'"
+        values = [row['order_id']]
+        if 'updated_at' in columns:
+            assignments += ',updated_at=?'
+            values.append(now_iso())
+        count += db.execute('UPDATE banknotes SET ' + assignments +
+                            " WHERE id=? AND order_number IS NULL AND (marketplace IS NULL OR marketplace IN ('','eBay'))",
+                            values + [row['id']]).rowcount
+    return count
+
+
 def apply_items(db, items, source='eBay', auto_match=True, authoritative=False, requested_order=None):
     """Caller owns the transaction; a partial network page never reaches here."""
     if requested_order is not None and (not authoritative or auto_match or not items or
@@ -494,6 +538,7 @@ def apply_items(db, items, source='eBay', auto_match=True, authoritative=False, 
         updates += event(db, match['banknote_id'], None, item['delivery_status'],
                          source + ' · identity match: ' + ', '.join(match['evidence']),
                          item['delivered_at'] or item['shipped_at'] or item['ordered_at'])
+    capture_linked_order_numbers(db)
     return {'items_seen': len(relevant), 'matched': matches, 'updated': updates}
 
 

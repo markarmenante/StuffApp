@@ -12,6 +12,8 @@ import market_scan as market_runtime
 import market_colonial
 import market_ebay_feed
 import market_grouping
+import market_checkout
+import market_purchase_capture
 import banknote_catalog
 import banknote_printers
 import ebay_orders
@@ -18565,13 +18567,15 @@ def _market_personal_feed(db, visible_items):
     displayed = {market_runtime.canonical_url(i.get('listing_url')) for i in visible_items}
     cards = []
     deleted = market_runtime.dismissed_keys(db, 'banknotes')
+    purchased = {market_runtime.listing_key(row) for row in db.execute(
+        "SELECT * FROM market_scan_items WHERE category='banknotes' AND status='ordered'")}
     excluded_count = 0
     for card in market_ebay_feed.cards(db, latest['id']):
         if _market_banknote_issue_problem(card):
             excluded_count += 1
             continue
         card['canonical_url'] = market_runtime.canonical_url(card['listing_url'])
-        if card['canonical_url'] in displayed or card['canonical_url'] in deleted:
+        if card['canonical_url'] in displayed or card['canonical_url'] in deleted or card['canonical_url'] in purchased:
             continue
         title = card['title']
         country = next((c for c in known_countries if re.search(r'(?<![a-z])' + re.escape(c) + r'(?![a-z])', title, re.I)), '')
@@ -18788,7 +18792,7 @@ def _market_vendor_name(item):
     return venue
 
 
-def _market_create_record(db, category, item, location=None, images=None):
+def _market_create_record(db, category, item, location=None, images=None, vendor=None, price=None):
     """File a scan item as a new Ordered record with everything the
     listing gave, at `location` (the same required Location the add form
     collects) and with the listing's photos as the record's images.
@@ -18796,7 +18800,7 @@ def _market_create_record(db, category, item, location=None, images=None):
     record_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
     today = date.today().isoformat()
-    vendor = _market_vendor_name(item)
+    vendor = _market_vendor_name(item) if vendor is None else vendor
     listing_line = f"Market Scan {today}: {item.get('venue') or ''} — {item['listing_url']}"
     description = '\n\n'.join(x for x in (
         item.get('title'), item.get('why'),
@@ -18823,7 +18827,7 @@ def _market_create_record(db, category, item, location=None, images=None):
             'series': item.get('series'),
             'pick_number': item.get('pick_number'),
             'grade_numeric': item.get('grade_numeric'),
-            'price': _price_with_usd_tail(db, item.get('price'), today),
+            'price': _price_with_usd_tail(db, item.get('price'), today) if price is None else price,
             'note_references': listing_line,
             'cat_id': next_serial_cat_id(db, 'banknotes', 'B'),
         })
@@ -18863,9 +18867,11 @@ def _market_create_record(db, category, item, location=None, images=None):
 
 def _market_action_problem(db, row, item, already_paid=False):
     problem = _market_listing_url_problem(item.get('listing_url'))
+    problem_kind = 'eligibility'
     if row['category'] == 'banknotes':
-        problem = problem or _market_banknote_issue_problem(item) or market_colonial.problem(item)
-    if row['status'] == 'unavailable':
+        problem = problem or _market_banknote_issue_problem(item) or (market_colonial.problem(item) if not item.get('_feed_account') else '')
+    if row['status'] == 'unavailable' and not (already_paid and item.get('_feed_account')
+            and item.get('_unavailable_kind') == 'ended'):
         return item.get('unavailable_reason') or 'This offer is unavailable or does not identify an exact item.'
     if not problem and not already_paid:
         probe = _market_listing_probe(item['listing_url'])
@@ -18873,11 +18879,14 @@ def _market_action_problem(db, row, item, already_paid=False):
             probe = market_ebay_feed.live_probe(db, item['listing_url']) or probe
         if probe['state'] in ('ended', 'invalid'):
             problem = probe['why']
+            problem_kind = probe['state']
         else:
             problem = _market_listing_identity_problem(item, probe)
+            problem_kind = 'identity'
             if not problem and row['category'] == 'banknotes':
                 observed = dict(item, title=probe.get('title') or item.get('title'), listing_text=probe.get('identity_text') or '')
-                problem = _market_banknote_issue_problem(observed) or market_colonial.problem(observed)
+                problem = _market_banknote_issue_problem(observed) or (market_colonial.problem(observed) if not item.get('_feed_account') else '')
+                problem_kind = 'eligibility'
             if not problem and _market_is_ebay(item.get('listing_url')) and probe['state'] != 'live':
                 # A transient block is not proof the item ended. Retain it
                 # for retries / Bought without advertising it as buyable.
@@ -18887,8 +18896,11 @@ def _market_action_problem(db, row, item, already_paid=False):
                            "WHERE id = ? AND status != 'ordered'", [json.dumps(item), row['id']])
                 db.commit()
                 return 'Current eBay availability could not be verified. Try again later.'
+        if not problem:
+            item['_checkout_url'] = market_checkout.checkout_url(item['listing_url'], probe)
     if problem:
         item['unavailable_reason'] = problem
+        item['_unavailable_kind'] = problem_kind
         db.execute("UPDATE market_scan_items SET status = 'unavailable', payload = ? WHERE id = ? AND status != 'ordered'", [json.dumps(item), row['id']])
         db.commit()
     return problem
@@ -18907,57 +18919,171 @@ def market_item_listing(category, item_id):
     return redirect(item['listing_url'])
 
 
-@app.route('/<category>/market/<item_id>/buy', methods=['POST'])
-def market_item_buy(category, item_id):
-    """Buy = open the listing to pay there, and file the item as a new
-    Ordered record now. Returns both URLs for the client. The Bought
-    button (already paid on the seller's site, e.g. after opening the
-    listing from the row) posts here too and simply does not open the
-    listing; a superseded or dismissed candidate can be filed the same
-    way from the Earlier candidates view."""
-    if category not in MARKET_SCAN_CATEGORIES:
-        return jsonify({'error': 'Unknown category'}), 400
-    _market_require_owner()
-    db = get_db()
-    row = _market_item_or_404(db, category, item_id)
-    item = json.loads(row['payload'])
+def _market_listing_rows(db, category, url):
+    """Include legacy candidates without an indexed listing identity."""
+    key = market_runtime.canonical_url(url)
+    rows = db.execute("SELECT * FROM market_scan_items WHERE category=? AND "
+                      "(canonical_url=? OR canonical_url IS NULL OR canonical_url='') "
+                      "ORDER BY created_at DESC", [category, key]).fetchall()
+    return [row for row in rows if market_runtime.listing_key(row) == key]
+
+
+def _market_ordered_listing(db, category, url):
+    table = CATEGORIES[category]['table']
+    for row in _market_listing_rows(db, category, url):
+        if row['status'] == 'ordered' and row['record_id'] and db.execute(
+                f"SELECT 1 FROM {table} WHERE id=?", [row['record_id']]).fetchone():
+            return row
+    return None
+
+
+def _market_purchase_response(db, category, row, item):
+    """Shared explicit Buy/Bought action for scan candidates and personal cards."""
     request_data = request.get_json(silent=True) or {}
-    if category == 'banknotes' and row['status'] != 'ordered' and request_data.get('bought') is not True and (row['status'] == 'dismissed' or market_runtime.is_dismissed(db, category, item.get('listing_url'))):
+    already_paid = request_data.get('bought') is True
+    requested_id = row['id']
+    ordered = _market_ordered_listing(db, category, item['listing_url'])
+    if ordered:
+        row = ordered
+        item = json.loads(row['payload'])
+    if category == 'banknotes' and row['status'] != 'ordered' and not already_paid and (row['status'] == 'dismissed' or market_runtime.is_dismissed(db, category, item.get('listing_url'))):
         return jsonify({'ok': False, 'error': 'This recommendation was deleted. Use Bought in Earlier candidates only for a purchase already made.'}), 409
-    problem = _market_action_problem(db, row, item, already_paid=request_data.get('bought') is True or row['status'] == 'ordered')
+    problem = _market_action_problem(db, row, item, already_paid=already_paid or bool(ordered))
     if problem:
         return jsonify({'ok': False, 'error': 'Offer unavailable: ' + problem}), 409
-    if row['status'] == 'ordered' and row['record_id']:
-        record_id = row['record_id']
+    if ordered:
+        record_id = ordered['record_id']
+        db.execute("UPDATE market_scan_items SET status='ordered',record_id=? WHERE id=?", [record_id, requested_id])
+        if category == 'banknotes':
+            market_purchase_capture.enqueue(db, record_id, item['listing_url'], item.get('title'), already_paid=already_paid, commit=False)
     else:
-        # Location is required on every new row, exactly as the add
-        # form's picker enforces it — Buy collects it up front.
-        payload = request.get_json(silent=True) or {}
-        location = str(payload.get('location') or '').strip()
+        location = str(request_data.get('location') or '').strip()
         choices = property_choices_for_category(category)
         if not location or (choices and location not in choices):
-            return jsonify({'ok': False, 'error': 'Location is required',
-                            'choices': choices}), 400
+            return jsonify({'ok': False, 'error': 'Location is required', 'choices': choices}), 400
+        # Probes, galleries, seller lookup and currency conversion may take time.
+        # Finish these before taking the short write lock used for idempotency.
         images = _market_store_images(item, category=category)
-        record_id = _market_create_record(db, category, item, location, images)
-        db.execute("UPDATE market_scan_items SET status = 'ordered', record_id = ? "
-                   "WHERE id = ?", [record_id, item_id])
-        # The listing's slab photos are trimmed to the note like an
-        # upload is (the untrimmed original stays for Check to read).
-        if category == 'banknotes' and images:
-            note = db.execute("SELECT * FROM banknotes WHERE id = ?", [record_id]).fetchone()
+        vendor = _market_vendor_name(item)
+        price = _price_with_usd_tail(db, item.get('price'), date.today().isoformat()) if category == 'banknotes' else None
+        db.commit()
+        created = False
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            # Another tab, scan candidate, or request may have filed this exact
+            # listing while the network work was running. Reuse that record.
+            ordered = _market_ordered_listing(db, category, item['listing_url'])
+            if ordered:
+                record_id = ordered['record_id']
+            else:
+                if category == 'banknotes' and not already_paid and market_runtime.is_dismissed(db, category, item['listing_url']):
+                    db.rollback()
+                    return jsonify({'ok': False, 'error': 'This recommendation was deleted. No record was created.'}), 409
+                record_id = _market_create_record(db, category, item, location, images, vendor=vendor, price=price)
+                created = True
+            linked = _market_listing_rows(db, category, item['listing_url'])
+            db.executemany("UPDATE market_scan_items SET status='ordered', record_id=? WHERE id=?",
+                           [(record_id, candidate['id']) for candidate in linked])
+            if category == 'banknotes':
+                market_purchase_capture.enqueue(db, record_id, item['listing_url'], item.get('title'), already_paid=already_paid, commit=False)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        # Trimming is also outside the idempotency transaction. Existing photos
+        # on a reused record are never changed by a repeated Buy/Bought request.
+        if created and category == 'banknotes' and images:
+            note = db.execute("SELECT * FROM banknotes WHERE id=?", [record_id]).fetchone()
             for field in ('image_1', 'image_2'):
                 if images.get(field):
                     try:
                         _trim_banknote_image(db, record_id, note, field, _banknote_expect_aspect(note))
+                        db.commit()
                     except Exception as e:
+                        db.rollback()
                         app.logger.warning('banknote %s: trim of market photo %s failed: %s', record_id, field, e)
     db.commit()
     if category == 'banknotes' and item.get('country'):
         ensure_country_history(item['country'])
     return jsonify({'ok': True, 'record_id': record_id,
                     'detail_url': url_for('detail_view', category=category, record_id=record_id),
-                    'listing_url': item['listing_url']})
+                    'listing_url': item['listing_url'],
+                    'checkout_url': item.get('_checkout_url') or item['listing_url']})
+
+
+@app.route('/<category>/market/<item_id>/buy', methods=['POST'])
+def market_item_buy(category, item_id):
+    """File the listing as Ordered; Buy also opens checkout on the client."""
+    if category not in MARKET_SCAN_CATEGORIES:
+        return jsonify({'error': 'Unknown category'}), 400
+    _market_require_owner()
+    db = get_db()
+    row = _market_item_or_404(db, category, item_id)
+    return _market_purchase_response(db, category, row, json.loads(row['payload']))
+
+
+@app.route('/banknotes/market/ebay-feed/<item_id>/buy', methods=['POST'])
+def market_ebay_item_buy(item_id):
+    """File an owner-selected observed card without a paid scan or invented facts."""
+    _market_require_owner()
+    if not market_ebay_feed.enabled() or not re.fullmatch(r'\d{9,15}', item_id):
+        abort(404)
+    db = get_db()
+    try:
+        account = market_ebay_feed.expected_account(db)
+    except ValueError:
+        abort(404)
+    if not account:
+        abort(404)
+    url = 'https://www.ebay.com/itm/' + item_id
+    key = market_runtime.canonical_url(url)
+    card = market_ebay_feed.recent_card(db, url, max_age=86400)
+    candidates = _market_listing_rows(db, 'banknotes', url)
+    if not card:
+        # Only a completed purchase from this account can be retried after the
+        # browser's short-lived evidence has been pruned.
+        row = next((candidate for candidate in candidates if candidate['status'] == 'ordered'
+                    and json.loads(candidate['payload']).get('_feed_account') == account), None)
+        if not row:
+            abort(404)
+        return _market_purchase_response(db, 'banknotes', row, json.loads(row['payload']))
+    problem = _market_listing_url_problem(card['listing_url']) or _market_banknote_issue_problem(card)
+    if problem:
+        return jsonify({'ok': False, 'error': 'Offer unavailable: ' + problem}), 409
+    if market_runtime.is_dismissed(db, 'banknotes', url) and (request.get_json(silent=True) or {}).get('bought') is not True:
+        return jsonify({'ok': False, 'error': 'This recommendation was deleted. No record was created.'}), 409
+    # Keep observed identity/price separate from scan eligibility. Missing
+    # catalogue, country, grade and seller facts stay blank for Check to fill.
+    item = dict(title=card['title'], listing_url=card['listing_url'], price=card['price'],
+                venue='eBay', image_urls=[card['image_url']] if card['image_url'] else [],
+                listing_text=card['listing_text'], discovery_sources=card['sources'],
+                source_observed_at=card['observed_at'], _feed_account=account,
+                theme='ebay-personalized', verified=False)
+    ident = str(uuid.uuid5(uuid.NAMESPACE_URL, 'banknotes-ebay-card:' + account + ':' + key))
+    # This archival scan never replaces the current scan or makes an unchecked
+    # card a recommendation. Ordered candidates survive normal scan pruning.
+    now = datetime.utcnow().isoformat()
+    db.execute("INSERT OR IGNORE INTO market_scans(id,category,started_at,finished_at,status,summary) "
+               "VALUES('ebay-personal-purchases','banknotes','1970-01-01T00:00:00','1970-01-01T00:00:00','done','Personal eBay purchases')")
+    db.execute("INSERT OR IGNORE INTO market_scan_items(id,scan_id,category,status,title,listing_url,venue,price,payload,created_at,canonical_url) "
+               "VALUES(?,'ebay-personal-purchases','banknotes','superseded',?,?,'eBay',?,?,?,?)",
+               [ident, item['title'], item['listing_url'], item['price'], json.dumps(item), now, key])
+    db.commit()
+    row = _market_item_or_404(db, 'banknotes', ident)
+    # A retry uses the latest account-bound observation, while an already filed
+    # record retains its original purchase evidence.
+    if row['status'] != 'ordered':
+        # Keep the precise earlier refusal: Bought can recover an ended listing,
+        # while identity/eligibility failures must still require correction.
+        previous = json.loads(row['payload'])
+        for key in ('unavailable_reason', '_unavailable_kind'):
+            if previous.get(key):
+                item[key] = previous[key]
+        db.execute("UPDATE market_scan_items SET payload=?,title=?,price=?,listing_url=? WHERE id=? AND status!='ordered'",
+                   [json.dumps(item), item['title'], item['price'], item['listing_url'], ident])
+        db.commit()
+        row = _market_item_or_404(db, 'banknotes', ident)
+    return _market_purchase_response(db, 'banknotes', row, json.loads(row['payload']))
 
 
 @app.route('/<category>/market/<item_id>/dismiss', methods=['POST'])
@@ -41626,6 +41752,7 @@ _ebay_order_sync = ebay_orders.register(
     app, get_db, open_db_connection, require_owner, DATA_DIR)
 import ebay_purchase_lookup
 ebay_purchase_lookup.register(app, get_db, require_owner)
+market_purchase_capture.register(app, get_db, require_owner)
 market_ebay_feed.register(app, get_db)
 banknote_feedback.register(app, get_db, require_owner, _user_can_see_row)
 def _compare_original_listing(category, record, url, page_text, purchase_sources=()):

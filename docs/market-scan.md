@@ -221,9 +221,14 @@ are reported separately instead of claimed as complete coverage.
 
 The observed cards appear in **Your eBay watched and sponsored items**, including
 cards whose exact listing is unreadable. This section shows observed prices and
-source labels, an explicit availability state, and an **Open eBay to check** link.
-It has no Buy/Bought controls. A card becomes a normal banknote buy candidate
-only after the existing grade, collection scope and exact-listing liveness checks.
+source labels, an explicit availability state, and the same **View listing**, **Buy**,
+**Bought** and **Delete** actions as scan candidates. View listing opens the exact
+observed item. Buy rechecks availability and collects Location before filing an
+Ordered record and opening the seller's ordering page. Bought files a purchase
+already made without opening the seller. Owner-selected cards do not need a paid
+scan; missing catalogue or grade details remain blank, and issued-note/NET
+exclusions still apply. A card becomes a normal ranked scan candidate only after
+the existing grade, collection scope and exact-listing liveness checks.
 Sponsored placement never adds score or establishes quality, rarity or value.
 Observed cards already present as checked candidates are not repeated.
 
@@ -255,7 +260,7 @@ of a match is not a guarantee of novelty.
 
 `tests/test_market_ebay_feed.py` covers authentication, Gerri isolation, request
 claims/expiry, account mismatch, strict listing identity, duplicate source labels,
-source availability, fresh browser proof, observed-card visibility without
+source availability, fresh browser proof, observed-card visibility and
 purchase controls, invented model URLs, and reference-based collection warnings.
 
 `tests/test_market_dismissal.py` verifies permanent decisions across regional URLs,
@@ -288,3 +293,41 @@ with bounded retry/claim timestamps and an atomic consumed scan ID. Bridge token
 and web-only tenant gates are unchanged. Coins use public sources rather than
 this Banknotes personal feed. Regression coverage is in
 `tests/test_market_ebay_session.py`; browser fixtures never execute paid models.
+
+
+## Buying personal cards and capturing the order number
+
+Personal-card actions resolve a recent observation for the currently linked buyer,
+using `/banknotes/market/ebay-feed/<item_id>/buy`. They accept the same Location and
+Bought flag as ordinary candidates. The shared purchase transaction deduplicates
+by exact canonical listing, including concurrent clicks and a card that also
+appears in scan results. Photo and network reads precede the short write lock.
+A completed account-bound purchase remains retryable after its source snapshot
+expires. Bought does not erase a prior Delete decision.
+
+For an exact, currently live US eBay listing with a Buy It Now control, Buy opens
+eBay's verified `/bin/ctb` ordering page. Auction-only listings and other sellers
+retain their exact listing/ordering page; contact-only dealers do not acquire a
+checkout capability. The handoff never submits payment. StuffApp's Ordered status
+records the initiated purchase and does not mean payment or physical ownership
+has been confirmed.
+
+An explicit banknote Buy/Bought also queues a check for the exact eBay item through
+Today's existing authenticated Purchases connection. The Mac searches the source
+title and verifies the exact item ID across the complete search result; title
+similarity alone cannot match a purchase. This avoids unrelated unreadable older
+orders blocking the new purchase. The existing buyer binding, browser queue and
+web-only tenant apply. No new credential or payment permissions are introduced.
+
+Only a unique, quantity-one, paid purchase supplies the order number. Ambiguous
+orders, repeat purchases, unreadable results, account changes and conflicting
+record edits are held for review. Existing entered order numbers, including an
+intentional clear, are preserved. The detail page displays capture status and
+fills an untouched blank order field after confirmation without refreshing the
+page. Pending checks retry at most once per minute for up to 24 hours; Today and
+the designated Mac must be online with the linked eBay session available.
+
+Tests: `test_market_ebay_buy.py`, `test_market_checkout.py`,
+`test_market_purchase_capture.py`, `test_market_personal_buy_browser.cjs`, and
+`test_market_purchase_capture_browser.cjs`. Browser tests use isolated fixtures
+and never submit a purchase.

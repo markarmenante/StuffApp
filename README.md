@@ -194,3 +194,16 @@ registry. Coin photo behavior is unchanged. Missing model
 access or inconclusive evidence leaves the affected slot empty; Check can retry.
 Tests: `test_banknote_photo_sides.py`, `test_banknote_check_sources.py`, and
 `test_market_images.py`.
+
+
+### Market Scan buying
+
+Watched and sponsored eBay cards share View listing, Buy, Bought and Delete with
+Market Scan candidates. Buy asks for Location, saves an Ordered record and opens
+eBay's ordering page for a verified Buy It Now listing. Other sellers open their
+exact listing, including contact-only dealers. Bought records an existing purchase.
+After eBay confirms payment, the existing Today connection checks the exact item
+and captures its order number. The record shows progress without a page refresh;
+manual edits and ambiguous purchases are preserved for review. Today must be
+running on the designated Mac with the linked eBay sign-in available.
+See [market-scan.md](docs/market-scan.md) for the verified boundaries and tests.

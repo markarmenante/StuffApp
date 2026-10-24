@@ -210,6 +210,63 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(self.db.execute('SELECT count(*) FROM ebay_status_events').fetchone()[0], 1)
 
 
+class PurchaseNumberCaptureTests(unittest.TestCase):
+    def setUp(self):
+        self.db = bare_db()
+        note(self.db)
+        self.db.execute('ALTER TABLE banknotes ADD COLUMN order_number TEXT')
+        self.db.execute('ALTER TABLE banknotes ADD COLUMN marketplace TEXT')
+
+    def tearDown(self):
+        self.db.close()
+
+    def observe(self, status='Paid', order='12-12345-12345'):
+        import ebay_mail
+        item = ebay_mail.validate_purchase(dict(order_id=order,item_id='185386368846',
+            title='Canada $20 PMG 64 EPQ banknote',seller='note-dealer',quantity=1,
+            status_text=status,delivery_text='',ordered_date='Oct 23, 2026'))
+        return ebay_mail.apply_purchases(self.db,[item],'2026-10-24T12:00:00Z')
+
+    def test_paid_unique_exact_order_is_saved_and_repeat_preserves_it(self):
+        self.assertEqual(self.observe()['matched'],1)
+        row=self.db.execute('SELECT order_number,marketplace,photo,status FROM banknotes').fetchone()
+        self.assertEqual(tuple(row),('12-12345-12345','eBay','unchanged.jpg','Ordered'))
+        self.assertEqual(ebay.capture_linked_order_numbers(self.db),0)
+
+    def test_unpaid_order_and_email_do_not_capture_an_order_number(self):
+        self.observe('Order placed')
+        self.assertIsNone(self.db.execute('SELECT order_number FROM banknotes').fetchone()[0])
+        self.db.execute("UPDATE ebay_purchase_observations SET status_text='Payment pending'")
+        self.assertEqual(ebay.capture_linked_order_numbers(self.db),0)
+        self.db.execute('DELETE FROM ebay_purchase_observations')
+        self.assertEqual(ebay.capture_linked_order_numbers(self.db),0)
+
+    def test_manual_number_blank_clear_and_other_marketplace_are_preserved(self):
+        for number,marketplace in (('manual-order',None),('',None),(None,'CNG')):
+            with self.subTest(number=number,marketplace=marketplace):
+                self.db.execute('UPDATE banknotes SET order_number=?,marketplace=?',(number,marketplace))
+                self.observe()
+                self.assertEqual(tuple(self.db.execute('SELECT order_number,marketplace FROM banknotes').fetchone()),(number,marketplace))
+
+    def test_multiple_purchase_records_do_not_capture(self):
+        self.observe('Order placed')
+        other=parsed()[0];other.update(line_key='other-line',order_id='13-12345-12345')
+        ebay.apply_items(self.db,[other],auto_match=False)
+        self.db.execute("UPDATE ebay_purchase_observations SET status_text='Paid'")
+        self.assertEqual(ebay.capture_linked_order_numbers(self.db),0)
+        self.assertIsNone(self.db.execute('SELECT order_number FROM banknotes').fetchone()[0])
+
+    def test_partial_snapshot_does_not_create_an_automatic_link(self):
+        import ebay_mail
+        item=ebay_mail.validate_purchase(dict(order_id='12-12345-12345',item_id='185386368846',
+            title='Canada $20 PMG 64 EPQ banknote',seller='note-dealer',quantity=1,
+            status_text='Paid',delivery_text='',ordered_date='Oct 23, 2026'))
+        result=ebay_mail.apply_purchases(self.db,[item],'2026-10-24T12:00:00Z',auto_match=False)
+        self.assertEqual(result['matched'],0)
+        self.assertEqual(ebay.capture_linked_order_numbers(self.db),0)
+        self.assertIsNone(self.db.execute('SELECT order_number FROM banknotes').fetchone()[0])
+
+
 class WorkerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

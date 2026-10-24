@@ -118,7 +118,7 @@ def validate_purchases(raw):
     return [i for i in items if i['order_id'] not in skipped], list(skipped.values())
 
 
-def apply_purchases(db, items, observed, auto_match=True, requested_order=None):
+def apply_purchases(db, items, observed, auto_match=True, requested_order=None, capture_order_numbers=True):
     # Explicit Check already has an owner-supplied exact order. Its titles need
     # not match the discovery keyword filter, but no sibling order may enter.
     if requested_order is not None and (auto_match or not items or
@@ -170,11 +170,17 @@ def apply_purchases(db, items, observed, auto_match=True, requested_order=None):
         result = ebay.apply_items(db, [], source='Today: eBay Purchases')
         totals['matched'] += result['matched']
         totals['updated'] += result['updated']
+    # Existing unambiguous links can receive a newly confirmed paid order
+    # number even while unrelated old purchases await review.
+    if capture_order_numbers:
+        ebay.capture_linked_order_numbers(db)
     return dict(totals, skipped=list(skipped.values()),
                 items_accepted=sum(i['order_id'] not in skipped for i in items))
 
 
 def purchase_snapshot(payload):
+    if payload.get('kind') == 'market_purchase' or any(k in payload for k in ('search_item_id','search_complete')):
+        raise ValueError('A targeted purchase search cannot be used as a full Purchases snapshot')
     account = text(payload, 'account', 100, r'[\w.%-]+').lower()
     observed = ebay.timestamp(payload.get('observed_at'), observed=True)
     raw = payload.get('items')

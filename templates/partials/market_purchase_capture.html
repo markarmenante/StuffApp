@@ -1,0 +1,11 @@
+{% if category == 'banknotes' and not is_new and r %}
+{% set capture = market_purchase_capture(r['id']) %}
+{% if capture %}
+<aside class="purchase-status-notice" id="marketPurchaseCapture" role="status"
+       data-status-url="{{ url_for('banknote_market_purchase_status', record_id=r['id']) }}">
+  <span data-capture-message>{{ capture.message }}</span>
+  <script type="application/json" data-capture-initial>{{ capture|tojson }}</script>
+</aside>
+<script src="{{ url_for('static', filename='js/market-purchase-capture.js') }}?v={{ asset_v('js/market-purchase-capture.js') }}" defer></script>
+{% endif %}
+{% endif %}

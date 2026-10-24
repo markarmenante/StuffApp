@@ -7,6 +7,7 @@ from flask import abort, jsonify, request
 import ebay_mail
 import ebay_listing_captures
 import ebay_purchase_prices
+import market_purchase_capture
 
 TIMEOUT = 120
 SESSION_TIMEOUT = 600
@@ -142,6 +143,8 @@ def complete_session(db, row, payload):
 
 def complete(db, payload):
     """Only acknowledge validated evidence for the claimed order, never a sibling."""
+    if payload.get('kind') == 'market_purchase' or any(k in payload for k in ('search_item_id','search_complete')):
+        raise ValueError('A targeted purchase search cannot complete an exact-order request')
     if not isinstance(payload.get('id'), str) or not re.fullmatch(r'[a-f0-9]{32}', payload['id']):
         raise ValueError('Invalid purchase request')
     db.execute('BEGIN IMMEDIATE')
@@ -238,19 +241,24 @@ def register(app, get_db, require_owner):
         db = get_db()
         try:
             if payload.get('action') == 'claim':
-                claimed = claim(db)
+                claimed = claim(db) or market_purchase_capture.claim(db)
                 account = db.execute('SELECT account_name FROM ebay_purchase_account WHERE id=1').fetchone()
                 if not account:
                     account = db.execute('SELECT account_name FROM ebay_connection WHERE id=1').fetchone()
                 return jsonify(ok=True, request=claimed, expected_account=account[0] if account else None)
             if payload.get('action') == 'complete':
-                return jsonify(complete(db, payload))
+                handler = market_purchase_capture.complete if payload.get('kind') == 'market_purchase' else complete
+                return jsonify(handler(db, payload))
         except ValueError as exc:
             db.rollback()
             # Evidence is atomic: reject it all, then report only the failed
             # attempt. Never leave a rejected completion looking like a slow
             # Mac, or let an old request fail its replacement for this order.
             request_id = payload.get('id')
+            if payload.get('kind') == 'market_purchase':
+                if isinstance(request_id,str) and re.fullmatch(r'[a-f0-9]{32}',request_id):
+                    market_purchase_capture.reject(db,request_id,str(exc))
+                return jsonify(error=str(exc)),409
             if (payload.get('action') == 'complete' and isinstance(request_id, str)
                     and re.fullmatch(r'[a-f0-9]{32}', request_id)):
                 message = ('The purchase evidence was rejected: ' + str(exc)[:200].rstrip('.')

@@ -101,7 +101,7 @@ class FeedTests(unittest.TestCase):
         self.assertIn('Sponsored module unavailable',html)
         self.assertIn('Collection check incomplete',html)
         self.assertIn('eBay Watched',html)
-        self.assertNotIn('market-buy',html)
+        self.assertIn('market-buy',html)
 
     def test_observed_cards_dedup_and_no_orders_are_created(self):
         ident=self.claimed(); payload=observation(ident)
@@ -350,10 +350,10 @@ class FeedTests(unittest.TestCase):
             html=render_template('partials/market_ebay_feed.html',market_personal_feed=observed)
         self.assertIn('Availability unverified',html)
         self.assertIn('/banknotes/existing',html)
-        self.assertIn('Open eBay to check',html)
+        self.assertIn('View listing',html)
         self.assertIn('eBay Watched',html)
         self.assertIn('eBay Sponsored',html)
-        self.assertNotIn('market-buy',html)
+        self.assertIn('market-buy',html)
         self.assertNotIn('✓ live',html)
         self.assertEqual(stuff._market_personal_feed(self.db,[dict(listing_url=URL)])['cards'],[])
 
