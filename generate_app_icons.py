@@ -31,7 +31,8 @@ def build_outputs():
     def png(path, size, opaque=False):
         image = source.resize((size, size), Image.Resampling.LANCZOS)
         if opaque:
-            # iOS app icons must be opaque; keep the complete artwork on white.
+            # The existing default iOS asset catalog requires an opaque icon.
+            # This exception does not apply to web or Apple touch icons.
             background = Image.new("RGBA", image.size, "white")
             image = Image.alpha_composite(background, image).convert("RGB")
         buffer = BytesIO()
@@ -40,7 +41,7 @@ def build_outputs():
 
     png(ROOT / "static/img/icon-192.png", 192)
     png(ROOT / "static/img/icon-512.png", 512)
-    png(ROOT / "static/img/apple-touch-icon.png", 180, opaque=True)
+    png(ROOT / "static/img/apple-touch-icon.png", 180)
     catalog = json.loads((NATIVE / "Contents.json").read_text())
     for entry in catalog["images"]:
         width, height = map(float, entry["size"].split("x"))

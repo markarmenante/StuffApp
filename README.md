@@ -220,8 +220,9 @@ the icon without iCloud access.
 Regenerate the derived assets with `python3 generate_app_icons.py`, using the
 Pillow version in `requirements.txt`; verify them without writes with
 `python3 generate_app_icons.py --check`. Resizing preserves the complete artwork.
-Web and macOS icons retain transparency; Apple touch and native iOS icons place
-it on white because native app icons must be opaque. The web manifest uses a source-hash
+Web icons, including the Apple touch icon, and macOS icons retain the original
+transparency. Only the existing default native iOS asset catalog uses an opaque
+white background to satisfy that platform format. The web manifest uses a source-hash
 revision, the page uses normal asset cache-busters, and the service worker's
 version is bumped when shipping an icon change. Do not label these images
 maskable: platform cropping would cut off the coin.

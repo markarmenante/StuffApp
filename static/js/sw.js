@@ -17,7 +17,7 @@
 // Bump on every shipped change to invalidate old caches: a stale CSS
 // entry from before the random→asset_v cache-buster fix would otherwise
 // linger and keep rendering the un-styled page offline.
-const VERSION = 'v9';
+const VERSION = 'v10';
 const SHELL_CACHE = `stuffapp-shell-${VERSION}`;
 const DATA_CACHE  = `stuffapp-data-${VERSION}`;
 
