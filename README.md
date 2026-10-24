@@ -207,3 +207,25 @@ and captures its order number. The record shows progress without a page refresh;
 manual edits and ambiguous purchases are preserved for review. Today must be
 running on the designated Mac with the linked eBay sign-in available.
 See [market-scan.md](docs/market-scan.md) for the verified boundaries and tests.
+
+
+### Application icon
+
+The approved owl-coin artwork is stored unchanged in
+`assets/branding/stuffapp-source.png`. Web/PWA icons, the browser favicon,
+Apple touch icon, macOS `assets/branding/stuffapp.icns` and every iOS AppIcon
+size are committed with the app, so future deployments and native builds retain
+the icon without iCloud access.
+
+Regenerate the derived assets with `python3 generate_app_icons.py`, using the
+Pillow version in `requirements.txt`; verify them without writes with
+`python3 generate_app_icons.py --check`. Resizing preserves the complete artwork.
+Web and macOS icons retain transparency; Apple touch and native iOS icons place
+it on white because native app icons must be opaque. The web manifest uses a source-hash
+revision, the page uses normal asset cache-busters, and the service worker's
+version is bumped when shipping an icon change. Do not label these images
+maskable: platform cropping would cut off the coin.
+
+Deploying updates web assets. Existing installed browser apps pick up icon
+changes on the browser's update schedule; existing iOS native apps require a
+new build/install from `ios/Stuff.xcodeproj`.
