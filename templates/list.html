@@ -707,7 +707,7 @@
           {% for match in row['collection_matches'] or [] %}
           <span class="market-tag market-tag-owned">{{ 'Already in your collection' if match['kind'] == 'catalogue' else 'Listing already linked to your collection' }}{% if match['status'] == 'Ordered' %} (ordered){% endif %}: <a href="{{ match['url'] }}" target="_blank" rel="noopener">{{ match['label'] }}</a> — {{ match['reason'] }}</span>
           {% endfor %}
-          {% if row['collection_check_incomplete'] %}<span class="market-tag">Collection check incomplete — catalogue reference or country missing</span>{% endif %}
+          {% if row['collection_check_incomplete'] %}<span class="market-tag">Collection check incomplete — catalogue reference or country/state missing or unclear</span>{% endif %}
           {% if row['owned'] and not row['collection_matches'] %}<span class="market-tag market-tag-owned">You have {{ row['owned'] }}</span>{% endif %}
           {% set _fair = row['fair']|market_copy %}
           {% if _fair %}<span class="market-fair">{{ _fair }}</span>{% endif %}

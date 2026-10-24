@@ -305,6 +305,105 @@ class FeedTests(unittest.TestCase):
             self.assertEqual(stuff._market_collection_matches(self.db,item),[])
         self.assertTrue(stuff._market_collection_check_incomplete(dict(country='Philippines',pick_number='')))
 
+    def test_criswell_aliases_require_the_same_state_and_variety(self):
+        held = dict(country='United States of America', issuer='State of South Carolina',
+                    municipality='Columbia, South Carolina', denomination='$20', date_1=1872,
+                    pick_number='SCCR7, Fr. SCCR7, Cr-SC-7', banknote_id='P 285', cat_id='B102')
+        self.note('south-carolina', **held, serial_number='1234', slab_number='999', grade='Gem UNC')
+        self.note('virginia', **dict(held, issuer='State of Virginia', municipality='Richmond, Virginia', pick_number='VACR7'))
+        self.note('north-carolina', **dict(held, issuer='State of North Carolina', municipality='Raleigh, North Carolina', pick_number='NCCR7'))
+        self.note('sold', **dict(held, status='Sold'))
+        self.note('gifted', **dict(held, status='Gifted'))
+        self.note('ordered', **dict(held, status='Ordered'))
+        self.note('delivered', **dict(held, status='Delivered'))
+        for alias in ('SCCR7', 'SC Cr. 007', 'Cr-SC-7', 'Cr–SC–7', 'Fr. SCCR7', 'Criswell 7', 'Cr.7'):
+            item = dict(held, pick_number=alias)
+            self.assertEqual(stuff._market_catalog_references(item), {'criswell:sc:7'}, alias)
+        title = 'March 2, 1872 Columbia South Carolina $20 Obsolete Note Cr.7 PMG 66EPQ'
+        item = dict(title=title, listing_url=URL, serial_number='different', slab_number='different', grade='64')
+        matches = stuff._market_collection_matches(self.db, item)
+        self.assertEqual({m['id'] for m in matches}, {'south-carolina', 'ordered', 'delivered'})
+        self.assertEqual({m['status'] for m in matches}, {'Own', 'Ordered', 'Delivered'})
+        self.assertTrue(all(m['kind'] == 'catalogue' for m in matches))
+        self.assertFalse(stuff._market_collection_check_incomplete(item))
+        self.assertEqual(stuff._market_catalog_references(dict(country='US', other_catalog='Cr-SC-7')), {'criswell:sc:7'})
+        for bad in (
+                dict(title=title.replace('Cr.7', 'Cr.7a')),
+                dict(title=title.replace('Cr.7', 'Cr.7-1')),
+                dict(title=title.replace('Cr.7', 'Cr.7.1')),
+                dict(title=title.replace('Cr.7', 'Fr.7'), country='US', pick_number='Fr.7'),
+                dict(title=title.replace('Cr.7', 'Haxby 7'), country='US', pick_number='Haxby 7'),
+                dict(title=title, country='Philippines'),
+                dict(title=title, issuer='State of Virginia'),
+                dict(title=title, pick_number='VACR7'),
+                dict(title=title, pick_number='SCCR7a'),
+                dict(title=title.replace('South Carolina', 'West Virginia')),
+                dict(country='US', pick_number='Cr.7'),
+                dict(title='1872 Columbia $20 Cr.7 PMG 66EPQ'),
+                dict(title='1872 Columbia South Carolina $20 PMG 66EPQ')):
+            self.assertEqual(stuff._market_collection_matches(self.db, bad), [], bad)
+        for value in ('Cr.7 PMG66EPQ', 'Cr.7; PMG66EPQ', 'Cr.7 / PMG66EPQ'):
+            self.assertEqual(stuff._market_catalog_references(dict(held, pick_number=value)),
+                             {'criswell:sc:7'}, value)
+        self.assertEqual(stuff._market_catalog_references(dict(held, other_catalog='Haxby SC123-G7')),
+                         {'criswell:sc:7', 'other:haxbysc123g7'})
+        self.assertEqual(stuff._market_catalog_references(dict(held, pick_number='Cr.7; Fr.35')),
+                         {'criswell:sc:7', 'friedberg:35'})
+        self.assertEqual(stuff._market_collection_matches(self.db,
+            dict(country='US', issuer='State of Virginia', pick_number='Cr.8 PMG66EPQ'),
+            [dict(held, id='residual-grade', pick_number='Cr.7 PMG66EPQ')]), [])
+        for unresolved in (dict(country='US', pick_number='Cr.7'),
+                           dict(held, pick_number='Cr.7/8'),
+                           dict(held, pick_number='Cr.7/8a'),
+                           dict(held, pick_number='Cr.7 PMG66EPQ', issuer='', municipality=''),
+                           dict(country='US', pick_number='Cr.7', issuer='Virginia and South Carolina'),
+                           dict(title=title, pick_number='VACR7'),
+                           dict(title=title, pick_number='SCCR7a')):
+            self.assertEqual(stuff._market_catalog_references(unresolved), set(), unresolved)
+            self.assertTrue(stuff._market_collection_check_incomplete(unresolved), unresolved)
+
+    def test_cached_south_carolina_cards_and_candidates_match_without_a_new_scan(self):
+        title = 'March 2, 1872 Columbia South Carolina $20 Obsolete Note Cr.7 PMG 66EPQ'
+        ident = self.claimed()
+        payload = observation(ident)
+        payload['items'][0].update(title=title, listing_text=title, price='$279.99', sources=['sponsored'], live_state='unknown')
+        self.assertEqual(self.post(payload).status_code, 200)
+        before_card = dict(self.db.execute('SELECT * FROM ebay_market_cards').fetchone())
+        self.note('south-carolina', country='United States of America', issuer='State of South Carolina',
+                  municipality='Columbia, South Carolina', denomination='$20', date_1=1872,
+                  pick_number='SCCR7, Fr. SCCR7, Cr-SC-7', banknote_id='P 285', cat_id='B102')
+        before_note = dict(self.db.execute("SELECT * FROM banknotes WHERE id='south-carolina'").fetchone())
+        candidate = dict(title=title, country='United States of America', pick_number='', listing_url=URL, verified=True)
+        self.db.execute("INSERT INTO market_scans(id,category,status,started_at) VALUES ('cached-criswell','banknotes','done',datetime('now'))")
+        self.db.execute("INSERT INTO market_scan_items(id,scan_id,category,status,payload,created_at) VALUES ('cached-note','cached-criswell','banknotes','new',?,datetime('now'))", (json.dumps(candidate),))
+        self.db.commit()
+        before_candidate = dict(self.db.execute("SELECT * FROM market_scan_items WHERE id='cached-note'").fetchone())
+        with patch.object(stuff, '_run_market_scan', side_effect=AssertionError('no new scan')):
+            for _ in range(2):
+                observed = stuff._market_personal_feed(self.db, [])
+                card = observed['cards'][0]
+                self.assertEqual(card['country'], 'United States of America')
+                self.assertEqual([m['id'] for m in card['collection_matches']], ['south-carolina'])
+                self.assertFalse(card['collection_check_incomplete'])
+                self.assertEqual(card['price'], '$279.99')
+                self.assertEqual(card['sources'], ['sponsored'])
+                self.assertEqual(card['availability_label'], 'Availability unverified')
+                saved = stuff._market_items(self.db, 'banknotes')[0]
+                self.assertEqual([m['id'] for m in saved['collection_matches']], ['south-carolina'])
+                self.assertFalse(saved['collection_check_incomplete'])
+        with stuff.app.test_request_context():
+            from flask import render_template
+            html = render_template('partials/market_ebay_feed.html', market_personal_feed=observed)
+        self.assertIn('Already in your collection', html)
+        self.assertIn('/banknotes/south-carolina', html)
+        self.assertIn('P 285', html)
+        self.assertNotIn('Collection check incomplete', html)
+        self.assertIn('market-buy', html)
+        self.assertIn('Delete', html)
+        self.assertEqual(dict(self.db.execute('SELECT * FROM ebay_market_cards').fetchone()), before_card)
+        self.assertEqual(dict(self.db.execute("SELECT * FROM banknotes WHERE id='south-carolina'").fetchone()), before_note)
+        self.assertEqual(dict(self.db.execute("SELECT * FROM market_scan_items WHERE id='cached-note'").fetchone()), before_candidate)
+
     def test_noncirculating_and_net_filters_apply_to_observed_cards_and_saved_actions(self):
         issue=stuff._market_banknote_issue_problem
         excluded=('SPECIMEN','Proof','remainder','essai','colour trial','replica','fantasy','unissued','non-circulating','not issued for circulation','PMG64NET','PMG 64 NET','NET')

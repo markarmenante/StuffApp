@@ -252,7 +252,14 @@ reference determines “Already in your collection.”** Serial numbers, grading
 certificates and grade differences do not affect this decision (Mark, 2026-10-11).
 The matcher normalizes case, spacing and catalogue aliases (Pick/P, Friedberg/Fr,
 TBB/B), preserves variety suffixes and catalogue namespaces, and scopes references
-by country. It reads both `pick_number` and `other_catalog`. A same eBay purchase
+by country. It reads both `pick_number` and `other_catalog`. Criswell state-note
+references also require one consistent issuing state: for example, `SCCR7`,
+`Fr. SCCR7`, `Cr-SC-7`, and `Cr.7` with explicit South Carolina context identify
+the same state issue, independently of federal `Fr.7` or another state's `Cr.7`.
+Observed listing titles can supply this explicit reference and state at display
+time, including already cached cards and scan candidates. Missing or conflicting
+state/variety evidence remains incomplete; no collection record or feed snapshot
+is rewritten. An explicit non-US country is never overridden by US state text. A same eBay purchase
 listing is separately labelled as a linked listing. Sold/gifted/lost holdings do
 not count. Missing country or catalogue reference produces an incomplete-check
 notice; denomination/year similarity alone is not a duplicate verdict, and absence

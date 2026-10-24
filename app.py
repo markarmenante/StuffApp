@@ -17526,18 +17526,72 @@ _MARKET_REFERENCE_RE = re.compile(
     r"[\s.#:-]*(?P<number>[a-z]{0,4}[\s-]*\d+[a-z0-9]*(?:[-.]\d+[a-z]*)?\*?)", re.I)
 
 
+# Criswell state-note numbers repeat between states. The state is part of
+# the catalogue identity, including older saved aliases such as Fr. SCCR7.
+_MARKET_CRISWELL_STATES = dict(_OBSOLETE_STATE_NAMES, WV='West Virginia')
+_MARKET_CRISWELL_RE = re.compile(
+    r'(?<![a-z0-9])(?:(?P<before>' + '|'.join(_MARKET_CRISWELL_STATES) + r')[\s.-]*)?'
+    r'(?:criswell|cr\.?)[\s.#:-]*'
+    r'(?:(?P<after>' + '|'.join(_MARKET_CRISWELL_STATES) + r')[\s.#:-]*)?'
+    r'(?P<number>\d+[a-z0-9]*(?:[.-]\d+[a-z]*)?\*?)(?![a-z0-9]|[.-]\d)', re.I)
+_MARKET_CRISWELL_STATE_RE = re.compile(
+    r'(?<![a-z])(?:' + '|'.join(re.escape(name) for name in
+        sorted(_MARKET_CRISWELL_STATES.values(), key=len, reverse=True)) + r')(?![a-z])', re.I)
+
+
+def _market_criswell_references(item):
+    """Read an explicit Criswell number only with one consistent US state.
+
+    This reads catalogue fields and the observed listing title, never serials,
+    certificates, prices or free-form descriptions. Missing or conflicting
+    jurisdiction/variety evidence stays unresolved rather than matching Cr.7
+    in every state. It does not change the source record or feed snapshot.
+    """
+    country = _canonical_banknote_country(item.get('country') or '')
+    if country and country != 'United States of America':
+        return set()
+    matches = [match for field in ('pick_number', 'other_catalog', 'title')
+               for match in _MARKET_CRISWELL_RE.finditer(
+                   str(item.get(field) or '').replace('–', '-').replace('—', '-'))]
+    if not matches or any(re.match(r'\s*/\s*\d', match.string[match.end():]) for match in matches):
+        return set()
+    states = {match[key].upper() for match in matches for key in ('before', 'after') if match[key]}
+    names = {name.lower(): code for code, name in _MARKET_CRISWELL_STATES.items()}
+    for field in ('country', 'issuer', 'municipality', 'title'):
+        states.update(names[match.group(0).lower()] for match in
+                      _MARKET_CRISWELL_STATE_RE.finditer(str(item.get(field) or '')))
+    numbers = {re.sub(r'^0+(?=\d)', '', match['number'].lower()) for match in matches}
+    if len(states) != 1 or len(numbers) != 1:
+        return set()
+    return {'criswell:' + next(iter(states)).lower() + ':' + next(iter(numbers))}
+
+
+def _market_reference_country(item):
+    country = _canonical_banknote_country(item.get('country') or '')
+    if not country and _market_criswell_references(item):
+        return 'United States of America'
+    return country
+
+
 def _market_catalog_references(item):
     """Catalogue identity, preserving both the namespace and variety suffix.
 
-    Pick/P, Friedberg/Fr, and TBB/B aliases compare consistently. A bare
-    number in pick_number uses that field's usual Pick catalogue (Friedberg
+    Pick/P, Friedberg/Fr, TBB/B, and state-scoped Criswell aliases compare
+    consistently. A bare number in pick_number uses that field's usual Pick
+    catalogue (Friedberg
     for US notes). Other named references compare by their full normalized
     text. Serial and grading certificates are deliberately irrelevant.
     """
-    refs = set()
+    refs = _market_criswell_references(item)
     for field in ('pick_number', 'other_catalog'):
-        for part in re.split(r'[;,|/\n]+', str(item.get(field) or '')):
+        value = str(item.get(field) or '').replace('–', '-').replace('—', '-')
+        has_criswell = bool(_MARKET_CRISWELL_RE.search(value))
+        for part in re.split(r'[;,|/\n]+', value):
             part = part.strip().replace('–', '-').replace('—', '-')
+            # Do not let legacy Fr. SCCR7 become a federal Friedberg number,
+            # or an unresolved Cr.7 fall through to a state-free other:cr7.
+            criswell_part = bool(_MARKET_CRISWELL_RE.search(part))
+            part = _MARKET_CRISWELL_RE.sub('', part).strip()
             if not part:
                 continue
             matches = list(_MARKET_REFERENCE_RE.finditer(part))
@@ -17551,7 +17605,9 @@ def _market_catalog_references(item):
                     number = number[1:]
                 number = re.sub(r'^([a-z]*)0+(?=\d)', r'\1', number)
                 refs.add(namespace + ':' + number)
-            if matches:
+            # Only explicit independent references survive a Criswell field;
+            # grading text and numeric continuations are not catalogues.
+            if matches or criswell_part or has_criswell:
                 continue
             compact = re.sub(r'[^a-z0-9*]', '', part.lower())
             if re.fullmatch(r'\d+[a-z0-9]*\*?', compact) and field == 'pick_number':
@@ -17563,7 +17619,7 @@ def _market_catalog_references(item):
 
 
 def _market_collection_check_incomplete(item):
-    return not (_banknote_country_fold(item.get('country')) and _market_catalog_references(item))
+    return not (_banknote_country_fold(_market_reference_country(item)) and _market_catalog_references(item))
 
 
 def _market_collection_matches(db, item, rows=None):
@@ -17573,13 +17629,13 @@ def _market_collection_matches(db, item, rows=None):
         rows = getattr(ctx, 'owned_banknotes', None) if ctx else None
     if rows is None:
         rows = _market_owned_banknote_rows(db)
-    country = _banknote_country_fold(item.get('country'))
+    country = _banknote_country_fold(_market_reference_country(item))
     catalog = _market_catalog_references(item)
     listing_id = market_ebay_feed.item_id(item.get('listing_url'))
     found = []
     for raw in rows:
         row = dict(raw)
-        same_country = bool(country and country == _banknote_country_fold(row.get('country')))
+        same_country = bool(country and country == _banknote_country_fold(_market_reference_country(row)))
         same_catalog = same_country and bool(catalog & _market_catalog_references(row))
         reason, kind = '', 'catalogue'
         if same_catalog:
@@ -18629,8 +18685,8 @@ def _market_personal_feed(db, visible_items):
         references = '; '.join(m.group(0) for m in _MARKET_REFERENCE_RE.finditer(title))
         if not country and re.search(r'\b(?:fr\.?|friedberg)\s*[.#]?\s*\d', references, re.I):
             country = 'United States of America'
-        identity = dict(country=country, pick_number=references, listing_url=card['listing_url'])
-        card['country'] = country  # display grouping reuses the same observed identity
+        identity = dict(country=country, pick_number=references, title=title, listing_url=card['listing_url'])
+        card['country'] = _market_reference_country(identity)  # display-only observed identity
         card['collection_matches'] = _market_collection_matches(db, identity, rows)
         card['collection_check_incomplete'] = _market_collection_check_incomplete(identity)
         card['observed_date'] = market_ebay_feed.utc(latest['observed_at'])[:16].replace('T', ' ') + ' UTC'
