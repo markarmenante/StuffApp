@@ -14,6 +14,14 @@ and replaces only its results area when the persisted revision changes. It
 keeps the location picker and active Buy/Bought/dismiss requests intact. Progress
 shows completed sources and candidate count, using the server's start time.
 
+Opening Market Scan from a collection keeps that list's Status selection, coin
+Home/Era selections, search and other collection query settings. Collection
+returns to the same selection after Earlier candidates, Current scan, refresh
+or Rescan. This return context travels in that page's URL, so separate tabs and
+categories keep their own selections. A directly opened Market Scan without
+collection context returns to the ordinary collection default. No shared browser
+storage or saved collection data is changed.
+
 eBay buy candidates require a live verdict from a readable exact listing page.
 A fresh exact-item observation from the authenticated signed-in browser may resolve
 a server-side challenge, but never override an ended or invalid listing. Search

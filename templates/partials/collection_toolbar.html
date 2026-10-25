@@ -47,7 +47,7 @@
 {% endif %}
 <span class="collection-toolbar-separator" aria-hidden="true">|</span>
 {% if category == 'banknotes' %}
-<a href="{{ url_for('market_view', category=category) }}" class="toolbar-btn pill market-pill"
+<a href="{{ market_navigation.current }}" class="toolbar-btn pill market-pill"
    title="Live buy candidates from eBay, Stack's Bowers, Heritage, dealers and auction houses">Market Scan</a>
 {% endif %}
 <a href="{{ url_for('analysis_view', category=category) }}" class="toolbar-btn pill analysis-pill"

@@ -25,11 +25,11 @@
      pressing Collection returns to the normal list. #}
   {% if category in ('coins', 'banknotes') and not at_property %}
     {% if _market %}
-    <a href="{{ url_for('list_view', category=category) }}"
+    <a href="{{ market_navigation.collection }}"
        class="toolbar-btn pill active market-pill"
        title="Back to the collection">Collection</a>
     {% elif not _analysis %}
-    <a href="{{ url_for('market_view', category=category) }}"
+    <a href="{{ market_navigation.current }}"
        class="toolbar-btn pill market-pill"
        title="Live buy candidates from eBay, Stack's Bowers, Heritage, dealers and auction houses">Market Scan</a>
     {% endif %}
@@ -66,12 +66,12 @@
   {% endif %}
   {% if _market %}
   {% if market_earlier %}
-  <a class="toolbar-btn pill" href="{{ url_for('market_view', category=category) }}"
+  <a class="toolbar-btn pill" href="{{ market_navigation.current }}"
      title="Back to the current scan's candidates">Current scan</a>
   {% else %}
   <button type="button" class="toolbar-btn pill" id="marketRescan"
           title="Run the scan again now">Rescan</button>
-  <a class="toolbar-btn pill" href="{{ url_for('market_view', category=category, earlier=1) }}"
+  <a class="toolbar-btn pill" href="{{ market_navigation.earlier }}"
      title="Candidates from earlier scans (superseded or dismissed) — file one you bought with Bought">Earlier candidates</a>
   {% endif %}
   <span class="market-status" id="marketStatus">

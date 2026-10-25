@@ -15227,6 +15227,23 @@ def persons_default():
     return redirect(url_for('list_view', category='persons'))
 
 
+def _market_collection_navigation(category, from_collection=False):
+    """Keep this tab's collection filters in its Market Scan URL.
+
+    Only collection query fields are carried. Return links are always built
+    for the same category, never taken from an arbitrary supplied URL.
+    Preserve explicit empty values such as filter= (All).
+    """
+    prefix = '' if from_collection else 'collection_'
+    query = {key: request.args[prefix + key]
+             for key in ('filter', 'q', 'q_' + category, 'history', 'dot', 'at')
+             if prefix + key in request.args}
+    context = {'collection_' + key: value for key, value in query.items()}
+    return dict(collection=url_for('list_view', category=category, **query),
+                current=url_for('market_view', category=category, **context),
+                earlier=url_for('market_view', category=category, earlier=1, **context))
+
+
 @app.route('/<category>')
 def list_view(category):
     if category not in CATEGORIES:
@@ -15370,6 +15387,8 @@ def list_view(category):
                            q=q,
                            dot=dot,
                            coin_filter=coin_filter,
+                           market_navigation=_market_collection_navigation(category, from_collection=True)
+                               if category in ('coins', 'banknotes') else None,
                            show_history=show_history,
                            at_property=at_property,
                            at_property_url=at_property_url,
@@ -18752,6 +18771,7 @@ def market_view(category):
                            extra_fields=[],
                            fields=visible_fields(category),
                            market_mode=True,
+                           market_navigation=_market_collection_navigation(category),
                            market_personal_feed=_market_personal_feed(db, items) if category == 'banknotes' and not earlier else None,
                            market_scan=scan,
                            market_ebay_session=market_ebay_feed.session_status(db) if category == 'banknotes' else None,
