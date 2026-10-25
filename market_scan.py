@@ -74,30 +74,30 @@ def init_dismissals(db):
         dismissed_at TEXT NOT NULL, PRIMARY KEY(category,canonical_url))""")
     # Preserve every historical dismissal still present when upgrading. Already
     # pruned historical rows cannot be recovered. This migration is idempotent.
-    for row in db.execute("SELECT * FROM market_scan_items WHERE category='banknotes' AND status='dismissed'").fetchall():
+    for row in db.execute("SELECT * FROM market_scan_items WHERE category IN ('banknotes','coins') AND status='dismissed'").fetchall():
         key = listing_key(row)
         if key:
             db.execute('INSERT OR IGNORE INTO market_dismissals VALUES(?,?,?)',
-                       ['banknotes', key, row['created_at'] or datetime.utcnow().isoformat()])
+                       [row['category'], key, row['created_at'] or datetime.utcnow().isoformat()])
 
 
 def dismissed_keys(db, category):
-    if category != 'banknotes':
+    if category not in ('banknotes', 'coins'):
         return set()
     return {r[0] for r in db.execute('SELECT canonical_url FROM market_dismissals WHERE category=?', [category])}
 
 
 def is_dismissed(db, category, url):
-    return bool(category == 'banknotes' and db is not None and db.execute(
+    return bool(category in ('banknotes', 'coins') and db is not None and db.execute(
         'SELECT 1 FROM market_dismissals WHERE category=? AND canonical_url=?',
         [category, canonical_url(url)]).fetchone())
 
 
-def dismiss_listing(db, category, url):
+def dismiss_listing(db, category, url, on_dismiss=None):
     """Serialize a durable listing decision with progressive scan publication."""
     key = canonical_url(url)
-    if not key or category != 'banknotes':
-        raise ValueError('An exact banknote listing is required')
+    if not key or category not in ('banknotes', 'coins'):
+        raise ValueError('An exact market listing is required')
     try:
         db.execute('BEGIN IMMEDIATE')
         db.execute('INSERT OR IGNORE INTO market_dismissals VALUES(?,?,?)',
@@ -108,6 +108,8 @@ def dismiss_listing(db, category, url):
                if listing_key(r) == key]
         db.executemany("UPDATE market_scan_items SET status='dismissed',canonical_url=? WHERE id=?", [(key, i) for i in ids])
         db.execute("UPDATE market_scans SET revision=revision+1, item_count=(SELECT count(*) FROM market_scan_items WHERE scan_id=market_scans.id AND status='new') WHERE category=?", [category])
+        if on_dismiss:
+            on_dismiss(db)
         db.commit()
     except BaseException:
         db.rollback()

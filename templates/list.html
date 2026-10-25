@@ -93,6 +93,7 @@
     {%- endif -%}
     {%- if market_wantlist and not market_earlier %} · missing entities: {{ market_wantlist.open }} of {{ market_wantlist.total }} · US large-size types: {{ market_wantlist.us_open }} of {{ market_wantlist.us_total }} still open{% endif -%}
   </span>
+  <span class="market-status" id="marketUnwatchStatus" role="status" aria-live="polite" hidden></span>
   {% endif %}
   {# Drilled in from a Property — give a one-tap way back. #}
   {% if at_property and at_property_url %}
@@ -742,7 +743,7 @@
           <button type="button" class="market-btn market-buy market-bought" data-id="{{ row['id'] }}" data-bought="1"
                   title="Already paid on the seller's site — file this as an Ordered {{ cat_info.singular|lower }} without opening the listing">Bought</button>
           {% if not market_earlier %}
-          <button type="button" class="market-btn market-dismiss{% if category == 'banknotes' %} market-delete{% endif %}" data-id="{{ row['id'] }}" data-dismiss-url="{{ url_for('market_item_dismiss', category=category, item_id=row['id']) }}" title="{{ 'Delete this recommendation and do not recommend this listing again' if category == 'banknotes' else 'Hide this candidate' }}">{{ 'Delete' if category == 'banknotes' else '✕' }}</button>
+          <button type="button" class="market-btn market-dismiss market-delete" data-id="{{ row['id'] }}" data-dismiss-url="{{ url_for('market_item_dismiss', category=category, item_id=row['id']) }}" title="Delete this recommendation; exact eBay items are also removed from your watchlist once confirmed">Delete</button>
           {% endif %}
         </div>
       </div>
@@ -860,6 +861,45 @@
   }
 
   function setStatus(text) { if (statusEl) statusEl.textContent = text; }
+
+  const unwatchStatus = document.getElementById('marketUnwatchStatus');
+  let unwatchTimer = null, unwatchGeneration = 0;
+  function showUnwatch(requests) {
+    if (!unwatchStatus) return;
+    const entries = (requests || []).filter(row => row && row.message);
+    unwatchStatus.hidden = !entries.length;
+    unwatchStatus.replaceChildren();
+    entries.slice(0, 5).forEach((row, index) => {
+      if (index) unwatchStatus.appendChild(document.createElement('br'));
+      const text = document.createElement('span');
+      text.textContent = (entries.length > 1 ? 'Item ' + row.item_id + ': ' : '') + row.message;
+      unwatchStatus.appendChild(text);
+      if (!row.active && !['removed', 'already_unwatched'].includes(row.state) && /^https:\/\/www\.ebay\.com\/itm\/\d{9,15}$/.test(row.listing_url || '')) {
+        const link = document.createElement('a');
+        link.href = row.listing_url; link.target = '_blank'; link.rel = 'noopener';
+        link.textContent = ' Open item';
+        unwatchStatus.appendChild(link);
+      }
+    });
+  }
+  async function pollUnwatch(generation = unwatchGeneration) {
+    if (!unwatchStatus) return;
+    clearTimeout(unwatchTimer);
+    try {
+      const response = await fetch('/banknotes/market/ebay-unwatch/status', {cache: 'no-store'});
+      if (!response.ok) throw new Error('Status unavailable');
+      const data = await response.json();
+      if (generation !== unwatchGeneration) return;
+      showUnwatch(data.requests);
+      if (data.active) unwatchTimer = setTimeout(() => pollUnwatch(generation), 3000);
+    } catch (_) {
+      if (generation === unwatchGeneration) {
+        if (!unwatchStatus.hidden) unwatchStatus.textContent = 'Deleted here. eBay watchlist removal status is unavailable; confirmation is pending.';
+        unwatchTimer = setTimeout(() => pollUnwatch(generation), 10000);
+      }
+    }
+  }
+  if (unwatchStatus) pollUnwatch();
 
   const estimateButton = document.getElementById('marketEstimatePrices');
   const estimateStatus = document.getElementById('marketEstimateStatus');
@@ -1120,7 +1160,12 @@
           const count = document.querySelectorAll('#marketResults .market-row, #marketResults .market-personal-row').length;
           const label = document.querySelector('.list-count, .list-cat-title-count');
           if (label) label.textContent = count + (CAT === 'coins' ? ' Coins' : '');
-          setStatus(CAT === 'banknotes' ? 'Deleted. This listing will no longer be recommended.' : 'Candidate hidden.');
+          setStatus('Deleted. This listing will no longer be recommended.');
+          if (d.unwatch) {
+            unwatchGeneration += 1;
+            showUnwatch([d.unwatch]);
+            if (d.unwatch.active) pollUnwatch(unwatchGeneration);
+          }
         })
         .catch(() => {
           const message = 'Could not delete this recommendation. Please try again.';

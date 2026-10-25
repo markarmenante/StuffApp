@@ -42,6 +42,7 @@ class IntegrationTests(unittest.TestCase):
     def setUp(self):
         db = appmod.open_db_connection()
         db.execute('DELETE FROM market_scan_items'); db.execute('DELETE FROM market_scans')
+        db.execute('DELETE FROM market_dismissals'); db.execute('DELETE FROM ebay_unwatch_commands')
         db.commit(); db.close()
 
     def rows(self):

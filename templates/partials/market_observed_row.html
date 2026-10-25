@@ -16,7 +16,7 @@
                     title="Check availability, open eBay to pay there and file this as an Ordered banknote">Buy</button>
             <button type="button" class="market-btn market-buy market-bought" data-buy-url="{{ url_for('market_ebay_item_buy', item_id=card.item_id) }}" data-bought="1"
                     title="Already paid on eBay? File this as an Ordered banknote">Bought</button>
-            <button type="button" class="market-btn market-dismiss market-delete" data-dismiss-url="{{ url_for('market_ebay_item_dismiss', item_id=card.item_id) }}" title="Delete this recommendation and do not recommend this listing again">Delete</button>
+            <button type="button" class="market-btn market-dismiss market-delete" data-dismiss-url="{{ url_for('market_ebay_item_dismiss', item_id=card.item_id) }}" title="Delete this recommendation and remove this exact item from your eBay watchlist">Delete</button>
           </div>
         </div>
       </div>

@@ -120,6 +120,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
         if(options.delayInitialEstimateStatus&&estimateReads===1)await initialEstimateGate;
         return route.fulfill({json:snapshot});
       }
+      if(url.pathname==='/banknotes/market/ebay-unwatch/status')return route.fulfill({json:{ok:true,requests:[],active:false}});
       if(url.pathname==='/banknotes/market/status'){
         await gate;
         return route.fulfill({json:{ok:true,scan_id:'fixture-scan',status:'done',revision:2,item_count:7,summary:'Synthetic progressive scan complete'}});

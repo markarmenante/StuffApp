@@ -1,7 +1,7 @@
 <section class="market-personal-feed" aria-labelledby="marketPersonalTitle">
   <div class="banknote-group-heading">
     <h2 id="marketPersonalTitle">{{ 'eBay source status' if market_unified|default(false) else 'Your eBay watched and sponsored items' }}</h2>
-    <p>Observed {{ market_personal_feed.observed_date }}. Watched and sponsored cards are labeled below; availability and collection eligibility may still need checking. Sponsored placement does not affect ranking. Delete hides a listing from future recommendations; your eBay watchlist stays unchanged.</p>
+    <p>Observed {{ market_personal_feed.observed_date }}. Watched and sponsored cards are labeled below; availability and collection eligibility may still need checking. Sponsored placement does not affect ranking. Delete hides a listing and requests removal of that exact item from your eBay watchlist; confirmation appears above.</p>
     {% if market_personal_feed.excluded_count %}<p>{{ market_personal_feed.excluded_count }} specimen, proof, other non-issued or NET-designated cards excluded by your collection rules.</p>{% endif %}
     {% for source, state in market_personal_feed.sources.items() %}
     {% if state.status != 'ok' %}<p role="status">{{ 'Watched' if source == 'watched' else 'Sponsored similar-to-watched' }}: {{ state.message or state.status }}</p>{% endif %}

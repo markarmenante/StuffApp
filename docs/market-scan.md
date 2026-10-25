@@ -149,9 +149,13 @@ newer scan. Existing undecided candidates remain visible during discovery.
 Only a successful, nonempty scan with no source errors supersedes old
 undecided candidates. Partial, failed, or empty scans retain them.
 
-Banknote current candidates and observed watched/sponsored cards have **Delete**.
+Coin and banknote current candidates and observed watched/sponsored cards have **Delete**.
 It permanently suppresses that exact listing from all recommendation sources,
-without changing the eBay watchlist, collection or Ordered records. Another
+preserving collection and Ordered records. New explicit Delete actions also
+request removal of that exact eBay item from the linked account's watchlist.
+The browser checks actual watch state even for researched or sponsored cards;
+it never assumes those cards are watched. Non-eBay deletion only suppresses the
+listing in StuffApp. Another
 listing with the same catalogue reference remains eligible. The decision lives
 in `market_dismissals`, keyed by category and canonical listing URL, on the hosted
 collection database, so it survives browsers/devices, restarts and all source
@@ -163,20 +167,69 @@ card back; errors leave it visible and retryable.
 
 The existing 60-day prune of dismissed/superseded candidate history still applies,
 and personal evidence expires after 24 hours. Neither removes the suppression
-record. Startup and pre-prune migration preserve existing retained banknote
+record. Startup and pre-prune migration preserve existing retained market
 dismissals, including legacy payload-only rows; dismissals already pruned before
 this upgrade cannot be recovered. Earlier candidates remain explicitly labelled
 Dismissed with historical View and Bought recovery, without recommendation Buy
 or Delete controls. Filing a purchase through Bought does not erase suppression.
-Ordered records are not pruned. Coin dismissal behavior is unchanged.
+Ordered records are not pruned. Coin dismissal now uses the same permanent
+category-and-listing suppression as banknotes, so a later scan cannot restore it.
 
-`POST /banknotes/market/<candidate_id>/dismiss` saves the candidate's listing
+`POST /<category>/market/<candidate_id>/dismiss` saves the candidate's listing
 identity. `POST /banknotes/market/ebay-feed/<ebay_item_id>/dismiss` resolves an
 account-bound observed card instead of accepting an arbitrary URL; a known prior
 deletion remains idempotent after its snapshot expires. Both require the existing
 app-owner authorization and cross-site write guard, and return the canonical URL
 for removal of duplicate visible occurrences. These are app actions, not
 bridge-token endpoints. The personal-card action is available only on web.
+
+Suppression and the new intent are committed atomically. `ebay_unwatch_commands`
+deduplicates by linked account and exact item ID; initialization, existing
+dismissals, ordinary reads and scans never create commands. Commands expire in
+ten minutes. Today's existing web-only token claims one through
+`GET /banknotes/market/ebay-unwatch` and posts a bounded result to the same route.
+The command carries account, exact item, expiry and an opaque claim token. A
+120-second abandoned claim can only be reclaimed in `verify_only` mode, so a
+restart or lost acknowledgment never repeats an uncertain click. Success requires
+fresh exact-item/account evidence of `not_watching`; queueing, sign-in challenges,
+expired requests and ambiguous results never count as confirmed removal.
+
+The owner-only `GET /banknotes/market/ebay-unwatch/status` is read-only and shared
+by both Market Scan categories. The page
+shows pending, verified or needs-attention text after removing the recommendation,
+and restores recent status on reload. A terminal failure leaves the listing
+suppressed and directs the owner to check eBay; it does not launch a retry or undo
+suppression. No purchase, bid, feedback or other eBay action is authorized by this
+queue. Verification uses synthetic writes and intercepted browser requests.
+Duplicate Delete requests return the same command/result, including terminal
+failures; they do not restart a completed or uncertain command. A failed removal
+therefore currently needs an exact-listing check on eBay, rather than an implicit
+new watchlist action from a stale page or network retry.
+
+External removal additionally requires a cryptographically verified Cloudflare
+Access application JWT from `Cf-Access-Jwt-Assertion`. The web deployment pins
+`STUFFAPP_CF_ACCESS_TEAM_DOMAIN` to its existing HTTPS Cloudflare team issuer and
+`STUFFAPP_CF_ACCESS_AUD` to this application's audience. PyJWT checks the RS256
+signature against that team's fixed `/cdn-cgi/access/certs` endpoint, issuer,
+audience, time claims, application type, subject, and signed email against both
+the configured owner and resolved app identity. Keys have a five-minute cache;
+retrieval has a three-second timeout, bounded body and no redirects. Missing
+configuration/proof or failed verification suppresses locally but creates no
+unwatch command. Raw email headers, dev-user settings, owner fallback and bridge
+tokens cannot substitute for signed owner proof. No JWT or decoded identity is
+logged or returned. Status exposes only `unwatch_authorized` for read-only checks.
+The Gerri instance remains disabled and does not need these variables.
+New removal intents also require an exact same-origin HTTPS `Origin` with no
+conflicting Fetch Metadata, or `Sec-Fetch-Site: same-origin` when Origin is absent.
+Missing proof, `Origin: null`, malformed origins and cross-site metadata cannot
+queue an external write, even with an authenticated owner session. Read-only
+capability checks validate the signed identity without requiring POST metadata.
+
+Before dispatch, Today may focus its own sign-in/security-check tab once and
+wait read-only within the current 120-second claim and ten-minute request expiry.
+It resumes the same intent only after verifying the exact linked account. If
+that wait ends, the UI reports unconfirmed removal and offers the exact listing
+for manual checking. Expired/uncertain actions are never clicked again.
 
 ## Budgets and concurrency
 

@@ -76,7 +76,9 @@ class DismissalTests(unittest.TestCase):
     def test_normal_delete_hides_both_sources_but_not_same_reference_other_listing(self):
         row=self.publish();self.snapshot((REGIONAL,OTHER))
         result=self.client.post('/banknotes/market/'+row['id']+'/dismiss')
-        self.assertEqual(result.json,dict(ok=True,canonical_url=market.canonical_url(URL)))
+        self.assertTrue(result.json['ok'])
+        self.assertEqual(result.json['canonical_url'],market.canonical_url(URL))
+        self.assertEqual(result.json['unwatch']['state'],'unavailable')
         self.assertEqual(stuff._market_items(self.db,'banknotes'),[])
         visible=stuff._market_personal_feed(self.db,[])['cards']
         self.assertEqual([c['item_id'] for c in visible],['123456789013'])

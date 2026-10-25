@@ -17,15 +17,18 @@ fold new standing instructions in here — nowhere else.)
   verification, and resume after confirmed readiness. Do not require the Today
   browser window to stay open. The designated Mac must still be awake; never
   automate passwords, verification codes, CAPTCHA or provider consent.
-- **Banknote recommendation deletion** (2026-10-11): keep a visible Delete
-  control on current recommendations and watched/sponsored cards. Deleting a
+- **Market Scan recommendation deletion** (2026-10-25): keep a visible Delete
+  control on current coin/banknote recommendations and watched/sponsored cards. Deleting a
   recommendation must permanently suppress that exact listing across future
   scans, feed refreshes, restarts and devices, using the hosted database. Match
   eBay item IDs across tracking URLs and regional domains; do not suppress other
   listings solely because they share a Pick/catalogue reference. Preserve the
   collection, Ordered records and explicitly labelled Earlier history/Bought
-  recovery. The eBay discovery connection remains read-only; deletion does not
-  unwatch or change the eBay account. See `docs/market-scan.md`.
+  recovery. New explicit Delete actions also request removal of that exact item
+  from the linked eBay watchlist, across researched, watched and sponsored cards.
+  Keep the result pending until the account-bound browser confirms the item is
+  no longer watched. Never replay old dismissals as unwatch commands or repeat
+  an uncertain watch-toggle click. See `docs/market-scan.md`.
 - **Commit and push directly to `main`.** No draft-PR round-trips — `main` is
   the deploy branch; Railway auto-deploys it.
 - **Shared connections and pathways** (2026-10-04): read this repo's

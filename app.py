@@ -14,6 +14,8 @@ import market_ebay_feed
 import market_grouping
 import market_valuation
 import market_estimates
+import market_unwatch
+import cloudflare_access
 import market_checkout
 import market_purchase_capture
 import banknote_catalog
@@ -6858,6 +6860,7 @@ def init_db():
         db.commit()
 
     market_estimates.init_schema(db)
+    market_unwatch.init_schema(db)
 
 
 def _parse_prescription_lines(text):
@@ -19316,7 +19319,7 @@ def _market_purchase_response(db, category, row, item):
     if ordered:
         row = ordered
         item = json.loads(row['payload'])
-    if category == 'banknotes' and row['status'] != 'ordered' and not already_paid and (row['status'] == 'dismissed' or market_runtime.is_dismissed(db, category, item.get('listing_url'))):
+    if row['status'] != 'ordered' and not already_paid and (row['status'] == 'dismissed' or market_runtime.is_dismissed(db, category, item.get('listing_url'))):
         return jsonify({'ok': False, 'error': 'This recommendation was deleted. Use Bought in Earlier candidates only for a purchase already made.'}), 409
     problem = _market_action_problem(db, row, item, already_paid=already_paid or bool(ordered))
     if problem:
@@ -19346,7 +19349,7 @@ def _market_purchase_response(db, category, row, item):
             if ordered:
                 record_id = ordered['record_id']
             else:
-                if category == 'banknotes' and not already_paid and market_runtime.is_dismissed(db, category, item['listing_url']):
+                if not already_paid and market_runtime.is_dismissed(db, category, item['listing_url']):
                     db.rollback()
                     return jsonify({'ok': False, 'error': 'This recommendation was deleted. No record was created.'}), 409
                 record_id = _market_create_record(db, category, item, location, images, vendor=vendor, price=price)
@@ -19463,16 +19466,13 @@ def market_item_dismiss(category, item_id):
     _market_require_owner()
     db = get_db()
     row = _market_item_or_404(db, category, item_id)
-    if category == 'banknotes':
-        key = market_runtime.listing_key(row)
-        if not key:
-            return jsonify({'ok': False, 'error': 'This candidate has no listing to delete.'}), 409
-        market_runtime.dismiss_listing(db, category, key)
-    else:
-        key = market_runtime.listing_key(row)
-        db.execute("UPDATE market_scan_items SET status = 'dismissed' WHERE id = ? AND status != 'ordered'", [item_id])
-        db.commit()
-    return jsonify({'ok': True, 'canonical_url': key})
+    key = market_runtime.listing_key(row)
+    if not key:
+        return jsonify({'ok': False, 'error': 'This candidate has no listing to delete.'}), 409
+    source_url = row['listing_url'] or json.loads(row['payload']).get('listing_url') or ''
+    authorized = _market_unwatch_authorized(for_write=True) if market_unwatch.item_id(source_url) else False
+    key, unwatch = market_unwatch.dismiss(db, key, source_url=source_url, category=category, authorized=authorized)
+    return jsonify({'ok': True, 'canonical_url': key, 'unwatch': unwatch})
 
 
 @app.route('/banknotes/market/ebay-feed/<item_id>/dismiss', methods=['POST'])
@@ -19486,8 +19486,17 @@ def market_ebay_item_dismiss(item_id):
     # an arbitrary client URL; repeated deletes still work after evidence expires.
     if not market_runtime.is_dismissed(db, 'banknotes', url) and not market_ebay_feed.recent_card(db, url, max_age=86400):
         abort(404)
-    key = market_runtime.dismiss_listing(db, 'banknotes', url)
-    return jsonify({'ok': True, 'canonical_url': key})
+    authorized = _market_unwatch_authorized(for_write=True)
+    key, unwatch = market_unwatch.dismiss(db, url, authorized=authorized)
+    return jsonify({'ok': True, 'canonical_url': key, 'unwatch': unwatch})
+
+
+def _market_unwatch_authorized(for_write=False):
+    if for_write and not cloudflare_access.same_origin_write(
+            request.headers.get('Origin'), request.headers.get('Sec-Fetch-Site'), request.host):
+        return False
+    return market_ebay_feed.enabled() and cloudflare_access.owner_verified(
+        request.headers.get('Cf-Access-Jwt-Assertion'), OWNER_EMAIL, g.get('user_email'))
 
 
 
@@ -30031,7 +30040,7 @@ def _upload_visible_to_current_user(filename):
 # Endpoints that everyone gets to hit regardless of category access.
 # Uploaded files and generated thumbnails are NOT exempt: the route
 # handlers enforce category + row-filter access before serving bytes.
-_AUTH_EXEMPT_ENDPOINTS = {'static', 'healthz', 'ebay_public.account_deletion', 'ebay_public.privacy', 'ebay_mail.receive', 'ebay_purchase_requests', 'ebay_market_feed', 'ebay_market_feed_request'}
+_AUTH_EXEMPT_ENDPOINTS = {'static', 'healthz', 'ebay_public.account_deletion', 'ebay_public.privacy', 'ebay_mail.receive', 'ebay_purchase_requests', 'ebay_market_feed', 'ebay_market_feed_request', 'ebay_unwatch_bridge'}
 
 
 @app.before_request
@@ -42124,6 +42133,7 @@ import ebay_purchase_lookup
 ebay_purchase_lookup.register(app, get_db, require_owner)
 market_purchase_capture.register(app, get_db, require_owner)
 market_ebay_feed.register(app, get_db, on_complete=_market_capture_bridge_estimate_basis)
+market_unwatch.register(app, get_db, _market_require_owner, _market_unwatch_authorized)
 banknote_feedback.register(app, get_db, require_owner, _user_can_see_row)
 def _compare_original_listing(category, record, url, page_text, purchase_sources=()):
     import anthropic
