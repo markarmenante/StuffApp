@@ -210,7 +210,7 @@ class AdministrationTests(unittest.TestCase):
 
     def test_worldwide_discovery_survives_finite_wantlist_and_equal_priority(self):
         themes = dict(stuff._MARKET_POLICIES['banknotes'].themes(self.db))
-        self.assertTrue(any(key.startswith('wantlist-') for key in themes))
+        self.assertTrue(any(key.startswith('entity-gap-') for key in themes))
         self.assertIn('colonial-japanese', themes)
         self.assertIn('colonial-worldwide', themes)
         self.assertIn('fixed want-list', themes['colonial-worldwide'])

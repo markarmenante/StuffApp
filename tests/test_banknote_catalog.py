@@ -31,7 +31,7 @@ class CatalogueTests(unittest.TestCase):
             self.assertIn('Confederate', info['period'])
         self.db.execute("UPDATE banknotes SET banknote_id='P 999', cat_id='B777', price='$42', denomination='$5'")
         self.db.execute("INSERT OR IGNORE INTO migration_state(key, applied_at) VALUES('banknote_display_number_v27', '2026-10-16')")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v28'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v29'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -242,7 +242,7 @@ class CatalogueTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET issue_type='National', denomination='$1' WHERE id='us1918'")
         self.db.execute("UPDATE banknotes SET status='Ordered' WHERE id IN ('pa1776','ct1776')")
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v28'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v29'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -865,6 +865,86 @@ class CatalogueTests(unittest.TestCase):
                 'Timor', 'South Vietnam', 'North Vietnam', 'Austro-Hungary'):
             self.assertEqual(catalog.canonical_country(distinct), distinct)
 
+    def test_afars_spelling_aliases_share_french_filing_and_intake(self):
+        canonical = 'French Territory of the Afars and Issas'
+        for alias in (canonical,) + catalog.ALIASES[canonical]:
+            with self.subTest(alias=alias):
+                self.assertEqual(catalog.canonical_country(alias), canonical)
+                self.assertEqual(catalog.classify(alias, 1975)['key'], 'french')
+                self.assertEqual(stuff.normalize_field_value('banknotes', 'country', alias), canonical)
+                self.assertEqual(stuff._coerce_banknote_spec('country', alias), canonical)
+                self.assertEqual(stuff._country_key(alias), 'djibouti')
+                self.assertIn(alias, catalog.country_spellings(canonical))
+        for distinct in ('Djibouti', 'French Somaliland', 'Somaliland', 'Somalia'):
+            self.assertEqual(catalog.canonical_country(distinct), distinct)
+        self.assertEqual(catalog.classify('Djibouti', 1980)['key'], 'other')
+        self.assertEqual(catalog.classify('French Somaliland', 1960)['key'], 'french')
+
+    def test_afars_startup_migration_unifies_coverage_preserves_facts_and_reseeds_once(self):
+        alias = 'French Afars & Issas'
+        canonical = 'French Territory of the Afars and Issas'
+        self.add('afars-held', alias, 1975, "Institut d'Emission des Départements d'Outre-Mer")
+        self.add('afars-second', canonical, 1975, "Institut d'Emission des Départements d'Outre-Mer")
+        self.add('british', 'Canada', 1967, 'Bank of Canada')
+        self.add('independent', 'Djibouti', 1980, 'Banque Nationale de Djibouti')
+        self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
+        self.db.execute("UPDATE banknotes SET cat_id='B413', denomination='1000 Francs', "
+                        "pick_number='P-34', status='Own', grade='Choice UNC 64', "
+                        "price='$599.89', image_1='existing-front.jpg', image_2='existing-back.jpg' "
+                        "WHERE id='afars-held'")
+        self.db.execute("UPDATE banknotes SET denomination='500 Francs' WHERE id='afars-second'")
+        self.db.execute("INSERT OR IGNORE INTO migration_state(key, applied_at) "
+                        "VALUES('banknote_display_number_v28', '2026-10-25')")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v29'")
+        self.db.commit()
+        before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
+            stuff.init_db()
+        self.assertEqual(renumber.call_count, 1)
+        after = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        self.assertEqual(after['afars-held']['country'], canonical)
+        self.assertEqual(after['independent']['country'], 'Djibouti')
+        for ident, original in before.items():
+            permitted = {'banknote_id', 'country', 'updated_at'} if ident == 'afars-held' else {'banknote_id'}
+            self.assertEqual({key: value for key, value in after[ident].items() if key not in permitted},
+                             {key: value for key, value in original.items() if key not in permitted}, ident)
+        audit = self.db.execute("SELECT original_country, canonical_country FROM "
+                                "banknote_country_alias_history WHERE banknote_id='afars-held'").fetchall()
+        self.assertEqual([tuple(row) for row in audit], [(alias, canonical)])
+        ordered = self.db.execute('SELECT id, banknote_id FROM banknotes ORDER BY ' +
+                                  stuff.CATEGORY_ORDER_BY['banknotes']).fetchall()
+        self.assertEqual([row['id'] for row in ordered],
+                         ['british', 'afars-second', 'afars-held', 'independent'])
+        self.assertEqual([row['banknote_id'] for row in ordered], ['P 001', 'P 002', 'P 003', 'P 004'])
+        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v29'").fetchone())
+        with patch.object(stuff, '_renumber_banknotes') as renumber:
+            stuff.init_db()
+        renumber.assert_not_called()
+        self.assertEqual(after, {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')})
+        self.assertEqual(self.db.execute("SELECT count(*) FROM banknote_country_alias_history "
+                                         "WHERE banknote_id='afars-held'").fetchone()[0], 1)
+        client = stuff.app.test_client()
+        entity_attr = 'data-entity-key="french-french-territory-of-the-afars-and-issas"'
+        for history in ('0', '1'):
+            html = client.get('/banknotes', query_string={'filter': 'heritage_french',
+                                                         'history': history}).get_data(as_text=True)
+            self.assertIn('item-afars-held', html)
+            self.assertIn('item-afars-second', html)
+            self.assertNotIn('item-independent', html)
+            self.assertEqual(html.count(entity_attr), 1)
+            self.assertNotIn('data-entity-key="other-record-frenchafarsissas"', html)
+        for query in (alias, 'French Afars and Issas', canonical):
+            html = client.get('/banknotes', query_string={'q': query}).get_data(as_text=True)
+            self.assertIn('item-afars-held', html)
+            self.assertIn('item-afars-second', html)
+            self.assertNotIn('item-independent', html)
+        response = client.post('/banknotes/afars-held/save-field', json={'field': 'country', 'value': alias})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.db.execute("SELECT country FROM banknotes WHERE id='afars-held'").fetchone()[0], canonical)
+        seed = stuff._finalize_sweep_seed({'country': alias}, 'banknotes',
+                                         {'role': 'owner'}, self.db, '2026-10-25')
+        self.assertEqual(seed['country'], canonical)
+
     def test_pennsylvania_alias_is_specific_to_the_colony(self):
         for alias in ('United States (Colonial - Pennsylvania)',
                       'United States (Colonial – Pennsylvania)', 'Pennsylvania Colony'):
@@ -1015,7 +1095,7 @@ class CatalogueTests(unittest.TestCase):
         self.add('colonial', 'United States (Colonial - Pennsylvania)', 1772,
                  'Province of Pennsylvania')
         self.add('ny', 'United States of America', 1776, self.WATER_WORKS)
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v28'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v29'")
         self.db.commit()
         stuff.init_db()
         row = self.db.execute("SELECT country,banknote_id FROM banknotes WHERE id='french'").fetchone()

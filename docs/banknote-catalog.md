@@ -91,6 +91,14 @@ Principe → São Tomé and Príncipe; Sarawak (Malaysia) → Sarawak; and
 Viet Nam - South (South Vietnam) → South Vietnam. Timor stays Timor: a dated BNU
 issue can be classified as Portuguese Timor without rewriting an ambiguous name.
 
+French Afars & Issas and French Afars and Issas resolve to French Territory of
+the Afars and Issas, as do the equivalent longer English and French names. The
+same identity drives French filing, search and the entity pill, so a holding is
+not split into an independent issue and a missing French territory. French
+Somaliland and independent Djibouti remain separate. Migration v29 refreshes
+display positions after this correction, preserving permanent catalogue IDs
+and other note facts; the original country spelling remains in the alias audit.
+
 Create, edit, autosave, AI intake, Market Buy/Bought and Sweep import normalize
 country spellings. Startup normalizes existing aliases before older intake
 migrations, preserving the original spelling in `banknote_country_alias_history`.

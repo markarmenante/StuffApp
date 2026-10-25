@@ -583,7 +583,7 @@ with stuffapp.app.app_context():
     # migration. Existing startup canonicalization has nothing to change here.
     full_db.execute("INSERT OR IGNORE INTO migration_state (key, applied_at) "
                     "VALUES ('banknote_display_number_v26', '2026-10-15')")
-    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v28'")
+    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v29'")
     full_db.commit()
     before = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
     with patch.object(stuffapp, 'ensure_country_history'):
@@ -597,7 +597,7 @@ with stuffapp.app.app_context():
         for field, value in before[row['id']].items():
             if field != 'banknote_id':
                 assert row[field] == value, (row['id'], field, value, row[field])
-    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v28'").fetchone()
+    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v29'").fetchone()
     migrated = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
     with patch.object(stuffapp, '_renumber_banknotes') as renumber:
         stuffapp.init_db()

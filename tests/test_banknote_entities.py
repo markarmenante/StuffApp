@@ -1,5 +1,6 @@
 """Evidence-backed roster completeness and conservative historical matching."""
 import ast
+from datetime import date
 from collections import Counter
 from pathlib import Path
 import sqlite3
@@ -21,7 +22,7 @@ class BanknoteEntityTests(unittest.TestCase):
 
     def test_unique_evidence_bearing_roster_with_explicit_three_state_issuance(self):
         self.assertEqual(len(ENTITY_CATALOG), len(ENTITY_BY_KEY))
-        self.assertEqual(len(ENTITY_CATALOG), 193)
+        self.assertEqual(len(ENTITY_CATALOG), 194)
         for entity in ENTITY_CATALOG:
             with self.subTest(entity=entity['key']):
                 self.assertIn(entity['group'], filing.GROUP_BY_KEY)
@@ -111,7 +112,6 @@ class BanknoteEntityTests(unittest.TestCase):
             ('Alderney', 1810, 'british-alderney'),
             ('St. Helena', 1976, 'british-saint-helena'),
             ('Faeroe Islands', 2001, 'danish-faroe-islands'),
-            ('French Afars and Issas', 1970, 'french-french-territory-of-the-afars-and-issas'),
         ):
             with self.subTest(country=country):
                 row = dict(country=country, date_1=year)
@@ -121,6 +121,20 @@ class BanknoteEntityTests(unittest.TestCase):
                 self.assertEqual(entity_for_row(row, old_classification)['key'], key)
                 self.assertEqual(row, before)
                 self.assertEqual(filing.row_classification(row), old_classification)
+
+    def test_afars_spellings_share_one_french_entity_without_merging_djibouti(self):
+        for spelling in ('French Afars & Issas', 'French Afars and Issas',
+                         'French Territory of the Afars and the Issas'):
+            with self.subTest(spelling=spelling):
+                row = dict(country=spelling, date_1=1975, pick_number='P-34', cat_id='B413')
+                before = dict(row)
+                self.assertEqual(filing.row_classification(row)['key'], 'french')
+                entity = entity_for_row(row)
+                self.assertEqual(entity['key'], 'french-french-territory-of-the-afars-and-issas')
+                self.assertIs(entity['issued'], True)
+                self.assertEqual(row, before)
+        self.assertIsNone(self.match('Djibouti', 1980, 'Banque Nationale de Djibouti'))
+        self.assertEqual(self.key('French Somaliland', 1960), 'french-french-somaliland')
 
     def test_shared_territories_keep_occupation_and_american_exception_separate(self):
         self.assertEqual(self.key('Burma', 1937, 'Government of Burma'), 'british-burma')
@@ -163,6 +177,77 @@ class BanknoteEntityTests(unittest.TestCase):
         self.assertIs(ENTITY_BY_KEY['british-alderney']['issued'], True)
         self.assertIs(ENTITY_BY_KEY['british-gilbert-and-ellice-islands']['issued'], True)
         self.assertIsNone(self.match('Uncatalogued territory', 1920))
+
+    def test_scan_periods_have_explicit_bounds_and_independence_evidence(self):
+        for entity in ENTITY_CATALOG:
+            with self.subTest(entity=entity['key']):
+                period = entity['scan_period']
+                if period is not None:
+                    self.assertIs(entity['issued'], True)
+                    self.assertIs(type(period['year_start']), int)
+                    self.assertTrue(period['source'])
+                    self.assertTrue(period['note'])
+                    end = period['year_end']
+                    if end is None:
+                        self.assertIn(period['end_kind'], ('continuing_dependency', 'continuing_crown_dependency', 'continuing_kingdom_member'))
+                        self.assertIsNone(entity['independence_date'])
+                    else:
+                        self.assertIs(type(end), int)
+                        self.assertGreater(end, period['year_start'])
+                if entity['independence_date']:
+                    date.fromisoformat(entity['independence_date'])
+                    self.assertTrue(entity['independence_source'].startswith('https://'))
+                    self.assertEqual(period['end_date'], entity['independence_date'])
+                    self.assertLessEqual(period['year_end'], int(entity['independence_date'][:4]))
+
+    def test_independence_and_transfer_are_separate_facts(self):
+        afars = ENTITY_BY_KEY['french-french-territory-of-the-afars-and-issas']
+        self.assertEqual(afars['independence_date'], '1977-06-27')
+        self.assertEqual(afars['scan_period']['year_end'], 1977)
+        for key in ('british-british-north-borneo', 'british-sarawak'):
+            entry = ENTITY_BY_KEY[key]
+            self.assertIsNone(entry['independence_date'])
+            self.assertEqual(entry['scan_period']['end_kind'], 'transfer')
+            self.assertEqual(entry['scan_period']['end_date'], '1963-09-16')
+        self.assertEqual(ENTITY_BY_KEY['british-malaya']['independence_date'], '1957-08-31')
+        self.assertEqual(ENTITY_BY_KEY['british-brunei']['independence_date'], '1984-01-01')
+        for key in ('british-canada', 'british-australia', 'british-new-zealand'):
+            self.assertIsNone(ENTITY_BY_KEY[key]['independence_date'])
+            self.assertNotEqual(ENTITY_BY_KEY[key]['scan_period']['end_kind'], 'independence')
+
+    def test_singapore_requires_historic_issuer_and_excludes_national_successor(self):
+        self.assertEqual(self.key('Singapore', 1840, 'Union Bank of Calcutta'), 'british-singapore')
+        self.assertEqual(self.key('Singapore', 1953, 'Board of Commissioners of Currency, Malaya and British Borneo'), 'british-singapore')
+        for year, issuer in ((1965, 'Union Bank of Calcutta'),
+                             (1967, 'Board of Commissioners of Currency, Singapore'),
+                             (1959, 'Monetary Authority of Singapore'),
+                             (1943, 'Japanese Government'), (1953, 'Unidentified issuer')):
+            with self.subTest(year=year, issuer=issuer):
+                self.assertIsNone(self.match('Singapore', year, issuer))
+        self.assertEqual(ENTITY_BY_KEY['british-singapore']['independence_date'], '1965-08-09')
+
+    def test_known_legacy_and_current_dependency_scopes_remain_eligible(self):
+        for key in ('british-jersey', 'british-guernsey', 'british-alderney',
+                    'british-cayman-islands', 'british-bermuda', 'danish-faroe-islands',
+                    'dutch-curacao', 'french-french-oceania',
+                    'french-saint-pierre-and-miquelon', 'german-kamerun', 'british-kuwait',
+                    'british-british-solomon-islands', 'british-turks-and-caicos-islands',
+                    'french-french-polynesia', 'french-dahomey', 'french-french-sudan',
+                    'french-upper-senegal-and-niger', 'japanese-hong-kong',
+                    'dutch-aruba', 'dutch-netherlands-new-guinea',
+                    'belgian-belgian-congo-and-ruanda-urundi', 'belgian-ruanda-urundi'):
+            with self.subTest(key=key):
+                self.assertIsNotNone(ENTITY_BY_KEY[key]['scan_period'])
+        for key in ('british-east-caribbean-states', 'french-west-african-states',
+                    'us-united-states', 'us-confederate-states', 'other-hawaii',
+                    'portuguese-nyassa-company', 'british-pitcairn-islands',
+                    'british-south-africa'):
+            with self.subTest(key=key):
+                self.assertIsNone(ENTITY_BY_KEY[key]['scan_period'])
+        colonial = [entity for entity in ENTITY_CATALOG
+                    if entity['countries'][0] in filing.AMERICAN_COLONIES.values()]
+        self.assertEqual(len(colonial), 13)
+        self.assertTrue(all(entity['scan_period']['year_end'] == 1776 for entity in colonial))
 
     def test_sqlite_rows_and_supplied_classification_work_without_mutation(self):
         connection = sqlite3.connect(':memory:')

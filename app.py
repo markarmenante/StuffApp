@@ -16,6 +16,7 @@ import market_checkout
 import market_purchase_capture
 import banknote_catalog
 import banknote_entities
+import banknote_entity_coverage
 import banknote_printers
 import ebay_orders
 import purchase_orders
@@ -5793,10 +5794,11 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
     visible_ids = {row['id'] for row in visible_rows}
     entities = {entity['key']: dict(entity) for entity in banknote_entities.ENTITY_CATALOG}
     holdings = {}
+    regional_notes = {}
     for row in collection:
         classification = banknote_catalog.row_classification(row)
-        entity = banknote_entities.entity_for_row(row, classification)
-        if entity is None:
+        matches = banknote_entity_coverage.entities_for_row(row, classification)
+        if not matches:
             country = classification['country']
             if not country:
                 continue
@@ -5805,9 +5807,13 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
             key = classification['key'] + '-record-' + banknote_catalog.fold(country)
             entity = {'key': key, 'group': classification['key'], 'label': country,
                       'issued': None, 'note': 'Issuance history not yet established.'}
-        entities.setdefault(entity['key'], dict(entity))
-        if purchase_states.held(row['status']):
-            holdings.setdefault(entity['key'], []).append((row['id'], classification['key']))
+            matches = (entity,)
+        for entity in matches:
+            entities.setdefault(entity['key'], dict(entity))
+            if purchase_states.held(row['status']):
+                holdings.setdefault(entity['key'], []).append((row['id'], classification['key']))
+                if entity.get('coverage_kind') == 'regional' and entity.get('coverage_note'):
+                    regional_notes.setdefault(entity['key'], set()).add(entity['coverage_note'])
 
     groups = {}
     for entity in entities.values():
@@ -5816,6 +5822,8 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
         if held:
             coverage = 'held'
             status = f"In collection — {len(held)} {'note' if len(held) == 1 else 'notes'}; includes owned and pending purchases."
+            if entity['key'] in regional_notes:
+                status += ' ' + ' '.join(sorted(regional_notes[entity['key']]))
             visible = next((ident for ident, _group in held if ident in visible_ids), None)
             if visible is not None:
                 href = '#item-' + quote(visible, safe='')
@@ -6832,9 +6840,10 @@ def init_db():
     # v27: symbol/written denominations share a currency family and
     # compare numeric base-unit amounts within the existing era/year.
     # v28: Confederate issues join the US collection family, before Philippines.
+    # v29: Afars and Issas spelling aliases join their existing French territory.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v28',),
+        ('banknote_display_number_v29',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6842,7 +6851,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v28', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v29', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -15671,14 +15680,9 @@ def _market_paid_text(price):
 # their candidates are merged, so a scan looks in every corner of the
 # collection's interests instead of one broad sweep.
 # ---------------------------------------------------------------------------
-# Colonial want-list (Mark, 2026-09-12): the banknote-issuing colonies and
-# dependencies the collection does not hold, from a review of the 309
-# notes on that date. Each entry names the issuer and period the scan
-# should hunt, and `held` — lowercase substrings of the `country` field
-# that mean the gap is filled (with `before`, only a note dated up to
-# that year counts: a 1958 Cuba or 1993 São Tomé note is post-colonial).
-# The scan builds three TOP-PRIORITY themes from whatever is still open
-# (_banknote_wantlist_themes), so the list retires itself as notes land.
+# Legacy colonial research list (2026-09-12), retained as historical source
+# material. Active missing-entity priorities below use the shared pill roster,
+# reviewed scan periods and current held coverage rather than substring guesses.
 # ---------------------------------------------------------------------------
 BANKNOTE_COLONIAL_WANTLIST = [
     # (name, empire group, issuer, period, held substrings, before-year)
@@ -15720,66 +15724,74 @@ BANKNOTE_COLONIAL_WANTLIST = [
 ]
 
 _WANTLIST_GROUP_TITLES = {
-    'british': 'British Empire',
-    'french': 'French, Portuguese and Dutch empires',
-    'other': 'Spanish, Italian, German, Danish, Japanese and American',
+    'british': 'British territories and colonial issues',
+    'french': 'French, Portuguese and Dutch territories',
+    'other': 'Other historical administrations',
 }
 
 
+def _banknote_wantlist_catalog():
+    """Documented issuers with reviewed periods eligible for gap searches."""
+    return tuple(entity for entity in banknote_entities.ENTITY_CATALOG
+                 if entity['issued'] is True and isinstance(entity.get('scan_period'), dict))
+
+
 def _banknote_wantlist_open(db):
-    """The want-list entries the collection still lacks: an entry is
-    held when an Own/Ordered banknote's country carries one of its
-    substrings (and, where `before` is set, is dated up to that year)."""
-    try:
-        rows = db.execute(
-            "SELECT country, date_1 FROM banknotes "
-            "WHERE (status IS NULL OR LOWER(TRIM(status)) IN ('own', 'owned', 'ordered', 'shipped', 'delivered', '')) "
-            "AND country IS NOT NULL AND TRIM(country) != ''").fetchall()
-    except sqlite3.Error:
-        rows = []
-    held = []
-    for r in rows:
-        c = (r['country'] or '').strip().lower()
-        try:
-            y = int(r['date_1']) if r['date_1'] not in (None, '') else None
-        except (TypeError, ValueError):
-            y = None
-        held.append((c, y))
-    open_entries = []
-    for entry in BANKNOTE_COLONIAL_WANTLIST:
-        name, group, issuer, period, subs, before = entry
-        got = False
-        for c, y in held:
-            matched = any(sub in c for sub in subs)
-            if name == 'Jersey' and c.strip() == 'jersey':
-                matched = True
-            if matched and (before is None or (y is not None and y <= before)):
-                got = True
-                break
-        if not got:
-            open_entries.append(entry)
-    return open_entries
+    """Missing eligible entities, using exactly the pill's held coverage rules.
+
+    Market Scan is owner-only and its worker reads that instance's collection
+    without request-specific search/status/location filters. A failed read must
+    fail the scan, never masquerade as an empty collection.
+    """
+    held_keys = set()
+    for row in db.execute('SELECT * FROM banknotes').fetchall():
+        if purchase_states.held(row['status']):
+            held_keys.update(entity['key'] for entity in banknote_entity_coverage.entities_for_row(row))
+    return [entity for entity in _banknote_wantlist_catalog() if entity['key'] not in held_keys]
 
 
 def _banknote_wantlist_themes(db):
-    """Up to three TOP-PRIORITY scan themes built from the open want-list
-    entries, grouped by empire; a group with nothing open yields none."""
-    open_entries = _banknote_wantlist_open(db)
+    """At most three priority searches from the same missing entities as pills."""
+    families = {'british': [], 'french': [], 'other': []}
+    for entity in _banknote_wantlist_open(db):
+        family = ('british' if entity['group'] == 'british' else
+                  'french' if entity['group'] in {'french', 'portuguese', 'dutch'} else 'other')
+        period = entity['scan_period']
+        if period['year_end'] is None:
+            scope = f"from {period['year_start']}; continuing dependency, no independence cutoff"
+        else:
+            scope = f"{period['year_start']}–{period['year_end'] - 1} only"
+            if entity.get('independence_date'):
+                scope += f"; independence {entity['independence_date']}"
+            else:
+                scope += f"; ends at {period['end_kind']} (not asserted to be independence)"
+        group_title = banknote_catalog.GROUP_BY_KEY[entity['group']]['title']
+        source_link = re.search(r'https?://[^\s;]+', str(period['source']))
+        reference = source_link.group(0) if source_link else entity['sources'][0]
+        note = period.get('note') or entity.get('note') or ''
+        families[family].append(f"- {entity['label']} [{entity['key']}] — {group_title}; "
+                                f"eligible issue years {scope}. {note} Reference: {reference}")
     themes = []
-    for group in ('british', 'french', 'other'):
-        entries = [e for e in open_entries if e[1] == group]
-        if not entries:
+    for family, lines in families.items():
+        if not lines:
             continue
-        lines = '; '.join(f"{name} — {issuer}, {period}" for name, _g, issuer, period, _s, _b in entries)
         themes.append((
-            f'wantlist-{group}',
-            f"TOP PRIORITY — MARK'S COLONIAL WANT-LIST ({_WANTLIST_GROUP_TITLES[group]}): "
-            f"these are the banknote-issuing colonies and dependencies the collection does NOT "
-            f"hold. Find live listings of a note from each issuer, in its colonial period: {lines}. "
-            f"One or two of the best-graded, fairly priced examples per issuer; a scarce issuer "
-            f"(Zanzibar, Kiautschou, French India, the Somaliland rupia) may be shown at a lower grade "
-            f"where the bar allows, with `rarity` set. Put the issuer's name from this list in `fills` "
-            f"and set `empire`."))
+            f'entity-gap-{family}',
+            f"TOP PRIORITY — MISSING ENTITIES, BEFORE INDEPENDENCE "
+            f"({_WANTLIST_GROUP_TITLES[family]}): these documented issuing entities are "
+            "not covered by owned or pending purchases in the collection. Find live listings "
+            "only for the named entity and eligible issue period below. Use the actual issue "
+            "date, issuer and catalogue identity, never a later independent/successor issue "
+            "or an old printed date reused on a later release. The stated upper year is a hard "
+            "limit even if a different administration is claimed. Ongoing dependencies have "
+            "no invented independence date. Unknown issuance and nonissuing entities are omitted. "
+            "Consult the references and verify this exact offered note. Return one or two "
+            "well-graded, fairly priced examples per entity, within the usual grade and rarity "
+            "rules. Copy its bracketed key exactly into `entity_key`; use only keys in this "
+            "theme. Put the exact entity name in `fills`, set `empire` accurately, and supply "
+            "sourced actual issue-year evidence for undated, overprinted or transitional notes. "
+            "An entity-level gap is not proof that an offered Pick/catalogue reference is new; "
+            "retain the usual exact-reference collection check.\n" + '\n'.join(lines)))
     return themes
 
 
@@ -16206,6 +16218,7 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '{"items": [{"title": str, "country": str, "denomination": str, '
             '"series": str|null, "year": int|null, "pick_number": str|null, '
             '"other_catalog": str|null (other stated catalogue references), '
+            '"entity_key": str|null (exact bracketed entity key for missing-entity themes; null otherwise), '
             '"issuer": str|null, "issue_year_start": int|null, "issue_year_end": int|null, "issue_date_source": str|null, '
             '"administration": {"kind": "colony"|"protectorate"|"mandate"|"trust territory"|"dependency"|"condominium"|"military occupation"|"leased territory"|"client state", '
             '"name": str (issuing administration), "territory": str (same territory as country), '
@@ -17528,6 +17541,7 @@ def _market_normalize_item(db, category, raw):
         'fair': str(raw.get('fair') or '').strip()[:300],
         'theme': str(raw.get('theme') or '')[:40],
         'empire': str(raw.get('empire') or '').strip()[:80],
+        'entity_key': str(raw.get('entity_key') or '').strip()[:120],
         'administration': market_colonial.normalize_administration(raw.get('administration')),
         'issuer': str(raw.get('issuer') or '').strip()[:200],
         'issue_year_start': raw.get('issue_year_start'),
@@ -18434,8 +18448,8 @@ class _BanknoteMarketPolicy(_MarketPolicy):
     def themes(self, db):
         priority = _banknote_wantlist_themes(db) + _banknote_us_wantlist_themes(db)
         themes = priority + [_banknote_obsolete_theme(db)] + super().themes(db)
-        # The historical 35-entry want-list supplies priorities, never the
-        # boundary of discovery. Broad themes must still find unlisted issuers.
+        # Missing documented entities supply priorities, never the boundary
+        # of discovery. Existing broad and US type searches remain separate.
         return themes
 
     def prepare(self, db, context):
@@ -18842,7 +18856,7 @@ def market_view(category):
                            market_earlier=earlier,
                            market_wantlist=(
                                {'open': len(_banknote_wantlist_open(db)),
-                                'total': len(BANKNOTE_COLONIAL_WANTLIST),
+                                'total': len(_banknote_wantlist_catalog()),
                                 'us_open': len(_banknote_us_wantlist_open(db)),
                                 'us_total': len(BANKNOTE_US_LARGE_WANTLIST)}
                                if category == 'banknotes' else None),

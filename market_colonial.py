@@ -7,6 +7,7 @@ evidence supports additional territories and periods. See docs/market-validation
 import re
 from urllib.parse import urlsplit
 import banknote_catalog as catalog
+import banknote_entities
 
 # Reuse documented sovereign-period metadata, not collection-family membership.
 PERIODS = {name:(start,end) for name,(_,start,end,_) in catalog.PERIODS.items()}
@@ -145,19 +146,86 @@ def victory_label(item):
     return ''
 
 
+def _entity_gap_problem(item):
+    """Known entity bounds cannot be widened by model-supplied administration.
+
+    This applies only to missing-entity themes. Existing domestic-US searches,
+    broad discovery and the separately requested Philippine Victory exception
+    keep their established rules.
+    """
+    if not str(item.get('theme') or '').startswith('entity-gap-'):
+        return ''
+    evidence = ' '.join(str(item.get(key) or '') for key in ('title', 'issuer', 'series'))
+    values = [item.get('issue_year_start'), item.get('issue_year_end')]
+    if any(value not in (None, '') for value in values):
+        years = [_year(value) for value in values]
+        if None in years or years[0] > years[1]:
+            return 'Missing-entity offer needs a complete actual issue-year range'
+        if not _source(item.get('issue_date_source')):
+            return 'Missing-entity issue-year range has no corroborating source'
+    else:
+        if re.search(r'\bN\.?D\.?\b|undated|reissue|overprint', evidence, re.I):
+            return 'Missing-entity undated or reissued note needs actual issue-year evidence'
+        year = _year(item.get('date_1'))
+        if year is None:
+            return 'Missing-entity issue date is not established'
+        years = [year]
+    # Actual issue evidence takes precedence over a potentially older printed
+    # date when identifying the historical entity, then bounds the whole range.
+    entity = banknote_entities.ENTITY_BY_KEY.get(str(item.get('entity_key') or ''))
+    primary = banknote_entities.entity_for_row(dict(item, date_1=years[0]))
+    period = entity.get('scan_period') if entity else None
+    if (not entity or not primary or primary['key'] != entity['key'] or
+            entity['issued'] is not True or not isinstance(period, dict)):
+        return 'Missing-entity offer does not match its requested historical entity'
+    family = ('british' if entity['group'] == 'british' else
+              'french' if entity['group'] in {'french', 'portuguese', 'dutch'} else 'other')
+    if item.get('theme') != 'entity-gap-' + family:
+        return 'Missing-entity offer does not belong to this requested theme'
+    # A shared Board issue cannot become a member's separate territorial issue
+    # merely because a model supplied that member as country/entity_key.
+    members = {'british-british-north-borneo', 'british-sarawak', 'british-brunei',
+               'british-malaya', 'british-singapore'}
+    issuer = catalog.fold(re.sub(r'^the\s+', '', str(item.get('issuer') or '').strip(),
+                                 flags=re.I).replace('&', ' and '))
+    regional_board = ('malayaandbritishborneo' in issuer or
+                      (issuer in {'boardofcommissionersofcurrency', 'commissionersofcurrency'}
+                       and 1953 <= min(years) <= max(years) < 1967))
+    if entity['key'] in members and regional_board:
+        return 'Shared Malaya and British Borneo Board issue is not a separate territorial issue'
+    start, end = period['year_start'], period['year_end']
+    independence = entity.get('independence_date')
+    if independence:
+        independence_year = int(independence[:4])
+        end = min(end, independence_year) if end is not None else independence_year
+    if min(years) < start or (end is not None and max(years) >= end):
+        return 'Missing-entity issue falls outside its reviewed pre-independence period'
+    administration = normalize_administration(item.get('administration'))
+    admin_end = _year(administration.get('year_end'))
+    if end is not None and admin_end is not None and admin_end > end:
+        return 'Missing-entity administration exceeds the reviewed historical cutoff'
+    stated = [int(year) for year in re.findall(r'\b(?:1[5-9]\d{2}|20\d{2})\b', evidence)]
+    if end is not None and stated and max(stated) >= end:
+        return 'Missing-entity title or series identifies a later issue'
+    return ''
+
+
 def problem(item):
     """Internal exclusion reason, or empty for a supported eligible issue.
 
     Separate domestic-US/non-colonial themes remain eligible. Additional
     administrations need issue-specific source attribution, not a country guess.
     """
+    gap_problem = _entity_gap_problem(item)
+    if gap_problem:
+        return gap_problem
     country = catalog.canonical_country(str(item.get('country') or ''))
     theme = str(item.get('theme') or '')
     if country == 'United States of America' and not item.get('administration'):
-        return 'Domestic US issue is not colonial' if theme.startswith(('colonial-', 'wantlist-british', 'wantlist-french', 'wantlist-other')) else ''
+        return 'Domestic US issue is not colonial' if theme.startswith(('colonial-', 'wantlist-british', 'wantlist-french', 'wantlist-other', 'entity-gap-')) else ''
     evidence = ' '.join(str(item.get(k) or '') for k in ('title','issuer','series'))
     special = bool(SPECIAL_ISSUE.search(evidence))
-    colonial = bool(item.get('empire') or item.get('administration')) or special or theme.startswith(('colonial-', 'wantlist-')) or theme == 'analysis-gaps'
+    colonial = bool(item.get('empire') or item.get('administration')) or special or theme.startswith(('colonial-', 'wantlist-', 'entity-gap-')) or theme == 'analysis-gaps'
     if not colonial:
         return ''
     if victory_label(item):

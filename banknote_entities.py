@@ -21,6 +21,9 @@ DANISH_HISTORY = 'https://www.nationalbanken.dk/media/14xdu45n/nationalbanken-18
 BSP = 'https://www.bsp.gov.ph/Pages/CoinsAndNotes/HistoryOfPhilippineMoney/HistoryOfPhilippineMoney.aspx'
 KENYA = 'https://www.centralbank.go.ke/currency-history/'
 VANUATU = 'https://www.rbv.gov.vu/index.php/en/about/our-history'
+SINGAPORE = 'https://www.mas.gov.sg/currency/history-of-currency-in-singapore'
+MALAYSIA_HISTORY = 'https://www.malaysia.gov.my/en/government/learn-about-malaysia/malaysian-history'
+UK_TERRITORIES = 'https://commonslibrary.parliament.uk/research-briefings/cbp-9706/'
 
 
 def _slug(value):
@@ -57,6 +60,8 @@ _entries += _many('british', (
     'Zanzibar', 'Gilbert and Ellice Islands',
 ))
 _entries += [
+    _entity('british', 'Singapore', sources=(SINGAPORE,),
+            note='Colonial branch-bank and shared currency-board issues; independent Singapore national issues from 1967 are separate.'),
     _entity('british', 'Alderney', sources=('https://en.numista.com/234220',),
             note='Private circulating one-pound issue of 1810, Pick S181; current coin-only government issues do not erase this historical note.'),
     _entity('british', 'Pitcairn Islands', aliases=('Pitcairn',), issued=False,
@@ -182,6 +187,214 @@ for _entry in _entries:
     if _entry['key'] in _DIRECT_SOURCES:
         _entry['sources'] = _DIRECT_SOURCES[_entry['key']]
 
+# Gap-search scope is distinct from broad collection-family membership. These
+# conservative YEAR bounds reuse the reviewed filing/market policy; the end is
+# exclusive because a printed year cannot establish which side of a transition
+# date a note was actually issued. None means unresolved/excluded, not open-ended.
+# Do not import market_colonial: its offer guard consumes this metadata.
+def _scan_period(start, end, kind, source, note='', end_date=None):
+    return dict(year_start=start, year_end=end, end_kind=kind, source=source,
+                note=note or 'Reviewed administration scope; transition year excluded.',
+                end_date=end_date)
+
+
+for _entry in _entries:
+    _entry.update(independence_date=None, independence_source=None, scan_period=None)
+    for _name in _entry['countries']:
+        _period = catalog.PERIODS.get(_name)
+        if _entry['issued'] is True and _period and _period[0] == _entry['group']:
+            _entry['scan_period'] = _scan_period(
+                _period[1], _period[2], 'administration_end',
+                'banknote_catalog.PERIODS; docs/banknote-catalog.md')
+            break
+
+# Already reviewed additional market periods. Explicit entity keys prevent a
+# shared modern country name from lending its dates to another administration.
+_REVIEWED_SCAN_PERIODS = {
+    'british-canada': (1763, 1867, 'confederation'),
+    'british-australia': (1788, 1901, 'federation'),
+    'british-new-zealand': (1840, 1907, 'dominion'),
+    'british-south-africa': (1806, 1910, 'union'),
+    'us-philippines': (1565, 1946, 'independence'),
+    'portuguese-portuguese-guinea': (1879, 1973, 'independence'),
+    'portuguese-portuguese-timor': (1702, 1975, 'administration_end'),
+    'portuguese-portuguese-india': (1510, 1961, 'transfer'),
+    'french-french-india': (1674, 1954, 'transfer'),
+    'french-french-indo-china': (1887, 1954, 'administration_end'),
+    'french-french-cochin-china': (1862, 1949, 'administration_end'),
+    'belgian-belgian-congo': (1908, 1960, 'independence'),
+    'dutch-netherlands-indies': (1800, 1945, 'independence'),
+    'british-british-guiana': (1831, 1966, 'independence'),
+    'british-british-honduras': (1862, 1981, 'independence'),
+    'british-straits-settlements': (1826, 1942, 'occupation'),
+    'british-sarawak': (1888, 1963, 'transfer'),
+    'british-british-north-borneo': (1881, 1963, 'transfer'),
+    'british-rhodesia-and-nyasaland': (1953, 1963, 'dissolution'),
+    'british-southern-rhodesia': (1923, 1965, 'administration_end'),
+    'british-rhodesia': (1923, 1965, 'administration_end'),
+    'british-british-east-africa': (1895, 1961, 'administration_end'),
+    'british-british-west-africa': (1912, 1957, 'administration_end'),
+    'british-british-caribbean-territories': (1950, 1962, 'administration_end'),
+    'british-malaya-and-british-borneo': (1952, 1957, 'first_constituent_independence'),
+    'french-french-west-africa': (1895, 1958, 'dissolution'),
+    'french-french-equatorial-africa': (1910, 1958, 'dissolution'),
+    'french-french-somaliland': (1896, 1967, 'renaming'),
+    'french-french-territory-of-the-afars-and-issas': (1967, 1977, 'independence'),
+    'joint-new-hebrides': (1906, 1980, 'independence'),
+    'british-palestine': (1920, 1948, 'mandate_end'),
+    'french-syria': (1920, 1943, 'independence'),
+    'british-trinidad-and-tobago': (1899, 1962, 'independence'),
+    'british-western-samoa': (1920, 1962, 'independence'),
+    'british-bahrain': (1861, 1971, 'independence'),
+    'british-qatar-and-dubai': (1916, 1971, 'administration_end'),
+    'dutch-suriname': (1667, 1975, 'independence'),
+    'danish-danish-west-indies': (1754, 1917, 'transfer'),
+    'japanese-taiwan': (1899, 1945, 'administration_end'),
+    'japanese-manchukuo': (1932, 1945, 'administration_end'),
+    'italian-italian-east-africa': (1936, 1941, 'occupation_end'),
+    'italian-italian-somaliland': (1889, 1941, 'occupation'),
+    'german-german-east-africa': (1885, 1918, 'administration_end'),
+    'german-german-south-west-africa': (1884, 1915, 'administration_end'),
+    'german-kiautschou': (1898, 1914, 'occupation'),
+    'british-zanzibar': (1890, 1963, 'independence'),
+    # The entity matcher already bounds these documented historical issues.
+    'british-newfoundland': (1850, 1949, 'confederation'),
+    'british-grenada': (1837, 1974, 'independence'),
+    'french-senegal': (1895, 1960, 'independence'),
+    'french-ivory-coast': (1893, 1960, 'independence'),
+    'danish-iceland': (1885, 1918, 'sovereignty'),
+    'british-kuwait': (1899, 1961, 'independence'),
+    'british-south-arabia': (1965, 1967, 'independence'),
+    'german-kamerun': (1884, 1916, 'occupation'),
+    'dutch-curacao': (1828, 1954, 'autonomy'),
+}
+for _entry in _entries:
+    if _entry['key'] in _REVIEWED_SCAN_PERIODS and _entry['issued'] is True:
+        _entry['scan_period'] = _scan_period(
+            *_REVIEWED_SCAN_PERIODS[_entry['key']],
+            'market_colonial.PERIODS / entity date rules; docs/market-validation.md')
+
+# Exact independence dates are only populated from identified primary sources.
+# Confederation, a name change, a transfer and the end of occupation are not
+# silently called independence. Dates do not broaden the conservative year gate.
+_INDEPENDENCE = {
+    'british-india': ('1947-08-15', 'https://history.state.gov/countries/india'),
+    'british-bahamas': ('1973-07-10', 'https://history.state.gov/countries/bahamas'),
+    'british-barbados': ('1966-11-30', 'https://history.state.gov/countries/barbados'),
+    'british-belize': ('1981-09-21', 'https://history.state.gov/countries/belize'),
+    'british-british-honduras': ('1981-09-21', 'https://history.state.gov/countries/belize'),
+    'british-brunei': ('1984-01-01', 'https://history.state.gov/countries/brunei'),
+    'british-singapore': ('1965-08-09', 'https://www.mfa.gov.sg/about-mfa/histories-and-milestones/'),
+    'british-malaya': ('1957-08-31', MALAYSIA_HISTORY),
+    'french-dahomey': ('1960-08-01', 'https://www.gouv.bj/pages/histoire/'),
+    'french-french-sudan': ('1960-09-22', 'https://independance.africamuseum.be/sites/independance.africamuseum.be/files/files/booklet_independance_en.pdf'),
+    'us-philippines': ('1946-07-04', 'https://history.state.gov/countries/philippines'),
+    'french-french-territory-of-the-afars-and-issas': (
+        '1977-06-27', 'https://diplomatie.gouv.dj/djibouti-historique'),
+}
+_NEW_SCAN_PERIODS = {
+    'dutch-aruba': _scan_period(1986, None, 'continuing_kingdom_member',
+        'https://www.cbaruba.org/the-aruban-florin/',
+        'Aruban florin from 1986 Status Aparte; autonomous country within the Kingdom, not an independence date.'),
+    'dutch-netherlands-new-guinea': _scan_period(1950, 1962, 'transfer',
+        'https://www.nationaalarchief.nl/onderzoeken/archief/2.10.60/download/pdf',
+        'Distinct Dutch administration 1950–1962; UNTEA transfer on 1 October 1962: https://peacekeeping.un.org/sites/default/files/past/unsfbackgr.html',
+        '1962-10-01'),
+    'belgian-belgian-congo-and-ruanda-urundi': _scan_period(1952, 1960, 'administration_end',
+        'https://www.bcc.cd/la-banque/histoire/historique-de-la-banque-centrale',
+        'BCCBRU operational from October 1952 and liquidated in 1960; shared entity does not extend beyond Congolese independence.'),
+    'belgian-ruanda-urundi': _scan_period(1960, 1962, 'administration_end',
+        'https://archive.brb.bi/en/content/historic',
+        'BERB common bank from August 1960; colonial scope ends before 1962 independence: https://www.fdnb.gov.bi/fr/le-1er-juillet-de-chaque-annee-date-memorable-pour-tout-burundais-ou-quil-soit'),
+    'british-british-solomon-islands': _scan_period(1916, 1934, 'documented_issue',
+        'https://banknote.news/files/tag-british-solomon-islands.php',
+        'The Banknote Book publisher documents Government issues from 1916 through 1933; scope is the verified issue span, not an independence claim.'),
+    'british-turks-and-caicos-islands': _scan_period(1928, 1929, 'documented_issue',
+        'https://www.greysheet.com/prices/detail/10th-january-1928-sig-3-southby-frith-prefix-a-1-s-n-a-1-07105-07664/gsid/141809/60/0',
+        'The documented 1928 circulating government issue is eligible; the territory remains dependent. Earlier issue bounds are not asserted.'),
+    'french-french-polynesia': _scan_period(1957, None, 'continuing_dependency',
+        'https://www.ispf.pf/publication/diagnostic-territorial-2021',
+        'French Polynesia name and status from 1957; continuing French collectivity. French Oceania predecessor remains separately identified.'),
+    'french-french-sudan': _scan_period(1895, 1960, 'independence',
+        'app.COUNTRY_COLONIAL[mali]; https://independance.africamuseum.be/sites/independance.africamuseum.be/files/files/booklet_independance_en.pdf',
+        'Reviewed French Sudan colonial scope; independent Mali and its national issues are excluded.'),
+    'french-dahomey': _scan_period(1894, 1960, 'independence',
+        'https://www.gouv.bj/pages/histoire/',
+        'Government history dates the colony to 1894 and international sovereignty to 1 August 1960.'),
+    'french-upper-senegal-and-niger': _scan_period(1904, 1920, 'renaming',
+        'https://independance.africamuseum.be/sites/independance.africamuseum.be/files/files/booklet_independance_en.pdf',
+        'Museum history dates Upper Senegal and Niger to 1904 and the French Sudan renaming to 1920; transition year excluded.'),
+    'japanese-hong-kong': _scan_period(1941, 1945, 'occupation_end',
+        'https://www.grs.gov.hk/ws/online/80VWR/en/home/index.html',
+        'Hong Kong Government Records Service documents the 1941–1945 Japanese occupation and forced use of military notes.'),
+    'british-singapore': _scan_period(1840, 1965, 'independence', SINGAPORE,
+        'MAS records Singapore branch-bank notes from 1840; independence was 9 August 1965.'),
+    'british-brunei': _scan_period(1967, 1984, 'independence',
+        'https://cms.bdcb.gov.bn/storage/uploads/publications/17089426511258820.pdf',
+        'Brunei Currency Board notes from 1967; independence was 1 January 1984.'),
+    'british-bermuda': _scan_period(1914, None, 'continuing_dependency',
+        'https://nmb.bm/exhibit/banknotes-of-bermuda/',
+        'First Bermuda banknotes in 1914; continuing overseas territory, with no independence date. Status: ' + UK_TERRITORIES),
+    'british-cayman-islands': _scan_period(1972, None, 'continuing_dependency',
+        'https://www.cima.ky/currency',
+        'Currency Board issue from 1 May 1972; continuing overseas territory. Status: ' + UK_TERRITORIES),
+    'british-jersey': _scan_period(1941, None, 'continuing_crown_dependency',
+        'https://www.gov.je/TaxesMoney/JerseyCurrency/Pages/CurrencyMakesMoney.aspx',
+        'States notes from 1941, resumed in 1963; Crown Dependency, not an independent successor or a colony.'),
+    'british-guernsey': _scan_period(1816, None, 'continuing_crown_dependency',
+        'https://www.greysheet.com/prices/sp/guernsey-states-of-guernsey?nodeid=10705',
+        'Documented States notes from 1816; Crown Dependency with no independence date. Status: ' + UK_TERRITORIES),
+    'british-alderney': _scan_period(1810, 1811, 'documented_issue',
+        'https://en.numista.com/234220',
+        'Only the documented 1810 private circulating issue is presently scoped; no invented independence date.'),
+    'british-gibraltar': _scan_period(1704, None, 'continuing_dependency',
+        'app.COUNTRY_COLONIAL[gibraltar]; ' + UK_TERRITORIES,
+        'Existing reviewed British administration from 1704; continuing overseas territory.'),
+    'british-saint-helena': _scan_period(1659, None, 'continuing_dependency',
+        'app.COUNTRY_COLONIAL[saint-helena]; ' + UK_TERRITORIES,
+        'Existing reviewed English administration from 1659; continuing overseas territory.'),
+    'danish-faroe-islands': _scan_period(1940, None, 'continuing_dependency', FAROE,
+        'Existing app.COUNTRY_ERAS starts the distinct wartime currency in 1940; continuing self-governing part of Denmark.'),
+    'french-saint-pierre-and-miquelon': _scan_period(1950, None, 'continuing_dependency',
+        'app.BANKNOTE_COLONIAL_WANTLIST; https://www.iedom.fr/saint-pierre-et-miquelon/',
+        'Existing reviewed 1950 circulating overprints; continuing French overseas collectivity, no independence date.'),
+    'french-french-oceania': _scan_period(1905, None, 'continuing_dependency',
+        'app.BANKNOTE_COLONIAL_WANTLIST; https://www.ieom.fr/polynesie-francaise/',
+        'Existing reviewed Papeete issues from 1905; renamed French Polynesia remains a French collectivity, with no independence date.'),
+}
+for _entry in _entries:
+    if _entry['key'] in _NEW_SCAN_PERIODS:
+        _entry['scan_period'] = _NEW_SCAN_PERIODS[_entry['key']]
+    if _entry['key'] in _INDEPENDENCE:
+        _entry['independence_date'], _entry['independence_source'] = _INDEPENDENCE[_entry['key']]
+        if _entry['scan_period']:
+            _entry['scan_period']['end_kind'] = 'independence'
+            _entry['scan_period']['end_date'] = _entry['independence_date']
+    if _entry['key'] in {'british-british-north-borneo', 'british-sarawak'}:
+        _entry['scan_period'].update(end_date='1963-09-16', source=MALAYSIA_HISTORY,
+            note='Joined Malaysia on 16 September 1963; recorded as a transfer/formation cutoff, not an independence date.')
+    if _entry['key'] == 'danish-iceland':
+        _entry['scan_period']['note'] = ('Existing app.COUNTRY_COLONIAL distinguishes sovereignty in union in 1918 '
+            'from the republic in 1944; the earlier sovereignty cutoff governs pre-independence gaps.')
+    if _entry['key'] == 'german-kamerun':
+        _entry['scan_period']['source'] = 'https://www.bundesarchiv.de/en/research-our-records/research-by-topic/sources-on-colonial-history/geographical-access-to-colonial-history-holdings/'
+    if _entry['key'] == 'dutch-curacao':
+        _entry['scan_period']['source'] = 'https://centralbank.cw/about-the-bank/history; app._COLONY_END'
+    if _entry['key'] == 'british-south-arabia':
+        _entry['scan_period']['source'] = 'https://en.numista.com/catalogue/issuing_entity.php?id=5825; app._COLONY_END'
+    if _entry['key'] == 'british-kuwait':
+        _entry['scan_period'].update(source='app.COUNTRY_COLONIAL[kuwait]',
+            note='Protectorate ended in 1961. A year-only 1961 first issue cannot establish pre-independence timing and is conservatively excluded.')
+    if _entry['countries'][0] in catalog.AMERICAN_COLONIES.values():
+        _entry['independence_date'] = '1776-07-04'
+        _entry['independence_source'] = 'https://www.archives.gov/milestone-documents/declaration-of-independence'
+        _entry['scan_period'] = _scan_period(1690, 1776, 'independence', US_COLONIES,
+            'American colonial paper-money era begins in 1690; this is not an asserted founding date for each colony.', '1776-07-04')
+    if _entry['key'] == 'british-south-africa':
+        # Earlier South African names can describe independent Boer republics.
+        # Broad collection-family membership is insufficient colonial identity.
+        _entry['scan_period'] = None
+
 ENTITY_CATALOG = tuple(_entries)
 ENTITY_BY_KEY = {entity['key']: entity for entity in ENTITY_CATALOG}
 
@@ -227,6 +440,7 @@ _EXPLICIT_COUNTRIES = {
 # Additional names shared by historical and independent issues. End years are
 # excluded where a year alone cannot resolve the actual transition date.
 _DATED_COUNTRIES = {
+    'Singapore': ('british-singapore', 1840, 1965),
     'Palestine': ('british-palestine', 1927, 1948),
     'Newfoundland': ('british-newfoundland', 1850, 1949),
     'Bahrain': ('british-bahrain', 1965, 1971),
@@ -307,6 +521,11 @@ def entity_for_row(row, classification=None):
         # The first Currency Board issue preceded independence in 1961.
         # Require that authority instead of guessing from the year alone.
         if token == 'kuwait' and 'kuwaitcurrencyboard' not in evidence:
+            return None
+        if token == 'singapore' and not any(term in evidence for term in (
+                'unionbankofcalcutta', 'boardofcommissionersofcurrencymalaya',
+                'boardofcommissionersofcurrencythestraitssettlements',
+                'boardofcommissionersofcurrencystraitssettlements')):
             return None
         if any(term in evidence for term in ('republic', 'banquecentraledesyrie')):
             return None

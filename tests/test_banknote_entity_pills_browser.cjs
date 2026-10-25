@@ -18,7 +18,7 @@ const os = require('node:os');
   const repo = path.resolve(__dirname, '..');
   const artifacts = process.env.ENTITY_PILLS_TEST_ARTIFACTS || mkdtempSync(path.join(os.tmpdir(), 'banknote-entity-pills-'));
   mkdirSync(artifacts, {recursive:true});
-  const sourceFiles = ['app.py','banknote_entities.py','templates/list.html','static/css/style.css','static/js/banknote-history-position.js'];
+  const sourceFiles = ['app.py','banknote_catalog.py','banknote_entities.py','banknote_entity_coverage.py','templates/list.html','static/css/style.css','static/js/banknote-history-position.js'];
   const hashes = () => Object.fromEntries(sourceFiles.map(file => [file, createHash('sha256').update(readFileSync(path.join(repo,file))).digest('hex')]));
   const sourceBefore = hashes();
   const render = String.raw`
@@ -46,18 +46,24 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-entity-browser-db-') as tempor
    ('cuba-held','Cuba',1896,'Banco Español de la Isla de Cuba','Own','Historic Cuba fixture'),
    ('cuba-modern','Cuba',1960,'Banco Nacional de Cuba','Own','Independent Cuba fixture'),
    ('canada-held','Canada',1967,'Bank of Canada','Own','VisibleOnly companion fixture'),
+   ('afars-held','French Afars & Issas',1975,'Trésor Public (Territoire Français des Afars et des Issas)','Ordered','Literal screenshot country fixture'),
+   ('djibouti-modern','Djibouti',2000,'Banque Centrale de Djibouti','Own','Independent successor fixture'),
+   ('mbb-delivered','Malaya and British Borneo',1953,'Board of Commissioners of Currency, Malaya and British Borneo','Delivered','North Borneo regional board fixture'),
+   ('mbb-ordered','Malaya and British Borneo',1959,'Board of Commissioners of Currency, Malaya and British Borneo','Ordered','North Borneo regional board fixture'),
   ]
   for number in range(30):
    rows.append(('india-filler-'+str(number),'India',1921+number%10,'Government of India','Own','Long collection fixture'))
   for index,(ident,country,year,issuer,status,description) in enumerate(rows):
    db.execute('INSERT INTO banknotes(id,banknote_id,country,date_1,issuer,status,denomination,description,price) VALUES(?,?,?,?,?,?,?,?,?)',
-              (ident,'Fixture '+str(index),country,year,issuer,status,'1 Rupee' if country=='India' else '1 Dollar',description,'42.37'))
+              (ident,'Fixture '+str(index),country,year,issuer,status,'1000 Francs' if ident=='afars-held' else '1 Rupee' if country=='India' else '1 Dollar',description,'42.37'))
+  db.execute("UPDATE banknotes SET pick_number='P34',cat_id='B413' WHERE id='afars-held'")
+  db.executemany('UPDATE banknotes SET cat_id=? WHERE id=?', [('B292','mbb-delivered'),('B321','mbb-ordered')])
   db.commit()
   before=[dict(row) for row in db.execute('SELECT * FROM banknotes ORDER BY id')]
   db.execute('PRAGMA query_only=ON')
   client=stuff.app.test_client()
   urls=[]
-  for query in ('filter=all','filter=heritage_british','filter=own&q_banknotes=VisibleOnly'):
+  for query in ('filter=all','filter=heritage_british','filter=own&q_banknotes=VisibleOnly','filter=all&q_banknotes=North%20Borneo'):
    urls.extend(['/banknotes?'+query,'/banknotes?'+query+'&history=0','/banknotes?'+query+'&history=1'])
   pages={}
   for url in urls:
@@ -216,6 +222,49 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-entity-browser-db-') as tempor
           await t.page.keyboard.press('Enter');
           await targetVisible(t.page,'item-india-held');
           assert.equal(new URL(t.page.url()).hash,'#item-india-held');
+        }finally{await t.close();}
+      });
+      await run(device+': literal French Afars & Issas resolves to one green French pill and exact target',async()=>{
+        const t=await setup(mobile);try {
+          const link=pill(t.page,'french-french-territory-of-the-afars-and-issas');
+          assert.equal(await link.count(),1,'the historical territory must have one canonical pill');
+          assert.equal(await link.getAttribute('data-coverage'),'held');
+          assert.equal(await link.locator('xpath=ancestor::*[@data-banknote-group]').getAttribute('data-banknote-group'),'french');
+          assert.equal(await link.getAttribute('href'),'#item-afars-held');
+          const color=await link.evaluate(element=>getComputedStyle(element).backgroundColor.match(/\d+/g).map(Number));
+          assert(color[1]>color[0]&&color[1]>color[2],JSON.stringify(color));
+          assert.equal(await t.page.locator('[data-banknote-group="other"] .banknote-entity-pill').filter({hasText:/Afars|Issas/i}).count(),0,'the stored spelling must not create an extra Other pill');
+          const rowGroup=async id=>t.page.locator('#item-'+id).evaluate(row=>{
+            for(let previous=row.previousElementSibling;previous;previous=previous.previousElementSibling) {
+              if(previous.matches('[data-banknote-group]'))return previous.dataset.banknoteGroup;
+            }
+            return null;
+          });
+          assert.equal(await rowGroup('afars-held'),'french','the actual note must appear in the French list group');
+          assert.equal(await rowGroup('djibouti-modern'),'other','independent Djibouti must retain its own filing');
+          assert.equal(await pill(t.page,'other-record-djibouti').getAttribute('href'),'#item-djibouti-modern');
+          await link.click();
+          assert.equal(new URL(t.page.url()).hash,'#item-afars-held');
+          await targetVisible(t.page,'item-afars-held');
+          assert.equal(t.requests.filter(request=>request.path.startsWith('/banknotes?')).length,1,'the canonical pill must jump directly to the saved note');
+        }finally{await t.close();}
+      });
+      await run(device+': North Borneo regional coverage links to the exact held board note',async()=>{
+        const t=await setup(mobile,origin+'/banknotes?filter=all&q_banknotes=North%20Borneo&history=0');try {
+          assert.equal(await t.page.locator('.item-list-banknotes .item-row').count(),2);
+          const link=pill(t.page,'british-british-north-borneo');
+          assert.equal(await link.getAttribute('data-coverage'),'held');
+          assert.equal(await link.getAttribute('href'),'#item-mbb-delivered');
+          assert.match(await link.getAttribute('title'),/shared Malaya and British Borneo currency-board note/i);
+          assert.match(await link.getAttribute('title'),/does not establish ownership of a separate territorial issue/i);
+          const color=await link.evaluate(element=>getComputedStyle(element).backgroundColor.match(/\d+/g).map(Number));
+          assert(color[1]>color[0]&&color[1]>color[2],JSON.stringify(color));
+          assert.equal(await t.page.locator('#item-mbb-ordered').count(),1);
+          await link.click();
+          assert.equal(new URL(t.page.url()).hash,'#item-mbb-delivered');
+          assert.equal(new URL(t.page.url()).searchParams.get('q_banknotes'),'North Borneo');
+          await targetVisible(t.page,'item-mbb-delivered');
+          assert.equal(t.requests.filter(request=>request.path.startsWith('/banknotes?')).length,1);
         }finally{await t.close();}
       });
       await run(device+': hidden held target opens its group and preserves History off',async()=>{

@@ -4,12 +4,13 @@ Verified 25 October 2026. `banknote_entities.py` supplies the historical entity
 pills beneath the existing collection group headings. It is a curated banknote
 collecting roster, not an exhaustive list of every territory ever administered
 by an empire, and it makes no claim that every political territory issued notes.
-The existing filing groups, historical paragraphs, ordering and saved records
-remain unchanged.
+The pills themselves use the existing filing groups and do not rewrite records.
+The subsequent Afars spelling correction described below uses the shared
+catalogue's existing audited country-normalization and display-position paths.
 
 ## Scope and evidence states
 
-The roster contains 193 entities: 151 with documented circulating note issues,
+The roster contains 194 entities: 152 with documented circulating note issues,
 one with no separate territorial circulating banknote series, and 41 whose
 separate issuance is not established. It covers every identity already named in
 `banknote_catalog.py`'s period, historic, dependency, overseas and American
@@ -21,7 +22,7 @@ as held pills, so an omission from the curated roster does not hide a holding.
 
 | Existing group key | Entities | Documented issue | No separate series | Unresolved |
 | --- | ---: | ---: | ---: | ---: |
-| british | 87 | 72 | 1 | 14 |
+| british | 88 | 73 | 1 | 14 |
 | french | 40 | 33 | 0 | 7 |
 | spanish | 6 | 2 | 0 | 4 |
 | portuguese | 10 | 9 | 0 | 1 |
@@ -109,20 +110,131 @@ territories with unresolved issuance exclude postcolonial paper. Hawaii remains
 in the existing independent/other family, including Kingdom and Republic notes;
 US federal Hawaii-overprint records remain federal US issues.
 
+French Afars & Issas and French Afars and Issas are spelling aliases of French
+Territory of the Afars and Issas, including the longer form with “the Issas” and
+the French-language name. The shared country catalogue now resolves these
+names for filing, search and pill coverage alike. They credit one French green
+pill when held; French Somaliland and independent Djibouti remain distinct.
+Startup retains the original spelling in the country-alias audit table and
+normalizes the saved country; display-number migration v29 places the note in
+the French run. Permanent B numbers and all other note and purchase facts are
+preserved.
+
 Coverage reads the viewer's authorized collection, independently of the current
 search, status, location or dot filter. It uses the existing held lifecycle:
 Own/Owned/blank, Ordered, Shipped and Delivered count; Sold, Gifted, Lost,
 Consigned and Loaned do not. A visible held target links directly to its exact
 row. A filtered-out target links to its existing historical group and exact row
 anchor, retaining the History setting. A cross-group historical identity links
-to the record's actual filing; coverage never silently refiles it. There are no
-schema, data-write, sorting or renumbering changes.
+to the record's actual filing; the coverage helper never silently refiles it.
+
+## Missing entities and dated Market Scan priorities
+
+The scan uses the same roster and full authorized collection coverage as the
+pills, including Owned and Ordered notes and the intervening delivery states.
+The three existing priority families receive every missing **eligible** entity;
+the old 35-subject list is retained as research history, not a second coverage
+system. Independent successor issues cannot retire a colonial gap. The regional
+currency helper described below can retire several documented territories from
+one shared-board issue without changing that note's country or issuer.
+
+Each definition stores `independence_date` and `independence_source` only when an
+exact date has been verified. `scan_period` stores a reviewed start year, an
+**exclusive** end year, the kind of transition, evidence, an explanatory note,
+and an exact end date when supported. An open end is allowed only for an
+explicitly identified continuing dependency; `scan_period=None` means excluded
+or unresolved. These fields do not alter collection filing. Candidate dates
+must fit the whole scope, even if a model supplies a broader administration or
+an old printed date on a later reissue. A year-only transition-year issue is
+conservatively excluded; Kuwait's first 1961 notes are an example where the
+year alone cannot prove pre-independence issuance.
+
+The current focused pass supplies 123 reviewed scopes and 25 source-backed exact
+independence-date entries. Of the 29 documented
+issuers without a scan scope, five are independent national/successor identities
+(US federal, Confederate, Hawaii, East Caribbean States and West African
+States), South Africa needs more precise colonial identity than its broad
+collection family, and 23 await sufficiently precise period attribution.
+They retain their truthful yellow/green pill status. No boundary is fabricated
+to make an unresolved item eligible. All 41 unresolved issuers and the scoped
+Pitcairn nonissuer are excluded from priority searches.
+
+The unresolved period set is Falkland Islands, Isle of Man, Gilbert and Ellice
+Islands, Saint Kitts, Cocos (Keeling) Islands, French Guiana, Guadeloupe,
+Martinique, Réunion, New Caledonia, French Antilles, French Pacific Territories,
+Mozambique Company, Netherlands Antilles, US-period Puerto Rico, Japanese
+Korea/Burma/Malaya/Netherlands Indies/China/French Indo-China/Oceania, and
+Greenland. The existing broad scan retains its separately sourced discovery
+rules; this omission applies to the new fixed missing-entity priorities.
+
+Most year bounds retain provenance to the existing reviewed catalogue,
+`market_colonial.PERIODS`, and dated entity rules. Additional established scope
+comes from the existing country history and legacy wantlist. Exact dates and
+newly added boundaries have the following primary evidence:
+
+- [Djibouti's foreign ministry history](https://diplomatie.gouv.dj/djibouti-historique)
+  supports Afars and Issas independence on 27 June 1977.
+- The US Office of the Historian verifies the dates for
+  [India](https://history.state.gov/countries/india),
+  [Bahamas](https://history.state.gov/countries/bahamas),
+  [Barbados](https://history.state.gov/countries/barbados),
+  [Belize/British Honduras](https://history.state.gov/countries/belize),
+  [Brunei](https://history.state.gov/countries/brunei), and
+  [Philippines](https://history.state.gov/countries/philippines).
+- [Malaysia's official history](https://www.malaysia.gov.my/en/government/learn-about-malaysia/malaysian-history)
+  distinguishes Malaya's 31 August 1957 independence from the formation of
+  Malaysia on 16 September 1963. North Borneo and Sarawak use the latter as a
+  transfer/formation cutoff, with no invented independence date.
+- [Singapore's foreign ministry](https://www.mfa.gov.sg/about-mfa/histories-and-milestones/)
+  gives independence on 9 August 1965.
+  [MAS's currency history](https://www.mas.gov.sg/currency/history-of-currency-in-singapore)
+  documents Singapore branch-bank notes from 1840 and shared-board issues.
+  The new Singapore entry requires an identified historical issuer and excludes
+  independent national notes from 1967.
+- [The National Archives' Declaration](https://www.archives.gov/milestone-documents/declaration-of-independence)
+  supplies 4 July 1776 for the 13 American colonial entities. The
+  [US Currency Education Program](https://www.uscurrency.gov/history) supplies
+  1690 as the beginning of the American colonial paper-money era, not an
+  asserted founding date for every colony.
+- [Germany's Federal Archives](https://www.bundesarchiv.de/en/research-our-records/research-by-topic/sources-on-colonial-history/geographical-access-to-colonial-history-holdings/)
+  supports Kamerun's 1884–1916 administration. The
+  [Curaçao central bank](https://centralbank.cw/about-the-bank/history) documents
+  its 1828 beginning; the existing 1954 autonomy cutoff remains conservative.
+- [Bermuda's national museum](https://nmb.bm/exhibit/banknotes-of-bermuda/),
+  [Cayman's Monetary Authority](https://www.cima.ky/currency), and
+  [Jersey's government](https://www.gov.je/TaxesMoney/JerseyCurrency/Pages/CurrencyMakesMoney.aspx)
+  establish documented issues for continuing territories. The
+  [Commons Library](https://commonslibrary.parliament.uk/research-briefings/cbp-9706/)
+  distinguishes overseas territories and Crown Dependencies. Alderney is scoped
+  to its verified 1810 issue, with no asserted modern banknote series.
+- The [Centrale Bank van Aruba](https://www.cbaruba.org/the-aruban-florin/)
+  dates its florin to 1986 Status Aparte within the Kingdom; that is not an
+  independence date. The [Dutch National Archives](https://www.nationaalarchief.nl/onderzoeken/archief/2.10.60/download/pdf)
+  and [UNTEA history](https://peacekeeping.un.org/sites/default/files/past/unsfbackgr.html)
+  bound Netherlands New Guinea to 1950–1962. The
+  [Congolese central bank](https://www.bcc.cd/la-banque/histoire/historique-de-la-banque-centrale)
+  dates BCCBRU operations to 1952–1960; the
+  [Burundian central bank](https://archive.brb.bi/en/content/historic) dates BERB
+  to 1960, before the 1962 independence cutoff.
+- [Benin's government history](https://www.gouv.bj/pages/histoire/) supports
+  Dahomey's 1894–1960 period and 1 August 1960 independence. The
+  [AfricaMuseum exhibition](https://independance.africamuseum.be/sites/independance.africamuseum.be/files/files/booklet_independance_en.pdf)
+  distinguishes Upper Senegal and Niger, French Sudan, and independent Mali.
+  [French Polynesia's statistics institute](https://www.ispf.pf/publication/diagnostic-territorial-2021)
+  documents the 1957 name/status and continuing relationship to France.
+- [Hong Kong's Government Records Service](https://www.grs.gov.hk/ws/online/80VWR/en/home/index.html)
+  supports its 1941–1945 occupation scope. Publisher records bound the known
+  [British Solomon issues](https://banknote.news/files/tag-british-solomon-islands.php)
+  to 1916–1933 and document the
+  [1928 Turks and Caicos issue](https://www.greysheet.com/prices/detail/10th-january-1928-sig-3-southby-frith-prefix-a-1-s-n-a-1-07105-07664/gsid/141809/60/0).
+  Those limited issue scopes do not pretend to establish the territories'
+  entire monetary history or independence dates.
 
 ## Validation
 
 `tests/test_banknote_entities.py` checks unique evidence-bearing entries, all
 existing filing rosters and all 35 legacy wantlist subjects, correct modern and
-occupation separation, explicit historical aliases without refiling, uncertain
+occupation separation, explicit historical aliases and canonical filing, uncertain
 and nonissuer states, SQLite row support and unchanged inputs. The integration
 suite covers lifecycle, access restrictions, filtering, cross-group navigation
 and actual Pitcairn status. Isolated browser fixtures verify desktop/mobile

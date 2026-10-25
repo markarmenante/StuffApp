@@ -1,13 +1,16 @@
-"""Colonial want-list for the banknote Market Scan: the issuers the
-collection lacks, retired automatically once a note from that issuer
-(in its colonial period) is Own or Ordered, and turned into up to three
-TOP-PRIORITY scan themes grouped by empire.
+"""Missing-entity priorities use pill coverage and reviewed issue periods.
 
-Run: .venv/bin/python tests/test_market_wantlist.py
+US large-size/obsolete discovery remains independent of entity-gap priorities.
+No network, browser, production database or external purchase is used.
 """
-import os, sys, tempfile
+import os
+import sqlite3
+import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = str(Path(__file__).resolve().parents[1])
 os.chdir(REPO)
 sys.path.insert(0, REPO)
 os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuffapp-wl-')
@@ -15,66 +18,113 @@ os.environ.pop('ANTHROPIC_API_KEY', None)
 
 import app as stuffapp
 
-WL = stuffapp.BANKNOTE_COLONIAL_WANTLIST
-assert len(WL) == 35, len(WL)
-names = [e[0] for e in WL]
-assert len(set(names)) == 35, 'duplicate entries'
-assert {e[1] for e in WL} == {'british', 'french', 'other'}
-print('TABLE OK')
+
+def open_keys(db):
+    return {entity['key'] for entity in stuffapp._banknote_wantlist_open(db)}
+
+
+def add(db, ident, country, year, status='Own', issuer=''):
+    db.execute('INSERT INTO banknotes(id,country,date_1,status,issuer) VALUES(?,?,?,?,?)',
+               (ident, country, year, status, issuer))
+
 
 with stuffapp.app.app_context():
     db = stuffapp.get_db()
-    # Empty collection: everything open, three themes.
-    open_entries = stuffapp._banknote_wantlist_open(db)
-    assert len(open_entries) == 35
+    eligible = stuffapp._banknote_wantlist_catalog()
+    eligible_keys = {entity['key'] for entity in eligible}
+    assert len(eligible_keys) == len(eligible)
+    assert len(eligible) > 35, 'active coverage must extend beyond the historical fixed list'
+    assert all(entity['issued'] is True and entity['scan_period'] for entity in eligible)
+    for excluded in ('british-pitcairn-islands', 'portuguese-nyassa-company',
+                     'british-east-caribbean-states', 'french-west-african-states'):
+        assert excluded not in eligible_keys, excluded
+    assert open_keys(db) == eligible_keys
     themes = stuffapp._banknote_wantlist_themes(db)
-    assert [k for k, _ in themes] == ['wantlist-british', 'wantlist-french', 'wantlist-other'], [k for k, _ in themes]
-    assert 'Palestine Currency Board' in themes[0][1] and 'TOP PRIORITY' in themes[0][1]
-    assert 'Banco Nacional Ultramarino, Goa' in themes[1][1]
-    assert 'Bank of Taiwan' in themes[2][1]
+    assert [key for key, _ in themes] == ['entity-gap-british', 'entity-gap-french', 'entity-gap-other']
+    combined = '\n'.join(text for _, text in themes)
+    assert 'BEFORE INDEPENDENCE' in combined and '`entity_key`' in combined
+    for entity in eligible:
+        assert combined.count('[' + entity['key'] + ']') == 1, entity['key']
+        period = entity['scan_period']
+        if period['year_end'] is not None:
+            assert f"{period['year_start']}–{period['year_end'] - 1} only" in combined
+    assert '[portuguese-nyassa-company]' not in combined
+    assert '[british-pitcairn-islands]' not in combined
+    print('SHARED ELIGIBLE ROSTER AND THREE THEMES OK')
 
-    # Held detection, with and without the period gate.
-    rows = [
-        ('Palestine', 1939, 'Own'),                 # plain match -> retired
-        ('Cuba', 1958, 'Own'),                      # republic note: colonial Cuba stays open
-        ('Sao Tome and Principe', 1993, 'Own'),     # post-independence: stays open
-        ('Netherlands Antilles', 1962, 'Ordered'),  # Curaçao entry retired by an Ordered note
-        ('Taiwan', 1933, 'Own'),                    # colonial-period Taiwan -> retired
-        ('Zanzibar', 1920, 'Sold'),                 # not active -> still open
-        ('Philippines', 1944, 'Own'),               # US period: Spanish-colonial entry stays open
-        ('New Jersey', 1776, 'Own'),                # colonial America, not the Channel Island
+    fixtures = [
+        ('palestine', 'Palestine', 1939, 'Own', 'Palestine Currency Board'),
+        ('cuba-modern', 'Cuba', 1958, 'Own', 'Banco Nacional de Cuba'),
+        ('sao-modern', 'Sao Tome and Principe', 1993, 'Own', 'Banco Central'),
+        ('taiwan', 'Taiwan', 1933, 'Own', 'Bank of Taiwan'),
+        ('zanzibar-sold', 'Zanzibar', 1920, 'Sold', 'Zanzibar Government'),
+        ('philippines', 'Philippines', 1944, 'Own', 'Treasury'),
+        ('new-jersey', 'New Jersey', 1776, 'Own', 'Colony of New Jersey'),
+        ('canada-modern', 'Canada', 1967, 'Own', 'Bank of Canada'),
+        ('afars-alias', 'French Afars & Issas', 1975, 'Ordered', 'Trésor Public'),
+        ('regional', 'Malaya and British Borneo', 1959, 'Shipped',
+         'Board of Commissioners of Currency, Malaya and British Borneo'),
     ]
-    for i, (c, y, st) in enumerate(rows):
-        db.execute("INSERT INTO banknotes (id, country, date_1, status) VALUES (?, ?, ?, ?)", [f'w{i}', c, y, st])
+    for row in fixtures:
+        add(db, *row)
     db.commit()
-    open_names = [e[0] for e in stuffapp._banknote_wantlist_open(db)]
-    assert 'Palestine' not in open_names
-    assert 'Curaçao' not in open_names
-    assert 'Taiwan (Japanese)' not in open_names
-    assert 'Cuba (Spanish colonial)' in open_names
-    assert 'São Tomé e Príncipe (colonial)' in open_names
-    assert 'Zanzibar' in open_names
-    assert 'Philippines (Spanish colonial)' in open_names
-    assert 'Jersey' in open_names, 'New Jersey must not retire Jersey'
-    assert len(open_names) == 32, len(open_names)
-    db.execute("INSERT INTO banknotes (id, country, date_1, status) VALUES ('w8', 'Jersey', 1976, 'Own')")
+    missing = open_keys(db)
+    for held in ('british-palestine', 'japanese-taiwan', 'us-philippines',
+                 'british-canada', 'french-french-territory-of-the-afars-and-issas',
+                 'british-malaya-and-british-borneo', 'british-british-north-borneo',
+                 'british-sarawak', 'british-singapore', 'british-brunei'):
+        assert held not in missing, held
+    for still_missing in ('spanish-cuba', 'portuguese-sao-tome-and-principe',
+                          'british-zanzibar', 'british-malaya'):
+        assert still_missing in missing, still_missing
+    jersey_row = db.execute("SELECT * FROM banknotes WHERE id='new-jersey'").fetchone()
+    assert 'british-jersey' not in {entity['key'] for entity in
+                                  stuffapp.banknote_entity_coverage.entities_for_row(jersey_row)}
+    if 'british-jersey' in eligible_keys:
+        assert 'british-jersey' in missing
+    # Green Commonwealth coverage stays covered even though new offers have
+    # stricter colonial-period rules. Pending regional coverage matches pills.
+    with stuffapp.app.test_request_context('/banknotes?filter=ordered&q_banknotes=nothing&dot=1'):
+        stuffapp.g.current_user = {'role': 'owner'}
+        pills = stuffapp.banknote_entity_pills(db, [])
+        yellow = {pill['key'] for group in pills.values() for pill in group
+                  if pill['coverage'] == 'missing' and pill['key'] in eligible_keys}
+        assert missing == yellow, (missing ^ yellow)
+    prompts = '\n'.join(text for _, text in stuffapp._banknote_wantlist_themes(db))
+    assert '[british-british-north-borneo]' not in prompts
+    assert '[french-french-territory-of-the-afars-and-issas]' not in prompts
+    assert '[spanish-cuba]' in prompts
+    # A colonial Cuba note closes only that historical identity.
+    add(db, 'cuba-colonial', 'Cuba', 1896, 'Delivered', 'Banco Español de la Isla de Cuba')
     db.commit()
-    assert 'Jersey' not in [e[0] for e in stuffapp._banknote_wantlist_open(db)]
-    # A colonial-period Cuban note retires the entry.
-    db.execute("INSERT INTO banknotes (id, country, date_1, status) VALUES ('w9', 'Cuba', 1896, 'Own')")
-    db.commit()
-    assert 'Cuba (Spanish colonial)' not in [e[0] for e in stuffapp._banknote_wantlist_open(db)]
-    print('HELD DETECTION OK')
+    assert 'spanish-cuba' not in open_keys(db)
+    print('IDENTITY, REGIONAL COVERAGE AND FILTER INDEPENDENCE OK')
 
-    # A group with nothing open yields no theme.
-    for e in WL:
-        if e[1] == 'british':
-            db.execute("INSERT INTO banknotes (id, country, date_1, status) VALUES (?, ?, ?, 'Own')",
-                       [f'b-{e[0]}', e[0].split(' (')[0], 1930])
+    for status in ('Own', 'Owned', '', None, 'Ordered', 'Shipped', 'Delivered', ' ordered '):
+        add(db, 'status-check', 'Bahamas', 1960, status)
+        assert 'british-bahamas' not in open_keys(db), status
+        db.execute("DELETE FROM banknotes WHERE id='status-check'")
+    for status in ('Sold', 'Gifted', 'Lost', 'Consigned', 'Loaned'):
+        add(db, 'status-check', 'Bahamas', 1960, status)
+        assert 'british-bahamas' in open_keys(db), status
+        db.execute("DELETE FROM banknotes WHERE id='status-check'")
     db.commit()
-    themes = stuffapp._banknote_wantlist_themes(db)
-    assert [k for k, _ in themes] == ['wantlist-french', 'wantlist-other'], [k for k, _ in themes]
-    print('THEMES OK')
+    with patch.object(stuffapp, '_banknote_wantlist_open', return_value=[]):
+        assert stuffapp._banknote_wantlist_themes(db) == []
+        keys = [key for key, _ in stuffapp._BanknoteMarketPolicy().themes(db)]
+        assert not any(key.startswith('entity-gap-') for key in keys)
+        assert 'us-obsolete' in keys
+        assert all(key in keys for key, _ in stuffapp._MARKET_THEMES['banknotes'])
+    class UnavailableCollection:
+        def execute(self, *_args):
+            raise sqlite3.OperationalError('fixture unavailable')
+    try:
+        stuffapp._banknote_wantlist_open(UnavailableCollection())
+    except sqlite3.OperationalError:
+        pass
+    else:
+        raise AssertionError('an unreadable collection must not imply all entities are missing')
+    print('PURCHASE PHASES, BROAD DISCOVERY AND READ FAILURE OK')
 
 # US large-size types (2026-09-19): Friedberg ranges, retired by any
 # Own/Ordered US note whose catalogue fields carry a number in range.
@@ -145,9 +195,9 @@ client = stuffapp.app.test_client()
 r = client.get('/banknotes/market')
 assert r.status_code == 200
 html = r.get_data(as_text=True)
-assert 'colonial want-list:' in html and 'of 35 still open' in html, 'want-list count missing'
+assert 'missing entities:' in html and f'of {len(stuffapp._banknote_wantlist_catalog())}' in html, 'entity count missing'
 assert 'US large-size types:' in html and f'of {len(stuffapp.BANKNOTE_US_LARGE_WANTLIST)} still open' in html, 'US count missing'
 r = client.get('/coins/market')
-assert 'colonial want-list' not in r.get_data(as_text=True)
+assert 'missing entities:' not in r.get_data(as_text=True)
 print('PAGE OK')
 print('ALL MARKET-WANTLIST ASSERTIONS PASSED')

@@ -81,6 +81,26 @@ class EntityPillTests(unittest.TestCase):
         self.assertEqual((pill['tag'], pill['data-coverage']), ('span', 'missing'))
         self.assertNotIn('href', pill)
 
+    def test_north_borneo_coverage_links_shared_board_notes_and_explains_basis(self):
+        issuer = 'Board of Commissioners of Currency, Malaya and British Borneo'
+        self.note('board-1953', country='Malaya and British Borneo', year=1953,
+                  status='Delivered', issuer=issuer, description='Earlier board note')
+        self.note('board-1959', country='Malaya and British Borneo', year=1959,
+                  status='Ordered', issuer=issuer, description='Later board note')
+        for history in ('0', '1'):
+            page = self.page('/banknotes?history=' + history)
+            pill = page.pills['british-british-north-borneo']
+            self.assertEqual(pill['data-coverage'], 'held')
+            self.assertIn('2 notes', pill['title'])
+            self.assertIn('shared Malaya and British Borneo', pill['title'])
+            self.assertIn(pill['href'], ('#item-board-1953', '#item-board-1959'))
+            self.assertIn(pill['href'][1:], page.targets)
+        page = self.page('/banknotes?history=0&filter=ordered')
+        self.assertEqual(page.pills['british-british-north-borneo']['href'], '#item-board-1959')
+        self.db.execute("UPDATE banknotes SET status='Sold'")
+        self.db.commit()
+        self.assertEqual(self.page().pills['british-british-north-borneo']['data-coverage'], 'missing')
+
     def test_search_and_status_filters_keep_whole_collection_coverage_with_live_fallback(self):
         self.note('india-owned', description='Distinct owned note')
         self.note('canada-ordered', country='Canada', year=1954, status='Ordered', description='Visible order')
