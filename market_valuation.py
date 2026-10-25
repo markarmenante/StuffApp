@@ -28,6 +28,11 @@ _CURRENCIES = {'USD', 'EUR', 'GBP', 'CHF', 'CAD', 'AUD', 'NZD', 'JPY', 'CNY',
                'PLN', 'THB', 'TRY', 'TWD'}
 _PREFIX = {'USD': '$', 'EUR': '€', 'GBP': '£', 'CHF': 'CHF ', 'CAD': 'C$',
            'AUD': 'A$', 'NZD': 'NZ$', 'JPY': '¥', 'HKD': 'HK$', 'SGD': 'S$'}
+_ASKING_SYMBOLS = {'US$': 'USD', 'CA$': 'CAD', 'C$': 'CAD', 'A$': 'AUD',
+                   'NZ$': 'NZD', 'HK$': 'HKD', 'S$': 'SGD', 'MX$': 'MXN',
+                   'R$': 'BRL', '$': 'USD', '€': 'EUR', '£': 'GBP', '¥': 'JPY',
+                   'USD$': 'USD', 'CAD$': 'CAD', 'AUD$': 'AUD', 'AU$': 'AUD',
+                   'NZD$': 'NZD', 'HKD$': 'HKD', 'SGD$': 'SGD'}
 
 
 def _text(value, limit):
@@ -167,14 +172,90 @@ def money(amount, currency):
     return _PREFIX.get(currency, currency + ' ') + digits
 
 
+def _asking_price(item):
+    """Only a fixed ask with one explicit currency/amount, never a bid or FX.
+
+    Saved recommendations already use these currency-bearing price formats.
+    Deliberately do not strip arbitrary text: bids, ranges, shipping totals and
+    conversion suffixes must not become a misleading asking-price indicator.
+    """
+    if (str(item.get('sale_type') or '').strip().lower() != 'fixed' or
+            item.get('price_kind') not in (None, '', 'asking', 'fixed', 'buy_now')):
+        return None
+    text = item.get('price')
+    if not isinstance(text, str) or len(text) > 120:
+        return None
+    text = text.strip()
+    currency, number = None, ''
+    for symbol in sorted(_ASKING_SYMBOLS, key=len, reverse=True):
+        # eBay's observed cards use "US $299.00" (including nonbreaking
+        # spaces). Keep the currency designator anchored and explicit.
+        pattern = (re.escape(symbol[:-1]) + r'[ \u00a0\u202f]*\$'
+                   if symbol.endswith('$') else re.escape(symbol))
+        match = re.match(pattern, text, re.I)
+        if match:
+            currency, number = _ASKING_SYMBOLS[symbol], text[match.end():].strip()
+            break
+    if currency is None:
+        match = re.fullmatch(r'([A-Za-z]{3})\s*([\d.,]+)|([\d.,]+)\s+([A-Za-z]{3})', text)
+        if match:
+            currency = (match[1] or match[4]).upper()
+            number = match[2] or match[3]
+    if currency not in _CURRENCIES:
+        return None
+    if re.fullmatch(r'\d+(?:\.\d{1,2})?', number):
+        canonical = number
+    elif re.fullmatch(r'\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?', number):
+        canonical = number.replace(',', '')
+    elif re.fullmatch(r'\d+(?:,\d{1,2})', number):
+        canonical = number.replace(',', '.')
+    elif re.fullmatch(r'\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?', number):
+        canonical = number.replace('.', '').replace(',', '.')
+    else:
+        return None
+    amount = Decimal(canonical)
+    return (currency, amount) if 0 < amount <= 1_000_000_000 else None
+
+
+def _comparison(item, value):
+    empty = dict(benchmark=None, benchmark_label='', ratio=None, percent=None, band='', title='')
+    price = _asking_price(item)
+    if price is None or price[0] != value['currency']:
+        return empty
+    midpoint = (Decimal(str(value['low'])) + Decimal(str(value['high']))) / 2
+    asking = price[1]
+    # Classify before any presentation rounding, including half-cent midpoints.
+    band = 'green' if asking <= midpoint else 'yellow' if asking <= midpoint * Decimal('1.30') else 'red'
+    ratio = asking / midpoint
+    percent = (ratio - 1) * 100
+    decimal_places = max(0, -midpoint.normalize().as_tuple().exponent)
+    benchmark_label = (_PREFIX.get(value['currency'], value['currency'] + ' ') +
+                       f'{midpoint:,.{max(2, decimal_places) if decimal_places else 0}f}')
+    rounded = percent.quantize(Decimal('.01'))
+    percent_text = format(rounded, 'f').rstrip('0').rstrip('.') if '.' in format(rounded, 'f') else str(rounded)
+    if band == 'green':
+        explanation = 'At/below market estimate'
+    elif band == 'red' and rounded <= 30:
+        explanation = 'Over 30% above market estimate'
+    elif rounded == 0:
+        explanation = 'Above market estimate'
+    else:
+        explanation = percent_text + '% above market estimate'
+    return dict(benchmark=float(midpoint), benchmark_label=benchmark_label,
+                ratio=float(ratio), percent=float(percent), band=band,
+                title=f'{explanation} · benchmark {benchmark_label} (range midpoint)')
+
+
 def display(item, *, today=None):
     """Terse view model for new, cached and observed cards. No I/O or mutation."""
     item = item if isinstance(item, dict) else {}
     value = normalize(item.get('valuation'), item.get('listing_url', ''), today=today)
     if value is None:
-        return dict(label='No estimate', evidence=[], as_of='', confidence='', grade='')
+        return dict(label='No estimate', evidence=[], as_of='', confidence='', grade='',
+                    benchmark=None, benchmark_label='', ratio=None, percent=None, band='', title='')
     evidence = [dict(source, amount_label=money(source['amount'], source['currency']))
                 for source in value['sources']]
     return dict(label=money(value['low'], value['currency']) + '–' +
                 money(value['high'], value['currency']), evidence=evidence,
-                as_of=value['as_of'], confidence=value['confidence'], grade=value['grade'])
+                as_of=value['as_of'], confidence=value['confidence'], grade=value['grade'],
+                **_comparison(item, value))

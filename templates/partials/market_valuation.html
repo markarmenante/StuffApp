@@ -2,8 +2,9 @@
 <span class="market-estimate market-estimate-unavailable">No estimate</span>
 {% else %}
 <details class="market-estimate">
-  <summary>Est. value: {{ valuation.label }}</summary>
+  <summary>{% if valuation.band %}<span class="market-value-dot market-value-dot-{{ valuation.band }}" role="img" aria-label="{{ valuation.title }}" title="{{ valuation.title }}"></span> {% endif %}Est. value: {{ valuation.label }}</summary>
   <div class="market-estimate-sources">
+    {% if valuation.band %}<span class="market-value-comparison">{{ valuation.title }}</span>{% endif %}
     {% if valuation.as_of %}<span>As of {{ valuation.as_of }}</span>{% endif %}
     {% if valuation.grade %}<span>{{ valuation.grade }}</span>{% endif %}
     {% for source in valuation.evidence %}

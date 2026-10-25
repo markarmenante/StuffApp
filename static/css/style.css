@@ -4055,8 +4055,13 @@ input[type="date"] { -webkit-appearance: none; }
 .market-line { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; }
 .market-price { font-weight: 600; }
 .market-estimate { font-weight: 500; }
+.market-estimate-status { color: var(--text-secondary); font-size: 12px; white-space: normal; }
 .market-estimate summary { cursor: pointer; }
 .market-estimate summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.market-value-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: 1px; border: 1px solid rgba(0,0,0,.18); }
+.market-value-dot-green { background: #2e8b57; }
+.market-value-dot-yellow { background: #e4b52b; }
+.market-value-dot-red { background: #c94646; }
 .market-estimate-unavailable { color: var(--text-hint); font-weight: 400; }
 .market-estimate-sources { display: grid; gap: 4px; padding: 6px 0; font-size: 12px; font-weight: 400; }
 .market-estimate-sources a { color: var(--blue); }

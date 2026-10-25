@@ -9,6 +9,8 @@ os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuffapp-market-')
 os.environ['ANTHROPIC_API_KEY'] = 'test-key'
 
 import app as stuffapp
+# The dedicated estimate job has its own bounded, offline regression suite.
+stuffapp._start_market_estimates = lambda db: None
 
 stuffapp._fetch_usd_rate = lambda currency, date_str: 1.1 if currency == 'EUR' else None
 PAGES = {

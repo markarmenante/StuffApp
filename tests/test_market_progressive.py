@@ -16,6 +16,8 @@ os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuffapp-progressive-')
 os.environ['ANTHROPIC_API_KEY'] = 'test-key'
 sys.modules['dotenv'] = types.SimpleNamespace(load_dotenv=lambda **kwargs: None)
 import app as appmod
+# The dedicated estimate job has its own bounded, offline regression suite.
+appmod._start_market_estimates = lambda db: None
 import market_scan as market
 appmod.app.config['TESTING'] = True
 

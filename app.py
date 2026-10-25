@@ -13,6 +13,7 @@ import market_colonial
 import market_ebay_feed
 import market_grouping
 import market_valuation
+import market_estimates
 import market_checkout
 import market_purchase_capture
 import banknote_catalog
@@ -6855,6 +6856,8 @@ def init_db():
             ('banknote_display_number_v29', datetime.utcnow().isoformat()),
         )
         db.commit()
+
+    market_estimates.init_schema(db)
 
 
 def _parse_prescription_lines(text):
@@ -18593,6 +18596,17 @@ def _run_market_scan(category, scan_id, ebay_request_id=None, skip_ebay=False):
                     summary += '; ' + source_note
             if errors:
                 summary += ' · Partial results; earlier candidates kept · ' + '; '.join(errors)[:400]
+            if category == 'banknotes':
+                # A requested scan also researches values for existing exact
+                # listings. Start before marking the scan done so its final UI
+                # poll sees the bounded estimate job; GETs never start one.
+                estimate_db = open_db_connection()
+                try:
+                    _start_market_estimates(estimate_db)
+                except Exception as exc:
+                    app.logger.warning('market estimates could not start: %s', type(exc).__name__)
+                finally:
+                    estimate_db.close()
             metrics.update(phase='complete', completed=len(sources), total=len(sources), errors=errors)
             repo.finish(summary, errors, metrics)
             app.logger.info('market scan %s done: %s', category, summary)
@@ -18741,7 +18755,7 @@ def _market_items(db, category, earlier=False):
         item['id'] = r['id']
         item['status'] = 'dismissed' if key in deleted else r['status']
         item['scanned_at'] = (r['created_at'] or '')[:10]
-        out.append(item)
+        out.append(market_estimates.overlay(db, item) if category == 'banknotes' else item)
     db.commit()
     return out
 
@@ -18809,9 +18823,129 @@ def _market_personal_feed(db, visible_items):
         card['availability_label'] = ('Listing ended' if card['live_state'] == 'ended' else
             ('Availability unverified' if card['live_state'] != 'live' or not card['listing_checked_at'] or
              card['listing_checked_at'] < time.time() - market_ebay_feed.FRESH_SECONDS else 'Listing observed live; eligibility not confirmed'))
-        cards.append(card)
+        cards.append(market_estimates.overlay(db, card))
     return dict(cards=_market_group_rows('banknotes', cards, observed=True), excluded_count=excluded_count, sources=json.loads(latest['source_status']),
                 observed_date=market_ebay_feed.utc(latest['observed_at'])[:16].replace('T', ' ') + ' UTC')
+
+
+_MARKET_ESTIMATE_LOCK = threading.Lock()
+_MARKET_ESTIMATE_ACTIVE = set()
+
+
+def _market_estimate_rows(db):
+    candidates = _market_items(db, 'banknotes')
+    observed = _market_personal_feed(db, candidates)
+    return candidates + (observed['cards'] if observed else [])
+
+
+def _market_estimate_research(wanted, context):
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'],
+                                 timeout=min(180, context.remaining()), max_retries=0)
+    try:
+        with market_runtime.scope(context, 'estimates'):
+            model = _market_resolve_model(os.environ['ANTHROPIC_API_KEY'])
+            observed_page = None
+            research_input = dict(wanted)
+            if not wanted.get('sale_type') and context.fetcher:
+                page = context.fetcher.fetch(wanted['listing_url'])
+                probe = _market_listing_probe(wanted['listing_url'], page)
+                if (page.status == 200 and not page.challenged and
+                        market_runtime.canonical_url(page.final_url) == wanted['listing_url'] and
+                        probe.get('state') == 'live' and
+                        not _market_listing_identity_problem(wanted, probe)):
+                    text = (probe.get('identity_text') or '')[:16000]
+                    observed_page = dict(url=wanted['listing_url'], text=text)
+                    research_input.update(listing_text=text, listing_checked_at=time.time())
+            # One bounded request per exact item. No automatic search restart
+            # or JSON repair can multiply this job's requested budget.
+            response = market_runtime.model_call(
+                client, model=model, max_tokens=3500,
+                tools=[dict(anthropic_web_search_tool(market_estimates.MAX_SEARCHES,
+                             default_tool='web_search_20250305'),
+                            max_uses=market_estimates.MAX_SEARCHES)],
+                messages=[{'role': 'user', 'content': market_estimates.prompt(research_input)}])
+            if getattr(response, 'stop_reason', '') not in ('end_turn', 'stop_sequence'):
+                raise RuntimeError('Estimate research did not complete')
+            raw = parse_model_json_object(_message_text(response))
+            def source_urls(value):
+                if hasattr(value, 'model_dump'):
+                    value = value.model_dump()
+                if isinstance(value, dict):
+                    if value.get('type') == 'web_search_result' and isinstance(value.get('url'), str):
+                        yield value['url']
+                    for child in value.values():
+                        yield from source_urls(child)
+                elif isinstance(value, (list, tuple)):
+                    for child in value:
+                        yield from source_urls(child)
+            # Overwrite any model-supplied field with actual tool observations.
+            raw['_observed_source_urls'] = list(source_urls(response.content))
+            raw['_observed_listing_text'] = observed_page
+            return raw
+    finally:
+        client.close()
+
+
+def _market_estimate_eligible(db, wanted):
+    # Called inside the cache publication transaction. Avoid the ordinary list
+    # reader here because it may commit legacy visibility migrations.
+    for row in db.execute("SELECT payload FROM market_scan_items WHERE category='banknotes' AND status='new'"):
+        candidate = json.loads(row['payload'])
+        found = market_estimates.target(candidate)
+        if found and found['key'] == wanted['key']:
+            return True
+    observed = _market_personal_feed(db, [])
+    return any(found and found['key'] == wanted['key'] for found in
+               (market_estimates.target(row) for row in (observed['cards'] if observed else [])))
+
+
+def _run_market_estimates(job_id, targets):
+    context = market_runtime.ScanContext(
+        seconds=market_estimates.MAX_SECONDS, discovery_seconds=market_estimates.MAX_SECONDS,
+        max_requests=len(targets), max_searches=len(targets) * market_estimates.MAX_SEARCHES,
+        max_output_tokens=len(targets) * 3500, max_page_requests=len(targets) + 1)
+    context.fetcher = market_runtime.FetchService(context, _market_transport)
+    try:
+        market_estimates.run(open_db_connection, job_id, targets, _market_estimate_research,
+                             _market_estimate_eligible, context)
+    finally:
+        with _MARKET_ESTIMATE_LOCK:
+            _MARKET_ESTIMATE_ACTIVE.discard(job_id)
+
+
+def _start_market_estimates(db):
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        raise ValueError('Price research is unavailable: the model connection is not configured.')
+    with _MARKET_ESTIMATE_LOCK:
+        current = market_estimates.status(db)
+        if current['status'] == 'running' and current['job_id'] not in _MARKET_ESTIMATE_ACTIVE:
+            market_estimates.finish(db, current['job_id'], 'Research was interrupted by a restart. Retry to continue.')
+        state, targets = market_estimates.claim(db, _market_estimate_rows(db))
+        if targets:
+            _MARKET_ESTIMATE_ACTIVE.add(state['job_id'])
+            threading.Thread(target=_run_market_estimates, args=(state['job_id'], targets), daemon=True).start()
+        return state
+
+
+@app.route('/banknotes/market/estimates', methods=['POST'])
+def market_estimates_start():
+    _market_require_owner()
+    try:
+        return jsonify(_start_market_estimates(get_db()))
+    except ValueError as exc:
+        return jsonify(ok=False, error=str(exc)), 503
+
+
+@app.route('/banknotes/market/estimates/status')
+def market_estimates_status():
+    _market_require_owner()
+    state = market_estimates.status(get_db())
+    if state['status'] == 'running' and state['job_id'] not in _MARKET_ESTIMATE_ACTIVE:
+        state.update(status='failed', error='Research was interrupted by a restart. Retry to continue.')
+    response = jsonify(state)
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
 
 
 def _market_require_owner():

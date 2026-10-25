@@ -71,6 +71,11 @@
   {% else %}
   <button type="button" class="toolbar-btn pill" id="marketRescan"
           title="Run the scan again now">Rescan</button>
+  {% if category == 'banknotes' %}
+  <button type="button" class="toolbar-btn pill" id="marketEstimatePrices"
+          title="Research comparable sales for banknotes without a current estimate">Estimate prices</button>
+  <span class="market-estimate-status" id="marketEstimateStatus" role="status" aria-live="polite"></span>
+  {% endif %}
   <a class="toolbar-btn pill" href="{{ market_navigation.earlier }}"
      title="Candidates from earlier scans (superseded or dismissed) — file one you bought with Bought">Earlier candidates</a>
   {% endif %}
@@ -836,8 +841,12 @@
     const fresh = page.getElementById('marketResults');
     const current = document.getElementById('marketResults');
     if (fresh && current && generation === actionGeneration && requestId === refreshRequest && !actionBusy && !document.querySelector('.location-choice-backdrop')) {
+      const expanded = new Set([...current.querySelectorAll('[data-listing-key]')]
+        .filter(row => row.querySelector('.market-estimate[open]'))
+        .map(row => row.dataset.listingKey));
       fresh.querySelectorAll('[data-listing-key]').forEach(row => {
         if (dismissedKeys.has(row.dataset.listingKey)) row.remove();
+        else if (expanded.has(row.dataset.listingKey)) row.querySelector('details.market-estimate')?.setAttribute('open', '');
       });
       syncMarketGroups(fresh);
       current.replaceChildren(...fresh.childNodes);
@@ -851,6 +860,68 @@
   }
 
   function setStatus(text) { if (statusEl) statusEl.textContent = text; }
+
+  const estimateButton = document.getElementById('marketEstimatePrices');
+  const estimateStatus = document.getElementById('marketEstimateStatus');
+  const estimateUrl = '/banknotes/market/estimates';
+  let estimateTimer = null, estimateKey = '', estimateRequest = false, estimateRunning = false;
+  let estimateGeneration = 0;
+  async function showEstimates(d, generation) {
+    if (!estimateButton || !estimateStatus || generation !== estimateGeneration) return;
+    const running = d.status === 'running';
+    estimateRunning = running;
+    estimateButton.disabled = estimateRequest || running;
+    estimateButton.textContent = !running && d.remaining > 0 ? 'Estimate remaining' : 'Estimate prices';
+    if (running) estimateStatus.textContent = 'Estimating… ' + (d.completed || 0) + ' of ' + (d.total || 0);
+    else if (d.status === 'failed') estimateStatus.textContent = d.error || 'Estimates unavailable. Try again.';
+    else if (d.status === 'done') estimateStatus.textContent = d.estimated ? 'Estimates updated' : (d.total ? 'No estimates found' : 'Estimates up to date');
+    else estimateStatus.textContent = '';
+    if (!running && d.status !== 'none' && d.remaining > 0) estimateStatus.textContent += ' · ' + d.remaining + ' remaining';
+    const key = (d.job_id || '') + ':' + (d.revision || 0);
+    if (d.job_id && key !== estimateKey) {
+      if (await refreshCandidates(revision) && generation === estimateGeneration) estimateKey = key;
+    }
+    if (generation !== estimateGeneration) return;
+    clearTimeout(estimateTimer);
+    if (running || (d.job_id && key !== estimateKey)) estimateTimer = setTimeout(pollEstimates, running ? 5000 : 2000);
+  }
+  async function pollEstimates() {
+    if (!estimateButton || earlier || estimateRequest) return;
+    clearTimeout(estimateTimer);
+    const generation = ++estimateGeneration;
+    try {
+      const response = await fetch(estimateUrl + '/status', {cache:'no-store'});
+      const d = await response.json();
+      if (!response.ok || !d.ok) throw new Error('Estimates unavailable');
+      await showEstimates(d, generation);
+    } catch (_) {
+      if (generation !== estimateGeneration) return;
+      estimateStatus.textContent = estimateRunning ? 'Reconnecting to estimates…' : 'Estimates unavailable. Try again.';
+      estimateButton.disabled = estimateRequest || estimateRunning;
+      if (estimateRunning) estimateTimer = setTimeout(pollEstimates, 8000);
+    }
+  }
+  estimateButton?.addEventListener('click', async () => {
+    if (estimateRequest || estimateButton.disabled) return;
+    const generation = ++estimateGeneration;
+    estimateRequest = true;
+    estimateButton.disabled = true;
+    estimateStatus.textContent = 'Starting estimates…';
+    clearTimeout(estimateTimer);
+    try {
+      const response = await fetch(estimateUrl, {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      const d = await response.json();
+      if (!response.ok || !d.ok) throw new Error(d.error || 'Estimates could not start');
+      estimateRequest = false;
+      await showEstimates(d, generation);
+    } catch (error) {
+      if (generation !== estimateGeneration) return;
+      estimateRequest = false;
+      estimateButton.disabled = false;
+      estimateStatus.textContent = error.message || 'Estimates could not start';
+    }
+  });
+  if (estimateButton) pollEstimates();
 
   // Refresh only the candidates; preserve dialogs and in-flight user actions.
   async function poll() {
@@ -872,6 +943,7 @@
       } else {
         setStatus(d.summary || d.error || 'Scan complete');
         if (rescan) rescan.disabled = false;
+        if (estimateButton) pollEstimates();
         if (!earlier && d.revision !== revision) setTimeout(poll, 2000);
       }
     } catch (_) { setTimeout(poll, 8000); }

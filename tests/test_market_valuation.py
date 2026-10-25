@@ -153,6 +153,135 @@ class ValuationTests(unittest.TestCase):
         self.assertEqual(value, before)
 
 
+class PriceComparisonTests(unittest.TestCase):
+    def row(self, price='$100', **changes):
+        value = estimate(low=80, high=120)
+        value['sources'][0]['amount'] = 100
+        item = dict(listing_url=LISTING, sale_type='fixed', price=price, valuation=value)
+        item.update(changes)
+        return item
+
+    def shown(self, price='$100', **changes):
+        return valuation.display(self.row(price, **changes), today=TODAY)
+
+    def test_exact_green_yellow_red_boundaries(self):
+        for price, expected in [('$69.99', 'green'), ('$70', 'green'), ('$70.01', 'green'),
+                                ('$99.99', 'green'), ('$100', 'green'), ('$100.01', 'yellow'),
+                                ('$129.99', 'yellow'), ('$130', 'yellow'), ('$130.01', 'red')]:
+            with self.subTest(price=price):
+                self.assertEqual(self.shown(price)['band'], expected)
+        exact = self.shown('$130.00')
+        self.assertEqual(exact['benchmark'], 100)
+        self.assertEqual(exact['ratio'], 1.3)
+        self.assertEqual(exact['percent'], 30)
+        self.assertEqual(exact['title'], '30% above market estimate · benchmark $100 (range midpoint)')
+        self.assertEqual(self.shown('$130.01')['percent'], 30.01)
+        self.assertTrue(self.shown('$130.01')['title'].startswith('30.01% above'))
+
+    def test_midpoint_is_explicit_not_upper_or_lower_range_endpoint(self):
+        shown = self.shown('$110')
+        self.assertEqual(shown['band'], 'yellow')
+        self.assertEqual(shown['percent'], 10)
+        self.assertEqual(shown['benchmark_label'], '$100')
+        self.assertEqual(self.shown('$80')['percent'], -20)
+        self.assertTrue(self.shown('$80')['title'].startswith('At/below market estimate'))
+
+    def test_half_cent_midpoint_and_binary_fraction_thresholds_are_not_rounded(self):
+        value = estimate(low=99.99, high=100.02)
+        self.assertEqual(self.shown('$130.00', valuation=value)['band'], 'yellow')
+        shown = self.shown('$130.01', valuation=value)
+        self.assertEqual(shown['band'], 'red')
+        self.assertEqual(shown['benchmark'], 100.005)
+        self.assertEqual(shown['benchmark_label'], '$100.005')
+        tiny = estimate(low=.10, high=.50)
+        self.assertEqual(self.shown('$0.39', valuation=tiny)['band'], 'yellow')
+        self.assertEqual(self.shown('$0.40', valuation=tiny)['band'], 'red')
+
+    def test_title_never_rounds_red_to_an_apparently_yellow_thirty_percent(self):
+        value = estimate(low=80000, high=120000)
+        shown = self.shown('$130,000.01', valuation=value)
+        self.assertEqual(shown['band'], 'red')
+        self.assertGreater(shown['percent'], 30)
+        self.assertTrue(shown['title'].startswith('Over 30% above'))
+
+    def test_exact_asking_cents_are_preserved_in_ratio(self):
+        value = estimate(low=500, high=700)
+        row = self.row('$599.89', valuation=value)
+        before = copy.deepcopy(row)
+        shown = valuation.display(row, today=TODAY)
+        self.assertEqual(shown['band'], 'green')
+        self.assertAlmostEqual(shown['ratio'], 599.89 / 600, places=14)
+        self.assertEqual(row, before)
+
+    def test_known_currency_formats_are_compared_without_fx(self):
+        for currency, price in [('USD', 'US$ 130.00'), ('USD', 'usd 130'), ('USD', '130 USD'),
+                                ('EUR', '€130,00'), ('GBP', '£130'), ('CHF', 'CHF 130'),
+                                ('CAD', 'CA$130'), ('CAD', 'C$130'), ('AUD', 'A$130'),
+                                ('NZD', 'NZ$130'), ('HKD', 'HK$130'), ('SGD', 'S$130')]:
+            value = estimate(low=80, high=120, currency=currency)
+            value['sources'][0]['currency'] = currency
+            with self.subTest(currency=currency, price=price):
+                self.assertEqual(self.shown(price, valuation=value)['band'], 'yellow')
+        value = estimate(low=1000, high=1400, currency='EUR')
+        value['sources'][0]['currency'] = 'EUR'
+        for price in ('€1,200.00', '€1.200,00', 'EUR 1,200', '1.200,00 EUR'):
+            self.assertEqual(self.shown(price, valuation=value)['band'], 'green')
+
+    def test_currency_mismatch_and_usd_conversion_do_not_produce_comparisons(self):
+        for price in ('€100', 'C$100', '£100', '¥100'):
+            shown = self.shown(price, price_usd=100)
+            self.assertEqual(shown['band'], '')
+            self.assertIsNone(shown['ratio'])
+        value = estimate(currency='EUR', low=80, high=120)
+        value['sources'][0]['currency'] = 'EUR'
+        self.assertEqual(self.shown('$100', valuation=value, price_usd=100)['band'], '')
+
+    def test_observed_ebay_spaced_dollar_prices_preserve_currency(self):
+        for currency, prices in (
+            ('USD', ('US $299.00', 'US\u00a0$299.00', 'USD $299.00', 'US $1,200.00')),
+            ('CAD', ('C $299.00', 'CA $299.00', 'CAD $299.00')),
+            ('AUD', ('A $299.00', 'AU $299.00', 'AUD $299.00')),
+            ('NZD', ('NZ $299.00', 'NZD $299.00')),
+            ('HKD', ('HK $299.00', 'HKD $299.00')),
+            ('SGD', ('S $299.00', 'SGD $299.00')),
+        ):
+            value = estimate(low=250, high=350, currency=currency)
+            value['sources'][0]['currency'] = currency
+            for price in prices:
+                with self.subTest(currency=currency, price=price):
+                    shown = self.shown(price, valuation=value)
+                    self.assertEqual(shown['band'], 'red' if '1,200' in price else 'green')
+                    if currency != 'USD':
+                        self.assertEqual(self.shown(price, price_usd=299)['band'], '')
+        for price in ('C AD $299.00', 'Unknown US $299.00', 'US C$299.00', 'CA USD $299.00'):
+            self.assertEqual(self.shown(price)['band'], '')
+
+    def test_bid_only_and_unknown_sale_types_have_no_dot(self):
+        for sale_type in ('auction', 'Auction', '', None, 'unknown', 'bid', 'fixed/auction'):
+            self.assertEqual(self.shown('$100', sale_type=sale_type)['band'], '')
+        for price_kind in ('bid', 'current_bid', 'estimate', 'unknown'):
+            self.assertEqual(self.shown('$100', price_kind=price_kind)['band'], '')
+
+    def test_missing_ambiguous_or_unparseable_prices_have_no_dot(self):
+        for price in ('See listing', '', None, 100, True, '$0', '$-100', '100', 'Current bid $100',
+                      '$100–$120', '$100 + $20 shipping', '$100 / $120', 'USD 100 EUR',
+                      '$NaN', '$Infinity', '$1,20,000', '$1.2.3', '$100 each'):
+            shown = self.shown(price)
+            self.assertEqual(shown['band'], '', repr(price))
+            self.assertEqual(shown['title'], '')
+            self.assertEqual(shown['label'], '$80–$120', 'valid estimate stays visible')
+
+    def test_no_estimate_is_unchanged_and_has_no_indicator_fields(self):
+        for value in (None, {}, estimate(low=-1), estimate(as_of='2020-01-01')):
+            shown = self.shown('$100', valuation=value)
+            self.assertEqual(shown['label'], 'No estimate')
+            self.assertEqual(shown['band'], '')
+            self.assertEqual(shown['title'], '')
+            self.assertEqual(shown['benchmark_label'], '')
+            for field in ('benchmark', 'ratio', 'percent'):
+                self.assertIsNone(shown[field])
+
+
 class AppValuationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -144,6 +144,17 @@ legacy `fair` prose as fair market value. Evidence stays behind the expandable
 estimate. See `docs/market-scan.md`, `market_grouping.py` and
 `market_valuation.py`; normal collection ordering is unchanged.
 
+Price markers (2026-10-25): for an explicit fixed asking price in the estimate's
+currency, compare with the supported range midpoint: green at/below, yellow up
+to exactly 30% above, red beyond 30%. Unknown prices/types, auctions, currency
+mismatches and missing estimates have no marker. `Estimate prices` starts or
+joins bounded research of existing current listings (at most 12 per job, two
+workers, 300 seconds); `Estimate remaining` covers later batches. Rendering and
+estimate-status reads do not schedule research. A requested banknote scan may enqueue the same
+enrichment. Cache results for display without rewriting listings or collection
+records; retain exact prices and `No estimate` when unsupported. See
+`market_estimates.py` and `docs/market-scan.md`.
+
 The Market Scan pill (left of "+" on the Coins and Banknotes lists)
 swaps the list for live buy candidates and reads "Collection" while
 showing them. A scan runs in a background thread (`_run_market_scan`;

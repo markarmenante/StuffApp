@@ -85,6 +85,35 @@ create an estimate. Invalid, unsupported or stale estimates are omitted by
 `market_valuation.py`. Tests: `test_market_grouping.py`,
 `test_market_valuation.py` and the browser interaction checks.
 
+For an explicit fixed asking price in the estimate's currency, the small marker
+compares that price with the midpoint of the supported range: green at or below
+the midpoint, yellow above it through exactly 30% above, and red beyond 30%.
+For an $80–$120 range, the benchmark is $100: $100 is green, $130 is yellow,
+and $130.01 is red. This comparison uses exact amounts before display rounding.
+The marker's accessible label and expanded explanation identify the midpoint
+benchmark. Opening it expands the evidence without opening the seller listing.
+An unknown price, unknown sale type, auction/bid amount, currency mismatch or
+missing estimate has no marker; no exchange rate or fixed-price status is
+inferred for this comparison.
+
+`Estimate prices` researches the current banknote candidates and observed
+watched/sponsored listings that lack supported estimates. It starts or joins one
+owner-authorized background job through `POST /banknotes/market/estimates`;
+`GET /banknotes/market/estimates/status` only reads progress. Estimate rendering
+and status reads never schedule research. Each job covers at most 12 uncached exact listings, with two
+workers, a 300-second deadline and up to six searches per listing. If more
+listings remain, the button becomes `Estimate remaining`. A requested banknote
+scan can also enqueue bounded enrichment after its results are saved.
+
+Research is cached within that service's collection database and overlaid for
+display without rewriting source cards, prices, ranks or collection records.
+Changed note identity invalidates reuse; deleted or no-longer-eligible targets
+cannot publish late. Unsupported research stays `No estimate` and receives a
+retry cooldown. The UI polls status and replaces only results, preserving open
+evidence and deferring replacement while a location choice or purchase/delete
+request is active. Failed starts remain retryable. Controlled tests intercept
+research and purchase actions rather than running a paid scan.
+
 ## Identity and decisions
 
 Canonical URLs remove known tracking parameters and fragments, preserve

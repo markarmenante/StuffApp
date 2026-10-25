@@ -18,6 +18,7 @@ const os = require('node:os');
   const artifacts=process.env.MARKET_ISSUER_TEST_ARTIFACTS||mkdtempSync(path.join(os.tmpdir(),'market-issuer-'));
   mkdirSync(artifacts,{recursive:true});
   const files=['app.py','market_grouping.py','market_valuation.py','templates/list.html','templates/partials/market_group_heading.html','templates/partials/market_observed_row.html','templates/partials/market_valuation.html','static/css/style.css'];
+  if(existsSync(path.join(repo,'market_estimates.py')))files.push('market_estimates.py');
   const hashes=()=>Object.fromEntries(files.map(file=>[file,createHash('sha256').update(readFileSync(path.join(repo,file))).digest('hex')]));
   const sourceBefore=hashes();
   const render=String.raw`
@@ -46,6 +47,17 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
  alias_candidates=candidates+[
   candidate('legacy-legal-tender',issuer='United States (Legal Tender Note)',title='1917 United States $1 Legal Tender Note',series='1917',date_1=1917,pick_number='Fr.39'),
   candidate('explicit-legal-tender',issuer='United States Treasury',title='1907 United States $5 Legal Tender Note',series='1907',date_1=1907,pick_number='Fr.91',denomination='5 Dollars')]
+ band_value=dict(valuation,low=80,high=120)
+ def band_candidate(ident,price,**extra):
+  fields=dict(valuation=band_value,sale_type='fixed',price=price,price_usd=None);fields.update(extra)
+  return candidate(ident,**fields)
+ band_candidates=candidates+[
+  band_candidate('band-green-low','$69.99'),band_candidate('band-green','$100.00'),
+  band_candidate('band-yellow-low','$100.01'),band_candidate('band-yellow','$130.00'),
+  band_candidate('band-red','$130.01'),band_candidate('band-unknown-sale','$100.00',sale_type=None),
+  band_candidate('band-auction','$100.00',sale_type='auction'),band_candidate('band-unknown-price','See listing'),
+  band_candidate('band-currency','€100.00'),band_candidate('band-no-estimate','$100.00',valuation=None)]
+ estimated_candidates=[dict(row,valuation=band_value,sale_type='fixed') if row['id']=='candidate-type' else row for row in candidates]
  extended_candidates=candidates+[candidate('candidate-progress',title='Progressive candidate Silver Certificate',price='$620.43',price_usd=620.43)]
  extended_cards=cards+[observed('234567890123',title='Progressive watched Series of 1934 A Silver Certificate',price='$632.11',valuation=valuation)]
  with stuff.app.app_context():
@@ -55,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   before=[dict(row) for row in db.execute('SELECT * FROM banknotes ORDER BY id')]
   db.execute('PRAGMA query_only=ON')
   pages={}
-  variants=[('base',candidates,cards,'done',1),('aliases',alias_candidates,cards,'done',1),('running',candidates,cards,'running',1),('fresh',extended_candidates,extended_cards,'done',2)]
+  variants=[('base',candidates,cards,'done',1),('aliases',alias_candidates,cards,'done',1),('bands',band_candidates,cards,'done',1),('estimated',estimated_candidates,cards,'done',2),('running',candidates,cards,'running',1),('fresh',extended_candidates,extended_cards,'done',2)]
   for index,removed in enumerate(({'candidate-type'},{'candidate-type','candidate-one'},{'candidate-type','candidate-one','123456789012'}),1):
    variants.append(('deleted'+str(index),[r for r in candidates if r['id'] not in removed],[r for r in cards if r['item_id'] not in removed],'done',1))
   for name,rows,observed_cards,status,revision in variants:
@@ -73,10 +85,12 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   const origin='http://127.0.0.1:5196';
   const evidence={passed:[],failures:[],errors:[],unexpectedRequests:[],simulatedPosts:[],externalRequests:[],sourceBefore,queryOnly:fixtures.queryOnly,sourceRowsPreserved:fixtures.sourceRowsPreserved,rowCount:fixtures.rowCount};
   const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL?{channel:process.env.BROWSER_CHANNEL}:{})});
-  async function setup(mobile=false,progress=false,staticVariant='base'){
+  async function setup(mobile=false,progress=false,staticVariant='base',options={}){
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width:mobile?390:1440,height:900},isMobile:mobile,hasTouch:mobile});
-    const posts=[],popups=[],visits=[];let pageRequests=0,deletes=0,release;
+    const posts=[],popups=[],visits=[];let pageRequests=0,deletes=0,release,releaseInitialEstimateStatus,estimateStarted=false,estimateFinished=false,estimateAttempts=0,estimateReads=0;
+    const estimateStatus=()=>({ok:true,job_id:estimateStarted?'fixture-estimate':'',status:estimateStarted?(estimateFinished?'done':'running'):'none',total:estimateStarted?2:0,completed:estimateFinished?2:0,estimated:estimateFinished?1:0,unavailable:estimateFinished?1:0,remaining:estimateFinished?(options.remaining||0):0,error:'',revision:estimateStarted?(estimateFinished?2:1):0});
     const gate=new Promise(resolve=>release=resolve);
+    const initialEstimateGate=new Promise(resolve=>releaseInitialEstimateStatus=resolve);
     await context.addInitScript(()=>{window.fixtureAlerts=[];window.alert=message=>window.fixtureAlerts.push(message);});
     await context.route('**/*',async route=>{
       const request=route.request(),url=new URL(request.url());
@@ -89,6 +103,11 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
       }
       if(request.method()==='POST'){
         const entry={path:url.pathname,body:request.postData()?request.postDataJSON():null};posts.push(entry);evidence.simulatedPosts.push(entry);
+        if(url.pathname==='/banknotes/market/estimates'){
+          estimateAttempts++;
+          if(options.estimateFailure&&estimateAttempts===1)return route.fulfill({status:503,json:{ok:false,error:'Synthetic research temporarily unavailable'}});
+          estimateStarted=true;return route.fulfill({json:estimateStatus()});
+        }
         if(url.pathname.endsWith('/dismiss')){
           deletes++;const id=url.pathname.split('/').at(-2);
           return route.fulfill({json:{ok:true,canonical_url:id==='123456789012'?'https://www.ebay.com/itm/'+id:'https://dealer.example/item/'+id}});
@@ -96,13 +115,18 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
         if(url.pathname.endsWith('/buy'))return route.fulfill({json:{ok:true,detail_url:'/banknotes/synthetic-created',listing_url:'https://dealer.example/item/never-opened'}});
         evidence.unexpectedRequests.push(request.method()+' '+url.pathname);return route.abort();
       }
+      if(url.pathname==='/banknotes/market/estimates/status'){
+        estimateReads++;const snapshot=estimateStatus();
+        if(options.delayInitialEstimateStatus&&estimateReads===1)await initialEstimateGate;
+        return route.fulfill({json:snapshot});
+      }
       if(url.pathname==='/banknotes/market/status'){
         await gate;
         return route.fulfill({json:{ok:true,scan_id:'fixture-scan',status:'done',revision:2,item_count:7,summary:'Synthetic progressive scan complete'}});
       }
       if(url.pathname==='/banknotes/market'){
         pageRequests++;
-        const name=deletes?'deleted'+Math.min(deletes,3):progress?(pageRequests===1?'running':'fresh'):staticVariant;
+        const name=deletes?'deleted'+Math.min(deletes,3):estimateFinished?'estimated':progress?(pageRequests===1?'running':'fresh'):staticVariant;
         return route.fulfill({contentType:'text/html',body:fixtures.pages[name]});
       }
       if(url.pathname==='/banknotes/synthetic-created')return route.fulfill({contentType:'text/html',body:'<h1>Simulated Ordered record</h1>'});
@@ -118,7 +142,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
     const page=await context.newPage();page.on('pageerror',error=>evidence.errors.push(error.message));page.on('popup',popup=>popups.push(popup));
     await page.goto(origin+'/banknotes/market',{waitUntil:'load'});
     await page.locator('#item-candidate-one').waitFor();
-    return {context,page,posts,popups,visits,release,requests:()=>pageRequests,close:async()=>{release();await context.close();}};
+    return {context,page,posts,popups,visits,release,releaseInitialEstimateStatus,finishEstimates:()=>{estimateFinished=true;},estimateReads:()=>estimateReads,requests:()=>pageRequests,close:async()=>{release();releaseInitialEstimateStatus();await context.close();}};
   }
   const candidate=(page,id)=>page.locator('#item-'+id);
   const observed=(page,id)=>page.locator('.market-personal-row[data-listing-key="https://www.ebay.com/itm/'+id+'"]');
@@ -192,6 +216,32 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
           assert.equal(t.popups.length,1);assert.deepEqual(t.visits,['https://currency.ha.com/itm/fixture/90001']);assert.equal(t.posts.length,0);
         }finally{await t.close();}
       });
+      await run(device+': price dots use exact midpoint and 30 percent boundaries, with no unsupported comparisons',async()=>{
+        const t=await setup(mobile,false,'bands');try{
+          const cases=[['band-green-low','green','$69.99'],['band-green','green','$100.00'],['band-yellow-low','yellow','$100.01'],['band-yellow','yellow','$130.00'],['band-red','red','$130.01']];
+          for(const [id,color,price] of cases){
+            const row=candidate(t.page,id),dot=row.locator('.market-value-dot');
+            assert.equal(await dot.count(),1);assert.match(await dot.getAttribute('class'),new RegExp('market-value-dot-'+color+'(?:\\s|$)'));
+            assert.equal(await dot.getAttribute('role'),'img');
+            assert.equal(await dot.getAttribute('aria-label'),await dot.getAttribute('title'));
+            assert.match(await dot.getAttribute('title'),/benchmark \$100 \(range midpoint\)/);
+            assert.equal((await row.locator('.market-price').textContent()).trim(),'Price: '+price);
+          }
+          assert.match(await candidate(t.page,'band-yellow').locator('.market-value-dot').getAttribute('title'),/^30% above/);
+          for(const id of ['band-unknown-sale','band-auction','band-unknown-price','band-currency','band-no-estimate']){
+            assert.equal(await candidate(t.page,id).locator('.market-value-dot').count(),0,id);
+          }
+          assert.equal(await candidate(t.page,'band-no-estimate').locator('.market-estimate-unavailable').textContent(),'No estimate');
+          const yellow=candidate(t.page,'band-yellow');
+          assert.equal(await yellow.locator('details').getAttribute('open'),null);
+          await yellow.locator('.market-value-dot').click();
+          assert.notEqual(await yellow.locator('details').getAttribute('open'),null);
+          assert.match(await yellow.locator('.market-value-comparison').textContent(),/^30% above.*benchmark \$100/);
+          assert.equal(t.page.url(),origin+'/banknotes/market');assert.equal(t.popups.length,0);assert.equal(t.posts.length,0);
+          const layout=await t.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
+          await t.page.screenshot({path:path.join(artifacts,device+'-price-bands.png'),fullPage:true});
+        }finally{await t.close();}
+      });
       await run(device+': Delete updates issuer and subtype counts and removes the final headings',async()=>{
         const t=await setup(mobile);try{
           const one=candidate(t.page,'candidate-one'),type=candidate(t.page,'candidate-type');
@@ -223,6 +273,51 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
           await t.page.getByRole('button',{name:'New York',exact:true}).click();await t.page.waitForURL(origin+'/banknotes/synthetic-created');
           assert.deepEqual(t.posts,[{path:mobile?'/banknotes/market/ebay-feed/234567890123/buy':'/banknotes/market/candidate-progress/buy',body:{location:'New York',bought:true}}]);
           assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': Estimate prices starts once, polls and replaces results while preserving open evidence',async()=>{
+        const t=await setup(mobile,false,'base',{remaining:mobile?3:0,delayInitialEstimateStatus:true});try{
+          const button=t.page.locator('#marketEstimatePrices'),status=t.page.locator('#marketEstimateStatus');
+          await button.waitFor();assert.equal(await button.isDisabled(),false);assert.equal(t.posts.length,0);
+          assert(t.estimateReads()>0,'Page opening only reads estimation status');
+          await candidate(t.page,'candidate-one').locator('summary').click();
+          await button.evaluate(element=>{element.click();element.click();});
+          await t.page.waitForFunction(()=>document.getElementById('marketEstimateStatus').textContent.includes('Estimating'));
+          assert.equal(await button.isDisabled(),true);
+          assert.equal(t.posts.filter(post=>post.path==='/banknotes/market/estimates').length,1);
+          assert.match(await status.textContent(),/0 of 2/);
+          await t.page.waitForTimeout(100);t.releaseInitialEstimateStatus();await t.page.waitForTimeout(100);
+          assert.match(await status.textContent(),/Estimating.*0 of 2/,'Older pre-start status must not overwrite running progress');
+          assert.equal(await button.isDisabled(),true);
+          await candidate(t.page,'candidate-one').locator('summary').focus();
+          t.finishEstimates();
+          await candidate(t.page,'candidate-type').locator('.market-value-dot-red').waitFor();
+          assert.equal(await status.textContent(),mobile?'Estimates updated · 3 remaining':'Estimates updated');assert.equal(await button.isDisabled(),false);
+          assert.equal(await button.textContent(),mobile?'Estimate remaining':'Estimate prices');
+          assert.notEqual(await candidate(t.page,'candidate-one').locator('details').getAttribute('open'),null);
+          assert.equal(await rows(t.page).count(),5);
+          assert.equal(await observed(t.page,'123456789012').locator('.market-estimate-unavailable').textContent(),'No estimate');
+          assert.equal(t.page.url(),origin+'/banknotes/market');assert.equal(t.popups.length,0);
+          assert.deepEqual(t.posts,[{path:'/banknotes/market/estimates',body:{}}]);
+          await t.page.screenshot({path:path.join(artifacts,device+'-estimates-updated.png'),fullPage:true});
+        }finally{await t.close();}
+      });
+      await run(device+': failed estimation can retry, and completion preserves an active location choice',async()=>{
+        const t=await setup(mobile,false,'base',{estimateFailure:true});try{
+          const button=t.page.locator('#marketEstimatePrices'),status=t.page.locator('#marketEstimateStatus');
+          await button.click();await t.page.getByText('Synthetic research temporarily unavailable',{exact:true}).waitFor();
+          assert.equal(await button.isDisabled(),false);assert.equal(await rows(t.page).count(),5);
+          await button.click();await t.page.waitForFunction(()=>document.getElementById('marketEstimateStatus').textContent.includes('Estimating'));
+          await candidate(t.page,'candidate-type').getByRole('button',{name:'Bought',exact:true}).click();
+          const dialog=t.page.getByRole('dialog',{name:'Choose location'});await dialog.waitFor();
+          t.finishEstimates();await t.page.getByText('Estimates updated',{exact:true}).waitFor();
+          assert(await dialog.isVisible());
+          assert.equal(await candidate(t.page,'candidate-type').locator('.market-estimate-unavailable').textContent(),'No estimate');
+          assert.equal(t.posts.length,2);assert(t.posts.every(post=>post.path==='/banknotes/market/estimates'));
+          await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+          await candidate(t.page,'candidate-type').locator('.market-value-dot-red').waitFor();
+          assert.equal(await dialog.count(),0);assert.equal(await status.textContent(),'Estimates updated');
+          assert.equal(t.posts.length,2);assert.equal(t.popups.length,0);assert.equal(t.page.url(),origin+'/banknotes/market');
         }finally{await t.close();}
       });
     }
