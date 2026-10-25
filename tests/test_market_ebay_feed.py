@@ -1,5 +1,6 @@
 """Personalized source evidence, account isolation, and collection warnings."""
 import json
+import datetime
 from itertools import product
 import os
 from pathlib import Path
@@ -309,6 +310,67 @@ class FeedTests(unittest.TestCase):
                      dict(country='Philippines',pick_number='P96b'),dict(country='Philippines',pick_number='',denomination='5 Pesos',date_1=1944,serial_number='A123',slab_number='999')):
             self.assertEqual(stuff._market_collection_matches(self.db,item),[])
         self.assertTrue(stuff._market_collection_check_incomplete(dict(country='Philippines',pick_number='')))
+
+    def test_title_identity_matches_only_the_same_country_and_full_reference(self):
+        self.note('bermuda-title',country='Bermuda',pick_number='P-14a')
+        self.note('seychelles-title',country='Seychelles',pick_number='P-14b')
+        self.note('us-title',country='USA',pick_number='Fr.7')
+        for title,expected in (
+            ('Bermuda P-14a PMG64',['bermuda-title']),
+            ('Seychelles P-14a PMG64',[]),('Seychelles P-14b PMG64',['seychelles-title']),
+            ('Maldives P-14a PMG64',[]),('Seychelles / Bermuda P-14a',[]),
+            ('Congo Fr.7 PMG64',[]),
+        ):
+            with self.subTest(title=title):
+                item=dict(title=title)
+                self.assertEqual([r['id'] for r in stuff._market_collection_matches(self.db,item)],expected)
+        self.assertFalse(stuff._market_collection_check_incomplete(dict(title='Bermuda P-14a PMG64')))
+        self.assertTrue(stuff._market_collection_check_incomplete(dict(title='Bermuda PMG64')))
+
+    def test_recovered_feed_identity_preserves_raw_fields_cached_estimate_and_prices(self):
+        self.note('bermuda-held',country='Bermuda',pick_number='P-14a')
+        ident=self.claimed();payload=observation(ident)
+        titles=('Seychelles P-14a PMG64','Bermuda P-14a PMG64',
+                'Maldives P-14a PMG64','Seychelles / Bermuda P-14a PMG64')
+        payload['items']=[dict(payload['items'][0],item_id=str(123456789012+i),
+            listing_url='https://www.ebay.com/itm/'+str(123456789012+i),title=title,
+            price='US $299.89',listing_text=title+'\nListing controls: Buy It Now') for i,title in enumerate(titles)]
+        self.assertEqual(self.post(payload).status_code,200)
+        original=dict(feed.cards(self.db,ident)[0],country='',pick_number='P-14a')
+        wanted=stuff.market_estimates.target(original)
+        valuation=dict(low=200,high=300,currency='USD',as_of=datetime.date.today().isoformat(),
+            confidence='medium',grade='PMG 64',sources=[dict(kind='sold',url='https://currency.ha.com/itm/fixture/90001',
+            title='Synthetic comparable',date='2026-04-12',amount=250,currency='USD',grade='PMG 64')])
+        self.db.execute('INSERT INTO market_estimate_cache(cache_key,listing_url,fingerprint,checked_at,retry_after,valuation,listing_basis,outcome) VALUES(?,?,?,?,?,?,?,?)',
+            (wanted['key'],wanted['listing_url'],wanted['fingerprint'],time.time(),time.time()+86400,json.dumps(valuation),
+             json.dumps(dict(url=wanted['listing_url'],sale_type='fixed',price_at_research='US $299.89',observed_at=time.time())),'ready'))
+        self.db.commit()
+        tables=('banknotes','ebay_market_cards','market_estimate_cache')
+        before={table:[tuple(r) for r in self.db.execute('SELECT * FROM '+table)] for table in tables}
+        self.db.execute('PRAGMA query_only=ON')
+        try:
+            shown={card['title']:card for card in stuff._market_personal_feed(self.db,[])['cards']}
+            seychelles=shown[titles[0]]
+            self.assertEqual(seychelles['country'],'')
+            self.assertEqual(seychelles['pick_number'],'P-14a')
+            self.assertEqual(seychelles['_market_identity']['country'],'Seychelles')
+            self.assertEqual(seychelles['_market_issuer']['title'],'Seychelles')
+            self.assertEqual(stuff.market_estimates.target(seychelles)['key'],wanted['key'])
+            self.assertEqual(seychelles['valuation']['low'],200)
+            self.assertEqual(seychelles['sale_type'],'fixed')
+            self.assertEqual(stuff.market_valuation.display(seychelles)['band'],'yellow')
+            self.assertEqual(seychelles['price'],'US $299.89')
+            self.assertEqual(seychelles['collection_matches'],[])
+            self.assertEqual([r['id'] for r in shown[titles[1]]['collection_matches']],['bermuda-held'])
+            ambiguous=shown[titles[3]]
+            self.assertEqual(ambiguous['country'],'Bermuda')  # unchanged legacy cache field
+            self.assertEqual(ambiguous['_market_identity']['country'],'')
+            self.assertEqual(ambiguous['_market_issuer']['title'],'Unknown issuer · Country not specified')
+            self.assertTrue(ambiguous['collection_check_incomplete'])
+            self.assertEqual(ambiguous['collection_matches'],[])
+            self.assertEqual(before,{table:[tuple(r) for r in self.db.execute('SELECT * FROM '+table)] for table in tables})
+        finally:
+            self.db.execute('PRAGMA query_only=OFF')
 
     def test_criswell_aliases_require_the_same_state_and_variety(self):
         held = dict(country='United States of America', issuer='State of South Carolina',

@@ -17,12 +17,13 @@ const os = require('node:os');
   const repo=path.resolve(__dirname,'..');
   const artifacts=process.env.MARKET_ISSUER_TEST_ARTIFACTS||mkdtempSync(path.join(os.tmpdir(),'market-issuer-'));
   mkdirSync(artifacts,{recursive:true});
-  const files=['app.py','market_grouping.py','market_valuation.py','templates/list.html','templates/partials/market_group_heading.html','templates/partials/market_observed_row.html','templates/partials/market_valuation.html','static/css/style.css'];
+  const files=['app.py','market_identity.py','market_grouping.py','market_valuation.py','templates/list.html','templates/partials/market_group_heading.html','templates/partials/market_observed_row.html','templates/partials/market_valuation.html','static/css/style.css'];
   if(existsSync(path.join(repo,'market_estimates.py')))files.push('market_estimates.py');
   const hashes=()=>Object.fromEntries(files.map(file=>[file,createHash('sha256').update(readFileSync(path.join(repo,file))).digest('hex')]));
   const sourceBefore=hashes();
   const render=String.raw`
-import copy,json,os,sys,tempfile,types
+import copy,json,os,sys,tempfile,time,types
+from contextlib import ExitStack
 from datetime import datetime,date
 from pathlib import Path
 from unittest.mock import patch
@@ -60,30 +61,69 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
  estimated_candidates=[dict(row,valuation=band_value,sale_type='fixed') if row['id']=='candidate-type' else row for row in candidates]
  extended_candidates=candidates+[candidate('candidate-progress',title='Progressive candidate Silver Certificate',price='$620.43',price_usd=620.43)]
  extended_cards=cards+[observed('234567890123',title='Progressive watched Series of 1934 A Silver Certificate',price='$632.11',valuation=valuation)]
+ identity_titles=[
+  ('456789012345','SEYCHELLES 1968 5 Rupees P-14a PMG 64','US $299.89'),
+  ('456789012346','BERMUDA 1957 5 Shillings P-14a PMG 67 EPQ','US $249.95'),
+  ('456789012347','MALDIVES 1960 5 Rupees P-14a PMG 67 EPQ','US $229.95'),
+  ('456789012348','Seychelles / Bermuda 1968 P-14a PMG 64','US $149.95'),
+  ('456789012349','1968 5 Rupees P-14a PMG 64','US $119.95'),
+  ('456789012350','Seychelles 1968 5 Rupees P-14a PMG 67 EPQ','US $499.00'),
+  ('456789012351','FRENCH SOMALILAND 1962 10 Francs P-32a PMG 64','US $149.89'),
+  ('456789012352','Council Bluffs Iowa 1902 $10 National Bank Note Fr.633 PMG 64','US $899.95'),
+  ('456789012353','Congo Fr. 7 PMG 64','US $139.95')]
+ identity_cards=[dict(request_id='identity-feed',item_id=ident,title=title,listing_url='https://www.ebay.com/itm/'+ident,price=price,image_url='',source_label='Watched',listing_text='',live_state='unknown',listing_checked_at=None) for ident,title,price in identity_titles]
+ identity_candidates=candidates+[
+  candidate('identity-explicit',country='Seychelles',issuer='Government of Seychelles',title='Seychelles 1968 5 Rupees P-14a PMG 64',series='',date_1=None,pick_number='P-14a'),
+  candidate('identity-title-only',country='',issuer='',title='Maldives 1960 5 Rupees P-14a PMG 65 EPQ',series='',date_1=None,pick_number='P-14a'),
+  candidate('identity-explicit-country',country='Bermuda',issuer='Bermuda Monetary Authority',title='Seychelles comparison mentioned by seller',series='',date_1=None,pick_number='P-14a')]
  with stuff.app.app_context():
   db=stuff.get_db();client=stuff.app.test_client()
   db.execute("INSERT INTO banknotes(id,country,date_1,issuer,status,price) VALUES('preserved-collection','India',1937,'Government of India','Own','42.37')")
+  db.execute("INSERT INTO banknotes(id,country,date_1,issuer,status,price,pick_number,denomination,banknote_id) VALUES('held-bermuda','Bermuda',1957,'Government of Bermuda','Own','77.37','P-14a','5 Shillings','B-FIXTURE')")
+  db.execute("INSERT INTO banknotes(id,country,date_1,issuer,status,price,pick_number,denomination,banknote_id) VALUES('held-us','USA',1861,'US Treasury','Own','88.37','Fr.7','10 Dollars','US-FIXTURE')")
+  epoch=time.time()
+  db.execute("INSERT INTO ebay_purchase_account VALUES(1,'fixture-owner')")
+  db.execute("INSERT INTO ebay_market_requests(id,requested_at,expires_at,status,expected_account,observed_at,source_status) VALUES('identity-feed',?,?, 'done','fixture-owner',?,?)",(epoch,epoch+600,epoch,json.dumps({key:dict(status='ok',message='') for key in ('watched','sponsored')})))
+  for card in identity_cards:
+   db.execute('INSERT INTO ebay_market_cards(request_id,item_id,title,listing_url,price,image_url,source_label,listing_text,live_state,listing_checked_at) VALUES(?,?,?,?,?,?,?,?,?,?)',tuple(card[key] for key in ('request_id','item_id','title','listing_url','price','image_url','source_label','listing_text','live_state','listing_checked_at')))
+   db.execute("INSERT INTO ebay_market_card_sources VALUES('identity-feed',?,'watched')",(card['item_id'],))
+  db.execute("INSERT INTO ebay_market_card_sources VALUES('identity-feed','456789012345','sponsored')")
+  legacy_card=dict(identity_cards[0],country='',pick_number='P-14a')
+  legacy_target=stuff.market_estimates.target(legacy_card)
+  cached_value=dict(valuation,low=200,high=300,grade='PMG 64; exact catalogue type.',sources=[dict(kind='sold',url='https://currency.ha.com/itm/fixture/90001',title='Synthetic same-type auction, realized including premium',date=today,amount=274.25,currency='USD',grade='PMG 64')])
+  cached_basis=dict(url=legacy_target['listing_url'],sale_type='fixed',price_at_research=legacy_card['price'],observed_at=epoch)
+  db.execute("INSERT INTO market_estimate_cache VALUES(?,?,?,?,?,?,?,'ready')",(legacy_target['key'],legacy_target['listing_url'],legacy_target['fingerprint'],epoch,epoch+86400,json.dumps(cached_value),json.dumps(cached_basis)))
   db.commit()
   before=[dict(row) for row in db.execute('SELECT * FROM banknotes ORDER BY id')]
+  protected_tables=('ebay_market_requests','ebay_market_cards','ebay_market_card_sources','market_estimate_cache')
+  source_before={table:[dict(row) for row in db.execute('SELECT * FROM '+table+' ORDER BY rowid')] for table in protected_tables}
   db.execute('PRAGMA query_only=ON')
   pages={}
-  variants=[('base',candidates,cards,'done',1),('aliases',alias_candidates,cards,'done',1),('bands',band_candidates,cards,'done',1),('estimated',estimated_candidates,cards,'done',2),('running',candidates,cards,'running',1),('fresh',extended_candidates,extended_cards,'done',2)]
+  variants=[('base',candidates,cards,'done',1),('aliases',alias_candidates,cards,'done',1),('bands',band_candidates,cards,'done',1),('identity',identity_candidates,identity_cards,'done',1),('estimated',estimated_candidates,cards,'done',2),('running',candidates,cards,'running',1),('fresh',extended_candidates,extended_cards,'done',2)]
   for index,removed in enumerate(({'candidate-type'},{'candidate-type','candidate-one'},{'candidate-type','candidate-one','123456789012'}),1):
    variants.append(('deleted'+str(index),[r for r in candidates if r['id'] not in removed],[r for r in cards if r['item_id'] not in removed],'done',1))
   for name,rows,observed_cards,status,revision in variants:
    scan=dict(id='fixture-scan',category='banknotes',status=status,started_at=now,finished_at=now if status=='done' else None,revision=revision,summary='Synthetic scan',error=None)
    personal=dict(cards=copy.deepcopy(observed_cards),observed_date=today,excluded_count=0,sources={key:dict(status='ok',message='') for key in ('watched','sponsored')})
-   with patch.object(stuff,'_market_latest_scan',return_value=scan),patch.object(stuff,'_market_reap_orphan',side_effect=lambda db,category,row:row),patch.object(stuff,'_market_items',return_value=copy.deepcopy(rows)),patch.object(stuff,'_market_personal_feed',return_value=personal),patch.object(stuff,'property_choices_for_category',return_value=['New York','Carpinteria']):
+   with ExitStack() as patches:
+    patches.enter_context(patch.object(stuff,'_market_latest_scan',return_value=scan));patches.enter_context(patch.object(stuff,'_market_reap_orphan',side_effect=lambda db,category,row:row))
+    patches.enter_context(patch.object(stuff,'_market_items',return_value=copy.deepcopy(rows)));patches.enter_context(patch.object(stuff,'property_choices_for_category',return_value=['New York','Carpinteria']))
+    if name=='identity':
+     patches.enter_context(patch.object(stuff.market_ebay_feed,'enabled',return_value=True))
+    else:
+     patches.enter_context(patch.object(stuff,'_market_personal_feed',return_value=personal))
     response=client.get('/banknotes/market');assert response.status_code==200,(name,response.status_code)
     pages[name]=response.get_data(as_text=True)
   after=[dict(row) for row in db.execute('SELECT * FROM banknotes ORDER BY id')]
   assert before==after
-  print('MARKET_ISSUER_FIXTURES='+json.dumps(dict(pages=pages,queryOnly=bool(db.execute('PRAGMA query_only').fetchone()[0]),sourceRowsPreserved=before==after,rowCount=len(before))))
+  source_after={table:[dict(row) for row in db.execute('SELECT * FROM '+table+' ORDER BY rowid')] for table in protected_tables}
+  assert source_before==source_after
+  print('MARKET_ISSUER_FIXTURES='+json.dumps(dict(pages=pages,queryOnly=bool(db.execute('PRAGMA query_only').fetchone()[0]),sourceRowsPreserved=before==after and source_before==source_after,rowCount=len(before),legacyBlankCountryCache=True)))
 `;
   const output=execFileSync(process.env.PYTHON||'python3',['-c',render,repo],{encoding:'utf8',env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'},maxBuffer:20*1024*1024});
   const fixtures=JSON.parse(output.split('\n').find(line=>line.startsWith('MARKET_ISSUER_FIXTURES=')).slice('MARKET_ISSUER_FIXTURES='.length));
   const origin='http://127.0.0.1:5196';
-  const evidence={passed:[],failures:[],errors:[],unexpectedRequests:[],simulatedPosts:[],externalRequests:[],sourceBefore,queryOnly:fixtures.queryOnly,sourceRowsPreserved:fixtures.sourceRowsPreserved,rowCount:fixtures.rowCount};
+  const evidence={passed:[],failures:[],errors:[],unexpectedRequests:[],simulatedPosts:[],externalRequests:[],sourceBefore,queryOnly:fixtures.queryOnly,sourceRowsPreserved:fixtures.sourceRowsPreserved,rowCount:fixtures.rowCount,legacyBlankCountryCache:fixtures.legacyBlankCountryCache};
   const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL?{channel:process.env.BROWSER_CHANNEL}:{})});
   async function setup(mobile=false,progress=false,staticVariant='base',options={}){
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width:mobile?390:1440,height:900},isMobile:mobile,hasTouch:mobile});
@@ -146,7 +186,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
     return {context,page,posts,popups,visits,release,releaseInitialEstimateStatus,finishEstimates:()=>{estimateFinished=true;},estimateReads:()=>estimateReads,requests:()=>pageRequests,close:async()=>{release();releaseInitialEstimateStatus();await context.close();}};
   }
   const candidate=(page,id)=>page.locator('#item-'+id);
-  const observed=(page,id)=>page.locator('.market-personal-row[data-listing-key="https://www.ebay.com/itm/'+id+'"]');
+  const observed=(page,id)=>page.locator('.market-personal-row[data-listing-key="https://www.ebay.com/itm/'+id+'"],.market-personal-row[data-listing-key="https://ebay.com/itm/'+id+'"]');
   const heading=(page,kind,key)=>page.locator('[data-market-'+kind+'-heading="'+key+'"]');
   const rows=page=>page.locator('#marketResults .item-row');
   async function run(name,fn){try{await fn();evidence.passed.push(name);}catch(error){evidence.failures.push({name,error:error.message});}}
@@ -166,7 +206,8 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
           assert.equal(await t.page.locator('[data-market-issuer-heading]').count(),3);
           assert.equal(await t.page.locator('[data-market-group-heading]').count(),4);
           assert.match(await card.textContent(),/eBay Watched/);assert.match(await card.textContent(),/eBay Sponsored/);assert.doesNotMatch(await card.textContent(),/Availability unverified/);
-          assert.match(await t.page.locator('[data-market-issuer-heading]').last().textContent(),/Unknown issuer.*France/);
+          assert.match(await t.page.locator('[data-market-issuer-heading]').last().textContent(),/France/);
+          assert.doesNotMatch(await t.page.locator('[data-market-issuer-heading]').last().textContent(),/Unknown issuer/);
           const layout=await t.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
           await t.page.screenshot({path:path.join(artifacts,device+'-grouped.png'),fullPage:true});
         }finally{await t.close();}
@@ -187,6 +228,69 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
           const layout=await aliases.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
           await aliases.page.screenshot({path:path.join(artifacts,device+'-treasury-aliases.png'),fullPage:true});
         }finally{await aliases.close();}
+      });
+      await run(device+': title-only countries get separate country headings without inventing an issuer',async()=>{
+        const t=await setup(mobile,false,'identity');try{
+          const countryKeys=[];
+          for(const [id,country] of [['456789012345','Seychelles'],['456789012346','Bermuda'],['456789012347','Maldives'],['456789012351','French Somaliland'],['456789012352','United States of America']]){
+            const row=observed(t.page,id),key=await row.getAttribute('data-market-issuer');countryKeys.push(key);
+            assert.equal(await heading(t.page,'issuer',key).locator('h2').textContent(),country);
+            assert.doesNotMatch(await heading(t.page,'issuer',key).textContent(),/Unknown issuer|Government|Central Bank/);
+          }
+          assert.equal(new Set(countryKeys).size,5,'Different countries must remain separate, including equal Pick numbers');
+          assert.equal(await observed(t.page,'456789012350').getAttribute('data-market-issuer'),countryKeys[0]);
+          assert.equal(await observed(t.page,'456789012350').getAttribute('data-market-group'),await observed(t.page,'456789012345').getAttribute('data-market-group'));
+          assert.equal(await candidate(t.page,'identity-title-only').getAttribute('data-market-issuer'),countryKeys[2]);
+          const explicit=candidate(t.page,'identity-explicit'),explicitKey=await explicit.getAttribute('data-market-issuer');
+          assert.notEqual(explicitKey,countryKeys[0]);
+          assert.equal(await heading(t.page,'issuer',explicitKey).locator('h2').textContent(),'Government of Seychelles · Seychelles');
+          const authoritative=candidate(t.page,'identity-explicit-country');
+          assert.equal(await heading(t.page,'issuer',await authoritative.getAttribute('data-market-issuer')).locator('h2').textContent(),'Bermuda Monetary Authority · Bermuda');
+          assert.equal(await rows(t.page).count(),16);assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+          const layout=await t.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
+          await t.page.screenshot({path:path.join(artifacts,device+'-title-country-headings.png'),fullPage:true});
+        }finally{await t.close();}
+      });
+      await run(device+': ambiguous titles stay unknown and catalogue duplicate links remain country-safe',async()=>{
+        const t=await setup(mobile,false,'identity');try{
+          for(const id of ['456789012348','456789012349','456789012353']){
+            const row=observed(t.page,id),key=await row.getAttribute('data-market-issuer');
+            assert.match(await heading(t.page,'issuer',key).locator('h2').textContent(),/Country not specified/);
+            assert.match(await row.textContent(),/Collection check incomplete/);
+            assert.equal(await row.locator('.market-tag-owned').count(),0);
+            assert.notEqual(key,await observed(t.page,'456789012346').getAttribute('data-market-issuer'));
+          }
+          const held=observed(t.page,'456789012346').locator('.market-tag-owned');
+          assert.equal(await held.count(),1);assert.match(await held.textContent(),/Already in your collection.*same catalogue reference/s);
+          assert.equal(await held.getByRole('link').getAttribute('href'),'/banknotes/held-bermuda');
+          for(const id of ['456789012345','456789012347','456789012350']){
+            const row=observed(t.page,id);assert.equal(await row.locator('.market-tag-owned').count(),0);
+            assert.doesNotMatch(await row.textContent(),/Collection check incomplete/);
+          }
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': title metadata preserves the blank-country cache, exact price, evidence, dot and actions',async()=>{
+        const t=await setup(mobile,false,'identity');try{
+          const row=observed(t.page,'456789012345'),url='https://www.ebay.com/itm/456789012345';
+          assert.equal((await row.locator('.market-price').textContent()).trim(),'Price: US $299.89');
+          assert.equal((await row.locator('.market-estimate summary').textContent()).trim(),'Est. value: $200–$300');
+          assert.equal(await row.locator('.market-value-dot-yellow').count(),1);
+          assert.equal(await row.getByRole('link',{name:'View listing',exact:true}).getAttribute('href'),url);
+          assert.equal(await row.getByRole('button',{name:'Buy',exact:true}).getAttribute('data-buy-url'),'/banknotes/market/ebay-feed/456789012345/buy');
+          assert.equal(await row.getByRole('button',{name:'Bought',exact:true}).getAttribute('data-buy-url'),'/banknotes/market/ebay-feed/456789012345/buy');
+          assert.equal(await row.getByRole('button',{name:'Delete',exact:true}).getAttribute('data-dismiss-url'),'/banknotes/market/ebay-feed/456789012345/dismiss');
+          assert.match(await row.textContent(),/eBay Watched/);assert.match(await row.textContent(),/eBay Sponsored/);
+          await row.locator('.market-value-dot').click();
+          assert.notEqual(await row.locator('.market-estimate').getAttribute('open'),null);
+          assert.match(await row.locator('.market-estimate').textContent(),/Synthetic same-type auction.*\$274\.25/s);
+          assert.match(await row.locator('.market-estimate').textContent(),/PMG 64/);
+          assert.equal(await row.locator('.market-estimate-sources a').getAttribute('href'),'https://currency.ha.com/itm/fixture/90001');
+          assert.equal(await observed(t.page,'456789012350').locator('.market-estimate-unavailable').textContent(),'No estimate');
+          assert.equal(await observed(t.page,'456789012350').locator('.market-value-dot').count(),0);
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);assert.equal(t.page.url(),origin+'/banknotes/market');
+          await t.page.screenshot({path:path.join(artifacts,device+'-title-country-cache.png'),fullPage:true});
+        }finally{await t.close();}
       });
       await run(device+': exact price cents, concise supported range and exact No estimate fallback',async()=>{
         const t=await setup(mobile);try{
@@ -327,5 +431,5 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
     writeFileSync(path.join(artifacts,'evidence.json'),JSON.stringify(evidence,null,2));
   }
   console.log(JSON.stringify({passed:evidence.passed.length,failures:evidence.failures,errors:evidence.errors,unexpectedRequests:evidence.unexpectedRequests,externalRequests:evidence.externalRequests,sourceStable:evidence.sourceStable,queryOnly:evidence.queryOnly,sourceRowsPreserved:evidence.sourceRowsPreserved,artifacts}));
-  if(evidence.failures.length||evidence.errors.length||evidence.unexpectedRequests.length||evidence.externalRequests.length||!evidence.sourceStable)process.exitCode=1;
+  if(evidence.failures.length||evidence.errors.length||evidence.unexpectedRequests.length||evidence.externalRequests.length||!evidence.sourceStable||!evidence.queryOnly||!evidence.sourceRowsPreserved)process.exitCode=1;
 })().catch(error=>{console.error(error);process.exitCode=1;});

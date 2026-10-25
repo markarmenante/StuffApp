@@ -75,7 +75,7 @@ class GroupingTests(unittest.TestCase):
 
     def test_unknown_series_is_explicit_and_does_not_guess_from_year(self):
         result=stuff._market_group_rows('banknotes',[dict(id='a',country='France',date_1=1934),dict(id='b')])
-        self.assertEqual(result[0]['_market_issuer']['title'],'Unknown issuer · France')
+        self.assertEqual(result[0]['_market_issuer']['title'],'France')
         self.assertEqual(result[1]['_market_issuer']['title'],'Unknown issuer · Country not specified')
         self.assertEqual(result[0]['_market_group']['title'],'Issued 1934 · Series not specified · Catalogue not specified')
         self.assertEqual(result[1]['_market_group']['title'],'Series not specified · Catalogue not specified')
@@ -209,6 +209,65 @@ class GroupingTests(unittest.TestCase):
         self.assertNotEqual(result[0]['_market_group']['key'],result[1]['_market_group']['key'])
         self.assertTrue(all('Series not specified' in r['_market_group']['title'] for r in result))
         self.assertEqual([r['series'] for r in result],['',''])
+
+    def test_title_countries_do_not_require_existing_holdings_or_invent_issuers(self):
+        countries=('Seychelles','Bermuda','Maldives','Mauritius','French Somaliland')
+        rows=[dict(id=str(i),title=country+' 1960 5 Rupees P-14a PMG 64 EPQ',
+                   price='US $299.89',listing_url='https://example.test/'+str(i)) for i,country in enumerate(countries)]
+        before=copy.deepcopy(rows)
+        result=stuff._market_group_rows('banknotes',rows,observed=True)
+        self.assertEqual([r['_market_issuer']['title'] for r in result],list(countries))
+        self.assertEqual(len({r['_market_group']['key'] for r in result}),5)
+        self.assertTrue(all('P-14A' in r['_market_group']['title'] for r in result))
+        self.assertTrue(all('Series not specified' in r['_market_group']['title'] for r in result))
+        self.assertEqual(rows,before)
+        self.assertTrue(all('country' not in r and 'issuer' not in r for r in result))
+
+    def test_title_alias_overlap_and_ambiguous_mentions_keep_country_boundaries(self):
+        cases={
+            'French Indochina P-1':'French Indo-China',
+            'French Territory of the Afars & Issas P-1':'French Territory of the Afars and Issas',
+            'British Honduras P-1':'British Honduras', 'Honduras P-1':'Honduras',
+            'British India P-1':'British India', 'India P-1':'India',
+            'Malaya & British Borneo P-1':'Malaya and British Borneo',
+            'Seychelles P-14a PMG64 US $299':'Seychelles', 'France P-88 US$200':'France',
+            'Seychelles P-14a U.S.A. $299.89':'Seychelles',
+        }
+        for title,country in cases.items():
+            with self.subTest(title=title):
+                identity=stuff._market_title_identity(dict(title=title))
+                self.assertEqual(identity['country'],country);self.assertFalse(identity['ambiguous'])
+        for title in ('Seychelles / Bermuda P-14a', 'British Honduras and Honduras P-1',
+                      'India and British India P-1', 'Georgia P-1', 'US and Bermuda P-1',
+                      'Congo Fr.7 PMG64', 'Virgin Islands Fr.7 PMG64'):
+            with self.subTest(title=title):
+                identity=stuff._market_title_identity(dict(title=title))
+                self.assertEqual(identity['country'],'');self.assertTrue(identity['ambiguous'])
+                self.assertTrue(stuff._market_collection_check_incomplete(dict(title=title)))
+        self.assertEqual(stuff._market_title_identity(dict(title='NotSeychelles P-1'))['country'],'')
+        self.assertEqual(stuff._market_title_identity(dict(country='Bermuda',title='Seychelles comparison P-1'))['country'],'Bermuda')
+
+    def test_only_explicit_issuer_text_and_national_bank_locality_are_recovered(self):
+        cases={
+            'Seychelles Government of Seychelles P-1 PMG64':('Seychelles','Government of Seychelles'),
+            'Bermuda Monetary Authority P-1 PMG64':('Bermuda','Bermuda Monetary Authority'),
+            '1902 $10 Council Bluffs Iowa City National Bank PMG64':
+                ('United States of America','City National Bank (Council Bluffs, Iowa)'),
+            '1902 Wheeling, West Virginia First National Bank $20':
+                ('United States of America','First National Bank (Wheeling, West Virginia)'),
+        }
+        for title,expected in cases.items():
+            with self.subTest(title=title):
+                identity=stuff._market_title_identity(dict(title=title))
+                self.assertEqual((identity['country'],identity['issuer']),expected)
+        for title in ('Seychelles 1960 PMG64 EPQ', 'Bermuda 50 Dollars $200', 'Banknote Maldives P-1'):
+            self.assertEqual(stuff._market_title_identity(dict(title=title))['issuer'],'')
+        rows=[dict(id='explicit',country='Seychelles',issuer='An Explicit Bank',title='Seychelles P-1'),
+              dict(id='country',title='Seychelles P-1'),dict(id='variety',title='Seychelles P-1a')]
+        result=stuff._market_group_rows('banknotes',rows)
+        self.assertEqual(result[0]['_market_issuer']['title'],'An Explicit Bank · Seychelles')
+        self.assertEqual(result[1]['_market_issuer']['title'],'Seychelles')
+        self.assertNotEqual(result[1]['_market_group']['key'],result[2]['_market_group']['key'])
 
 
 class MarketRouteTests(unittest.TestCase):

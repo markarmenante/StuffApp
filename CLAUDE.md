@@ -147,6 +147,16 @@ legacy `fair` prose as fair market value. Evidence stays behind the expandable
 estimate. See `docs/market-scan.md`, `market_grouping.py` and
 `market_valuation.py`; normal collection ordering is unchanged.
 
+Title identity recovery (2026-10-25): `market_identity.py` derives missing
+Market Scan country and bounded explicit issuer names from titles using the
+available country/territory rosters, independent of holdings. A known country
+without a named issuer heads its own section; countries never invent banks.
+Overlapping aliases prefer the full name, while independent multiple-country
+mentions stay unresolved. Preserve distinct historical countries, catalogue
+varieties and series. Observed `_market_identity` is display/matching metadata;
+the original card fields still feed the estimate fingerprint. Do not replace
+those raw fields or weaken cache identity invalidation to improve a heading.
+
 Price markers (2026-10-25): for an explicit fixed asking price in the estimate's
 currency, compare with the supported range midpoint: green at/below, yellow up
 to exactly 30% above, red beyond 30%. Unknown prices/types, auctions, currency

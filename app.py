@@ -12,6 +12,7 @@ import market_scan as market_runtime
 import market_colonial
 import market_ebay_feed
 import market_grouping
+import market_identity
 import market_valuation
 import market_estimates
 import market_unwatch
@@ -17672,11 +17673,26 @@ def _market_criswell_references(item):
     return {'criswell:' + next(iter(states)).lower() + ':' + next(iter(numbers))}
 
 
+def _market_title_identity(item):
+    return market_identity.resolve(item,
+        country_names=tuple(value[0] for value in COUNTRY_ERAS.values()),
+        us_states=tuple(_MARKET_CRISWELL_STATES.values()))
+
+
+def _market_banknote_identity_fields(item):
+    """Derived matching/display copy; never an estimate fingerprint or write."""
+    fields = dict(item)
+    fields.update(_market_title_identity(item))
+    if not fields['country'] and not fields['ambiguous'] and _market_criswell_references(item):
+        fields['country'] = 'United States of America'
+    if not fields.get('pick_number') and not fields.get('other_catalog'):
+        fields['pick_number'] = '; '.join(m.group(0) for m in
+            _MARKET_REFERENCE_RE.finditer(str(item.get('title') or '')))
+    return fields
+
+
 def _market_reference_country(item):
-    country = _canonical_banknote_country(item.get('country') or '')
-    if not country and _market_criswell_references(item):
-        return 'United States of America'
-    return country
+    return _market_banknote_identity_fields(item)['country']
 
 
 def _market_catalog_references(item):
@@ -17725,7 +17741,8 @@ def _market_catalog_references(item):
 
 
 def _market_collection_check_incomplete(item):
-    return not (_banknote_country_fold(_market_reference_country(item)) and _market_catalog_references(item))
+    fields = _market_banknote_identity_fields(item)
+    return not (_banknote_country_fold(fields['country']) and _market_catalog_references(fields))
 
 
 def _market_collection_matches(db, item, rows=None):
@@ -17735,8 +17752,9 @@ def _market_collection_matches(db, item, rows=None):
         rows = getattr(ctx, 'owned_banknotes', None) if ctx else None
     if rows is None:
         rows = _market_owned_banknote_rows(db)
-    country = _banknote_country_fold(_market_reference_country(item))
-    catalog = _market_catalog_references(item)
+    identity = _market_banknote_identity_fields(item)
+    country = _banknote_country_fold(identity['country'])
+    catalog = _market_catalog_references(identity)
     listing_id = market_ebay_feed.item_id(item.get('listing_url'))
     found = []
     for raw in rows:
@@ -18780,7 +18798,8 @@ def _market_group_rows(category, rows, observed=False):
                 _denom_amount(row.get('denomination')))
     return market_grouping.group_rows(rows, category,
         coin_fields=canonicalize_coin_fields, note_type=note_type, observed=observed,
-        catalog_references=_market_catalog_references, banknote_order=banknote_order)
+        catalog_references=_market_catalog_references, banknote_order=banknote_order,
+        identity_fields=_market_banknote_identity_fields)
 
 
 def _market_personal_feed(db, visible_items):
@@ -18813,12 +18832,17 @@ def _market_personal_feed(db, visible_items):
         if card['canonical_url'] in displayed or card['canonical_url'] in deleted or card['canonical_url'] in purchased:
             continue
         title = card['title']
+        # Resolve the observed title before adding the legacy display fields.
+        # These derived facts cannot change the original estimate fingerprint.
+        identity = _market_banknote_identity_fields(card)
+        card['_market_identity'] = {key: identity[key] for key in ('country', 'issuer', 'ambiguous')}
         country = next((c for c in known_countries if re.search(r'(?<![a-z])' + re.escape(c) + r'(?![a-z])', title, re.I)), '')
         references = '; '.join(m.group(0) for m in _MARKET_REFERENCE_RE.finditer(title))
         if not country and re.search(r'\b(?:fr\.?|friedberg)\s*[.#]?\s*\d', references, re.I):
             country = 'United States of America'
-        identity = dict(country=country, pick_number=references, title=title, listing_url=card['listing_url'])
-        card['country'] = _market_reference_country(identity)  # display-only observed identity
+        legacy_identity = dict(country=country, pick_number=references, title=title)
+        card['country'] = (_canonical_banknote_country(country) or
+            ('United States of America' if _market_criswell_references(legacy_identity) else ''))
         card['pick_number'] = references
         card['collection_matches'] = _market_collection_matches(db, identity, rows)
         card['collection_check_incomplete'] = _market_collection_check_incomplete(identity)

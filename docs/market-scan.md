@@ -68,10 +68,35 @@ existing region grouping and ranking.
 Scanned, watched and sponsored banknotes now share those issuer sections. Source
 labels, availability warnings, duplicate checks and exact Buy/Bought/Delete
 targets remain with each listing. Observed cards use only explicitly named
-series and references; an issuer is never guessed from a title. Missing issuer
-information appears as “Unknown issuer”. Current and Earlier views use the same
+series and references. `market_identity.py` recovers an unambiguous country
+from exact title words using the filing/history/entity rosters and spelling
+aliases, independently of the countries already held. Longer contained names
+take precedence (for example British Honduras); separate country mentions remain
+ambiguous. Colonies and currency areas retain their own names, including British
+India, French Somaliland and Malaya and British Borneo. A US price prefix such
+as `US $299.89` is not a country mention. Ambiguous names such as bare Congo or
+Georgia cannot become a US attribution through a Friedberg-looking number.
+
+Explicit structured country/issuer fields lead. Otherwise a country-only card
+uses that country as its heading, such as “Seychelles”; it never invents an
+issuing institution. Only bounded, explicitly written institution names are
+read from titles. A named US national bank requires a full state name, and its
+issuer heading retains the explicitly adjacent city/state to avoid combining
+same-named banks in different places. Missing country and issuer remain labelled
+unknown. Current and Earlier views use the same
 grouping, and deleting a card updates both section counts. Display grouping
 does not rewrite stored payloads, ranks or the ordinary collection list.
+
+Observed title recovery lives separately in `_market_identity` metadata and a
+matching-only copy. The observed card retains its legacy `country` and catalogue
+fields for estimate fingerprinting; the cache overlay and changed-identity
+invalidation rules are unchanged. Thus improving a heading does not discard a
+previous supported estimate, price marker or evidence. Collection matching uses
+the recovered country plus the complete catalogue namespace/variety, never a
+different country's same-numbered reference. An ambiguous title has an
+incomplete catalogue check; an independently linked exact purchased listing
+can still identify its existing collection record. Tests cover the real feed
+shaping/cache path with a query-only fixture database and preserved source rows.
 
 Banknotes show `Price: …` and `Est. value: …`, or exactly `No estimate`. The
 asking/current price remains separate from a researched market-value range.

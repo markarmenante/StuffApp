@@ -5,6 +5,7 @@ import re
 import unicodedata
 
 import banknote_catalog
+import market_identity
 
 
 def _text(value):
@@ -76,22 +77,25 @@ def _issuer_label(issuer, country, kind):
     return issuer
 
 
-def _banknote_identity(row, note_type, observed, catalog_references):
-    country = _text(banknote_catalog.canonical_country(row.get("country")))
+def _banknote_identity(row, note_type, observed, catalog_references, identity_fields):
+    fields = identity_fields(row) if identity_fields else dict(row, **market_identity.resolve(row))
+    if isinstance(row.get('_market_identity'), dict):
+        fields.update(row['_market_identity'])
+    country = _text(banknote_catalog.canonical_country(fields.get("country")))
     series = observed_series(row.get("title")) if observed or row.get("_market_card_kind") == "observed" else _series(row.get("series"))
-    issuer = _text(row.get("issuer"))
+    issuer = _text(fields.get("issuer"))
     if _fold(issuer) in ("unknown", "unknown issuer", "not specified", "n/a", "none", "-", "—"):
         issuer = ""
     kind = ""
     if country == "United States of America" and note_type:
-        kind = _text(note_type(row))
+        kind = _text(note_type(fields))
     issuer = _issuer_label(issuer, country, kind)
-    references, reference_title = _catalogue_identity(row, country, catalog_references)
-    # A missing issuer is a labelled bucket, never an issuer inferred from a
-    # country, series or seller's title. Country scopes generic issuer names
-    # such as "Government"; successors and colonies retain their own scope.
+    references, reference_title = _catalogue_identity(fields, country, catalog_references)
+    # A missing issuer uses the known country as its heading. A country never
+    # supplies an invented bank; explicit institutions retain their own scope.
     issuer_identity = ("banknotes", _fold(country), _fold(issuer))
-    issuer_title = (issuer or "Unknown issuer") + " · " + (country or "Country not specified")
+    issuer_title = (issuer + " · " + (country or "Country not specified") if issuer else
+                    country or "Unknown issuer · Country not specified")
     parts = [kind] if kind else []
     if series:
         parts.append("Series of " + series.upper() if re.fullmatch(r"\d{4}[a-z]?", series, re.I)
@@ -114,7 +118,7 @@ def _key(identity):
 
 
 def group_rows(rows, category, *, coin_fields=None, note_type=None, observed=False,
-               catalog_references=None, banknote_order=None):
+               catalog_references=None, banknote_order=None, identity_fields=None):
     """Gather banknotes by explicit issuer, then similar series/catalogue type.
 
     Every result is a new dict. Metadata is derived only for rendering; no
@@ -133,7 +137,7 @@ def group_rows(rows, category, *, coin_fields=None, note_type=None, observed=Fal
             issuer_key, issuer_title = "coins", ""
             order = ()
         elif category == "banknotes":
-            issuer_identity, issuer_title, identity, title, series = _banknote_identity(row, note_type, observed, catalog_references)
+            issuer_identity, issuer_title, identity, title, series = _banknote_identity(row, note_type, observed, catalog_references, identity_fields)
             issuer_key = _key(issuer_identity)
             order = tuple(banknote_order(dict(row, series=series))) if banknote_order else ()
         else:
