@@ -112,6 +112,51 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(groups['a']['count'],2)
         self.assertEqual(rows,before)
 
+    def test_live_legal_tender_issuer_alias_shares_treasury_heading_only(self):
+        rows=[dict(note('legacy'),issuer='United States (Legal Tender Note)',
+                   title='1917 United States $1 Legal Tender Note',series='1917',pick_number='Fr.39'),
+              dict(note('treasury'),issuer='United States Treasury',
+                   title='1907 United States $5 Legal Tender Note',series='1907',pick_number='Fr.91')]
+        before=copy.deepcopy(rows)
+        result=stuff._market_group_rows('banknotes',rows)
+        self.assertEqual([r['id'] for r in result],['treasury','legacy'])
+        self.assertEqual(len({r['_market_issuer']['key'] for r in result}),1)
+        self.assertEqual(result[0]['_market_issuer']['title'],
+                         'United States Treasury · United States of America')
+        self.assertEqual(result[0]['_market_issuer']['count'],2)
+        self.assertEqual(len({r['_market_group']['key'] for r in result}),2)
+        self.assertTrue(all('United States Note (Legal Tender Note)' in r['_market_group']['title'] for r in result))
+        self.assertEqual(rows,before)
+        self.assertEqual({r['id']:r['issuer'] for r in result},{r['id']:r['issuer'] for r in before})
+
+    def test_treasury_aliases_require_us_country_and_preserve_bank_issuers(self):
+        aliases=('US Treasury','U.S. Treasury','United States Treasury',
+                 'Treasury of United States','Treasury of the United States')
+        rows=[dict(note(str(i)),issuer=issuer) for i,issuer in enumerate(aliases)]
+        rows.extend([
+            dict(note('federal'),issuer='Federal Reserve Bank of New York',title='Federal Reserve Bank Note'),
+            dict(note('national'),issuer='First National Bank of Boston',title='National Bank Note'),
+            dict(note('generic'),issuer='United States'),
+            dict(note('unknown'),issuer=''),
+            dict(note('foreign'),country='Philippines',issuer='US Treasury'),
+            dict(note('contradiction'),issuer='United States (Legal Tender Note)',title='National Bank Note'),
+        ])
+        before=copy.deepcopy(rows)
+        result=stuff._market_group_rows('banknotes',rows)
+        groups={r['id']:r['_market_issuer'] for r in result}
+        treasury=groups['0']['key']
+        self.assertTrue(all(groups[str(i)]['key']==treasury for i in range(len(aliases))))
+        self.assertEqual(groups['0']['count'],len(aliases))
+        self.assertTrue(all(groups[name]['key']!=treasury for name in
+                            ('federal','national','generic','unknown','foreign','contradiction')))
+        self.assertNotEqual(groups['federal']['key'],groups['national']['key'])
+        self.assertEqual(groups['generic']['title'],'United States · United States of America')
+        self.assertEqual(rows,before)
+        # Without a classified note type, the legacy label stays literal.
+        raw=[dict(note('unclassified'),issuer='United States (Legal Tender Note)')]
+        self.assertTrue(grouping.group_rows(raw,'banknotes')[0]['_market_issuer']['title'].startswith(
+            'United States (Legal Tender Note) ·'))
+
     def test_catalogue_types_separate_but_equivalent_references_and_grades_gather(self):
         base=dict(country='British Honduras',issuer='Government of British Honduras',series='1960')
         rows=[dict(note('a'),**base,pick_number='P-1a',denomination='1 Dollar',grade='65',serial_number='AAA'),

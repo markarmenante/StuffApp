@@ -43,6 +43,9 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   row.update(extra);return row
  candidates=[candidate('candidate-one',valuation=valuation),candidate('candidate-type',pick_number='Fr.1605',price='$189.95',price_usd=189.95),candidate('candidate-other',issuer='Another Bank',price='$75.25',price_usd=75.25),candidate('candidate-unknown',country='France',issuer='',series='1939',date_1=1939,pick_number='P-1',price='$22.22',price_usd=22.22)]
  cards=[observed('123456789012')]
+ alias_candidates=candidates+[
+  candidate('legacy-legal-tender',issuer='United States (Legal Tender Note)',title='1917 United States $1 Legal Tender Note',series='1917',date_1=1917,pick_number='Fr.39'),
+  candidate('explicit-legal-tender',issuer='United States Treasury',title='1907 United States $5 Legal Tender Note',series='1907',date_1=1907,pick_number='Fr.91',denomination='5 Dollars')]
  extended_candidates=candidates+[candidate('candidate-progress',title='Progressive candidate Silver Certificate',price='$620.43',price_usd=620.43)]
  extended_cards=cards+[observed('234567890123',title='Progressive watched Series of 1934 A Silver Certificate',price='$632.11',valuation=valuation)]
  with stuff.app.app_context():
@@ -52,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   before=[dict(row) for row in db.execute('SELECT * FROM banknotes ORDER BY id')]
   db.execute('PRAGMA query_only=ON')
   pages={}
-  variants=[('base',candidates,cards,'done',1),('running',candidates,cards,'running',1),('fresh',extended_candidates,extended_cards,'done',2)]
+  variants=[('base',candidates,cards,'done',1),('aliases',alias_candidates,cards,'done',1),('running',candidates,cards,'running',1),('fresh',extended_candidates,extended_cards,'done',2)]
   for index,removed in enumerate(({'candidate-type'},{'candidate-type','candidate-one'},{'candidate-type','candidate-one','123456789012'}),1):
    variants.append(('deleted'+str(index),[r for r in candidates if r['id'] not in removed],[r for r in cards if r['item_id'] not in removed],'done',1))
   for name,rows,observed_cards,status,revision in variants:
@@ -70,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   const origin='http://127.0.0.1:5196';
   const evidence={passed:[],failures:[],errors:[],unexpectedRequests:[],simulatedPosts:[],externalRequests:[],sourceBefore,queryOnly:fixtures.queryOnly,sourceRowsPreserved:fixtures.sourceRowsPreserved,rowCount:fixtures.rowCount};
   const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL?{channel:process.env.BROWSER_CHANNEL}:{})});
-  async function setup(mobile=false,progress=false){
+  async function setup(mobile=false,progress=false,staticVariant='base'){
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width:mobile?390:1440,height:900},isMobile:mobile,hasTouch:mobile});
     const posts=[],popups=[],visits=[];let pageRequests=0,deletes=0,release;
     const gate=new Promise(resolve=>release=resolve);
@@ -99,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
       }
       if(url.pathname==='/banknotes/market'){
         pageRequests++;
-        const name=deletes?'deleted'+Math.min(deletes,3):progress?(pageRequests===1?'running':'fresh'):'base';
+        const name=deletes?'deleted'+Math.min(deletes,3):progress?(pageRequests===1?'running':'fresh'):staticVariant;
         return route.fulfill({contentType:'text/html',body:fixtures.pages[name]});
       }
       if(url.pathname==='/banknotes/synthetic-created')return route.fulfill({contentType:'text/html',body:'<h1>Simulated Ordered record</h1>'});
@@ -133,7 +136,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
           assert.equal(await card.getAttribute('data-market-issuer'),issuer);assert.equal(await card.getAttribute('data-market-group'),group);
           assert.equal(await otherType.getAttribute('data-market-issuer'),issuer);assert.notEqual(await otherType.getAttribute('data-market-group'),group);
           assert.notEqual(await otherIssuer.getAttribute('data-market-issuer'),issuer);
-          assert.match(await heading(t.page,'issuer',issuer).textContent(),/US Treasury.*3 listings/s);
+          assert.match(await heading(t.page,'issuer',issuer).textContent(),/United States Treasury.*3 listings/s);
           assert.equal(await heading(t.page,'group',group).locator('.market-group-count').textContent(),'2 listings');
           assert.equal(await t.page.locator('[data-market-issuer-heading]').count(),3);
           assert.equal(await t.page.locator('[data-market-group-heading]').count(),4);
@@ -142,6 +145,23 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
           const layout=await t.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
           await t.page.screenshot({path:path.join(artifacts,device+'-grouped.png'),fullPage:true});
         }finally{await t.close();}
+        const aliases=await setup(mobile,false,'aliases');try{
+          const legacy=candidate(aliases.page,'legacy-legal-tender'),explicit=candidate(aliases.page,'explicit-legal-tender'),silver=candidate(aliases.page,'candidate-one');
+          const issuer=await silver.getAttribute('data-market-issuer');
+          assert.equal(await rows(aliases.page).count(),7);
+          assert.equal(await legacy.getAttribute('data-market-issuer'),issuer);
+          assert.equal(await explicit.getAttribute('data-market-issuer'),issuer);
+          assert.match(await heading(aliases.page,'issuer',issuer).textContent(),/United States Treasury.*5 listings/s);
+          assert.equal(await aliases.page.locator('[data-market-issuer-heading]').count(),3);
+          const legacyGroup=await legacy.getAttribute('data-market-group'),explicitGroup=await explicit.getAttribute('data-market-group');
+          assert.notEqual(legacyGroup,explicitGroup);
+          for(const key of [legacyGroup,explicitGroup])assert.match(await heading(aliases.page,'group',key).textContent(),/United States Note \(Legal Tender Note\)/);
+          assert.match(await heading(aliases.page,'group',await silver.getAttribute('data-market-group')).textContent(),/Silver Certificate/);
+          assert.match(await legacy.textContent(),/United States \(Legal Tender Note\)/);
+          assert.match(await explicit.textContent(),/United States Treasury/);
+          const layout=await aliases.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
+          await aliases.page.screenshot({path:path.join(artifacts,device+'-treasury-aliases.png'),fullPage:true});
+        }finally{await aliases.close();}
       });
       await run(device+': exact price cents, concise supported range and exact No estimate fallback',async()=>{
         const t=await setup(mobile);try{

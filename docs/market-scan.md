@@ -57,7 +57,11 @@ Both Market Scan pages gather similar listings into visible sections. Banknotes
 group first by explicit issuer and canonical country, then by complete series,
 US note type and catalogue reference. Different issuer names, series suffixes
 and reference varieties stay distinct. Grades and serials do not split the same
-reference. Within an issuer, notes follow series year and numeric denomination;
+reference. Explicit US Treasury spelling aliases share one issuer; the legacy
+“United States (Legal Tender Note)” label does so only for an identified United
+States Note. National banks and Federal Reserve banks stay separate, and a
+country name alone never supplies an issuer. Within an issuer, notes follow
+series year and numeric denomination;
 issuer blocks retain first appearance in the ranked results. Coins retain their
 existing region grouping and ranking.
 

@@ -62,6 +62,20 @@ def _catalogue_identity(row, country, catalog_references):
     return (), "Catalogue not specified"
 
 
+def _issuer_label(issuer, country, kind):
+    """Display aliases for an explicit Treasury issuer; never infer from country."""
+    if country != "United States of America":
+        return issuer
+    folded = _fold(issuer).replace(".", "")
+    if folded in {"us treasury", "united states treasury", "treasury of united states",
+                  "treasury of the united states"}:
+        return "United States Treasury"
+    if (folded == "united states (legal tender note)" and
+            kind == "United States Note (Legal Tender Note)"):
+        return "United States Treasury"
+    return issuer
+
+
 def _banknote_identity(row, note_type, observed, catalog_references):
     country = _text(banknote_catalog.canonical_country(row.get("country")))
     series = observed_series(row.get("title")) if observed or row.get("_market_card_kind") == "observed" else _series(row.get("series"))
@@ -71,6 +85,7 @@ def _banknote_identity(row, note_type, observed, catalog_references):
     kind = ""
     if country == "United States of America" and note_type:
         kind = _text(note_type(row))
+    issuer = _issuer_label(issuer, country, kind)
     references, reference_title = _catalogue_identity(row, country, catalog_references)
     # A missing issuer is a labelled bucket, never an issuer inferred from a
     # country, series or seller's title. Country scopes generic issuer names
