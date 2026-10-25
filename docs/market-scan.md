@@ -114,6 +114,16 @@ evidence and deferring replacement while a location choice or purchase/delete
 request is active. Failed starts remain retryable. Controlled tests intercept
 research and purchase actions rather than running a paid scan.
 
+Fresh signed-in exact-listing reads can supply price-comparison context for an
+already saved estimate without another model call. Today puts visible, enabled
+purchase controls on the dedicated second line of its bounded evidence;
+descriptions and recommendation cards cannot supply that proof. A bid control
+takes precedence over a fixed-price control. The authenticated feed POST may
+retain this context in an existing positive estimate cache entry, keyed to the
+same listing and note identity and bound to the observed price. Its own observed
+timestamp expires after 24 hours; refreshing it does not extend the valuation's
+expiry or rewrite the source card. Display GETs only read this context.
+
 ## Identity and decisions
 
 Canonical URLs remove known tracking parameters and fragments, preserve

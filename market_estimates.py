@@ -12,6 +12,7 @@ from datetime import date
 
 import market_scan
 import market_valuation
+import market_ebay_feed
 
 MAX_ITEMS = 12
 MAX_SECONDS = 300
@@ -67,11 +68,72 @@ def target(item):
                 listing_text=str(item.get('listing_text') or '')[:4000])
 
 
+def _bridge_controls(probe):
+    lines = str(probe.get('identity_text') or '').splitlines()
+    line = lines[1] if len(lines) > 1 else ''
+    controls = ({label.strip().casefold() for label in line[len('Listing controls: '):].split(' | ')}
+                if line.startswith('Listing controls: ') else set())
+    sale_type = ('auction' if 'place bid' in controls else
+                 'fixed' if controls & {'buy it now', 'add to cart'} else '')
+    return sale_type, line[:240]
+
+
+def _exact_bridge_probe(db, item):
+    probe = market_ebay_feed.live_probe(db, item.get('listing_url'))
+    if (probe and probe.get('browser_observed') is True and
+            _canonical(probe.get('final')) == _canonical(item.get('listing_url')) and
+            str(probe.get('price') or '') == str(item.get('price') or '')):
+        return probe
+    return None
+
+
+def _fresh_bridge_context(db, out):
+    """Use the saved, account-checked exact-page read; never start a reader.
+
+    Control labels have their own line so descriptive text, the listing title,
+    and recommended-item cards cannot masquerade as a purchase control.
+    """
+    probe = _exact_bridge_probe(db, out)
+    if not probe:
+        return out
+    if probe.get('state') != 'live':
+        out.pop('sale_type', None)
+        return out
+    sale_type, _ = _bridge_controls(probe)
+    if sale_type:
+        out['sale_type'] = sale_type
+    return out
+
+
+def capture_bridge_basis(db, item, now=None):
+    """Feed POST only: retain exact observed controls for an existing estimate.
+
+    The caller owns the feed transaction. No cache creation, valuation changes,
+    TTL extension, listing-price edits, model calls or separate commit occur.
+    """
+    now = time.time() if now is None else now
+    wanted = target(item)
+    probe = _exact_bridge_probe(db, item) if wanted else None
+    if not probe:
+        return
+    sale_type, evidence = _bridge_controls(probe)
+    observed = probe.get('checked_at')
+    basis = None
+    if (probe.get('state') == 'live' and sale_type and isinstance(observed, (int, float)) and
+            now - market_ebay_feed.FRESH_SECONDS <= observed <= now + 60):
+        basis = dict(url=wanted['listing_url'], sale_type=sale_type, evidence=evidence,
+                     price_at_research=wanted['price'], observed_at=observed)
+    elif probe.get('state') != 'ended':
+        return
+    db.execute("UPDATE market_estimate_cache SET listing_basis=? WHERE cache_key=? AND listing_url=? AND fingerprint=? AND outcome='ready' AND retry_after>?",
+               (json.dumps(basis), wanted['key'], wanted['listing_url'], wanted['fingerprint'], now))
+
+
 def overlay(db, item, now=None):
     """Return a copy; existing supported estimates take precedence."""
     out = dict(item)
     if market_valuation.normalize(out.get('valuation'), out.get('listing_url', '')):
-        return out
+        return _fresh_bridge_context(db, out) if not item.get('sale_type') else out
     wanted = target(item)
     if not wanted:
         return out
@@ -88,12 +150,15 @@ def overlay(db, item, now=None):
         out['valuation'] = value
         # This is a display-only context, not a source/card rewrite or a claim
         # that an unverified card became an eligible live recommendation.
-        if (not out.get('sale_type') and isinstance(basis, dict) and
-                now - cached['checked_at'] <= 86400 and
+        observed = basis.get('observed_at', cached['checked_at']) if isinstance(basis, dict) else None
+        if (not out.get('sale_type') and isinstance(basis, dict) and isinstance(observed, (int, float)) and
+                now - 86400 <= observed <= now + 60 and
                 basis.get('sale_type') in ('fixed', 'auction') and
                 _canonical(basis.get('url')) == wanted['listing_url'] and
                 basis.get('price_at_research') == wanted['price']):
             out['sale_type'] = basis.get('sale_type')
+        if not item.get('sale_type'):
+            out = _fresh_bridge_context(db, out)
     return out
 
 

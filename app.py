@@ -18838,6 +18838,14 @@ def _market_estimate_rows(db):
     return candidates + (observed['cards'] if observed else [])
 
 
+def _market_capture_bridge_estimate_basis(db):
+    # This runs only inside the authenticated feed POST transaction, after the
+    # accepted snapshot is available. The display path remains read-only.
+    observed = _market_personal_feed(db, [])
+    for card in observed['cards'] if observed else []:
+        market_estimates.capture_bridge_basis(db, card)
+
+
 def _market_estimate_research(wanted, context):
     import anthropic
     client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'],
@@ -42115,7 +42123,7 @@ _ebay_order_sync = ebay_orders.register(
 import ebay_purchase_lookup
 ebay_purchase_lookup.register(app, get_db, require_owner)
 market_purchase_capture.register(app, get_db, require_owner)
-market_ebay_feed.register(app, get_db)
+market_ebay_feed.register(app, get_db, on_complete=_market_capture_bridge_estimate_basis)
 banknote_feedback.register(app, get_db, require_owner, _user_can_see_row)
 def _compare_original_listing(category, record, url, page_text, purchase_sources=()):
     import anthropic

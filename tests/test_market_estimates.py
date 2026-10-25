@@ -17,6 +17,7 @@ from unittest.mock import patch, Mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import market_estimates as estimates
 import market_scan
+import market_ebay_feed
 
 SOURCE = 'https://currency.ha.com/itm/fixture/90001'
 
@@ -47,6 +48,7 @@ class CacheTests(unittest.TestCase):
         self.db = self.connect()
         self.db.execute('CREATE TABLE market_dismissals(category TEXT,canonical_url TEXT,dismissed_at TEXT)')
         estimates.init_schema(self.db)
+        market_ebay_feed.init_schema(self.db)
 
     def connect(self):
         db = sqlite3.connect(self.path); db.row_factory = sqlite3.Row
@@ -323,6 +325,90 @@ class AppTests(unittest.TestCase):
             finally:
                 self.db.execute('PRAGMA query_only=OFF')
             self.assertEqual(snapshot(), before)
+
+    def test_fresh_bridge_controls_enable_cached_estimate_without_research_or_source_write(self):
+        row = item(2)
+        wanted = estimates.target(row)
+        state, _ = estimates.claim(self.db, [row])
+        estimates.store(self.db, state['job_id'], wanted, researched(wanted))
+        now = time.time()
+        self.db.execute("INSERT INTO ebay_market_requests(id,requested_at,expires_at,status,observed_at) VALUES('proof',?,?,'done',?)", (now, now+600, now))
+        text = row['title'] + '\nListing controls: Buy It Now | Add to cart\nUS $199.89'
+        self.db.execute("INSERT INTO ebay_market_cards VALUES('proof','123456789014',?,?,?,?,?,?,?,?)",
+                        (row['title'], row['listing_url'], row['price'], '', 'Watched', text, 'live', now))
+        self.db.commit()
+        before = self.db.execute("SELECT * FROM ebay_market_cards WHERE request_id='proof'").fetchone()
+        self.db.execute('PRAGMA query_only=ON')
+        try:
+            with patch.object(self.stuff, '_market_estimate_research', side_effect=AssertionError('display cannot research')):
+                shown = estimates.overlay(self.db, row)
+                self.assertEqual(shown['sale_type'], 'fixed')
+                self.assertEqual(shown['valuation']['low'], 150)
+                self.assertEqual(shown['price'], '$199.89')
+                self.assertEqual(estimates.market_valuation.display(shown)['band'], 'yellow')
+                # A supported inline estimate takes the same fresh-proof path.
+                inline = estimates.overlay(self.db, dict(row, valuation=researched(wanted)['valuation']))
+                self.assertEqual(inline['sale_type'], 'fixed')
+                self.assertNotIn('sale_type', estimates.overlay(self.db, dict(row, price='$249.89')))
+                self.assertEqual(tuple(before), tuple(self.db.execute("SELECT * FROM ebay_market_cards WHERE request_id='proof'").fetchone()))
+                self.assertNotIn('sale_type', row)
+        finally:
+            self.db.execute('PRAGMA query_only=OFF')
+        for control_text, checked, live, expected in (
+                ('Listing controls: Place bid | Buy It Now', now, 'live', 'auction'),
+                ('Buy It Now in the description', now, 'live', None),
+                ('Description\nListing controls: Buy It Now', now, 'live', None),
+                ('Listing controls: Buy It Now', now-601, 'live', None),
+                ('Listing controls: Buy It Now', now, 'ended', None)):
+            self.db.execute("UPDATE ebay_market_cards SET listing_text=?,listing_checked_at=?,live_state=? WHERE request_id='proof'",
+                            (row['title']+'\n'+control_text, checked, live))
+            self.db.commit()
+            self.assertEqual(estimates.overlay(self.db, row).get('sale_type'), expected)
+
+    def test_feed_post_persists_exact_control_basis_without_extending_value_or_changing_price(self):
+        now = time.time(); raw = item(3)
+        number = '123456789015'
+        self.db.execute("INSERT INTO ebay_market_requests(id,requested_at,expires_at,status,observed_at) VALUES('old-proof',?,?,'done',?)", (now, now+600, now))
+        self.db.execute("INSERT INTO ebay_market_cards VALUES('old-proof',?,?,?,?,?,?,?,?,?)",
+                        (number, raw['title'], raw['listing_url'], raw['price'], '', 'Watched', raw['title'], 'unknown', None))
+        self.db.execute("INSERT INTO ebay_market_card_sources VALUES('old-proof',?,'watched')", (number,))
+        self.db.commit()
+        with patch.object(self.stuff.market_ebay_feed, 'enabled', return_value=True):
+            card = self.stuff._market_personal_feed(self.db, [])['cards'][0]
+            state, targets = estimates.claim(self.db, [card])
+            wanted = targets[0]
+            estimates.store(self.db, state['job_id'], wanted, researched(wanted))
+            before = dict(self.db.execute('SELECT * FROM market_estimate_cache WHERE cache_key=?', (wanted['key'],)).fetchone())
+            self.db.execute("INSERT INTO ebay_market_requests(id,requested_at,expires_at,status) VALUES('new-proof',?,?,'reading')", (now, now+600))
+            self.db.commit()
+            text = raw['title'] + '\nListing controls: Buy It Now | Add to cart\n' + raw['price']
+            payload = dict(request_id='new-proof', account='fixture-owner', observed_at=market_ebay_feed.utc(now+.1),
+                sources=dict(watched=dict(status='ok', message=''), sponsored=dict(status='unavailable', message='')),
+                items=[dict(item_id=number, title=raw['title'], listing_url=raw['listing_url'], price=raw['price'],
+                            image_url='', source_label='Watched', sources=['watched'], listing_text=text,
+                            live_state='live', listing_checked_at=market_ebay_feed.utc(now))])
+            with patch.object(self.stuff.market_ebay_feed.ebay_mail, 'authenticate'), \
+                    patch.object(self.stuff, '_market_estimate_research', side_effect=AssertionError('feed POST cannot research')):
+                response = self.client.post('/banknotes/market/ebay-feed', json=payload)
+                self.assertEqual(response.status_code, 200, response.json)
+            after = dict(self.db.execute('SELECT * FROM market_estimate_cache WHERE cache_key=?', (wanted['key'],)).fetchone())
+            self.assertEqual({k:v for k,v in after.items() if k != 'listing_basis'},
+                             {k:v for k,v in before.items() if k != 'listing_basis'})
+            basis = json.loads(after['listing_basis'])
+            self.assertEqual(basis['sale_type'], 'fixed')
+            self.assertAlmostEqual(basis['observed_at'], now, places=4)
+            self.assertEqual(basis['price_at_research'], '$199.89')
+            self.assertEqual(basis['url'], wanted['listing_url'])
+            self.db.execute('PRAGMA query_only=ON')
+            try:
+                with patch.object(market_ebay_feed, 'live_probe', return_value=None):
+                    saved = estimates.overlay(self.db, card, now=now+700)
+                    self.assertEqual(saved['sale_type'], 'fixed')
+                    self.assertEqual(estimates.market_valuation.display(saved)['band'], 'yellow')
+                    self.assertNotIn('sale_type', estimates.overlay(self.db, dict(card, price='$249.89'), now=now+700))
+                    self.assertNotIn('sale_type', estimates.overlay(self.db, card, now=now+86401))
+            finally:
+                self.db.execute('PRAGMA query_only=OFF')
 
 
 if __name__ == '__main__':

@@ -227,6 +227,7 @@ def live_probe(db, url):
         return None
     return dict(state=row['live_state'], status=200, challenged=False,
                 length=len(row['listing_text']), final=row['listing_url'],
+                checked_at=row['listing_checked_at'], price=row['price'],
                 title=row['listing_text'].splitlines()[0], identity_text=row['listing_text'], images=[row['image_url']] if row['image_url'] else [],
                 why='Exact listing read in the signed-in eBay browser', browser_observed=True)
 
@@ -315,7 +316,7 @@ def complete(db, payload):
     return len(clean)
 
 
-def register(app, get_db):
+def register(app, get_db, on_complete=None):
     @app.route('/banknotes/market/ebay-feed/request', methods=['POST'])
     def ebay_market_feed_request():
         """Refresh observed cards without launching a model-backed scan."""
@@ -369,6 +370,8 @@ def register(app, get_db):
                 db.commit()
                 return jsonify(ok=True, pending=True, items_accepted=0)
             count = complete(db, payload)
+            if on_complete:
+                on_complete(db)
             db.execute("UPDATE ebay_market_sessions SET state='ready',message='eBay is signed in. Continuing the requested scan.' WHERE request_id=?", (payload['request_id'],))
             db.commit()
             return jsonify(ok=True, items_accepted=count)
