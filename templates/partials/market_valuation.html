@@ -6,7 +6,9 @@
   <div class="market-estimate-sources">
     {% if valuation.band %}<span class="market-value-comparison">{{ valuation.title }}</span>{% endif %}
     {% if valuation.as_of %}<span>As of {{ valuation.as_of }}</span>{% endif %}
+    {% if valuation.basis_note %}<span>{{ valuation.basis_note }}</span>{% elif valuation.confidence %}<span>{{ valuation.confidence|capitalize }} confidence</span>{% endif %}
     {% if valuation.grade %}<span>{{ valuation.grade }}</span>{% endif %}
+    {% if valuation.adjustments %}<span>{{ valuation.adjustments }}</span>{% endif %}
     {% for source in valuation.evidence %}
     <a href="{{ source.url }}" target="_blank" rel="noopener">{{ source.title }} · {{ source.amount_label }}{% if source.date %} · {{ source.date }}{% endif %}</a>
     {% endfor %}

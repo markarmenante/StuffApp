@@ -152,6 +152,31 @@ class ValuationTests(unittest.TestCase):
         self.assertEqual(len(self.display(value)['evidence']), 6)
         self.assertEqual(value, before)
 
+    def test_adjacent_grades_and_related_varieties_require_adjustments_and_force_low_confidence(self):
+        for match in ('adjacent_grade', 'related_variety'):
+            value = estimate(confidence='high', adjustments='Offered PMG 64 EPQ; comparable PMG 65 EPQ. Wider lower range for the grade difference.')
+            value['sources'] = [dict(value['sources'][0], match=match,
+                                     url=f'https://currency.ha.com/itm/fixture/{n}') for n in range(3)]
+            before = copy.deepcopy(value)
+            shown = self.display(value)
+            self.assertEqual(shown['label'], '$150–$200')
+            self.assertEqual(shown['confidence'], 'low')
+            self.assertEqual(shown['basis_note'], 'Low confidence · based on similar notes')
+            self.assertIn('PMG 65', shown['adjustments'])
+            self.assertEqual(value, before)
+            value.pop('adjustments')
+            self.assertEqual(self.display(value)['label'], 'No estimate')
+
+    def test_proxy_permission_does_not_accept_asks_currency_mismatches_or_unknown_match(self):
+        for changes in (dict(kind='asking'), dict(currency='EUR'), dict(match='different_country')):
+            value = estimate(adjustments='Synthetic nearby-grade comparison.')
+            value['sources'][0].update(match='adjacent_grade')
+            value['sources'][0].update(changes)
+            self.assertEqual(self.display(value)['label'], 'No estimate')
+        direct = self.display(estimate())
+        self.assertEqual(direct['basis_note'], '')
+        self.assertEqual(direct['confidence'], 'medium')
+
 
 class PriceComparisonTests(unittest.TestCase):
     def row(self, price='$100', **changes):
@@ -309,6 +334,40 @@ class AppValuationTests(unittest.TestCase):
         coins = self.stuff._market_scan_prompt('coins', 'fixture', 'fixture', '', '')
         self.assertNotIn('"valuation":', coins)
         self.assertNotIn('VALUE ESTIMATES:', coins)
+
+    def test_focused_prompt_uses_title_identity_and_ordered_comparable_search(self):
+        prompt, target = self.stuff.market_estimates.prompt, self.stuff.market_estimates.target
+        text = prompt(target(dict(title='Seychelles 1963 P-12c PMG 58 EPQ', listing_url=LISTING,
+                                  pick_number=None, grade=None, grade_numeric=None)))
+        self.assertIn('external comparable research', text)
+        self.assertIn('structured fields are null', text)
+        self.assertIn('exact listing page is blocked', text)
+        self.assertIn('(1) the exact catalogue variety and offered grade/designation', text)
+        self.assertIn('(2) the same variety in adjacent grades', text)
+        self.assertIn('(3) only if those fail', text)
+        self.assertIn('common catalogue spelling variants', text)
+        self.assertIn('Seychelles 1963 P-12c PMG 58 EPQ', text)
+
+    def test_proxy_disclosure_stays_in_expanded_evidence_and_is_escaped(self):
+        value = estimate(adjustments='Adjacent grade; widen range. <script>unsafe</script>')
+        value['sources'][0]['match'] = 'adjacent_grade'
+        shown = valuation.display(dict(valuation=value, listing_url=LISTING), today=TODAY)
+        rendered = self.stuff.app.jinja_env.get_template('partials/market_valuation.html').render(valuation=shown)
+        summary = rendered.split('<summary>', 1)[1].split('</summary>', 1)[0]
+        self.assertNotIn('Low confidence', summary)
+        self.assertNotIn('Adjacent grade', summary)
+        self.assertIn('Low confidence · based on similar notes', rendered)
+        self.assertIn('&lt;script&gt;', rendered)
+        self.assertNotIn('<script>', rendered)
+
+    def test_direct_estimate_confidence_is_visible_only_in_expanded_evidence(self):
+        for confidence in ('low', 'medium'):
+            shown = valuation.display(dict(valuation=estimate(confidence=confidence), listing_url=LISTING), today=TODAY)
+            rendered = self.stuff.app.jinja_env.get_template('partials/market_valuation.html').render(valuation=shown)
+            summary = rendered.split('<summary>', 1)[1].split('</summary>', 1)[0]
+            self.assertNotIn('confidence', summary)
+            self.assertIn(f'{confidence.capitalize()} confidence', rendered)
+            self.assertNotIn('based on similar notes', rendered)
 
     def test_normalization_preserves_asking_cents_and_estimate_independently(self):
         raw = dict(title='India 1937 10 Rupees PMG64 EPQ', country='India', year=1937,

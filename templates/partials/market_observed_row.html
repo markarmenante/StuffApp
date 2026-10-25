@@ -3,7 +3,7 @@
       <div class="item-body">
         <div class="item-line1"><a class="item-brand" href="{{ card.listing_url }}" target="_blank" rel="noopener">{{ card.title }}</a></div>
         <div class="market-meta">
-          <div class="idr market-line"><span class="market-price">Price: {{ card.price or 'See listing' }}</span>{% set valuation = card|market_valuation %}{% include 'partials/market_valuation.html' %}<span class="market-tag">{{ card.availability_label }}</span></div>
+          <div class="idr market-line"><span class="market-price">Price: {{ card.price or 'See listing' }}</span>{% set valuation = card|market_valuation %}{% include 'partials/market_valuation.html' %}{% if card.availability_label == 'Listing ended' %}<span class="market-tag">Listing ended</span>{% endif %}</div>
           <div class="idr market-tags">
             {% if 'watched' in card.sources %}<span class="market-tag">eBay Watched</span>{% endif %}
             {% if 'sponsored' in card.sources %}<span class="market-tag">eBay Sponsored · similar to watched</span>{% endif %}

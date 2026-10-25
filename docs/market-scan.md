@@ -96,6 +96,16 @@ An unknown price, unknown sale type, auction/bid amount, currency mismatch or
 missing estimate has no marker; no exchange rate or fixed-price status is
 inferred for this comparison.
 
+Comparable research starts with the exact catalogue variety and offered grade,
+including references and grades clearly stated in the listing title when
+structured fields are blank or the live page is blocked. It then tries adjacent
+grades of the same variety before closely related date/variety evidence.
+Verified proxies require a short adjustment explanation and are always marked
+low confidence in expanded evidence. Actual realized/guide amounts, source
+dates and currency checks remain required; active asking prices are not sales.
+The routine availability label is hidden on observed cards; ended-listing
+warnings and purchase-time availability checks remain active.
+
 `Estimate prices` researches the current banknote candidates and observed
 watched/sponsored listings that lack supported estimates. It starts or joins one
 owner-authorized background job through `POST /banknotes/market/estimates`;

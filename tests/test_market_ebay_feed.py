@@ -163,7 +163,7 @@ class FeedTests(unittest.TestCase):
                 if expected_image:
                     self.assertIn('src="' + expected_image + '"', html)
                 if not watched_live and not sponsored_live:
-                    self.assertIn('Availability unverified', html)
+                    self.assertNotIn('Availability unverified', html)
 
     def test_duplicate_images_keep_the_cdn_allowlist(self):
         valid = 'https://i.ebayimg.com/images/g/valid/s-l500.jpg'
@@ -198,7 +198,12 @@ class FeedTests(unittest.TestCase):
                 self.assertEqual(cards[0]['image_url'], base['image_url'])
                 self.assertEqual(cards[0]['live_state'], 'ended')
                 self.assertEqual(feed.live_probe(self.db, URL)['state'], 'ended')
-                self.assertEqual(stuff._market_personal_feed(self.db, [])['cards'][0]['availability_label'], 'Listing ended')
+                observed = stuff._market_personal_feed(self.db, [])
+                self.assertEqual(observed['cards'][0]['availability_label'], 'Listing ended')
+                with stuff.app.test_request_context():
+                    html = stuff.render_template('partials/market_ebay_feed.html', market_personal_feed=observed)
+                self.assertIn('Listing ended', html)
+                self.assertNotIn('Availability unverified', html)
 
     def test_wrong_account_spoofed_url_stale_and_unavailable_source_rejected(self):
         ident=self.claimed(); payload=observation(ident)
@@ -447,7 +452,7 @@ class FeedTests(unittest.TestCase):
         with stuff.app.test_request_context():
             from flask import render_template
             html=render_template('partials/market_ebay_feed.html',market_personal_feed=observed)
-        self.assertIn('Availability unverified',html)
+        self.assertNotIn('Availability unverified',html)
         self.assertIn('/banknotes/existing',html)
         self.assertIn('View listing',html)
         self.assertIn('eBay Watched',html)

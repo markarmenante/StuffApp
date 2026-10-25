@@ -13,13 +13,18 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SCHEMA = ('"valuation": {"low": number, "high": number, "currency": str (ISO currency), '
           '"as_of": "YYYY-MM-DD", "confidence": "low"|"medium"|"high", '
-          '"grade": str (offered grade and adjustments from the comparable grades), '
+          '"grade": str (offered grade and designation), '
+          '"adjustments": str (brief grade/variety differences and justified adjustment; required for proxies), '
           '"sources": [{"kind": "sold"|"price_guide", "url": str, "title": str, '
           '"date": "YYYY-MM-DD", "amount": number, "currency": str (same as the estimate), '
-          '"grade": str (comparable grade and designation)}]}|null')
+          '"grade": str (actual comparable grade and designation), '
+          '"match": "exact"|"adjacent_grade"|"related_variety"}]}|null')
 
 PROMPT = """VALUE ESTIMATES: Keep the listing's asking/current price in `price`, separate from `valuation`.
-Give a defensible low–high fair market range only when you actually read dated comparable sales or an attributed price-guide entry for the same catalogue type and comparable grade/designation. Aim for 3–6 recent sold comparables; explain adjacent-grade or EPQ/PPQ adjustments briefly in valuation.grade. Include each exact source URL, source title, sale/guide date, realized/guide amount, currency and grade. Cite the individual lot URL rather than a sale/category/search page. Verify the individual lot's session date from its lot record or auction timetable; never use an arbitrary first or last date of a multi-day auction. If the exact lot date cannot be verified, omit that comparable rather than inventing a date. Sold amounts must state the actual realized price, with buyer-premium treatment in the source title; do not assume a premium is included. Estimate and source amounts must use the same currency; never invent exchange rates. Use established auction archives (Heritage, Stack's Bowers, Spink, Noonans, Lyn Knight, CNG, Leu, Nomos, Künker, GreatCollections, biddr/sixbid/NumisBids) or exact eBay sold listings; guides may use PMG, PCGS, NGC, Greysheet or NumisMedia. Do not use the candidate's own listing, an active dealer/sponsored ask, a census count, or purchase cost as valuation evidence. Sponsorship and a seller's value claim do not establish market value. If sources cannot be read, the grade/type cannot be matched, or evidence is insufficient, return valuation:null. Do not invent a number or a source. Older/one-sale/guide-only evidence requires low or medium confidence. Keep `fair` as a terse evidence note, never a substitute estimate. For observed watched/sponsored cards without external research, return valuation:null unless the supplied data includes this actual dated sold/guide evidence."""
+Search in this order: (1) the exact catalogue variety and offered grade/designation; (2) the same variety in adjacent grades; (3) only if those fail, a closely related date/catalogue variety of the same issuer, denomination and design/series. Try common catalogue spelling variants before broadening. A clear listing title can establish catalogue identity and offered grade even when its live page is blocked or structured fields are blank. Distinguish that known offered identity from what the comparable actually sold.
+Give a defensible low–high fair market range only from dated sold comparables or an attributed price-guide entry you actually read. Aim for 3–6 recent sales, but a defensible single-sale or guide anchor may support a cautious range. Mark each source match as exact, adjacent_grade, or related_variety. For either nonexact match, use low confidence and a brief valuation.adjustments note naming the actual comparable grade/type, the offered grade/type, and why the range is adjusted or widened. Grade steps and EPQ/PPQ differences are not linear; never invent a percentage premium. Do not substitute a different country, denomination, design, rare signature/prefix, specimen or fancy-serial premium for an ordinary issue. A proxy must be demonstrably comparable; otherwise return valuation:null.
+Include each exact source URL, source title, sale/guide date, realized/guide amount, currency and actual comparable grade. Cite the individual lot URL rather than a sale/category/search page. Verify the individual lot's session date from its lot record or auction timetable; never use an arbitrary first or last date of a multi-day auction. If the exact lot date cannot be verified, omit that comparable rather than inventing a date. Sold amounts must state the actual realized price, with buyer-premium treatment in the source title; do not assume a premium is included. Estimate and source amounts must use the same currency; never invent exchange rates.
+Use established auction archives (Heritage, Stack's Bowers, Spink, Noonans, Lyn Knight, CNG, Leu, Nomos, Künker, GreatCollections, biddr/sixbid/NumisBids) or exact eBay sold listings; guides may use PMG, PCGS, NGC, Greysheet or NumisMedia. Do not use the candidate's own listing, an active dealer/sponsored ask, a census count, or purchase cost as valuation evidence. Sponsorship and a seller's value claim do not establish market value. If neither direct evidence nor a defensible verified proxy can be read, return valuation:null. Do not invent a number or a source. Older/one-sale/guide-only exact evidence requires low or medium confidence; every proxy requires low confidence. Keep `fair` as a terse evidence note, never a substitute estimate. Observed cards without an external comparable-research step must remain valuation:null unless supplied actual dated sold/guide evidence supports them."""
 
 MAX_ESTIMATE_AGE_DAYS = 366
 _CURRENCIES = {'USD', 'EUR', 'GBP', 'CHF', 'CAD', 'AUD', 'NZD', 'JPY', 'CNY',
@@ -121,13 +126,15 @@ def _source(raw, listing_url, as_of, currency, today):
             _identity(raw['url']) == _identity(listing_url)):
         return None
     title, grade = _text(raw.get('title'), 180), _text(raw.get('grade'), 120)
+    match = raw.get('match', 'exact')
     observed = _date(raw.get('date'), today)
     amount = _amount(raw.get('amount'))
-    if (not title or not grade or observed is None or observed > as_of or
+    if (match not in ('exact', 'adjacent_grade', 'related_variety') or
+            not title or not grade or observed is None or observed > as_of or
             amount is None or raw.get('currency') != currency):
         return None
     return dict(kind=kind, url=urlunsplit((url.scheme, url.netloc, url.path, url.query, '')),
-                title=title, date=observed, amount=amount, currency=currency, grade=grade)
+                title=title, date=observed, amount=amount, currency=currency, grade=grade, match=match)
 
 
 def normalize(value, listing_url='', *, today=None):
@@ -155,16 +162,21 @@ def normalize(value, listing_url='', *, today=None):
             break
     if not sources:
         return None
+    proxy = any(source['match'] != 'exact' for source in sources)
+    adjustments = _text(value.get('adjustments'), 320)
+    if proxy and not adjustments:
+        return None
     # Thin or old evidence cannot be presented with high confidence.
     recent_sales = sum(source['kind'] == 'sold' and
                        (today - date.fromisoformat(source['date'])).days <= 1096
                        for source in sources)
-    if not recent_sales:
+    if proxy or not recent_sales:
         confidence = 'low'
     elif recent_sales < 3 and confidence == 'high':
         confidence = 'medium'
     return dict(low=low, high=high, currency=currency, as_of=as_of,
-                confidence=confidence, grade=grade, sources=sources)
+                confidence=confidence, grade=grade, sources=sources,
+                adjustments=adjustments, basis='proxy' if proxy else 'direct')
 
 
 def money(amount, currency):
@@ -251,11 +263,13 @@ def display(item, *, today=None):
     item = item if isinstance(item, dict) else {}
     value = normalize(item.get('valuation'), item.get('listing_url', ''), today=today)
     if value is None:
-        return dict(label='No estimate', evidence=[], as_of='', confidence='', grade='',
+        return dict(label='No estimate', evidence=[], as_of='', confidence='', grade='', adjustments='', basis_note='',
                     benchmark=None, benchmark_label='', ratio=None, percent=None, band='', title='')
     evidence = [dict(source, amount_label=money(source['amount'], source['currency']))
                 for source in value['sources']]
     return dict(label=money(value['low'], value['currency']) + '–' +
                 money(value['high'], value['currency']), evidence=evidence,
                 as_of=value['as_of'], confidence=value['confidence'], grade=value['grade'],
+                adjustments=value['adjustments'],
+                basis_note='Low confidence · based on similar notes' if value['basis'] == 'proxy' else '',
                 **_comparison(item, value))

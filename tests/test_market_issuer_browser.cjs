@@ -164,7 +164,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
           assert.equal(await heading(t.page,'group',group).locator('.market-group-count').textContent(),'2 listings');
           assert.equal(await t.page.locator('[data-market-issuer-heading]').count(),3);
           assert.equal(await t.page.locator('[data-market-group-heading]').count(),4);
-          assert.match(await card.textContent(),/eBay Watched/);assert.match(await card.textContent(),/eBay Sponsored/);assert.match(await card.textContent(),/Availability unverified/);
+          assert.match(await card.textContent(),/eBay Watched/);assert.match(await card.textContent(),/eBay Sponsored/);assert.doesNotMatch(await card.textContent(),/Availability unverified/);
           assert.match(await t.page.locator('[data-market-issuer-heading]').last().textContent(),/Unknown issuer.*France/);
           const layout=await t.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
           await t.page.screenshot({path:path.join(artifacts,device+'-grouped.png'),fullPage:true});

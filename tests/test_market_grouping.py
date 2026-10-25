@@ -308,7 +308,7 @@ class MarketRouteTests(unittest.TestCase):
         self.assertLess(body.index('Candidate Silver Certificate'),body.index(card['title']))
         self.assertLess(body.index(card['title']),body.index('Another issuer Silver Certificate'))
         self.assertEqual(body.count('data-market-issuer-heading='),2)
-        self.assertIn('Availability unverified',body)
+        self.assertNotIn('Availability unverified',body)
         self.assertIn('eBay Watched',body)
         self.assertIn('eBay Sponsored · similar to watched',body)
         self.assertIn('data-id="candidate-one"',body)
