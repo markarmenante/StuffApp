@@ -30,6 +30,16 @@ issue-type buckets (military, colonial, US, other); its empire labels now use th
 same catalogue. Its older colonial-issue eligibility rules are not the list's
 historical-family membership test.
 
+Each represented group also has a horizontal entity-pill row. Green shows held
+notes (including pending purchases), yellow shows documented issuing entities
+without holdings, and unfilled pills identify documented non-issuers. A question
+mark explicitly distinguishes unresolved issuance history. Coverage uses the
+whole authorized collection, independently of view filters. Green links reach
+the exact saved note, revealing its existing group when filters hide it, while
+preserving the History preference. The roster in `banknote_entities.py` changes
+neither filing nor display numbers; see [entity coverage](banknote-entities.md)
+for historical scope, matching safeguards and sources.
+
 Canada and Australia remain in British/Commonwealth holdings at every date, as
 requested. New Zealand follows the same collecting convention. Their national
 issues are labelled Dominion / independent Commonwealth, not colonial. Crown

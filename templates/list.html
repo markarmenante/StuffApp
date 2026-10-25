@@ -191,6 +191,14 @@
   <div class="banknote-group-heading" data-banknote-group="{{ _bn_group.key }}">
     <h2>{{ _bn_group.title }}</h2>
     <p>{{ _bn_group.description }}</p>
+    {% set _entity_pills = banknote_entity_groups.get(_bn_group.key, []) if banknote_entity_groups is defined else [] %}
+    {% if _entity_pills %}
+    <ul class="banknote-entity-pills" aria-label="{{ _bn_group.title }} entities. Green: in collection, including pending purchases. Yellow: issued banknotes, not held. Neutral: did not issue its own banknotes. Question mark: issuance not yet established." tabindex="0">
+      {% for entity in _entity_pills %}
+      <li>{% if entity.href %}<a href="{{ entity.href }}"{% else %}<span{% endif %} class="banknote-entity-pill entity-{{ entity.coverage }}" data-entity-key="{{ entity.key }}" data-coverage="{{ entity.coverage }}" title="{{ entity.title }}" aria-label="{{ entity.label }}: {{ entity.status }}">{{ entity.label }}<span class="banknote-entity-status">: {{ entity.status }}</span>{% if entity.coverage == 'unknown' %}<span aria-hidden="true"> ?</span>{% endif %}{% if entity.href %}</a>{% else %}</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
   </div>
   {% endif %}
   {% if category == 'properties' and ns.prev == 'Residential' and (row['type'] or '') == 'Commercial' %}
@@ -1244,6 +1252,18 @@ window.shareCardRow = async function (ev, btn) {
         }
       })
       .catch(function() { thumb.classList.remove('uploading'); alert('Upload failed.'); });
+  }
+
+  // Wrapped banknote toolbars need their actual height so entity jumps remain
+  // visible below the sticky controls on phones as well as desktops.
+  var banknoteToolbar = document.querySelector('.list-toolbar-banknotes');
+  if (banknoteToolbar) {
+    var setBanknoteScrollMargin = function() {
+      document.documentElement.style.setProperty('--banknote-toolbar-height', banknoteToolbar.getBoundingClientRect().height + 'px');
+    };
+    setBanknoteScrollMargin();
+    if (window.ResizeObserver) new ResizeObserver(setBanknoteScrollMargin).observe(banknoteToolbar);
+    else window.addEventListener('resize', setBanknoteScrollMargin);
   }
 
   // A History navigation restores a row + offset, ahead of any old URL anchor.

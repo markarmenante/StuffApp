@@ -15,6 +15,7 @@ import market_grouping
 import market_checkout
 import market_purchase_capture
 import banknote_catalog
+import banknote_entities
 import banknote_printers
 import ebay_orders
 import purchase_orders
@@ -5781,6 +5782,64 @@ def banknote_grouping(rows):
         placements[row['id']] = info
         previous = info['key']
     return placements
+
+
+def banknote_entity_pills(db, visible_rows, show_history=True):
+    """Collection coverage ignores view filters, while retaining row access rules."""
+    from urllib.parse import quote
+
+    sql, params = build_search_query('banknotes', '')
+    collection = db.execute(sql, params).fetchall()
+    visible_ids = {row['id'] for row in visible_rows}
+    entities = {entity['key']: dict(entity) for entity in banknote_entities.ENTITY_CATALOG}
+    holdings = {}
+    for row in collection:
+        classification = banknote_catalog.row_classification(row)
+        entity = banknote_entities.entity_for_row(row, classification)
+        if entity is None:
+            country = classification['country']
+            if not country:
+                continue
+            # A saved country absent from the reviewed roster remains visible,
+            # without inventing whether that entity issued its own notes.
+            key = classification['key'] + '-record-' + banknote_catalog.fold(country)
+            entity = {'key': key, 'group': classification['key'], 'label': country,
+                      'issued': None, 'note': 'Issuance history not yet established.'}
+        entities.setdefault(entity['key'], dict(entity))
+        if purchase_states.held(row['status']):
+            holdings.setdefault(entity['key'], []).append((row['id'], classification['key']))
+
+    groups = {}
+    for entity in entities.values():
+        held = holdings.get(entity['key'], [])
+        href = None
+        if held:
+            coverage = 'held'
+            status = f"In collection — {len(held)} {'note' if len(held) == 1 else 'notes'}; includes owned and pending purchases."
+            visible = next((ident for ident, _group in held if ident in visible_ids), None)
+            if visible is not None:
+                href = '#item-' + quote(visible, safe='')
+            else:
+                # The existing group filter reveals the exact target even when
+                # search, status, location or the unresolved filter hid it.
+                href = url_for('list_view', category='banknotes',
+                               filter='heritage_' + held[0][1],
+                               history='1' if show_history else '0',
+                               _anchor='item-' + held[0][0])
+                status += ' Show these notes outside the current filters.'
+        elif entity['issued'] is True:
+            coverage, status = 'missing', 'Issued banknotes — none in the collection.'
+        elif entity['issued'] is False:
+            coverage, status = 'nonissuer', 'Did not issue its own banknotes.'
+        else:
+            coverage, status = 'unknown', 'Banknote issuance not yet established.'
+        groups.setdefault(entity['group'], []).append({
+            **entity, 'coverage': coverage, 'status': status, 'href': href,
+            'title': status + (' ' + entity['note'] if entity.get('note') else ''),
+        })
+    for pills in groups.values():
+        pills.sort(key=lambda entity: banknote_catalog.fold(entity['label']))
+    return groups
 
 
 app.jinja_env.globals['banknote_catalog_groups'] = banknote_catalog.GROUPS
@@ -15280,6 +15339,7 @@ def list_view(category):
                                      coin_filter=coin_filter,
                                      at_property=at_property)
     rows = db.execute(sql, params).fetchall()
+    entity_pills = banknote_entity_pills(db, rows, show_history) if category == 'banknotes' else {}
     # Self-heal missing banknote histories on view. The startup backfill
     # sweep can't finish on Railway's container lifecycle (it's killed by
     # sleep/redeploy before completing), so instead kick off generation
@@ -15390,6 +15450,7 @@ def list_view(category):
                            market_navigation=_market_collection_navigation(category, from_collection=True)
                                if category in ('coins', 'banknotes') else None,
                            show_history=show_history,
+                           banknote_entity_groups=entity_pills,
                            at_property=at_property,
                            at_property_url=at_property_url,
                            prop_status=prop_status,

@@ -4275,6 +4275,16 @@ input[type="date"] { -webkit-appearance: none; }
 .banknote-group-heading { margin: 24px 0 12px; padding: 16px 18px; border-top: 2px solid var(--text, #243345); background: var(--bg-alt, #f3f4f5); }
 .banknote-group-heading h2 { margin: 0 0 5px; font-size: 1.05rem; }
 .banknote-group-heading p { margin: 0; font-size: .82rem; color: var(--text-muted, #626970); line-height: 1.45; }
+.banknote-entity-pills { display: flex; flex-wrap: nowrap; gap: 7px; list-style: none; margin: 12px 0 0; padding: 3px 2px 7px; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.banknote-entity-pills li { flex: 0 0 auto; }
+.banknote-entity-pill { position: relative; display: inline-block; padding: 5px 11px; border: 1px solid #b8bdc3; border-radius: 999px; font-size: .78rem; font-weight: 600; line-height: 1.4; white-space: nowrap; text-decoration: none; color: #46515b; background: transparent; }
+.banknote-entity-pill.entity-held { color: #205d37; background: #e0f1e5; border-color: #8ab49a; }
+.banknote-entity-pill.entity-held:hover { background: #cce6d4; text-decoration: underline; }
+.banknote-entity-pill.entity-missing { color: #705208; background: #fff2c5; border-color: #d2b85f; }
+.banknote-entity-pill.entity-unknown { background: transparent; border-style: dashed; }
+.banknote-entity-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.banknote-entity-pills:focus-visible, .banknote-entity-pill:focus-visible { outline: 2px solid var(--blue, #315da8); outline-offset: 2px; }
+.item-list-banknotes .item-row { scroll-margin-top: calc(var(--nav-height) + var(--banknote-toolbar-height, 56px) + 8px); }
 .banknote-period { font-size: .76rem; color: var(--text-muted, #626970); margin: 4px 0; }
 .banknote-period.needs-review { color: #91611b; }
 .banknote-distribution-label { font-size: .8rem; font-weight: 600; color: #775024; margin: 4px 0; }
