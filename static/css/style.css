@@ -4023,6 +4023,16 @@ input[type="date"] { -webkit-appearance: none; }
 .market-group-heading:first-child { margin-top: 0; }
 .market-group-heading h2 { margin: 0; font-size: 1rem; line-height: 1.4; overflow-wrap: anywhere; }
 .market-group-count { flex-shrink: 0; color: var(--text-muted, #626970); font-size: .8rem; }
+.market-issuer-heading {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px 18px;
+  flex-wrap: wrap; padding: 14px 18px; margin-top: 16px;
+  border-top: 2px solid var(--border); background: var(--bg-alt, #f3f4f5);
+}
+.market-issuer-heading:first-child { margin-top: 0; }
+.market-issuer-heading h2 { margin: 0; font-size: 1rem; line-height: 1.4; overflow-wrap: anywhere; }
+.market-issuer-count { flex-shrink: 0; color: var(--text-muted, #626970); font-size: .8rem; }
+.market-series-heading { margin-top: 0; padding-top: 8px; padding-bottom: 8px; border-top-width: 1px; background: none; }
+.market-series-heading h3 { margin: 0; font-size: .875rem; line-height: 1.4; font-weight: 500; overflow-wrap: anywhere; }
 .market-row { cursor: pointer; }
 .list-toolbar-market { flex-wrap: wrap; min-width: 0; }
 .list-toolbar-market .market-status { white-space: normal; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
@@ -4044,6 +4054,12 @@ input[type="date"] { -webkit-appearance: none; }
 .market-title { font-size: 12px; color: var(--text-secondary); }
 .market-line { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; }
 .market-price { font-weight: 600; }
+.market-estimate { font-weight: 500; }
+.market-estimate summary { cursor: pointer; }
+.market-estimate summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.market-estimate-unavailable { color: var(--text-hint); font-weight: 400; }
+.market-estimate-sources { display: grid; gap: 4px; padding: 6px 0; font-size: 12px; font-weight: 400; }
+.market-estimate-sources a { color: var(--blue); }
 .market-grade { font-weight: 500; }
 .market-venue, .market-closes { color: var(--text-secondary); }
 .market-live { color: #2f6f5e; font-weight: 600; font-size: 12px; }
@@ -4077,7 +4093,7 @@ input[type="date"] { -webkit-appearance: none; }
 .market-dismiss { width: 26px; padding: 0; }
 .market-delete { width: auto; padding: 0 12px; }
 .market-dismiss:disabled { opacity: .5; cursor: default; }
-.market-personal-feed .market-actions { flex-wrap: wrap; }
+.market-personal-feed .market-actions, .market-personal-row .market-actions { flex-wrap: wrap; }
 .market-personal-row .item-body { min-width: 0; flex: 1; }
 .market-personal-row .item-body, .market-personal-row .idr,
 .market-personal-row .idr span, .market-personal-row .market-tag {

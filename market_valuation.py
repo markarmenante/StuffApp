@@ -1,0 +1,180 @@
+"""Bounded, attributed Market Scan estimates; presentation never does research.
+
+These are research estimates, not authenticated appraisals. The discovery call
+must read its sources; this boundary checks the supplied evidence contract and
+keeps an offered price or old free-text `fair` note from becoming an estimate.
+"""
+import re
+import ipaddress
+from datetime import date
+from decimal import Decimal, InvalidOperation
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+
+SCHEMA = ('"valuation": {"low": number, "high": number, "currency": str (ISO currency), '
+          '"as_of": "YYYY-MM-DD", "confidence": "low"|"medium"|"high", '
+          '"grade": str (offered grade and adjustments from the comparable grades), '
+          '"sources": [{"kind": "sold"|"price_guide", "url": str, "title": str, '
+          '"date": "YYYY-MM-DD", "amount": number, "currency": str (same as the estimate), '
+          '"grade": str (comparable grade and designation)}]}|null')
+
+PROMPT = """VALUE ESTIMATES: Keep the listing's asking/current price in `price`, separate from `valuation`.
+Give a defensible low–high fair market range only when you actually read dated comparable sales or an attributed price-guide entry for the same catalogue type and comparable grade/designation. Aim for 3–6 recent sold comparables; explain adjacent-grade or EPQ/PPQ adjustments briefly in valuation.grade. Include each exact source URL, source title, sale/guide date, realized/guide amount, currency and grade. Sold amounts must state the actual realized price, with buyer-premium treatment in the source title; do not assume a premium is included. Estimate and source amounts must use the same currency; never invent exchange rates. Use established auction archives (Heritage, Stack's Bowers, Spink, Noonans, Lyn Knight, CNG, Leu, Nomos, Künker, GreatCollections, biddr/sixbid/NumisBids) or exact eBay sold listings; guides may use PMG, PCGS, NGC, Greysheet or NumisMedia. Do not use the candidate's own listing, an active dealer/sponsored ask, a census count, or purchase cost as valuation evidence. Sponsorship and a seller's value claim do not establish market value. If sources cannot be read, the grade/type cannot be matched, or evidence is insufficient, return valuation:null. Do not invent a number or a source. Older/one-sale/guide-only evidence requires low or medium confidence. Keep `fair` as a terse evidence note, never a substitute estimate. For observed watched/sponsored cards without external research, return valuation:null unless the supplied data includes this actual dated sold/guide evidence."""
+
+MAX_ESTIMATE_AGE_DAYS = 366
+_CURRENCIES = {'USD', 'EUR', 'GBP', 'CHF', 'CAD', 'AUD', 'NZD', 'JPY', 'CNY',
+               'HKD', 'SGD', 'INR', 'SEK', 'NOK', 'DKK', 'ZAR', 'AED', 'BHD',
+               'BND', 'BRL', 'CZK', 'HUF', 'IDR', 'KRW', 'MXN', 'MYR', 'PHP',
+               'PLN', 'THB', 'TRY', 'TWD'}
+_PREFIX = {'USD': '$', 'EUR': '€', 'GBP': '£', 'CHF': 'CHF ', 'CAD': 'C$',
+           'AUD': 'A$', 'NZD': 'NZ$', 'JPY': '¥', 'HKD': 'HK$', 'SGD': 'S$'}
+
+
+def _text(value, limit):
+    return re.sub(r'\s+', ' ', value).strip()[:limit] if isinstance(value, str) else ''
+
+
+def _amount(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        amount = Decimal(str(value))
+        if not amount.is_finite() or not 0 < amount <= 1_000_000_000:
+            return None
+        rounded = amount.quantize(Decimal('.01'))
+        return float(rounded) if rounded > 0 else None
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _date(value, today):
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+        return value if date(1900, 1, 1) <= parsed <= today else None
+    except ValueError:
+        return None
+
+
+def _url(value):
+    if (not isinstance(value, str) or len(value) > 2000 or
+            re.search(r'[\s\x00-\x1f\\]', value)):
+        return None
+    try:
+        url = urlsplit(value.strip())
+        if url.scheme not in ('https', 'http') or not url.hostname or url.username or url.password:
+            return None
+        host = url.hostname.lower().removeprefix('www.')
+        if ('.' not in host or not re.fullmatch(r'[a-z0-9.-]+', host) or
+                host.endswith(('.local', '.internal', '.localhost', '.test', '.example', '.invalid'))):
+            return None
+        try:
+            ipaddress.ip_address(host)
+            return None
+        except ValueError:
+            pass
+        if url.port not in (None, 80, 443):
+            return None
+        return url, host
+    except ValueError:
+        return None
+
+
+def _identity(value):
+    parsed = _url(value)
+    if not parsed:
+        return ''
+    url, host = parsed
+    # Match the app's market_scan.canonical_url treatment of mobile and all
+    # international eBay hosts. One item ID is one offer regardless of locale.
+    if host.startswith('ebay.') or '.ebay.' in host:
+        match = re.search(r'/itm/(?:[^/]+/)?(\d+)(?:/|$)', url.path)
+        if match:
+            return 'ebay:' + match.group(1)
+    query = [(key, value) for key, value in parse_qsl(url.query)
+             if not key.lower().startswith('utm_') and key.lower() not in
+             {'fbclid', 'gclid', 'msclkid', '_trksid', '_trkparms'}]
+    return host + url.path.rstrip('/') + ('?' + urlencode(sorted(query)) if query else '')
+
+
+def _source(raw, listing_url, as_of, currency, today):
+    if not isinstance(raw, dict):
+        return None
+    parsed = _url(raw.get('url'))
+    if not parsed:
+        return None
+    url, host = parsed
+    kind = raw.get('kind')
+    # Research is responsible for source quality. Specialist auction archives
+    # are valid too; a domain allowlist would silently discard their evidence.
+    if (kind not in ('sold', 'price_guide') or not url.path.strip('/') or
+            any(host == root or host.endswith('.' + root)
+                for root in ('google.com', 'bing.com', 'duckduckgo.com')) or
+            re.search(r'(?:^|/)(?:search|sch|search-results)(?:/|$)', url.path, re.I) or
+            any(key.lower() in {'q', 'query', '_nkw', 'search'} for key, _ in parse_qsl(url.query)) or
+            _identity(raw['url']) == _identity(listing_url)):
+        return None
+    title, grade = _text(raw.get('title'), 180), _text(raw.get('grade'), 120)
+    observed = _date(raw.get('date'), today)
+    amount = _amount(raw.get('amount'))
+    if (not title or not grade or observed is None or observed > as_of or
+            amount is None or raw.get('currency') != currency):
+        return None
+    return dict(kind=kind, url=urlunsplit((url.scheme, url.netloc, url.path, url.query, '')),
+                title=title, date=observed, amount=amount, currency=currency, grade=grade)
+
+
+def normalize(value, listing_url='', *, today=None):
+    """Return a copied estimate, or None when required evidence is missing."""
+    if not isinstance(value, dict):
+        return None
+    today = today or date.today()
+    low, high = _amount(value.get('low')), _amount(value.get('high'))
+    currency, confidence = value.get('currency'), value.get('confidence')
+    as_of, grade = _date(value.get('as_of'), today), _text(value.get('grade'), 240)
+    if (low is None or high is None or low >= high or not isinstance(currency, str) or
+            currency not in _CURRENCIES or not isinstance(confidence, str) or
+            confidence not in {'low', 'medium', 'high'} or not as_of or not grade or
+            not isinstance(value.get('sources'), list)):
+        return None
+    if (today - date.fromisoformat(as_of)).days > MAX_ESTIMATE_AGE_DAYS:
+        return None
+    sources, seen = [], set()
+    for raw in value['sources'][:12]:
+        source = _source(raw, listing_url, as_of, currency, today)
+        if source and _identity(source['url']) not in seen:
+            sources.append(source)
+            seen.add(_identity(source['url']))
+        if len(sources) == 6:
+            break
+    if not sources:
+        return None
+    # Thin or old evidence cannot be presented with high confidence.
+    recent_sales = sum(source['kind'] == 'sold' and
+                       (today - date.fromisoformat(source['date'])).days <= 1096
+                       for source in sources)
+    if not recent_sales:
+        confidence = 'low'
+    elif recent_sales < 3 and confidence == 'high':
+        confidence = 'medium'
+    return dict(low=low, high=high, currency=currency, as_of=as_of,
+                confidence=confidence, grade=grade, sources=sources)
+
+
+def money(amount, currency):
+    digits = f'{amount:,.0f}' if amount == int(amount) else f'{amount:,.2f}'
+    return _PREFIX.get(currency, currency + ' ') + digits
+
+
+def display(item, *, today=None):
+    """Terse view model for new, cached and observed cards. No I/O or mutation."""
+    item = item if isinstance(item, dict) else {}
+    value = normalize(item.get('valuation'), item.get('listing_url', ''), today=today)
+    if value is None:
+        return dict(label='No estimate', evidence=[], as_of='', confidence='', grade='')
+    evidence = [dict(source, amount_label=money(source['amount'], source['currency']))
+                for source in value['sources']]
+    return dict(label=money(value['low'], value['currency']) + '–' +
+                money(value['high'], value['currency']), evidence=evidence,
+                as_of=value['as_of'], confidence=value['confidence'], grade=value['grade'])

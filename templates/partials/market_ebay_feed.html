@@ -1,43 +1,23 @@
 <section class="market-personal-feed" aria-labelledby="marketPersonalTitle">
   <div class="banknote-group-heading">
-    <h2 id="marketPersonalTitle">Your eBay watched and sponsored items</h2>
-    <p>Observed {{ market_personal_feed.observed_date }}. These are your eBay cards; availability and collection eligibility may still need checking. Sponsored placement does not affect ranking. Delete hides a listing from future recommendations; your eBay watchlist stays unchanged.</p>
+    <h2 id="marketPersonalTitle">{{ 'eBay source status' if market_unified|default(false) else 'Your eBay watched and sponsored items' }}</h2>
+    <p>Observed {{ market_personal_feed.observed_date }}. Watched and sponsored cards are labeled below; availability and collection eligibility may still need checking. Sponsored placement does not affect ranking. Delete hides a listing from future recommendations; your eBay watchlist stays unchanged.</p>
     {% if market_personal_feed.excluded_count %}<p>{{ market_personal_feed.excluded_count }} specimen, proof, other non-issued or NET-designated cards excluded by your collection rules.</p>{% endif %}
     {% for source, state in market_personal_feed.sources.items() %}
     {% if state.status != 'ok' %}<p role="status">{{ 'Watched' if source == 'watched' else 'Sponsored similar-to-watched' }}: {{ state.message or state.status }}</p>{% endif %}
     {% endfor %}
   </div>
+  {% if not market_unified|default(false) %}
   {% if market_personal_feed.cards %}
   <div class="item-list item-list-banknotes">
     {% for card in market_personal_feed.cards %}
     {% set market_group = card.get('_market_group') %}
     {% include 'partials/market_group_heading.html' %}
-    <div class="item-row market-personal-row"{% if market_group %} data-market-group="{{ market_group.key }}"{% endif %} data-listing-key="{{ card.canonical_url }}">
-      {% if card.image_url %}<a class="item-thumb market-thumb" href="{{ card.listing_url }}" target="_blank" rel="noopener" aria-label="Open eBay listing"><img src="{{ card.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer"></a>{% endif %}
-      <div class="item-body">
-        <div class="item-line1"><a class="item-brand" href="{{ card.listing_url }}" target="_blank" rel="noopener">{{ card.title }}</a></div>
-        <div class="market-meta">
-          <div class="idr market-line"><span class="market-price">{{ card.price or 'Price not shown' }}</span><span class="market-tag">{{ card.availability_label }}</span></div>
-          <div class="idr market-tags">
-            {% if 'watched' in card.sources %}<span class="market-tag">eBay Watched</span>{% endif %}
-            {% if 'sponsored' in card.sources %}<span class="market-tag">eBay Sponsored · similar to watched</span>{% endif %}
-            {% for match in card.collection_matches %}<span class="market-tag market-tag-owned">{{ 'Already in your collection' if match.kind == 'catalogue' else 'Listing already linked to your collection' }}{% if match.status == 'Ordered' %} (ordered){% endif %}: <a href="{{ match.url }}" target="_blank" rel="noopener">{{ match.label }}</a> — {{ match.reason }}</span>{% endfor %}
-            {% if card.collection_check_incomplete %}<span class="market-tag">Collection check incomplete — catalogue reference or country/state missing or unclear</span>{% endif %}
-          </div>
-          <div class="market-actions">
-            <a class="market-btn" href="{{ card.listing_url }}" target="_blank" rel="noopener">View listing</a>
-            <button type="button" class="market-btn market-buy" data-buy-url="{{ url_for('market_ebay_item_buy', item_id=card.item_id) }}"
-                    title="Check availability, open eBay to pay there and file this as an Ordered banknote">Buy</button>
-            <button type="button" class="market-btn market-buy market-bought" data-buy-url="{{ url_for('market_ebay_item_buy', item_id=card.item_id) }}" data-bought="1"
-                    title="Already paid on eBay? File this as an Ordered banknote">Bought</button>
-            <button type="button" class="market-btn market-dismiss market-delete" data-dismiss-url="{{ url_for('market_ebay_item_dismiss', item_id=card.item_id) }}" title="Delete this recommendation and do not recommend this listing again">Delete</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    {% include 'partials/market_observed_row.html' %}
     {% endfor %}
   </div>
   {% elif market_personal_feed.sources.watched.status == 'ok' and market_personal_feed.sources.sponsored.status == 'ok' %}
   <p>No additional watched or sponsored recommendations remain after your collection rules, deleted listings, and checked candidates are accounted for.</p>
+  {% endif %}
   {% endif %}
 </section>

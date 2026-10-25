@@ -52,13 +52,19 @@ class PresentationTests(unittest.TestCase):
                     self.assertEqual(response.status_code,200)
                     html=response.get_data(as_text=True)
                     self.assertNotIn('Klarna',html); self.assertNotIn('search snippet',html)
-                    self.assertIn('500 Pesos fills',html); self.assertIn('Buyer premium 20%',html)
-                    self.assertIn('seller reports top-7',html); self.assertIn('$900 in 2025',html)
+                    self.assertIn('500 Pesos fills',html)
+                    if category == 'banknotes':
+                        self.assertIn('No estimate',html)
+                        self.assertNotIn('class="market-fair"',html)
+                    else:
+                        self.assertIn('Buyer premium 20%',html)
+                        self.assertIn('seller reports top-7',html); self.assertIn('$900 in 2025',html)
                     self.assertIn('✓ live',html); self.assertIn('See listing',html)
                     self.assertIn('list-toolbar-market',html)
                     self.assertNotIn('banknote-history-position.js',html)
                 raw=json.loads(db.execute('SELECT payload FROM market_scan_items WHERE id=?',(category+'new',)).fetchone()[0])
                 self.assertEqual(raw['live_evidence'],HEURISTIC)
                 self.assertEqual(raw['why'],PAYLOAD['why'])
+                self.assertEqual(raw['fair'],PAYLOAD['fair'])
 
 if __name__=='__main__': unittest.main()

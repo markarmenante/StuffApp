@@ -1,4 +1,4 @@
-"""Market-only grouping preserves ranked listings, policy and source boundaries."""
+"""Issuer-first market grouping preserves listing identity, policy and source labels."""
 import copy
 import json
 import os
@@ -75,8 +75,10 @@ class GroupingTests(unittest.TestCase):
 
     def test_unknown_series_is_explicit_and_does_not_guess_from_year(self):
         result=stuff._market_group_rows('banknotes',[dict(id='a',country='France',date_1=1934),dict(id='b')])
-        self.assertEqual(result[0]['_market_group']['title'],'France · Series not specified')
-        self.assertEqual(result[1]['_market_group']['title'],'Other banknote listings · Series not specified')
+        self.assertEqual(result[0]['_market_issuer']['title'],'Unknown issuer · France')
+        self.assertEqual(result[1]['_market_issuer']['title'],'Unknown issuer · Country not specified')
+        self.assertEqual(result[0]['_market_group']['title'],'Issued 1934 · Series not specified · Catalogue not specified')
+        self.assertEqual(result[1]['_market_group']['title'],'Series not specified · Catalogue not specified')
         self.assertEqual(grouping.observed_series('France 1934 100 Francs PMG 65'),'')
         self.assertEqual(grouping.observed_series('Series of 1934 A Silver Certificate PMG 65'),'1934A')
         self.assertEqual(grouping.observed_series('Philippines Victory Series P-96'),'Victory')
@@ -90,6 +92,78 @@ class GroupingTests(unittest.TestCase):
             'Victory Series 66 PMG 65','Victory Series 67 PMG 65','Victory Series PMG 66'))]
         result=stuff._market_group_rows('banknotes',rows,observed=True)
         self.assertEqual(len({row['_market_group']['key'] for row in result}),3)
+
+    def test_issuer_leads_across_series_with_country_and_unknown_boundaries(self):
+        rows=[dict(note('a'),issuer='Government',country='France',series='1935'),
+              dict(note('b'),issuer='Another Bank',country='France',series='1934'),
+              dict(note('c'),issuer='  GOVERNMENT  ',country='France',series='1934'),
+              dict(note('d'),issuer='Government',country='French Indochina',series='1934'),
+              dict(note('e'),issuer='',country='France'),
+              dict(note('f'),issuer='Unknown issuer',country='France')]
+        before=copy.deepcopy(rows)
+        result=stuff._market_group_rows('banknotes',rows)
+        self.assertEqual([row['id'] for row in result],['c','a','b','d','e','f'])
+        groups={row['id']:row['_market_issuer'] for row in result}
+        self.assertEqual(groups['a']['key'],groups['c']['key'])
+        self.assertNotEqual(groups['a']['key'],groups['d']['key'])
+        self.assertNotEqual(groups['a']['key'],groups['e']['key'])
+        self.assertEqual(groups['e']['key'],groups['f']['key'])
+        self.assertEqual([r['_market_issuer']['heading'] for r in result],[True,False,True,True,True,False])
+        self.assertEqual(groups['a']['count'],2)
+        self.assertEqual(rows,before)
+
+    def test_catalogue_types_separate_but_equivalent_references_and_grades_gather(self):
+        base=dict(country='British Honduras',issuer='Government of British Honduras',series='1960')
+        rows=[dict(note('a'),**base,pick_number='P-1a',denomination='1 Dollar',grade='65',serial_number='AAA'),
+              dict(note('b'),**base,pick_number='P-1b',denomination='1 Dollar'),
+              dict(note('c'),**base,pick_number='Pick 1a',other_catalog='B101',denomination='$1',grade='67',serial_number='BBB'),
+              dict(note('d'),**base,pick_number='',denomination='1 Dollar')]
+        result=stuff._market_group_rows('banknotes',rows)
+        groups={r['id']:r['_market_group'] for r in result}
+        self.assertEqual(groups['a']['key'],groups['c']['key'])
+        self.assertEqual(groups['a']['count'],2)
+        self.assertNotEqual(groups['a']['key'],groups['b']['key'])
+        self.assertNotEqual(groups['a']['key'],groups['d']['key'])
+        self.assertEqual(len({r['_market_issuer']['key'] for r in result}),1)
+        self.assertIn('Catalogue not specified',groups['d']['title'])
+
+    def test_year_and_numeric_denomination_sort_without_rewriting_values(self):
+        rows=[]
+        for ident,year,denom in [('ten',1935,'$10'),('pound',1935,'1 Pound'),
+                                ('one',1935,'1 Dollar'),('cents',1935,'50 Cents'),
+                                ('old',1934,'100 Dollars'),('blank',1935,'')]:
+            rows.append(dict(note(ident),country='British Honduras',issuer='Government',
+                             series='Currency Board issues',date_1=year,denomination=denom))
+        before=copy.deepcopy(rows)
+        result=stuff._market_group_rows('banknotes',rows)
+        self.assertEqual([r['id'] for r in result],['old','cents','one','ten','pound','blank'])
+        self.assertEqual(rows,before)
+
+    def test_mixed_sources_share_explicit_issuer_and_type_without_changing_actions(self):
+        candidate=dict(note('scan'),issuer='US Treasury',pick_number='Fr.1604',
+                       _market_card_kind='candidate',status='new')
+        observed=dict(note('card'),issuer='US Treasury',title='Series of 1934 A Silver Certificate',
+                      pick_number='Friedberg1604',series='untrusted field',_market_card_kind='observed',
+                      item_id='123456789012',sources=['watched','sponsored'],availability_label='Availability unverified')
+        unknown=dict(observed,id='unknown',item_id='123456789013',issuer='')
+        before=copy.deepcopy([candidate,observed,unknown])
+        result=stuff._market_group_rows('banknotes',[candidate,unknown,observed])
+        self.assertEqual([r['id'] for r in result],['scan','card','unknown'])
+        self.assertEqual(result[0]['_market_group']['key'],result[1]['_market_group']['key'])
+        self.assertEqual(result[0]['_market_issuer']['count'],2)
+        self.assertNotEqual(result[1]['_market_issuer']['key'],result[2]['_market_issuer']['key'])
+        self.assertEqual(result[1]['sources'],['watched','sponsored'])
+        self.assertEqual(result[1]['item_id'],'123456789012')
+        self.assertEqual(result[1]['availability_label'],'Availability unverified')
+        self.assertEqual([candidate,observed,unknown],before)
+
+    def test_unknown_series_uses_explicit_date_without_fabricating_series(self):
+        rows=[dict(note('old'),issuer='Government',series='',date_1=1900),
+              dict(note('new'),issuer='Government',series='',date_1=1960)]
+        result=stuff._market_group_rows('banknotes',rows)
+        self.assertNotEqual(result[0]['_market_group']['key'],result[1]['_market_group']['key'])
+        self.assertTrue(all('Series not specified' in r['_market_group']['title'] for r in result))
+        self.assertEqual([r['series'] for r in result],['',''])
 
 
 class MarketRouteTests(unittest.TestCase):
@@ -142,8 +216,9 @@ class MarketRouteTests(unittest.TestCase):
                                       sources={k:dict(status='ok',message='') for k in feed.KINDS},items=cards));self.db.commit()
             before=[tuple(r) for r in self.db.execute('SELECT * FROM ebay_market_cards ORDER BY item_id')]
             result=stuff._market_personal_feed(self.db,[])['cards']
-            self.assertEqual([r['item_id'] for r in result],[str(123456789012+i) for i in (0,2,1)])
-            self.assertEqual([r['_market_group']['count'] for r in result],[2,2,1])
+            self.assertEqual([r['item_id'] for r in result],[str(123456789012+i) for i in (1,0,2)])
+            self.assertEqual([r['_market_group']['count'] for r in result],[1,1,1])
+            self.assertTrue(all(r['_market_issuer']['count']==3 for r in result))
             self.assertTrue(all(r['availability_label']=='Availability unverified' for r in result))
             self.assertTrue(all(set(r['sources'])=={'watched','sponsored'} for r in result))
             self.assertTrue(all('collection_matches' in r and 'collection_check_incomplete' in r for r in result))
@@ -154,6 +229,48 @@ class MarketRouteTests(unittest.TestCase):
              patch.object(stuff,'render_template',return_value='fixture'):
             for cat in ('coins','banknotes'):
                 self.assertEqual(self.client.get('/'+cat+'?history=0').status_code,200)
+
+    def test_route_unifies_sources_under_one_issuer_and_preserves_distinct_actions(self):
+        candidate=dict(note('candidate-one'),issuer='US Treasury',pick_number='Fr.1604',
+                       title='Candidate Silver Certificate',canonical_url='https://example.test/item/candidate-one',
+                       grade_numeric=65,price='$100',status='new')
+        other=dict(note('candidate-two'),issuer='Another Bank',pick_number='Fr.1604',
+                   title='Another issuer Silver Certificate',price='$110',status='new')
+        card=dict(item_id='123456789012',issuer='US Treasury',country='USA',pick_number='Fr.1604',
+                  title='Watched Series of 1934 A Silver Certificate',
+                  listing_url='https://www.ebay.com/itm/123456789012',
+                  canonical_url='https://www.ebay.com/itm/123456789012',price='$105',
+                  sources=['watched','sponsored'],collection_matches=[],collection_check_incomplete=False,
+                  availability_label='Availability unverified',image_url='')
+        personal=dict(cards=[card],observed_date='2026-10-25',excluded_count=0,
+                      sources={k:dict(status='ok',message='') for k in feed.KINDS})
+        before=copy.deepcopy([candidate,other,personal])
+        with patch.object(stuff,'_market_items',return_value=[candidate,other]), \
+             patch.object(stuff,'_market_personal_feed',return_value=personal), \
+             patch.object(stuff,'render_template',return_value='fixture') as render:
+            self.assertEqual(self.client.get('/banknotes/market').status_code,200)
+            rows=render.call_args.kwargs['rows']
+        self.assertEqual([r.get('id') or r['item_id'] for r in rows],
+                         ['candidate-one','123456789012','candidate-two'])
+        self.assertEqual(rows[0]['_market_group']['key'],rows[1]['_market_group']['key'])
+        self.assertEqual(rows[0]['_market_issuer']['count'],2)
+        self.assertEqual(rows[1]['_market_card_kind'],'observed')
+        with patch.object(stuff,'_market_items',return_value=[candidate,other]), \
+             patch.object(stuff,'_market_personal_feed',return_value=personal):
+            response=self.client.get('/banknotes/market')
+        self.assertEqual(response.status_code,200)
+        body=response.get_data(as_text=True)
+        self.assertLess(body.index('Candidate Silver Certificate'),body.index(card['title']))
+        self.assertLess(body.index(card['title']),body.index('Another issuer Silver Certificate'))
+        self.assertEqual(body.count('data-market-issuer-heading='),2)
+        self.assertIn('Availability unverified',body)
+        self.assertIn('eBay Watched',body)
+        self.assertIn('eBay Sponsored · similar to watched',body)
+        self.assertIn('data-id="candidate-one"',body)
+        self.assertIn('data-buy-url="/banknotes/market/ebay-feed/123456789012/buy"',body)
+        self.assertIn('data-dismiss-url="/banknotes/market/ebay-feed/123456789012/dismiss"',body)
+        self.assertIn('data-bought="1"',body)
+        self.assertEqual([candidate,other,personal],before)
 
 
 if __name__=='__main__': unittest.main()

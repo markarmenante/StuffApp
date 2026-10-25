@@ -54,23 +54,32 @@ tool and concurrency caps; a scan is bounded discovery, not a guarantee to inspe
 every territory or listing. Collection and Ordered records are unchanged.
 
 Both Market Scan pages gather similar listings into visible sections. Banknotes
-use the country spelling aliases and complete series label, with the existing US
-note-type rules separating same-year classes such as Silver Certificates and
-Federal Reserve Notes. Series suffixes remain distinct. Coins use the existing
-catalogue-region normalization, including the separate island headings.
+group first by explicit issuer and canonical country, then by complete series,
+US note type and catalogue reference. Different issuer names, series suffixes
+and reference varieties stay distinct. Grades and serials do not split the same
+reference. Within an issuer, notes follow series year and numeric denomination;
+issuer blocks retain first appearance in the ranked results. Coins retain their
+existing region grouping and ranking.
 
-Groups follow the first appearance in the existing ranked results; listings
-retain their rank order within each group. This is display-only metadata on
-copies: persisted ranks, catalogue references, eligibility, ownership warnings,
-dismissals and per-listing actions remain unchanged. Current and Earlier market
-views use the same grouping. Collection lists are unchanged.
+Scanned, watched and sponsored banknotes now share those issuer sections. Source
+labels, availability warnings, duplicate checks and exact Buy/Bought/Delete
+targets remain with each listing. Observed cards use only explicitly named
+series and references; an issuer is never guessed from a title. Missing issuer
+information appears as “Unknown issuer”. Current and Earlier views use the same
+grouping, and deleting a card updates both section counts. Display grouping
+does not rewrite stored payloads, ranks or the ordinary collection list.
 
-Watched/sponsored cards are grouped independently in their existing observed
-section. They reuse the country already identified for collection checks and
-only explicitly named series in card titles. A bare year is not treated as a
-series. Missing data reads “Series not specified”, “Other banknote listings” or
-“Region not specified”; it does not trigger enrichment or a new scan. Grouping
-never upgrades an observed card into a verified recommendation.
+Banknotes show `Price: …` and `Est. value: …`, or exactly `No estimate`. The
+asking/current price remains separate from a researched market-value range.
+New research can provide structured `valuation` data with currency, range,
+research date, grade comparison and dated sold/price-guide evidence. Sources
+are available by expanding the terse estimate. The rendering path makes no
+network calls and never converts legacy free-text `fair` into a numeric value.
+Old cards without supported data simply show `No estimate`; their saved text
+is preserved. A watched-card shaping call has no research capability and cannot
+create an estimate. Invalid, unsupported or stale estimates are omitted by
+`market_valuation.py`. Tests: `test_market_grouping.py`,
+`test_market_valuation.py` and the browser interaction checks.
 
 ## Identity and decisions
 

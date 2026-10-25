@@ -29,6 +29,9 @@ repo=Path(sys.argv[1]); source=(repo/'templates/list.html').read_text()
 start=source.index('<script>\n(function () {\n  const CAT =')
 script=source[start:source.index('</script>',start)+len('</script>')]
 app=Flask(__name__,template_folder=str(repo/'templates'))
+sys.path.insert(0,str(repo))
+from market_valuation import display as market_valuation_display
+app.add_template_filter(market_valuation_display,'market_valuation')
 for rule,endpoint in [
  ('/<category>/market/scan','market_scan_start'),
  ('/<category>/market/status','market_scan_status'),

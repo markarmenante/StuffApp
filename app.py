@@ -12,6 +12,7 @@ import market_scan as market_runtime
 import market_colonial
 import market_ebay_feed
 import market_grouping
+import market_valuation
 import market_checkout
 import market_purchase_capture
 import banknote_catalog
@@ -16259,6 +16260,8 @@ def _market_scan_prompt(category, theme_key, theme_text, profile, holdings,
             '"why": str, "fair": str}], '
             '"notes": str (when items is empty: what you searched and why nothing qualified; else "")}'
         )
+    if category == 'banknotes':
+        schema = schema.replace('"fair": str', market_valuation.SCHEMA + ', "fair": str')
     scope = ('paper money — all colonial, protectorate, mandate, trust-territory, dependency, '
              'condominium, leased-territory, client-state and military-occupation issues worldwide '
              'first, without an empire or territory whitelist (including Japanese and lesser-known '
@@ -16287,6 +16290,8 @@ LIVENESS: every item must be purchasable now. An auction lot must be in a sale t
 EXACT AUCTION LINKS: use a verified individual lot page, never the auction house homepage, auction index, catalogue, calendar or live-bidding landing page. A sale number, future sale date or general bidding controls do not identify the particular coin or banknote. Follow the actual lot link; never guess a URL or assume an internal sale ID equals the auction number. If the exact lot link cannot be found, omit the candidate.
 
 ADMINISTRATION ELIGIBILITY: Collection group is not colonial status. Search ALL documented colonial, dependent and occupation administrations; examples and the fixed want-list are not limits. Use the actual issue period and relationship, not an old printed date, a foreign printer, later circulation or a country's modern name. Military occupation can follow independence. Include issuer and catalogue identity. For additional territories, occupation issues, or transition years, supply the complete administration object, both issue_year_start and issue_year_end, and issue_date_source. The source excerpt must identify this particular issue as belonging to that administration; cite an actual catalogue, museum, issuing-bank or authoritative historical reference URL, not a search page or a guessed link. The actual issue range must fit inside the sourced administration period. For known colonial issues without this evidence, conservative pre-independence boundaries still apply. Undated notes and reissues always need actual issue-year evidence. Exclude ordinary independent Commonwealth/Republic/successor-bank issues, propaganda notes, counterfeits, and unsupported claims; leave missing facts null, never invent them. Domestic US large-size themes remain separate, while documented British-American colonial issues are included. EXCEPTION explicitly requested by Mark: genuine Philippine VICTORY series notes remain wanted after independence, including Roxas signature varieties and Central Bank of the Philippines Victory overprints. Identify the actual Philippine Victory catalogue number, issuer and series; label these accurately as Victory or post-independence Victory-CBP, never automatically colonial.
+
+{market_valuation.PROMPT if category == 'banknotes' else ''}
 
 TONE (Mark's instruction, 2026-09-10): `why`, `fills`, `rarity` and `fair` are factual one-liners — what the piece is, its grade, its price, which gap it fills, and the evidence. No flattery, no "exactly the trophy-grade piece the collection needs", no reading of the collection or the collector; state facts and figures only. Keep purchase-button wording, financing language and search/price-extraction commentary in `live_evidence` only; it is internal verification data. Never repeat it in `why`, `fills`, `rarity` or `fair`. Retain concrete price caveats (buyer premium, shipping, estimates), dated comparable sales and attributed census evidence. If the price is unknown use "See listing" in `price`.
 
@@ -17559,6 +17564,7 @@ def _market_normalize_item(db, category, raw):
             item['source_observed_at'] = card['observed_at']
         item.update({
             'country': _canonical_banknote_country(str(raw.get('country') or '').strip()[:80]),
+            'valuation': market_valuation.normalize(raw.get('valuation'), url),
             'series': (str(raw.get('series') or '').strip()[:60] or None),
             'pick_number': (str(raw.get('pick_number') or '').strip()[:60] or None),
             'other_catalog': str(raw.get('other_catalog') or '').strip()[:160],
@@ -18425,7 +18431,9 @@ def _market_ebay_source(api_key, inputs):
                 if not card:
                     continue
                 item.update(listing_url=card['listing_url'], venue='eBay', theme='ebay-personalized',
-                            discovery_sources=card['sources'])
+                            discovery_sources=card['sources'], valuation=None)
+                # This shaping call has no research tool and observed cards
+                # contain no comparable sales; it cannot establish a value.
                 if card['price']:
                     item['price'] = card['price']
                 if card['image_url']:
@@ -18640,6 +18648,11 @@ def _market_reap_orphan(db, category, scan):
     return _market_latest_scan(db, category)
 
 
+@app.template_filter('market_valuation')
+def _market_valuation_display(item):
+    return market_valuation.display(item)
+
+
 @app.template_filter('market_copy')
 def _market_display_copy(value):
     """Remove retrieval commentary from saved candidates without altering evidence.
@@ -18741,8 +18754,16 @@ def _market_group_rows(category, rows, observed=False):
         fields['description'] = ' '.join(str(row.get(k) or '') for k in ('title', 'description'))
         found = _us_note_class(fields)
         return found['name'] if found else ''
+    def banknote_order(row):
+        series_year = re.match(r'^((?:1[6-9]|20)\d{2})(?:[A-Za-z])?$', str(row.get('series') or '').strip())
+        year = (int(series_year.group(1)) if series_year else
+                _note_primary_year(row.get('series'), row.get('country'), row.get('date_1')))
+        return (year or 9999,
+                _denom_currency(row.get('denomination')),
+                _denom_amount(row.get('denomination')))
     return market_grouping.group_rows(rows, category,
-        coin_fields=canonicalize_coin_fields, note_type=note_type, observed=observed)
+        coin_fields=canonicalize_coin_fields, note_type=note_type, observed=observed,
+        catalog_references=_market_catalog_references, banknote_order=banknote_order)
 
 
 def _market_personal_feed(db, visible_items):
@@ -18781,6 +18802,7 @@ def _market_personal_feed(db, visible_items):
             country = 'United States of America'
         identity = dict(country=country, pick_number=references, title=title, listing_url=card['listing_url'])
         card['country'] = _market_reference_country(identity)  # display-only observed identity
+        card['pick_number'] = references
         card['collection_matches'] = _market_collection_matches(db, identity, rows)
         card['collection_check_incomplete'] = _market_collection_check_incomplete(identity)
         card['observed_date'] = market_ebay_feed.utc(latest['observed_at'])[:16].replace('T', ' ') + ' UTC'
@@ -18809,7 +18831,14 @@ def market_view(category):
     cat_info = CATEGORIES[category]
     scan = _market_reap_orphan(db, category, _market_latest_scan(db, category))
     earlier = request.args.get('earlier') == '1'
-    items = _market_group_rows(category, _market_items(db, category, earlier=earlier))
+    candidates = _market_items(db, category, earlier=earlier)
+    personal_feed = _market_personal_feed(db, candidates) if category == 'banknotes' and not earlier else None
+    # Source labels and action identities stay with each row while all sources
+    # share the same issuer/type sections in the banknote Market Scan.
+    display_rows = [dict(row, _market_card_kind='candidate') for row in candidates]
+    if personal_feed:
+        display_rows.extend(dict(card, _market_card_kind='observed') for card in personal_feed['cards'])
+    items = _market_group_rows(category, display_rows)
     running = bool(scan and scan['status'] == 'running')
     # First visit (or a stale scan older than 12 hours with nothing left
     # to act on) starts a scan by itself; the page polls until it lands.
@@ -18820,7 +18849,7 @@ def market_view(category):
             stale = age > timedelta(hours=12)
         except ValueError:
             stale = True
-    autoscan = (not running) and (scan is None or (stale and not items)) and not earlier
+    autoscan = (not running) and (scan is None or (stale and not candidates)) and not earlier
     return render_template('list.html',
                            category=category,
                            cat_info=cat_info,
@@ -18847,7 +18876,8 @@ def market_view(category):
                            fields=visible_fields(category),
                            market_mode=True,
                            market_navigation=_market_collection_navigation(category),
-                           market_personal_feed=_market_personal_feed(db, items) if category == 'banknotes' and not earlier else None,
+                           market_personal_feed=personal_feed,
+                           market_unified=category == 'banknotes',
                            market_scan=scan,
                            market_ebay_session=market_ebay_feed.session_status(db) if category == 'banknotes' else None,
                            market_ebay_enabled=category == 'banknotes' and market_ebay_feed.enabled(),

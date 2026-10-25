@@ -181,11 +181,15 @@
   {% set _us_panels = series_panels(rows) if category == 'banknotes' and show_history else {} %}
   {% set _bn_groups = banknote_grouping(rows) if category == 'banknotes' and not _market and not _analysis else {} %}
   {% for row in rows %}
-  {% set _row_lifecycle = purchase_lifecycle(category, row) if not _market else none %}
   {% if _market %}
     {% set market_group = row.get('_market_group') %}
     {% include 'partials/market_group_heading.html' %}
   {% endif %}
+  {% if _market and row.get('_market_card_kind') == 'observed' %}
+    {% set card = row %}
+    {% include 'partials/market_observed_row.html' %}
+  {% else %}
+  {% set _row_lifecycle = purchase_lifecycle(category, row) if not _market else none %}
   {% set _bn_group = _bn_groups.get(row['id']) %}
   {% if _bn_group and _bn_group.heading %}
   <div class="banknote-group-heading" data-banknote-group="{{ _bn_group.key }}">
@@ -228,7 +232,7 @@
   {% if _market %}
   {# A market row opens the listing in a new tab; its thumbnail is the
      seller's photo (no upload targets here). #}
-  <div class="item-row market-row" id="item-{{ row['id'] }}"{% if market_group %} data-market-group="{{ market_group.key }}"{% endif %} data-listing-key="{{ row['canonical_url'] or '' }}" data-href="{{ url_for('market_item_listing', category=category, item_id=row['id']) }}" data-external="1">
+  <div class="item-row market-row" id="item-{{ row['id'] }}"{% if market_group %} data-market-group="{{ market_group.key }}"{% endif %}{% if row.get('_market_issuer') %} data-market-issuer="{{ row['_market_issuer'].key }}"{% endif %} data-listing-key="{{ row['canonical_url'] or '' }}" data-href="{{ url_for('market_item_listing', category=category, item_id=row['id']) }}" data-external="1">
     <div class="item-thumb market-thumb" title="Open the listing">
       {% if row['image_url'] %}
         <img src="{{ row['image_url'] }}" alt="" loading="lazy" referrerpolicy="no-referrer"
@@ -693,7 +697,8 @@
       <div class="market-meta">
         {% if row['title'] %}<div class="idr market-title"><span>{{ row['title'] }}</span></div>{% endif %}
         <div class="idr market-line">
-          <span class="market-price">{{ row['price'] }}{% if row['price_usd'] and not (row['price'] or '').startswith('$') %} / ${{ '{:,.0f}'.format(row['price_usd']) }}{% endif %}</span>
+          <span class="market-price">{% if category == 'banknotes' %}Price: {% endif %}{{ row['price'] }}{% if row['price_usd'] and not (row['price'] or '').startswith('$') %} / ${{ '{:,.2f}'.format(row['price_usd']) }}{% endif %}</span>
+          {% if category == 'banknotes' %}{% set valuation = row|market_valuation %}{% include 'partials/market_valuation.html' %}{% endif %}
           {% if row['grade'] or row['grade_numeric'] %}<span class="market-grade">{{ row['grading_authority'] or '' }} {{ row['grade_numeric']|int if row['grade_numeric'] else row['grade'] }}{% if row['designation'] %} {{ row['designation'] }}{% endif %}</span>{% endif %}
           <span class="market-venue">{{ row['venue'] }}{% if row['seller'] and row['seller'] != row['venue'] %} · {{ row['seller'] }}{% endif %}</span>
           {% if row['closes'] %}<span class="market-closes">{% if row['sale_type'] == 'auction' %}auction closes{% else %}until{% endif %} {{ row['closes'] }}</span>{% endif %}
@@ -717,8 +722,10 @@
           {% endfor %}
           {% if row['collection_check_incomplete'] %}<span class="market-tag">Collection check incomplete — catalogue reference or country/state missing or unclear</span>{% endif %}
           {% if row['owned'] and not row['collection_matches'] %}<span class="market-tag market-tag-owned">You have {{ row['owned'] }}</span>{% endif %}
+          {% if category != 'banknotes' %}
           {% set _fair = row['fair']|market_copy %}
           {% if _fair %}<span class="market-fair">{{ _fair }}</span>{% endif %}
+          {% endif %}
         </div>
         <div class="market-actions">
           {% if market_earlier %}<span class="market-tag market-tag-earlier">{{ 'Dismissed' if row['status'] == 'dismissed' else 'Scan of' }} {{ row['scanned_at'] }}</span>{% endif %}
@@ -744,6 +751,7 @@
   <div class="us-series-divider" aria-hidden="true"></div>
   {% endif %}
   {% if category == 'properties' %}{% set ns.prev = row['type'] %}{% endif %}
+  {% endif %}
   {% endfor %}
 </div>
 
@@ -792,13 +800,24 @@
     if (!root) return;
     root.querySelectorAll('.item-list').forEach(list => {
       const counts = new Map();
+      const issuers = new Map();
       [...list.children].forEach(row => {
         if (row.matches('.item-row[data-market-group]')) {
           const key = row.dataset.marketGroup;
           counts.set(key, (counts.get(key) || 0) + 1);
         }
+        if (row.matches('.item-row[data-market-issuer]')) {
+          const key = row.dataset.marketIssuer;
+          issuers.set(key, (issuers.get(key) || 0) + 1);
+        }
       });
       [...list.children].forEach(heading => {
+        if (heading.matches('[data-market-issuer-heading]')) {
+          const count = issuers.get(heading.dataset.marketIssuerHeading) || 0;
+          if (!count) { heading.remove(); return; }
+          const label = heading.querySelector('.market-issuer-count');
+          if (label) label.textContent = count + (count === 1 ? ' listing' : ' listings');
+        }
         if (!heading.matches('[data-market-group-heading]')) return;
         const count = counts.get(heading.dataset.marketGroupHeading) || 0;
         if (!count) { heading.remove(); return; }
@@ -1026,7 +1045,7 @@
           }
           row?.remove();
           syncMarketGroups();
-          const count = document.querySelectorAll('.market-row').length;
+          const count = document.querySelectorAll('#marketResults .market-row, #marketResults .market-personal-row').length;
           const label = document.querySelector('.list-count, .list-cat-title-count');
           if (label) label.textContent = count + (CAT === 'coins' ? ' Coins' : '');
           setStatus(CAT === 'banknotes' ? 'Deleted. This listing will no longer be recommended.' : 'Candidate hidden.');
@@ -1050,7 +1069,7 @@
   });
   document.addEventListener('click', ev => {
     const row = ev.target.closest('.market-row');
-    if (row && !ev.target.closest('a, button, input, .market-actions')) {
+    if (row && !ev.target.closest('a, button, input, details, summary, .market-actions')) {
       window.open(row.dataset.href, '_blank', 'noopener');
     }
   });
@@ -1283,7 +1302,7 @@ window.shareCardRow = async function (ev, btn) {
     setTimeout(function() { target.classList.remove('just-returned'); }, 2200);
   })();
 
-  document.querySelectorAll('.item-row:not(.market-row)').forEach(function(row) {
+  document.querySelectorAll('.item-row:not(.market-row):not(.market-personal-row)').forEach(function(row) {
     var rowFileBtn = row.querySelector('.row-upload-btn input[type=file]');
     var firstThumb = row.querySelector('.item-thumb[data-upload-url]');
 

@@ -135,6 +135,15 @@ approximation" in the caption. Generation needs `ANTHROPIC_API_KEY`
 
 ## Market Scan (coins, banknotes)
 
+Issuer grouping and concise estimates (2026-10-25): Banknote candidates,
+watched and sponsored cards share issuer sections, with similar series and
+catalogue types together. Preserve each source label and exact action target.
+Show `Price: …` and `Est. value: …`, or exactly `No estimate`. Only supported
+structured valuations produce an estimate; do not relabel an asking price or
+legacy `fair` prose as fair market value. Evidence stays behind the expandable
+estimate. See `docs/market-scan.md`, `market_grouping.py` and
+`market_valuation.py`; normal collection ordering is unchanged.
+
 The Market Scan pill (left of "+" on the Coins and Banknotes lists)
 swaps the list for live buy candidates and reads "Collection" while
 showing them. A scan runs in a background thread (`_run_market_scan`;
