@@ -272,13 +272,18 @@ and never exceeds the remaining shared budget minus ten seconds reserved for
 extraction; it follows no redirects and performs no retries. Only native source
 snippets join the proof pool, never model answers or citation URLs alone. The
 fetch/extraction phase can use those excerpts directly. For missing dimensions
-with Pick/TBB identity, an observed Banknote Index Country directory is preferred:
-follow its actual country/territory link, then its exact reference entry. No
+with explicit unambiguous Pick/TBB identity, the verified public Banknote Index
+Country directory is a configured navigation fallback, so search need not
+rediscover it. It is not source evidence: follow its actual country/territory
+link, then its exact reference entry. No
 country or item IDs are invented, and a directory alone is not field evidence.
 There is no second uncited dimensions call. Search Numista's whole domain,
 including current short numeric URLs, then move to specialist/archive sources.
 Direct image/dealer facts remain separate and source failure preserves purchase
 and image Check. Saved notes and new drafts use the same lookup/apply routes.
+Research diagnostics log source/candidate counts, fetch attempt/stop/failure,
+and allowlisted claimed/accepted field names only; no record values, source
+URLs, purchase details or credentials are logged by these summaries.
 
 Catalogue values enter `filled` only for blank fields. Lookup returns per-field
 proofs plus `catalogue.guard` and raw `expected_values`. The banknote detail UI

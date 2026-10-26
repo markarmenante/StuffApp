@@ -60,7 +60,7 @@ class CandidateTests(unittest.TestCase):
         raw = dict(catalogue_research=research())
         raw['catalogue_research']['fields']['size_width'] = dict(source_url='https://en.numista.com/999999')
         selected = lookup.fetch_candidates(NOTE, raw, sources)
-        self.assertEqual(selected, [URL, INDEX])
+        self.assertEqual(selected, [lookup.BNI_COUNTRY_DIRECTORY, URL])
         self.assertNotIn('https://en.numista.com/999999', selected)
 
     def test_observed_country_directory_can_resolve_missing_dimensions(self):
@@ -70,7 +70,7 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(lookup.fetch_candidates(NOTE, {}, sources), [directory])
         self.assertEqual(lookup.fetch_candidates(dict(NOTE,size_width=156,size_height=103), {}, sources), [])
         self.assertEqual(lookup.fetch_candidates(dict(NOTE,country=''), {}, sources), [])
-        self.assertEqual(lookup.fetch_candidates(NOTE, {}, {}), [])
+        self.assertEqual(lookup.fetch_candidates(NOTE, {}, {}), [directory])
 
     def test_numeric_discovery_does_not_require_rufiyaa_english_alias(self):
         note = copy.deepcopy(NOTE)
@@ -78,7 +78,7 @@ class CandidateTests(unittest.TestCase):
             URL:dict(title='10 Rupees - Maldives', quotes=[]),
             'https://en.numista.com/other':dict(title='Bermuda 10 Rupees P-5b', quotes=[]),
         })
-        self.assertEqual(selected, [URL])
+        self.assertEqual(selected, [lookup.BNI_COUNTRY_DIRECTORY, URL])
         self.assertEqual(note, NOTE)
 
     def test_discovery_rejects_neighboring_type_currency_and_coin(self):
@@ -86,12 +86,38 @@ class CandidateTests(unittest.TestCase):
                       'Maldives 10 Rufiyaa P-5a', 'Maldives 10 Rufiyaa coin P-5b'):
             with self.subTest(title=title):
                 self.assertEqual(lookup.fetch_candidates(NOTE, {}, {
-                    URL:dict(title=title, quotes=[])}), [])
+                    URL:dict(title=title, quotes=[])}), [lookup.BNI_COUNTRY_DIRECTORY])
 
     def test_observed_legacy_numista_note_url_keeps_same_numeric_identity(self):
         old = 'https://en.numista.com/catalogue/note223321.html'
         self.assertEqual(lookup.fetch_candidates(NOTE, {}, {
-            old:dict(title='Maldives 10 Rufiyaa P-5b', quotes=[])}), [URL])
+            old:dict(title='Maldives 10 Rufiyaa P-5b', quotes=[])}), [lookup.BNI_COUNTRY_DIRECTORY, URL])
+
+    def test_configured_directory_requires_explicit_unambiguous_country_and_reference(self):
+        for change in ({'country':''}, {'pick_number':''}, {'pick_number':'64'},
+                       {'pick_number':'P-5b, possibly P-5c'}, {'pick_number':'P-5b, P-5a'},
+                       {'pick_number':'Fr-652'}, {'size_width':156,'size_height':103}):
+            with self.subTest(change=change):
+                self.assertEqual(lookup.fetch_candidates(dict(NOTE, **change), {}, {}), [])
+        for country, ref in (('Seychelles','P-14a'), ('Bermuda','TBB B101a'),
+                             ('French Somaliland','P-12b')):
+            self.assertEqual(lookup.fetch_candidates(dict(NOTE,country=country,pick_number=ref), {}, {}),
+                             [lookup.BNI_COUNTRY_DIRECTORY])
+        # A model's invented identity does not create a configured navigation intent.
+        self.assertEqual(lookup.fetch_candidates({}, {'catalogue_research':research()}, {}), [])
+
+    def test_configured_navigation_is_separate_from_observed_sources_and_proof(self):
+        source = {}
+        urls = lookup.fetch_candidates(NOTE, {}, source)
+        self.assertEqual(source, {})
+        prompt = lookup.fetch_prompt(NOTE, urls)
+        self.assertIn('Configured public directory (navigation only, not evidence)', prompt)
+        self.assertIn('Observed URLs: []', prompt)
+        self.assertIn('actual exact country or historical-territory link', prompt)
+        self.assertIn('do not stop while requested dimensions remain unverified', prompt)
+        fake = research()
+        fake['fields']['printer']['source_url'] = lookup.BNI_COUNTRY_DIRECTORY
+        self.assertEqual(lookup.validate(NOTE, {}, fake, source)['fields'], {})
 
     def test_failed_server_calls_spend_budget_but_text_claims_do_not(self):
         calls = [dict(content=[dict(type='server_tool_use', name='web_fetch'),
@@ -194,7 +220,7 @@ class ProviderBudgetTests(unittest.TestCase):
 
     def test_model_url_and_document_claim_cannot_trigger_fetch(self):
         first = dict(catalogue_research=research(), _catalogue_sources={URL:{'document_text':FULL}})
-        result, calls = self.call([response(first)])
+        result, calls = self.call([response(first)], note=dict(NOTE,size_width=156,size_height=103))
         self.assertEqual(len(calls), 1)
         self.assertEqual(result['_catalogue_sources'], {})
 
@@ -203,7 +229,7 @@ class ProviderBudgetTests(unittest.TestCase):
                                {'identity':['unexpected']}):
             with self.subTest(research=research_value):
                 first = dict(serial_number='C136027', catalogue_research=research_value)
-                result, calls = self.call([response(first)])
+                result, calls = self.call([response(first)], note=dict(NOTE,size_width=156,size_height=103))
                 self.assertEqual(result['serial_number'], 'C136027')
                 self.assertEqual(len(calls), 1)
 
@@ -279,7 +305,7 @@ class ProviderBudgetTests(unittest.TestCase):
     def test_native_search_no_key_does_not_contact_or_create_an_integration(self):
         native_calls = []
         result, calls = self.call([response(dict(serial_number='C136027'))],
-            search_key='', native_calls=native_calls)
+            search_key='', native_calls=native_calls, note=dict(NOTE,size_width=156,size_height=103))
         self.assertEqual(native_calls, [])
         self.assertEqual(len(calls), 1)
         self.assertEqual(result['serial_number'], 'C136027')
@@ -287,7 +313,8 @@ class ProviderBudgetTests(unittest.TestCase):
     def test_native_unavailable_or_failed_extraction_does_not_retry_or_lose_direct_facts(self):
         native_calls = []
         result, calls = self.call([response(dict(serial_number='C136027'))],
-            ticks=(100,101,110,112), search_key='synthetic-key', native_calls=native_calls)
+            ticks=(100,101,110,112), search_key='synthetic-key', native_calls=native_calls,
+            note=dict(NOTE,size_width=156,size_height=103))
         self.assertEqual(len(native_calls), 1)
         self.assertEqual(len(calls), 1)
         self.assertEqual(result['serial_number'], 'C136027')
@@ -301,7 +328,7 @@ class ProviderBudgetTests(unittest.TestCase):
     def test_unexpected_native_search_failure_preserves_first_direct_result(self):
         result, calls = self.call([response(dict(serial_number='C136027'))],
             ticks=(100,101,110,112), search_key='synthetic-key',
-            native_error=RuntimeError('unexpected adapter failure'))
+            native_error=RuntimeError('unexpected adapter failure'), note=dict(NOTE,size_width=156,size_height=103))
         self.assertEqual(len(calls), 1)
         self.assertEqual(result['serial_number'], 'C136027')
 
@@ -312,6 +339,42 @@ class ProviderBudgetTests(unittest.TestCase):
             ticks=(100,101,110,112), native=native, search_key='synthetic-key')
         self.assertIn('printer', lookup.validate(NOTE, {}, result['catalogue_research'],
             result['_catalogue_sources'])['fields'])
+
+    def test_no_search_sources_uses_existing_fetch_phase_without_creating_proof(self):
+        second = dict(catalogue_research=research(), _catalogue_sources={URL:dict(document_text=FULL)})
+        result, calls = self.call([response(), response(second)])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]['tools'][0]['max_uses'], 4)
+        self.assertEqual(calls[1]['timeout'], 65)
+        prompt = calls[1]['messages'][0]['content']
+        self.assertIn(lookup.BNI_COUNTRY_DIRECTORY, prompt)
+        self.assertNotIn(URL, prompt)
+        self.assertEqual(result['_catalogue_sources'], {})
+        self.assertEqual(lookup.validate(NOTE, {}, result['catalogue_research'], {})['fields'], {})
+
+    def test_configured_directory_accepts_only_actual_fetched_entry_proof(self):
+        note_url = 'https://banknoteindex.com/browse.mhtml?browseBy=Id&browse=53893'
+        claimed = dict(identity=dict(NOTE, reference='P-5b', match='exact'), fields={
+            'size_width':dict(value=156,scope='type',source_url=note_url,quote='Width in mm | 156'),
+            'size_height':dict(value=103,scope='type',source_url=note_url,quote='Height in mm | 103')})
+        full = 'Maldives Government of the Maldives 10 Rufiyaa P-5b 1960. Width in mm | 156\nHeight in mm | 103'
+        result, calls = self.call([response(), response(dict(catalogue_research=claimed), fetch_blocks(note_url,full))])
+        validated = lookup.validate(NOTE, {}, result['catalogue_research'], result['_catalogue_sources'])
+        self.assertEqual({k:p['value'] for k,p in validated['fields'].items()}, {'size_width':156,'size_height':103})
+        self.assertNotIn(lookup.BNI_COUNTRY_DIRECTORY, result['_catalogue_sources'])
+        self.assertEqual(len(calls), 2)
+
+    def test_retrieval_diagnostics_have_counts_and_field_names_only(self):
+        secret = 'PRIVATE-DIAGNOSTIC-MARKER'
+        result = dict(catalogue_research={'identity':{'country':secret}, 'fields':{
+            'printer':dict(value=secret,source_url='https://'+secret,quote=secret), secret:{}}})
+        with self.assertLogs(stuff.app.logger, level='INFO') as captured:
+            self.call([response(), response(result)], note=dict(NOTE,serial_number=secret,order_number=secret))
+        summary = '\n'.join(captured.output)
+        self.assertIn('native_sources=0 sources=0 candidates=1', summary)
+        self.assertIn('fetch_attempted=True fetch_stop=end_turn fetch_failed=False claimed_fields=printer', summary)
+        for forbidden in (secret, NOTE['country'], NOTE['pick_number'], 'https://', 'synthetic-key'):
+            self.assertNotIn(forbidden, summary)
 
 
 if __name__ == '__main__':

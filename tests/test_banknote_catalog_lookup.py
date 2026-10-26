@@ -205,7 +205,7 @@ class ValidationTests(unittest.TestCase):
             index: dict(title='Seychelles banknotes - paper money catalog', quotes=[]),
         }
         note = dict(country='Seychelles', denomination='5 Rupees', pick_number='P-14a')
-        self.assertEqual(lookup.fetch_candidates(note, {}, candidates), [index])
+        self.assertEqual(lookup.fetch_candidates(note, {}, candidates), [lookup.BNI_COUNTRY_DIRECTORY, index])
 
     def test_fetched_document_overcomes_truncated_search_citations(self):
         note = dict(country='Seychelles', pick_number='P-14a', denomination='5 Rupees',
@@ -241,8 +241,8 @@ class ValidationTests(unittest.TestCase):
             result = stuff.fetch_banknote_specs(NOTE)
             self.assertEqual(result['_catalogue_direct_fields'], [])
             self.assertEqual(result['_catalogue_sources'], {})
-            self.assertEqual(factory.return_value.messages.create.call_count, 1)
-            args = factory.return_value.messages.create.call_args.kwargs
+            self.assertEqual(factory.return_value.messages.create.call_count, 2)
+            args = factory.return_value.messages.create.call_args_list[0].kwargs
             self.assertLessEqual(args['timeout'], 75)
             self.assertNotIn('web_fetch', [tool['name'] for tool in args['tools']])
             fetch = lookup.web_fetch_tool()
@@ -298,6 +298,14 @@ class RouteTests(unittest.TestCase):
         after = self.row()
         self.assertEqual({k:v for k,v in before.items() if k != 'specs_searched_at'},
                          {k:v for k,v in after.items() if k != 'specs_searched_at'})
+
+    def test_validation_diagnostics_show_field_names_without_note_or_source_values(self):
+        with self.assertLogs(stuff.app.logger, level='INFO') as captured:
+            self.check()
+        summary = '\n'.join(captured.output)
+        self.assertIn('state=ready accepted_fields=material,printer,size_height,size_width', summary)
+        for forbidden in ('Maldives', 'P-5b', 'Bradbury', URL, 'C136027', '199.99', 'manual-crop'):
+            self.assertNotIn(forbidden, summary)
 
     def test_apply_catalogue_fills_with_guard_and_preserves_item_facts(self):
         data = self.check().get_json(); before = self.row()

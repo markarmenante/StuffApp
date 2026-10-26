@@ -11,8 +11,9 @@ that instance's existing `PERPLEXITY_API_KEY`. It creates no provider credential
 or bulk collection job. Vision and catalogue work share one 75-second
 budget, with at most four web searches, one paused search-turn continuation and
 no whole-call retries. The first phase uses vision and search. A bounded second
-phase receives native source excerpts and at most two ranked URLs actually
-observed by search. It extracts supported facts from those excerpts or uses
+phase receives native source excerpts and at most two ranked URLs: observed
+source pages and an eligible configured public catalogue directory. It extracts
+supported facts from those excerpts or uses
 fetch, preserving direct first-phase facts if retrieval fails. It can read
 up to four full public catalogue pages across the request with
 `web_fetch_20250910` (12,000 content tokens per fetch, explicit catalogue/auction
@@ -83,11 +84,15 @@ Search uses a generated country/numeric-denomination/year query for Numista's
 whole domain, then semantic catalogue-reference and specialist/archive queries.
 Observed legacy Numista note URLs retain their exact numeric record identity
 when normalized to the current URL form. Country indexes can be useful discovery
-sources; for missing dimensions with Pick/TBB identity, an observed Banknote
-Index Country directory takes priority. The fetch phase follows its actual
-country/historical-territory link and then the matching complete-reference entry.
-It never guesses country or item IDs; the entry itself must supply the field
-evidence. Clearly different denominations, references and coin results are not
+sources; for missing dimensions with explicit unambiguous Pick/TBB identity,
+the verified public Banknote Index Country directory is a configured navigation
+fallback and takes priority even if search did not rediscover it. It is labeled
+separately from observed URLs and never added to the evidence map merely because
+it is configured. The fetch phase follows its actual country/historical-territory
+link and then the matching complete-reference entry. It never guesses country
+or item IDs; the entry itself must supply the field evidence. Finding another
+field does not satisfy a still-unverified dimension request. Clearly different
+denominations, references and coin results are not
 treated as the requested banknote. The validator still checks the complete
 reference after retrieval. Unknown,
 inaccessible and conflicting results stay blank rather than becoming guesses;
@@ -96,6 +101,12 @@ the former uncited secondary dimensions lookup is removed. Regressions are in
 `tests/test_banknote_catalog_search.py`,
 existing purchase/photo Check suites
 and the detail-page browser fixture.
+
+Privacy-safe diagnostics distinguish retrieval gaps from validation rejection:
+the adapter logs native/source/candidate counts, whether fetch was attempted,
+its bounded stop/failure state and allowlisted claimed field names. The route
+logs validation state and accepted field names. These summaries omit all note
+values, source URLs, purchase details, record identifiers and credentials.
 
 The list files notes by historical collection relationship first, then territory,
 then the existing monetary era, year and denomination rules. The catalogue is

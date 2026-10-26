@@ -27381,13 +27381,17 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
     candidates = banknote_catalog_lookup.fetch_candidates(research_note, result, result['_catalogue_sources'])
     remaining = deadline - time.monotonic()
     fetch_left = max(0, banknote_catalog_lookup.MAX_FETCHES - banknote_catalog_lookup.tool_uses(responses, 'web_fetch'))
+    fetch_attempted, fetch_failed, fetch_stop = False, False, 'not_attempted'
     if ((candidates or native_sources) and fetch_left and remaining >= 8
             and not any(source.get('document_text') for source in banknote_catalog_lookup.actual_sources(responses)[0].values())):
         try:
+            fetch_attempted = True
             fetched = client.messages.create(model=lookup_model, max_tokens=4096,
                 tools=[banknote_catalog_lookup.web_fetch_tool(fetch_left)], timeout=remaining,
                 messages=[{'role':'user', 'content':banknote_catalog_lookup.fetch_prompt(research_note, candidates, native_sources)}])
             responses.append(fetched.model_dump())
+            stop = getattr(fetched, 'stop_reason', None)
+            fetch_stop = stop if stop in ('end_turn','pause_turn','max_tokens','stop_sequence','tool_use') else 'other'
             for url, source in banknote_catalog_lookup.actual_sources(responses)[0].items():
                 old_source = result['_catalogue_sources'].get(url, {})
                 result['_catalogue_sources'][url] = dict(source,
@@ -27398,7 +27402,15 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
                 if isinstance(fetched_result.get('catalogue_research'), dict):
                     result['catalogue_research'] = fetched_result['catalogue_research']
         except Exception:
+            fetch_failed = True
             app.logger.info('Catalogue page verification unavailable; direct Check facts retained')
+    research = result.get('catalogue_research')
+    claims = research.get('fields') if isinstance(research, dict) else None
+    claimed_fields = sorted(key for key in claims if key in banknote_catalog_lookup.FIELDS) if isinstance(claims, dict) else []
+    app.logger.info('Catalogue research summary: native_sources=%d sources=%d candidates=%d '
+        'fetch_attempted=%s fetch_stop=%s fetch_failed=%s claimed_fields=%s',
+        len(native_sources), len(result['_catalogue_sources']), len(candidates),
+        fetch_attempted, fetch_stop, fetch_failed, ','.join(claimed_fields))
     return result
 
 
@@ -27829,6 +27841,8 @@ def banknote_lookup_specs(record_id):
         filled[field] = value
     if catalogue['state'] == 'ready' and not catalogue['fields']:
         catalogue.update(state='unresolved', message='No additional catalogue details could be confirmed for this note.')
+    app.logger.info('Catalogue validation summary: state=%s accepted_fields=%s',
+        catalogue['state'], ','.join(sorted(catalogue['fields'])))
     catalogue['guard'] = dict(identity=banknote_catalog_lookup.identity_snapshot(note),
                               fields=list(catalogue['fields']))
     if catalogue['fields']:
