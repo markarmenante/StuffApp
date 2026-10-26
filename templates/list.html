@@ -75,6 +75,7 @@
   <button type="button" class="toolbar-btn pill" id="marketEstimatePrices"
           title="Research comparable sales for banknotes without a current estimate">Estimate prices</button>
   <span class="market-estimate-status" id="marketEstimateStatus" role="status" aria-live="polite"></span>
+  <span class="market-status" id="marketLabelStatus" role="status" aria-live="polite" hidden><span></span> <button type="button" class="market-btn" id="marketLabelRetry" hidden>Retry photo labels</button></span>
   {% endif %}
   <a class="toolbar-btn pill" href="{{ market_navigation.earlier }}"
      title="Candidates from earlier scans (superseded or dismissed) — file one you bought with Bought">Earlier candidates</a>
@@ -733,6 +734,7 @@
           {% if _fair %}<span class="market-fair">{{ _fair }}</span>{% endif %}
           {% endif %}
         </div>
+        {% if category == 'banknotes' %}{% set label_item = row %}{% include 'partials/market_label_check.html' %}{% endif %}
         <div class="market-actions">
           {% if market_earlier %}<span class="market-tag market-tag-earlier">{{ 'Dismissed' if row['status'] == 'dismissed' else 'Scan of' }} {{ row['scanned_at'] }}</span>{% endif %}
           <a class="market-btn market-view" href="{{ url_for('market_item_listing', category=category, item_id=row['id']) }}" target="_blank" rel="noopener">View listing</a>
@@ -842,15 +844,21 @@
     const fresh = page.getElementById('marketResults');
     const current = document.getElementById('marketResults');
     if (fresh && current && generation === actionGeneration && requestId === refreshRequest && !actionBusy && !document.querySelector('.location-choice-backdrop')) {
-      const expanded = new Set([...current.querySelectorAll('[data-listing-key]')]
-        .filter(row => row.querySelector('.market-estimate[open]'))
-        .map(row => row.dataset.listingKey));
+      const expanded = new Map([...current.querySelectorAll('[data-listing-key]')]
+        .map(row => [row.dataset.listingKey, ['market-estimate', 'market-label-check']
+          .filter(name => row.querySelector('details.' + name + '[open]'))]));
+      const focused = document.activeElement;
+      const focusedRow = focused?.closest('[data-listing-key]');
+      const focusKind = focused?.matches('.market-estimate summary') ? '.market-estimate summary' :
+        focused?.matches('.market-label-check summary') ? '.market-label-check summary' : null;
       fresh.querySelectorAll('[data-listing-key]').forEach(row => {
         if (dismissedKeys.has(row.dataset.listingKey)) row.remove();
-        else if (expanded.has(row.dataset.listingKey)) row.querySelector('details.market-estimate')?.setAttribute('open', '');
+        else for (const name of expanded.get(row.dataset.listingKey) || []) row.querySelector('details.' + name)?.setAttribute('open', '');
       });
       syncMarketGroups(fresh);
       current.replaceChildren(...fresh.childNodes);
+      if (focusKind && focusedRow) [...current.querySelectorAll('[data-listing-key]')]
+        .find(row => row.dataset.listingKey === focusedRow.dataset.listingKey)?.querySelector(focusKind)?.focus({preventScroll: true});
       const oldCount = document.querySelector('.list-count, .list-cat-title-count');
       const newCount = page.querySelector('.list-count, .list-cat-title-count');
       if (oldCount && newCount) oldCount.textContent = newCount.textContent;
@@ -962,6 +970,75 @@
     }
   });
   if (estimateButton) pollEstimates();
+
+  // Photo jobs also finish after the scan has stopped. This path only reads;
+  // accepted feed updates queue work, and an explicit retry uses POST.
+  const labelStatus = document.getElementById('marketLabelStatus');
+  const labelRetry = document.getElementById('marketLabelRetry');
+  const labelUrl = '/banknotes/market/labels';
+  let labelTimer = null, labelGeneration = 0, labelKey = '', labelRequest = false;
+  function scheduleLabels(delay) {
+    clearTimeout(labelTimer);
+    if (!document.hidden) labelTimer = setTimeout(pollLabels, delay);
+  }
+  async function showLabels(data, generation) {
+    if (generation !== labelGeneration) return;
+    const running = ['queued', 'running'].includes(data.status);
+    const failed = !running && Boolean(data.error);
+    const retryWait = Math.max(0, (Number(data.retry_after) || 0) * 1000 - Date.now());
+    const canRetry = data.retry_available !== false && !retryWait;
+    labelStatus.hidden = !running && !failed;
+    labelStatus.querySelector('span').textContent = running ? 'Reading photo labels…' : failed ?
+      'Photo labels unavailable.' + (retryWait ? ' Retry in ' + Math.ceil(retryWait / 60000) + ' min.' : !canRetry ? ' Rescan to retry.' : '') : '';
+    labelRetry.hidden = !failed || (!canRetry && !retryWait);
+    labelRetry.disabled = labelRequest || !canRetry;
+    const key = (data.job_id || '') + ':' + (data.revision || 0);
+    if (data.job_id && key !== labelKey) {
+      if (await refreshCandidates(revision) && generation === labelGeneration) labelKey = key;
+    }
+    if (generation === labelGeneration) scheduleLabels(running ? 3000 : data.job_id && key !== labelKey ? 2000 : retryWait ? Math.min(30000, Math.max(1000, retryWait)) : 30000);
+  }
+  async function pollLabels() {
+    if (!labelStatus || earlier || labelRequest || document.hidden) return;
+    clearTimeout(labelTimer);
+    const generation = ++labelGeneration;
+    try {
+      const response = await fetch(labelUrl, {cache: 'no-store'});
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error('Photo label status unavailable');
+      await showLabels(data, generation);
+    } catch (_) {
+      if (generation === labelGeneration) scheduleLabels(10000);
+    }
+  }
+  labelRetry?.addEventListener('click', async () => {
+    if (labelRequest || labelRetry.disabled) return;
+    const generation = ++labelGeneration;
+    labelRequest = true;
+    labelRetry.disabled = true;
+    clearTimeout(labelTimer);
+    try {
+      const response = await fetch(labelUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error('Photo labels unavailable');
+      labelRequest = false;
+      await showLabels(data, generation);
+    } catch (_) {
+      if (generation !== labelGeneration) return;
+      labelRequest = false;
+      labelRetry.disabled = false;
+      labelStatus.hidden = false;
+      labelStatus.querySelector('span').textContent = 'Photo labels unavailable.';
+      scheduleLabels(10000);
+    }
+  });
+  if (labelStatus) {
+    pollLabels();
+    document.addEventListener('visibilitychange', () => {
+      clearTimeout(labelTimer);
+      if (!document.hidden) pollLabels();
+    });
+  }
 
   // Refresh only the candidates; preserve dialogs and in-flight user actions.
   async function poll() {
@@ -1186,7 +1263,7 @@
   });
   document.addEventListener('click', ev => {
     const row = ev.target.closest('.market-row');
-    if (row && !ev.target.closest('a, button, input, details, summary, .market-actions')) {
+    if (row && !ev.target.closest('a, button, input, details, summary, .market-actions, .market-label-check')) {
       window.open(row.dataset.href, '_blank', 'noopener');
     }
   });

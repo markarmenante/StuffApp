@@ -29,6 +29,7 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_ebay_orders.py', 'test_ebay_m
          'test_market_grouping.py',
          'test_market_valuation.py',
          'test_market_estimates.py',
+         'test_market_slab_labels.py',
          'test_market_ebay_feed.py',
          'test_market_unwatch.py',
          'test_cloudflare_access.py',

@@ -157,6 +157,20 @@ varieties and series. Observed `_market_identity` is display/matching metadata;
 the original card fields still feed the estimate fingerprint. Do not replace
 those raw fields or weaken cache identity invalidation to improve a heading.
 
+Watched grading labels (2026-10-25): `market_slab_labels.py` automatically queues
+the accepted feed's raw watched photos, including listings promoted to scan
+candidates. It uses the existing server Anthropic image adapter without search,
+title hints or collection facts. Signed-owner/same-origin POST and read-only GET
+share `/banknotes/market/labels`. Two database-leased workers process the finite
+snapshot; photo/account/item/version caches, cooldowns and current-source checks
+prevent repeated work or stale publication. Read only the supplied photo, never
+claim complete seller-gallery inspection. Multiple notes, unresolved labels and
+title/candidate contradictions remain explicit; grades/serials/certificates do
+not identify collection duplicates. Printed dates remain separate from Series.
+Keep all recovery and matching metadata outside the raw estimate fingerprint
+and collection records. Photo-read NET/non-circulating exclusions also protect
+action eligibility. See `docs/market-scan.md` for limits and evidence semantics.
+
 Price markers (2026-10-25): for an explicit fixed asking price in the estimate's
 currency, compare with the supported range midpoint: green at/below, yellow up
 to exactly 30% above, red beyond 30%. Unknown prices/types, auctions, currency

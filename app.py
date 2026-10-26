@@ -15,6 +15,7 @@ import market_grouping
 import market_identity
 import market_valuation
 import market_estimates
+import market_slab_labels
 import market_unwatch
 import cloudflare_access
 import market_checkout
@@ -6861,6 +6862,7 @@ def init_db():
         db.commit()
 
     market_estimates.init_schema(db)
+    market_slab_labels.init_schema(db)
     market_unwatch.init_schema(db)
 
 
@@ -18776,6 +18778,10 @@ def _market_items(db, category, earlier=False):
         item['id'] = r['id']
         item['status'] = 'dismissed' if key in deleted else r['status']
         item['scanned_at'] = (r['created_at'] or '')[:10]
+        if category == 'banknotes':
+            item = _market_overlay_slab_labels(db, item, owned_rows)
+            if item.get('_market_label_excluded'):
+                continue
         out.append(market_estimates.overlay(db, item) if category == 'banknotes' else item)
     db.commit()
     return out
@@ -18850,6 +18856,10 @@ def _market_personal_feed(db, visible_items):
         card['availability_label'] = ('Listing ended' if card['live_state'] == 'ended' else
             ('Availability unverified' if card['live_state'] != 'live' or not card['listing_checked_at'] or
              card['listing_checked_at'] < time.time() - market_ebay_feed.FRESH_SECONDS else 'Listing observed live; eligibility not confirmed'))
+        card = _market_overlay_slab_labels(db, card, rows)
+        if card.get('_market_label_excluded'):
+            excluded_count += 1
+            continue
         cards.append(market_estimates.overlay(db, card))
     return dict(cards=_market_group_rows('banknotes', cards, observed=True), excluded_count=excluded_count, sources=json.loads(latest['source_status']),
                 observed_date=market_ebay_feed.utc(latest['observed_at'])[:16].replace('T', ' ') + ' UTC')
@@ -18857,6 +18867,202 @@ def _market_personal_feed(db, visible_items):
 
 _MARKET_ESTIMATE_LOCK = threading.Lock()
 _MARKET_ESTIMATE_ACTIVE = set()
+
+
+def _market_watched_label_snapshot(db):
+    """Raw watched source, including items promoted to researched candidates."""
+    if not market_ebay_feed.enabled():
+        return None, []
+    try:
+        account = market_ebay_feed.expected_account(db)
+    except ValueError:
+        return None, []
+    snapshot = db.execute("SELECT * FROM ebay_market_requests WHERE status='done' AND observed_at>? ORDER BY observed_at DESC,rowid DESC LIMIT 1", (time.time() - 86400,)).fetchone()
+    if not snapshot or not account or snapshot['expected_account'] != account:
+        return None, []
+    deleted = market_runtime.dismissed_keys(db, 'banknotes')
+    cards = [card for card in market_ebay_feed.cards(db, snapshot['id'])
+             if 'watched' in card['sources'] and not _market_banknote_issue_problem(card)
+             and market_runtime.canonical_url(card['listing_url']) not in deleted]
+    return dict(snapshot), cards
+
+
+def _market_label_target_current(db, wanted):
+    snapshot, cards = _market_watched_label_snapshot(db)
+    return bool(snapshot and any(target and target['key'] == wanted['key'] for target in
+        (market_slab_labels.target(card, snapshot['expected_account']) for card in cards)))
+
+
+def _market_enqueue_slab_labels(db):
+    snapshot, cards = _market_watched_label_snapshot(db)
+    if not snapshot:
+        return
+    market_slab_labels.enqueue(db, snapshot['id'], snapshot['expected_account'], cards,
+                              expires_at=snapshot['observed_at'] + 86400)
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        market_slab_labels.fail_queued(db)
+
+
+def _market_slab_issue_problem(db, url):
+    snapshot, cards = _market_watched_label_snapshot(db)
+    source = next((row for row in cards if row['item_id'] == market_ebay_feed.item_id(url)), None)
+    if not source:
+        return ''
+    check = market_slab_labels.annotation(db, market_slab_labels.target(source, snapshot['expected_account']))
+    for reading in check['readings'] if check else []:
+        if reading.get('label_confident'):
+            problem = _market_banknote_issue_problem(dict(title=reading['literal_label'],
+                country=reading['country'], pick_number=reading['reference'], grade=reading['grade']))
+            if problem:
+                return problem + ' (read from the listing photo)'
+    return ''
+
+
+def _market_overlay_slab_labels(db, item, owned_rows=None):
+    """Derived comparisons only. Never alter raw estimate-identity fields."""
+    snapshot, cards = _market_watched_label_snapshot(db)
+    number = market_ebay_feed.item_id(item.get('listing_url'))
+    source = next((row for row in cards if row['item_id'] == number), None)
+    if not source:
+        return item
+    check = market_slab_labels.annotation(db, market_slab_labels.target(source, snapshot['expected_account']))
+    if not check:
+        return item
+    out = dict(item, label_check=check)
+    out['_market_label_excluded'] = bool(_market_slab_issue_problem(db, item.get('listing_url')))
+    if check['state'] in ('pending', 'reading', 'unavailable', 'unreadable'):
+        return out  # A failed photo read does not erase explicit title evidence.
+    identities = []
+    for reading in check['readings']:
+        if not reading.get('supported'):
+            continue
+        identity = dict(title='', country=_canonical_banknote_country(reading['country']),
+                        issuer=reading['issuer'], pick_number=reading['reference'],
+                        other_catalog='', municipality=reading['state'],
+                        denomination=reading['denomination'], series=reading['series'],
+                        grade=reading['grade'], grading_authority=reading['grading_authority'])
+        if _market_catalog_references(identity):
+            identities.append(identity)
+    listed = _market_banknote_identity_fields(source)
+    listed_refs = _market_catalog_references(listed)
+    label_refs = set().union(*(_market_catalog_references(row) for row in identities)) if identities else set()
+    title = source.get('title') or ''
+    bundle = bool(re.search(r'\b(?:(?:lot|set|group)\s+of\s+(?:[2-9]|[1-9]\d|one hundred|two|three|four|five|six|seven|eight|nine|ten)\b|pair\s+of\s+(?:bank)?notes|[2-9]\s+(?:graded\s+)?(?:bank)?notes\b)', title, re.I))
+    subset = bool(label_refs and len(listed_refs) > len(label_refs) and label_refs.issubset(listed_refs))
+    countries = {_banknote_country_fold(row['country']) for row in identities}
+    country_conflict = bool(listed['country'] and countries and _banknote_country_fold(listed['country']) not in countries)
+    reference_conflict = bool(listed_refs and label_refs and not listed_refs.issubset(label_refs) and not subset)
+    # A promoted candidate may have explicit fields that differ from its watched
+    # title. Those fields also underpin its unchanged valuation fingerprint.
+    if 'request_id' not in item:
+        candidate = _market_banknote_identity_fields(item)
+        candidate_refs = _market_catalog_references(candidate)
+        country_conflict = country_conflict or bool(candidate['country'] and countries and _banknote_country_fold(candidate['country']) not in countries)
+        reference_conflict = reference_conflict or bool(candidate_refs and label_refs and not candidate_refs.issubset(label_refs))
+    prohibited = out['_market_label_excluded']
+    if country_conflict or reference_conflict or prohibited:
+        check.update(state='conflict', message=(
+            'The photo label and listing details disagree; the collection check needs review. Existing estimates have not been validated against this label.'
+            if not prohibited else 'The photo label shows an excluded issue or grading designation; the listing needs review.'))
+        out['collection_check_incomplete'] = True
+        out['collection_matches'] = [match for match in item.get('collection_matches', []) if match.get('kind') == 'listing']
+        return out
+    if not identities:
+        check.update(state='unreadable', message=market_slab_labels.MESSAGES['unreadable'])
+        return out
+    found = {}
+    for index, identity in enumerate(identities):
+        for match in _market_collection_matches(db, dict(identity, listing_url=item.get('listing_url')), owned_rows):
+            match = dict(match)
+            if match.get('kind') == 'catalogue':
+                match['reason'] = 'same catalogue reference read from photo label' + (f' (note {index + 1})' if len(identities) > 1 else '')
+            found[match['id']] = match
+    out['collection_matches'] = list(found.values())
+    out['collection_check_incomplete'] = check['state'] != 'ready' or len(identities) != len(check['readings'])
+    if bundle or subset:
+        check.update(state='partial', message='This listing offers multiple notes; the supplied photo establishes only the references shown. The whole listing check remains incomplete.')
+        out['collection_check_incomplete'] = True
+    if len(identities) == 1 and check['state'] == 'ready':
+        identity = identities[0]
+        identity['issuer'] = identity['issuer'] or (item.get('_market_identity') or listed).get('issuer', '')
+        out['_market_identity'] = {key: identity[key] for key in ('country', 'issuer', 'pick_number', 'other_catalog', 'denomination', 'series')}
+        out['_market_identity']['ambiguous'] = False
+    elif len(identities) > 1:
+        # One photograph cannot establish that all offered notes are visible.
+        check.update(state='partial', message='Multiple notes were read from the supplied photo. Matches are shown per reference; the whole listing check remains incomplete.')
+        out['collection_check_incomplete'] = True
+    if len(identities) == 1 and check['state'] == 'ready':
+        printed = re.search(r'(?<!\d)([1-6]\d|70)(?!\d)', identities[0]['grade'])
+        title_grade = re.search(r'\b(?:PMG|PCGS(?:\s+(?:Currency|Banknote))?|Legacy)(?=\s|\d)[^\d\n]{0,25}([1-6]\d|70)(?!\d)', title, re.I)
+        grade_disagreement = bool(printed and title_grade and printed[1] != title_grade[1])
+        candidate_grade = item.get('grade_numeric') if 'request_id' not in item else None
+        if printed and str(candidate_grade or '').isdigit():
+            grade_disagreement = grade_disagreement or int(printed[1]) != int(candidate_grade)
+        if grade_disagreement:
+            check['message'] = 'The catalogue reference was read from the photo, but its numeric grade differs from the listing. Existing estimates have not been validated against this grade.'
+    return out
+
+
+def _market_read_slab_label(data):
+    """One image-only call; no title, collection facts, search or file writes."""
+    from io import BytesIO
+    from PIL import Image, ImageOps
+    import anthropic
+    with Image.open(BytesIO(data)) as original:
+        if original.width * original.height > 50_000_000:
+            raise ValueError('Photo is too large')
+        photo = ImageOps.exif_transpose(original).convert('RGB')
+        photo.thumbnail((1568, 1568), Image.Resampling.LANCZOS)
+        buffer = BytesIO()
+        photo.save(buffer, format='JPEG', quality=92)
+    encoded, media_type = _fit_vision_image(buffer.getvalue(), 'image/jpeg')
+    api_key = _require_anthropic_key()
+    client = anthropic.Anthropic(api_key=api_key, timeout=60, max_retries=0)
+    try:
+        response = client.messages.create(
+            model=anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL'),
+            max_tokens=6000,
+            messages=[{'role': 'user', 'content': [
+                {'type': 'text', 'text': 'photo-0: the exact watched listing photograph'},
+                {'type': 'image', 'source': {'type': 'base64', 'media_type': media_type, 'data': encoded}},
+                {'type': 'text', 'text': market_slab_labels.PROMPT}]}])
+        if response.stop_reason != 'end_turn':
+            raise ValueError('Photo label reading did not complete')
+        return parse_model_json_object(_message_text(response))
+    finally:
+        client.close()
+
+
+_market_label_worker = market_slab_labels.Worker(open_db_connection, _market_label_target_current, _market_read_slab_label)
+
+
+def _market_wake_label_worker():
+    if os.environ.get('ANTHROPIC_API_KEY') and os.environ.get('MARKET_LABEL_WORKER', '1') != '0':
+        _market_label_worker.start()
+
+
+@app.route('/banknotes/market/labels', methods=['GET', 'POST'])
+def market_labels():
+    _market_require_owner()
+    db = get_db()
+    if request.method == 'POST':
+        if not _market_unwatch_authorized(for_write=True):
+            return jsonify(ok=False, error='Open the owner’s signed-in StuffApp page to check photo labels.'), 403
+        db.execute('BEGIN IMMEDIATE')
+        try:
+            _market_enqueue_slab_labels(db)
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        _market_wake_label_worker()
+    try:
+        account = market_ebay_feed.expected_account(db)
+    except ValueError:
+        account = None
+    response = jsonify(market_slab_labels.status(db, account))
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
 
 
 def _market_estimate_rows(db):
@@ -18871,6 +19077,7 @@ def _market_capture_bridge_estimate_basis(db):
     observed = _market_personal_feed(db, [])
     for card in observed['cards'] if observed else []:
         market_estimates.capture_bridge_basis(db, card)
+    _market_enqueue_slab_labels(db)
 
 
 def _market_estimate_research(wanted, context):
@@ -19266,7 +19473,7 @@ def _market_action_problem(db, row, item, already_paid=False):
     problem = _market_listing_url_problem(item.get('listing_url'))
     problem_kind = 'eligibility'
     if row['category'] == 'banknotes':
-        problem = problem or _market_banknote_issue_problem(item) or (market_colonial.problem(item) if not item.get('_feed_account') else '')
+        problem = problem or _market_banknote_issue_problem(item) or _market_slab_issue_problem(db, item.get('listing_url')) or (market_colonial.problem(item) if not item.get('_feed_account') else '')
     if row['status'] == 'unavailable' and not (already_paid and item.get('_feed_account')
             and item.get('_unavailable_kind') == 'ended'):
         return item.get('unavailable_reason') or 'This offer is unavailable or does not identify an exact item.'
@@ -19444,7 +19651,7 @@ def market_ebay_item_buy(item_id):
         if not row:
             abort(404)
         return _market_purchase_response(db, 'banknotes', row, json.loads(row['payload']))
-    problem = _market_listing_url_problem(card['listing_url']) or _market_banknote_issue_problem(card)
+    problem = _market_listing_url_problem(card['listing_url']) or _market_banknote_issue_problem(card) or _market_slab_issue_problem(db, card['listing_url'])
     if problem:
         return jsonify({'ok': False, 'error': 'Offer unavailable: ' + problem}), 409
     if market_runtime.is_dismissed(db, 'banknotes', url) and (request.get_json(silent=True) or {}).get('bought') is not True:
@@ -42156,7 +42363,8 @@ _ebay_order_sync = ebay_orders.register(
 import ebay_purchase_lookup
 ebay_purchase_lookup.register(app, get_db, require_owner)
 market_purchase_capture.register(app, get_db, require_owner)
-market_ebay_feed.register(app, get_db, on_complete=_market_capture_bridge_estimate_basis)
+market_ebay_feed.register(app, get_db, on_complete=_market_capture_bridge_estimate_basis,
+                          after_complete=_market_wake_label_worker)
 market_unwatch.register(app, get_db, _market_require_owner, _market_unwatch_authorized)
 banknote_feedback.register(app, get_db, require_owner, _user_can_see_row)
 def _compare_original_listing(category, record, url, page_text, purchase_sources=()):
@@ -42205,6 +42413,7 @@ with app.app_context():
 
 _ebay_order_sync.start()
 _original_listing_service.start()
+_market_wake_label_worker()
 
 # Fill in history for any country already in the collection that has
 # none — one sequential daemon thread, a no-op once every country is

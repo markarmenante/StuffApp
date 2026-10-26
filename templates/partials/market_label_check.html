@@ -1,0 +1,18 @@
+{% set label_check = label_item.get('label_check') %}
+{% if label_check and label_check.state in ('pending', 'reading', 'ready', 'partial', 'unreadable', 'conflict', 'unavailable') %}
+{% if label_check.readings %}
+<details class="market-label-check" data-label-state="{{ label_check.state }}">
+  <summary>{{ label_check.message }}</summary>
+  <ul class="market-label-readings">
+    {% for reading in label_check.readings %}
+    <li>
+      <span>{% for value in (reading.country, reading.issuer, reading.reference, reading.denomination, ('Date ' ~ reading.date_text) if reading.date_text else '', ('Series ' ~ reading.series) if reading.series else '', reading.grading_authority, reading.grade) if value %}{{ ' · ' if not loop.first }}{{ value }}{% endfor %}</span>
+      {% if reading.literal_label %}<blockquote>{{ reading.literal_label }}</blockquote>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% else %}
+<div class="market-label-check" data-label-state="{{ label_check.state }}">{{ label_check.message }}</div>
+{% endif %}
+{% endif %}

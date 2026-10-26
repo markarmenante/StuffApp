@@ -98,6 +98,74 @@ incomplete catalogue check; an independently linked exact purchased listing
 can still identify its existing collection record. Tests cover the real feed
 shaping/cache path with a query-only fixture database and preserved source rows.
 
+### Grading labels in watched photographs
+
+`market_slab_labels.py` queues image-only readings after an authenticated feed
+snapshot is accepted. The queue includes raw watched cards even when the same
+listing is also a researched candidate, and even when its title already has a
+reference. Sponsored-only cards are outside this automatic photo check. The
+signed-owner, same-origin `POST /banknotes/market/labels` bootstraps an existing
+saved watched snapshot or retries eligible failures. `GET` on the same path
+only returns status/revision; rendering and polling never enqueue model work.
+The feed transaction records intent, then wakes the worker after commit.
+
+The initial evidence is the actual watched card's `i.ebayimg.com` photo,
+upgraded to that same image's full-resolution URL. It is not a claim that every
+photo in the seller's gallery was read. Fetches allow only that CDN and validate
+redirects, bytes, dimensions and exact image identity. Original image buffers
+are read without changing or attaching collection photographs. The existing
+server `ANTHROPIC_API_KEY` and `ANTHROPIC_COIN_LOOKUP_MODEL` resolver supply one
+image-only call per attempt, with no web tools, seller title or collection
+candidates in the prompt. No purchase, unwatch or Check operation runs.
+
+The finite snapshot has at most 100 targets, two database-enforced concurrent
+claims, a 12 MB / 50-million-pixel image limit, and at most 12 visible-note
+readings per image. Calls allow 60 seconds and 6,000 output tokens without SDK
+retries. Persistent 120-second claims have opaque fences and at most one
+recovery attempt after an interrupted process. Pending work resumes at startup;
+the snapshot's 24-hour expiry ends its authority. Authentication failures stop
+the queued batch rather than repeatedly calling a rejected connection.
+
+Cache identity binds the linked account, exact item, canonical photo URL and
+extractor version. Each completed read retains its image SHA-256. Ready results
+are reused for 24 hours, incomplete/unreadable results for six hours, and errors
+for one hour. New image IDs invalidate reuse immediately. Bytes at an unchanged
+URL are fetched and hashed on the next eligible reading, not on every render;
+replacement bytes behind that same CDN URL therefore cannot be detected during
+the cache lifetime. Results recheck the current account, snapshot, photo and
+durable dismissal under the publication lock. A changed or deleted target
+cannot receive a late label result. Status exposes retry eligibility and its
+cooldown time; failed Retry controls stay disabled until eligible.
+
+Each reading retains literal label/note transcription, country, explicit issuer,
+complete catalogue reference, denomination, printed date, explicitly named
+series, grading service and grade. `date_text` keeps a printed year separate
+from Series. Only a clearly read service label with literal country/reference
+support supplies a duplicate identity. Certificate, barcode, serial and grading
+numbers cannot become catalogue references. Criswell still needs the explicit
+state; country and full reference variety remain part of matching. This is a
+photo reading, not certification by the grading service.
+
+Multiple labels stay separate, with matching collection links per reference.
+An explicit bundle title, multiple visible notes, unreadable entries or uncertain
+coverage keep the whole-listing check incomplete; no fields are combined across
+notes. Country/reference disagreement with either the watched title or the
+rendered candidate stays visible as a conflict and suppresses an automatic
+catalogue verdict. A clearly different numeric grade warns that the existing
+estimate has not been validated against that grade while leaving reference-based
+matching intact. Photo-read NET grades and non-circulating issues follow the
+existing display and action exclusions even if their catalogue is unreadable.
+
+`label_check` and derived `_market_identity` metadata overlay both display paths.
+Raw title, country, reference, grade, price, photo and action fields remain
+unchanged, as do valuation cache keys and source evidence. A photo failure leaves
+explicit title-based checks available without claiming the photo was read.
+The UI polls this independent queue after scans finish, updates only the results
+area and preserves active dialogs/actions and expanded valuation evidence.
+Tests include delayed-lock fencing, exact-image/account/dismissal changes,
+serial/certificate prefix traps, photo exclusions, bundles, candidate conflicts,
+query-only rendering and three sanitized real-photo transcription fixtures.
+
 Banknotes show `Price: …` and `Est. value: …`, or exactly `No estimate`. The
 asking/current price remains separate from a researched market-value range.
 New research can provide structured `valuation` data with currency, range,

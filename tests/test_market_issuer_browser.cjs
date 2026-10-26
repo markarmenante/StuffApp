@@ -17,8 +17,9 @@ const os = require('node:os');
   const repo=path.resolve(__dirname,'..');
   const artifacts=process.env.MARKET_ISSUER_TEST_ARTIFACTS||mkdtempSync(path.join(os.tmpdir(),'market-issuer-'));
   mkdirSync(artifacts,{recursive:true});
-  const files=['app.py','market_identity.py','market_grouping.py','market_valuation.py','templates/list.html','templates/partials/market_group_heading.html','templates/partials/market_observed_row.html','templates/partials/market_valuation.html','static/css/style.css'];
+  const files=['app.py','market_ebay_feed.py','market_identity.py','market_grouping.py','market_valuation.py','templates/list.html','templates/partials/market_group_heading.html','templates/partials/market_observed_row.html','templates/partials/market_valuation.html','templates/partials/market_label_check.html','static/css/style.css'];
   if(existsSync(path.join(repo,'market_estimates.py')))files.push('market_estimates.py');
+  if(existsSync(path.join(repo,'market_slab_labels.py')))files.push('market_slab_labels.py');
   const hashes=()=>Object.fromEntries(files.map(file=>[file,createHash('sha256').update(readFileSync(path.join(repo,file))).digest('hex')]));
   const sourceBefore=hashes();
   const render=String.raw`
@@ -81,6 +82,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   db.execute("INSERT INTO banknotes(id,country,date_1,issuer,status,price) VALUES('preserved-collection','India',1937,'Government of India','Own','42.37')")
   db.execute("INSERT INTO banknotes(id,country,date_1,issuer,status,price,pick_number,denomination,banknote_id) VALUES('held-bermuda','Bermuda',1957,'Government of Bermuda','Own','77.37','P-14a','5 Shillings','B-FIXTURE')")
   db.execute("INSERT INTO banknotes(id,country,date_1,issuer,status,price,pick_number,denomination,banknote_id) VALUES('held-us','USA',1861,'US Treasury','Own','88.37','Fr.7','10 Dollars','US-FIXTURE')")
+  db.execute("INSERT INTO banknotes(id,country,date_1,status,price,pick_number,denomination,banknote_id) VALUES('held-photo','Zimbabwe',1980,'Ordered','92.43','P-24','10 Rupees','PHOTO-FIXTURE')")
   epoch=time.time()
   db.execute("INSERT INTO ebay_purchase_account VALUES(1,'fixture-owner')")
   db.execute("INSERT INTO ebay_market_requests(id,requested_at,expires_at,status,expected_account,observed_at,source_status) VALUES('identity-feed',?,?, 'done','fixture-owner',?,?)",(epoch,epoch+600,epoch,json.dumps({key:dict(status='ok',message='') for key in ('watched','sponsored')})))
@@ -98,8 +100,29 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   protected_tables=('ebay_market_requests','ebay_market_cards','ebay_market_card_sources','market_estimate_cache')
   source_before={table:[dict(row) for row in db.execute('SELECT * FROM '+table+' ORDER BY rowid')] for table in protected_tables}
   db.execute('PRAGMA query_only=ON')
+  # Keep the cache lookup on the real raw observed-card path; only photo-reader
+  # results below are synthetic. Rendering cannot write any source/held/cache row.
+  with patch.object(stuff.market_ebay_feed,'enabled',return_value=True):
+   cached_card=next(row for row in stuff._market_personal_feed(db,[])['cards'] if row['item_id']=='456789012345')
+  assert cached_card.get('valuation') and stuff.market_estimates.target(cached_card)['key']==legacy_target['key']
+  def reading(country,reference,**extra):
+   value=dict(country=country,issuer='',reference=reference,denomination='',date_text='',series='',grading_authority='PMG',grade='64',literal_label=country+' '+reference+' PMG 64');value.update(extra);return value
+  def label(state,message,readings=None):
+   return dict(state=state,message=message,readings=readings or [],checked_at=epoch)
+  ready_cards=[dict(cached_card,label_check=label('ready','Photo label: Seychelles · Pick 14a · PMG 64. Supplied photo checked.',[reading('Seychelles','Pick 14a',date_text='1968')]))]
+  matching_identity=dict(country='Zimbabwe',pick_number='P-24',title='Graded banknote PMG 64')
+  ready_cards.append(observed('567890123450',title='Graded banknote PMG 64',country='',issuer='',pick_number='',price='US $192.43',_market_identity=dict(country='Zimbabwe',issuer='',ambiguous=False),collection_matches=stuff._market_collection_matches(db,matching_identity),label_check=label('ready','Photo label: Zimbabwe · Pick 24 · PMG 64. Supplied photo checked.',[reading('Zimbabwe','Pick 24')])) )
+  ready_cards.append(observed('567890123451',title='Seychelles 1972 P117d PMG 66 EPQ',country='Seychelles',issuer='',pick_number='P117d',price='US $1,200.00',collection_check_incomplete=True,label_check=label('conflict','Photo label says Pick 17d; listing says Pick 117d. Collection check incomplete; estimate not label-validated.',[reading('Seychelles','Pick 17d',series='1972',grade='66 EPQ')])) )
+  ready_cards.append(observed('567890123452',title='Two graded banknotes',country='',issuer='',pick_number='',collection_check_incomplete=True,collection_matches=stuff._market_collection_matches(db,dict(country='Bermuda',pick_number='P14a')),label_check=label('partial','One of two notes identified in the supplied photo. Collection check incomplete.',[reading('Bermuda','Pick 14a'),reading('','',literal_label='Unclear holder label')])) )
+  ready_cards.append(observed('567890123453',title='PMG certified note 1234567-014',country='',issuer='',pick_number='',collection_check_incomplete=True,label_check=label('unreadable','Certificate visible; catalogue reference unreadable. Collection check incomplete.')) )
+  ready_cards.append(observed('567890123454',title='Photo unavailable',country='',issuer='',pick_number='',collection_check_incomplete=True,label_check=label('unavailable','Photo could not be read. Collection check incomplete.')) )
+  ready_cards.append(observed('567890123455',title='Council Bluffs Iowa 1902 National Bank Note PMG 64',country='USA',issuer='',pick_number='',label_check=label('ready','Photo label: United States · Friedberg 652 · PMG 64. Supplied photo checked.',[reading('United States of America','Friedberg 652',literal_label='<script>window.fixtureUnsafe=true</script> Fr.652 PMG 64')])) )
+  ready_candidates=[dict(row,label_check=label('ready','Photo label: United States · Friedberg 1604. Supplied photo checked.',[reading('United States of America','Friedberg 1604')])) if row['id']=='candidate-one' else row for row in candidates]
+  pending_cards=[dict(row,label_check=label('reading','Reading holder label in supplied photo…'),collection_matches=[],collection_check_incomplete=True) for row in ready_cards]
+  pending_candidates=[dict(row,label_check=label('reading','Reading holder label in supplied photo…')) if row['id']=='candidate-one' else row for row in candidates]
   pages={}
   variants=[('base',candidates,cards,'done',1),('aliases',alias_candidates,cards,'done',1),('bands',band_candidates,cards,'done',1),('identity',identity_candidates,identity_cards,'done',1),('estimated',estimated_candidates,cards,'done',2),('running',candidates,cards,'running',1),('fresh',extended_candidates,extended_cards,'done',2)]
+  variants.extend([('labels-pending',pending_candidates,pending_cards,'done',1),('labels-ready',ready_candidates,ready_cards,'done',1)])
   for index,removed in enumerate(({'candidate-type'},{'candidate-type','candidate-one'},{'candidate-type','candidate-one','123456789012'}),1):
    variants.append(('deleted'+str(index),[r for r in candidates if r['id'] not in removed],[r for r in cards if r['item_id'] not in removed],'done',1))
   for name,rows,observed_cards,status,revision in variants:
@@ -128,6 +151,9 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   async function setup(mobile=false,progress=false,staticVariant='base',options={}){
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width:mobile?390:1440,height:900},isMobile:mobile,hasTouch:mobile});
     const posts=[],popups=[],visits=[];let pageRequests=0,deletes=0,release,releaseInitialEstimateStatus,estimateStarted=false,estimateFinished=false,estimateAttempts=0,estimateReads=0;
+    let labelReads=0,labelStarted=Boolean(options.labels),labelFinished=Boolean(options.labelsReady),labelRevision=options.labelsReady?2:1,labelError=Boolean(options.labelError),labelAttempts=0;
+    const labelRetryAfter=options.labelCooldown?(Date.now()+options.labelCooldown)/1000:null;
+    const labelStatus=()=>({ok:true,job_id:labelStarted?'fixture-labels':'',status:labelStarted?(labelFinished?'done':'running'):'none',revision:labelStarted?labelRevision:0,total:labelStarted?8:0,completed:labelFinished?8:0,remaining:labelStarted&&!labelFinished?8:0,error:labelError?'Synthetic private provider error that must not be rendered':'',retry_available:!options.labelExpired,retry_after:labelError?labelRetryAfter:null});
     const estimateStatus=()=>({ok:true,job_id:estimateStarted?'fixture-estimate':'',status:estimateStarted?(estimateFinished?'done':'running'):'none',total:estimateStarted?2:0,completed:estimateFinished?2:0,estimated:estimateFinished?1:0,unavailable:estimateFinished?1:0,remaining:estimateFinished?(options.remaining||0):0,error:'',revision:estimateStarted?(estimateFinished?2:1):0});
     const gate=new Promise(resolve=>release=resolve);
     const initialEstimateGate=new Promise(resolve=>releaseInitialEstimateStatus=resolve);
@@ -148,9 +174,13 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
           if(options.estimateFailure&&estimateAttempts===1)return route.fulfill({status:503,json:{ok:false,error:'Synthetic research temporarily unavailable'}});
           estimateStarted=true;return route.fulfill({json:estimateStatus()});
         }
+        if(url.pathname==='/banknotes/market/labels'){
+          labelAttempts++;labelStarted=true;labelFinished=false;labelError=false;labelRevision++;
+          return route.fulfill({json:labelStatus()});
+        }
         if(url.pathname.endsWith('/dismiss')){
           deletes++;const id=url.pathname.split('/').at(-2);
-          return route.fulfill({json:{ok:true,canonical_url:id==='123456789012'?'https://www.ebay.com/itm/'+id:'https://dealer.example/item/'+id}});
+          return route.fulfill({json:{ok:true,canonical_url:/^\d{12}$/.test(id)?'https://www.ebay.com/itm/'+id:'https://dealer.example/item/'+id}});
         }
         if(url.pathname.endsWith('/buy'))return route.fulfill({json:{ok:true,detail_url:'/banknotes/synthetic-created',listing_url:'https://dealer.example/item/never-opened'}});
         evidence.unexpectedRequests.push(request.method()+' '+url.pathname);return route.abort();
@@ -160,6 +190,11 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
         if(options.delayInitialEstimateStatus&&estimateReads===1)await initialEstimateGate;
         return route.fulfill({json:snapshot});
       }
+      if(url.pathname==='/banknotes/market/labels'){
+        labelReads++;
+        if(options.labelInitialFailure&&labelReads===1)return route.fulfill({status:503,json:{ok:false}});
+        return route.fulfill({json:labelStatus()});
+      }
       if(url.pathname==='/banknotes/market/ebay-unwatch/status')return route.fulfill({json:{ok:true,requests:[],active:false}});
       if(url.pathname==='/banknotes/market/status'){
         await gate;
@@ -167,7 +202,7 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
       }
       if(url.pathname==='/banknotes/market'){
         pageRequests++;
-        const name=deletes?'deleted'+Math.min(deletes,3):estimateFinished?'estimated':progress?(pageRequests===1?'running':'fresh'):staticVariant;
+        const name=options.labels?(labelFinished?'labels-ready':'labels-pending'):deletes?'deleted'+Math.min(deletes,3):estimateFinished?'estimated':progress?(pageRequests===1?'running':'fresh'):staticVariant;
         return route.fulfill({contentType:'text/html',body:fixtures.pages[name]});
       }
       if(url.pathname==='/banknotes/synthetic-created')return route.fulfill({contentType:'text/html',body:'<h1>Simulated Ordered record</h1>'});
@@ -181,9 +216,10 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
       evidence.unexpectedRequests.push(request.method()+' '+url.pathname+url.search);return route.abort();
     });
     const page=await context.newPage();page.on('pageerror',error=>evidence.errors.push(error.message));page.on('popup',popup=>popups.push(popup));
+    if(options.clock)await page.clock.install();
     await page.goto(origin+'/banknotes/market',{waitUntil:'load'});
     await page.locator('#item-candidate-one').waitFor();
-    return {context,page,posts,popups,visits,release,releaseInitialEstimateStatus,finishEstimates:()=>{estimateFinished=true;},estimateReads:()=>estimateReads,requests:()=>pageRequests,close:async()=>{release();releaseInitialEstimateStatus();await context.close();}};
+    return {context,page,posts,popups,visits,release,releaseInitialEstimateStatus,finishEstimates:()=>{estimateFinished=true;},estimateReads:()=>estimateReads,labelReads:()=>labelReads,labelAttempts:()=>labelAttempts,finishLabels:()=>{labelFinished=true;labelRevision++;},requests:()=>pageRequests,close:async()=>{release();releaseInitialEstimateStatus();await context.close();}};
   }
   const candidate=(page,id)=>page.locator('#item-'+id);
   const observed=(page,id)=>page.locator('.market-personal-row[data-listing-key="https://www.ebay.com/itm/'+id+'"],.market-personal-row[data-listing-key="https://ebay.com/itm/'+id+'"]');
@@ -193,6 +229,112 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   try{
     for(const mobile of [false,true]){
       const device=mobile?'mobile':'desktop';
+      await run(device+': photo completion updates a finished scan, preserving exact price, cached estimate and actions',async()=>{
+        const t=await setup(mobile,false,'base',{labels:true});try{
+          const cached=observed(t.page,'456789012345'),matched=observed(t.page,'567890123450');
+          assert.equal(await t.page.locator('#marketLabelRetry').isVisible(),false);
+          assert.equal(await matched.locator('.market-tag-owned').count(),0);
+          await cached.locator('.market-estimate summary').click();await cached.locator('.market-estimate summary').focus();
+          t.finishLabels();await matched.locator('[data-label-state="ready"]').waitFor();
+          assert.equal(await matched.locator('.market-tag-owned a').getAttribute('href'),'/banknotes/held-photo');
+          assert.match(await matched.locator('.market-tag-owned').textContent(),/ordered.*same catalogue reference/s);
+          assert.equal((await cached.locator('.market-price').textContent()).trim(),'Price: US $299.89');
+          assert.equal((await cached.locator('.market-estimate summary').textContent()).trim(),'Est. value: $200–$300');
+          assert.equal(await cached.locator('.market-value-dot-yellow').count(),1);
+          assert.notEqual(await cached.locator('.market-estimate').getAttribute('open'),null);
+          assert.match(await cached.locator('.market-estimate').textContent(),/Synthetic same-type auction.*\$274\.25/s);
+          assert.equal(await cached.locator('.market-estimate-sources a').getAttribute('href'),'https://currency.ha.com/itm/fixture/90001');
+          assert.equal(await cached.getByRole('link',{name:'View listing',exact:true}).getAttribute('href'),'https://www.ebay.com/itm/456789012345');
+          assert.equal(await cached.getByRole('button',{name:'Buy',exact:true}).getAttribute('data-buy-url'),'/banknotes/market/ebay-feed/456789012345/buy');
+          assert.equal(await cached.getByRole('button',{name:'Delete',exact:true}).getAttribute('data-dismiss-url'),'/banknotes/market/ebay-feed/456789012345/dismiss');
+          assert.equal(await t.page.locator('#marketLabelStatus').isVisible(),false);
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);assert(t.labelReads()>=1);
+        }finally{await t.close();}
+      });
+      await run(device+': photo conflicts, multiple slabs and certificate-only readings remain explicit and safely escaped',async()=>{
+        const t=await setup(mobile,false,'base',{labels:true,labelsReady:true});try{
+          const conflict=observed(t.page,'567890123451'),partial=observed(t.page,'567890123452'),certificate=observed(t.page,'567890123453');
+          assert.match(await conflict.locator('.market-label-check summary').textContent(),/Pick 17d.*Pick 117d.*estimate not label-validated/);
+          assert.match(await conflict.textContent(),/Collection check incomplete/);assert.equal(await conflict.locator('.market-tag-owned').count(),0);
+          assert.match(await partial.locator('.market-label-check summary').textContent(),/One of two notes.*incomplete/);
+          await partial.locator('.market-label-check summary').click();assert.equal(await partial.locator('.market-label-readings li').count(),2);
+          assert.equal(await partial.locator('.market-tag-owned a').getAttribute('href'),'/banknotes/held-bermuda');
+          assert.match(await certificate.locator('.market-label-check').textContent(),/Certificate visible; catalogue reference unreadable/);
+          assert.equal(await certificate.locator('.market-tag-owned').count(),0);
+          assert.equal(await observed(t.page,'567890123455').locator('.market-tag-owned').count(),0,'Fr.652 must not match held Fr.7');
+          const promoted=candidate(t.page,'candidate-one').locator('.market-label-check');await promoted.locator('summary').click();assert.match(await promoted.textContent(),/Friedberg 1604/);
+          const escaped=observed(t.page,'567890123455').locator('.market-label-check');await escaped.locator('summary').click();
+          assert.match(await escaped.locator('blockquote').textContent(),/<script>window.fixtureUnsafe=true<\/script>/);
+          assert.equal(await t.page.evaluate(()=>window.fixtureUnsafe),undefined);assert.equal(await escaped.locator('script').count(),0);
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+          const layout=await t.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
+          await t.page.screenshot({path:path.join(artifacts,device+'-photo-labels.png'),fullPage:true});
+        }finally{await t.close();}
+      });
+      await run(device+': idle photo polling preserves expanded readings and keyboard focus',async()=>{
+        const t=await setup(mobile,false,'base',{labels:true,labelsReady:true,clock:true});try{
+          await t.page.locator('#marketLabelStatus').waitFor({state:'hidden'});
+          const details=observed(t.page,'456789012345').locator('.market-label-check');
+          await details.locator('summary').click();await details.locator('summary').focus();
+          assert.match(await details.locator('.market-label-readings').textContent(),/Date 1968/);
+          assert.doesNotMatch(await details.locator('.market-label-readings').textContent(),/Series 1968/);
+          const before=t.requests();t.finishLabels();await t.page.clock.runFor(30100);
+          await t.page.waitForFunction(()=>document.activeElement?.matches('.market-label-check summary'));
+          assert(t.requests()>before);assert.notEqual(await details.getAttribute('open'),null);
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': photo completion waits for a location choice and does not interrupt an action',async()=>{
+        const t=await setup(mobile,false,'base',{labels:true});try{
+          const row=observed(t.page,'567890123450');
+          await t.page.getByText('Reading photo labels…',{exact:true}).waitFor();
+          await row.getByRole('button',{name:'Bought',exact:true}).click();const dialog=t.page.getByRole('dialog',{name:'Choose location'});await dialog.waitFor();
+          t.finishLabels();await t.page.locator('#marketLabelStatus').waitFor({state:'hidden'});
+          assert(await dialog.isVisible());assert.equal(await row.locator('[data-label-state="reading"]').count(),1);assert.equal(t.posts.length,0);
+          await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await row.locator('[data-label-state="ready"]').waitFor();
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': photo refresh cannot restore a deleted exact listing',async()=>{
+        const t=await setup(mobile,false,'base',{labels:true});try{
+          const row=observed(t.page,'567890123450');await row.getByRole('button',{name:'Delete',exact:true}).click();await row.waitFor({state:'detached'});
+          t.finishLabels();await observed(t.page,'456789012345').locator('[data-label-state="ready"]').waitFor();
+          assert.equal(await row.count(),0);
+          assert.deepEqual(t.posts,[{path:'/banknotes/market/ebay-feed/567890123450/dismiss',body:null}]);assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': initial photo-status failure retries quietly without starting work',async()=>{
+        const t=await setup(mobile,false,'base',{labels:true,labelInitialFailure:true,clock:true});try{
+          assert.equal(await t.page.locator('#marketLabelStatus').isVisible(),false);assert.equal(t.posts.length,0);
+          await t.page.clock.runFor(10100);await t.page.getByText('Reading photo labels…',{exact:true}).waitFor();assert(t.labelReads()>=2);
+          t.finishLabels();await t.page.clock.runFor(3100);await observed(t.page,'567890123450').locator('[data-label-state="ready"]').waitFor();
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': photo retry is explicit, single-flight and never displays provider text',async()=>{
+        const t=await setup(mobile,false,'base',{labels:true,labelsReady:true,labelError:true});try{
+          const retry=t.page.getByRole('button',{name:'Retry photo labels',exact:true});await retry.waitFor();
+          assert.equal(t.posts.length,0);assert.equal(await t.page.getByText('Synthetic private provider error that must not be rendered',{exact:false}).count(),0);
+          await retry.evaluate(button=>{button.click();button.click();});await t.page.getByText('Reading photo labels…',{exact:true}).waitFor();
+          assert.equal(await retry.isVisible(),false);
+          assert.equal(t.labelAttempts(),1);t.finishLabels();await t.page.locator('#marketLabelStatus').waitFor({state:'hidden'});
+          assert.deepEqual(t.posts,[{path:'/banknotes/market/labels',body:{}}]);assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': failed photo checks respect retry cooldown and expired snapshots need a new scan',async()=>{
+        const t=await setup(mobile,false,'base',{labels:true,labelsReady:true,labelError:true,labelCooldown:20000,clock:true});try{
+          const retry=t.page.getByRole('button',{name:'Retry photo labels',exact:true});await retry.waitFor();
+          assert.equal(await retry.isDisabled(),true);assert.match(await t.page.locator('#marketLabelStatus').textContent(),/Retry in 1 min/);
+          await retry.evaluate(button=>button.click());assert.equal(t.posts.length,0);
+          await t.page.clock.runFor(20500);await t.page.waitForFunction(()=>!document.getElementById('marketLabelRetry').disabled);
+          await retry.click();await t.page.getByText('Reading photo labels…',{exact:true}).waitFor();
+          assert.deepEqual(t.posts,[{path:'/banknotes/market/labels',body:{}}]);
+        }finally{await t.close();}
+        const expired=await setup(mobile,false,'base',{labels:true,labelsReady:true,labelError:true,labelExpired:true});try{
+          await expired.page.getByText('Photo labels unavailable. Rescan to retry.',{exact:true}).waitFor();
+          assert.equal(await expired.page.locator('#marketLabelRetry').isVisible(),false);assert.equal(expired.posts.length,0);
+        }finally{await expired.close();}
+      });
       await run(device+': candidate and observed sources share issuer/type, with distinct other types and issuers',async()=>{
         const t=await setup(mobile);try{
           const one=candidate(t.page,'candidate-one'),card=observed(t.page,'123456789012'),otherType=candidate(t.page,'candidate-type'),otherIssuer=candidate(t.page,'candidate-other');

@@ -10,6 +10,7 @@
             {% for match in card.collection_matches %}<span class="market-tag market-tag-owned">{{ 'Already in your collection' if match.kind == 'catalogue' else 'Listing already linked to your collection' }}{% if match.status == 'Ordered' %} (ordered){% endif %}: <a href="{{ match.url }}" target="_blank" rel="noopener">{{ match.label }}</a> — {{ match.reason }}</span>{% endfor %}
             {% if card.collection_check_incomplete %}<span class="market-tag">Collection check incomplete — catalogue reference or country/state missing or unclear</span>{% endif %}
           </div>
+          {% set label_item = card %}{% include 'partials/market_label_check.html' %}
           <div class="market-actions">
             <a class="market-btn" href="{{ card.listing_url }}" target="_blank" rel="noopener">View listing</a>
             <button type="button" class="market-btn market-buy" data-buy-url="{{ url_for('market_ebay_item_buy', item_id=card.item_id) }}"

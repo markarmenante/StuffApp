@@ -4056,6 +4056,14 @@ input[type="date"] { -webkit-appearance: none; }
 .market-price { font-weight: 600; }
 .market-estimate { font-weight: 500; }
 .market-estimate-status { color: var(--text-secondary); font-size: 12px; white-space: normal; }
+.market-label-check { margin-top: 4px; color: var(--text-secondary); font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+.market-label-check summary { cursor: pointer; }
+.market-label-check summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.market-label-check[data-label-state="conflict"], .market-label-check[data-label-state="partial"] { color: #8a4b00; }
+.market-label-readings { margin: 6px 0; padding-left: 18px; }
+.market-label-readings li + li { margin-top: 6px; }
+.market-label-readings blockquote { margin: 3px 0; padding-left: 8px; border-left: 2px solid var(--border); }
+#marketLabelStatus[hidden], #marketLabelStatus [hidden] { display: none; }
 .market-estimate summary { cursor: pointer; }
 .market-estimate summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .market-value-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: 1px; border: 1px solid rgba(0,0,0,.18); }

@@ -1,0 +1,77 @@
+[
+  {
+    "item_id": "116505928385",
+    "raw": {
+      "photo_id": "photo-0",
+      "visible_notes": 1,
+      "all_visible_identified": true,
+      "readings": [
+        {
+          "photo_id": "photo-0",
+          "confidence": "high",
+          "literal_label": "PMG\nPAPER MONEY GUARANTY\nSeychelles / British Administration\nPick# 14a 1968 5 Rupees - Wmk: Parrot's Head\n64\nChoice Uncirculated",
+          "literal_note": "FIVE RUPEES\nGOVERNMENT OF SEYCHELLES",
+          "country": "Seychelles",
+          "issuer": "Government of Seychelles",
+          "reference": "Pick# 14a",
+          "state": null,
+          "denomination": "5 Rupees",
+          "series": null,
+          "grading_authority": "PMG",
+          "grade": "64 Choice Uncirculated",
+          "certificate_number": null
+        }
+      ]
+    }
+  },
+  {
+    "item_id": "168760683810",
+    "raw": {
+      "photo_id": "photo-0",
+      "visible_notes": 1,
+      "all_visible_identified": true,
+      "readings": [
+        {
+          "photo_id": "photo-0",
+          "confidence": "high",
+          "literal_label": "PCGS CURRENCY\nFr. 652 1902 PB $20 Charter #9306\nNational Bank Note\nThe City NB, Council Bluffs, IA\nChoice New\n63PPQ\nwww.pcgscurrency.com",
+          "literal_note": "NATIONAL CURRENCY\nUnited States of America\nSERIES OF 1902.\nTHE CITY NATIONAL BANK OF Council Bluffs\nWILL PAY TO THE BEARER ON DEMAND\nTWENTY DOLLARS\nCouncil Bluffs, Iowa",
+          "country": "United States of America",
+          "issuer": "The City National Bank of Council Bluffs",
+          "reference": "Fr. 652",
+          "state": null,
+          "denomination": "$20",
+          "series": "1902",
+          "grading_authority": "PCGS Currency",
+          "grade": "Choice New 63PPQ",
+          "certificate_number": null
+        }
+      ]
+    }
+  },
+  {
+    "item_id": "155636932488",
+    "raw": {
+      "photo_id": "photo-0",
+      "visible_notes": 1,
+      "all_visible_identified": true,
+      "readings": [
+        {
+          "photo_id": "photo-0",
+          "confidence": "high",
+          "literal_label": "PMG\nPAPER MONEY GUARANTY\nSeychelles / British Administration\nPick# 17d 1972 50 Rupees - \"SEX\" Note\n66 EPQ\nGem Uncirculated",
+          "literal_note": "GOVERNMENT OF SEYCHELLES\nFIFTY RUPEES\n50\n1st JANUARY, 1972\nGOVERNOR",
+          "country": "Seychelles",
+          "issuer": "Government of Seychelles",
+          "reference": "Pick# 17d",
+          "state": null,
+          "denomination": "50 Rupees",
+          "series": "1972",
+          "grading_authority": "PMG",
+          "grade": "66 EPQ Gem Uncirculated",
+          "certificate_number": null
+        }
+      ]
+    }
+  }
+]

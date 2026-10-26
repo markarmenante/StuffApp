@@ -114,6 +114,7 @@ with tempfile.TemporaryDirectory(prefix='market-unwatch-db-') as temporary:
         pages++; return route.fulfill({contentType:'text/html',body:fixtures.pages[category][removed]});
       }
       if (url.pathname==='/banknotes/market/estimates/status') return route.fulfill({json:{ok:true,status:'none',remaining:0}});
+      if (url.pathname==='/banknotes/market/labels') return route.fulfill({json:{ok:true,status:'none',job_id:null,revision:0,remaining:0}});
       if (url.pathname==='/'+category+'/report/status') return route.fulfill({json:{state:'idle'}});
       if (url.pathname==='/files-status') return route.fulfill({json:{stale:false,last_export_at:null}});
       if (url.pathname==='/sw.js') return route.fulfill({contentType:'text/javascript',body:''});

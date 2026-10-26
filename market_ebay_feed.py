@@ -316,7 +316,7 @@ def complete(db, payload):
     return len(clean)
 
 
-def register(app, get_db, on_complete=None):
+def register(app, get_db, on_complete=None, after_complete=None):
     @app.route('/banknotes/market/ebay-feed/request', methods=['POST'])
     def ebay_market_feed_request():
         """Refresh observed cards without launching a model-backed scan."""
@@ -374,6 +374,11 @@ def register(app, get_db, on_complete=None):
                 on_complete(db)
             db.execute("UPDATE ebay_market_sessions SET state='ready',message='eBay is signed in. Continuing the requested scan.' WHERE request_id=?", (payload['request_id'],))
             db.commit()
+            if after_complete:
+                try:
+                    after_complete()
+                except Exception:
+                    app.logger.warning('Accepted eBay feed; photo-label worker will resume after restart')
             return jsonify(ok=True, items_accepted=count)
         except ValueError as exc:
             db.rollback()
