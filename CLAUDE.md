@@ -253,6 +253,50 @@ refuses ebay.com, so eBay can only be checked in production's logs.
 
 ## What the model sees for a banknote (Check, serial scan)
 
+Banknote Check also researches missing type details from the country and full
+catalogue reference (2026-10-26). `banknote_catalog_lookup.py` validates the
+separate `catalogue_research` channel inside the existing Anthropic vision/web
+call: actual cited excerpts or provider-fetched public catalogue text, exact
+namespace and suffix, known issue context, and dated-variety evidence for
+signatures/watermarks/dates. It never obtains
+grade, certificate, serial, purchase price or photos from catalogue research.
+The vision/search call and its bounded fetch-only follow-up share one 75-second
+budget, at most four searches, one search pause continuation, and no automatic
+whole-call retries. The follow-up selects actual observed public source URLs;
+up to four provider-hosted fetches (12k tokens each, failed calls count) read catalogue or auction
+pages from an explicit domain allowlist when search snippets truncate.
+If the instance already has `PERPLEXITY_API_KEY`, `banknote_catalog_search.py`
+adds one native Search request with two short full-reference queries, at most
+five results and 12k total / 4k per-page tokens. Its timeout is at most 15 seconds
+and never exceeds the remaining shared budget minus ten seconds reserved for
+extraction; it follows no redirects and performs no retries. Only native source
+snippets join the proof pool, never model answers or citation URLs alone. The
+fetch/extraction phase can use those excerpts directly. For missing dimensions
+with Pick/TBB identity, an observed Banknote Index Country directory is preferred:
+follow its actual country/territory link, then its exact reference entry. No
+country or item IDs are invented, and a directory alone is not field evidence.
+There is no second uncited dimensions call. Search Numista's whole domain,
+including current short numeric URLs, then move to specialist/archive sources.
+Direct image/dealer facts remain separate and source failure preserves purchase
+and image Check. Saved notes and new drafts use the same lookup/apply routes.
+
+Catalogue values enter `filled` only for blank fields. Lookup returns per-field
+proofs plus `catalogue.guard` and raw `expected_values`. The banknote detail UI
+flushes current edits (including intentional clears), fences in-flight edits,
+and sends the guard to apply. Apply acquires a SQLite write lock before comparing
+the original identity/current target and returns only accepted values; it skips
+changed/occupied targets. The opaque `guard.proposal_id` binds accepted values to
+server-stored evidence for 15 minutes, including any direct identity recovered
+for a new draft. `banknote_catalog_proposals.py` stores accepted full excerpts
+durably and appends their field/value/reference/date/URL evidence to the latest
+Reference Notes under the same lock. Skipped fields receive no evidence claim;
+repeated acceptance does not append it again. The UI preserves edits made while
+Check or apply was pending. Never route these fills through unguarded autosave
+or bulk-update the collection. Existing explicit correction review remains separate.
+See [catalogue Check contract](docs/banknote-catalog.md#catalogue-assisted-check)
+and `tests/test_banknote_catalog_lookup.py`, `tests/test_banknote_catalog_fetch.py`
+and `tests/test_banknote_catalog_search.py`.
+
 Uploads of `image_1` / `image_2` are trimmed to the bare note on arrival
 (since 2026-09-10), so the stored files no longer show a PMG / PCGS
 holder label. Every vision call therefore resolves each image through

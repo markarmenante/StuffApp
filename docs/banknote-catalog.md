@@ -1,5 +1,102 @@
 # Historical banknote collection filing
 
+## Catalogue-assisted Check
+
+The ordinary Banknote Check uses the note's country and complete catalogue
+reference to research missing type details for any supported country. It also
+works when the existing photo/purchase step recovers that identity for a new
+draft. `fetch_banknote_specs` reuses the existing authenticated Anthropic model
+resolver and web-search adapter, with optional native Perplexity Search through
+that instance's existing `PERPLEXITY_API_KEY`. It creates no provider credential
+or bulk collection job. Vision and catalogue work share one 75-second
+budget, with at most four web searches, one paused search-turn continuation and
+no whole-call retries. The first phase uses vision and search. A bounded second
+phase receives native source excerpts and at most two ranked URLs actually
+observed by search. It extracts supported facts from those excerpts or uses
+fetch, preserving direct first-phase facts if retrieval fails. It can read
+up to four full public catalogue pages across the request with
+`web_fetch_20250910` (12,000 content tokens per fetch, explicit catalogue/auction
+domain allowlist). This reuses Anthropic authentication; it carries no browser
+cookies and performs no local direct-HTTP fallback. Follow only observed source
+links, including from a country catalogue index when search misses an exact
+type. Failed fetch attempts count toward the same four-call limit. Actual
+fetched text resolves the provider's truncated search citations.
+
+Before that extraction/fetch phase, `banknote_catalog_search.py` can make one
+native `POST https://api.perplexity.ai/search` request using the existing key.
+Two short country/full-reference queries preserve namespace and suffix; no
+purchase, grade, certificate, serial or photo details are sent. The request caps
+results at five, total content at 12,000 tokens and each page at 4,000 tokens,
+using the same public catalogue-domain allowlist. Its timeout is the lesser of
+15 seconds and the shared budget remaining minus ten seconds reserved for
+extraction. There are no redirects, retries, new credentials or model-answer
+fallbacks. Only native result snippets with their actual safe URLs become
+evidence; a model's invented private-source property cannot authorize a fill.
+Absent configuration or an unavailable source preserves the direct Check result.
+
+`banknote_catalog_lookup.py` keeps catalogue research distinct from direct
+photo/dealer facts. Each usable field has an actual provider-cited URL and a
+literal supporting excerpt, together with its exact country, catalogue namespace
+and full variety suffix. Competing references, historical-territory mismatches,
+unknown states for Criswell/Haxby and conflicting known issue facts remain
+unresolved. Specialist reference punctuation is preserved. A stable Pick/TBB
+type fact can use a publisher's country-only issuer heading; an explicitly
+different named institution is rejected. Existing parenthetical authority names
+are accepted only as complete stored alternatives, never by dropping bank names.
+
+Printer, material, dimensions and other type facts can use a matching type-wide
+source. Signatures, watermark, date and series need the exact dated variety in
+their own cited context; a nearby variant or a series-wide list is insufficient.
+Full signer names must appear in that evidence. Known or ambiguous values remain
+untouched. Catalogue history can fill the existing blank Historical Context
+(`condition`) field, but never replace the user's notes. Serial, certificate,
+grade, price, seller, purchase date, status, photos and crops are excluded from
+catalogue fills. Source failure leaves direct purchase/photo Check available.
+
+The response adds `catalogue {state, message, fields, guard}` alongside the
+existing `filled`/`overwritten` results. `fields` contains `{value, scope,
+source_url, quote}` per usable target. `guard.identity` contains the original raw
+country, denomination, issuer, series, dates and references; `guard.fields`
+identifies catalogue-only additions. `expected_values` contains the raw values
+for every proposed target. The detail UI saves pending edits and intentional
+clears before Check and suppresses stale results if the user edits while it runs.
+Apply receives `catalogue_guard` plus `expected_values`, compares them under
+`BEGIN IMMEDIATE`, skips changed identities/occupied fields, and returns
+`accepted_values` and `skipped_fields`. These values are not autosaved again.
+No research pass writes type fields before the normal Check acceptance path.
+
+`guard.proposal_id` refers to a server-issued 15-minute proposal in
+`banknote_catalog_proposals` with field/value/source rows in
+`banknote_catalog_proposal_fields`. Apply checks the record, original identity,
+any directly recovered draft identity, proposed value and expiry while holding
+the same write lock. Source claims sent by the browser cannot create evidence.
+Only fields actually accepted are marked as accepted and appended to the latest
+`note_references_research` (Reference Notes) with their reference, acceptance
+date, field/value, source URL and excerpt. The existing text is preserved; the
+full source excerpt remains in the accepted evidence table even if the visible
+notes later change. Expiration removes only unused proposals, not accepted
+evidence. A repeated apply cannot append the same evidence again. The UI flushes
+Reference Notes before Check and protects edits made while acceptance is pending.
+These are catalogue type sources, separate from the specimen's provenance.
+
+Search uses a generated country/numeric-denomination/year query for Numista's
+whole domain, then semantic catalogue-reference and specialist/archive queries.
+Observed legacy Numista note URLs retain their exact numeric record identity
+when normalized to the current URL form. Country indexes can be useful discovery
+sources; for missing dimensions with Pick/TBB identity, an observed Banknote
+Index Country directory takes priority. The fetch phase follows its actual
+country/historical-territory link and then the matching complete-reference entry.
+It never guesses country or item IDs; the entry itself must supply the field
+evidence. Clearly different denominations, references and coin results are not
+treated as the requested banknote. The validator still checks the complete
+reference after retrieval. Unknown,
+inaccessible and conflicting results stay blank rather than becoming guesses;
+the former uncited secondary dimensions lookup is removed. Regressions are in
+`tests/test_banknote_catalog_lookup.py`, `tests/test_banknote_catalog_fetch.py`,
+`tests/test_banknote_catalog_search.py`,
+existing purchase/photo Check suites
+and the detail-page browser fixture.
+
 The list files notes by historical collection relationship first, then territory,
 then the existing monetary era, year and denomination rules. The catalogue is
 `banknote_catalog.py`; SQLite ordering, group filters, list headings, analysis

@@ -1649,6 +1649,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- Grade, Conditions -->
   <p id="banknoteCheckSources" role="status" hidden style="padding:8px 12px;white-space:pre-line;overflow-wrap:anywhere"></p>
+  <details id="banknoteCatalogueSources" hidden style="padding:8px 12px;overflow-wrap:anywhere">
+    <summary>Catalogue reference</summary>
+    <div></div>
+  </details>
   {{ notescell('notes','Grade, Conditions') }}
   <div class="dgrid banknote-grading-row">
     {{ tacell('grading_authority','Grading Service', banknote_grading_services()) }}
@@ -3776,10 +3780,14 @@ function lookupApplyFailureMessage(status, text) {
 }
 
 async function applyLookupUpdates(applyUrl, updates, options = {}) {
+  const payload = options.prepareUpdates ? options.prepareUpdates(updates) : {updates};
+  if (!Object.keys(payload.updates || {}).length) {
+    return {updated: 0, fields: [], accepted_values: {}, skipped: true};
+  }
   const res = await fetch(applyUrl, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({updates}),
+    body: JSON.stringify(payload),
   });
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
@@ -4932,8 +4940,10 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
   window.ensureRecord = ensureRecord;
 
+  const fieldSaveRequests = new Set();
+  const failedSaveFields = new Set();
   function saveField(name, value) {
-    return ensureRecord().then(() => {
+    const pending = ensureRecord().then(() => {
       return fetch(SAVE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4975,8 +4985,19 @@ document.querySelectorAll('.comp-item').forEach(item => {
           return d;
         });
     }).catch(err => console.warn('Auto-save failed:', err));
+    fieldSaveRequests.add(pending);
+    pending.then(result => {
+      if (result?.ok) failedSaveFields.delete(name);
+      else failedSaveFields.add(name);
+      fieldSaveRequests.delete(pending);
+    });
+    return pending;
   }
   window.saveField = saveField;
+  window.waitForCheckSaves = async () => {
+    const results = await Promise.all([...fieldSaveRequests]);
+    if (results.some(result => !result?.ok)) throw new Error('Could not save the current banknote details. Try again before checking.');
+  };
   const orderInput = form.querySelector('[name="order_number"]');
   orderInput?.addEventListener('input', () => {
     const link = form.querySelector('.purchase-order-link');
@@ -5108,6 +5129,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
     if (!el || !el.name || !form.contains(el)) return;
     if (!/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
     if (el.type === 'file' || (el.value || '').trim() === '') return;
+    if (lastSaved.get(el) === el.value) return;
     try { saveField(el.name, el.value); } catch (e) { /* best effort */ }
   });
 
@@ -5205,6 +5227,16 @@ document.querySelectorAll('.comp-item').forEach(item => {
   const SAVE_DEBOUNCE_MS = 250;
   const pendingTimers = new WeakMap();
   const lastSaved = new WeakMap();
+  const initialCheckValues = new Map([...form.elements].map(el => [el, el.value]));
+  window.banknoteCheckNeedsBlankSave = el => Boolean(initialCheckValues.get(el))
+    || failedSaveFields.has(el.name) || (lastSaved.has(el) && lastSaved.get(el) !== el.value);
+  // Check's conditional apply already persisted these values. Keep its
+  // display update out of ordinary autosave, including a later blur.
+  window.markLookupValueSaved = (el, value) => {
+    clearTimeout(pendingTimers.get(el));
+    pendingTimers.delete(el);
+    lastSaved.set(el, value);
+  };
   function saveNow(el) {
     const t = pendingTimers.get(el);
     if (t) { clearTimeout(t); pendingTimers.delete(el); }
@@ -5226,7 +5258,8 @@ document.querySelectorAll('.comp-item').forEach(item => {
   }
   function bindAutosaveInput(el) {
     lastSaved.set(el, el.value);
-    el.addEventListener('input', () => {
+    el.addEventListener('input', event => {
+      if (event.detail?.lookupApplied) return;
       // Kick off record creation on the very first keystroke so the
       // row exists even if the user navigates away before debounce or
       // blur fires. ensureRecord() is idempotent — subsequent input
@@ -5249,13 +5282,17 @@ document.querySelectorAll('.comp-item').forEach(item => {
 
   // Date / month inputs — save on change
   form.querySelectorAll('input[type=date][name], input[type=month][name]').forEach(el => {
-    el.addEventListener('change', () => saveField(el.name, el.value));
+    el.addEventListener('change', event => {
+      if (!event.detail?.lookupApplied) saveField(el.name, el.value);
+    });
   });
 
   // Selects — save on change
   form.querySelectorAll('select[name]').forEach(el => {
     if (el.name === 'status' && document.querySelector('[data-purchase-status-control]')) return;
-    el.addEventListener('change', () => saveField(el.name, el.value));
+    el.addEventListener('change', event => {
+      if (!event.detail?.lookupApplied) saveField(el.name, el.value);
+    });
   });
 
   // Radio buttons — save on change
@@ -7613,16 +7650,19 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     return n < 0 ? `${Math.abs(Math.trunc(n))} BC` : String(Math.trunc(n));
   }
 
-  function setCoinFormValue(name, value) {
+  function setCoinFormValue(name, value, options = {}) {
     document.getElementsByName(name).forEach(el => {
       el.value = value == null ? '' : String(value);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+      if (options.alreadySaved) window.markLookupValueSaved?.(el, el.value);
+      const detail = {lookupApplied: Boolean(options.alreadySaved)};
+      el.dispatchEvent(new CustomEvent('input', { bubbles: true, detail }));
+      el.dispatchEvent(new CustomEvent('change', { bubbles: true, detail }));
     });
   }
 
-  function applyCoinLookupValues(values) {
+  function applyCoinLookupValues(values, options = {}) {
     if (!values || typeof values !== 'object') return;
+    values = {...values};
     if (Object.prototype.hasOwnProperty.call(values, 'date_1')) {
       values.date_1_text = values.date_1_text || coinYearDisplay(values.date_1);
     }
@@ -7630,9 +7670,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       values.date_2_text = values.date_2_text || coinYearDisplay(values.date_2);
     }
     Object.entries(values).forEach(([field, value]) => {
-      setCoinFormValue(field, value);
-      if (field === 'date_1_text') setCoinFormValue('date_1', value);
-      if (field === 'date_2_text') setCoinFormValue('date_2', value);
+      setCoinFormValue(field, value, options);
+      if (field === 'date_1_text') setCoinFormValue('date_1', value, options);
+      if (field === 'date_2_text') setCoinFormValue('date_2', value, options);
     });
     // A Check-filled price runs through the blur formatter: the server
     // already appended the USD tail when it could reach a rate; this
@@ -7696,13 +7736,73 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     }
   }
 
+  function banknoteCheckSnapshot() {
+    const form = document.getElementById('mainForm');
+    if (form?.dataset.category !== 'banknotes') return null;
+    const values = {};
+    form.querySelectorAll('input[name]:not([type=file]), textarea[name], select[name]').forEach(el => {
+      if (!['checkbox', 'radio'].includes(el.type)) values[el.name] = el.value;
+    });
+    const identity = ['country', 'municipality', 'issuer', 'denomination', 'series',
+      'date_1', 'date_1_text', 'date_2', 'date_2_text', 'pick_number', 'other_catalog',
+      'description', 'note_references', 'order_number', 'marketplace'];
+    const unchanged = field => {
+      const names = /^date_[12](?:_text)?$/.test(field)
+        ? [field.replace(/_text$/, ''), field.replace(/_text$/, '') + '_text'] : [field];
+      return names.every(name => !Object.hasOwn(values, name)
+        || form.querySelector(`[name="${name}"]`)?.value === values[name]);
+    };
+    const images = {};
+    form.querySelectorAll('.drop-zone[data-field]').forEach(zone => {
+      images[zone.dataset.field] = zone.querySelector('img')?.getAttribute('src') || '';
+    });
+    return {values, images, unchanged,
+      assertIdentity() {
+        if (!identity.every(unchanged)) {
+          throw new Error('The banknote details changed while Check was running. Your edits were kept. Press Check again for these details.');
+        }
+      },
+    };
+  }
+
+  function showBanknoteCatalogueSources(catalogue) {
+    const details = document.getElementById('banknoteCatalogueSources');
+    if (!details) return;
+    const body = details.querySelector('div');
+    body.replaceChildren();
+    details.hidden = !catalogue;
+    if (!catalogue) return;
+    details.querySelector('summary').textContent = catalogue.state === 'ready'
+      ? 'Catalogue reference checked' : 'Catalogue reference: no verified additions';
+    const message = document.createElement('p');
+    message.textContent = catalogue.message || '';
+    body.appendChild(message);
+    Object.entries(catalogue.fields || {}).forEach(([field, evidence]) => {
+      const row = document.createElement('p');
+      row.textContent = field.replaceAll('_', ' ') + ': ' + String(evidence.value ?? '') + ' — ';
+      try {
+        const url = new URL(evidence.source_url);
+        if (url.protocol === 'https:' && !url.username && !url.password) {
+          const link = document.createElement('a');
+          link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          link.textContent = url.hostname; row.appendChild(link);
+        }
+      } catch { /* Invalid source URLs are never clickable. */ }
+      if (evidence.quote) row.appendChild(document.createTextNode(' · ' + evidence.quote));
+      body.appendChild(row);
+    });
+  }
+
   // Push the form's current non-empty values to the server before a
   // Check runs. Check reads the SERVER row, so a just-pasted
   // description whose blur-save is still in flight (or never fired --
   // paste then click Check directly) would otherwise be invisible to
-  // the lookup. Non-empty only: this can add, never erase.
+  // the lookup. Banknotes also save deliberately cleared fields, so a
+  // removed catalogue identity cannot silently remain the lookup input.
   async function flushCheckInputFields() {
     if (typeof window.saveField !== 'function') return;
+    const checkpoint = banknoteCheckSnapshot();
+    if (checkpoint) await window.waitForCheckSaves?.();
     await flushPurchaseOrderFields();
     const fieldsByCategory = {
       coins: [
@@ -7714,9 +7814,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       banknotes: [
         'country', 'municipality', 'issuer', 'official', 'denomination',
         'series', 'pick_number', 'other_catalog', 'printer', 'signatures',
-        'serial_number', 'watermark', 'date_1', 'date_2', 'description',
-        'note_references', 'notes', 'vendor', 'price', 'purchase_date',
-        'grade', 'obv_rev',
+        'serial_number', 'watermark', 'date_1', 'date_1_text', 'date_2', 'date_2_text', 'description',
+        'note_references', 'note_references_research', 'notes', 'vendor', 'price', 'purchase_date',
+        'grade', 'grade_numeric', 'grading_authority', 'slab_number', 'grade_condition',
+        'grade_modifier', 'material', 'issue_type', 'size_width', 'size_height',
+        'lettering', 'lettering_translation', 'condition', 'obv_rev',
       ],
     };
     const formEl = document.getElementById('mainForm');
@@ -7724,16 +7826,29 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const saves = [];
     fields.forEach(name => {
       const el = document.querySelector(`[name="${name}"]`);
-      if (el && el.name && (el.value || '').trim() !== '') {
-        saves.push(window.saveField(el.name, el.value));
+      if (el && el.name && ((el.value || '').trim() !== ''
+          || (checkpoint && window.banknoteCheckNeedsBlankSave?.(el)))) {
+        const value = el.value;
+        saves.push(window.saveField(el.name, value).then(result => {
+          if (checkpoint && !result?.ok) {
+            throw new Error('Could not save the current banknote details. Your form has been kept. Try again before checking.');
+          }
+          if (checkpoint && el.value === value) window.markLookupValueSaved?.(el, value);
+        }));
       }
     });
     await Promise.all(saves);
+    if (checkpoint) await window.waitForCheckSaves?.();
+    if (checkpoint && !Object.keys(checkpoint.values).every(checkpoint.unchanged)) {
+      throw new Error('The banknote details changed while saving. Your edits were kept. Press Check again.');
+    }
   }
 
   async function runCoinSpecLookup(btn, options = {}) {
     const url = btn.dataset.specUrl;
     if (!url) throw new Error('No check URL after save');
+    const checkpoint = banknoteCheckSnapshot();
+    if (checkpoint) showBanknoteCatalogueSources(null);
     const ctl = new AbortController();
     let timeoutId;
     const setBudget = ms => {
@@ -7868,12 +7983,18 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     } else if (resp.ok && !data.lookup_error) {
       sourceStatus('');
     }
+    if (checkpoint) {
+      checkpoint.assertIdentity();
+      showBanknoteCatalogueSources(data.catalogue);
+    }
 
     // Show newly imported listing photos even if the field lookup failed.
     // Existing photos and manual crops are never replaced by Check.
     Object.entries(data.images || {}).forEach(([field, url]) => {
       const zone = document.querySelector(`.drop-zone[data-field="${field}"]`);
       if (!zone) return;
+      if (checkpoint && (checkpoint.images[field] || zone.querySelector('img')
+          || zone.querySelector('input[type=file]')?.files?.length)) return;
       let img = zone.querySelector('img');
       if (!img) {
         const placeholder = zone.querySelector('span:not(.panel-lbl)');
@@ -7891,8 +8012,52 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       throw new Error(data.error || 'Lookup failed');
     }
 
-    const filled = data.filled || {};
-    const overwritten = data.overwritten || {};
+    let filled = data.filled || {};
+    let overwritten = data.overwritten || {};
+    const changedFields = new Set();
+    const showPreserved = () => {
+      if (!changedFields.size) return;
+      sourceStatus([...(data.purchase_sources?.warnings || []),
+        'Kept fields changed while Check was running: '
+          + [...changedFields].map(field => field.replaceAll('_', ' ')).join(', ') + '.'].join('\n'));
+    };
+    const keepUnchanged = values => Object.fromEntries(Object.entries(values).filter(([field]) => {
+      const safe = !checkpoint || checkpoint.unchanged(field);
+      if (!safe) changedFields.add(field);
+      return safe;
+    }));
+    if (checkpoint) {
+      filled = keepUnchanged(filled);
+      overwritten = keepUnchanged(overwritten);
+      showPreserved();
+    }
+    const prepareUpdates = checkpoint ? updates => {
+      checkpoint.assertIdentity();
+      const safe = keepUnchanged(updates);
+      // A fill remains a fill even if a stale response calls an occupied
+      // form field blank. Intentional changes still use the review modal.
+      Object.keys(safe).forEach(field => {
+        if (Object.hasOwn(filled, field) && String(checkpoint.values[field] || '').trim()) {
+          delete safe[field]; changedFields.add(field);
+        }
+      });
+      showPreserved();
+      return {updates: safe,
+        expected_values: Object.fromEntries(Object.keys(safe).map(field => [field,
+          Object.hasOwn(data.expected_values || {}, field) ? data.expected_values[field]
+            : (checkpoint.values[field] ?? null)])),
+        ...(data.catalogue?.guard ? {catalogue_guard: data.catalogue.guard} : {}),
+      };
+    } : undefined;
+    const displayApplied = (result, fallback) => {
+      if (!checkpoint) { applyCoinLookupValues(result.values || fallback); return; }
+      (result.skipped_fields || []).forEach(field => changedFields.add(field));
+      try { checkpoint.assertIdentity(); }
+      catch { sourceStatus('The banknote details changed while Check was finishing. Your form edits were kept. Press Check again.'); return; }
+      const values = keepUnchanged(result.accepted_values || result.values || {});
+      applyCoinLookupValues(values, {alreadySaved: true});
+      showPreserved();
+    };
     if (data.specs_searched_at) {
       btn.classList.add('done');
     }
@@ -7915,9 +8080,10 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const applyUrl = url.replace('/lookup-specs', '/apply-lookup-specs');
     if (!Object.keys(overwritten).length) {
       const d = await applyLookupUpdates(applyUrl, filled, {
-        ignoreApplyFailure: options.ignoreApplyFailure,
+        ignoreApplyFailure: checkpoint ? false : options.ignoreApplyFailure,
+        prepareUpdates,
       });
-      if (d.updated) applyCoinLookupValues(d.values || filled);
+      if (d.updated || checkpoint) displayApplied(d, filled);
       return Boolean(d.updated);
     }
 
@@ -7929,13 +8095,14 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       {
         reloadOnApply: false,
         silentEmpty: true,
-        ignoreApplyFailure: options.ignoreApplyFailure,
+        ignoreApplyFailure: checkpoint ? false : options.ignoreApplyFailure,
+        prepareUpdates,
         emptyMessage: 'Already up to date. Every field the lookup checked matches this coin.'
           + (data.sources ? '\n\nChecked: ' + data.sources : ''),
       }
     );
-    if (result && result.applied) {
-      applyCoinLookupValues((result.data && result.data.values) || result.updates);
+    if (result?.data && (result.applied || checkpoint)) {
+      displayApplied(result.data, result.updates);
     }
     return !!(result && result.applied);
   }
@@ -8426,6 +8593,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
    (PDF, lookup-style buttons) into a popover reachable via a ⋮
    kebab. Prev / next / Back are always visible — losing one-click
    navigation hurts more than the lookup pills hiding. #}
+<style>.detail-actions-popover[hidden] { display: none; }</style>
 <script>
 (function setupActionsKebab() {
   const overlay = document.querySelector('.detail-nav-overlay');

@@ -14,6 +14,7 @@ const path = require('node:path');
     return template.slice(a, b);
   };
   const lookup = source('  async function runCoinSpecLookup(', '  function delay(ms)');
+  const checkGuards = source('  function banknoteCheckSnapshot()', '  // Push the form\'s current non-empty values');
   const handler = source("  document.querySelectorAll('.coin-spec-check-btn').forEach", '  // ── Coin ✓ Check:');
   const pageHtml = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
     <form id="mainForm" data-category="banknotes"><input name="order_number" value="12-34567-89012"><input name="marketplace" value="eBay"><textarea name="description">Keep my entered details</textarea></form>
@@ -25,7 +26,7 @@ const path = require('node:path');
     const applyLookupUpdates=async(...args)=>{applies.push(args);return{updated:true,values:args[1]}};
     const applyCoinLookupValues=values=>{window.appliedValues=values};
     const showLookupReview=async(...args)=>{reviewCalls.push(args);return{applied:false}};
-    ${lookup}\n${handler}\n</script></body></html>`;
+    ${checkGuards}\n${lookup}\n${handler}\n</script></body></html>`;
   const browser = await chromium.launch({ headless: true, ...(process.env.BROWSER_CHANNEL ? { channel: process.env.BROWSER_CHANNEL } : {}) });
   const results = [], failures = [];
   const now = Date.parse('2026-10-17T16:00:00Z'), id = 'a'.repeat(32);
