@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}Banknote order review — StuffApp{% endblock %}
+{% block content %}
+{% include 'partials/banknote_import_styles.html' %}
+<div class="banknote-import" data-import-mode="new">
+  <header class="import-toolbar">
+    <h1>Banknote order review</h1>
+    <a class="toolbar-btn pill" href="/banknotes">Collection</a>
+  </header>
+  <p class="import-intro">Save the purchased banknotes from your exact eBay order, review each item, then release it to your collection.</p>
+  <form class="import-form" id="banknoteImportOrderForm" action="/banknotes/imports" method="post">
+    <label for="banknoteImportOrderNumber">eBay order number</label>
+    <input id="banknoteImportOrderNumber" name="order_number" type="text" value="{{ order_number|default('') }}" placeholder="24-15335-90978" required autocomplete="off" spellcheck="false">
+    <button id="banknoteImportStart" class="toolbar-btn pill active" type="submit">Save order for review</button>
+  </form>
+  <p class="import-status" id="banknoteImportStatus" role="status" aria-live="polite"></p>
+  <section class="import-pending" aria-labelledby="pendingTitle">
+    <h2 id="pendingTitle">Saved orders</h2>
+    {% for saved in pending_batches|default([]) %}
+    <a href="{{ saved.url|default('/banknotes/imports/' ~ saved.id) }}" data-saved-batch="{{ saved.id }}">Order {{ saved.order_number }}{% if saved.pending_count is defined %} · {{ saved.pending_count }} pending{% endif %}{% if saved.state == 'queued' %} · Checking order…{% endif %}</a>
+    {% else %}<p>No orders waiting for review.</p>{% endfor %}
+  </section>
+</div>
+<script src="{{ url_for('static', filename='js/banknote-imports.js') }}?v={{ asset_v('js/banknote-imports.js') }}" defer></script>
+{% endblock %}

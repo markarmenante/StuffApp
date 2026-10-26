@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}Order {{ batch.order_number }} review — StuffApp{% endblock %}
+{% block content %}
+{% include 'partials/banknote_import_styles.html' %}
+<div class="banknote-import" data-import-mode="review">
+  <header class="import-toolbar">
+    <h1>Order {{ batch.order_number }}</h1>
+    <span class="import-count" id="banknoteImportCount">{{ batch.pending_count }} pending</span>
+    <button class="toolbar-btn pill" id="banknoteImportRefreshOrder" type="button">Refresh eBay order</button>
+    <a class="toolbar-btn pill" href="/banknotes/imports/new">Saved orders</a>
+    <a class="toolbar-btn pill" href="/banknotes">Collection</a>
+  </header>
+  <p class="import-intro">Saved for review. Open each item to inspect its photos and details before releasing it to the collection.</p>
+  <p class="import-status" id="banknoteImportStatus" role="status" aria-live="polite">{{ batch.message or '' }}</p>
+  <div class="import-actions" style="margin:0 16px 12px">
+    <button class="toolbar-btn pill" id="banknoteImportRetry" type="button" hidden>Retry order</button>
+    <button class="toolbar-btn pill" id="banknoteImportRefresh" type="button" hidden>Refresh saved status</button>
+  </div>
+  <div id="banknoteImportList"></div>
+</div>
+<script id="banknote-import-data" type="application/json">{{ {'batch':batch}|tojson }}</script>
+<script src="{{ url_for('static', filename='js/banknote-imports.js') }}?v={{ asset_v('js/banknote-imports.js') }}" defer></script>
+{% endblock %}

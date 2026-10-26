@@ -2,6 +2,7 @@
 import re
 import time
 import uuid
+from urllib.parse import urlsplit, parse_qs
 
 from flask import abort, jsonify, request
 import ebay_mail
@@ -30,8 +31,54 @@ def snapshot(row, session=None):
 
 
 def current_order(db, order_id):
-    return db.execute("SELECT 1 FROM banknotes WHERE order_number=? "
+    live = db.execute("SELECT 1 FROM banknotes WHERE order_number=? "
                       "AND COALESCE(marketplace,'') IN ('','eBay') LIMIT 1", (order_id,)).fetchone()
+    return live or import_batch(db, order_id)
+
+
+def import_batch(db, order_id, request_id=None):
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE name='banknote_import_batches'").fetchone():
+        return None
+    query = "SELECT * FROM banknote_import_batches WHERE order_id=? AND state='queued'"
+    params = [order_id]
+    if request_id:
+        query += ' AND request_id=?'
+        params.append(request_id)
+    return db.execute(query,params).fetchone()
+
+
+def checkout_orders(payload, requested, items, importing):
+    checkout = payload.get('checkout')
+    if not checkout:
+        if importing:
+            raise ValueError('The purchase reader did not verify complete checkout membership; update Today and retry the import')
+        if any(item['order_id'] != requested for item in items):
+            raise ValueError('Purchase result contains an unrelated order')
+        return {requested}
+    if not importing or not isinstance(checkout,dict) or checkout.get('requested_order_id') != requested:
+        raise ValueError('Checkout expansion requires an active exact-order import')
+    checkout_id = checkout.get('purchase_order_id')
+    groups = checkout.get('orders')
+    if not isinstance(checkout_id,str) or not re.fullmatch(r'[0-9-]{8,30}',checkout_id) or not isinstance(groups,list) or not 1<=len(groups)<=25:
+        raise ValueError('Invalid checkout identity')
+    membership=set();orders=set()
+    for group in groups:
+        if not isinstance(group,dict):raise ValueError('Invalid checkout order')
+        order=group.get('order_id');ids=group.get('item_ids');url=group.get('details_url')
+        if not isinstance(order,str) or not re.fullmatch(r'\d{2}-\d{5}-\d{5}',order) or order in orders:
+            raise ValueError('Invalid or duplicate seller order')
+        if not isinstance(url,str):raise ValueError('Checkout order lacks an exact details link')
+        parsed=urlsplit(url);query=parse_qs(parsed.query)
+        if (parsed.scheme!='https' or parsed.netloc!='order.ebay.com' or parsed.path!='/ord/show'
+                or parsed.fragment or query.get('orderId')!=[order] or query.get('purchaseOrderId')!=[checkout_id]):
+            raise ValueError('Seller order is not bound to the verified checkout')
+        if not isinstance(ids,list) or not ids or len(ids)>25 or any(not isinstance(i,str) or not re.fullmatch(r'\d{10,14}',i) for i in ids) or len(set(ids))!=len(ids):
+            raise ValueError('Invalid checkout item membership')
+        orders.add(order);membership.update((order,i) for i in ids)
+    actual={(item['order_id'],item['item_id']) for item in items}
+    if requested not in orders or membership!=actual or len(actual)!=len(items):
+        raise ValueError('The complete checkout items do not match its seller orders')
+    return orders
 
 
 def expire(db):
@@ -106,6 +153,8 @@ def claim(db):
             db.execute("UPDATE ebay_purchase_requests SET status='reading',message=? WHERE id=?", (message, row['id']))
             result = dict(id=row['id'], order_id=row['order_id'],
                           expires_at=session['expires_at'] if session else row['requested_at'] + TIMEOUT)
+            if import_batch(db,row['order_id'],row['id']):
+                result['import_checkout'] = True
             if session:
                 result['session_recovery'] = dict(open_browser=not bool(session['open_reserved']))
                 db.execute('UPDATE ebay_purchase_request_sessions SET open_reserved=1 WHERE request_id=?', (row['id'],))
@@ -116,7 +165,7 @@ def claim(db):
 def complete_session(db, row, payload):
     session = payload.get('session')
     if (not session_for(db, row['id']) or not isinstance(session, dict)
-            or set(session) - {'state', 'reason'} or any(k in payload for k in ('items', 'receipt', 'listing', 'error'))):
+            or set(session) - {'state', 'reason'} or any(k in payload for k in ('items', 'receipt', 'listing', 'receipts', 'listings', 'checkout', 'error'))):
         raise ValueError('Invalid purchase session outcome')
     state, reason = session.get('state'), session.get('reason')
     if (state not in ('sign_in_required', 'challenge_required', 'unavailable')
@@ -171,27 +220,47 @@ def complete(db, payload):
     else:
         account, observed, items, skipped = ebay_mail.purchase_snapshot(payload)
         ebay_mail.check_account(db, account)
-        if skipped or not items or any(i['order_id'] != row['order_id'] for i in items):
+        importing=import_batch(db,row['order_id'],row['id'])
+        orders=checkout_orders(payload,row['order_id'],items,bool(importing))
+        if skipped or not items or len(items)>25:
             db.rollback()
             raise ValueError('Purchase result must contain only the complete requested order')
         # The owner requested this exact order for a current banknote. Keep all
         # its items even when the seller title lacks discovery words such as
         # banknote or PMG; quantity and sibling checks still apply downstream.
-        result = ebay_mail.apply_purchases(db, items, observed, auto_match=False,
-                                          requested_order=row['order_id'])
-        stored = {r[0] for r in db.execute('SELECT item_id FROM ebay_order_items WHERE order_id=?', (row['order_id'],))}
-        if result['skipped'] or result['items_accepted'] != len(items) or any(i['item_id'] not in stored for i in items):
-            db.rollback()
-            raise ValueError('Purchase identity could not be confirmed')
+        for order in orders:
+            subset=[item for item in items if item['order_id']==order]
+            result = ebay_mail.apply_purchases(db, subset, observed, auto_match=False,
+                                              requested_order=order,capture_order_numbers=not bool(importing))
+            stored = {r[0] for r in db.execute('SELECT item_id FROM ebay_order_items WHERE order_id=?', (order,))}
+            if result['skipped'] or result['items_accepted'] != len(subset) or any(i['item_id'] not in stored for i in subset):
+                db.rollback()
+                raise ValueError('Purchase identity could not be confirmed')
         ebay_listing_captures.save(db, payload.get('listing'), items)
         ebay_purchase_prices.save(db, payload.get('receipt'), items, row['requested_at'])
+        by_id={item['item_id']:item for item in items}
+        if len(by_id)!=len(items):raise ValueError('Repeated item identity requires review')
+        for name,save in (('listings',ebay_listing_captures.save),('receipts',ebay_purchase_prices.save)):
+            captures=payload.get(name,[])
+            if not isinstance(captures,list) or len(captures)>25:raise ValueError('Invalid item capture list')
+            seen=set()
+            for capture in captures:
+                ident=capture.get('item_id') if isinstance(capture,dict) else None
+                if ident not in by_id or ident in seen:raise ValueError('Capture does not identify one purchased item')
+                seen.add(ident)
+                args=(db,capture,[by_id[ident]])
+                save(*args,row['requested_at']) if name=='receipts' else save(*args)
+        if importing:
+            if importing['account_name']!=account.lower():raise ValueError('Import account does not match the verified order')
+            import banknote_imports
+            banknote_imports.materialize(db,account,row['order_id'],items,row['id'])
         status, message = 'done', 'Order found. Checking the purchased item...'
     db.execute('UPDATE ebay_purchase_requests SET status=?,message=? WHERE id=?', (status, message, row['id']))
     db.commit()
     return dict(ok=True)
 
 
-def register(app, get_db, require_owner):
+def register(app, get_db, require_owner, after_import=None):
     @app.get('/banknotes/<record_id>/purchase-refresh/<request_id>')
     def banknote_purchase_refresh(record_id, request_id):
         require_owner()
@@ -233,7 +302,7 @@ def register(app, get_db, require_owner):
     @app.post('/ebay/today/requests')
     def ebay_purchase_requests():
         ebay_mail.authenticate()
-        if request.content_length is None or request.content_length > 200000:
+        if request.content_length is None or request.content_length > 2000000:
             abort(413)
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
@@ -248,7 +317,11 @@ def register(app, get_db, require_owner):
                 return jsonify(ok=True, request=claimed, expected_account=account[0] if account else None)
             if payload.get('action') == 'complete':
                 handler = market_purchase_capture.complete if payload.get('kind') == 'market_purchase' else complete
-                return jsonify(handler(db, payload))
+                result=handler(db,payload)
+                if after_import and handler is complete:
+                    batch=db.execute("SELECT id FROM banknote_import_batches WHERE request_id=? AND state='review'",(payload.get('id'),)).fetchone()
+                    if batch:after_import(batch[0])
+                return jsonify(result)
         except ValueError as exc:
             db.rollback()
             # Evidence is atomic: reject it all, then report only the failed

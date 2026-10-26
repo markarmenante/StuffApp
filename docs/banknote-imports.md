@@ -1,0 +1,74 @@
+# Banknote order review
+
+Entering an exact eBay order on **Order review**, or pressing Check on an otherwise
+blank banknote form with an order number, creates a saved review batch. It does not
+create collection records. The order-only new form stays local until import; an
+existing failed form is preserved.
+
+A fresh authenticated read is required. An eBay checkout can contain several seller
+orders: the reader verifies each seller order's details link has the same observed
+`purchaseOrderId`, and the returned item membership must match those verified links
+exactly. Every draft retains its own actual seller order, exact item ID, seller,
+paid unit amount and original listing. Shipping, tax, order totals and listing
+asking prices cannot supply an item price. A missing receipt leaves the price blank.
+A partial or old-reader response without checkout membership is rejected atomically.
+
+All drafts are committed before automatic Check begins. At most two checks run
+concurrently; each batch contains at most 25 items and each Check has a five-minute
+publication lease. Check uses the existing photo-side classifier and catalogue
+validator, fills blank draft fields only, and saves accepted catalogue proof.
+Original source photographs are retained before the slower catalogue call, with
+owner/account-bound access. They are protected from orphan cleanup. Source text is
+untrusted evidence. A title without the usual banknote discovery words is retained;
+ambiguous quantities and bundles stay visible but blocked from release as one note.
+
+The review screen opens each saved draft for edits and explicit release. Changes use
+a draft revision: a stale save or late Check cannot overwrite newer edits. Check
+failures persist with a retry message. Read-only status GETs never start provider
+work. Unstarted checks resume after restart; an interrupted active check is shown
+as retryable after its lease expires, without an automatic paid replay.
+**Refresh eBay order** explicitly rereads the complete source, keeps saved fields
+and photos, updates verified membership, and queues fresh checks. An item absent
+from that fresh snapshot cannot be released.
+
+Release is an atomic transaction. It revalidates the current connected account,
+exact item membership, source identity, draft revision and existing item links.
+It creates the collection record and exact purchase link once, preserves originals,
+copies display photographs, and retains catalogue evidence. Repeated release is
+idempotent. A remaining draft returns to its order review; pending drafts in another
+batch return to saved orders; otherwise release returns to the collection.
+
+A unique unfinished existing banknote with the exact seller order and exact original
+listing may be completed instead of duplicated. This narrow recovery requires
+blank country, denomination, Pick and other catalogue fields and no purchase link.
+Its occupied fields, original photos and crops seed the draft. Release compares the
+saved record snapshot and fills only its remaining blanks; concurrent changes stop
+the release. A populated or ambiguous existing match stays blocked for review.
+
+Storage is separate from `banknotes`: `banknote_import_batches`,
+`banknote_import_items`, `banknote_import_assets`, and `banknote_import_evidence`.
+Batch/account/order and account/item-line uniqueness prevent duplicate drafts.
+Collection lists, reports, totals and Market Scan coverage see no staged drafts.
+No existing collection record or photo is removed by this workflow.
+
+## Routes and runtime
+
+- `GET /banknotes/imports/new`: new/resume order review.
+- `POST /banknotes/imports`: `{order_number, refresh?:true}`; resume by default.
+- `GET /banknotes/imports/<batch>` and `/status`: review HTML and read-only state.
+- `GET /banknotes/imports/<batch>/items/<item>`: saved draft detail.
+- `POST` or `PATCH` the item URL: `{revision, updates}`.
+- `POST` the item URL plus `/check`: `{revision}`, asynchronous status 202.
+- `POST /banknotes/imports/<batch>/release`: `{items:[{id,revision}]}`.
+
+All draft routes require the collection owner. The existing authenticated Today
+purchase bridge carries only active import claims with `import_checkout:true`;
+regular collection Check retains its exact-order behavior. The designated Today
+Mac must be awake with the correct signed-in eBay account. Existing provider keys
+and source readers are reused. `BANKNOTE_IMPORT_WORKER=0` disables automatic draft
+checks for isolated tests; it does not change read-only status behavior.
+
+Validation uses synthetic three-seller-order checkouts, exact cents against unrelated
+totals, membership and account failures, repeated import/release, revision conflicts,
+provider failure/retry, saved photos, blank-only partial-record recovery and accepted
+catalogue evidence. No real purchase or collection release is performed by tests.

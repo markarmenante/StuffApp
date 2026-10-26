@@ -482,3 +482,13 @@ lockout or a failed deploy:
   to their modern nation).
 - The SQLite DB lives at `$DATA_DIR/stuffapp.db` (defaults to the repo root;
   gitignored).
+
+## Banknote order drafts (2026-10-26)
+
+Exact order import now saves separate review drafts for every verified checkout item.
+Each retains its actual seller order, exact paid unit price and original photos.
+All drafts are saved before bounded automatic Check; only explicit release creates
+or completes a collection record. Retries and release are idempotent, edits are
+revision guarded, and drafts stay outside totals/reports/Market Scan coverage.
+See [banknote order review](docs/banknote-imports.md) for source membership, existing
+partial-form recovery, lifecycle, owner access and runtime contracts.

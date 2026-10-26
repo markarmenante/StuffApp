@@ -29,6 +29,7 @@ import banknote_entity_coverage
 import banknote_printers
 import ebay_orders
 import purchase_orders
+import banknote_imports
 import purchase_lifecycle as purchase_states
 import banknote_feedback
 import original_listings
@@ -6913,6 +6914,7 @@ def init_db():
     market_estimates.init_schema(db)
     market_slab_labels.init_schema(db)
     banknote_catalog_proposals.init_schema(db)
+    banknote_imports.init_schema(db)
     market_unwatch.init_schema(db)
 
 
@@ -21379,6 +21381,209 @@ def _market_analysis_block(db, category):
     return '\n\n'.join(parts), finished_at
 
 
+# Order drafts are separate documents until an explicit release transaction.
+_IMPORT_BATCH_THREADS = set()
+_IMPORT_BATCH_LOCK = threading.Lock()
+
+
+def _import_fields():
+    blocked={'order_number','marketplace','image_1','image_2','banknote_id','cat_id','documents'}
+    fields=[dict(field) for field in visible_fields('banknotes') if not field.get('readonly')
+            and field['type'] not in ('file','checkbox-group') and field['name'] not in blocked
+            and not field['name'].startswith('sell_')]
+    for field in fields:
+        if field['name']=='status':field.update(type='select',options=['Ordered','Shipped','Delivered','Own'])
+    return fields
+
+
+def _normalize_import_updates(updates):
+    allowed={field['name']:field for field in _import_fields()}
+    result={}
+    if set(updates)-set(allowed):raise banknote_imports.ImportProblem('A source identity or unsupported draft field cannot be changed here.')
+    for field,value in updates.items():
+        if not isinstance(value,(str,int,float)) and value is not None:
+            raise banknote_imports.ImportProblem('Draft fields must be plain text or numbers.')
+        value='' if value is None else str(value).strip()
+        if len(value)>60000:raise banknote_imports.ImportProblem('A draft field is too long.')
+        if field=='status' and value not in ('Ordered','Shipped','Delivered','Own','Owned'):
+            raise banknote_imports.ImportProblem('Choose a valid purchase status.')
+        if field=='price':value=_normalize_price_input(value)
+        elif field in ('date_1','date_2'):value=_normalize_coin_year_input(value)
+        value=normalize_field_value('banknotes',field,value)
+        result[field]=value or None
+    return result
+
+
+def _evaluate_import_check(note,prepared):
+    error=None
+    try:suggestions=fetch_banknote_specs(note)
+    except Exception:
+        suggestions={}
+        error='The image/catalogue provider could not finish Check. Your draft and photographs were kept; retry Check.'
+    response=_banknote_check_result(note,prepared,suggestions,error)
+    if isinstance(response,tuple):
+        response,status=response
+        result=response.get_json()
+        result['lookup_error']=result.get('error') or error
+        return result
+    return response.get_json()
+
+
+def _run_import_check(batch_id,item_id,revision,token):
+    try:
+        with app.app_context():
+            banknote_imports.run_check(open_db_connection,batch_id,item_id,revision,token,
+                                      UPLOAD_FOLDER,_classify_banknote_listing_photos,_evaluate_import_check)
+    finally:banknote_imports._CHECK_SLOTS.release()
+
+
+def _queue_import_check(db,batch_id,item_id,revision):
+    if not banknote_imports._CHECK_SLOTS.acquire(blocking=False):
+        raise banknote_imports.ImportProblem('Two draft checks are running. Wait for one to finish, then try again.')
+    try:token=banknote_imports.claim_check(db,batch_id,item_id,revision)
+    except Exception:
+        banknote_imports._CHECK_SLOTS.release();raise
+    if not token:
+        banknote_imports._CHECK_SLOTS.release();return
+    threading.Thread(target=_run_import_check,args=(batch_id,item_id,revision,token),daemon=True,
+                     name='banknote-draft-check').start()
+
+
+def _start_import_checks(batch_id):
+    if os.environ.get('BANKNOTE_IMPORT_WORKER','1')=='0':return
+    with _IMPORT_BATCH_LOCK:
+        if batch_id in _IMPORT_BATCH_THREADS:return
+        _IMPORT_BATCH_THREADS.add(batch_id)
+    def run():
+        try:
+            with app.app_context():
+                db=get_db()
+                rows=db.execute("SELECT id,revision FROM banknote_import_items WHERE batch_id=? AND state='draft' AND check_state='idle' ORDER BY created_at,item_id LIMIT 25",(batch_id,)).fetchall()
+                for row in rows:
+                    # At most two provider jobs across all imports. Unclaimed
+                    # rows stay idle/durable if this coordinator is interrupted.
+                    banknote_imports._CHECK_SLOTS.acquire()
+                    current=db.execute('SELECT revision,check_state FROM banknote_import_items WHERE id=?',(row['id'],)).fetchone()
+                    if not current or current['check_state']!='idle':
+                        banknote_imports._CHECK_SLOTS.release();continue
+                    revision=current['revision']
+                    try:token=banknote_imports.claim_check(db,batch_id,row['id'],revision)
+                    except Exception:
+                        db.execute("UPDATE banknote_import_items SET check_state='failed',check_message=? WHERE id=? AND check_state='idle'",
+                                   ('The draft changed before automatic Check started. Your edits were kept; press Check to retry.',row['id']))
+                        db.commit()
+                        banknote_imports._CHECK_SLOTS.release();continue
+                    if not token:
+                        banknote_imports._CHECK_SLOTS.release();continue
+                    threading.Thread(target=_run_import_check,args=(batch_id,row['id'],revision,token),
+                                     daemon=True,name='banknote-import-check').start()
+        finally:
+            with _IMPORT_BATCH_LOCK:_IMPORT_BATCH_THREADS.discard(batch_id)
+    threading.Thread(target=run,daemon=True,name='banknote-import-batch').start()
+
+
+def _import_context(batch=None,item=None):
+    pending=[]
+    try:
+        account=banknote_imports._account(get_db())
+        for row in get_db().execute("SELECT id FROM banknote_import_batches WHERE account_name=? AND state!='complete' ORDER BY created_at DESC LIMIT 25",(account,)):
+            pending.append(banknote_imports.status(get_db(),row['id']))
+    except banknote_imports.ImportProblem:pass
+    return dict(batch=batch,item=item,fields=_import_fields(),pending_batches=pending,
+                categories=CATEGORIES,counts=get_counts(),current_category='banknotes',category='banknotes',
+                cat_info=CATEGORIES['banknotes'],is_new=False)
+
+
+@app.get('/banknotes/imports/new')
+def banknote_import_new():
+    require_owner()
+    return render_template('banknote_import_new.html',**_import_context())
+
+
+@app.post('/banknotes/imports')
+def banknote_import_create():
+    require_owner();data=request.get_json(silent=True) or request.form
+    try:
+        ident=banknote_imports.begin(get_db(),data.get('order_number'),refresh=data.get('refresh') is True)
+        _start_import_checks(ident)
+        return jsonify(banknote_imports.status(get_db(),ident))
+    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+
+
+@app.get('/banknotes/imports/<batch_id>')
+def banknote_import_review(batch_id):
+    require_owner()
+    try:batch=banknote_imports.status(get_db(),batch_id)
+    except banknote_imports.ImportProblem:abort(404)
+    return render_template('banknote_import_review.html',**_import_context(batch))
+
+
+@app.get('/banknotes/imports/<batch_id>/status')
+def banknote_import_status(batch_id):
+    require_owner()
+    try:result=banknote_imports.status(get_db(),batch_id)
+    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),404
+    response=jsonify(result);response.headers['Cache-Control']='no-store';return response
+
+
+@app.route('/banknotes/imports/<batch_id>/items/<item_id>',methods=['GET','POST','PATCH'])
+def banknote_import_detail(batch_id,item_id):
+    require_owner();db=get_db()
+    try:
+        if request.method!='GET':
+            data=request.get_json(silent=True) or {}
+            item=banknote_imports.save(db,batch_id,item_id,data.get('revision'),data.get('updates'),_normalize_import_updates)
+            return jsonify(ok=True,item=item)
+        batch=banknote_imports.status(db,batch_id)
+        item=next((i for i in batch['items'] if i['id']==item_id),None)
+        if not item:abort(404)
+        return render_template('banknote_import_detail.html',**_import_context(batch,item))
+    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+
+
+@app.post('/banknotes/imports/<batch_id>/items/<item_id>/check')
+def banknote_import_check(batch_id,item_id):
+    require_owner();data=request.get_json(silent=True) or {}
+    try:
+        _queue_import_check(get_db(),batch_id,item_id,data.get('revision'))
+        batch=banknote_imports.status(get_db(),batch_id)
+        item=next(i for i in batch['items'] if i['id']==item_id)
+        return jsonify(ok=True,item=item,status_url=batch['status_url']),202
+    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+
+
+def _create_released_banknote(db,fields,existing=None):
+    columns=_table_cols(db,'banknotes')
+    allowed={field['name'] for field in _import_fields()}|{'order_number','marketplace','image_1','image_2'}
+    values={key:value for key,value in fields.items() if key in columns and key in allowed}
+    if existing:
+        values={key:value for key,value in values.items() if banknote_catalog_lookup.is_blank(existing.get(key))
+                and not banknote_catalog_lookup.is_blank(value)}
+        if values:
+            values['updated_at']=datetime.utcnow().isoformat()
+            db.execute('UPDATE banknotes SET '+','.join(key+'=?' for key in values)+' WHERE id=?',
+                       [*values.values(),existing['id']])
+        _renumber_banknotes(db)
+        return existing['id']
+    ident=str(uuid.uuid4());now=datetime.utcnow().isoformat()
+    values.update(id=ident,cat_id=next_serial_cat_id(db,'banknotes','B'),created_at=now,updated_at=now)
+    if not values.get('owner'):values['owner']='Mark'
+    if not values.get('property_name'):values['property_name']='Carpinteria'
+    if not values.get('status'):values['status']='Ordered'
+    db.execute('INSERT INTO banknotes('+','.join(values)+') VALUES('+','.join('?' for _ in values)+')',list(values.values()))
+    _renumber_banknotes(db)
+    return ident
+
+
+@app.post('/banknotes/imports/<batch_id>/release')
+def banknote_import_release(batch_id):
+    require_owner();data=request.get_json(silent=True) or {}
+    try:
+        result=banknote_imports.release(get_db(),batch_id,data.get('items'),UPLOAD_FOLDER,_create_released_banknote)
+        return jsonify(result)
+    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+
+
 @app.route('/<category>/new', methods=['GET', 'POST'])
 def new_record(category):
     if category not in CATEGORIES:
@@ -27627,6 +27832,17 @@ def banknote_lookup_specs(record_id):
         lookup_error = f'Lookup failed: {e or e.__class__.__name__}'
         lookup_status = 500
 
+    return _banknote_check_result(note, prepared, suggestions, lookup_error, lookup_status,
+                                  db=db, record_id=record_id, source_record=source_record)
+
+
+def _banknote_check_result(note, prepared, suggestions, lookup_error=None, lookup_status=503,
+                           *, db=None, record_id=None, source_record=None):
+    """Shared evidence validation for live records and isolated import drafts.
+
+    Omitting db disables all collection/proposal/history writes. Draft callers
+    persist only validated blank fills under their own revision lock.
+    """
     if not isinstance(suggestions, dict):
         suggestions = {}
     if '_catalogue_sources' in suggestions or 'catalogue_research' in suggestions:
@@ -27905,7 +28121,7 @@ def banknote_lookup_specs(record_id):
         catalogue['state'], ','.join(sorted(catalogue['fields'])))
     catalogue['guard'] = dict(identity=banknote_catalog_lookup.identity_snapshot(note),
                               fields=list(catalogue['fields']))
-    if catalogue['fields']:
+    if catalogue['fields'] and db is not None:
         catalogue['guard']['proposal_id'] = banknote_catalog_proposals.create(db, record_id,
             catalogue['guard']['identity'], catalogue['fields'], recovered={
                 field:direct_identity[field] for field in banknote_catalog_lookup.IDENTITY_FIELDS
@@ -27987,7 +28203,7 @@ def banknote_lookup_specs(record_id):
     # result keeps the Check button un-done so a retry isn't skipped.
     now = None
     listing_failure_resolved = False
-    if not lookup_error:
+    if not lookup_error and db is not None:
         listing_failure_resolved = original_listings.listing_checks.clear_failed_after_check(
             db, 'banknotes', source_record, prepared.get('verified_listing_urls', []))
         now = datetime.utcnow().isoformat()
@@ -28032,7 +28248,7 @@ def banknote_lookup_specs(record_id):
     check_country = filled.get('country') \
         or (overwritten.get('country') or {}).get('new') \
         or _coin_row_value(note, 'country')
-    if check_country:
+    if check_country and db is not None:
         ensure_country_history(str(check_country))
 
     return jsonify({
@@ -30347,6 +30563,16 @@ def _upload_visible_to_current_user(filename):
     if not allowed:
         return False
     db = get_db()
+
+    # Draft originals remain private to the owner and connected purchase
+    # account; they need not be prematurely attached to a collection row.
+    if g.current_user.get('role') == 'owner' and 'banknotes' in allowed:
+        draft = db.execute('''SELECT 1 FROM banknote_import_assets a
+            JOIN banknote_import_items i ON i.id=a.item_id
+            JOIN ebay_purchase_account p ON p.id=1 AND lower(p.account_name)=i.account_name
+            WHERE a.filename=? LIMIT 1''', (name,)).fetchone()
+        if draft:
+            return True
 
     for cat, info in CATEGORIES.items():
         if cat not in allowed:
@@ -33546,6 +33772,8 @@ def _collect_referenced_uploads(db):
     filenames currently referenced by at least one row. Also scoops up
     the topics.image column which lives outside the FIELDS map."""
     referenced = set()
+    # Staged photos are durable user work even before collection release.
+    referenced.update(row[0] for row in db.execute('SELECT filename FROM banknote_import_assets'))
     for cat, fields in FIELDS.items():
         table = CATEGORIES[cat]['table']
         file_cols = [f['name'] for f in fields if f.get('type') == 'file']
@@ -42557,7 +42785,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 _ebay_order_sync = ebay_orders.register(
     app, get_db, open_db_connection, require_owner, DATA_DIR)
 import ebay_purchase_lookup
-ebay_purchase_lookup.register(app, get_db, require_owner)
+ebay_purchase_lookup.register(app, get_db, require_owner, after_import=_start_import_checks)
 market_purchase_capture.register(app, get_db, require_owner)
 market_ebay_feed.register(app, get_db, on_complete=_market_capture_bridge_estimate_basis,
                           after_complete=_market_wake_label_worker)
@@ -42606,6 +42834,9 @@ with app.app_context():
     ebay_orders.init_schema(get_db())
     market_ebay_feed.init_schema(get_db())
     original_listings.init_schema(get_db())
+    if os.environ.get('BANKNOTE_IMPORT_WORKER','1')!='0':
+        for batch in get_db().execute("SELECT DISTINCT batch_id FROM banknote_import_items WHERE state='draft' AND check_state='idle' LIMIT 25").fetchall():
+            _start_import_checks(batch[0])
 
 _ebay_order_sync.start()
 _original_listing_service.start()

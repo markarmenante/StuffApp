@@ -4109,6 +4109,27 @@ document.querySelectorAll('.comp-item').forEach(item => {
   sync();
 });
 
+// An order-only banknote starts in saved order review, not the collection.
+// Existing notes with identifying details/photos retain their ordinary Check.
+window.banknoteOrderDraftCandidate = function (allowEmptyOrder = false) {
+  const draftForm = document.getElementById('mainForm');
+  if (draftForm?.dataset.category !== 'banknotes') return false;
+  const value = name => (draftForm.querySelector(`[name="${name}"]`)?.value || '').trim();
+  if ((!allowEmptyOrder && !value('order_number')) || !['', 'ebay'].includes(value('marketplace').toLowerCase())) return false;
+  const identifying = ['country', 'municipality', 'issuer', 'denomination', 'series',
+    'pick_number', 'serial_number', 'slab_number', 'description', 'note_references',
+    'date_1', 'date_1_text', 'grade_numeric'];
+  if (identifying.some(name => value(name))) return false;
+  if ([...draftForm.querySelectorAll('input[type=file]')].some(input => input.files?.length)) return false;
+  return ![...draftForm.querySelectorAll('.drop-zone img')].some(image => image.getAttribute('src'));
+};
+window.banknoteDeferOrderDraft = function () {
+  const draftForm = document.getElementById('mainForm');
+  return Boolean(draftForm && (draftForm.dataset.orderDraftEntry === 'true'
+    || draftForm.querySelector('[name="order_number"]')?.value.trim())
+    && window.banknoteOrderDraftCandidate(true));
+};
+
 // ── Auto-save on field change/blur ──────────────────────────────────────────
 (function () {
   {# Autosave-on-new runs for every category that uses the new_record
@@ -4943,6 +4964,9 @@ document.querySelectorAll('.comp-item').forEach(item => {
   const fieldSaveRequests = new Set();
   const failedSaveFields = new Set();
   function saveField(name, value) {
+    if (!recordExists && window.banknoteDeferOrderDraft()) {
+      return Promise.resolve({ok: true, deferredOrderDraft: true});
+    }
     const pending = ensureRecord().then(() => {
       return fetch(SAVE_URL, {
         method: 'POST',
@@ -5000,6 +5024,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
   };
   const orderInput = form.querySelector('[name="order_number"]');
   orderInput?.addEventListener('input', () => {
+    if (!recordExists && window.banknoteOrderDraftCandidate(true)) form.dataset.orderDraftEntry = 'true';
     const link = form.querySelector('.purchase-order-link');
     if (link) { link.hidden = true; link.removeAttribute('href'); }
   });
@@ -5106,6 +5131,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
   // reliably (incl. Safari); saveField's keepalive fetch survives the
   // navigation. Non-empty values only — this can add, never erase.
   window.addEventListener('pagehide', function () {
+    if (!recordExists && window.banknoteDeferOrderDraft()) return;
     // Record not created yet (images-first add, then straight to Back):
     // beacon a text-only copy of the form so the row still lands.
     // Files are stripped — beacons share the same 64KiB cap that broke
@@ -5264,7 +5290,7 @@ document.querySelectorAll('.comp-item').forEach(item => {
       // row exists even if the user navigates away before debounce or
       // blur fires. ensureRecord() is idempotent — subsequent input
       // events are no-ops once recordExists is true.
-      ensureRecord();
+      if (!window.banknoteDeferOrderDraft()) ensureRecord();
       scheduleSave(el);
     });
     el.addEventListener('blur', () => saveNow(el));
@@ -8157,6 +8183,14 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
       try {
+        if (window.banknoteOrderDraftCandidate?.()) {
+          btn.textContent = 'Saving order…';
+          const orderNumber = document.querySelector('#mainForm [name="order_number"]').value;
+          const saved = await window.startBanknoteOrderReview(orderNumber);
+          window.__stuffAllowUnload = true;
+          window.location.assign(saved.url);
+          return;
+        }
         await ensureCoinSpecUrl(btn);
         // Land any typed-but-unsaved values first: Check reads the
         // server row, not the DOM.
@@ -8971,6 +9005,7 @@ window.openPerplexitySearch = function openPerplexitySearch(btn) {
 };
 </script>
 {% if category == 'banknotes' %}
+<script src="{{ url_for('static', filename='js/banknote-imports.js') }}?v={{ asset_v('js/banknote-imports.js') }}" defer></script>
 <script>
 (function () {
   const grade = document.querySelector('select[name="grade"]');
