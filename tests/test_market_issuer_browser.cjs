@@ -120,9 +120,26 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   ready_candidates=[dict(row,label_check=label('ready','Photo label: United States · Friedberg 1604. Supplied photo checked.',[reading('United States of America','Friedberg 1604')])) if row['id']=='candidate-one' else row for row in candidates]
   pending_cards=[dict(row,label_check=label('reading','Reading holder label in supplied photo…'),collection_matches=[],collection_check_incomplete=True) for row in ready_cards]
   pending_candidates=[dict(row,label_check=label('reading','Reading holder label in supplied photo…')) if row['id']=='candidate-one' else row for row in candidates]
+  # Deliberately interleave equivalent references with another variety/bank.
+  # Photo-derived facts remain annotations so the raw valuation key is stable.
+  grouping_cards=[dict(cached_card),
+   observed('678901234562',title='Seychelles 1968 5 Rupees P-14b PMG 64',country='Seychelles',issuer='Government of Seychelles',pick_number='P-14b',denomination='5 Rupees',price='US $329.12'),
+   observed('678901234563',title='Seychelles 1968 5 Rupees Pick 14a PMG 64',country='Seychelles',issuer='Central Bank of Seychelles',pick_number='Pick 14a',denomination='5 Rupees',price='US $345.67'),
+   observed('678901234560',title='Seychelles 1968 5 Rupees graded PMG 64',country='',issuer='',pick_number='',denomination='',price='US $309.25',_market_identity=dict(country='Seychelles',issuer='Government of Seychelles',pick_number='Pick#14a',denomination='5 Rupees',series='',ambiguous=False),label_check=label('ready','Identified from the supplied photo.',[reading('Seychelles','Pick#14a',issuer='Government of Seychelles',date_text='1968')])),
+   observed('678901234564',title='French Somaliland 1962 5 Francs P-14a PMG 64',country='French Somaliland',issuer='Government of French Somaliland',pick_number='P-14a',price='US $269.33'),
+   observed('678901234561',title='Seychelles 1968 5 Rupees graded PMG 67 EPQ',country='Seychelles',issuer='',pick_number='14a',denomination='5 Rupees',price='US $499.89'),
+   observed('678901234565',title='Djibouti 1984 5 Francs P-14a PMG 64',country='Djibouti',issuer='Government of Djibouti',pick_number='P-14a',price='US $189.44')]
+  grouping_before=copy.deepcopy(grouping_cards)
+  grouped=stuff._market_group_rows('banknotes',grouping_cards,observed=True)
+  assert grouping_before==grouping_cards
+  for grouped_card in grouped:
+   original=next(card for card in grouping_before if card['item_id']==grouped_card['item_id'])
+   assert stuff.market_estimates.target(grouped_card)['key']==stuff.market_estimates.target(original)['key']
+   assert all(grouped_card.get(key)==original.get(key) for key in ('price','listing_url','country','issuer','pick_number','title','valuation'))
   pages={}
   variants=[('base',candidates,cards,'done',1),('aliases',alias_candidates,cards,'done',1),('bands',band_candidates,cards,'done',1),('identity',identity_candidates,identity_cards,'done',1),('estimated',estimated_candidates,cards,'done',2),('running',candidates,cards,'running',1),('fresh',extended_candidates,extended_cards,'done',2)]
   variants.extend([('labels-pending',pending_candidates,pending_cards,'done',1),('labels-ready',ready_candidates,ready_cards,'done',1)])
+  variants.append(('seychelles-grouping',candidates,grouping_cards,'done',1))
   for index,removed in enumerate(({'candidate-type'},{'candidate-type','candidate-one'},{'candidate-type','candidate-one','123456789012'}),1):
    variants.append(('deleted'+str(index),[r for r in candidates if r['id'] not in removed],[r for r in cards if r['item_id'] not in removed],'done',1))
   for name,rows,observed_cards,status,revision in variants:
@@ -229,6 +246,49 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
   try{
     for(const mobile of [false,true]){
       const device=mobile?'mobile':'desktop';
+      await run(device+': Seychelles government and country-only cards share one heading and adjacent equivalent14a references',async()=>{
+        const t=await setup(mobile,false,'seychelles-grouping');try{
+          const ids=['456789012345','678901234560','678901234561'];
+          const group=await observed(t.page,ids[0]).getAttribute('data-market-group'),issuer=await observed(t.page,ids[0]).getAttribute('data-market-issuer');
+          for(const id of ids){assert.equal(await observed(t.page,id).getAttribute('data-market-group'),group);assert.equal(await observed(t.page,id).getAttribute('data-market-issuer'),issuer);}
+          assert.equal(await heading(t.page,'issuer',issuer).locator('h2').textContent(),'Seychelles');
+          assert.equal(await heading(t.page,'issuer',issuer).locator('.market-issuer-count').textContent(),'4 listings');
+          assert.equal(await heading(t.page,'group',group).locator('.market-group-count').textContent(),'3 listings');
+          assert.match(await heading(t.page,'group',group).locator('h3').textContent(),/P-14A/i);
+          const order=await rows(t.page).evaluateAll(elements=>elements.map(row=>row.dataset.listingKey));
+          const positions=ids.map(id=>order.findIndex(url=>url.endsWith('/'+id))).sort((a,b)=>a-b);
+          assert.deepEqual(positions,[positions[0],positions[0]+1,positions[0]+2],'Equivalent14a listings must be contiguous');
+          const variety=observed(t.page,'678901234562');assert.equal(await variety.getAttribute('data-market-issuer'),issuer);assert.notEqual(await variety.getAttribute('data-market-group'),group);
+          assert.match(await heading(t.page,'group',await variety.getAttribute('data-market-group')).textContent(),/P-14B/i);
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+          const layout=await t.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
+          await t.page.screenshot({path:path.join(artifacts,device+'-seychelles-grouping.png'),fullPage:true});
+        }finally{await t.close();}
+      });
+      await run(device+': grouping aliases preserve distinct issuers, historical countries, prices, actions and valuation evidence',async()=>{
+        const t=await setup(mobile,false,'seychelles-grouping');try{
+          const cached=observed(t.page,'456789012345'),countryIssuer=await cached.getAttribute('data-market-issuer');
+          const bank=observed(t.page,'678901234563'),colonial=observed(t.page,'678901234564'),modern=observed(t.page,'678901234565');
+          const keys=await Promise.all([bank,colonial,modern].map(row=>row.getAttribute('data-market-issuer')));
+          assert.equal(new Set([countryIssuer,...keys]).size,4);
+          assert.equal(await heading(t.page,'issuer',keys[0]).locator('h2').textContent(),'Central Bank of Seychelles · Seychelles');
+          assert.match(await heading(t.page,'issuer',keys[1]).locator('h2').textContent(),/French Somaliland/);
+          assert.match(await heading(t.page,'issuer',keys[2]).locator('h2').textContent(),/Djibouti/);
+          for(const [id,price] of [['456789012345','299.89'],['678901234560','309.25'],['678901234561','499.89'],['678901234562','329.12'],['678901234563','345.67']]){
+            const row=observed(t.page,id);assert.equal((await row.locator('.market-price').textContent()).trim(),'Price: US $'+price);
+            assert.equal(await row.getByRole('link',{name:'View listing',exact:true}).getAttribute('href'),'https://www.ebay.com/itm/'+id);
+            assert.equal(await row.getByRole('button',{name:'Buy',exact:true}).getAttribute('data-buy-url'),'/banknotes/market/ebay-feed/'+id+'/buy');
+            assert.equal(await row.getByRole('button',{name:'Delete',exact:true}).getAttribute('data-dismiss-url'),'/banknotes/market/ebay-feed/'+id+'/dismiss');
+          }
+          assert.equal(await cached.locator('.market-value-dot-yellow').count(),1);await cached.locator('.market-estimate summary').click();
+          assert.equal((await cached.locator('.market-estimate summary').textContent()).trim(),'Est. value: $200–$300');
+          assert.match(await cached.locator('.market-estimate').textContent(),/Synthetic same-type auction.*\$274\.25/s);
+          assert.equal(await cached.locator('.market-estimate-sources a').getAttribute('href'),'https://currency.ha.com/itm/fixture/90001');
+          await observed(t.page,'678901234560').locator('.market-label-check summary').click();
+          assert.match(await observed(t.page,'678901234560').locator('.market-label-readings').textContent(),/Government of Seychelles.*Pick#14a/);
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
       await run(device+': photo completion updates a finished scan, preserving exact price, cached estimate and actions',async()=>{
         const t=await setup(mobile,false,'base',{labels:true});try{
           const cached=observed(t.page,'456789012345'),matched=observed(t.page,'567890123450');
@@ -384,8 +444,8 @@ with tempfile.TemporaryDirectory(prefix='market-issuer-db-') as temporary:
           assert.equal(await observed(t.page,'456789012350').getAttribute('data-market-group'),await observed(t.page,'456789012345').getAttribute('data-market-group'));
           assert.equal(await candidate(t.page,'identity-title-only').getAttribute('data-market-issuer'),countryKeys[2]);
           const explicit=candidate(t.page,'identity-explicit'),explicitKey=await explicit.getAttribute('data-market-issuer');
-          assert.notEqual(explicitKey,countryKeys[0]);
-          assert.equal(await heading(t.page,'issuer',explicitKey).locator('h2').textContent(),'Government of Seychelles · Seychelles');
+          assert.equal(explicitKey,countryKeys[0]);
+          assert.equal(await heading(t.page,'issuer',explicitKey).locator('h2').textContent(),'Seychelles');
           const authoritative=candidate(t.page,'identity-explicit-country');
           assert.equal(await heading(t.page,'issuer',await authoritative.getAttribute('data-market-issuer')).locator('h2').textContent(),'Bermuda Monetary Authority · Bermuda');
           assert.equal(await rows(t.page).count(),16);assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);

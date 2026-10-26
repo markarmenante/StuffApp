@@ -64,7 +64,11 @@ def _catalogue_identity(row, country, catalog_references):
 
 
 def _issuer_label(issuer, country, kind):
-    """Display aliases for an explicit Treasury issuer; never infer from country."""
+    """Narrow display aliases; no source attribution or bank identity changes."""
+    # Mark groups the country-only Seychelles fallback with this explicitly
+    # printed government issuer. Keep every other named institution separate.
+    if country == "Seychelles" and _fold(issuer) == "government of seychelles":
+        return ""
     if country != "United States of America":
         return issuer
     folded = _fold(issuer).replace(".", "")

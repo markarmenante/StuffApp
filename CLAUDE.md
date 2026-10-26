@@ -156,6 +156,11 @@ mentions stay unresolved. Preserve distinct historical countries, catalogue
 varieties and series. Observed `_market_identity` is display/matching metadata;
 the original card fields still feed the estimate fingerprint. Do not replace
 those raw fields or weaken cache identity invalidation to improve a heading.
+The country-only Seychelles heading and explicit Government of Seychelles share
+the short heading “Seychelles”; retain the literal issuer in source/photo details.
+This is a narrow display alias, never a general merger of governments or banks.
+Canonical Pick spellings (`P-14a`, `Pick#14a`, explicit catalogue-field `14a`)
+gather together while full varieties, series, dates and countries remain distinct.
 
 Watched grading labels (2026-10-25): `market_slab_labels.py` automatically queues
 the accepted feed's raw watched photos, including listings promoted to scan

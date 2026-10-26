@@ -65,6 +65,16 @@ series year and numeric denomination;
 issuer blocks retain first appearance in the ranked results. Coins retain their
 existing region grouping and ranking.
 
+The Seychelles country-only fallback and the explicit “Government of Seychelles”
+issuer share the short heading “Seychelles” (Mark, 2026-10-25). This narrow display
+alias leaves literal issuer/label evidence intact; it does not merge the Central
+Bank of Seychelles, other named institutions, generic Government labels or other
+historical territories. Equivalent explicit Pick fields such as `P-14a`,
+`Pick#14a` and bare `14a` already have one canonical catalogue key and therefore
+gather contiguously within the same series/date group. Full varieties, distinct
+series/dates and other catalogue namespaces remain separate. A bare number in a
+listing title, grade or serial is not promoted into a catalogue reference.
+
 Scanned, watched and sponsored banknotes now share those issuer sections. Source
 labels, availability warnings, duplicate checks and exact Buy/Bought/Delete
 targets remain with each listing. Observed cards use only explicitly named

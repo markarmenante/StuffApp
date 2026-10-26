@@ -18,6 +18,7 @@ sys.modules['dotenv'] = types.SimpleNamespace(load_dotenv=lambda **kwargs: None)
 import app as stuff
 import market_grouping as grouping
 import market_ebay_feed as feed
+import market_estimates
 
 
 def note(ident, **fields):
@@ -268,6 +269,65 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(result[0]['_market_issuer']['title'],'An Explicit Bank · Seychelles')
         self.assertEqual(result[1]['_market_issuer']['title'],'Seychelles')
         self.assertNotEqual(result[1]['_market_group']['key'],result[2]['_market_group']['key'])
+
+    def test_seychelles_government_and_country_fallback_share_canonical_pick_groups(self):
+        rows=[dict(id='title',title='Seychelles P-14a PMG 67',country='',pick_number='P-14a',
+                   price='US $499.00',listing_url='https://www.ebay.com/itm/960101542738',
+                   sources=['watched'],_market_card_kind='observed',
+                   _market_identity=dict(country='Seychelles',issuer='',ambiguous=False)),
+              dict(id='other-variety',country='Seychelles',pick_number='P-14b',title='Seychelles P-14b'),
+              dict(id='photo',title='1968 Seychelles 5 Rupees PMG 64',country='',pick_number='',
+                   price='US $299.00',listing_url='https://www.ebay.com/itm/116505928385',
+                   sources=['watched'],_market_card_kind='observed',
+                   _market_identity=dict(country='Seychelles',issuer='Government Of Seychelles',
+                                         pick_number='Pick# 14a',ambiguous=False)),
+              dict(id='bare',country='Seychelles',issuer='Government of Seychelles',pick_number='14a',title='Graded banknote')]
+        before=copy.deepcopy(rows)
+        result=stuff._market_group_rows('banknotes',rows)
+        self.assertEqual([r['id'] for r in result],['title','photo','bare','other-variety'])
+        self.assertEqual(len({r['_market_issuer']['key'] for r in result}),1)
+        self.assertEqual([r['_market_issuer']['title'] for r in result],['Seychelles']*4)
+        self.assertEqual(sum(r['_market_issuer']['heading'] for r in result),1)
+        self.assertEqual(len({r['_market_group']['key'] for r in result[:3]}),1)
+        self.assertEqual(result[0]['_market_group']['count'],3)
+        self.assertNotEqual(result[0]['_market_group']['key'],result[3]['_market_group']['key'])
+        self.assertEqual(rows,before)
+        by_id={r['id']:r for r in result}
+        for original in before:
+            self.assertEqual(market_estimates.target(original),market_estimates.target(by_id[original['id']]))
+        self.assertEqual(by_id['photo']['_market_identity']['issuer'],'Government Of Seychelles')
+
+    def test_seychelles_alias_keeps_banks_territories_series_dates_and_namespaces_distinct(self):
+        base=dict(country='Seychelles',pick_number='14a',series='1968A')
+        rows=[dict(id='government',issuer='Government of Seychelles',**base),
+              dict(id='country',issuer='',**base),
+              dict(id='bank',issuer='Central Bank of Seychelles',**base),
+              dict(id='generic',issuer='Government',**base),
+              dict(id='series',issuer='',**dict(base,series='1968B')),
+              dict(id='year',issuer='',**dict(base,series='',date_1=1968)),
+              dict(id='unknown-year',issuer='',**dict(base,series='')),
+              dict(id='tbb',issuer='',**dict(base,pick_number='B14a')),
+              dict(id='other-country',issuer='Government of Seychelles',**dict(base,country='Mauritius')),
+              dict(id='territory',issuer='',**dict(base,country='French Somaliland')),
+              dict(id='successor',issuer='',**dict(base,country='Djibouti'))]
+        groups={r['id']:r for r in stuff._market_group_rows('banknotes',rows)}
+        self.assertEqual(groups['government']['_market_group']['key'],groups['country']['_market_group']['key'])
+        for other in ('bank','generic','other-country','territory','successor'):
+            self.assertNotEqual(groups['government']['_market_issuer']['key'],groups[other]['_market_issuer']['key'])
+        for other in ('series','year','unknown-year','tbb'):
+            self.assertNotEqual(groups['government']['_market_group']['key'],groups[other]['_market_group']['key'])
+        self.assertNotEqual(groups['year']['_market_group']['key'],groups['unknown-year']['_market_group']['key'])
+        self.assertNotEqual(groups['territory']['_market_issuer']['key'],groups['successor']['_market_issuer']['key'])
+
+    def test_pick_sort_is_natural_and_bare_title_numbers_are_not_references(self):
+        refs=('Pick#14b','P-14a','14a','Pick 2a','P-11b')
+        rows=[dict(id=str(i),country='Seychelles',issuer='Government of Seychelles' if i%2 else '',pick_number=ref)
+              for i,ref in enumerate(refs)]
+        result=stuff._market_group_rows('banknotes',rows)
+        self.assertEqual([r['pick_number'] for r in result],['Pick 2a','P-11b','P-14a','14a','Pick#14b'])
+        for title in ('Seychelles PMG 64', 'Seychelles serial 14a', 'Seychelles certificate 14a'):
+            row=stuff._market_group_rows('banknotes',[dict(title=title)],observed=True)[0]
+            self.assertIn('Catalogue not specified',row['_market_group']['title'])
 
 
 class MarketRouteTests(unittest.TestCase):
