@@ -35,7 +35,18 @@ _BUNDLE = re.compile(r'\b(?:lot|set|bundle|pair)\s*(?:of\s*)?[2-9]\d*\b|\bpair o
 
 
 class ImportProblem(ValueError):
-    pass
+    def __init__(self, message, *, code=None, item=None):
+        super().__init__(message)
+        self.code = code
+        self.item = item
+
+    def payload(self):
+        result = {'error': str(self)}
+        if self.code:
+            result['code'] = self.code
+        if self.item is not None:
+            result['item'] = self.item
+        return result
 
 
 def _json(value):
@@ -270,6 +281,21 @@ def materialize(db, account, order_id, items, request_id):
     return batch['id']
 
 
+_EXISTING_UNVERSIONED_FIELDS = frozenset(('banknote_id', 'updated_at', 'specs_searched_at'))
+_EXISTING_DRAFT_EXCLUDED_FIELDS = _EXISTING_UNVERSIONED_FIELDS | {'id', 'cat_id', 'created_at'}
+
+
+def _existing_record_version(record):
+    return hashlib.sha256(_json({key: value for key, value in record.items()
+        if key not in _EXISTING_UNVERSIONED_FIELDS}).encode()).hexdigest()
+
+
+def _existing_record_changes(existing, current):
+    return [dict(field=key, before=value, current=current.get(key))
+            for key, value in existing.items()
+            if key not in _EXISTING_UNVERSIONED_FIELDS and current.get(key) != value]
+
+
 def _public_item(db, row):
     row = dict(row)
     source = json.loads(row['source_json'])
@@ -280,8 +306,14 @@ def _public_item(db, row):
     warnings = [v for v in (row['warning'],message if check_state in ('failed','partial') else '') if v]
     photos = [dict(url='/uploads/'+asset['filename'],filename=asset['filename'],selectable=True,source_url=asset['source_url'],position=asset['position'])
               for asset in db.execute('SELECT * FROM banknote_import_assets WHERE item_id=? ORDER BY position', (row['id'],))]
+    existing_changes = []
+    existing_version = None
     if row.get('existing_record_id'):
         existing=json.loads(row['existing_snapshot_json'])
+        live=db.execute('SELECT * FROM banknotes WHERE id=?',(row['existing_record_id'],)).fetchone()
+        if row['state']=='draft' and live:
+            existing_changes=_existing_record_changes(existing,dict(live))
+            existing_version=_existing_record_version(dict(live))
         saved=[dict(url='/uploads/'+existing[field],filename=existing[field],selectable=False,source_url='',position=index)
                for index,field in enumerate(('image_1','image_2')) if existing.get(field)]
         photos=saved+[photo for photo in photos if photo['url'] not in {p['url'] for p in saved}]
@@ -295,6 +327,8 @@ def _public_item(db, row):
                 listing_url='https://www.ebay.com/itm/'+row['item_id'],order_number=source['order_id'],
                 detail_url=f"/banknotes/imports/{row['batch_id']}/items/{row['id']}",
                 released_record_id=row['released_record_id'],existing_record_id=row.get('existing_record_id'),photos=photos,check_state=check_state,
+                existing_record_changes=existing_changes,existing_record_version=existing_version,
+                existing_record_url='/banknotes/'+row['existing_record_id'] if row.get('existing_record_id') else None,
                 check_message=message,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields,
                 manual_photos=json.loads(row.get('manual_photos_json') or '{}'))
 
@@ -341,13 +375,57 @@ def save(db,batch_id,item_id,revision,updates,normalize):
     try:
         batch,row=_item(db,batch_id,item_id)
         if row['state']!='draft' or row['revision']!=revision:
-            raise ImportProblem('This draft changed or was released. Reload it before saving.')
+            raise ImportProblem('This draft changed or was released. Reload it before saving.', code='draft_changed')
         existing=json.loads(row['existing_snapshot_json'] or '{}')
         if any(not banknote_catalog_lookup.is_blank(existing.get(key)) and
                str(value or '').strip()!=str(existing[key] or '').strip() for key,value in normalized.items()):
             raise ImportProblem('Existing record values are preserved. Open the existing record to change them, then refresh this review.')
         fields=json.loads(row['fields_json']);fields.update(normalized)
         db.execute('UPDATE banknote_import_items SET fields_json=?,revision=revision+1,updated_at=? WHERE id=?',(_json(fields),time.time(),item_id))
+        db.commit()
+    except Exception:
+        db.rollback();raise
+    return _public_item(db,db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item_id,)).fetchone())
+
+
+def refresh_existing(db,batch_id,item_id,revision,existing_record_version):
+    """Accept reviewed current values from the same exact unfinished record.
+
+    This updates only the saved draft and its baseline. It does not fetch eBay,
+    run Check, release anything, or write the existing collection record.
+    """
+    if type(revision) is not int or not isinstance(existing_record_version,str) or not existing_record_version:
+        raise ImportProblem('Review the current collection values before refreshing this draft.')
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        batch,row=_item(db,batch_id,item_id)
+        source=_validate_source(db,batch,row)
+        if row['state']!='draft' or row['revision']!=revision:
+            raise ImportProblem('This draft changed or was released. Review its latest saved values.',code='draft_changed')
+        if row['check_state']=='checking' and row['check_expires']>time.time():
+            raise ImportProblem('Wait for Check to finish before refreshing the existing record.')
+        if not row['existing_record_id']:
+            raise ImportProblem('This draft does not complete an existing collection record.')
+        matches=_existing_matches(db,source)
+        if len(matches)!=1 or matches[0]['id']!=row['existing_record_id']:
+            raise ImportProblem('The existing record no longer uniquely matches this exact order and listing. Open the existing record to review it.')
+        if db.execute('SELECT 1 FROM banknote_ebay_links WHERE line_key=? OR banknote_id=?',
+                (row['line_key'],row['existing_record_id'])).fetchone():
+            raise ImportProblem('This purchased item or its existing record is already linked. Open the existing record to review its purchase link.')
+        current=dict(matches[0])
+        if _existing_record_version(current)!=existing_record_version:
+            raise ImportProblem('The collection record changed again. Review its current values before refreshing the draft.',
+                                code='existing_record_changed',item=_public_item(db,row))
+        previous=json.loads(row['existing_snapshot_json'] or '{}')
+        fields=json.loads(row['fields_json'])
+        for key,value in previous.items():
+            if (key not in _EXISTING_DRAFT_EXCLUDED_FIELDS and not banknote_catalog_lookup.is_blank(value)
+                    and banknote_catalog_lookup.is_blank(current.get(key)) and fields.get(key)==value):
+                fields.pop(key,None)
+        fields.update({key:value for key,value in current.items()
+                       if key not in _EXISTING_DRAFT_EXCLUDED_FIELDS and not banknote_catalog_lookup.is_blank(value)})
+        db.execute('''UPDATE banknote_import_items SET fields_json=?,existing_snapshot_json=?,
+            revision=revision+1,updated_at=? WHERE id=?''',(_json(fields),_json(current),time.time(),item_id))
         db.commit()
     except Exception:
         db.rollback();raise
@@ -368,7 +446,7 @@ def select_photo(db,batch_id,item_id,revision,field,filename,folder):
         batch,row=_item(db,batch_id,item_id)
         _validate_source(db,batch,row)
         if row['state']!='draft' or row['revision']!=revision:
-            raise ImportProblem('This draft changed or was released. Reload it before choosing a photo.')
+            raise ImportProblem('This draft changed or was released. Reload it before choosing a photo.',code='draft_changed')
         if row['check_state']=='checking' and row['check_expires']>time.time():
             raise ImportProblem('Wait for Check to finish before choosing draft photos.')
         existing=json.loads(row['existing_snapshot_json'] or '{}')
@@ -495,7 +573,7 @@ def claim_check(db,batch_id,item_id,revision):
     try:
         batch,row=_item(db,batch_id,item_id)
         _validate_source(db,batch,row)
-        if row['state']!='draft' or row['revision']!=revision:raise ImportProblem('The draft changed. Reload it before checking.')
+        if row['state']!='draft' or row['revision']!=revision:raise ImportProblem('The draft changed. Reload it before checking.',code='draft_changed')
         if row['check_state']=='checking' and row['check_expires']>time.time():
             db.commit();return None
         token=uuid.uuid4().hex
@@ -517,7 +595,7 @@ def release(db,batch_id,selected,folder,create):
             _,row=_item(db,batch_id,entry['id'])
             if row['state']=='released':
                 released.append(dict(id=row['id'],record_id=row['released_record_id']));continue
-            if row['state']!='draft' or row['revision']!=entry['revision']:raise ImportProblem('A selected draft changed. Review the latest version before release.')
+            if row['state']!='draft' or row['revision']!=entry['revision']:raise ImportProblem('A selected draft changed. Review the latest version before release.',code='draft_changed')
             if row['check_state']=='checking' and row['check_expires']>time.time():raise ImportProblem('Wait for Check to finish before releasing this draft.')
             source=_validate_source(db,batch,row)
             linked=db.execute('SELECT banknote_id FROM banknote_ebay_links WHERE line_key=?',(row['line_key'],)).fetchone()
@@ -530,9 +608,11 @@ def release(db,batch_id,selected,folder,create):
             if row['existing_record_id']:
                 live=db.execute('SELECT * FROM banknotes WHERE id=?',(row['existing_record_id'],)).fetchone()
                 existing=json.loads(row['existing_snapshot_json'])
-                if not live or any(live[key]!=value for key,value in existing.items()
-                        if key not in ('banknote_id','updated_at','specs_searched_at')):
-                    raise ImportProblem('The existing banknote changed since import. Its fields and photographs were kept; review it before release.')
+                if not live:
+                    raise ImportProblem('The existing banknote is unavailable. Review the collection before release.')
+                if _existing_record_changes(existing,dict(live)):
+                    raise ImportProblem('The existing banknote changed since import. Its fields and photographs were kept; review the changes before release.',
+                                        code='existing_record_changed',item=_public_item(db,row))
                 if db.execute('SELECT 1 FROM banknote_ebay_links WHERE banknote_id=?',(live['id'],)).fetchone():
                     raise ImportProblem('The existing banknote is already linked to a purchased item. Review its order link before release.')
                 if not db.execute('SELECT 1 FROM banknote_original_listings WHERE banknote_id=? AND url=?',

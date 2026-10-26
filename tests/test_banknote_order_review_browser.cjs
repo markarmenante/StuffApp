@@ -135,12 +135,19 @@ def fixture_complete():
 
 @stuff.app.post('/__fixture/partial-record')
 def fixture_partial_record():
- number=request.get_json()['order'];db=stuff.get_db()
+ data=request.get_json();number=data['order'];record_id=data.get('record_id','recover-exact-partial');db=stuff.get_db()
  ident=str(177000000000+int(number[-5:])*10+1)
  for filename,color in (('recover-front.png',(30,160,80)),('recover-back.png',(180,80,30))):
   Image.new('RGB',(480,220),color).save(Path(stuff.UPLOAD_FOLDER)/filename)
- db.execute("INSERT INTO banknotes(id,order_number,marketplace,image_1,image_2,notes) VALUES('recover-exact-partial',?,'eBay','recover-front.png','recover-back.png','Preserve my partial note')",(number,))
- stuff.original_listings.add_source(db,'banknotes','recover-exact-partial','https://www.ebay.com/itm/'+ident);db.commit()
+ db.execute("INSERT INTO banknotes(id,order_number,marketplace,image_1,image_2,notes) VALUES(?,?,'eBay','recover-front.png','recover-back.png','Preserve my partial note')",(record_id,number))
+ stuff.original_listings.add_source(db,'banknotes',record_id,'https://www.ebay.com/itm/'+ident);db.commit()
+ return jsonify(ok=True)
+
+@stuff.app.post('/__fixture/change-existing')
+def fixture_change_existing():
+ data=request.get_json();db=stuff.get_db();filename=data.get('filename','reviewed-back-crop.png')
+ Image.new('RGB',(360,180),(130,40,90)).save(Path(stuff.UPLOAD_FOLDER)/filename)
+ db.execute('UPDATE banknotes SET image_2=?,notes=?,printer=? WHERE id=?',(filename,'Updated collection inspection','Collection printer changed',data['record_id']));db.commit()
  return jsonify(ok=True)
 
 @stuff.app.post('/__fixture/ambiguous-photos')
@@ -482,6 +489,99 @@ finally:server.server_close();temporary.cleanup()
         }finally{await t.close();}
       });
     }
+    await run('non-revision release failures explain the issue and allow retry without a draft conflict lock',async()=>{
+      const t=await setup(false);try{
+        const {before,id,batch}=await newCheckout(t,'98-76543-28010',false);
+        const draft=batch.items[0];await t.page.goto(origin+draft.detail_url);
+        await t.page.route('**/banknotes/imports/'+id+'/release',async route=>{
+          await new Promise(resolve=>setTimeout(resolve,450));
+          return route.fulfill({status:409,json:{error:'Fresh order verification required.'}});
+        },{times:1});
+        await t.page.locator('#banknoteImportRelease').click();
+        assert.equal(await t.page.locator('#banknoteImportRelease').textContent(),'Releasing…');
+        assert.equal(await t.page.locator('#banknoteImportRelease').isDisabled(),true);
+        await t.page.waitForFunction(()=>document.getElementById('banknoteImportStatus').textContent.includes('Fresh order verification'));
+        assert.equal(await t.page.locator('#banknoteImportRelease').isEnabled(),true,'a non-revision conflict must not lock Release');
+        assert.equal(await t.page.locator('#banknoteImportRefresh').isVisible(),false);
+        assert.equal(await t.page.locator('#banknoteImportConflict').count(),0);
+        assert.deepEqual((await t.state()).rows,before.rows);
+        const response=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
+        await t.page.locator('#banknoteImportRelease').click();assert.equal((await response).status(),200);
+        await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+        assert.equal((await t.state()).rows.length,before.rows.length+1);
+      }finally{await t.close();}
+    });
+    await run('changed collection crop is reviewed and refreshed into the draft before explicit release',async()=>{
+      const t=await setup(false);try{
+        const number='98-76543-29010',recordId='recover-changed-crop';
+        assert.equal((await t.context.request.post(origin+'/__fixture/partial-record',{data:{order:number,record_id:recordId}})).status(),200);
+        const {before,id,batch}=await newCheckout(t,number,false);
+        const draft=batch.items.find(item=>item.existing_record_id===recordId);assert(draft);
+        await t.page.goto(origin+draft.detail_url);
+        assert.equal((await t.context.request.post(origin+'/__fixture/change-existing',{data:{record_id:recordId}})).status(),200);
+        const reject=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
+        await t.page.locator('#banknoteImportRelease').click();const rejected=await reject;
+        assert.equal(rejected.status(),409);assert.equal((await rejected.json()).code,'existing_record_changed');
+        const changes=t.page.locator('#banknoteImportExistingChanges');await changes.waitFor({state:'visible'});
+        assert((await changes.innerText()).includes('Back photo'));
+        assert((await changes.innerText()).includes('Updated collection inspection'));
+        assert((await changes.innerText()).includes('Fixture source printer'),'comparison shows actual checked draft value, not original blank');
+        assert((await changes.innerText()).includes('Collection printer changed'));
+        assert.equal(await changes.locator('img').count(),2,'both previous and current crop shown for review');
+        await changes.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+        assert.equal(await t.page.locator('#banknoteImportExistingLink').getAttribute('href'),'/banknotes/'+recordId);
+        assert.equal(await t.page.locator('#banknoteImportExistingLink').getAttribute('target'),'_blank');
+        assert.equal(await t.page.locator('#banknoteImportRefresh').isVisible(),false,'collection change is not a draft revision conflict');
+        assert.equal(await t.page.locator('#banknoteImportRefreshExisting').isEnabled(),true);
+        const observed=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+        assert(observed.existing_record_version);
+        await t.page.locator('[name="watermark"]').fill('My pending inspection detail');
+        // A second crop, made after the preview was reviewed, must be shown and
+        // explicitly accepted again rather than silently overwriting the draft.
+        await t.page.route('**'+draft.detail_url+'/refresh-existing',async route=>{
+          assert.equal((await t.context.request.post(origin+'/__fixture/change-existing',{data:{record_id:recordId,filename:'second-reviewed-back-crop.png'}})).status(),200);
+          return route.continue();
+        },{times:1});
+        const changedAgain=t.page.waitForResponse(response=>response.url().endsWith('/refresh-existing')&&response.request().method()==='POST');
+        await t.page.locator('#banknoteImportRefreshExisting').click();const changedAgainResponse=await changedAgain;
+        assert.equal(changedAgainResponse.status(),409);
+        assert.equal((await changedAgainResponse.json()).code,'existing_record_changed');
+        assert.equal(changedAgainResponse.request().postDataJSON().existing_record_version,observed.existing_record_version);
+        await t.page.waitForFunction(()=>!document.getElementById('banknoteImportRefreshExisting').disabled);
+        assert.equal(await changes.locator('img[src="/uploads/second-reviewed-back-crop.png"]').count(),1,'new crop is shown before retry');
+        assert.equal(await t.page.locator('[name="watermark"]').inputValue(),'My pending inspection detail');
+        assert.equal(await t.page.locator('#banknoteImportRelease').isDisabled(),true);
+        await changes.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+        await t.page.screenshot({path:path.join(artifacts,'collection-change-review.png'),fullPage:true});
+        const updated=t.page.waitForResponse(response=>response.url().endsWith('/refresh-existing')&&response.request().method()==='POST');
+        await t.page.locator('#banknoteImportRefreshExisting').click();const updatedResponse=await updated;
+        assert.equal(updatedResponse.status(),200);
+        assert.notEqual(updatedResponse.request().postDataJSON().existing_record_version,observed.existing_record_version);
+        await t.page.waitForFunction(()=>document.getElementById('banknoteImportStatus').textContent.includes('Draft updated'));
+        const refreshed=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+        assert.equal(refreshed.fields.watermark,'My pending inspection detail','refresh saves and retains local draft edits');
+        assert.equal(refreshed.fields.notes,'Updated collection inspection','current occupied collection values win');
+        assert.equal(refreshed.fields.image_2,'second-reviewed-back-crop.png');
+        assert.equal(refreshed.fields.printer,'Collection printer changed');
+        assert.equal(refreshed.existing_record_changes.length,0);
+        assert.equal(await t.page.locator('#mainForm [data-field="image_2"] img').getAttribute('src'),'/uploads/second-reviewed-back-crop.png');
+        assert.equal(await t.page.locator('[name="watermark"]').inputValue(),'My pending inspection detail');
+        assert.equal(await t.page.locator('#banknoteImportRelease').isEnabled(),true);
+        assert.equal((await t.state()).rows.length,before.rows.length,'updating the draft does not release or duplicate collection');
+        assert.equal((await t.state()).rows.find(row=>row.id===recordId).watermark,null,'refresh must not fill live record');
+        assert.equal(t.releaseResults.filter(result=>result.released?.length).length,0,'refresh never releases automatically');
+        await t.page.screenshot({path:path.join(artifacts,'refreshed-collection-crop.png'),fullPage:true});
+        const released=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
+        await t.page.locator('#banknoteImportRelease').click();assert.equal((await released).status(),200);
+        await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+        const state=await t.state(),row=state.rows.find(row=>row.id===recordId);
+        assert.equal(state.rows.length,before.rows.length,'same record is completed without duplication');
+        assert.equal(row.image_2,'second-reviewed-back-crop.png');assert.equal(row.notes,'Updated collection inspection');
+        assert.equal(row.watermark,'My pending inspection detail');assert.equal(numberValue(row.price),125.37);
+        assert.equal(state.links.filter(link=>link.banknote_id===recordId).length,1);
+        assert.equal((await batchStatus(t,id)).pending_count,2);
+      }finally{await t.close();}
+    });
     await run('exact unfinished record is completed in place only on explicit release',async()=>{
       const t=await setup(false);try{
         const number='98-76543-25010';

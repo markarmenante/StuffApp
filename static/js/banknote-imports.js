@@ -67,7 +67,7 @@
   const statusUrl = sameOrigin(batch.status_url || batchUrl + '/status');
   const refresh = document.getElementById('banknoteImportRefresh');
   let pollTimer, pollFailures = 0, polling = false;
-  let form, fields = [], baseline = {}, saving = null, saveTimer, busy = false, conflict = null;
+  let form, fields = [], baseline = {}, saving = null, saveTimer, busy = false, busyAction = '', conflict = null;
   let leftPage = false;
   const dirty = () => fields.some(field => field.value !== (baseline[field.name] || ''));
   // The shared detail form displays units/currency, while saved draft fields
@@ -200,8 +200,61 @@
     if (typeof value === 'string') return value;
     return value?.message || value?.warning || value?.summary || value?.title || value?.label || value?.field || '';
   }
+  const existingChanges = () => item?.existing_record_changes || [];
+  const draftConflict = error => error.status === 409 && (error.data?.code === 'draft_changed'
+    || (!error.data?.code && /(?:draft.*changed|newer draft revision|draft revision.*changed)/i.test(error.message)));
+  function actionError(error, suffix = '') {
+    if (error.data?.code === 'existing_record_changed' && error.data.item) setRemote(error.data.item);
+    else if (draftConflict(error)) {
+      conflict = {pending:true}; refresh.hidden = false; refresh.textContent = 'Review latest saved values';
+    }
+    say(error.message + suffix, true);
+    renderDetail();
+  }
+  function renderExistingChanges() {
+    const panel = document.getElementById('banknoteImportExistingChanges');
+    if (!panel) return;
+    const changes = existingChanges();
+    panel.hidden = !changes.length || item.state !== 'draft';
+    if (panel.hidden) return;
+    const comparison = document.getElementById('banknoteImportExistingComparison');
+    const compared = changes.map(change => ({...change, draft: fields.find(field => field.name === change.field)?.value ?? item.fields?.[change.field]}));
+    const signature = JSON.stringify(compared);
+    if (comparison.dataset.changes !== signature) {
+      comparison.dataset.changes = signature; comparison.replaceChildren();
+      compared.forEach(change => {
+        const name = change.field;
+        const field = fields.find(candidate => candidate.name === name);
+        const label = name === 'image_1' ? 'Front photo' : name === 'image_2' ? 'Back photo'
+          : field?.closest('.dcell, .bottom-cell')?.querySelector('.clabel, .blabel')?.textContent || name.replaceAll('_',' ');
+        const section = el('div', undefined, 'import-existing-change');
+        section.append(el('strong', label));
+        const values = el('div', undefined, 'import-existing-values');
+        [['draft','Current draft'],['current','Current collection record']].forEach(([key, title]) => {
+          const value = text(change[key]); const figure = el('figure');
+          figure.append(el('figcaption', title));
+          if (value && (name === 'image_1' || name === 'image_2')) {
+            const url = sameOrigin(root.dataset.uploadedFileTemplate.replace('__draft_image__', encodeURIComponent(value)));
+            const link = el('a'); link.href = url; link.target = '_blank'; link.rel = 'noopener';
+            const image = el('img'); image.src = url; image.alt = title + ' — ' + label; link.append(image); figure.append(link);
+          } else figure.append(el('p', value || '(blank)'));
+          values.append(figure);
+        });
+        section.append(values); comparison.append(section);
+      });
+    }
+    const update = document.getElementById('banknoteImportRefreshExisting');
+    // A blur-triggered autosave must not disable the button between pointerdown
+    // and click. Its handler awaits any in-flight save before refreshing.
+    update.disabled = busy || checkRunning(item) || Boolean(conflict);
+    update.textContent = busyAction === 'refresh-existing' ? 'Updating draft…' : 'Update draft from collection';
+    const link = document.getElementById('banknoteImportExistingLink');
+    link.href = sameOrigin(item.existing_record_url || '/banknotes/' + encodeURIComponent(item.existing_record_id));
+  }
   function renderDetail() {
     syncDetailDisplay();
+    renderExistingChanges();
+    form?.setAttribute('aria-busy', String(busy || Boolean(saving)));
     document.getElementById('banknoteImportState').textContent = stateLabel(item);
     const gallery = document.getElementById('banknoteImportPhotos');
     const signature = JSON.stringify(item.photos || []);
@@ -252,7 +305,10 @@
     const check = document.getElementById('banknoteImportCheck');
     check.disabled = !editable || busy || checkRunning(item) || Boolean(conflict);
     check.textContent = checkRunning(item) ? 'Checking…' : item.check_state === 'failed' ? 'Retry Check' : '✓ Check';
-    document.getElementById('banknoteImportRelease').disabled = !editable || busy || checkRunning(item) || Boolean(conflict);
+    const release = document.getElementById('banknoteImportRelease');
+    release.disabled = !editable || busy || checkRunning(item) || Boolean(conflict) || Boolean(existingChanges().length);
+    release.textContent = busyAction === 'release' ? 'Releasing…' : 'Release to Collection';
+    release.title = existingChanges().length ? 'Review the collection changes and update this draft first.' : '';
   }
   function setRemote(remote) {
     if (saving) return false;
@@ -297,10 +353,7 @@
         });
         item = remote; say(dirty() ? 'Saving your latest edits…' : 'Draft saved · not yet in collection');
       } catch (error) {
-        if (error.status === 409) {
-          conflict = {pending:true}; refresh.hidden = false; refresh.textContent = 'Review latest saved values';
-          say('This draft changed elsewhere. Your edits are kept here. Review the saved values before saving again.', true);
-        } else say(error.message + ' Your edits are kept here.', true);
+        actionError(error, ' Your edits are kept here.');
         throw error;
       }
     })();
@@ -319,10 +372,7 @@
       if (!result.item) throw new Error('The photo choice could not be confirmed. Refresh the saved status before trying again.');
       if (setRemote(result.item)) say('Photo choice saved · not yet in collection');
     } catch (error) {
-      if (error.status === 409) {
-        conflict = {pending:true}; refresh.hidden = false; refresh.textContent = 'Review latest saved values';
-      }
-      say(error.message,true);
+      actionError(error);
     } finally { busy = false; renderDetail(); }
   }
   function showConflict(remote) {
@@ -359,8 +409,9 @@
         const remote = (batch.items || []).find(draft => String(draft.id) === String(item.id));
         if (remote) {
           if (manual && conflict) showConflict(remote);
-          else if (!conflict && setRemote(remote) && !dirty() && !saving) {
-            say(item.state === 'released' ? 'Released to collection.' : checkRunning(item)
+          else if (!conflict && !busy && setRemote(remote) && !dirty() && !saving) {
+            say(item.state === 'released' ? 'Released to collection.' : existingChanges().length
+              ? 'The collection record changed. Review the updates below before releasing this draft.' : checkRunning(item)
               ? 'Draft saved. Checking photos and missing details…' : item.check_state === 'failed'
               ? 'Draft saved. Check did not finish; you can retry it.' : 'Draft saved · not yet in collection');
           }
@@ -440,7 +491,7 @@
           const companion = fields.find(candidate => candidate.name === 'date_1_text');
           if (companion && !companion.readOnly && !companion.disabled) companion.value = field.value;
         }
-        syncDetailDisplay();
+        syncDetailDisplay(); renderExistingChanges();
         say('Unsaved changes…'); clearTimeout(saveTimer);
         if (!conflict) saveTimer = setTimeout(() => saveDraft().catch(() => {}), 650);
       });
@@ -463,21 +514,34 @@
         if (result.item) item = result.item;
         say('Draft saved. Checking photos and missing details…');
         clearTimeout(pollTimer); pollTimer = setTimeout(() => pollStatus(), 1000);
-      } catch (error) { say(error.message,true); }
+      } catch (error) { actionError(error); }
       finally { busy = false; renderDetail(); }
+    });
+    document.getElementById('banknoteImportRefreshExisting')?.addEventListener('click', async () => {
+      if (busy || checkRunning(item) || conflict || !existingChanges().length) return;
+      // Bind the acknowledgement to the values the user actually reviewed, even
+      // if saving local edits reveals a newer change in the collection.
+      const reviewedVersion = item.existing_record_version;
+      busy = true; busyAction = 'refresh-existing'; renderDetail();
+      try {
+        await saveDraft(); say('Updating the draft from the collection record…');
+        const result = await request(item.detail_url + '/refresh-existing', 'POST', {revision:item.revision, existing_record_version:reviewedVersion});
+        if (!result.item) throw new Error('The draft update could not be confirmed. Refresh the saved status before trying again.');
+        if (setRemote(result.item)) say('Draft updated. Review the note, then click Release to Collection when ready.');
+      } catch (error) { actionError(error); }
+      finally { busy = false; busyAction = ''; renderDetail(); }
     });
     document.getElementById('banknoteImportRelease').addEventListener('click', async () => {
       if (busy || checkRunning(item)) return;
-      busy = true; renderDetail();
+      busy = true; busyAction = 'release'; renderDetail();
       try {
         await saveDraft(); say('Releasing to collection…');
         const result = await request(batchUrl + '/release', 'POST', {items:[{id:item.id,revision:item.revision}]});
         if (!result.next_url) throw new Error('The release could not be confirmed. Refresh the saved status before trying again.');
         leftPage = true; window.location.assign(sameOrigin(result.next_url));
       } catch (error) {
-        if (error.status === 409) { conflict = {pending:true}; refresh.hidden = false; refresh.textContent = 'Review latest saved values'; }
-        say(error.message,true);
-      } finally { busy = false; renderDetail(); }
+        actionError(error);
+      } finally { busy = false; busyAction = ''; renderDetail(); }
     });
     document.querySelectorAll('[data-import-back]').forEach(link => link.addEventListener('click', async event => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

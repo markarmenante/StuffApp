@@ -11,5 +11,14 @@
 </header>
 <p class="import-status" id="banknoteImportStatus" role="status" aria-live="polite">Saved draft · not yet in collection</p>
 <button class="toolbar-btn pill" id="banknoteImportRefresh" type="button" hidden>Refresh saved status</button>
+<section class="import-evidence import-existing-changes" id="banknoteImportExistingChanges" hidden aria-labelledby="banknoteImportExistingTitle">
+  <strong id="banknoteImportExistingTitle">The collection record changed</strong>
+  <p>Review the updated details below, then update this draft before releasing it. Current collection values and photos will be preserved. Your edits to its remaining blank fields stay in the draft.</p>
+  <div id="banknoteImportExistingComparison"></div>
+  <div class="import-actions">
+    <button class="toolbar-btn pill active" type="button" id="banknoteImportRefreshExisting">Update draft from collection</button>
+    <a class="toolbar-btn pill" id="banknoteImportExistingLink" target="_blank" rel="noopener">View collection record</a>
+  </div>
+</section>
 <div class="import-evidence" id="banknoteImportWarnings" hidden></div>
 {% if import_item.preserved_fields|default([]) %}<p class="import-intro" id="banknoteImportPreserved">Existing record values and photographs are preserved. Missing details can be completed here.</p>{% endif %}

@@ -21541,7 +21541,7 @@ def banknote_import_create():
         ident=banknote_imports.begin(get_db(),data.get('order_number'),refresh=data.get('refresh') is True)
         _start_import_checks(ident)
         return jsonify(banknote_imports.status(get_db(),ident))
-    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 
 
 @app.get('/banknotes/imports/<batch_id>')
@@ -21574,7 +21574,7 @@ def banknote_import_detail(batch_id,item_id):
         response=app.make_response(render_template('detail.html',**_import_detail_context(batch,item)))
         response.headers['Cache-Control']='no-store'
         return response
-    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 
 
 @app.post('/banknotes/imports/<batch_id>/items/<item_id>/photos')
@@ -21586,7 +21586,7 @@ def banknote_import_photo(batch_id,item_id):
         item=banknote_imports.select_photo(get_db(),batch_id,item_id,data.get('revision'),
                                          data.get('field'),data.get('filename'),UPLOAD_FOLDER)
         return jsonify(ok=True,item=item)
-    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 
 
 @app.post('/banknotes/imports/<batch_id>/items/<item_id>/check')
@@ -21597,7 +21597,19 @@ def banknote_import_check(batch_id,item_id):
         batch=banknote_imports.status(get_db(),batch_id)
         item=next(i for i in batch['items'] if i['id']==item_id)
         return jsonify(ok=True,item=item,status_url=batch['status_url']),202
-    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
+
+
+@app.post('/banknotes/imports/<batch_id>/items/<item_id>/refresh-existing')
+def banknote_import_refresh_existing(batch_id,item_id):
+    require_owner();data=request.get_json(silent=True) or {}
+    try:
+        if not isinstance(data,dict):
+            raise banknote_imports.ImportProblem('Review the current collection values before refreshing this draft.')
+        item=banknote_imports.refresh_existing(get_db(),batch_id,item_id,data.get('revision'),
+                                               data.get('existing_record_version'))
+        return jsonify(ok=True,item=item)
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 
 
 def _create_released_banknote(db,fields,existing=None):
@@ -21629,7 +21641,7 @@ def banknote_import_release(batch_id):
     try:
         result=banknote_imports.release(get_db(),batch_id,data.get('items'),UPLOAD_FOLDER,_create_released_banknote)
         return jsonify(result)
-    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 
 
 @app.route('/<category>/new', methods=['GET', 'POST'])

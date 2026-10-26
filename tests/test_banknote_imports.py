@@ -225,6 +225,158 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(self.release(b,[item]).status_code,409)
         self.assertEqual(self.db.execute("SELECT notes FROM banknotes WHERE id='failed-form'").fetchone()[0],'Newer edit')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+
+    def refresh_existing(self,item):
+        return self.client.post(item['detail_url']+'/refresh-existing',json={
+            'revision':item['revision'],'existing_record_version':item['existing_record_version']})
+
+    def recovered_item(self):
+        self.partial_record();batch=self.imported()
+        return batch,next(item for item in batch['items'] if item.get('existing_record_id'))
+
+    def current_item(self,batch,item):
+        return next(value for value in self.client.get(batch['status_url']).json['items'] if value['id']==item['id'])
+
+    def test_existing_photo_change_is_reviewable_and_refresh_preserves_current_photo(self):
+        batch,item=self.recovered_item()
+        edited=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{
+            'country':'Netherlands Antilles','denomination':'2.5 Gulden','printer':'My draft research'}})
+        item=edited.json['item']
+        replacement=Path(stuff.UPLOAD_FOLDER)/'newer-back.jpg'
+        Image.new('RGB',(160,80),'purple').save(replacement)
+        self.db.execute("UPDATE banknotes SET image_2='newer-back.jpg',banknote_id='P 099',updated_at='later' WHERE id='failed-form'")
+        self.db.commit()
+        before=dict(self.db.execute("SELECT * FROM banknotes WHERE id='failed-form'").fetchone())
+        failed=self.release(batch,[item])
+        self.assertEqual(failed.status_code,409,failed.json)
+        self.assertEqual(failed.json['code'],'existing_record_changed')
+        changed=failed.json['item']
+        self.assertEqual(changed['existing_record_changes'],[{'field':'image_2','before':'saved-back.jpg','current':'newer-back.jpg'}])
+        self.assertEqual(changed['existing_record_url'],'/banknotes/failed-form')
+        self.assertEqual(self.current_item(batch,item)['existing_record_changes'],changed['existing_record_changes'])
+        self.assertEqual(self.client.get(item['detail_url']).status_code,200)
+        request_count=self.db.execute('SELECT COUNT(*) FROM ebay_purchase_requests').fetchone()[0]
+        response=self.refresh_existing(changed)
+        self.assertEqual(response.status_code,200,response.json)
+        refreshed=response.json['item']
+        self.assertEqual(refreshed['revision'],item['revision']+1)
+        self.assertFalse(refreshed['existing_record_changes'])
+        self.assertEqual(refreshed['fields']['image_2'],'newer-back.jpg')
+        self.assertIn('image_2',refreshed['preserved_fields'])
+        self.assertEqual(refreshed['fields']['printer'],'My draft research')
+        self.assertEqual(refreshed['check_state'],item['check_state'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_purchase_requests').fetchone()[0],request_count)
+        self.assertEqual(dict(self.db.execute("SELECT * FROM banknotes WHERE id='failed-form'").fetchone()),before)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+        result=self.release(batch,[refreshed]);self.assertEqual(result.status_code,200,result.json)
+        self.assertEqual(result.json['released'][0]['record_id'],'failed-form')
+        live=self.db.execute("SELECT * FROM banknotes WHERE id='failed-form'").fetchone()
+        self.assertEqual(live['image_2'],'newer-back.jpg');self.assertEqual(live['printer'],'My draft research')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+
+    def test_refresh_existing_requires_review_of_newest_collection_values(self):
+        batch,item=self.recovered_item()
+        self.db.execute("UPDATE banknotes SET notes='First change' WHERE id='failed-form'");self.db.commit()
+        first=self.current_item(batch,item)
+        self.db.execute("UPDATE banknotes SET notes='Second change' WHERE id='failed-form'");self.db.commit()
+        response=self.refresh_existing(first)
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(response.json['code'],'existing_record_changed')
+        latest=response.json['item']
+        self.assertEqual(latest['existing_record_changes'],[{'field':'notes','before':'Keep user text','current':'Second change'}])
+        self.assertEqual(latest['revision'],item['revision'])
+        refreshed=self.refresh_existing(latest).json['item']
+        self.assertEqual(refreshed['fields']['notes'],'Second change')
+        self.db.execute("UPDATE banknotes SET notes='Third change' WHERE id='failed-form'");self.db.commit()
+        failed=self.release(batch,[refreshed])
+        self.assertEqual(failed.status_code,409);self.assertEqual(failed.json['code'],'existing_record_changed')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+
+    def test_refresh_existing_keeps_blank_draft_edits_and_deliberate_collection_clears(self):
+        batch,item=self.recovered_item()
+        item=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{
+            'country':'Draft country','printer':'Draft printer'}}).json['item']
+        self.db.execute("UPDATE banknotes SET notes=NULL,issuer='Current issuer' WHERE id='failed-form'");self.db.commit()
+        refreshed=self.refresh_existing(self.current_item(batch,item)).json['item']
+        self.assertFalse(refreshed['fields'].get('notes'))
+        self.assertEqual(refreshed['fields']['issuer'],'Current issuer')
+        self.assertEqual(refreshed['fields']['country'],'Draft country')
+        self.assertEqual(refreshed['fields']['printer'],'Draft printer')
+        self.assertNotIn('notes',refreshed['preserved_fields']);self.assertIn('issuer',refreshed['preserved_fields'])
+        self.assertEqual(self.release(batch,[refreshed]).status_code,200)
+        self.assertIsNone(self.db.execute("SELECT notes FROM banknotes WHERE id='failed-form'").fetchone()[0])
+
+    def test_refresh_existing_keeps_manually_selected_draft_photo(self):
+        self.partial_record();self.db.execute("UPDATE banknotes SET image_2=NULL WHERE id='failed-form'");self.db.commit()
+        batch=self.imported();item=next(value for value in batch['items'] if value.get('existing_record_id'))
+        batch,item=self.ambiguous_photos(batch,item)
+        photo=next(value for value in item['photos'] if value['selectable'])
+        item=self.choose(item,'image_2',photo['filename']).json['item']
+        self.db.execute("UPDATE banknotes SET notes='Current notes' WHERE id='failed-form'");self.db.commit()
+        refreshed=self.refresh_existing(self.current_item(batch,item)).json['item']
+        self.assertEqual(refreshed['fields']['image_2'],photo['filename'])
+        self.assertEqual(refreshed['manual_photos'],item['manual_photos'])
+        self.assertEqual(refreshed['fields']['notes'],'Current notes')
+        self.assertIsNone(self.db.execute("SELECT image_2 FROM banknotes WHERE id='failed-form'").fetchone()[0])
+
+    def test_refresh_existing_revision_conflict_and_active_check_do_not_rebase(self):
+        batch,item=self.recovered_item()
+        self.db.execute("UPDATE banknotes SET notes='Current notes' WHERE id='failed-form'");self.db.commit()
+        old=self.current_item(batch,item)
+        item=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'printer':'Newest draft'}}).json['item']
+        stale=self.refresh_existing(old)
+        self.assertEqual(stale.status_code,409);self.assertEqual(stale.json['code'],'draft_changed')
+        imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
+        active=self.refresh_existing(self.current_item(batch,item));self.assertEqual(active.status_code,409)
+        self.assertIn('Check',active.json['error'])
+        saved=self.current_item(batch,item)
+        self.assertEqual(saved['fields']['notes'],'Keep user text');self.assertEqual(saved['fields']['printer'],'Newest draft')
+
+    def test_refresh_existing_refuses_changed_account_or_purchase_source(self):
+        batch,item=self.recovered_item()
+        self.db.execute("UPDATE banknotes SET notes='Current notes' WHERE id='failed-form'");self.db.commit()
+        item=self.current_item(batch,item)
+        self.db.execute("UPDATE ebay_purchase_account SET account_name='other'");self.db.commit()
+        self.assertEqual(self.refresh_existing(item).status_code,409)
+        self.db.execute("UPDATE ebay_purchase_account SET account_name='buyer'")
+        self.db.execute("UPDATE ebay_order_items SET title='Changed purchased item' WHERE order_id=?",(ORDERS[1],));self.db.commit()
+        self.assertEqual(self.refresh_existing(item).status_code,409)
+        self.assertEqual(self.db.execute('SELECT revision FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0],item['revision'])
+
+    def test_refresh_existing_never_switches_targets_or_accepts_ambiguous_matches(self):
+        batch,item=self.recovered_item()
+        self.db.execute("UPDATE banknotes SET notes='Current notes' WHERE id='failed-form'");self.db.commit()
+        item=self.current_item(batch,item)
+        self.db.execute("INSERT INTO banknotes(id,order_number,marketplace) VALUES('other-target',?,'eBay')",(ORDERS[1],))
+        stuff.original_listings.add_source(self.db,'banknotes','other-target','https://www.ebay.com/itm/'+IDS[1]);self.db.commit()
+        self.assertEqual(self.refresh_existing(item).status_code,409)
+        self.db.execute("DELETE FROM banknote_original_listings WHERE banknote_id='failed-form'");self.db.commit()
+        self.assertEqual(self.refresh_existing(item).status_code,409)
+        stored=self.db.execute('SELECT existing_record_id,revision FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()
+        self.assertEqual(stored['existing_record_id'],'failed-form');self.assertEqual(stored['revision'],item['revision'])
+
+    def test_refresh_existing_refuses_item_or_record_linked_elsewhere(self):
+        batch,item=self.recovered_item()
+        self.db.execute("UPDATE banknotes SET notes='Current notes' WHERE id='failed-form'");self.db.commit()
+        item=self.current_item(batch,item)
+        other=next(value for value in batch['items'] if not value.get('existing_record_id'))
+        line=self.db.execute('SELECT line_key FROM banknote_import_items WHERE id=?',(other['id'],)).fetchone()[0]
+        self.db.execute("INSERT INTO banknote_ebay_links(banknote_id,line_key,matched_by,matched_at) VALUES('failed-form',?,'manual','now')",(line,));self.db.commit()
+        self.assertEqual(self.refresh_existing(item).status_code,409)
+        self.db.execute('DELETE FROM banknote_ebay_links')
+        self.db.execute("INSERT INTO banknotes(id) VALUES('linked-other')")
+        line=self.db.execute('SELECT line_key FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0]
+        self.db.execute("INSERT INTO banknote_ebay_links(banknote_id,line_key,matched_by,matched_at) VALUES('linked-other',?,'manual','now')",(line,));self.db.commit()
+        self.assertEqual(self.refresh_existing(item).status_code,409)
+        self.assertEqual(self.db.execute('SELECT revision FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0],item['revision'])
+
+    def test_display_renumber_does_not_require_collection_recovery(self):
+        batch,item=self.recovered_item()
+        self.db.execute("UPDATE banknotes SET banknote_id='P 110',updated_at='later',specs_searched_at='later' WHERE id='failed-form'");self.db.commit()
+        latest=self.current_item(batch,item)
+        self.assertFalse(latest['existing_record_changes'])
+        self.assertEqual(latest['existing_record_version'],item['existing_record_version'])
+        self.assertEqual(self.release(batch,[latest]).status_code,200)
     def refresh(self,b):
         response=self.client.post('/banknotes/imports',json={'order_number':b['order_number'],'refresh':True})
         self.assertEqual(response.status_code,200,response.json)

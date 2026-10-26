@@ -51,7 +51,14 @@ listing may be completed instead of duplicated. This narrow recovery requires
 blank country, denomination, Pick and other catalogue fields and no purchase link.
 Its occupied fields, original photos and crops seed the draft. Release compares the
 saved record snapshot and fills only its remaining blanks; concurrent changes stop
-the release. A populated or ambiguous existing match stays blocked for review.
+the release. The detail page shows which existing fields or photographs changed,
+with before/current previews. **Update draft from collection** explicitly accepts
+that reviewed snapshot into the draft, keeps draft-only edits and adopts the
+current occupied collection values and photos. It does not run Check or release.
+A second collection change requires another review. The user then explicitly
+clicks Release to Collection. Other release validation failures display their
+reason without locking the draft as an unrelated revision conflict. A populated
+or ambiguous existing match stays blocked for review.
 
 Storage is separate from `banknotes`: `banknote_import_batches`,
 `banknote_import_items`, `banknote_import_assets`, and `banknote_import_evidence`.
@@ -69,6 +76,8 @@ No existing collection record or photo is removed by this workflow.
 - `POST` the item URL plus `/check`: `{revision}`, asynchronous status 202.
 - `POST` the item URL plus `/photos`: `{revision, field, filename}` selects
   `image_1` (front) or `image_2` (back) from a retained same-draft original.
+- `POST` the item URL plus `/refresh-existing`: `{revision, existing_record_version}`
+  accepts the reviewed current record into an unfinished-record draft.
 - `POST /banknotes/imports/<batch>/release`: `{items:[{id,revision}]}`.
 
 All draft routes require the collection owner. The existing authenticated Today
