@@ -208,6 +208,30 @@ Each regional run is a named section with a visible closing rule in both
 History modes. A following Jamaican or other nonregional note stays outside
 that section; interrupted date-filtered runs close and reopen separately.
 
+The issuer headers retain an **Issued** denomination list with History both
+on and off. These are the authority's issued denominations, including values
+not held in the collection, rather than a summary of the visible records:
+
+- BCCB: $1, $2, $5, $10, $20, $100.
+- ECCA: $1, $5, $20, $100.
+- ECCB: $1, $2, $5, $10, $20, $50, $100 across its history. The header's
+  explanation includes the withdrawn $1 and the $2 circulation commemorative;
+  the list does not claim every denomination belonged to every series.
+
+Unresolved issuing authorities receive no borrowed denomination list. This
+display change does not modify records, grouping, sorting or display numbers.
+The BCCB set is documented in its
+[1961 Executive Commissioner report](https://www.parliament.gov.gy/documents/documents-laid/20110-report_of_the_executive_commisioner_1961_.pdf).
+The Bank of Guyana's
+[History of Bank Notes](https://bankofguyana.org.gy/bog/images/communications/history_notescoins/History_of_Guyana_Notes.pdf)
+illustrates the ECCA $1, $5, $20 and $100 on PDF pages 47–50. ECCB's
+[2006–2007 report](https://cdn.eccb-centralbank.org/documents/2022-05-11-04-53-07-Annual-Report-2006-2007-PDF1.pdf)
+documents its earlier issues and the end of $1 issuance in 1989; its
+[2020–2021 report](https://cdn.eccb-centralbank.org/documents/2023-07-03-15-59-20-2020-2021-Annual-Report-2.pdf)
+shows the $5, $10, $20, $50 and $100 polymer family; and its
+[2023–2024 report](https://cdn.eccb-centralbank.org/documents/2024-07-03-12-52-21-2023-2024-Annual-Report.pdf)
+documents the circulation $2 commemorative introduced in December 2023.
+
 These dates and the succession come from the ECCB's
 [currency anniversary history in its 2014–2015 annual report](https://cdn.eccb-centralbank.org/documents/2023-10-18-02-17-12-Report-and-statement-of-accounts---ending-31-march-2015.PDF)
 and [2007–2008 annual report chronology](https://cdn.eccb-centralbank.org/documents/2022-05-11-04-52-02-Annual-Report-2007-2008-PDF.pdf).

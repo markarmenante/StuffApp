@@ -438,16 +438,22 @@ EASTERN_CARIBBEAN_ISSUERS = {
     'bccb': {
         'rank': 0, 'title': 'British Caribbean Territories — Eastern Group (BCCB)',
         'span': '1950–1965', 'entity_country': 'British Caribbean Territories',
+        'denoms': '$1, $2, $5, $10, $20, $100',
+        'denoms_note': 'Denominations issued by this authority across its history, including those not held in the collection.',
         'history': 'The British Caribbean Currency Board administered the common currency of the British Caribbean Territories (Eastern Group) from 1950. Its first unified banknotes entered circulation in 1951. The East Caribbean Currency Authority succeeded the Board in 1965; the two are separate issuing authorities.',
     },
     'ecca': {
         'rank': 1, 'title': 'East Caribbean States — Currency Authority (ECCA)',
         'span': '1965–1983', 'entity_country': 'East Caribbean States',
+        'denoms': '$1, $5, $20, $100',
+        'denoms_note': 'Denominations issued by the Currency Authority, including those not held in the collection.',
         'history': 'The East Caribbean Currency Authority succeeded the British Caribbean Currency Board in 1965 and first issued notes on 6 October 1965. Grenada joined the currency arrangement in 1968. Catalogue descriptions such as ND (1965) identify an undated note family, not the issue date of every territorial or signature variety. The full catalogue suffix and territorial attribution remain significant. The Eastern Caribbean Central Bank succeeded the Authority in 1983.',
     },
     'eccb': {
         'rank': 2, 'title': 'East Caribbean States — Central Bank (ECCB)',
         'span': 'Established 1983 · notes from 1984', 'entity_country': 'East Caribbean States',
+        'denoms': '$1, $2, $5, $10, $20, $50, $100',
+        'denoms_note': 'Across all Central Bank issues, including the withdrawn $1 and the $2 circulation commemorative. Denominations vary by series.',
         'history': 'The Eastern Caribbean Central Bank was established on 1 October 1983 as successor to the East Caribbean Currency Authority. Its first banknotes entered circulation on 15 November 1984. These central-bank issues form a separate issuer section within the continuing Eastern Caribbean currency area; territorial codes and full catalogue varieties are retained.',
     },
 }

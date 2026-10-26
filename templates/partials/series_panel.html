@@ -12,10 +12,10 @@
     {% if _panel.now %}
     <span class="usp-now">now {{ _panel.now }}</span>
     {% endif %}
-    {# US panels: every denomination the series was issued in, right after
-       the series name. #}
+    {# US panels show the series denominations; regional issuer panels
+       show the authority's issued denominations, including those not held. #}
     {% if _panel.denoms %}
-    <span class="usp-denoms">{{ _panel.denoms }}</span>
+    <span class="usp-denoms"{% if _panel.denoms_note %} title="{{ _panel.denoms_note }}"{% endif %}>{% if _panel.regional_issuer %}Issued: {% endif %}{{ _panel.denoms }}</span>
     {% endif %}
     {% if _panel.title_span %}
     <span class="usp-span">{{ _panel.title_span }}</span>

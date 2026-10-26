@@ -221,7 +221,11 @@
   {% endif %}
   {% if _bn_group and _bn_group.regional_issuer_heading and not show_history %}
   <div class="us-series-panel usp-cont" data-banknote-issuer="{{ _bn_group.regional.key }}">
-    <div class="usp-head"><span class="usp-class">{{ _bn_group.regional.title }}</span><span class="usp-span">{{ _bn_group.regional.span }}</span></div>
+    <div class="usp-head">
+      <span class="usp-class">{{ _bn_group.regional.title }}</span>
+      {% if _bn_group.regional.denoms %}<span class="usp-denoms" title="{{ _bn_group.regional.denoms_note }}">Issued: {{ _bn_group.regional.denoms }}</span>{% endif %}
+      <span class="usp-span">{{ _bn_group.regional.span }}</span>
+    </div>
   </div>
   {% endif %}
   {% if category == 'properties' and ns.prev == 'Residential' and (row['type'] or '') == 'Commercial' %}

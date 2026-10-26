@@ -121,9 +121,24 @@ class CaribbeanTests(unittest.TestCase):
             self.assertEqual(html.count('data-banknote-family="eastern-caribbean"'), 1)
             for key in ('bccb', 'ecca', 'eccb'):
                 self.assertEqual(html.count('data-banknote-issuer="' + key + '"'), 1)
+            # These are issued sets, not the denominations held in this fixture.
+            for issued in ('$1, $2, $5, $10, $20, $100', '$1, $5, $20, $100',
+                           '$1, $2, $5, $10, $20, $50, $100'):
+                self.assertIn('>Issued: ' + issued + '</span>', html)
+            self.assertIn('withdrawn $1 and the $2 circulation commemorative', html)
             self.assertIn('East Caribbean States - Grenada', html)
             self.assertIn('P-14h', html)
             self.assertIn('P-14j', html)
+
+    def test_unresolved_authority_does_not_borrow_issued_denominations(self):
+        self.add('unclear', 'East Caribbean States', '', '5 Dollars', 'P-14', 1965)
+        self.add('other-issuer', 'East Caribbean States', 'Unidentified local bank', '1 Dollar', '', 1955)
+        for history in ('0', '1'):
+            response = stuff.app.test_client().get('/banknotes', query_string={'history': history})
+            self.assertEqual(response.status_code, 200)
+            html = response.get_data(as_text=True)
+            self.assertNotIn('class="usp-denoms"', html)
+            self.assertNotIn('>Issued: ', html)
 
     def test_family_closes_before_following_country_in_both_history_modes(self):
         from html.parser import HTMLParser

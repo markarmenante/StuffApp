@@ -5580,6 +5580,7 @@ def _series_panel_for_row(row):
         return {
             'country_key': 'eastern-caribbean', 'title': regional['title'],
             'regional_issuer': regional['key'], 'title_span': regional['span'],
+            'denoms': regional.get('denoms'), 'denoms_note': regional.get('denoms_note'),
             'series': series_raw, 'year': year, 'note_type': None,
             'note_class': None, 'clause': None, 'previous_clause': None,
             # The family's catalogued ND date is not a variety issue date.

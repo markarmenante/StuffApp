@@ -117,6 +117,10 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-caribbean-browser-db-') as tem
     return {page,close:()=>context.close()};
   }
   const regionalIds=['bccb-1','bccb-2','ecca-1','ecca-5','ecca-5-grenada','ecca-20','eccb-5','eccb-10'];
+  // Reviewed historical issue rosters, independent of the small set of held
+  // fixture denominations and of the application helper under test. These
+  // issuer headers cover each authority's lifetime, not one simultaneous series.
+  const issuedDenominations={bccb:[1,2,5,10,20,100],ecca:[1,5,20,100],eccb:[1,2,5,10,20,50,100]};
   const family=page=>page.locator('[data-banknote-family="eastern-caribbean"]');
   const issuer=(page,key)=>page.locator('[data-banknote-issuer="'+key+'"]');
   async function run(name,fn) {try{await fn();evidence.passed.push(name);}catch(error){evidence.failures.push({name,error:error.message});}}
@@ -160,6 +164,28 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-caribbean-browser-db-') as tem
           }finally{await t.close();}
         });
       }
+      await run(device+': all issuer headers show their full issued denominations in both History modes',async()=>{
+        for(const history of [true,false]) {
+          const t=await setup(mobile,history);try{
+            for(const [key,expected] of Object.entries(issuedDenominations)) {
+              const heading=issuer(t.page,key),denoms=heading.locator('.usp-head .usp-denoms');
+              assert.equal(await denoms.count(),1,key+' needs one denomination summary');
+              assert.equal(await denoms.isVisible(),true,key+' denominations must be visible');
+              const text=(await denoms.innerText()).trim();
+              assert.match(text,/^Issued:/,key+' label must distinguish issued denominations from holdings');
+              assert.deepEqual((text.match(/\d+/g)||[]).map(Number),expected,key+' must show the complete reviewed issuer roster, in numeric order');
+              assert((await denoms.getAttribute('title')||'').trim().length>0,key+' needs the issuer-lifetime explanation');
+              const box=await denoms.evaluate(element=>{
+                const rect=element.getBoundingClientRect();
+                return {left:rect.left,right:rect.right,width:rect.width,height:rect.height,viewport:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth};
+              });
+              assert(box.width>0&&box.height>0&&box.left>=0&&box.right<=box.viewport+1,JSON.stringify({key,...box}));
+              assert(box.scrollWidth<=box.viewport+1,JSON.stringify({key,...box}));
+              await heading.screenshot({path:path.join(artifacts,'issued-denominations-'+key+'-'+device+'-'+(history?'history':'compact')+'.png')});
+            }
+          }finally{await t.close();}
+        }
+      });
       await run(device+': following Jamaica stays outside the Caribbean family with a visible end boundary in both History modes',async()=>{
         for(const history of [true,false]) {
           const t=await setup(mobile,history);try{
@@ -226,12 +252,16 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-caribbean-browser-db-') as tem
           await t.page.locator('#banknoteHistoryToggle').click();
           await t.page.waitForURL(url=>url.searchParams.get('history')==='0');
           assert.equal(await family(t.page).count(),1);
-          for(const key of ['bccb','ecca','eccb'])assert.equal(await issuer(t.page,key).count(),1);
+          for(const [key,expected] of Object.entries(issuedDenominations)) {
+            assert.equal(await issuer(t.page,key).count(),1);
+            assert.deepEqual(((await issuer(t.page,key).locator('.usp-denoms').innerText()).match(/\d+/g)||[]).map(Number),expected);
+          }
           assert.equal(await t.page.locator('.us-series-panel:not([data-banknote-issuer])').count(),0);
           await t.page.locator('#banknoteHistoryToggle').click();
           await t.page.waitForURL(url=>url.searchParams.get('history')!=='0');
           assert.match(await issuer(t.page,'ecca').innerText(),/Currency Authority/);
           assert.match(await issuer(t.page,'ecca').innerText(),/1965.?1983/);
+          for(const [key,expected] of Object.entries(issuedDenominations))assert.deepEqual(((await issuer(t.page,key).locator('.usp-denoms').innerText()).match(/\d+/g)||[]).map(Number),expected);
           for(const id of regionalIds)assert.equal(await t.page.locator('#item-'+id).count(),1);
         }finally{await t.close();}
       });
