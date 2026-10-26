@@ -17,7 +17,7 @@ stuffapp._configure_db_connection(db)
 db.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
 
 rows = [
@@ -115,7 +115,7 @@ stuffapp._configure_db_connection(db2)
 db2.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
 ph_rows = [
     # (denomination, issuer, series, date_1) — the screenshot's mix
@@ -157,7 +157,7 @@ stuffapp._configure_db_connection(db2)
 db2.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
 us_rows = [
     # (country, series, lettering, issuer, date_1)
@@ -259,7 +259,7 @@ stuffapp._configure_db_connection(db3)
 db3.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
 ni_rows = [
     ('Netherlands', '10 Gulden', 1943),
@@ -331,7 +331,7 @@ stuffapp._configure_db_connection(db4)
 db4.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
 em_rows = [
     # (series, issuer, lettering, condition, denomination, date_1)
@@ -412,7 +412,7 @@ stuffapp._configure_db_connection(db3)
 db3.execute("""CREATE TABLE banknotes (
     id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
-    other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
+    pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
 rows = [
     ('Manchukuo', 'Central Bank of Manchou', '', '10 Yuan', 1938),
@@ -583,7 +583,7 @@ with stuffapp.app.app_context():
     # migration. Existing startup canonicalization has nothing to change here.
     full_db.execute("INSERT OR IGNORE INTO migration_state (key, applied_at) "
                     "VALUES ('banknote_display_number_v26', '2026-10-15')")
-    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v29'")
+    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v30'")
     full_db.commit()
     before = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
     with patch.object(stuffapp, 'ensure_country_history'):
@@ -597,7 +597,7 @@ with stuffapp.app.app_context():
         for field, value in before[row['id']].items():
             if field != 'banknote_id':
                 assert row[field] == value, (row['id'], field, value, row[field])
-    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v29'").fetchone()
+    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v30'").fetchone()
     migrated = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
     with patch.object(stuffapp, '_renumber_banknotes') as renumber:
         stuffapp.init_db()

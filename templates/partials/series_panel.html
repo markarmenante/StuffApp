@@ -3,7 +3,7 @@
    the note type (Silver Certificate, Federal Reserve Note…) is named
    within the panel, followed by liability, the printed promise, what it
    replaced, and the era. Other countries: country header + era band. #}
-<div class="us-series-panel{% if _panel.continues_country %} usp-cont{% endif %}">
+<div class="us-series-panel{% if _panel.continues_country %} usp-cont{% endif %}"{% if _panel.regional_issuer %} data-banknote-issuer="{{ _panel.regional_issuer }}"{% endif %}>
 
   <div class="usp-head">
     <span class="usp-class">{{ _panel.title }}</span>

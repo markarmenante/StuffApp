@@ -341,6 +341,16 @@ this path applies when a new image arrives. Regression coverage is in
 
 ## Collection report (banknotes)
 
+Eastern Caribbean regional filing (2026-10-26): list and report share one
+regional family with distinct BCCB (1950–1965), ECCA (1965–1983) and ECCB
+(established 1983, notes from 1984) issuer sections. Explicit territorial labels
+and blank-country records with a named regional issuer join the right section
+without rewriting stored country, series or full catalogue varieties. ECCA
+ND (1965) is a catalogue family, not proof of every variety's issue year.
+Issuer, series, numeric denomination and full reference determine filing;
+v30 refreshes P positions only. See `docs/banknote-catalog.md` and the Caribbean
+tests for preservation and boundary cases.
+
 The Report pill on the Banknotes list (owner only; Mark, 2026-09-12)
 builds a PDF of the whole collection: one country / colony per section
 on a fresh page (grouped by the stored `country`, in the list's order),

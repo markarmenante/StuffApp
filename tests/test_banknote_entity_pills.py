@@ -81,6 +81,46 @@ class EntityPillTests(unittest.TestCase):
         self.assertEqual((pill['tag'], pill['data-coverage']), ('span', 'missing'))
         self.assertNotIn('href', pill)
 
+    def test_caribbean_pill_combines_authority_variants_and_navigates_to_held_note(self):
+        for ident, country, status in (
+                ('regional-own', 'East Caribbean States', 'Own'),
+                ('regional-grenada', 'East Caribbean States - Grenada', 'Ordered'),
+                ('regional-blank', None, 'Ordered'),
+                ('regional-authority', 'East Caribbean Currency Authority', 'Own')):
+            self.note(ident, country=country, year=1965, status=status,
+                      issuer='East Caribbean Currency Authority')
+        self.note('regional-board', country='British Caribbean Territories',
+                  year=1956, issuer='British Caribbean Currency Board')
+        before = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        for history in ('0', '1'):
+            page = self.page('/banknotes?history=' + history + '&filter=ordered')
+            pill = page.pills['british-east-caribbean-states']
+            self.assertEqual(pill['data-coverage'], 'held')
+            self.assertIn('4 notes', pill['title'])
+            self.assertIn(pill['href'], ('#item-regional-grenada', '#item-regional-blank'))
+            self.assertIn(pill['href'][1:], page.targets)
+            self.assertEqual(page.pills['british-grenada']['data-coverage'], 'missing')
+            self.assertFalse(any('-record-' in key and 'caribbean' in key for key in page.pills))
+            board = page.pills['british-british-caribbean-territories']
+            self.assertIn('1 note;', board['title'])
+            self.assertIn('item-regional-board', self.page(board['href']).targets)
+        after = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        self.assertEqual(before, after)
+
+    def test_solomon_1977_owned_or_ordered_note_covers_the_pre_independence_entity(self):
+        self.note('solomon-1977', country='Solomon Islands', year=1977, status='Ordered')
+        self.note('solomon-1980', country='Solomon Islands', year=1980,
+                  issuer='Solomon Islands Monetary Authority')
+        for history in ('0', '1'):
+            page = self.page('/banknotes?q_banknotes=Solomon&history=' + history)
+            pill = page.pills['british-british-solomon-islands']
+            self.assertEqual(pill['data-coverage'], 'held')
+            self.assertIn('1 note;', pill['title'])
+            self.assertEqual(pill['href'], '#item-solomon-1977')
+        self.db.execute("UPDATE banknotes SET status='Sold' WHERE id='solomon-1977'")
+        self.db.commit()
+        self.assertEqual(self.page().pills['british-british-solomon-islands']['data-coverage'], 'missing')
+
     def test_north_borneo_coverage_links_shared_board_notes_and_explains_basis(self):
         issuer = 'Board of Commissioners of Currency, Malaya and British Borneo'
         self.note('board-1953', country='Malaya and British Borneo', year=1953,

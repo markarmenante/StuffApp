@@ -251,6 +251,23 @@ def problem(item):
         if year is None:
             return 'Colonial issue date is not established'
         years = [year]
+    # SIMA's first dollar notes were actually issued in October 1977, before
+    # independence on 7 July 1978. The generic lower bound excludes an
+    # administration's transition year; this reviewed start is an issue year,
+    # so the established 1977 SIMA issue is eligible. Neither a model-supplied
+    # administration nor an old printed date may admit a later/unknown issue.
+    solomon_1977 = country == 'Solomon Islands' and bool(item.get('issuer')) and all(
+        catalog.classify(country, year, item.get('issuer'), item.get('series'))['key'] == 'british'
+        for year in years)
+    if country == 'Solomon Islands' and not solomon_1977:
+        return 'Solomon Islands pre-independence issue date / Monetary Authority issuer not established'
+    if solomon_1977:
+        stated = [int(y) for y in re.findall(r'\b(?:1[5-9]\d{2}|20\d{2})\b', evidence)]
+        if stated and max(stated) >= 1978:
+            return 'Solomon Islands title or series identifies a transition / independent issue'
+        admin_end = _year(normalize_administration(item.get('administration')).get('year_end'))
+        if admin_end is not None and admin_end > 1978:
+            return 'Solomon Islands administration exceeds independence on 7 July 1978'
     if item.get('administration'):
         return _administration_problem(item, years)
     if special or (country == 'Philippines' and re.search(r'japan|overprint', evidence, re.I)):
@@ -260,7 +277,7 @@ def problem(item):
         return 'Administration period not established; supply sourced issue and administration evidence'
     if periods:
         start,end=periods
-        if min(years) <= start or max(years) >= end:
+        if (min(years) <= start and not solomon_1977) or max(years) >= end:
             return 'Issue date is outside a confirmed colonial period or in a transition year'
     # Cross-check dates explicitly carried by a series/reissue title, rather
     # than allowing a historic printed date to hide a post-independence issue.

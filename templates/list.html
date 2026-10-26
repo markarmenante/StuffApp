@@ -212,6 +212,17 @@
     {% endif %}
   </div>
   {% endif %}
+  {% if _bn_group and _bn_group.regional_heading %}
+  <div class="banknote-group-heading" data-banknote-family="eastern-caribbean">
+    <h2>Eastern Caribbean</h2>
+    <p>One regional currency family, with separate Currency Board, Currency Authority and Central Bank issues.</p>
+  </div>
+  {% endif %}
+  {% if _bn_group and _bn_group.regional_issuer_heading and not show_history %}
+  <div class="us-series-panel usp-cont" data-banknote-issuer="{{ _bn_group.regional.key }}">
+    <div class="usp-head"><span class="usp-class">{{ _bn_group.regional.title }}</span><span class="usp-span">{{ _bn_group.regional.span }}</span></div>
+  </div>
+  {% endif %}
   {% if category == 'properties' and ns.prev == 'Residential' and (row['type'] or '') == 'Commercial' %}
   <div class="property-type-divider" aria-hidden="true"></div>
   {% endif %}

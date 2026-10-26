@@ -169,8 +169,10 @@ issues go to Independent & other. Spanish Puerto Rico and Cuba do not get groupe
 with their later administrations. Independent Algerian, Cuban, Belizean,
 Indonesian, Cypriot and other successor-state issues stay in the final group.
 
-Currency areas remain distinct: British Caribbean Territories is not East
-Caribbean States; British East Africa's post-independence currency-board issues
+Currency authorities remain distinct within regional collection families: the
+Eastern Caribbean family retains separate British Caribbean Currency Board,
+East Caribbean Currency Authority and Eastern Caribbean Central Bank sections
+(see below). British East Africa's post-independence currency-board issues
 are labelled transitional. West African States/BCEAO remains a related successor
 currency area in the French collection family; qualifiers such as “(Senegal)”
 are preserved. New Hebrides belongs to the joint-administration group. Italian
@@ -185,6 +187,53 @@ symbol is ambiguous (such as $10 Pesos). Separate currency families remain
 separate, and the existing historical groups and chronology take priority.
 Migration v27 refreshes display positions (P numbers) without rewriting saved
 denominations or permanent B numbers.
+
+## Eastern Caribbean regional family
+
+The collection list and PDF report gather this regional currency lineage under
+one **Eastern Caribbean** heading, with three distinct issuer subsections:
+
+- **British Caribbean Territories — Eastern Group (BCCB), 1950–1965.** The
+  British Caribbean Currency Board was established in 1950; its first unified
+  notes entered circulation on 1 August 1951.
+- **East Caribbean States — Currency Authority (ECCA), 1965–1983.** The ECCA
+  succeeded the Board and first issued notes on 6 October 1965. Grenada joined
+  the arrangement in 1968. An `ND (1965)` catalogue family does not establish
+  the actual issue date of a later territorial or signature variety.
+- **East Caribbean States — Central Bank (ECCB), established 1983, notes from
+  1984.** The ECCB began on 1 October 1983; its first notes entered circulation
+  on 15 November 1984.
+
+These dates and the succession come from the ECCB's
+[currency anniversary history in its 2014–2015 annual report](https://cdn.eccb-centralbank.org/documents/2023-10-18-02-17-12-Report-and-statement-of-accounts---ending-31-march-2015.PDF)
+and [2007–2008 annual report chronology](https://cdn.eccb-centralbank.org/documents/2022-05-11-04-52-02-Annual-Report-2007-2008-PDF.pdf).
+The [Board's own 1961 report](https://www.parliament.gov.gy/documents/documents-laid/20110-report_of_the_executive_commisioner_1961_.pdf)
+documents its formal name and regional constitution. The grouping is a
+numismatic currency lineage, not a claim of identical membership or continuous
+colonial rule.
+
+`eastern_caribbean_issue` is a display/filing resolver, separate from the saved
+country normalizer. It recognizes explicit regional country labels, qualified
+labels such as `East Caribbean States - Grenada`, and the exact regional issuer
+when the country is blank or a named member territory. A standalone Grenada
+record is not a regional alias. A missing or conflicting issuer remains
+unresolved; the year 1965 alone never chooses an authority. Country, territorial
+attribution, issuer, series, full Pick suffix, photos, purchase details and
+permanent B numbers are retained. The report repeats each note's raw country
+within its shared issuer section so a territorial qualifier is still visible.
+
+Within an issuer, equivalent dated/undated series labels file together before
+numeric denominations and the full natural-order catalogue reference. Written
+dollar denominations such as `Five Dollars` compare with `$5` in this regional
+family. Range descriptions retain their distinct design/series wording, except
+for the reviewed BCCB 1953–1964 Currency Board/Elizabeth II wording variants.
+The original labels stay unchanged. Migration **v30** updates only the
+P display positions to match the list/report order; edits to either catalogue
+reference also resequence positions. The two existing regional entity pills
+remain separate (BCCB and the ECCA/ECCB successor area); a regional Grenada
+attribution does not assert a standalone Grenadian issue or pre-independence
+territorial coverage. Tests: `test_banknote_caribbean.py` and the isolated
+`test_banknote_caribbean_browser.cjs` fixture.
 
 ## Spelling and preservation
 

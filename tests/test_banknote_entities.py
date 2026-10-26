@@ -20,6 +20,46 @@ class BanknoteEntityTests(unittest.TestCase):
         result = self.match(country, year, issuer, series)
         return result['key'] if result else None
 
+    def test_caribbean_regional_aliases_share_coverage_without_territorial_credit(self):
+        authority = 'East Caribbean Currency Authority'
+        for country in (None, '', 'East Caribbean States',
+                        'East Caribbean States - Grenada',
+                        'East Caribbean Currency Authority'):
+            with self.subTest(country=country):
+                row = dict(country=country, date_1=1965, issuer=authority,
+                           series='ND (1965)', pick_number='P-14k')
+                before = dict(row)
+                match = entity_for_row(row)
+                self.assertEqual(match['key'], 'british-east-caribbean-states')
+                self.assertIsNone(match['scan_period'])
+                self.assertEqual(row, before)
+        self.assertEqual(self.key('East Caribbean States', 1985,
+                                  'Eastern Caribbean Central Bank'),
+                         'british-east-caribbean-states')
+        self.assertEqual(self.key('British Caribbean Territories', 1959,
+                                  'British Caribbean Territories Currency Board'),
+                         'british-british-caribbean-territories')
+        self.assertEqual(self.key('Grenada', 1920, 'Colonial Bank'),
+                         'british-grenada')
+        self.assertIsNone(self.match('Grenada', 1985, 'Unspecified national issuer'))
+        self.assertIsNone(self.match('British Caribbean Territories', 1959,
+                                     'National Bank of Grenada'))
+        self.assertIsNone(self.match('East Caribbean States', 1965,
+                                     'Unidentified private bank'))
+
+    def test_solomon_1977_pre_independence_issue_counts_without_successor_credit(self):
+        for issuer in ('', 'Solomon Islands Monetary Authority'):
+            self.assertEqual(self.key('Solomon Islands', 1977, issuer),
+                             'british-british-solomon-islands')
+        for year in (None, 1978, 1980):
+            self.assertIsNone(self.match('Solomon Islands', year,
+                                         'Solomon Islands Monetary Authority'))
+        self.assertIsNone(self.match('Solomon Islands', 1977,
+                                     'Central Bank of Solomon Islands'))
+        entry = ENTITY_BY_KEY['british-british-solomon-islands']
+        self.assertEqual(entry['independence_date'], '1978-07-07')
+        self.assertEqual(entry['scan_period']['year_end'], 1978)
+
     def test_unique_evidence_bearing_roster_with_explicit_three_state_issuance(self):
         self.assertEqual(len(ENTITY_CATALOG), len(ENTITY_BY_KEY))
         self.assertEqual(len(ENTITY_CATALOG), 194)
@@ -156,8 +196,10 @@ class BanknoteEntityTests(unittest.TestCase):
         self.assertEqual(self.key('Formosa', 1930, 'Bank of Taiwan'), 'japanese-taiwan')
         self.assertEqual(self.key('Kiautschou', 1907, 'Deutsch-Asiatische Bank'), 'german-kiautschou')
         self.assertIsNone(self.match('Kiautschou', 1907, 'Japanese Government'))
-        self.assertIsNone(self.match('Saint Kitts', 2000, 'Eastern Caribbean Central Bank'))
-        self.assertIsNone(self.match('Saint Kitts', 1976, 'East Caribbean Currency Authority'))
+        self.assertEqual(self.key('Saint Kitts', 2000, 'Eastern Caribbean Central Bank'),
+                         'british-east-caribbean-states')
+        self.assertEqual(self.key('Saint Kitts', 1976, 'East Caribbean Currency Authority'),
+                         'british-east-caribbean-states')
         self.assertEqual(self.key('Saint Kitts', 1920, 'Colonial Bank'), 'british-saint-kitts')
         self.assertIsNone(self.match('German New Guinea', 1922, 'Reichsbank', 'Commemorative Notgeld'))
         self.assertIsNone(self.match('German New Guinea', 1915, 'Australian Military Administration'))

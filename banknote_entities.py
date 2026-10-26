@@ -162,7 +162,7 @@ _entries += [
 _ALIASES = {
     'british-british-north-borneo': ('North Borneo',),
     'british-saint-helena': ('St. Helena',),
-    'british-british-solomon-islands': ('British Solomon Islands Protectorate',),
+    'british-british-solomon-islands': ('British Solomon Islands Protectorate', 'Solomon Islands'),
     'french-french-territory-of-the-afars-and-issas': ('French Afars and Issas',),
     'german-kiautschou': ('Kiau-Chau', 'Kiaochow', 'Kiautschau'),
     'german-kamerun': ('German Kamerun', 'German Cameroon'),
@@ -278,6 +278,8 @@ for _entry in _entries:
 # Confederation, a name change, a transfer and the end of occupation are not
 # silently called independence. Dates do not broaden the conservative year gate.
 _INDEPENDENCE = {
+    'british-british-solomon-islands': (
+        '1978-07-07', 'https://parliament.gov.sb/files/business%26procedures/constitution.htm'),
     'british-india': ('1947-08-15', 'https://history.state.gov/countries/india'),
     'british-bahamas': ('1973-07-10', 'https://history.state.gov/countries/bahamas'),
     'british-barbados': ('1966-11-30', 'https://history.state.gov/countries/barbados'),
@@ -306,9 +308,11 @@ _NEW_SCAN_PERIODS = {
     'belgian-ruanda-urundi': _scan_period(1960, 1962, 'administration_end',
         'https://archive.brb.bi/en/content/historic',
         'BERB common bank from August 1960; colonial scope ends before 1962 independence: https://www.fdnb.gov.bi/fr/le-1er-juillet-de-chaque-annee-date-memorable-pour-tout-burundais-ou-quil-soit'),
-    'british-british-solomon-islands': _scan_period(1916, 1934, 'documented_issue',
-        'https://banknote.news/files/tag-british-solomon-islands.php',
-        'The Banknote Book publisher documents Government issues from 1916 through 1933; scope is the verified issue span, not an independence claim.'),
+    'british-british-solomon-islands': _scan_period(1916, 1978, 'independence',
+        'https://banknote.news/files/tag-british-solomon-islands.php; '
+        'https://www.cbsi.com.sb/financial-stability/currency-management/currency-overview',
+        'Government issues of 1916–1933 and the 1977 Monetary Authority issue precede independence on 7 July 1978. The transition year is excluded when only a year is known; no continuous annual issuance is implied.',
+        '1978-07-07'),
     'british-turks-and-caicos-islands': _scan_period(1928, 1929, 'documented_issue',
         'https://www.greysheet.com/prices/detail/10th-january-1928-sig-3-southby-frith-prefix-a-1-s-n-a-1-07105-07664/gsid/141809/60/0',
         'The documented 1928 circulating government issue is eligible; the territory remains dependent. Earlier issue bounds are not asserted.'),
@@ -469,7 +473,27 @@ def entity_for_row(row, classification=None):
     values = dict(row)
     info = classification or catalog.row_classification(row)
     group = info.get('key')
+    # The collection files explicit regional issuers together even when a
+    # saved country is blank, names the authority, or carries an island suffix.
+    # Coverage follows that filing identity; a regional note never establishes
+    # ownership of a separate Grenada or other member-territory issue.
+    caribbean = catalog.eastern_caribbean_issue(
+        values.get('country'), values.get('date_1'),
+        values.get('issuer'), values.get('series'))
+    if caribbean:
+        regional_key = {
+            'British Caribbean Territories': 'british-british-caribbean-territories',
+            'East Caribbean States': 'british-east-caribbean-states',
+        }.get(caribbean.get('entity_country'))
+        if regional_key:
+            return ENTITY_BY_KEY[regional_key]
+        return None
     country = catalog.canonical_country(info.get('country') or values.get('country') or '')
+    if country == 'Solomon Islands':
+        # This shared name spans independence: only the reviewed dated filing
+        # can credit the predecessor. Never reach the broad historical-name
+        # fallback for a transition-year, modern or contradictory issue.
+        return ENTITY_BY_KEY['british-british-solomon-islands'] if group == 'british' else None
     if group == 'french' and country.startswith('West African States'):
         return ENTITY_BY_KEY['french-west-african-states']
     if group == 'portuguese' and country == 'Timor':

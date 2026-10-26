@@ -390,6 +390,11 @@ PERIODS = {
     'Malta': ('british', 1800, 1964, 'British colonial administration'),
     'Mauritius': ('british', 1810, 1968, 'British colonial administration'),
     'Seychelles': ('british', 1814, 1976, 'British colonial administration'),
+    # SIMA introduced the first Solomon Islands dollar notes in October 1977,
+    # before independence on 7 July 1978. Earlier protectorate pound notes use
+    # their explicit British Solomon Islands identity, not this modern name.
+    'Solomon Islands': ('british', 1977, 1978,
+                       'Solomon Islands Monetary Authority — British protectorate issue'),
     'Ceylon': ('british', 1796, 1948, 'British colonial administration'),
     'South Africa': ('british', 1910, 1961, 'Union of South Africa — self-governing Dominion / Commonwealth'),
 }
@@ -425,6 +430,117 @@ FRENCH_OVERSEAS = {'French Guiana', 'Guadeloupe', 'Martinique', 'Réunion',
 def _year(value):
     m = re.search(r'(?<!\d)(1[5-9]\d{2}|20\d{2})(?!\d)', str(value or ''))
     return int(m.group()) if m else None
+
+
+# Display/filing identities, deliberately separate from country normalization.
+# A territorial suffix is specimen attribution, not another currency authority.
+EASTERN_CARIBBEAN_ISSUERS = {
+    'bccb': {
+        'rank': 0, 'title': 'British Caribbean Territories — Eastern Group (BCCB)',
+        'span': '1950–1965', 'entity_country': 'British Caribbean Territories',
+        'history': 'The British Caribbean Currency Board administered the common currency of the British Caribbean Territories (Eastern Group) from 1950. Its first unified banknotes entered circulation in 1951. The East Caribbean Currency Authority succeeded the Board in 1965; the two are separate issuing authorities.',
+    },
+    'ecca': {
+        'rank': 1, 'title': 'East Caribbean States — Currency Authority (ECCA)',
+        'span': '1965–1983', 'entity_country': 'East Caribbean States',
+        'history': 'The East Caribbean Currency Authority succeeded the British Caribbean Currency Board in 1965 and first issued notes on 6 October 1965. Grenada joined the currency arrangement in 1968. Catalogue descriptions such as ND (1965) identify an undated note family, not the issue date of every territorial or signature variety. The full catalogue suffix and territorial attribution remain significant. The Eastern Caribbean Central Bank succeeded the Authority in 1983.',
+    },
+    'eccb': {
+        'rank': 2, 'title': 'East Caribbean States — Central Bank (ECCB)',
+        'span': 'Established 1983 · notes from 1984', 'entity_country': 'East Caribbean States',
+        'history': 'The Eastern Caribbean Central Bank was established on 1 October 1983 as successor to the East Caribbean Currency Authority. Its first banknotes entered circulation on 15 November 1984. These central-bank issues form a separate issuer section within the continuing Eastern Caribbean currency area; territorial codes and full catalogue varieties are retained.',
+    },
+}
+_CARIBBEAN_ISSUER_NAMES = {
+    'bccb': ('British Caribbean Currency Board', 'BCCB',
+             'British Caribbean Territories Currency Board',
+             'British Caribbean Currency Board (The British Caribbean Territories, Eastern Group)',
+             'Board of Commissioners of Currency, British Caribbean Territories (Eastern Group)',
+             'Board of Commissioners of Currency British Caribbean Territories Eastern Group',
+             'British Caribbean Territories (Eastern Group) Currency Board'),
+    'ecca': ('East Caribbean Currency Authority', 'Eastern Caribbean Currency Authority', 'ECCA'),
+    'eccb': ('Eastern Caribbean Central Bank', 'East Caribbean Central Bank', 'ECCB'),
+}
+_CARIBBEAN_ISSUER_LOOKUP = {fold(name): key for key, names in _CARIBBEAN_ISSUER_NAMES.items() for name in names}
+_CARIBBEAN_COUNTRY_BOARD = {fold(name) for name in (
+    'British Caribbean Territories', 'British Caribbean Territories (Eastern Group)',
+    'British Caribbean Territories - Eastern Group', 'British Caribbean Territories Eastern Group')}
+_CARIBBEAN_TERRITORIES = ('Anguilla', 'Antigua', 'Antigua and Barbuda', 'Barbados',
+    'Dominica', 'Grenada', 'Montserrat', 'Saint Kitts', 'Saint Kitts and Nevis',
+    'Saint Lucia', 'Saint Vincent', 'Saint Vincent and the Grenadines',
+    'St. Kitts', 'St. Kitts and Nevis', 'St. Lucia', 'St. Vincent',
+    'St. Vincent and the Grenadines')
+_CARIBBEAN_COUNTRY_STATES = {fold(base + suffix) for base in ('East Caribbean States', 'Eastern Caribbean States')
+    for suffix in ('',) + tuple(' - ' + territory for territory in _CARIBBEAN_TERRITORIES)
+                         + tuple(' (' + territory + ')' for territory in _CARIBBEAN_TERRITORIES)}
+
+
+def eastern_caribbean_issue(country, date=None, issuer=None, series=None):
+    """Resolve explicit regional identity only; never infer an issuer from 1965.
+
+    Raw country/issuer fields are not changed. A blank country with a named
+    regional issuer is supported; a standalone territorial country is not an
+    alias for the regional currency. Unknown/conflicting issuer text retains
+    its own subsection and receives no borrowed Board/Authority history.
+    """
+    country_token = fold(country)
+    country_issuer = _CARIBBEAN_ISSUER_LOOKUP.get(country_token)
+    regional = country_token in _CARIBBEAN_COUNTRY_BOARD or country_token in _CARIBBEAN_COUNTRY_STATES or country_issuer
+    issuer_text = str(issuer or '').strip()
+    issuer_key = _CARIBBEAN_ISSUER_LOOKUP.get(fold(issuer_text))
+    member = country_token in {fold(name) for name in _CARIBBEAN_TERRITORIES}
+    if not regional and not ((not country_token or member) and issuer_key):
+        return None
+    # The actual named issuer takes precedence over a regional country label.
+    key = issuer_key if issuer_text else (country_issuer or ('bccb' if country_token in _CARIBBEAN_COUNTRY_BOARD else None))
+    if key:
+        return {'family': 'Eastern Caribbean', 'key': key, **EASTERN_CARIBBEAN_ISSUERS[key]}
+    return {
+        'family': 'Eastern Caribbean', 'key': 'unresolved', 'rank': 3,
+        'title': issuer_text or 'East Caribbean States — issuer not established',
+        'span': '', 'entity_country': None,
+        'history': 'The saved regional attribution is retained. The issuing authority has not been established; a recorded year alone does not identify the Currency Board, Currency Authority or Central Bank.',
+    }
+
+
+def eastern_caribbean_series(country, date=None, issuer=None, series=None):
+    """A series filing key, not a claim about an undated variety's issue date."""
+    regional = eastern_caribbean_issue(country, date, issuer, series)
+    if not regional:
+        return ''
+    text = str(series or '').strip()
+    years = re.findall(r'(?<!\d)(?:1[5-9]\d{2}|20\d{2})(?!\d)', text)
+    if years:
+        start, end = years[0], years[-1]
+        # Only the reviewed BCCB 1953–1964 wording variants share a range
+        # key; other descriptions can identify distinct designs/series.
+        descriptor = fold(re.sub(r'(?<!\d)(?:1[5-9]\d{2}|20\d{2})(?!\d)', '', text))
+        board_equivalent = (regional['key'] == 'bccb' and (start, end) == ('1953', '1964')
+                            and descriptor in ('', 'currencyboardissue', 'elizabethiiissue'))
+        if board_equivalent or re.fullmatch(r'(?:ND\s*)?\(?\s*\d{4}\s*\)?', text, re.I):
+            return start + ':' + end
+        return start + ':' + end + ':' + fold(text)
+    if text:
+        return str(_year(date) or 99999) + ':' + fold(text)
+    year = str(_year(date) or 99999)
+    return year + ':' + year
+
+
+def catalogue_reference_sort(value):
+    """Natural full-reference ordering; keeps namespace and every suffix."""
+    text = re.sub(r'^\s*(?:pick|p)\s*[-.#]?\s*(?=\d)', 'p', str(value or ''), flags=re.I)
+    text = re.sub(r'\s+', '', text.casefold())
+    if text[:1].isdigit():
+        text = 'p' + text
+    return re.sub(r'\d+', lambda m: m.group().zfill(12), text) or '~'
+
+
+def eastern_caribbean_denomination(value):
+    """Read known written dollar denominations for filing, without saving edits."""
+    words = {'one': '1', 'two': '2', 'five': '5', 'ten': '10', 'twenty': '20',
+             'fifty': '50', 'one hundred': '100', 'hundred': '100'}
+    match = re.fullmatch(r'\s*(one hundred|hundred|one|two|five|ten|twenty|fifty)\s+(dollars?)\s*', str(value or ''), re.I)
+    return words[match[1].lower()] + ' ' + match[2] if match else value
 
 
 AMERICAN_COLONIES = {
@@ -482,6 +598,30 @@ def classify(country, date=None, issuer=None, series=None):
         return {**GROUP_BY_KEY[key], 'country': country, 'period': label, 'uncertain': uncertain}
     def other(label='Independent or other issue; administration not assigned', uncertain=False):
         return result('other', label, uncertain)
+    if country == 'Solomon Islands':
+        # Source: CBSI Currency Overview and research paper RP-012014; the
+        # Solomon Islands Independence Order 1978 fixes 7 July 1978. SIMA
+        # continued after independence, so its name or an ND series date alone
+        # cannot establish a pre-independence issue. Keep transition years and
+        # malformed/ranged dates unresolved, and do not overlook a later issuer.
+        exact = exact_year(date)
+        issuer_key = fold(issuer or '')
+        compatible = issuer_key in {
+            '', 'sima', 'solomonislandsmonetaryauthority',
+            'thesolomonislandsmonetaryauthority',
+            'solomonislandsmonetaryauthoritysima',
+            'solomonislandmonetaryauthority',
+        }
+        if exact == 1977 and compatible:
+            return result('british', PERIODS[country][3])
+        if exact == 1978:
+            return other('Independence transition — 7 July 1978; exact issue date needed', True)
+        if exact and exact > 1978:
+            return other('Independent Solomon Islands issue')
+        return other('Date / issuer needed to establish pre-independence issue', True)
+    regional = eastern_caribbean_issue(country, date, issuer, series)
+    if regional:
+        return result('british', regional['title'], regional['key'] == 'unresolved')
     japanese = any(s in evidence for s in ('japanesegovernment', 'japaneseoccupation',
                    'southerndevelopmentbank', 'militaryyen', 'bankofchosen')) or (country == 'China' and y and 1938 <= y <= 1945
                     and any(s in evidence for s in ('federalreservebankofchina', 'centralreservebankofchina')))
@@ -591,6 +731,8 @@ def row_classification(row):
 def sort_country(country, date=None, issuer=None, series=None):
     # Domestic US issues lead their requested Philippine collection family.
     canonical = canonical_country(country) or 'zzz'
+    if eastern_caribbean_issue(country, date, issuer, series):
+        return 'Eastern Caribbean'
     if fold(canonical) in _CONFEDERATE_COUNTRIES:
         return '0 United States Confederate States'
     colony = american_colonial_country(canonical, date, issuer, series)

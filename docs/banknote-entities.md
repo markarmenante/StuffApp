@@ -99,6 +99,27 @@ their colonial predecessor. Canada, Australia, New Zealand, Ceylon and regional
 successor areas retain the existing nuanced collection-family descriptions;
 membership is not an assertion of ongoing foreign control.
 
+Eastern Caribbean collection grouping (26 October 2026) uses the shared
+`eastern_caribbean_issue` resolver for coverage as well as filing. Recognized
+Currency Authority / Central Bank records count toward the existing East
+Caribbean States pill, including a blank country with an explicit regional
+issuer, an authority saved as the country, and a recognized member-island suffix.
+The British Caribbean Currency Board retains its separate predecessor pill.
+These are regional holdings: an ECCA note labelled Grenada does not turn the
+separate Grenada territorial pill green. Full Pick varieties and saved country
+labels remain intact. The successor region has no colonial scan period;
+ND (1965) alone cannot establish the actual issue date of a territorial variety
+or eligibility before that territory's independence.
+
+The Solomon Islands Monetary Authority's 1977 first dollar issue counts toward
+the British Solomon Islands pill, including Ordered notes. The stored modern
+country spelling remains intact. [CBSI's currency history](https://www.cbsi.com.sb/financial-stability/currency-management/currency-overview)
+documents the 1977 introduction; the [Independence Order](https://parliament.gov.sb/files/business%26procedures/constitution.htm)
+specifies 7 July 1978. That date is retained in the entity's independence
+metadata. Year-only 1978 notes and later independent issues do not gain this
+colonial coverage. The scan scope now includes the documented 1977 issue as
+well as the earlier Government issues, without implying uninterrupted issuance.
+
 For historic names absent from the existing classifier, a narrow exact-name
 fallback supplies coverage without moving a record: for example North Borneo,
 French India, Italian East Africa and Danish West Indies. Shared modern names
