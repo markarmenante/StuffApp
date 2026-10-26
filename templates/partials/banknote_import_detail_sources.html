@@ -1,0 +1,13 @@
+<details class="import-purchased-photos"{% if not import_item.fields.get('image_1') or not import_item.fields.get('image_2') %} open{% endif %}>
+  <summary class="section-bar">Purchased photos · select front and back</summary>
+  <div class="import-gallery" id="banknoteImportPhotos" aria-label="Purchased item photos"></div>
+</details>
+<div class="import-source">
+  <span><strong>Order:</strong> {{ import_item.order_number }}</span>
+  {% set source_purchase = import_item.purchase|default({}) %}
+  {% if source_purchase.get('price') is not none and source_purchase.get('price') != '' %}<span><strong>Paid item price:</strong> <span id="banknoteImportSourcePrice">{{ source_purchase.get('price') }}</span></span>{% endif %}
+  {% if source_purchase.get('vendor') %}<span><strong>Seller:</strong> {{ source_purchase.vendor }}</span>{% endif %}
+  {% if import_item.listing_url %}<a href="{{ import_item.listing_url }}" target="_blank" rel="noopener noreferrer">View purchased listing ↗</a>{% endif %}
+  {% if import_item.existing_record_id %}<a href="/banknotes/{{ import_item.existing_record_id }}" target="_blank" rel="noopener">Completes existing record ↗</a>{% endif %}
+</div>
+<details class="import-evidence" id="banknoteImportEvidence" hidden><summary>Check sources</summary><ul></ul></details>

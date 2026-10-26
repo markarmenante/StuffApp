@@ -17,7 +17,7 @@ const {createHash} = require('node:crypto');
   const artifacts = process.env.ORDER_REVIEW_ARTIFACTS || fs.mkdtempSync(path.join(os.tmpdir(), 'banknote-order-review-'));
   fs.mkdirSync(artifacts, {recursive:true});
   const sourceFiles = ['app.py','banknote_imports.py','ebay_purchase_lookup.py','purchase_orders.py',
-    'static/js/banknote-imports.js','templates/banknote_import_new.html','templates/banknote_import_review.html','templates/banknote_import_detail.html','templates/partials/banknote_import_styles.html','templates/partials/collection_toolbar.html','templates/detail.html'].filter(file=>fs.existsSync(path.join(repo,file)));
+    'static/js/banknote-imports.js','templates/banknote_import_new.html','templates/banknote_import_review.html','templates/partials/banknote_import_detail_header.html','templates/partials/banknote_import_detail_sources.html','templates/partials/banknote_import_styles.html','templates/partials/collection_toolbar.html','templates/detail.html'].filter(file=>fs.existsSync(path.join(repo,file)));
   const hashes=()=>Object.fromEntries(sourceFiles.map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(repo,file))).digest('hex')]));
   const evidence={passed:[],failures:[],errors:[],externalRequests:[],sourceBefore:hashes()};
   const python = String.raw`
@@ -166,10 +166,10 @@ finally:server.server_close();temporary.cleanup()
   });
   const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright');
   const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL?{channel:process.env.BROWSER_CHANNEL}:{})});
-  async function run(name,fn){try{await fn();evidence.passed.push(name);console.log('PASS '+name);}catch(error){evidence.failures.push({name,error:error.stack});console.log('FAIL '+name+': '+error.message.split('\n')[0]);}}
+  async function run(name,fn){try{await fn();evidence.passed.push(name);console.log('PASS '+name);}catch(error){evidence.failures.push({name,error:error.stack});console.log('FAIL '+name+': '+error.stack);}}
   async function setup(mobile){
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width:mobile?390:1440,height:900},isMobile:mobile,hasTouch:mobile});
-    const releaseResults=[];
+    const releaseResults=[], draftWrites=[];
     await context.route('**/*',async route=>{
       if(new URL(route.request().url()).origin===origin){
         if(route.request().method()==='POST'&&route.request().url().endsWith('/release')){
@@ -181,8 +181,15 @@ finally:server.server_close();temporary.cleanup()
       return route.fulfill({contentType:route.request().resourceType()==='stylesheet'?'text/css':'text/javascript',body:''});
     });
     const page=await context.newPage();page.setDefaultTimeout(10000);page.on('pageerror',error=>evidence.errors.push(error.message));
+    page.on('request',request=>{
+      if (/\/banknotes\/imports\/[^/]+\/items\//.test(page.url()) && ['POST','PATCH','PUT','DELETE'].includes(request.method())) {
+        const pathname=new URL(request.url()).pathname;
+        draftWrites.push({method:request.method(),path:pathname});
+        if (!pathname.startsWith('/banknotes/imports/')) evidence.errors.push('Draft attempted a non-draft write: '+request.method()+' '+pathname);
+      }
+    });
     const state=async()=>{const response=await context.request.get(origin+'/__fixture/state');assert.equal(response.status(),200);return response.json();};
-    return {context,page,state,releaseResults,close:()=>context.close()};
+    return {context,page,state,releaseResults,draftWrites,close:()=>context.close()};
   }
   const numberValue=value=>Number(String(value).replace(/[^0-9.\-]/g,''));
   const draftFields=row=>JSON.parse(row.fields_json);
@@ -242,6 +249,21 @@ finally:server.server_close();temporary.cleanup()
     await run('isolated application starts with no pending drafts',async()=>{
       const t=await setup(false);try{const state=await t.state();assert.equal(state.drafts.length,0);assert.deepEqual(state.rows.map(row=>row.id),['preserved-blank','preserved-owned']);}finally{await t.close();}
     });
+    await run('ordinary collection detail keeps its existing fields and persistence',async()=>{
+      const t=await setup(false);try{
+        await t.page.goto(origin+'/banknotes/preserved-owned');
+        assert.equal(await t.page.locator('.detail-page-banknotes #mainForm').count(),1);
+        assert.equal(await t.page.locator('#mainForm').getAttribute('action'),'/banknotes/preserved-owned');
+        assert.equal(await t.page.locator('#banknoteImportRelease').count(),0);
+        assert.equal(await t.page.locator('#mainForm .banknote-grading-row').count(),1);
+        const response=t.page.waitForResponse(response=>response.url().includes('/banknotes/preserved-owned/')&&response.request().method()==='POST');
+        await t.page.locator('[name="printer"]').fill('Existing collection detail still saves');
+        await t.page.locator('[name="printer"]').blur();
+        assert.equal((await response).status(),200);
+        await t.page.reload();
+        assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Existing collection detail still saves');
+      }finally{await t.close();}
+    });
     for(const mobile of [false,true]){
       const label=mobile?'mobile':'desktop';
       await run(label+': blank Check stages three exact seller orders; full edits release one at a time',async()=>{
@@ -265,18 +287,43 @@ finally:server.server_close();temporary.cleanup()
           assert.equal(repeated.status(),200);assert.equal((await repeated.json()).id,id);
           assert.equal((await t.state()).drafts.filter(item=>item.batch_id===id).length,3,'retry must not duplicate drafts');
           await t.page.locator('[data-review-draft="'+drafts[0].id+'"]').click();
-          await t.page.locator('#banknoteImportDetailForm').waitFor();
-          for(const field of ['country','issuer','denomination','pick_number','grade_numeric','grading_authority','slab_number','serial_number','printer','watermark','price','notes']){
-            assert.equal(await t.page.locator('#banknoteImportDetailForm [name="'+field+'"]').count(),1,'full detail field '+field);
+          await t.page.locator('#mainForm').waitFor();
+          assert.equal(await t.page.locator('.detail-page-banknotes #mainForm').count(),1,'review uses the existing collection detail page');
+          assert.equal(await t.page.locator('#mainForm .banknote-imgs').count(),1,'review keeps the existing side-by-side banknote photos');
+          assert.equal(await t.page.locator('#mainForm .banknote-grading-row').count(),1,'review keeps the existing grading row');
+          assert.equal(await t.page.locator('#mainForm').getAttribute('action'),drafts[0].detail_url,'form writes only to this draft');
+          for(const field of ['order_number','marketplace']){
+            assert.equal(await t.page.locator('#mainForm [name="'+field+'"]').evaluate(input=>input.readOnly||input.disabled),true,'source '+field+' remains protected');
           }
+          assert.equal(await t.page.locator('#mainForm [data-delete-url]').count(),0,'draft must not offer live collection deletion');
+          for(const field of ['country','issuer','denomination','pick_number','grade_numeric','grading_authority','slab_number','serial_number','printer','watermark','price','notes']){
+            assert.equal(await t.page.locator('#mainForm [name="'+field+'"]').count(),1,'full detail field '+field);
+          }
+          await t.page.locator('.import-purchased-photos').evaluate(details=>{details.open=true;});
           await t.page.locator('#banknoteImportPhotos img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
           assert.equal(await t.page.locator('#banknoteImportPhotos img').count(),2);
+          const editablePreview=t.page.locator('[data-md-preview-for="condition"]');
+          const history=t.page.locator('[name="condition"]');
+          if(await editablePreview.isVisible()) await editablePreview.click();
+          await history.fill('**Inspected history** https://example.invalid/catalogue');
+          await history.blur();
+          await editablePreview.locator('strong').waitFor();
+          assert.equal(await editablePreview.locator('a.result-src').getAttribute('href'),'https://example.invalid/catalogue');
+          await editablePreview.locator('strong').click();
+          assert.equal(await history.isVisible(),true,'standard rich-text preview opens the editor');
+          await history.blur();
+          await t.page.locator('[name="size_width"]').fill('155.5 mm');
+          await t.page.locator('[name="size_width"]').blur();
+          await t.page.locator('[name="date_1"]').fill('1966 / AH1386');
+          await t.page.locator('[name="date_1"]').blur();
           await t.page.locator('[name="printer"]').fill('Reviewed fixture printer');
           await t.page.locator('[name="notes"]').fill('My inspection notes <script>window.unsafeDraft=true</script>');
           await t.page.keyboard.press('Control+s');
           await savedField(t,id,drafts[0].id,'printer','Reviewed fixture printer');
           await t.page.reload();
           assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Reviewed fixture printer');
+          assert.equal(await t.page.locator('[name="date_1"]').inputValue(),'1966 / AH1386','descriptive issue dates survive save/reload');
+          assert.equal(await t.page.locator('[name="size_width"]').inputValue(),'155.5 mm','fractional dimensions retain standard display');
           assert.equal(await t.page.locator('[name="notes"]').inputValue(),'My inspection notes <script>window.unsafeDraft=true</script>');
           assert.equal(await t.page.evaluate(()=>Boolean(window.unsafeDraft)),false);
           const savedPhotos=(await batchStatus(t,id)).items[0].photos.map(photo=>photo.url);
@@ -295,6 +342,14 @@ finally:server.server_close();temporary.cleanup()
           assert.deepEqual(rechecked.photos.map(photo=>photo.url),savedPhotos,'source refresh preserves selected draft photos');
           assert.deepEqual((await t.state()).rows,before.rows,'refreshing draft source must not touch collection');
           await t.page.locator('[data-review-draft="'+drafts[0].id+'"]').click();
+          // The familiar Check button must save and check this draft only.
+          await t.page.locator('[name="watermark"]').fill('Inspected before Check');
+          const draftCheckResponse=t.page.waitForResponse(response=>response.url()===origin+drafts[0].detail_url+'/check'&&response.request().method()==='POST');
+          await t.page.locator('#banknoteImportCheck').click();
+          assert.equal((await draftCheckResponse).status(),202);
+          await t.page.waitForFunction(()=>!document.getElementById('banknoteImportCheck').disabled);
+          assert.equal((await batchStatus(t,id)).items.find(item=>item.id===drafts[0].id).fields.watermark,'Inspected before Check');
+          assert.deepEqual((await t.state()).rows,before.rows,'Check from shared detail must keep collection unchanged');
           await noOverflow(t.page);await t.page.screenshot({path:path.join(artifacts,label+'-draft-detail.png'),fullPage:true});
           // Enter submits the draft form only. It must never release/create a note.
           await t.page.locator('[name="printer"]').press('Enter');await t.page.waitForTimeout(120);
@@ -417,6 +472,7 @@ finally:server.server_close();temporary.cleanup()
           assert(remote.warnings.some(message=>message.includes('Fixture independent warning')),'other unresolved warnings stay visible');
           assert(!remote.warnings.some(message=>message.includes('choose the missing or uncertain side manually')),'resolved side warning clears');
           await t.page.reload();
+          await t.page.locator('.import-purchased-photos').evaluate(details=>{details.open=true;});
           assert.equal(await t.page.locator('[data-photo-selected="image_1"]:visible').count(),1);
           assert.equal(await t.page.locator('[data-photo-selected="image_2"]:visible').count(),1);
           assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Reviewed before choosing photos');
@@ -442,7 +498,8 @@ finally:server.server_close();temporary.cleanup()
         assert.equal(await t.page.locator('[name="country"]').evaluate(field=>field.readOnly),false,'newly acquired draft fields remain editable');
         assert(await t.page.locator('[data-photo-side]').evaluateAll(buttons=>buttons.every(button=>button.disabled)),'existing front/back slots cannot be replaced');
         assert.equal(await t.page.locator('figure[data-photo-filename="recover-front.png"] [data-photo-side]').count(),0,'preserved original is view-only');
-        await t.page.locator('#banknoteImportPhotos img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+        await t.page.locator('.import-purchased-photos').evaluate(details=>{details.open=true;});
+          await t.page.locator('#banknoteImportPhotos img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
         const released=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
         await t.page.locator('#banknoteImportRelease').click();assert.equal((await released).status(),200);
         const result=t.releaseResults.at(-1);assert.equal(result.released[0].record_id,'recover-exact-partial');

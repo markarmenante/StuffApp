@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
-{% block title %}{{ record[cat_info.label_field] if record else 'New' }} — StuffApp{% endblock %}
+{% block title %}{{ import_item.title if import_draft|default(false) else (record[cat_info.label_field] if record else 'New') }} — StuffApp{% endblock %}
 
+{% set import_draft = import_draft|default(false) %}
 {% set r = record %}
 {% set _supports_purchase = category in ['coins', 'banknotes', 'cameras', 'lenses', 'pens', 'art', 'items', 'vehicles', 'recordings', 'audio', 'rifles'] %}
-{% set _purchase_state = purchase_lifecycle(category, r) if r and not is_new else none %}
+{% set _purchase_state = purchase_lifecycle(category, r) if r and not is_new and not import_draft else none %}
 {% macro val(field) %}{{ (r[field] if r and field in r.keys() and r[field] is not none else '') }}{% endmacro %}
 {% macro cell(field, label, colspan=1, rows=1) %}
 {% if not is_hidden_field(category, field) %}
@@ -430,9 +431,10 @@
 {% endmacro %}
 
 {% block content %}
-<div class="detail-page detail-page-{{ category }}">
+{% if import_draft %}{% include 'partials/banknote_import_styles.html' %}{% endif %}
+<div class="detail-page detail-page-{{ category }}{% if import_draft %} banknote-import banknote-import-detail{% endif %}"{% if import_draft %} data-import-mode="detail" data-draft-id="{{ import_item.id }}" data-uploaded-file-template="{{ url_for('uploaded_file', filename='__draft_image__') }}"{% endif %}>
 <form method="post"
-      action="{% if is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
+      action="{% if import_draft %}{{ import_item.detail_url }}{% elif is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
       enctype="multipart/form-data" id="mainForm" autocomplete="off"
       data-category="{{ category }}"
       data-is-new="{{ 'true' if is_new else 'false' }}">
@@ -445,6 +447,9 @@
   </aside>
   {% endif %}
   <!-- Floating nav: prev / next / back (+ optional Topic/Lookup), overlays the record header row -->
+  {% if import_draft %}
+  {% include 'partials/banknote_import_detail_header.html' %}
+  {% else %}
   <div class="detail-nav-overlay">
     {%- set _has_status_field = (fields | selectattr('name', 'equalto', 'status') | list) | length > 0 -%}
     {% if _purchase_state and _has_status_field %}
@@ -554,6 +559,8 @@
     <a class="back-link" href="{{ back_href if back_href else url_for('list_view', category=category) ~ ('#item-' ~ r['id'] if r and r['id'] else '') }}">← Back</a>
   </div>
 
+  {% endif %}{# ordinary detail navigation #}
+
   {% if is_new %}<div class="new-record-bar">Add a New {{ cat_info.singular }}</div>{% endif %}
 
 {% if focus_field %}
@@ -593,6 +600,8 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   if (!first) return;
   window.requestAnimationFrame(function () {
+    // Do not steal focus if the owner already started entering an order.
+    if (document.activeElement && document.activeElement !== document.body) return;
     first.focus({ preventScroll: true });
     if (typeof first.select === 'function' && first.tagName === 'INPUT') {
       first.select();
@@ -1366,31 +1375,33 @@ document.addEventListener('DOMContentLoaded', function () {
        The ✂ button opens the quad-corner crop fix-up: the recorded
        original with the stored crop's corners draggable. -->
   <div class="coin-imgs coin-imgs-large banknote-imgs">
-    <div class="coin-img-panel drop-zone" data-field="image_1"
-         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+    <div class="coin-img-panel{% if not import_draft %} drop-zone{% endif %}" data-field="image_1"
+         data-upload-url="{% if not is_new and not import_draft %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_1'] and r['image_1']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="">
-        {% if not is_new %}<button type="button" class="quad-fix-btn" title="Adjust crop" aria-label="Adjust front crop" onclick="openQuadFix(event, 'image_1')">✂</button>{% endif %}
+        {% if not is_new and not import_draft %}<button type="button" class="quad-fix-btn" title="Adjust crop" aria-label="Adjust front crop" onclick="openQuadFix(event, 'image_1')">✂</button>{% endif %}
       {% else %}<span style="font-size:28px;color:#ccc">💵</span>{% endif %}
-      <label class="file-upload-lbl">
+      {% if not import_draft %}<label class="file-upload-lbl">
         <input type="file" name="image_1" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_1')">
-      </label>
+      </label>{% endif %}
     </div>
-    <div class="coin-img-panel drop-zone" data-field="image_2"
-         data-upload-url="{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
+    <div class="coin-img-panel{% if not import_draft %} drop-zone{% endif %}" data-field="image_2"
+         data-upload-url="{% if not is_new and not import_draft %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_2'] and r['image_2']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="">
-        {% if not is_new %}<button type="button" class="quad-fix-btn" title="Adjust crop" aria-label="Adjust back crop" onclick="openQuadFix(event, 'image_2')">✂</button>{% endif %}
+        {% if not is_new and not import_draft %}<button type="button" class="quad-fix-btn" title="Adjust crop" aria-label="Adjust back crop" onclick="openQuadFix(event, 'image_2')">✂</button>{% endif %}
       {% else %}<span style="font-size:28px;color:#ccc">💵</span>{% endif %}
-      <label class="file-upload-lbl">
+      {% if not import_draft %}<label class="file-upload-lbl">
         <input type="file" name="image_2" accept="image/*" style="display:none"
                onchange="uploadViaInput(this, '{% if not is_new %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}', 'image_2')">
-      </label>
+      </label>{% endif %}
     </div>
   </div>
 
-  {% if not is_new %}
+  {% if import_draft %}{% include 'partials/banknote_import_detail_sources.html' %}{% endif %}
+
+  {% if not is_new and not import_draft %}
   <style>
     .banknote-imgs .coin-img-panel { position: relative; }
     .quad-fix-btn {
@@ -1600,7 +1611,7 @@ document.addEventListener('DOMContentLoaded', function () {
        direct path when the photos are in and only this field is blank. #}
     <div class="dcell serial-scan-cell">
       <input type="text" name="serial_number" value="{{ val('serial_number') }}" {% if is_new and not val('serial_number') %}placeholder="Serial #"{% endif %}>
-      {% if _is_owner and not is_new %}
+      {% if _is_owner and not is_new and not import_draft %}
       <button type="button" class="serial-scan-btn"
               data-url="{{ url_for('banknote_scan_serial', record_id=r['id']) }}"
               title="Read the serial number from the note's photos and save it">Scan</button>
@@ -1644,8 +1655,10 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
+  {% if not import_draft %}
   {% include 'partials/market_purchase_capture.html' %}
   {% include 'partials/original_listing.html' %}
+  {% endif %}
 
   <!-- Grade, Conditions -->
   <p id="banknoteCheckSources" role="status" hidden style="padding:8px 12px;white-space:pre-line;overflow-wrap:anywhere"></p>
@@ -1729,11 +1742,11 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
   {% endif %}
-  {% if not is_new %}{% include 'partials/pedigree_panels.html' %}{% endif %}
+  {% if not is_new and not import_draft %}{% include 'partials/pedigree_panels.html' %}{% endif %}
 
   {# Unbounded table-backed docs row, same shape as coins. #}
   {% set _documents = (record_documents_by_set.get('main') if record_documents_by_set else None) or (((r['documents'] if r and 'documents' in r.keys() else None) or '')|from_json) %}
-  {{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}
+  {% if not import_draft %}{{ dyndocrow(_documents, css_classes='dgrid dg4 property-doc-row') }}{% endif %}
 
   {# Origin map, like the coin detail page: pinned at the note's
      issuing city when it names one (municipality — notgeld towns),
@@ -3423,7 +3436,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
   {% endif %}{# end category blocks #}
 
-  {% if is_new %}
+  {% if import_draft %}
+  <div class="save-bar"><span class="autosave-hint">Draft edits save automatically</span><a href="{{ back_href }}" class="back-link" data-import-back>← Order review</a></div>
+  {% elif is_new %}
   <!-- Save bar (new records only) -->
   <div class="save-bar">
     <button type="submit" class="btn-save" id="saveBtn">Save</button>
@@ -3451,6 +3466,7 @@ document.addEventListener('DOMContentLoaded', function () {
 </form>
 </div>
 
+{% if not import_draft %}
 <script>
 function confirmDelete(btn) {
   // Two-click confirm using the shared arm/disarm helpers (defined
@@ -3475,6 +3491,9 @@ function previewFile(input, previewId) {
   }
 }
 
+</script>
+{% endif %}
+<script>
 // Format Results markdown-ish text into HTML (mirror of the server
 // filter so we can refresh the preview without a page reload).
 function formatResultsHtml(text) {
@@ -3561,7 +3580,9 @@ function formatResultsHtml(text) {
   return out.join('');
 }
 window.formatResultsHtml = formatResultsHtml;
-
+</script>
+{% if not import_draft %}
+<script>
 // Re-render preview whenever the raw textarea changes
 document.getElementById('resultsRaw')?.addEventListener('input', (e) => {
   const disp = document.getElementById('resultsDisplay');
@@ -8619,6 +8640,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
 </script>
 {% endif %}
 
+{% endif %}{# collection persistence and Check scripts; drafts use their own saved-draft controller #}
+
 {# ── Floating-nav overflow → kebab ────────────────────────────────
    The detail page's floating action bar (PDF / Check / History /
    Lookup / prev / next / Back) sits over the top-nav row. On narrow
@@ -9005,6 +9028,7 @@ window.openPerplexitySearch = function openPerplexitySearch(btn) {
 };
 </script>
 {% if category == 'banknotes' %}
+{% if import_draft %}<script id="banknote-import-data" type="application/json">{{ {'batch':import_batch, 'item':import_item, 'allowed_fields':import_editable_fields}|tojson }}</script>{% endif %}
 <script src="{{ url_for('static', filename='js/banknote-imports.js') }}?v={{ asset_v('js/banknote-imports.js') }}" defer></script>
 <script>
 (function () {

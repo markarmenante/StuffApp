@@ -21409,6 +21409,12 @@ def _normalize_import_updates(updates):
             raise banknote_imports.ImportProblem('Choose a valid purchase status.')
         if field=='price':value=_normalize_price_input(value)
         elif field in ('date_1','date_2'):value=_normalize_coin_year_input(value)
+        elif field in ('size_width','size_height') and value:
+            # The shared detail form displays physical measurements with mm.
+            measurement=re.fullmatch(r'([+]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*(?:mm)?',value,re.IGNORECASE)
+            if not measurement:
+                raise banknote_imports.ImportProblem('Enter banknote dimensions in millimetres.')
+            value=measurement.group(1).lstrip('+').replace(',','.')
         value=normalize_field_value('banknotes',field,value)
         result[field]=value or None
     return result
@@ -21494,6 +21500,34 @@ def _import_context(batch=None,item=None):
                 cat_info=CATEGORIES['banknotes'],is_new=False)
 
 
+def _import_detail_context(batch,item):
+    """Use the ordinary banknote form without loading a live collection row.
+
+    Draft IDs belong only to banknote_import_items. Even a draft that will
+    complete an existing record must render its saved snapshot here, never the
+    live record or the collection detail route's write-capable helpers.
+    """
+    record=dict.fromkeys(_table_cols(get_db(),'banknotes'))
+    record.update({key:value for key,value in item['fields'].items() if key in record})
+    record.update(id=item['id'],order_number=item['order_number'],marketplace='eBay',
+                  banknote_id=None,cat_id=None)
+    return dict(category='banknotes',cat_info=CATEGORIES['banknotes'],record=record,
+                counts=get_counts(),current_category='banknotes',categories=CATEGORIES,
+                fields=visible_fields('banknotes'),is_new=False,import_draft=True,
+                import_batch=batch,import_item=item,batch=batch,item=item,
+                import_editable_fields=[field['name'] for field in _import_fields()],
+                prev_id=None,next_id=None,back_href=batch['url'],hertz=None,
+                coin_age_val=None,coin_capital=None,property_topics=None,
+                property_people_rows=[],camera_compatible_lenses=None,
+                lens_compatible_cameras=None,property_pill_categories=[],
+                service_overdue=False,service_years=None,watch_service_events=[],
+                watch_service_has_open_return=False,record_documents_by_set={},
+                person_medications_by_position={},banknote_origin=None,
+                pedigree_events=[],pedigree_purchase=None,today_iso=None,
+                complications_options=COMPLICATIONS_OPTIONS,
+                vlists=current_vlists('banknotes'),ta=build_typeahead('banknotes'))
+
+
 @app.get('/banknotes/imports/new')
 def banknote_import_new():
     require_owner()
@@ -21537,7 +21571,9 @@ def banknote_import_detail(batch_id,item_id):
         batch=banknote_imports.status(db,batch_id)
         item=next((i for i in batch['items'] if i['id']==item_id),None)
         if not item:abort(404)
-        return render_template('banknote_import_detail.html',**_import_context(batch,item))
+        response=app.make_response(render_template('detail.html',**_import_detail_context(batch,item)))
+        response.headers['Cache-Control']='no-store'
+        return response
     except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
 
 

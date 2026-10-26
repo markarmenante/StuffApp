@@ -70,6 +70,55 @@
   let form, fields = [], baseline = {}, saving = null, saveTimer, busy = false, conflict = null;
   let leftPage = false;
   const dirty = () => fields.some(field => field.value !== (baseline[field.name] || ''));
+  // The shared detail form displays units/currency, while saved draft fields
+  // retain their canonical values. Compare display to display for CAS merges.
+  function displayValue(field, data) {
+    const value = text(data?.[field.name]);
+    if (!root.classList.contains('banknote-import-detail')) return value;
+    if (field.name === 'date_1') return text(data?.date_1_text) || (/^-\d+$/.test(value) ? value.slice(1) + ' BC' : value);
+    if (!value) return value;
+    if (field.name === 'price' && /^-?\d+(?:\.\d+)?$/.test(value)) {
+      const parts = value.split('.');
+      return '$' + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + (parts[1] || '').padEnd(2,'0');
+    }
+    if (field.classList.contains('coin-unit-input')) return value + (field.dataset.suffix || '');
+    return value;
+  }
+  function assignField(field, value) {
+    if (field.tagName === 'SELECT' && value && ![...field.options].some(option => option.value === value)) {
+      field.add(new Option(value === 'Own' ? 'Owned' : value, value));
+    }
+    field.value = value;
+  }
+  function syncDetailDisplay() {
+    if (!form || !root.classList.contains('banknote-import-detail')) return;
+    form.querySelectorAll('.date-overlay-input').forEach(input => {
+      const display = input.parentElement.querySelector('.date-overlay-display');
+      if (display) display.textContent = /^\d{4}-\d{2}-\d{2}$/.test(input.value)
+        ? input.value.slice(5,7) + '/' + input.value.slice(8,10) + '/' + input.value.slice(0,4) : input.value;
+    });
+    form.querySelectorAll('[data-md-preview-for]').forEach(preview => {
+      const field = form.elements.namedItem(preview.dataset.mdPreviewFor);
+      if (!field) return;
+      if (preview.dataset.savedText !== field.value) { preview.innerHTML = window.formatResultsHtml(field.value); preview.dataset.savedText = field.value; }
+      if (!field.value) { preview.style.display = 'none'; field.style.display = ''; }
+    });
+    fields.filter(field => field.tagName === 'TEXTAREA').forEach(field => window._autosizeTextarea?.(field));
+    const grade = form.elements.namedItem('grade');
+    const summary = form.querySelector('.banknote-grade-summary');
+    if (summary) summary.value = [grade?.selectedOptions[0]?.textContent || '', form.elements.namedItem('grade_modifier')?.value || ''].filter(Boolean).join(' ');
+    form.querySelectorAll('.banknote-imgs .coin-img-panel[data-field]').forEach(panel => {
+      const filename = item.fields?.[panel.dataset.field];
+      const img = panel.querySelector('img');
+      if (!filename) { if (img) img.remove(); return; }
+      const url = sameOrigin(root.dataset.uploadedFileTemplate.replace('__draft_image__', encodeURIComponent(filename)));
+      if (img && img.getAttribute('src') === url) return;
+      const image = img || el('img'); image.src = url;
+      image.alt = panel.dataset.field === 'image_1' ? 'Banknote front' : 'Banknote back';
+      panel.querySelector(':scope > span')?.remove();
+      if (!img) panel.prepend(image);
+    });
+  }
   const checkRunning = draft => draft.check_state === 'checking';
   const batchRunning = () => ['queued', 'sign_in_required', 'challenge_required'].includes(batch.state)
     || (batch.items || []).some(draft => draft.state === 'draft' && ['idle', 'checking'].includes(draft.check_state));
@@ -152,6 +201,7 @@
     return value?.message || value?.warning || value?.summary || value?.title || value?.label || value?.field || '';
   }
   function renderDetail() {
+    syncDetailDisplay();
     document.getElementById('banknoteImportState').textContent = stateLabel(item);
     const gallery = document.getElementById('banknoteImportPhotos');
     const signature = JSON.stringify(item.photos || []);
@@ -209,16 +259,16 @@
     // A status request can finish after a newer autosave response.
     if (Number(remote.revision) < Number(item.revision)) return false;
     const conflicting = fields.filter(field => field.value !== baseline[field.name]
-      && text(remote.fields?.[field.name]) !== baseline[field.name]
-      && text(remote.fields?.[field.name]) !== field.value);
+      && displayValue(field, remote.fields) !== baseline[field.name]
+      && displayValue(field, remote.fields) !== field.value);
     if (conflicting.length) {
       conflict = remote;
       say('This draft changed elsewhere. Your edits are kept here. Review the saved values before saving again.', true);
       refresh.hidden = false; refresh.textContent = 'Review latest saved values'; renderDetail(); return false;
     }
     fields.forEach(field => {
-      const value = text(remote.fields?.[field.name]);
-      if (field.value === baseline[field.name]) field.value = value;
+      const value = displayValue(field, remote.fields);
+      if (field.value === baseline[field.name]) assignField(field, value);
       baseline[field.name] = value;
     });
     item = remote; renderDetail(); return true;
@@ -241,9 +291,9 @@
           const oldValue = baseline[field.name];
           if (Object.hasOwn(updates, field.name)) {
             // Only reflect canonical saved values if typing has not continued.
-            if (field.value === updates[field.name]) field.value = text(remote.fields?.[field.name]);
-          } else if (field.value === oldValue) field.value = text(remote.fields?.[field.name]);
-          baseline[field.name] = text(remote.fields?.[field.name]);
+            if (field.value === updates[field.name]) assignField(field, displayValue(field, remote.fields));
+          } else if (field.value === oldValue) assignField(field, displayValue(field, remote.fields));
+          baseline[field.name] = displayValue(field, remote.fields);
         });
         item = remote; say(dirty() ? 'Saving your latest edits…' : 'Draft saved · not yet in collection');
       } catch (error) {
@@ -280,21 +330,21 @@
     const panel = el('section', undefined, 'import-evidence'); panel.id = 'banknoteImportConflict';
     panel.append(el('strong', 'A newer draft was saved'));
     const list = el('ul');
-    fields.filter(field => field.value !== text(remote.fields?.[field.name])).forEach(field => {
-      const label = field.closest('label')?.querySelector('span')?.textContent || field.name;
-      list.append(el('li', label + ' — saved: ' + (text(remote.fields?.[field.name]) || '(blank)') + ' · your edit: ' + (field.value || '(blank)')));
+    fields.filter(field => field.value !== displayValue(field, remote.fields)).forEach(field => {
+      const label = field.closest('label')?.querySelector('span')?.textContent || field.closest('.dcell, .bottom-cell')?.querySelector('.clabel, .blabel')?.textContent || field.name;
+      list.append(el('li', label + ' — saved: ' + (displayValue(field, remote.fields) || '(blank)') + ' · your edit: ' + (field.value || '(blank)')));
     });
     panel.append(list); const actions = el('div', undefined, 'import-actions');
     const keep = el('button', 'Keep my edits', 'toolbar-btn pill active'); keep.type = 'button';
     const use = el('button', 'Use saved values', 'toolbar-btn pill'); use.type = 'button';
     keep.addEventListener('click', async () => {
       const localEdits = Object.fromEntries(fields.filter(field => field.value !== baseline[field.name]).map(field => [field.name,field.value]));
-      fields.forEach(field => { baseline[field.name] = text(remote.fields?.[field.name]); field.value = Object.hasOwn(localEdits,field.name) ? localEdits[field.name] : baseline[field.name]; });
+      fields.forEach(field => { baseline[field.name] = displayValue(field, remote.fields); assignField(field, Object.hasOwn(localEdits,field.name) ? localEdits[field.name] : baseline[field.name]); });
       item = remote; conflict = null; panel.remove(); refresh.hidden = true;
       try { await saveDraft(); } catch (_) {} renderDetail();
     });
     use.addEventListener('click', () => {
-      fields.forEach(field => { baseline[field.name] = text(remote.fields?.[field.name]); field.value = baseline[field.name]; });
+      fields.forEach(field => { baseline[field.name] = displayValue(field, remote.fields); assignField(field, baseline[field.name]); });
       item = remote; conflict = null; panel.remove(); refresh.hidden = true; say('Showing the latest saved draft.'); renderDetail();
     });
     actions.append(keep,use); panel.append(actions); status.after(panel);
@@ -342,10 +392,55 @@
     document.getElementById('banknoteImportRetry').addEventListener('click', event => readOrder(event, false));
     document.getElementById('banknoteImportRefreshOrder').addEventListener('click', event => readOrder(event, true));
   } else {
-    form = document.getElementById('banknoteImportDetailForm'); fields = [...form.querySelectorAll('[name]')];
+    form = document.getElementById('mainForm') || document.getElementById('banknoteImportDetailForm');
+    const allowed = new Set(seed.allowed_fields || [...form.querySelectorAll('[name]')].map(field => field.name));
+    fields = [...form.querySelectorAll('input[name]:not([type=file]), textarea[name], select[name]')].filter(field => allowed.has(field.name));
+    if (root.classList.contains('banknote-import-detail')) {
+      form.querySelectorAll('[name]').forEach(field => {
+        if (allowed.has(field.name)) assignField(field, displayValue(field, item.fields));
+        else if (field.tagName === 'SELECT') field.disabled = true;
+        else field.readOnly = true;
+      });
+      form.querySelectorAll('[data-md-preview-for]').forEach(preview => {
+        const field = form.elements.namedItem(preview.dataset.mdPreviewFor);
+        if (!field) return;
+        preview.dataset.savedText = field.value;
+        const edit = () => {
+          if (field.disabled || field.readOnly) return;
+          preview.style.display = 'none'; field.style.display = ''; field.focus(); window._autosizeTextarea?.(field);
+        };
+        preview.addEventListener('click', event => { if (!event.target.closest('a')) edit(); });
+        preview.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); edit(); } });
+        field.addEventListener('blur', () => {
+          if (field.value) { preview.innerHTML = window.formatResultsHtml(field.value); preview.dataset.savedText = field.value; preview.style.display = ''; field.style.display = 'none'; }
+        });
+      });
+      form.querySelectorAll('.coin-date-edit-btn').forEach(button => button.addEventListener('click', () => {
+        const field = document.getElementById(button.dataset.target);
+        if (field && !field.disabled && !field.readOnly) { field.focus(); field.select(); }
+      }));
+      form.querySelectorAll('.ta-input').forEach((input, index) => {
+        const options = (input.dataset.ta || '').split('||').filter(Boolean);
+        if (!options.length) return;
+        const list = el('datalist'); list.id = 'draft-options-' + index;
+        options.forEach(value => list.append(new Option(value, value)));
+        input.setAttribute('list', list.id); input.after(list);
+      });
+      form.querySelectorAll('.banknote-imgs .coin-img-panel').forEach(panel => {
+        panel.addEventListener('click', () => {
+          const image = panel.querySelector('img');
+          if (image?.getAttribute('src')) window.open(sameOrigin(image.getAttribute('src')), '_blank', 'noopener');
+        });
+      });
+    }
     fields.forEach(field => {
       baseline[field.name] = field.value;
       field.addEventListener('input', () => {
+        if (field.name === 'date_1') {
+          const companion = fields.find(candidate => candidate.name === 'date_1_text');
+          if (companion && !companion.readOnly && !companion.disabled) companion.value = field.value;
+        }
+        syncDetailDisplay();
         say('Unsaved changes…'); clearTimeout(saveTimer);
         if (!conflict) saveTimer = setTimeout(() => saveDraft().catch(() => {}), 650);
       });

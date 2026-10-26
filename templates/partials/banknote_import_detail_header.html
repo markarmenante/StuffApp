@@ -1,0 +1,15 @@
+{# Saved drafts use the normal banknote form; only its workflow actions differ. #}
+<header class="import-toolbar" aria-label="Banknote draft review">
+  <span class="import-badge" id="banknoteImportState">Saved draft</span>
+  <span id="banknoteImportTitle">{{ import_item.title }}</span>
+  <nav class="import-actions">
+    <button class="toolbar-btn pill" type="button" id="banknoteImportSave">Save draft</button>
+    <button class="toolbar-btn pill" type="button" id="banknoteImportCheck">✓ Check</button>
+    <button class="toolbar-btn pill active" type="button" id="banknoteImportRelease">Release to Collection</button>
+    <a class="toolbar-btn pill" href="{{ back_href }}" data-import-back>← Order review</a>
+  </nav>
+</header>
+<p class="import-status" id="banknoteImportStatus" role="status" aria-live="polite">Saved draft · not yet in collection</p>
+<button class="toolbar-btn pill" id="banknoteImportRefresh" type="button" hidden>Refresh saved status</button>
+<div class="import-evidence" id="banknoteImportWarnings" hidden></div>
+{% if import_item.preserved_fields|default([]) %}<p class="import-intro" id="banknoteImportPreserved">Existing record values and photographs are preserved. Missing details can be completed here.</p>{% endif %}

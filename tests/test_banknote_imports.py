@@ -293,6 +293,64 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(response.json['item']['purchase']['price'],original)
         self.assertEqual(response.json['item']['fields']['price'],'$1.23')
 
+    def test_draft_review_uses_existing_detail_template_without_live_record_side_effects(self):
+        b=self.imported();item=b['items'][0]
+        before=[tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items ORDER BY id')]
+        with patch.object(stuff,'render_template',wraps=stuff.render_template) as render, \
+                patch.object(stuff,'ensure_country_history') as history, \
+                patch.object(stuff,'_start_import_checks') as start, \
+                patch.object(stuff,'_queue_import_check') as check:
+            response=self.client.get(item['detail_url'])
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(render.call_args.args[0],'detail.html')
+        context=render.call_args.kwargs
+        self.assertTrue(context['import_draft']);self.assertFalse(context['is_new'])
+        self.assertEqual(context['back_href'],b['url'])
+        self.assertEqual(context['record']['id'],item['id'])
+        self.assertIsNone(context['record']['cat_id']);self.assertIsNone(context['record']['banknote_id'])
+        self.assertEqual(context['record']['order_number'],item['order_number'])
+        self.assertEqual(context['record']['marketplace'],'eBay')
+        self.assertEqual(context['record']['price'],item['fields']['price'])
+        self.assertNotIn('order_number',context['import_editable_fields'])
+        self.assertNotIn('image_1',context['import_editable_fields'])
+        self.assertEqual(context['record_documents_by_set'],{})
+        self.assertIsNone(context['banknote_origin'])
+        html=response.get_data(as_text=True)
+        self.assertIn('id="mainForm"',html)
+        self.assertIn('class="coin-imgs coin-imgs-large banknote-imgs"',html)
+        self.assertEqual(response.headers['Cache-Control'],'no-store')
+        self.assertFalse(history.called);self.assertFalse(start.called);self.assertFalse(check.called)
+        self.assertEqual(before,[tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items ORDER BY id')])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+
+    def test_recovery_detail_renders_saved_draft_snapshot_not_existing_live_identity(self):
+        self.partial_record();b=self.imported();item=next(i for i in b['items'] if i.get('existing_record_id'))
+        with patch.object(stuff,'render_template',wraps=stuff.render_template) as render:
+            self.assertEqual(self.client.get(item['detail_url']).status_code,200)
+        context=render.call_args.kwargs
+        self.assertEqual(context['record']['id'],item['id'])
+        self.assertNotEqual(context['record']['id'],'failed-form')
+        self.assertEqual(context['record']['image_1'],'saved-front.jpg')
+        self.assertEqual(context['record']['notes'],'Keep user text')
+        self.assertIn('notes',context['import_item']['preserved_fields'])
+        self.assertIn('image_1',context['import_item']['preserved_fields'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+        self.assertIsNone(self.db.execute("SELECT country FROM banknotes WHERE id='failed-form'").fetchone()[0])
+
+    def test_shared_detail_display_values_normalize_without_losing_paid_cents(self):
+        b=self.imported();item=b['items'][0]
+        response=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{
+            'size_width':'155 mm','size_height':'66.5 mm','date_1':'450 BC','price':'$599.89'}})
+        self.assertEqual(response.status_code,200,response.json)
+        fields=response.json['item']['fields']
+        self.assertEqual(fields['size_width'],'155');self.assertEqual(fields['size_height'],'66.5')
+        self.assertEqual(fields['date_1'],'-450');self.assertEqual(fields['price'],'$599.89')
+        item=response.json['item']
+        rejected=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'size_width':'6 inches'}})
+        self.assertEqual(rejected.status_code,409)
+        current=self.client.get(b['status_url']).json
+        self.assertEqual(next(i for i in current['items'] if i['id']==item['id'])['fields']['size_width'],'155')
+
     def ambiguous_photos(self,b=None,item=None):
         b=b or self.imported();item=item or b['items'][0]
         with patch.object(self,'classify',return_value={'photos':[]}):

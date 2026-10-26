@@ -22,8 +22,11 @@ owner/account-bound access. They are protected from orphan cleanup. Source text 
 untrusted evidence. A title without the usual banknote discovery words is retained;
 ambiguous quantities and bundles stay visible but blocked from release as one note.
 
-The review screen opens each saved draft for edits and explicit release. Changes use
-a draft revision: a stale save or late Check cannot overwrite newer edits. Check
+The review list opens each saved draft in the existing banknote detail page,
+including its identification, side-by-side images, grading, purchase and reference
+fields. Save draft, Check, Release to Collection and Order review use draft routes;
+collection-only actions are available after release. Saved original photos can be
+selected in Purchased photos. Changes use a draft revision: a stale save or late Check cannot overwrite newer edits. Check
 failures persist with a retry message. Read-only status GETs never start provider
 work. Unstarted checks resume after restart; an interrupted active check is shown
 as retryable after its lease expires, without an automatic paid replay.

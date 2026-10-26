@@ -45,6 +45,15 @@
 .banknote-import .import-bottom-actions { padding: 16px; background: var(--surface); }
 .banknote-import button:disabled { opacity: .55; cursor: wait; }
 .banknote-import [hidden] { display: none !important; }
+.banknote-import-detail { max-width: none; margin: 0; }
+.banknote-import-detail .import-toolbar { padding: 8px 12px; }
+.banknote-import-detail .import-toolbar #banknoteImportTitle { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.banknote-import-detail .import-toolbar .import-actions { margin: 0; }
+.banknote-import-detail .import-status { margin: 8px 12px; }
+.banknote-import-detail .import-intro { padding: 8px 12px; }
+.banknote-import-detail .import-purchased-photos > summary { cursor: pointer; }
+.banknote-import-detail .banknote-imgs img { cursor: zoom-in; }
+.banknote-import-detail .save-bar { justify-content: space-between; }
 @media(max-width:650px) {
  .banknote-import .import-toolbar { padding: 10px; gap: 8px; }
  .banknote-import .import-toolbar h1 { flex-basis: 100%; }
