@@ -48,6 +48,7 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-caribbean-browser-db-') as tem
    ('eccb-5','Eastern Caribbean States',1984,'Eastern Caribbean Central Bank','5 Dollars','P-18a','1984', 'Own','Fixture-CB5'),
    ('grenada-separate','Grenada',1980,'Synthetic separate territorial issuer','1 Dollar','Fixture-S1','1980', 'Own','Fixture-Grenada'),
    ('canada-separate','Canada',1967,'Bank of Canada','1 Dollar','P-84a','1967', 'Own','Fixture-Canada'),
+   ('jamaica-following','Jamaica',1957,'Government of Jamaica','1 Pound','P-41','1957', 'Own','Fixture-Jamaica'),
    ('solomon-1977','Solomon Islands',1977,'Solomon Islands Monetary Authority','5 Dollars','P-6a','1977', 'Ordered','B426'),
    ('solomon-modern','Solomon Islands',1980,'Solomon Islands Monetary Authority','5 Dollars','Fixture-P10','1980', 'Own','Fixture-Solomon-modern'),
   ]
@@ -143,7 +144,7 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-caribbean-browser-db-') as tem
               assert.match(await issuer(t.page,'ecca').innerText(),/1965.?1983/);
               assert.doesNotMatch(await issuer(t.page,'ecca').innerText(),/1951.?1965/);
             }else assert.equal(await t.page.locator('.us-series-panel:not([data-banknote-issuer])').count(),0);
-            const actual=await t.page.locator('.item-list-banknotes > .item-row').evaluateAll(rows=>rows.map(r=>r.id.replace(/^item-/,'')));
+            const actual=await t.page.locator('.item-list-banknotes .item-row').evaluateAll(rows=>rows.map(r=>r.id.replace(/^item-/,'')));
             assert.deepEqual(actual.filter(id=>regionalIds.includes(id)),regionalIds,'issuer, numeric denomination, and Pick variety ordering');
             const indices=regionalIds.map(id=>actual.indexOf(id));
             assert.equal(Math.max(...indices)-Math.min(...indices),regionalIds.length-1,'regional notes remain contiguous');
@@ -159,6 +160,41 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-caribbean-browser-db-') as tem
           }finally{await t.close();}
         });
       }
+      await run(device+': following Jamaica stays outside the Caribbean family with a visible end boundary in both History modes',async()=>{
+        for(const history of [true,false]) {
+          const t=await setup(mobile,history);try{
+            const scope=t.page.locator('section[data-banknote-family-scope="eastern-caribbean"]');
+            assert.equal(await scope.count(),1,'one semantic regional scope');
+            assert.deepEqual(await scope.locator('.item-row').evaluateAll(rows=>rows.map(row=>row.id.replace(/^item-/,''))),regionalIds);
+            const jamaica=t.page.locator('#item-jamaica-following');
+            assert.equal(await jamaica.evaluate(row=>Boolean(row.closest('[data-banknote-family-scope]'))),false,'Jamaica must not inherit the preceding Caribbean family');
+            const boundary=scope.locator('[data-banknote-family-end="eastern-caribbean"]');
+            assert.equal(await boundary.count(),1);
+            assert.equal(await boundary.getAttribute('role'),'separator');
+            const positions=await boundary.evaluate(element=>{
+              const parent=element.closest('[data-banknote-family-scope]'),jamaica=document.getElementById('item-jamaica-following');
+              const last=parent.querySelectorAll('.item-row');
+              const style=getComputedStyle(element),box=element.getBoundingClientRect();
+              return {
+                afterLastRow:Boolean(last[last.length-1].compareDocumentPosition(element)&Node.DOCUMENT_POSITION_FOLLOWING),
+                beforeJamaica:Boolean(parent.compareDocumentPosition(jamaica)&Node.DOCUMENT_POSITION_FOLLOWING),
+                height:box.height,width:box.width,display:style.display,visibility:style.visibility,
+                borderTop:parseFloat(style.borderTopWidth),borderBottom:parseFloat(style.borderBottomWidth),background:style.backgroundColor,
+              };
+            });
+            assert.equal(positions.afterLastRow,true);
+            assert.equal(positions.beforeJamaica,true);
+            assert(positions.height>0&&positions.width>0&&positions.display!=='none'&&positions.visibility!=='hidden',JSON.stringify(positions));
+            assert(positions.borderTop>0||positions.borderBottom>0||!['transparent','rgba(0, 0, 0, 0)'].includes(positions.background),'boundary needs a visible rule');
+            assert.match(await jamaica.innerText(),/Government of Jamaica/);
+            await boundary.evaluate(element=>{
+              const toolbar=document.querySelector('.list-toolbar').getBoundingClientRect();
+              scrollBy(0,element.getBoundingClientRect().top-toolbar.bottom-220);
+            });
+            await t.page.screenshot({path:path.join(artifacts,'caribbean-end-'+device+'-'+(history?'history':'compact')+'.png')});
+          }finally{await t.close();}
+        }
+      });
       await run(device+': source country, territorial attribution, issuer, full Pick and image targets survive',async()=>{
         const t=await setup(mobile);try{
           for(const id of regionalIds){

@@ -125,6 +125,60 @@ class CaribbeanTests(unittest.TestCase):
             self.assertIn('P-14h', html)
             self.assertIn('P-14j', html)
 
+    def test_family_closes_before_following_country_in_both_history_modes(self):
+        from html.parser import HTMLParser
+        class ScopeParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.stack, self.scopes, self.parents = [], [], {}
+            def handle_starttag(self, tag, attributes):
+                attrs = dict(attributes)
+                if tag == 'section':
+                    scope = {'rows': [], 'boundary': None} if attrs.get('data-banknote-family-scope') else None
+                    self.stack.append(scope)
+                    if scope is not None:
+                        self.scopes.append(scope)
+                scope = next((value for value in reversed(self.stack) if value is not None), None)
+                if 'item-row' in attrs.get('class', '').split():
+                    self.parents[attrs['id']] = scope
+                    if scope is not None:
+                        scope['rows'].append(attrs['id'])
+                if attrs.get('data-banknote-family-end'):
+                    scope['boundary'] = attrs
+            def handle_endtag(self, tag):
+                if tag == 'section':
+                    self.stack.pop()
+        self.fixture()
+        self.add('jamaica', 'Jamaica', 'Government of Jamaica', '1 Pound', 'P-37', 1957)
+        self.add('canada', 'Canada', 'Bank of Canada', '1 Dollar', 'P-84a', 1967)
+        placements = stuff.banknote_grouping(self.rows())
+        self.assertTrue(placements['central10']['regional_end'])
+        self.assertNotIn('regional_end', placements['jamaica'])
+        by_id = {row['id']: row for row in self.rows()}
+        # Purchase-date views can interrupt and later reopen the regional run.
+        interrupted = stuff.banknote_grouping([by_id['authority1'], by_id['jamaica'], by_id['central10']])
+        self.assertTrue(interrupted['authority1']['regional_end'])
+        self.assertTrue(interrupted['central10']['regional_heading'])
+        self.assertTrue(interrupted['central10']['regional_end'])
+        for history in ('0', '1'):
+            html = stuff.app.test_client().get('/banknotes', query_string={'history': history}).get_data(as_text=True)
+            parsed = ScopeParser()
+            parsed.feed(html)
+            self.assertEqual(len(parsed.scopes), 1)
+            scope = parsed.scopes[0]
+            self.assertEqual(len(scope['rows']), 8)
+            self.assertIsNone(parsed.parents['item-jamaica'])
+            self.assertIsNone(parsed.parents['item-canada'])
+            boundary = scope['boundary']
+            self.assertEqual(boundary['role'], 'separator')
+            self.assertIn('us-series-divider', boundary['class'])
+            self.assertEqual(parsed.stack, [])
+
+        # A filtered regional-only list must also close its section at the end.
+        self.db.execute("DELETE FROM banknotes WHERE id IN ('jamaica','canada')")
+        self.db.commit()
+        self.assertTrue(stuff.banknote_grouping(self.rows())['central10']['regional_end'])
+
     def test_report_has_same_issuer_sections_and_keeps_territorial_attribution(self):
         self.fixture()
         sections = stuff._banknote_report_sections(self.db)

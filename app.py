@@ -5802,6 +5802,7 @@ def banknote_grouping(rows):
     previous = None
     previous_region = None
     previous_issuer = None
+    previous_row_id = None
     placements = {}
     for row in rows:
         info = dict(banknote_catalog.row_classification(row))
@@ -5814,9 +5815,14 @@ def banknote_grouping(rows):
             info['regional_issuer_heading'] = info['regional_heading'] or signature != previous_issuer
             previous_region, previous_issuer = regional['family'], signature
         else:
+            if previous_region is not None:
+                placements[previous_row_id]['regional_end'] = True
             previous_region = previous_issuer = None
         placements[row['id']] = info
         previous = info['key']
+        previous_row_id = row['id']
+    if previous_region is not None:
+        placements[previous_row_id]['regional_end'] = True
     return placements
 
 

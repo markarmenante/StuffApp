@@ -204,6 +204,10 @@ one **Eastern Caribbean** heading, with three distinct issuer subsections:
   1984.** The ECCB began on 1 October 1983; its first notes entered circulation
   on 15 November 1984.
 
+Each regional run is a named section with a visible closing rule in both
+History modes. A following Jamaican or other nonregional note stays outside
+that section; interrupted date-filtered runs close and reopen separately.
+
 These dates and the succession come from the ECCB's
 [currency anniversary history in its 2014–2015 annual report](https://cdn.eccb-centralbank.org/documents/2023-10-18-02-17-12-Report-and-statement-of-accounts---ending-31-march-2015.PDF)
 and [2007–2008 annual report chronology](https://cdn.eccb-centralbank.org/documents/2022-05-11-04-52-02-Annual-Report-2007-2008-PDF.pdf).

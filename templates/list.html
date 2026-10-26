@@ -213,6 +213,7 @@
   </div>
   {% endif %}
   {% if _bn_group and _bn_group.regional_heading %}
+  <section data-banknote-family-scope="eastern-caribbean" aria-label="Eastern Caribbean">
   <div class="banknote-group-heading" data-banknote-family="eastern-caribbean">
     <h2>Eastern Caribbean</h2>
     <p>One regional currency family, with separate Currency Board, Currency Authority and Central Bank issues.</p>
@@ -766,8 +767,12 @@
   </div>
   {# Closing rule under the last note of a history-panel group — the
      bracket's bottom edge, matching the panel's own top border above. #}
-  {% if _placement and _placement.group_end %}
+  {% if _placement and _placement.group_end and not (_bn_group and _bn_group.regional_end) %}
   <div class="us-series-divider" aria-hidden="true"></div>
+  {% endif %}
+  {% if _bn_group and _bn_group.regional_end %}
+  <div class="us-series-divider" data-banknote-family-end="eastern-caribbean" role="separator" aria-label="End of Eastern Caribbean"></div>
+  </section>
   {% endif %}
   {% if category == 'properties' %}{% set ns.prev = row['type'] %}{% endif %}
   {% endif %}
