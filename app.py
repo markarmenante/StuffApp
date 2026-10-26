@@ -21541,6 +21541,18 @@ def banknote_import_detail(batch_id,item_id):
     except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
 
 
+@app.post('/banknotes/imports/<batch_id>/items/<item_id>/photos')
+def banknote_import_photo(batch_id,item_id):
+    require_owner();data=request.get_json(silent=True) or {}
+    try:
+        if not isinstance(data,dict):
+            raise banknote_imports.ImportProblem('Choose a saved draft photograph and its front or back side.')
+        item=banknote_imports.select_photo(get_db(),batch_id,item_id,data.get('revision'),
+                                         data.get('field'),data.get('filename'),UPLOAD_FOLDER)
+        return jsonify(ok=True,item=item)
+    except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),409
+
+
 @app.post('/banknotes/imports/<batch_id>/items/<item_id>/check')
 def banknote_import_check(batch_id,item_id):
     require_owner();data=request.get_json(silent=True) or {}
@@ -27227,6 +27239,43 @@ def _parse_purchase_date(raw):
     return None
 
 
+def _banknote_description_grade_number(description):
+    """Read numbers tied to an explicit grade, never the next title number.
+
+    A seller may put PMG before the country and denomination. Require the
+    number to follow the service/grade wording or precede EPQ/PPQ instead of
+    treating the first small number after the service as a grade.
+    """
+    grade_phrase = (
+        r'(?:superb?\s+)?gem\s+(?:crisp\s+)?(?:unc(?:irculated)?|new)'
+        r'|(?:very\s+)?choice\s+(?:crisp\s+)?(?:unc(?:irculated)?|new)'
+        r'|(?:choice\s+)?(?:about|almost)\s+(?:unc(?:irculated)?|new)'
+        r'|crisp\s+uncirculated|uncirculated|extremely\s+fine|very\s+fine|very\s+good'
+        r'|unc|au|xf|ef|vf|vg|fine|good|poor|fair|new')
+    lead = re.compile(
+        r'(?:\b(?:' + _BANKNOTE_GRADER_ALIAS_RE + r')\b'
+        r'(?:[\s:()–—-]*(?:graded?|apparent|details|net)\b)*'
+        r'|\b(?:' + grade_phrase + r'))[\s:()–—-]*$', re.I)
+    quality = re.compile(r'^\s*(?:EPQ|PPQ|exceptional\s+paper\s+quality|premium\s+paper\s+quality)\b', re.I)
+    reference = re.compile(
+        r'\b(?:pick|p|fr|friedberg|tbb|km|serial(?:\s+(?:no\.?|number))?'
+        r'|cert(?:ificate)?(?:\s+(?:no\.?|number))?)\s*[-#:.]?\s*$', re.I)
+    denomination = re.compile(
+        r'^\s*(?:\d+\s*/\s*\d+|dollars?|gulden|guilders?|rupees?|rufiyaa|francs?'
+        r'|pounds?|shillings?|cents?|pesos?|escudos?|marks?|rials?|reais|notes?|banknotes?)\b', re.I)
+    candidates = set()
+    for match in re.finditer(r'(?<![\w#./])(\d{1,2})(?![\d,.]*\d|[\w./]|-\d)', description):
+        before, after = description[:match.start()], description[match.end():]
+        if reference.search(before) or denomination.match(after):
+            continue
+        number = int(match.group(1))
+        if 1 <= number <= 70 and (lead.search(before) or quality.match(after)):
+            candidates.add(number)
+    # Multiple distinct stated grades need the image/source review; choosing
+    # whichever appears first can turn a comparison or multi-note lot into fact.
+    return float(next(iter(candidates))) if len(candidates) == 1 else None
+
+
 def _banknote_description_fields(note):
     """Read paper-money fields the dealer's own description states.
 
@@ -27309,21 +27358,14 @@ def _banknote_description_fields(note):
     # Grading service (any in BANKNOTE_GRADERS, longest spelling first)
     # + its numeric grade: "PMG-64", "PMG 66 EPQ", "PCGS Banknote 58",
     # "PCGS Currency Apparent Very Fine 30", "Legacy Currency Grading 64
-    # PPQ", "CGA Gem Uncirculated 66", "PMG 30 NET". The number is the
-    # first 1-70 in the 60 characters after the service name that is not
-    # a Pick number.
+    # PPQ", "CGA Gem Uncirculated 66", "PMG 30 NET". The number needs
+    # explicit grading context, even if the service begins a long title.
     m = re.search(r'\b(' + _BANKNOTE_GRADER_ALIAS_RE + r')\b', description, re.IGNORECASE)
     if m:
         out['grading_authority'] = normalize_banknote_grading_authority(m.group(1))
-        tail = description[m.end():m.end() + 60]
-        for nm in re.finditer(r'(?<![\w#-])(\d{1,2})(?![\d,.]*\d)\b', tail):
-            before = tail[:nm.start()].lower()
-            if re.search(r'\b(?:pick|p)\s*[-#]?\s*$', before):
-                continue
-            n = float(nm.group(1))
-            if 1 <= n <= 70:
-                out['grade_numeric'] = n
-                break
+        number = _banknote_description_grade_number(description)
+        if number is not None:
+            out['grade_numeric'] = number
         # Problem-note wording (PMG "Net", PCGS Banknote "Details",
         # PCGS Currency / Legacy / CGA "Apparent") goes to the condition
         # field, ahead of whatever else the dealer listed.

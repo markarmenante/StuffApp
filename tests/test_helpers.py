@@ -125,6 +125,26 @@ for text, auth, num, mod, cond, grade in cases:
 # The Pick number never becomes the grade: "P-64 PMG" is Pick 64.
 got = _svc({'description': 'Iran P-64 PMG Choice Unc 63 EPQ'})
 assert got.get('grade_numeric') == 63 and got.get('pick_number') == 'P-64', got
+# A service name at the start of a listing does not turn a denomination,
+# catalogue reference or certificate into a numeric grade.
+for text, expected in (
+    ('PMG Netherlands Antilles 2 1/2 Gulden P-21a GEM Uncirculated 67 EPQ', 67),
+    ('PMG Netherlands Antilles 2 1/2 Gulden P-21a', None),
+    ('PMG Netherlands Antilles 5 Gulden 1984 P-15b 67 EPQ', 67),
+    ('PMG Netherlands Antilles 2 1/2 Gulden P-21a GEM Uncirculated', None),
+    ('PMG 2 1/2 Gulden P-21a', None),
+    ('PMG 10 Rupees P-12c', None),
+    ('PMG Pick 64 EPQ', None),
+    ('PMG Certificate 64 EPQ', None),
+    ('PMG serial number 30', None),
+    ('PMG 64,000 certificate', None),
+    ('PMG 64-123456 certificate', None),
+    ('PMG 64 and PCGS Currency 65', None),
+    ('PMG-64 Choice Uncirculated', 64),
+    ('PMG 64 Choice Uncirculated 64 EPQ', 64),
+):
+    got = _svc({'description': text})
+    assert got.get('grade_numeric') == expected, (text, got, expected)
 for raw, want in (('pcgs currency', 'PCGS Currency'), ('PCGS Bank Note', 'PCGS Banknote'),
                   ('LCG', 'Legacy'), ('Legacy Currency Grading', 'Legacy'),
                   ('paper money guaranty', 'PMG'), ('pcgs', 'PCGS'), ('ngc', 'NGC'), ('', None)):

@@ -293,4 +293,65 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(response.json['item']['purchase']['price'],original)
         self.assertEqual(response.json['item']['fields']['price'],'$1.23')
 
+    def ambiguous_photos(self,b=None,item=None):
+        b=b or self.imported();item=item or b['items'][0]
+        with patch.object(self,'classify',return_value={'photos':[]}):
+            b=self.check(b,item)
+        return b,next(i for i in b['items'] if i['id']==item['id'])
+    def choose(self,item,field,filename,revision=None):
+        return self.client.post(item['detail_url']+'/photos',json=dict(revision=item['revision'] if revision is None else revision,field=field,filename=filename))
+    def test_manual_front_back_resolves_ambiguity_and_release_keeps_original_bytes(self):
+        b,item=self.ambiguous_photos();self.assertEqual(item['check_state'],'partial')
+        self.assertFalse(item['fields'].get('image_1'));self.assertEqual(len(item['photos']),2)
+        first=self.choose(item,'image_1',item['photos'][0]['filename']);self.assertEqual(first.status_code,200,first.json)
+        item=first.json['item'];self.assertEqual(item['check_state'],'partial')
+        second=self.choose(item,'image_2',item['photos'][1]['filename']);self.assertEqual(second.status_code,200,second.json)
+        item=second.json['item'];self.assertEqual(item['check_state'],'done');self.assertFalse(item['warnings'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        result=self.release(b,[item]);self.assertEqual(result.status_code,200,result.json)
+        row=self.db.execute('SELECT * FROM banknotes WHERE id=?',(result.json['released'][0]['record_id'],)).fetchone()
+        for field in ('image_1','image_2'):
+            self.assertEqual((Path(stuff.UPLOAD_FOLDER)/row[field]).read_bytes(),(Path(stuff.UPLOAD_FOLDER)/item['fields'][field]).read_bytes())
+        self.assertEqual(self.choose(item,'image_1',item['photos'][0]['filename']).status_code,409)
+    def test_manual_photo_rejects_foreign_asset_stale_revision_and_missing_file(self):
+        b,item=self.ambiguous_photos();other=next(i for i in b['items'] if i['id']!=item['id'])
+        b,other=self.ambiguous_photos(b,other)
+        self.assertEqual(self.choose(item,'image_1',other['photos'][0]['filename']).status_code,409)
+        self.assertEqual(self.choose(item,'image_1','../outside.jpg').status_code,409)
+        self.assertEqual(self.choose(item,'price',item['photos'][0]['filename']).status_code,409)
+        first=self.choose(item,'image_1',item['photos'][0]['filename']);self.assertEqual(first.status_code,200)
+        self.assertEqual(self.choose(item,'image_2',item['photos'][1]['filename']).status_code,409)
+        item=first.json['item'];(Path(stuff.UPLOAD_FOLDER)/item['photos'][1]['filename']).unlink()
+        self.assertEqual(self.choose(item,'image_2',item['photos'][1]['filename']).status_code,409)
+    def test_manual_photo_rejects_same_content_for_both_sides(self):
+        b,item=self.ambiguous_photos();name=item['photos'][0]['filename']
+        item=self.choose(item,'image_1',name).json['item']
+        self.assertEqual(self.choose(item,'image_2',name).status_code,409)
+        duplicate='duplicate-'+name;(Path(stuff.UPLOAD_FOLDER)/duplicate).write_bytes((Path(stuff.UPLOAD_FOLDER)/name).read_bytes())
+        asset=self.db.execute('SELECT * FROM banknote_import_assets WHERE item_id=? AND filename=?',(item['id'],name)).fetchone()
+        self.db.execute('INSERT INTO banknote_import_assets VALUES(?,?,?,?,?,?,?)',(item['id'],'https://i.ebayimg.com/images/g/duplicate/s-l1600.jpg',duplicate,asset['sha256'],asset['width'],asset['height'],2));self.db.commit()
+        self.assertEqual(self.choose(item,'image_2',duplicate).status_code,409)
+    def test_manual_photo_keeps_other_warnings_and_draft_fields(self):
+        b,item=self.ambiguous_photos();extra='The exact paid item amount is unavailable.'
+        self.db.execute('UPDATE banknote_import_items SET check_message=check_message || ? WHERE id=?',(' '+extra,item['id']));self.db.commit()
+        before=dict(item['fields']);item=self.choose(item,'image_1',item['photos'][0]['filename']).json['item']
+        item=self.choose(item,'image_2',item['photos'][1]['filename']).json['item']
+        self.assertEqual(item['check_state'],'partial');self.assertEqual(item['check_message'],extra)
+        self.assertTrue(all(item['fields'][key]==value for key,value in before.items()))
+    def test_manual_photo_cannot_replace_existing_record_slots_or_active_check(self):
+        self.partial_record();b=self.imported();item=next(i for i in b['items'] if i.get('existing_record_id'))
+        b,item=self.ambiguous_photos(b,item)
+        candidate=next(photo for photo in item['photos'] if photo['selectable'])
+        self.assertEqual(self.choose(item,'image_1',candidate['filename']).status_code,409)
+        self.assertEqual(self.db.execute("SELECT image_1 FROM banknotes WHERE id='failed-form'").fetchone()[0],'saved-front.jpg')
+        other=next(i for i in b['items'] if not i.get('existing_record_id'));b,other=self.ambiguous_photos(b,other)
+        imports.claim_check(self.db,b['id'],other['id'],other['revision'])
+        self.assertEqual(self.choose(other,'image_1',other['photos'][0]['filename']).status_code,409)
+    def test_manual_photo_requires_connected_account_and_can_replace_draft_only_slot(self):
+        b,item=self.ambiguous_photos();item=self.choose(item,'image_1',item['photos'][0]['filename']).json['item']
+        item=self.choose(item,'image_1',item['photos'][1]['filename']).json['item']
+        self.assertEqual(item['fields']['image_1'],item['photos'][1]['filename'])
+        self.db.execute("UPDATE ebay_purchase_account SET account_name='different'");self.db.commit()
+        self.assertEqual(self.choose(item,'image_2',item['photos'][0]['filename']).status_code,409)
+
 if __name__=='__main__':unittest.main()

@@ -143,6 +143,15 @@ def fixture_partial_record():
  stuff.original_listings.add_source(db,'banknotes','recover-exact-partial','https://www.ebay.com/itm/'+ident);db.commit()
  return jsonify(ok=True)
 
+@stuff.app.post('/__fixture/ambiguous-photos')
+def fixture_ambiguous_photos():
+ data=request.get_json();db=stuff.get_db()
+ row=db.execute('SELECT fields_json FROM banknote_import_items WHERE batch_id=? AND id=?',(data['batch'],data['item'])).fetchone()
+ fields=json.loads(row[0]);fields.pop('image_1',None);fields.pop('image_2',None)
+ message='Front and back could not both be confirmed from the listing. Existing photos and all originals were retained; choose the missing or uncertain side manually. Fixture independent warning.'
+ db.execute("UPDATE banknote_import_items SET fields_json=?,revision=revision+1,check_state='partial',check_message=? WHERE id=?",(json.dumps(fields),message,data['item']));db.commit()
+ return jsonify(ok=True)
+
 server=make_server('127.0.0.1',0,stuff.app,threaded=True)
 print('FIXTURE_ORIGIN=http://127.0.0.1:'+str(server.server_port),flush=True)
 try:server.serve_forever()
@@ -186,6 +195,10 @@ finally:server.server_close();temporary.cleanup()
   const noOverflow=async page=>assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'horizontal page overflow');
   async function newCheckout(t,number,fromBlank=true){
     const before=await t.state();
+    const diagnostics={requests:[],dialogs:[]};
+    const captureRequest=request=>{if(request.method()==='POST')diagnostics.requests.push(new URL(request.url()).pathname);};
+    const captureDialog=async dialog=>{diagnostics.dialogs.push(dialog.message());await dialog.dismiss();};
+    t.page.on('request',captureRequest);t.page.on('dialog',captureDialog);
     await t.page.goto(origin+(fromBlank?'/banknotes/new':'/banknotes/imports/new'));
     if(fromBlank){
       await t.page.locator('[name="order_number"]').fill(number);
@@ -203,7 +216,12 @@ finally:server.server_close();temporary.cleanup()
       await t.page.locator('#banknoteImportOrderNumber').fill(number);
       await t.page.locator('#banknoteImportStart').click();
     }
-    await t.page.waitForURL(/\/banknotes\/imports\/[a-f0-9]{32}$/);
+    try{await t.page.waitForURL(/\/banknotes\/imports\/[a-f0-9]{32}$/);}
+    catch(error){
+      diagnostics.url=t.page.url();diagnostics.form=await t.page.evaluate(()=>({candidate:window.banknoteOrderDraftCandidate?.(),fields:Object.fromEntries([...document.querySelectorAll('#mainForm [name]')].filter(field=>field.value&&field.type!=='file').map(field=>[field.name,field.value]))}));
+      evidence['navigationFailure'+number]=diagnostics;
+      await t.page.screenshot({path:path.join(artifacts,'navigation-failure-'+number+'.png'),fullPage:true});throw error;
+    }finally{t.page.off('request',captureRequest);t.page.off('dialog',captureDialog);}
     const id=t.page.url().split('/').at(-1);
     const response=await t.context.request.post(origin+'/__fixture/complete',{data:{order:number}});
     assert.equal(response.status(),200,await response.text());
@@ -356,6 +374,57 @@ finally:server.server_close();temporary.cleanup()
           const other=await t.context.request.get(origin+draft.detail_url,{headers:{'Cf-Access-Authenticated-User-Email':'unknown@example.invalid'}});assert.equal(other.status(),403);
         }finally{await t.close();}
       });
+      await run(label+': manually selecting ambiguous photos saves edits, persists sides and never releases',async()=>{
+        const t=await setup(mobile);try{
+          const {before,id,batch}=await newCheckout(t,mobile?'98-76543-27020':'98-76543-27010',false);
+          const draft=batch.items[0],photos=draft.photos;
+          assert.equal(photos.length,2);assert(photos.every(photo=>photo.filename&&photo.selectable!==false));
+          const originalAssets=(await t.state()).assets.filter(asset=>asset.item_id===draft.id);
+          assert.equal((await t.context.request.post(origin+'/__fixture/ambiguous-photos',{data:{batch:id,item:draft.id}})).status(),200);
+          await t.page.goto(origin+draft.detail_url);
+          const front=t.page.locator('[data-photo-side="image_1"][data-photo-filename="'+photos[0].filename+'"]');
+          const back=t.page.locator('[data-photo-side="image_2"][data-photo-filename="'+photos[1].filename+'"]');
+          assert.equal(await front.isEnabled(),true);assert.equal(await back.isEnabled(),true);
+          let photoRequests=0;
+          t.page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/photos'))photoRequests++;});
+          await t.page.route('**'+draft.detail_url,route=>route.request().method()==='POST'
+            ?route.fulfill({status:503,json:{error:'Synthetic photo-save interruption'}}):route.continue());
+          await t.page.locator('[name="printer"]').fill('Reviewed before choosing photos');
+          await front.click();
+          await t.page.waitForFunction(()=>document.getElementById('banknoteImportStatus')?.textContent.includes('photo-save interruption'));
+          assert.equal(photoRequests,0,'a failed field save must block the photo selection');
+          assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Reviewed before choosing photos');
+          await t.page.unroute('**'+draft.detail_url);
+          let response=t.page.waitForResponse(response=>response.url().endsWith('/photos')&&response.request().method()==='POST');
+          await front.click();assert.equal((await response).status(),200);
+          let remote=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+          assert.equal(remote.fields.printer,'Reviewed before choosing photos','selection flushes typed fields first');
+          assert.equal(remote.fields.image_1,photos[0].filename);assert(!remote.fields.image_2);
+          assert.equal(await t.page.locator('figure[data-photo-filename="'+photos[0].filename+'"] [data-photo-selected="image_1"]').isVisible(),true);
+          assert.equal(await t.page.locator('[data-photo-side="image_2"][data-photo-filename="'+photos[0].filename+'"]').isDisabled(),true,'the same original cannot occupy both sides');
+          // A rejected revision must preserve the selected front and the pending back.
+          await t.page.route('**'+draft.detail_url+'/photos',route=>route.fulfill({status:409,json:{error:'Synthetic newer draft revision'}}),{times:1});
+          await back.click();await t.page.locator('#banknoteImportRefresh').waitFor({state:'visible'});
+          assert.equal(await t.page.locator('#banknoteImportRelease').isDisabled(),true);
+          remote=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+          assert.equal(remote.fields.image_1,photos[0].filename);assert(!remote.fields.image_2);
+          await t.page.locator('#banknoteImportRefresh').click();
+          await t.page.getByRole('button',{name:'Use saved values',exact:true}).click();
+          response=t.page.waitForResponse(response=>response.url().endsWith('/photos')&&response.request().method()==='POST');
+          await back.click();assert.equal((await response).status(),200);
+          remote=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+          assert.equal(remote.fields.image_1,photos[0].filename);assert.equal(remote.fields.image_2,photos[1].filename);
+          assert(remote.warnings.some(message=>message.includes('Fixture independent warning')),'other unresolved warnings stay visible');
+          assert(!remote.warnings.some(message=>message.includes('choose the missing or uncertain side manually')),'resolved side warning clears');
+          await t.page.reload();
+          assert.equal(await t.page.locator('[data-photo-selected="image_1"]:visible').count(),1);
+          assert.equal(await t.page.locator('[data-photo-selected="image_2"]:visible').count(),1);
+          assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Reviewed before choosing photos');
+          assert.deepEqual((await t.state()).rows,before.rows,'choosing photos never releases or edits collection');
+          assert.deepEqual((await t.state()).assets.filter(asset=>asset.item_id===draft.id),originalAssets,'original photo files and hashes are preserved');
+          await noOverflow(t.page);await t.page.screenshot({path:path.join(artifacts,label+'-manual-photo-sides.png'),fullPage:true});
+        }finally{await t.close();}
+      });
     }
     await run('exact unfinished record is completed in place only on explicit release',async()=>{
       const t=await setup(false);try{
@@ -371,6 +440,8 @@ finally:server.server_close();temporary.cleanup()
         assert.equal(await t.page.locator('[name="notes"]').inputValue(),'Preserve my partial note');
         assert.equal(await t.page.locator('[name="notes"]').evaluate(field=>field.readOnly),true,'occupied original fields must visibly remain protected');
         assert.equal(await t.page.locator('[name="country"]').evaluate(field=>field.readOnly),false,'newly acquired draft fields remain editable');
+        assert(await t.page.locator('[data-photo-side]').evaluateAll(buttons=>buttons.every(button=>button.disabled)),'existing front/back slots cannot be replaced');
+        assert.equal(await t.page.locator('figure[data-photo-filename="recover-front.png"] [data-photo-side]').count(),0,'preserved original is view-only');
         await t.page.locator('#banknoteImportPhotos img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
         const released=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
         await t.page.locator('#banknoteImportRelease').click();assert.equal((await released).status(),200);

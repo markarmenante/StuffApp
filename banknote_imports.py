@@ -26,6 +26,10 @@ import source_documents
 MAX_ITEMS = 25
 CHECK_TTL = 300
 _CHECK_SLOTS = threading.BoundedSemaphore(2)
+PHOTO_SIDE_WARNINGS = (
+    'Front and back could not both be confirmed from the listing. Existing photos and all originals were retained; choose the missing or uncertain side manually.',
+    'Listing-photo sides could not be verified. Existing photos and all originals were retained; run Check again or choose the photos manually.',
+)
 _ORDER = re.compile(r'\d{2}-\d{5}-\d{5}')
 _BUNDLE = re.compile(r'\b(?:lot|set|bundle|pair)\s*(?:of\s*)?[2-9]\d*\b|\bpair of\b|\b[2-9]\d*\s+(?:consecutive\s+)?(?:serial\s+)?(?:notes|banknotes)\b', re.I)
 
@@ -51,6 +55,7 @@ def init_schema(db):
         source_json TEXT NOT NULL, source_digest TEXT NOT NULL, fields_json TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'draft', revision INTEGER NOT NULL DEFAULT 1,
         released_record_id TEXT, existing_record_id TEXT, existing_snapshot_json TEXT,
+        manual_photos_json TEXT NOT NULL DEFAULT '{}',
         warning TEXT NOT NULL DEFAULT '',
         check_state TEXT NOT NULL DEFAULT 'idle', check_token TEXT, check_expires REAL NOT NULL DEFAULT 0,
         check_message TEXT NOT NULL DEFAULT '', checked_at REAL,
@@ -72,6 +77,8 @@ def init_schema(db):
     columns={row[1] for row in db.execute('PRAGMA table_info(banknote_import_items)')}
     for name in ('existing_record_id','existing_snapshot_json'):
         if name not in columns:db.execute('ALTER TABLE banknote_import_items ADD COLUMN '+name+' TEXT')
+    if 'manual_photos_json' not in columns:
+        db.execute("ALTER TABLE banknote_import_items ADD COLUMN manual_photos_json TEXT NOT NULL DEFAULT '{}'")
 
 
 def _account(db):
@@ -271,11 +278,11 @@ def _public_item(db, row):
     if check_state == 'checking' and row['check_expires'] <= time.time():
         check_state,message='failed','Check was interrupted or expired. Your draft was kept; press Check to retry.'
     warnings = [v for v in (row['warning'],message if check_state in ('failed','partial') else '') if v]
-    photos = [dict(url='/uploads/'+asset['filename'],source_url=asset['source_url'],position=asset['position'])
+    photos = [dict(url='/uploads/'+asset['filename'],filename=asset['filename'],selectable=True,source_url=asset['source_url'],position=asset['position'])
               for asset in db.execute('SELECT * FROM banknote_import_assets WHERE item_id=? ORDER BY position', (row['id'],))]
     if row.get('existing_record_id'):
         existing=json.loads(row['existing_snapshot_json'])
-        saved=[dict(url='/uploads/'+existing[field],source_url='',position=index)
+        saved=[dict(url='/uploads/'+existing[field],filename=existing[field],selectable=False,source_url='',position=index)
                for index,field in enumerate(('image_1','image_2')) if existing.get(field)]
         photos=saved+[photo for photo in photos if photo['url'] not in {p['url'] for p in saved}]
     evidence = [json.loads(proof['proof_json']) | {'field':proof['field'],'value':json.loads(proof['value_json'])}
@@ -288,7 +295,8 @@ def _public_item(db, row):
                 listing_url='https://www.ebay.com/itm/'+row['item_id'],order_number=source['order_id'],
                 detail_url=f"/banknotes/imports/{row['batch_id']}/items/{row['id']}",
                 released_record_id=row['released_record_id'],existing_record_id=row.get('existing_record_id'),photos=photos,check_state=check_state,
-                check_message=message,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields)
+                check_message=message,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields,
+                manual_photos=json.loads(row.get('manual_photos_json') or '{}'))
 
 
 def status(db,batch_id):
@@ -340,6 +348,54 @@ def save(db,batch_id,item_id,revision,updates,normalize):
             raise ImportProblem('Existing record values are preserved. Open the existing record to change them, then refresh this review.')
         fields=json.loads(row['fields_json']);fields.update(normalized)
         db.execute('UPDATE banknote_import_items SET fields_json=?,revision=revision+1,updated_at=? WHERE id=?',(_json(fields),time.time(),item_id))
+        db.commit()
+    except Exception:
+        db.rollback();raise
+    return _public_item(db,db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item_id,)).fetchone())
+
+
+def _manually_selected_pair(fields,selected):
+    return all(fields.get(field) and selected.get(field)==fields[field] for field in ('image_1','image_2'))
+
+
+def select_photo(db,batch_id,item_id,revision,field,filename,folder):
+    """Select a retained original for a draft slot; never alter collection photos."""
+    if (type(revision) is not int or field not in ('image_1','image_2') or not isinstance(filename,str)
+            or not filename or Path(filename).name!=filename):
+        raise ImportProblem('Choose a saved draft photograph and its front or back side.')
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        batch,row=_item(db,batch_id,item_id)
+        _validate_source(db,batch,row)
+        if row['state']!='draft' or row['revision']!=revision:
+            raise ImportProblem('This draft changed or was released. Reload it before choosing a photo.')
+        if row['check_state']=='checking' and row['check_expires']>time.time():
+            raise ImportProblem('Wait for Check to finish before choosing draft photos.')
+        existing=json.loads(row['existing_snapshot_json'] or '{}')
+        if not banknote_catalog_lookup.is_blank(existing.get(field)):
+            raise ImportProblem('This photo already belongs to the existing record and is preserved. Open that record to change it.')
+        asset=db.execute('SELECT * FROM banknote_import_assets WHERE item_id=? AND filename=?',(item_id,filename)).fetchone()
+        root=Path(folder).resolve();path=root/filename
+        if not asset or path.resolve().parent!=root or not path.is_file():
+            raise ImportProblem('That photograph is not an available original for this draft.')
+        fields=json.loads(row['fields_json']);other='image_2' if field=='image_1' else 'image_1'
+        if fields.get(other):
+            other_path=root/fields[other]
+            other_asset=db.execute('SELECT sha256 FROM banknote_import_assets WHERE item_id=? AND filename=?',(item_id,fields[other])).fetchone()
+            other_hash=other_asset['sha256'] if other_asset else (
+                hashlib.sha256(other_path.read_bytes()).hexdigest() if other_path.resolve().parent==root and other_path.is_file() else None)
+            if fields[other]==filename or (other_hash and other_hash==asset['sha256']):
+                raise ImportProblem('Choose different photographs for the front and back.')
+        fields[field]=filename
+        selected=json.loads(row['manual_photos_json'] or '{}');selected[field]=filename
+        message=row['check_message'];state=row['check_state']
+        if _manually_selected_pair(fields,selected):
+            for warning in PHOTO_SIDE_WARNINGS:message=message.replace(warning,'')
+            message=' '.join(message.split())
+            if state=='partial' and not message:state='done'
+        db.execute('''UPDATE banknote_import_items SET fields_json=?,manual_photos_json=?,
+            revision=revision+1,check_state=?,check_message=?,updated_at=? WHERE id=?''',
+            (_json(fields),_json(selected),state,message,time.time(),item_id))
         db.commit()
     except Exception:
         db.rollback();raise
@@ -419,6 +475,8 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate):
             db.execute('''INSERT OR IGNORE INTO banknote_import_assets(item_id,source_url,filename,sha256,width,height,position)
                 VALUES(?,?,?,?,?,?,?)''',(item_id,asset['source_url'],asset['filename'],asset['sha256'],asset.get('width'),asset.get('height'),asset['position']))
         warnings=list(dict.fromkeys(prepared['warnings']+[result['lookup_error']] if result.get('lookup_error') else prepared['warnings']))
+        if _manually_selected_pair(current_fields,json.loads(current['manual_photos_json'] or '{}')):
+            warnings=[warning for warning in warnings if warning not in PHOTO_SIDE_WARNINGS]
         db.execute('''UPDATE banknote_import_items SET fields_json=?,revision=revision+1,check_state=?,check_message=?,
             check_token=NULL,check_expires=0,checked_at=?,updated_at=? WHERE id=?''',
             (_json(current_fields),'partial' if warnings else 'done',' '.join(warnings),time.time(),time.time(),item_id))

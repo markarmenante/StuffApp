@@ -82,7 +82,25 @@
     if (large) { anchor.target = '_blank'; anchor.rel = 'noopener'; }
     const image = el('img'); image.src = src; image.alt = 'Purchased banknote photo ' + (index + 1);
     image.loading = index < 2 ? 'eager' : 'lazy'; anchor.append(image);
-    if (large) { const figure = el('figure'); figure.append(anchor, el('figcaption', 'Photo ' + (index + 1))); parent.append(figure); }
+    if (large) {
+      const figure = el('figure'); figure.dataset.photoFilename = photo.filename || ''; figure.tabIndex = -1;
+      const caption = el('figcaption', 'Photo ' + (index + 1));
+      for (const [field, label] of [['image_1','Front'], ['image_2','Back']]) {
+        const badge = el('span', label, 'import-badge'); badge.dataset.photoSelected = field; badge.hidden = true; caption.append(badge);
+      }
+      figure.append(anchor, caption);
+      if (photo.filename && photo.selectable !== false) {
+        const actions = el('div', undefined, 'import-photo-actions');
+        for (const [field, label] of [['image_1','front'], ['image_2','back']]) {
+          const button = el('button', 'Use as ' + label, 'toolbar-btn pill');
+          button.type = 'button'; button.dataset.photoSide = field; button.dataset.photoFilename = photo.filename;
+          button.setAttribute('aria-label', 'Use photo ' + (index + 1) + ' as ' + label);
+          button.addEventListener('click', () => selectPhoto(photo, field)); actions.append(button);
+        }
+        figure.append(actions);
+      }
+      parent.append(figure);
+    }
     else parent.append(anchor);
   }
   const missing = draft => [['country','country'],['denomination','denomination'],['pick_number','catalogue number']]
@@ -159,6 +177,23 @@
     });
     const editable = item.state === 'draft';
     const preserved = new Set(item.preserved_fields || []);
+    gallery.querySelectorAll('figure[data-photo-filename]').forEach(figure => {
+      const filename = figure.dataset.photoFilename;
+      figure.querySelectorAll('[data-photo-selected]').forEach(badge => {
+        badge.hidden = !filename || item.fields?.[badge.dataset.photoSelected] !== filename;
+      });
+      const actions = figure.querySelector('.import-photo-actions');
+      if (actions) actions.hidden = !editable;
+      figure.querySelectorAll('[data-photo-side]').forEach(button => {
+        const field = button.dataset.photoSide;
+        const selected = item.fields?.[field] === filename;
+        const opposite = item.fields?.[field === 'image_1' ? 'image_2' : 'image_1'] === filename;
+        button.disabled = !editable || busy || checkRunning(item) || Boolean(conflict) || preserved.has(field) || selected || opposite;
+        button.setAttribute('aria-pressed', String(selected));
+        button.title = preserved.has(field) ? 'The existing record’s photo is preserved.' : selected
+          ? 'Selected for this side.' : opposite ? 'This photo is already selected for the other side.' : '';
+      });
+    });
     fields.forEach(field => {
       field.readOnly = preserved.has(field.name);
       field.disabled = !editable || busy || (field.tagName === 'SELECT' && preserved.has(field.name));
@@ -222,6 +257,23 @@
     renderDetail();
     try { await saving; } finally { saving = null; renderDetail(); }
     if (dirty()) await saveDraft();
+  }
+  async function selectPhoto(photo, field) {
+    if (busy || conflict || checkRunning(item) || item.state !== 'draft' || photo.selectable === false
+        || (item.preserved_fields || []).includes(field)) return;
+    busy = true; renderDetail();
+    try {
+      await saveDraft();
+      say('Saving the ' + (field === 'image_1' ? 'front' : 'back') + ' photo…');
+      const result = await request(item.detail_url + '/photos', 'POST', {revision:item.revision, field, filename:photo.filename});
+      if (!result.item) throw new Error('The photo choice could not be confirmed. Refresh the saved status before trying again.');
+      if (setRemote(result.item)) say('Photo choice saved · not yet in collection');
+    } catch (error) {
+      if (error.status === 409) {
+        conflict = {pending:true}; refresh.hidden = false; refresh.textContent = 'Review latest saved values';
+      }
+      say(error.message,true);
+    } finally { busy = false; renderDetail(); }
   }
   function showConflict(remote) {
     document.getElementById('banknoteImportConflict')?.remove();

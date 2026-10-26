@@ -27,6 +27,11 @@ a draft revision: a stale save or late Check cannot overwrite newer edits. Check
 failures persist with a retry message. Read-only status GETs never start provider
 work. Unstarted checks resume after restart; an interrupted active check is shown
 as retryable after its lease expires, without an automatic paid replay.
+When automatic side identification is uncertain, **Use as front** and **Use as back**
+select from that draft's saved originals. The choice is revision guarded, cannot
+use another draft's asset or the same image for both sides, and cannot replace an
+occupied photo in an existing collection record. Both explicit selections clear
+only resolved side-identification warnings; purchase and provider warnings remain.
 **Refresh eBay order** explicitly rereads the complete source, keeps saved fields
 and photos, updates verified membership, and queues fresh checks. An item absent
 from that fresh snapshot cannot be released.
@@ -59,6 +64,8 @@ No existing collection record or photo is removed by this workflow.
 - `GET /banknotes/imports/<batch>/items/<item>`: saved draft detail.
 - `POST` or `PATCH` the item URL: `{revision, updates}`.
 - `POST` the item URL plus `/check`: `{revision}`, asynchronous status 202.
+- `POST` the item URL plus `/photos`: `{revision, field, filename}` selects
+  `image_1` (front) or `image_2` (back) from a retained same-draft original.
 - `POST /banknotes/imports/<batch>/release`: `{items:[{id,revision}]}`.
 
 All draft routes require the collection owner. The existing authenticated Today
