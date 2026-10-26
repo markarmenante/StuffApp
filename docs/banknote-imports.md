@@ -35,6 +35,20 @@ select from that draft's saved originals. The choice is revision guarded, cannot
 use another draft's asset or the same image for both sides, and cannot replace an
 occupied photo in an existing collection record. Both explicit selections clear
 only resolved side-identification warnings; purchase and provider warnings remain.
+
+Each selected front and back photo has **Adjust crop** on the review detail page.
+It uses the same four-corner editor as the collection. **Save crop** saves a new
+draft image, retains the original photograph and records the crop transform.
+Further adjustments start from that original, and Check can still read its holder
+label. Cancel leaves the image unchanged. Draft revisions and image identity
+protect against stale editors; cropping is unavailable during Check or after
+release. Released reviews link to the collection's photo editor.
+
+An explicit crop of a preserved unfinished-record photo remains in the draft
+until Release to Collection. Release applies only that reviewed photo change,
+while retaining other occupied collection fields and the original image. A
+concurrent collection change still requires review before release.
+
 **Refresh eBay order** explicitly rereads the complete source, keeps saved fields
 and photos, updates verified membership, and queues fresh checks. An item absent
 from that fresh snapshot cannot be released.
@@ -50,7 +64,8 @@ A unique unfinished existing banknote with the exact seller order and exact orig
 listing may be completed instead of duplicated. This narrow recovery requires
 blank country, denomination, Pick and other catalogue fields and no purchase link.
 Its occupied fields, original photos and crops seed the draft. Release compares the
-saved record snapshot and fills only its remaining blanks; concurrent changes stop
+saved record snapshot and fills its remaining blanks, with a narrow exception for
+an explicitly saved draft crop of that record's photo; concurrent changes stop
 the release. The detail page shows which existing fields or photographs changed,
 with before/current previews. **Update draft from collection** explicitly accepts
 that reviewed snapshot into the draft, keeps draft-only edits and adopts the
@@ -61,7 +76,8 @@ reason without locking the draft as an unrelated revision conflict. A populated
 or ambiguous existing match stays blocked for review.
 
 Storage is separate from `banknotes`: `banknote_import_batches`,
-`banknote_import_items`, `banknote_import_assets`, and `banknote_import_evidence`.
+`banknote_import_items`, `banknote_import_assets`, `banknote_import_image_edits`,
+and `banknote_import_evidence`.
 Batch/account/order and account/item-line uniqueness prevent duplicate drafts.
 Collection lists, reports, totals and Market Scan coverage see no staged drafts.
 No existing collection record or photo is removed by this workflow.
@@ -78,6 +94,10 @@ No existing collection record or photo is removed by this workflow.
   `image_1` (front) or `image_2` (back) from a retained same-draft original.
 - `POST` the item URL plus `/refresh-existing`: `{revision, existing_record_version}`
   accepts the reviewed current record into an unfinished-record draft.
+- `GET` the item URL plus `/trim-quad/<field>` opens crop data for a selected
+  front or back; `/trim-source/<field>` serves its original under draft access rules.
+- `POST` the item URL plus `/trim-quad/<field>`: `{revision, trimmed, quad}` saves
+  the adjusted crop to that draft only.
 - `POST /banknotes/imports/<batch>/release`: `{items:[{id,revision}]}`.
 
 All draft routes require the collection owner. The existing authenticated Today

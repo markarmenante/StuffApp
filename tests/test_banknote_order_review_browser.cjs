@@ -447,6 +447,8 @@ finally:server.server_close();temporary.cleanup()
           const front=t.page.locator('[data-photo-side="image_1"][data-photo-filename="'+photos[0].filename+'"]');
           const back=t.page.locator('[data-photo-side="image_2"][data-photo-filename="'+photos[1].filename+'"]');
           assert.equal(await front.isEnabled(),true);assert.equal(await back.isEnabled(),true);
+          assert.equal(await t.page.locator('.quad-fix-btn').count(),0,'empty sides have no crop controls');
+          assert((await t.page.locator('#banknoteImportImageHelp').innerText()).includes('Choose front and back'));
           let photoRequests=0;
           t.page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/photos'))photoRequests++;});
           await t.page.route('**'+draft.detail_url,route=>route.request().method()==='POST'
@@ -462,6 +464,8 @@ finally:server.server_close();temporary.cleanup()
           let remote=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
           assert.equal(remote.fields.printer,'Reviewed before choosing photos','selection flushes typed fields first');
           assert.equal(remote.fields.image_1,photos[0].filename);assert(!remote.fields.image_2);
+          await t.page.locator('[aria-label="Adjust front crop"]').click();await t.page.locator('.quad-modal canvas').waitFor();
+          await t.page.locator('.qm-cancel').click();
           assert.equal(await t.page.locator('figure[data-photo-filename="'+photos[0].filename+'"] [data-photo-selected="image_1"]').isVisible(),true);
           assert.equal(await t.page.locator('[data-photo-side="image_2"][data-photo-filename="'+photos[0].filename+'"]').isDisabled(),true,'the same original cannot occupy both sides');
           // A rejected revision must preserve the selected front and the pending back.
@@ -476,6 +480,7 @@ finally:server.server_close();temporary.cleanup()
           await back.click();assert.equal((await response).status(),200);
           remote=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
           assert.equal(remote.fields.image_1,photos[0].filename);assert.equal(remote.fields.image_2,photos[1].filename);
+          assert.equal(await t.page.locator('[aria-label="Adjust back crop"]').isVisible(),true,'back crop control appears without reload');
           assert(remote.warnings.some(message=>message.includes('Fixture independent warning')),'other unresolved warnings stay visible');
           assert(!remote.warnings.some(message=>message.includes('choose the missing or uncertain side manually')),'resolved side warning clears');
           await t.page.reload();
@@ -580,6 +585,114 @@ finally:server.server_close();temporary.cleanup()
         assert.equal(row.watermark,'My pending inspection detail');assert.equal(numberValue(row.price),125.37);
         assert.equal(state.links.filter(link=>link.banknote_id===recordId).length,1);
         assert.equal((await batchStatus(t,id)).pending_count,2);
+      }finally{await t.close();}
+    });
+    for (const mobile of [false,true]) {
+      const label=mobile?'mobile':'desktop';
+      await run(label+': crop editor saves both draft sides, preserves originals and releases only on request',async()=>{
+        const t=await setup(mobile);try{
+          const {before,id,batch}=await newCheckout(t,mobile?'98-76543-31020':'98-76543-31010',false);
+          const draft=batch.items[0];await t.page.goto(origin+draft.detail_url);
+          const crop=field=>t.page.locator('.banknote-imgs [data-field="'+field+'"] .quad-fix-btn');
+          assert.equal(await crop('image_1').isVisible(),true);assert.equal(await crop('image_2').isVisible(),true);
+          const originals=Object.fromEntries(await Promise.all(draft.photos.map(async photo=>{
+            const response=await t.context.request.get(origin+photo.url);
+            return [photo.filename,createHash('sha256').update(await response.body()).digest('hex')];
+          })));
+          await crop('image_1').click();await t.page.locator('.quad-modal canvas').waitFor();
+          assert.equal(await t.page.locator('#banknoteImportRelease').isDisabled(),true,'release cannot race an open editor');
+          assert.equal(await t.page.locator('#banknoteImportCheck').isDisabled(),true,'Check cannot race an open editor');
+          await t.page.locator('.qm-cancel').click();
+          assert.equal((await batchStatus(t,id)).items.find(item=>item.id===draft.id).revision,draft.revision,'Cancel does not change the draft');
+          const savedNames={};
+          for(const [field,sideLabel] of [['image_1','front'],['image_2','back']]) {
+            await t.page.locator('[name="watermark"]').fill('Unsaved inspection before '+sideLabel+' crop');
+            const loaded=t.page.waitForResponse(response=>response.url().endsWith('/trim-quad/'+field)&&response.request().method()==='GET');
+            await crop(field).click();const info=await (await loaded).json();
+            await t.page.locator('.quad-modal canvas').waitFor();
+            assert.equal((await batchStatus(t,id)).items.find(item=>item.id===draft.id).fields.watermark,'Unsaved inspection before '+sideLabel+' crop','opening crop saves typed details first');
+            const canvas=t.page.locator('.quad-modal canvas'),bounds=await canvas.boundingBox();
+            const scale=bounds.width/info.width;
+            await t.page.mouse.move(bounds.x+info.quad[0][0]*scale,bounds.y+info.quad[0][1]*scale);
+            await t.page.mouse.down();await t.page.mouse.move(bounds.x+45*scale,bounds.y+35*scale);await t.page.mouse.up();
+            await noOverflow(t.page);await t.page.screenshot({path:path.join(artifacts,label+'-'+sideLabel+'-crop-editor.png')});
+            const saved=t.page.waitForResponse(response=>response.url().endsWith('/trim-quad/'+field)&&response.request().method()==='POST');
+            await t.page.locator('.qm-save').click();const response=await saved;
+            assert.equal(response.status(),200,await response.text());const result=await response.json();
+            assert.equal(response.request().postDataJSON().revision,info.revision);assert.equal(response.request().postDataJSON().trimmed,info.trimmed);
+            await t.page.locator('.quad-modal').waitFor({state:'detached'});
+            savedNames[field]=result.item.fields[field];assert.notEqual(savedNames[field],draft.fields[field]);
+            assert.equal(await t.page.locator('[data-photo-side="'+(field==='image_1'?'image_2':'image_1')+'"][data-photo-filename="'+draft.fields[field]+'"]').isDisabled(),true,'cropped source cannot become opposite side');
+            assert.equal(await t.page.locator('.banknote-imgs [data-field="'+field+'"] img').getAttribute('src'),result.url);
+            assert.deepEqual((await t.state()).rows,before.rows,'cropping never writes collection');
+          }
+          await t.page.locator('[data-import-back]').first().click();await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+          for(const field of ['image_1','image_2'])assert.equal(await t.page.locator('article[data-draft-id="'+draft.id+'"] img[src="/uploads/'+savedNames[field]+'"]').count(),1,'review list shows saved crop');
+          await t.page.locator('[data-review-draft="'+draft.id+'"]').click();
+          for(const field of ['image_1','image_2'])assert.equal(await t.page.locator('.banknote-imgs [data-field="'+field+'"] img').getAttribute('src'),'/uploads/'+savedNames[field]);
+          const reopened=t.page.waitForResponse(response=>response.url().endsWith('/trim-quad/image_1')&&response.request().method()==='GET');
+          await crop('image_1').click();const previous=await (await reopened).json();await t.page.locator('.quad-modal canvas').waitFor();
+          assert.equal(previous.width,480);assert.equal(previous.height,220,'repeat crop uses complete original');
+          assert(Math.abs(previous.quad[0][0]-45)<1);assert(Math.abs(previous.quad[0][1]-35)<1,'edited corners remembered');
+          await t.page.locator('.qm-cancel').click();
+          const checked=t.page.waitForResponse(response=>response.url().endsWith('/check')&&response.request().method()==='POST');
+          await t.page.locator('#banknoteImportCheck').click();assert.equal((await checked).status(),202);
+          await t.page.waitForFunction(()=>!document.getElementById('banknoteImportCheck').disabled);
+          const rechecked=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+          for(const field of ['image_1','image_2'])assert.equal(rechecked.fields[field],savedNames[field],'Check retains reviewed crop');
+          for(const photo of draft.photos){const response=await t.context.request.get(origin+photo.url);assert.equal(createHash('sha256').update(await response.body()).digest('hex'),originals[photo.filename],'original bytes preserved');}
+          assert.deepEqual((await t.state()).rows,before.rows);
+          const release=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
+          await t.page.locator('#banknoteImportRelease').click();assert.equal((await release).status(),200);
+          await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+          const released=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+          const collectionRow=(await t.state()).rows.find(row=>row.id===released.released_record_id);
+          for(const field of ['image_1','image_2']){
+            const original=await t.context.request.get(origin+'/uploads/'+savedNames[field]),copy=await t.context.request.get(origin+'/uploads/'+collectionRow[field]);
+            assert.deepEqual(await copy.body(),await original.body(),'release keeps exact saved crop');
+            const response=await t.context.request.get(origin+'/banknotes/'+collectionRow.id+'/trim-quad/'+field);assert.equal(response.status(),200);
+            const info=await response.json();assert.equal(info.width,480);assert.equal(info.height,220,'released editor retains original');
+          }
+          await t.page.goto(origin+draft.detail_url);
+          assert.equal(await t.page.locator('.quad-fix-btn:visible').count(),0,'released review is immutable');
+          const collectionLink=t.page.locator('#banknoteImportOpenCollection');assert.equal(await collectionLink.isVisible(),true);
+          assert.equal(await collectionLink.getAttribute('href'),'/banknotes/'+collectionRow.id);
+          assert.equal(await t.page.getByRole('link',{name:'Edit photos in collection'}).isVisible(),true);
+          await collectionLink.click();await t.page.waitForURL(origin+'/banknotes/'+collectionRow.id);
+          await t.page.locator('.banknote-imgs [data-field="image_1"]').hover();await crop('image_1').click();await t.page.locator('.quad-modal canvas').waitFor();
+          await t.page.locator('.qm-cancel').click();
+        }finally{await t.close();}
+      });
+    }
+    await run('stale crop editor rejects a newer draft without losing its saved photo',async()=>{
+      const t=await setup(false);try{
+        const {before,id,batch}=await newCheckout(t,'98-76543-32010',false),draft=batch.items[0];
+        await t.page.goto(origin+draft.detail_url);await t.page.locator('[aria-label="Adjust front crop"]').click();await t.page.locator('.quad-modal canvas').waitFor();
+        const update=await t.context.request.post(origin+draft.detail_url,{data:{revision:draft.revision,updates:{watermark:'Changed in another tab'}}});assert.equal(update.status(),200);
+        const rejected=t.page.waitForResponse(response=>response.url().endsWith('/trim-quad/image_1')&&response.request().method()==='POST');
+        const dialog=t.page.waitForEvent('dialog').then(async dialog=>{assert(/changed|newer/i.test(dialog.message()));await dialog.dismiss();});
+        await t.page.locator('.qm-save').click();assert.equal((await rejected).status(),409);await dialog;
+        await t.page.locator('.qm-cancel').click();assert.equal(await t.page.locator('#banknoteImportRefresh').isVisible(),true);
+        const latest=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);assert.equal(latest.fields.watermark,'Changed in another tab');assert.equal(latest.fields.image_1,draft.fields.image_1);
+        assert.deepEqual((await t.state()).rows,before.rows);
+      }finally{await t.close();}
+    });
+    await run('review crop of an existing unfinished record changes its photo only at explicit release',async()=>{
+      const t=await setup(false);try{
+        const number='98-76543-33010',recordId='recover-draft-edited-crop';
+        assert.equal((await t.context.request.post(origin+'/__fixture/partial-record',{data:{order:number,record_id:recordId}})).status(),200);
+        const {before,id,batch}=await newCheckout(t,number,false),draft=batch.items.find(item=>item.existing_record_id===recordId);
+        await t.page.goto(origin+draft.detail_url);assert.equal(await t.page.locator('[aria-label="Adjust back crop"]').isEnabled(),true);
+        await t.page.locator('[aria-label="Adjust back crop"]').click();await t.page.locator('.quad-modal canvas').waitFor();
+        const saved=t.page.waitForResponse(response=>response.url().endsWith('/trim-quad/image_2')&&response.request().method()==='POST');
+        await t.page.locator('.qm-save').click();assert.equal((await saved).status(),200);await t.page.locator('.quad-modal').waitFor({state:'detached'});
+        const edited=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);assert.notEqual(edited.fields.image_2,'recover-back.png');
+        assert.deepEqual((await t.state()).rows,before.rows,'draft editor preserves live existing record');
+        const released=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
+        await t.page.locator('#banknoteImportRelease').click();assert.equal((await released).status(),200);await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+        const row=(await t.state()).rows.find(row=>row.id===recordId);
+        assert.equal(row.image_1,'recover-front.png');assert.notEqual(row.image_2,'recover-back.png');assert.equal(row.notes,'Preserve my partial note');
+        const info=await (await t.context.request.get(origin+'/banknotes/'+recordId+'/trim-quad/image_2')).json();assert.equal(info.width,480);assert.equal(info.height,220);
       }finally{await t.close();}
     });
     await run('exact unfinished record is completed in place only on explicit release',async()=>{

@@ -29,7 +29,7 @@ class DraftTests(unittest.TestCase):
         self.ctx=stuff.app.app_context();self.ctx.push()
         self.db=stuff.get_db();self.client=stuff.app.test_client()
         self.db.execute('PRAGMA foreign_keys=OFF')
-        for table in ('banknote_import_evidence','banknote_import_assets','banknote_import_items','banknote_import_batches',
+        for table in ('banknote_import_image_edits','trimmed_image_sources','banknote_import_evidence','banknote_import_assets','banknote_import_items','banknote_import_batches',
                       'banknote_ebay_links','ebay_purchase_prices','ebay_order_items','ebay_purchase_request_sessions',
                       'ebay_purchase_requests','ebay_purchase_observations','ebay_listing_captures','banknotes','record_documents',
                       'original_listing_sources','banknote_original_listings','original_listing_image_sources','original_image_assets','record_source_documents'):
@@ -563,5 +563,157 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(item['fields']['image_1'],item['photos'][1]['filename'])
         self.db.execute("UPDATE ebay_purchase_account SET account_name='different'");self.db.commit()
         self.assertEqual(self.choose(item,'image_2',item['photos'][0]['filename']).status_code,409)
+
+
+    def crop_info(self,item,field='image_1'):
+        return self.client.get(item['detail_url']+'/trim-quad/'+field)
+
+    def crop(self,item,field='image_1',info=None,quad=None):
+        info=info or self.crop_info(item,field).json
+        return self.client.post(item['detail_url']+'/trim-quad/'+field,json={
+            'revision':info['revision'],'trimmed':info['trimmed'],
+            'quad':quad if quad is not None else [[10,10],[150,10],[150,70],[10,70]]})
+
+    def checked_item(self):
+        batch=self.imported();item=batch['items'][0]
+        batch=self.check(batch,item)
+        return batch,self.current_item(batch,item)
+
+    def test_crop_read_and_cancel_do_not_mutate_draft_or_collection(self):
+        batch,item=self.checked_item()
+        before=[tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items ORDER BY id')]
+        info=self.crop_info(item);self.assertEqual(info.status_code,200,info.json)
+        self.assertEqual(info.json['revision'],item['revision'])
+        response=self.client.get(info.json['source_url']);self.assertEqual(response.status_code,200);response.close()
+        self.assertEqual(before,[tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items ORDER BY id')])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_image_edits').fetchone()[0],0)
+
+    def test_crop_both_sides_preserves_originals_and_remains_reeditable(self):
+        batch,item=self.checked_item();originals={field:item['fields'][field] for field in ('image_1','image_2')}
+        before={name:(Path(stuff.UPLOAD_FOLDER)/name).read_bytes() for name in originals.values()}
+        for field in originals:
+            response=self.crop(item,field);self.assertEqual(response.status_code,200,response.json)
+            item=response.json['item'];name=item['fields'][field]
+            self.assertNotEqual(name,originals[field]);self.assertEqual(item['manual_photos'][field],name)
+            self.assertEqual(item['image_sources'][field],originals[field])
+            image=self.client.get(response.json['url']);self.assertEqual(image.status_code,200);image.close()
+            self.assertEqual(stuff._banknote_vision_source(name,self.db),originals[field])
+            info=self.crop_info(item,field).json
+            self.assertEqual(info['quad'][0],[10,10]);self.assertEqual((info['width'],info['height']),(160,80))
+        for name,raw in before.items():self.assertEqual((Path(stuff.UPLOAD_FOLDER)/name).read_bytes(),raw)
+        self.assertEqual(self.current_item(batch,item)['fields'],item['fields'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        first=item['fields']['image_1'];item=self.crop(item).json['item']
+        self.assertEqual(stuff._banknote_vision_source(item['fields']['image_1'],self.db),originals['image_1'])
+        referenced=stuff._collect_referenced_uploads(self.db)
+        self.assertTrue(set(originals.values())|{first,item['fields']['image_1'],item['fields']['image_2']} <= referenced)
+
+    def test_check_keeps_manual_crop_and_uses_original_holder(self):
+        batch,item=self.checked_item();original=item['fields']['image_1'];item=self.crop(item).json['item'];cropped=item['fields']['image_1']
+        seen=[]
+        def evaluate(note,prepared):
+            seen.append(stuff._banknote_vision_source(note['image_1'],self.db))
+            return dict(filled={'image_1':'other-file.jpg','notes':'additional verified details'})
+        batch=self.check(batch,item,evaluate);item=self.current_item(batch,item)
+        self.assertEqual(seen,[original]);self.assertEqual(item['fields']['image_1'],cropped)
+        self.assertEqual(item['fields']['notes'],'additional verified details')
+
+    def test_release_copies_crop_and_original_mapping(self):
+        batch,item=self.checked_item();original=item['fields']['image_1'];item=self.crop(item).json['item']
+        cropped=item['fields']['image_1'];raw=(Path(stuff.UPLOAD_FOLDER)/cropped).read_bytes()
+        response=self.release(batch,[item]);self.assertEqual(response.status_code,200,response.json)
+        live=self.db.execute('SELECT * FROM banknotes').fetchone();self.assertNotEqual(live['image_1'],cropped)
+        self.assertEqual((Path(stuff.UPLOAD_FOLDER)/live['image_1']).read_bytes(),raw)
+        self.assertEqual(stuff._banknote_vision_source(live['image_1'],self.db),original)
+        info=self.client.get('/banknotes/'+live['id']+'/trim-quad/image_1').json
+        self.assertEqual(info['quad'][0],[10,10]);self.assertEqual((info['width'],info['height']),(160,80))
+        self.assertEqual(self.crop_info(item).status_code,409)
+        self.assertEqual(self.crop(item,info={'revision':item['revision'],'trimmed':cropped}).status_code,409)
+
+    def test_recovery_crop_changes_only_explicit_image_on_release(self):
+        batch,item=self.recovered_item();before=dict(self.db.execute("SELECT * FROM banknotes WHERE id='failed-form'").fetchone())
+        item=self.crop(item,'image_2').json['item']
+        self.assertEqual(dict(self.db.execute("SELECT * FROM banknotes WHERE id='failed-form'").fetchone()),before)
+        self.assertEqual(item['fields']['image_1'],before['image_1']);self.assertNotEqual(item['fields']['image_2'],before['image_2'])
+        self.assertEqual(self.release(batch,[item]).status_code,200)
+        live=dict(self.db.execute("SELECT * FROM banknotes WHERE id='failed-form'").fetchone())
+        self.assertNotEqual(live['image_2'],before['image_2']);self.assertEqual(live['image_1'],before['image_1'])
+        self.assertEqual(live['notes'],before['notes']);self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+        self.assertEqual(stuff._banknote_vision_source(live['image_2'],self.db),before['image_2'])
+
+    def test_recovery_crop_binding_rejects_concurrent_collection_photo_change(self):
+        batch,item=self.recovered_item();info=self.crop_info(item).json
+        Image.new('RGB',(160,80),'purple').save(Path(stuff.UPLOAD_FOLDER)/'replacement.jpg')
+        self.db.execute("UPDATE banknotes SET image_1='replacement.jpg' WHERE id='failed-form'");self.db.commit()
+        result=self.crop(item,info=info);self.assertEqual(result.status_code,409,result.json)
+        self.assertEqual(result.json['code'],'existing_record_changed')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_image_edits').fetchone()[0],0)
+        self.assertEqual(self.crop_info(item).status_code,409)
+
+    def test_refresh_existing_keeps_crop_unless_review_accepts_changed_original(self):
+        batch,item=self.recovered_item();item=self.crop(item).json['item'];crop=item['fields']['image_1']
+        self.db.execute("UPDATE banknotes SET notes='New collection notes' WHERE id='failed-form'");self.db.commit()
+        item=self.refresh_existing(self.current_item(batch,item)).json['item']
+        self.assertEqual(item['fields']['image_1'],crop)
+        batch=self.refresh(batch);item=self.current_item(batch,item);self.assertEqual(item['fields']['image_1'],crop)
+        Image.new('RGB',(160,80),'purple').save(Path(stuff.UPLOAD_FOLDER)/'replacement.jpg')
+        self.db.execute("UPDATE banknotes SET image_1='replacement.jpg' WHERE id='failed-form'");self.db.commit()
+        item=self.refresh_existing(self.current_item(batch,item)).json['item']
+        self.assertEqual(item['fields']['image_1'],'replacement.jpg')
+        self.assertIn(crop,stuff._collect_referenced_uploads(self.db))
+        self.assertEqual(self.release(batch,[item]).status_code,200)
+        self.assertEqual(self.db.execute("SELECT image_1 FROM banknotes WHERE id='failed-form'").fetchone()[0],'replacement.jpg')
+
+    def test_refresh_existing_does_not_resurrect_manually_cropped_photo_after_live_clear(self):
+        batch,item=self.recovered_item();item=self.crop(item).json['item'];cropped=item['fields']['image_1']
+        self.db.execute("UPDATE banknotes SET image_1=NULL WHERE id='failed-form'");self.db.commit()
+        item=self.refresh_existing(self.current_item(batch,item)).json['item']
+        self.assertFalse(item['fields'].get('image_1'));self.assertIn(cropped,stuff._collect_referenced_uploads(self.db))
+        self.assertEqual(self.release(batch,[item]).status_code,200)
+        self.assertIsNone(self.db.execute("SELECT image_1 FROM banknotes WHERE id='failed-form'").fetchone()[0])
+
+    def test_order_refresh_does_not_resurrect_cropped_photo_after_live_clear(self):
+        batch,item=self.recovered_item();item=self.crop(item).json['item']
+        self.db.execute("UPDATE banknotes SET image_1=NULL WHERE id='failed-form'");self.db.commit()
+        batch=self.refresh(batch);item=self.current_item(batch,item)
+        self.assertFalse(item['fields'].get('image_1'))
+
+    def test_crop_guards_stale_revision_filename_and_active_check(self):
+        batch,item=self.checked_item();info=self.crop_info(item).json
+        item=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'notes':'Keep my edit'}}).json['item']
+        stale=self.crop(item,info=info);self.assertEqual(stale.status_code,409);self.assertEqual(stale.json['code'],'draft_changed')
+        self.assertEqual(self.client.get(info['source_url']).status_code,409)
+        invalid=dict(info,revision=item['revision'],trimmed='../other.jpg')
+        self.assertEqual(self.crop(item,info=invalid).status_code,409)
+        info=self.crop_info(item).json;imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
+        self.assertEqual(self.crop(item,info=info).status_code,409);self.assertEqual(self.crop_info(item).status_code,409)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_image_edits').fetchone()[0],0)
+
+    def test_crop_rejects_foreign_draft_asset_account_and_malformed_quad(self):
+        batch,item=self.checked_item();other=next(value for value in batch['items'] if value['id']!=item['id'])
+        info=self.crop_info(item).json
+        for quad in ([],[[1,2]],'bad',[[False,1],[150,1],[150,70],[1,70]],[[float('nan'),1],[150,1],[150,70],[1,70]],[[1,1],[2,1],[2,2],[1,2]]):
+            self.assertEqual(self.crop(item,info=info,quad=quad).status_code,409)
+        self.assertEqual(self.crop_info(item,'notes').status_code,409)
+        response=self.client.post(other['detail_url']+'/trim-quad/image_1',json=dict(revision=other['revision'],trimmed=info['trimmed'],quad=info['quad']))
+        self.assertEqual(response.status_code,409)
+        item=self.crop(item).json['item'];url='/uploads/'+item['fields']['image_1']
+        self.db.execute("UPDATE ebay_purchase_account SET account_name='other'");self.db.commit()
+        self.assertEqual(self.crop_info(item).status_code,409);self.assertEqual(self.client.get(url).status_code,404)
+
+    def test_cropped_front_cannot_be_selected_as_back_via_its_original(self):
+        batch,item=self.ambiguous_photos();original=item['photos'][0]['filename']
+        item=self.choose(item,'image_1',original).json['item'];item=self.crop(item).json['item']
+        response=self.choose(item,'image_2',original)
+        self.assertEqual(response.status_code,409);self.assertIn('different',response.json['error'])
+
+    def test_crop_failed_render_leaves_no_file_or_draft_changes(self):
+        batch,item=self.checked_item();info=self.crop_info(item).json
+        files={path.name for path in Path(stuff.UPLOAD_FOLDER).iterdir()};before=self.current_item(batch,item)
+        with patch.object(stuff,'_rectify_note_quad',return_value=None):
+            self.assertEqual(self.crop(item,info=info).status_code,409)
+        self.assertEqual(files,{path.name for path in Path(stuff.UPLOAD_FOLDER).iterdir()})
+        self.assertEqual(before,self.current_item(batch,item))
 
 if __name__=='__main__':unittest.main()

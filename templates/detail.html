@@ -1379,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', function () {
          data-upload-url="{% if not is_new and not import_draft %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_1'] and r['image_1']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_1']) }}" alt="">
-        {% if not is_new and not import_draft %}<button type="button" class="quad-fix-btn" title="Adjust crop" aria-label="Adjust front crop" onclick="openQuadFix(event, 'image_1')">✂</button>{% endif %}
+        {% if not is_new or import_draft %}<button type="button" class="quad-fix-btn" title="Adjust crop" aria-label="Adjust front crop" onclick="openQuadFix(event, 'image_1')">✂</button>{% endif %}
       {% else %}<span style="font-size:28px;color:#ccc">💵</span>{% endif %}
       {% if not import_draft %}<label class="file-upload-lbl">
         <input type="file" name="image_1" accept="image/*" style="display:none"
@@ -1390,7 +1390,7 @@ document.addEventListener('DOMContentLoaded', function () {
          data-upload-url="{% if not is_new and not import_draft %}{{ url_for('upload_image', category=category, record_id=r['id']) }}{% endif %}">
       {% if r and r['image_2'] and r['image_2']|is_image %}
         <img src="{{ url_for('uploaded_file', filename=r['image_2']) }}" alt="">
-        {% if not is_new and not import_draft %}<button type="button" class="quad-fix-btn" title="Adjust crop" aria-label="Adjust back crop" onclick="openQuadFix(event, 'image_2')">✂</button>{% endif %}
+        {% if not is_new or import_draft %}<button type="button" class="quad-fix-btn" title="Adjust crop" aria-label="Adjust back crop" onclick="openQuadFix(event, 'image_2')">✂</button>{% endif %}
       {% else %}<span style="font-size:28px;color:#ccc">💵</span>{% endif %}
       {% if not import_draft %}<label class="file-upload-lbl">
         <input type="file" name="image_2" accept="image/*" style="display:none"
@@ -1399,9 +1399,12 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   </div>
 
-  {% if import_draft %}{% include 'partials/banknote_import_detail_sources.html' %}{% endif %}
+  {% if import_draft %}
+  <p id="banknoteImportImageHelp" class="import-intro">Use ✂ on either photo to adjust its crop. Changes stay in this draft until release.</p>
+  {% include 'partials/banknote_import_detail_sources.html' %}
+  {% endif %}
 
-  {% if not is_new and not import_draft %}
+  {% if not is_new or import_draft %}
   <style>
     .banknote-imgs .coin-img-panel { position: relative; }
     .quad-fix-btn {
@@ -1413,6 +1416,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     .banknote-imgs .coin-img-panel:hover .quad-fix-btn,
     .banknote-imgs .coin-img-panel:focus-within .quad-fix-btn { opacity: 1; }
+    .banknote-import-detail .quad-fix-btn { opacity: 1; }
+    .quad-fix-btn[disabled] { opacity: .4; cursor: default; }
+    .quad-fix-btn[hidden] { display: none; }
     .quad-fix-btn:focus-visible { outline: 2px solid #2f6fef; outline-offset: 2px; }
     @media (hover: none), (pointer: coarse) {
       .banknote-imgs .quad-fix-btn { opacity: 1; width: 44px; height: 44px; border-radius: 22px; }
@@ -1438,7 +1444,7 @@ document.addEventListener('DOMContentLoaded', function () {
   <script>
   // Check and uploads can fill a previously empty side without reloading.
   function ensureBanknoteCropControl(zone) {
-    if (!zone?.closest('.banknote-imgs') || !zone.dataset.uploadUrl || !zone.querySelector('img')) return;
+    if (!zone?.closest('.banknote-imgs') || (!zone.dataset.uploadUrl && !zone.closest('[data-import-mode="detail"]')) || !zone.querySelector('img')) return;
     var field = zone.dataset.field;
     if (!['image_1', 'image_2'].includes(field) || zone.querySelector('.quad-fix-btn')) return;
     var button = document.createElement('button');
@@ -1450,13 +1456,17 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   async function openQuadFix(ev, field) {
     ev.preventDefault(); ev.stopPropagation();
+    var trigger = ev.currentTarget;
+    var draft = {{ import_draft|tojson }} ? window.banknoteImportCrop : null;
+    if ({{ import_draft|tojson }} && !draft) return;
+    if (trigger?.disabled || document.querySelector('.quad-modal')) return;
     var recordId = {{ r['id']|tojson }};
     var base = '/banknotes/' + recordId + '/trim-quad/' + field;
     var info;
     try {
-      info = await (await fetch(base)).json();
-    } catch (e) { info = {error: 'Could not load the crop data.'}; }
-    if (info.error) { alert(info.error); return; }
+      info = draft ? await draft.load(field) : await (await fetch(base)).json();
+    } catch (e) { info = {error: e.message || 'Could not load the crop data.'}; }
+    if (info.error) { draft?.close(); alert(info.error); return; }
     var img = new Image();
     img.onload = function () {
       var scale = Math.min((window.innerWidth * 0.92) / info.width,
@@ -1469,9 +1479,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
       var modal = document.createElement('div');
       modal.className = 'quad-modal';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('aria-label', 'Adjust ' + (field === 'image_1' ? 'front' : 'back') + ' crop');
       modal.innerHTML =
         '<div class="qm-hint">Drag the corners onto the note’s paper' +
-        ' edges — Save re-crops from the original photo.</div>' +
+        ' edges — Save re-crops from the original photo.' +
+        (draft ? ' Changes stay in this draft until release.' : '') + '</div>' +
         '<canvas width="' + cw + '" height="' + ch + '"></canvas>' +
         '<div class="qm-row"><button type="button" class="qm-save">' +
         'Save crop</button><button type="button" class="qm-cancel">' +
@@ -1528,32 +1542,48 @@ document.addEventListener('DOMContentLoaded', function () {
       });
       canvas.addEventListener('pointerup', function () { active = -1; });
 
-      function close() { modal.remove(); }
+      var savingCrop = false;
+      function close() {
+        if (savingCrop) return;
+        modal.remove(); draft?.close(); trigger?.focus({preventScroll:true});
+      }
+      modal.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { event.preventDefault(); close(); }
+        if (event.key === 'Tab') {
+          var buttons = [...modal.querySelectorAll('button:not([disabled])')];
+          if (event.shiftKey && document.activeElement === buttons[0]) { event.preventDefault(); buttons[buttons.length - 1]?.focus(); }
+          else if (!event.shiftKey && document.activeElement === buttons[buttons.length - 1]) { event.preventDefault(); buttons[0]?.focus(); }
+        }
+      });
       modal.querySelector('.qm-cancel').addEventListener('click', close);
       modal.addEventListener('click', function (e) {
         if (e.target === modal) close();
       });
       modal.querySelector('.qm-save').addEventListener('click', async function () {
-        this.disabled = true;
+        this.disabled = true; savingCrop = true;
+        modal.querySelector('.qm-cancel').disabled = true;
         var body = {quad: quad.map(function (p) {
           return [p[0] / scale, p[1] / scale];
         })};
         var rsp;
         try {
-          rsp = await (await fetch(base, {
+          rsp = draft ? await draft.save(field, info, body.quad) : await (await fetch(base, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(body),
           })).json();
-        } catch (e) { rsp = {error: 'Save failed.'}; }
+        } catch (e) { rsp = {error: e.message || 'Save failed.'}; }
+        savingCrop = false;
+        modal.querySelector('.qm-cancel').disabled = false;
         if (rsp.error) { alert(rsp.error); this.disabled = false; return; }
         var panel = document.querySelector(
           '.banknote-imgs .coin-img-panel[data-field="' + field + '"] img');
-        if (panel) panel.src = rsp.url + '?v=' + Date.now();
+        if (panel && !draft) panel.src = rsp.url + '?v=' + Date.now();
         close();
       });
-      draw();
+      draw(); modal.querySelector('.qm-cancel').focus();
     };
+    img.onerror = function () { draft?.close(); alert('Could not load the original photo. Try opening the crop editor again.'); };
     img.src = info.source_url;
   }
   </script>

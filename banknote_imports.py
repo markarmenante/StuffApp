@@ -77,6 +77,13 @@ def init_schema(db):
         item_id TEXT NOT NULL REFERENCES banknote_import_items(id), source_url TEXT NOT NULL,
         filename TEXT NOT NULL, sha256 TEXT NOT NULL, width INTEGER, height INTEGER,
         position INTEGER NOT NULL, PRIMARY KEY(item_id,source_url));
+    CREATE TABLE IF NOT EXISTS banknote_import_image_edits (
+        filename TEXT PRIMARY KEY, item_id TEXT NOT NULL REFERENCES banknote_import_items(id),
+        field TEXT NOT NULL CHECK(field IN ('image_1','image_2')),
+        base_filename TEXT NOT NULL, source_filename TEXT NOT NULL,
+        quad_json TEXT NOT NULL, sha256 TEXT NOT NULL, created_at REAL NOT NULL);
+    CREATE INDEX IF NOT EXISTS banknote_import_image_edits_item
+        ON banknote_import_image_edits(item_id,field);
     CREATE TABLE IF NOT EXISTS banknote_import_evidence (
         item_id TEXT NOT NULL REFERENCES banknote_import_items(id), field TEXT NOT NULL,
         value_json TEXT NOT NULL, proof_json TEXT NOT NULL, accepted_at REAL NOT NULL,
@@ -260,12 +267,15 @@ def materialize(db, account, order_id, items, request_id):
                 previous=json.loads(prior['existing_snapshot_json'] or '{}')
                 for key,value in previous.items():
                     if (not banknote_catalog_lookup.is_blank(value) and banknote_catalog_lookup.is_blank(recovery.get(key))
-                            and refreshed_fields.get(key)==value):
+                            and (refreshed_fields.get(key)==value or
+                                 _image_edits(db,prior,refreshed_fields).get(key,{}).get('base_filename')==value)):
                         # A deliberately cleared live value must not return
                         # through its old, read-only recovery copy.
                         refreshed_fields.pop(key,None)
+                crops=_preserved_image_edits(db,prior,refreshed_fields,recovery)
                 refreshed_fields.update({key:value for key,value in recovery.items() if key not in
                     ('id','cat_id','banknote_id','created_at','updated_at','specs_searched_at') and not banknote_catalog_lookup.is_blank(value)})
+                refreshed_fields.update(crops)
             db.execute('''UPDATE banknote_import_items SET source_json=?,source_digest=?,warning=?,
                 fields_json=?,state=?,released_record_id=?,revision=revision+1,check_state='idle',check_token=NULL,check_expires=0,updated_at=?
                 WHERE account_name=? AND line_key=? AND state!='released' ''',
@@ -330,7 +340,8 @@ def _public_item(db, row):
                 existing_record_changes=existing_changes,existing_record_version=existing_version,
                 existing_record_url='/banknotes/'+row['existing_record_id'] if row.get('existing_record_id') else None,
                 check_message=message,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields,
-                manual_photos=json.loads(row.get('manual_photos_json') or '{}'))
+                manual_photos=json.loads(row.get('manual_photos_json') or '{}'),
+                image_sources={field:edit['source_filename'] for field,edit in _image_edits(db,row,fields).items()})
 
 
 def status(db,batch_id):
@@ -420,16 +431,110 @@ def refresh_existing(db,batch_id,item_id,revision,existing_record_version):
         fields=json.loads(row['fields_json'])
         for key,value in previous.items():
             if (key not in _EXISTING_DRAFT_EXCLUDED_FIELDS and not banknote_catalog_lookup.is_blank(value)
-                    and banknote_catalog_lookup.is_blank(current.get(key)) and fields.get(key)==value):
+                    and banknote_catalog_lookup.is_blank(current.get(key)) and
+                    (fields.get(key)==value or _image_edits(db,row,fields).get(key,{}).get('base_filename')==value)):
                 fields.pop(key,None)
+        crops=_preserved_image_edits(db,row,fields,current)
         fields.update({key:value for key,value in current.items()
                        if key not in _EXISTING_DRAFT_EXCLUDED_FIELDS and not banknote_catalog_lookup.is_blank(value)})
+        fields.update(crops)
         db.execute('''UPDATE banknote_import_items SET fields_json=?,existing_snapshot_json=?,
             revision=revision+1,updated_at=? WHERE id=?''',(_json(fields),_json(current),time.time(),item_id))
         db.commit()
     except Exception:
         db.rollback();raise
     return _public_item(db,db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item_id,)).fetchone())
+
+
+def _image_edits(db,row,fields):
+    """Only a crop explicitly saved for this exact draft side may replace it."""
+    result={}
+    for field in ('image_1','image_2'):
+        edit=db.execute('SELECT * FROM banknote_import_image_edits WHERE item_id=? AND field=? AND filename=?',
+                        (row['id'],field,fields.get(field))).fetchone()
+        if edit:result[field]=dict(edit)
+    return result
+
+
+def _preserved_image_edits(db,row,fields,current):
+    previous=json.loads(row['existing_snapshot_json'] or '{}')
+    return {field:fields[field] for field,edit in _image_edits(db,row,fields).items()
+            if current.get(field)==edit['base_filename'] or
+            (banknote_catalog_lookup.is_blank(current.get(field)) and banknote_catalog_lookup.is_blank(previous.get(field)))}
+
+
+def _draft_image(db,batch_id,item_id,field,folder,revision=None,trimmed=None):
+    if field not in ('image_1','image_2'):
+        raise ImportProblem('Unknown image field.')
+    batch,row=_item(db,batch_id,item_id)
+    _validate_source(db,batch,row)
+    if row['state']!='draft' or (revision is not None and row['revision']!=revision):
+        raise ImportProblem('This draft changed or was released. Reopen the photo editor.',code='draft_changed')
+    if row['check_state']=='checking' and row['check_expires']>time.time():
+        raise ImportProblem('Wait for Check to finish before editing draft photos.')
+    fields=json.loads(row['fields_json']);filename=fields.get(field)
+    if not filename or (trimmed is not None and filename!=trimmed):
+        raise ImportProblem('This draft photograph changed. Reopen the photo editor.',code='draft_changed')
+    root=Path(folder).resolve()
+    def available(name):
+        return isinstance(name,str) and Path(name).name==name and (root/name).resolve().parent==root and (root/name).is_file()
+    if not available(filename):raise ImportProblem('The saved draft photograph is unavailable.')
+    edit=_image_edits(db,row,fields).get(field)
+    existing=json.loads(row['existing_snapshot_json'] or '{}')
+    if row.get('existing_record_id'):
+        live=db.execute('SELECT * FROM banknotes WHERE id=?',(row['existing_record_id'],)).fetchone()
+        if not live or live[field]!=existing.get(field):
+            raise ImportProblem('The collection photograph changed. Review its current version before editing the draft.',
+                                code='existing_record_changed',item=_public_item(db,row))
+    if edit:
+        source,quad,base=edit['source_filename'],json.loads(edit['quad_json']),edit['base_filename']
+    else:
+        asset=db.execute('SELECT 1 FROM banknote_import_assets WHERE item_id=? AND filename=?',(item_id,filename)).fetchone()
+        if not asset and existing.get(field)!=filename:
+            raise ImportProblem('That photograph does not belong to this draft.')
+        source,quad,base=filename,None,filename
+        original=db.execute('SELECT source,quad FROM trimmed_image_sources WHERE trimmed=?',(filename,)).fetchone()
+        if original and available(original['source']):
+            source=original['source']
+            try:quad=json.loads(original['quad']) if original['quad'] else None
+            except ValueError:quad=None
+    if not available(source):raise ImportProblem('The original draft photograph is unavailable.')
+    return row,dict(trimmed=filename,source=source,quad=quad,base_filename=base)
+
+
+def image_info(db,batch_id,item_id,field,folder,revision=None,trimmed=None):
+    return _draft_image(db,batch_id,item_id,field,folder,revision,trimmed)
+
+
+def crop_image(db,batch_id,item_id,field,folder,revision,trimmed,quad,render):
+    """Save a new draft crop, retaining original bytes and collection state."""
+    if type(revision) is not int or not isinstance(trimmed,str) or not trimmed:
+        raise ImportProblem('Reopen the photo editor before saving this crop.')
+    created=None
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        row,info=_draft_image(db,batch_id,item_id,field,folder,revision,trimmed)
+        output,width,height,corners=render(Path(folder)/info['source'],quad)
+        filename=uuid.uuid4().hex+'.jpg';created=Path(folder)/filename
+        created.write_bytes(output)
+        encoded_quad=_json(corners)
+        db.execute("""INSERT INTO banknote_import_image_edits
+            (filename,item_id,field,base_filename,source_filename,quad_json,sha256,created_at)
+            VALUES(?,?,?,?,?,?,?,?)""",
+            (filename,item_id,field,info['base_filename'],info['source'],encoded_quad,hashlib.sha256(output).hexdigest(),time.time()))
+        db.execute('INSERT INTO trimmed_image_sources(trimmed,source,quad) VALUES(?,?,?)',
+                   (filename,info['source'],encoded_quad))
+        fields=json.loads(row['fields_json']);fields[field]=filename
+        selected=json.loads(row['manual_photos_json'] or '{}');selected[field]=filename
+        db.execute("""UPDATE banknote_import_items SET fields_json=?,manual_photos_json=?,
+            revision=revision+1,updated_at=? WHERE id=?""",(_json(fields),_json(selected),time.time(),item_id))
+        db.commit()
+    except Exception:
+        db.rollback()
+        if created:created.unlink(missing_ok=True)
+        raise
+    item=_public_item(db,db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item_id,)).fetchone())
+    return dict(ok=True,item=item,url='/uploads/'+filename,width=width,height=height)
 
 
 def _manually_selected_pair(fields,selected):
@@ -459,10 +564,13 @@ def select_photo(db,batch_id,item_id,revision,field,filename,folder):
         fields=json.loads(row['fields_json']);other='image_2' if field=='image_1' else 'image_1'
         if fields.get(other):
             other_path=root/fields[other]
-            other_asset=db.execute('SELECT sha256 FROM banknote_import_assets WHERE item_id=? AND filename=?',(item_id,fields[other])).fetchone()
+            other_edit=_image_edits(db,row,fields).get(other)
+            other_name=other_edit['source_filename'] if other_edit else fields[other]
+            other_path=root/other_name
+            other_asset=db.execute('SELECT sha256 FROM banknote_import_assets WHERE item_id=? AND filename=?',(item_id,other_name)).fetchone()
             other_hash=other_asset['sha256'] if other_asset else (
                 hashlib.sha256(other_path.read_bytes()).hexdigest() if other_path.resolve().parent==root and other_path.is_file() else None)
-            if fields[other]==filename or (other_hash and other_hash==asset['sha256']):
+            if fields[other]==filename or other_name==filename or (other_hash and other_hash==asset['sha256']):
                 raise ImportProblem('Choose different photographs for the front and back.')
         fields[field]=filename
         selected=json.loads(row['manual_photos_json'] or '{}');selected[field]=filename
@@ -602,6 +710,7 @@ def release(db,batch_id,selected,folder,create):
             if linked:raise ImportProblem('This purchased item was already added to the collection. Refresh the review list.')
             fields=json.loads(row['fields_json'])
             fields['order_number']=source['order_id'];fields['marketplace']='eBay'
+            image_edits=_image_edits(db,row,fields)
             existing=None
             if not row['existing_record_id'] and _existing_matches(db,source):
                 raise ImportProblem('This exact purchased listing now has a collection record. Refresh the order review before release; no duplicate was created.')
@@ -618,16 +727,27 @@ def release(db,batch_id,selected,folder,create):
                 if not db.execute('SELECT 1 FROM banknote_original_listings WHERE banknote_id=? AND url=?',
                         (live['id'],'https://www.ebay.com/itm/'+source['item_id'])).fetchone():
                     raise ImportProblem('The existing banknote listing changed. Review it before release.')
+                crops=_preserved_image_edits(db,row,fields,existing)
                 fields.update({key:value for key,value in existing.items() if not banknote_catalog_lookup.is_blank(value)})
+                fields.update(crops)
+                image_edits={field:edit for field,edit in image_edits.items() if field in crops}
             for field in ('image_1','image_2'):
                 if fields.get(field):
                     if existing and existing.get(field)==fields[field]:continue
                     asset=db.execute('SELECT * FROM banknote_import_assets WHERE item_id=? AND filename=?',(row['id'],fields[field])).fetchone()
                     path=Path(folder)/fields[field]
-                    if not asset or path.name!=fields[field] or not path.is_file():raise ImportProblem('A draft photograph is unavailable; check the draft before releasing it.')
+                    edit=image_edits.get(field)
+                    if ((not asset and not edit) or path.name!=fields[field] or path.resolve().parent!=Path(folder).resolve()
+                            or not path.is_file()):raise ImportProblem('A draft photograph is unavailable; check the draft before releasing it.')
+                    if edit and hashlib.sha256(path.read_bytes()).hexdigest()!=edit['sha256']:
+                        raise ImportProblem('The saved draft crop changed on disk. Reopen its photo editor before release.')
                     filename=uuid.uuid4().hex+path.suffix;destination=Path(folder)/filename
                     shutil.copyfile(path,destination);copies.append(destination);fields[field]=filename
-            ident=create(db,fields,existing)
+                    transform=db.execute('SELECT source,quad FROM trimmed_image_sources WHERE trimmed=?',(path.name,)).fetchone()
+                    if transform:
+                        db.execute('INSERT INTO trimmed_image_sources(trimmed,source,quad) VALUES(?,?,?)',
+                                   (filename,transform['source'],transform['quad']))
+            ident=create(db,fields,existing,image_overrides=tuple(image_edits))
             identity=banknote_catalog_lookup.identity_snapshot(fields)
             proofs={proof['field']:json.loads(proof['proof_json']) for proof in db.execute(
                 'SELECT * FROM banknote_import_evidence WHERE item_id=?',(row['id'],))

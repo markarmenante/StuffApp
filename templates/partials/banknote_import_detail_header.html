@@ -6,6 +6,7 @@
     <button class="toolbar-btn pill" type="button" id="banknoteImportSave">Save draft</button>
     <button class="toolbar-btn pill" type="button" id="banknoteImportCheck">✓ Check</button>
     <button class="toolbar-btn pill active" type="button" id="banknoteImportRelease">Release to Collection</button>
+    <a class="toolbar-btn pill active" id="banknoteImportOpenCollection" hidden>Open in Collection</a>
     <a class="toolbar-btn pill" href="{{ back_href }}" data-import-back>← Order review</a>
   </nav>
 </header>
@@ -21,4 +22,4 @@
   </div>
 </section>
 <div class="import-evidence" id="banknoteImportWarnings" hidden></div>
-{% if import_item.preserved_fields|default([]) %}<p class="import-intro" id="banknoteImportPreserved">Existing record values and photographs are preserved. Missing details can be completed here.</p>{% endif %}
+{% if import_item.preserved_fields|default([]) %}<p class="import-intro" id="banknoteImportPreserved">Existing record values are preserved. Missing details and photo crops can be reviewed here before release.</p>{% endif %}

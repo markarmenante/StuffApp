@@ -110,13 +110,14 @@
     form.querySelectorAll('.banknote-imgs .coin-img-panel[data-field]').forEach(panel => {
       const filename = item.fields?.[panel.dataset.field];
       const img = panel.querySelector('img');
-      if (!filename) { if (img) img.remove(); return; }
+      if (!filename) { img?.remove(); panel.querySelector('.quad-fix-btn')?.remove(); return; }
       const url = sameOrigin(root.dataset.uploadedFileTemplate.replace('__draft_image__', encodeURIComponent(filename)));
-      if (img && img.getAttribute('src') === url) return;
-      const image = img || el('img'); image.src = url;
+      const image = img || el('img');
+      if (image.getAttribute('src') !== url) image.src = url;
       image.alt = panel.dataset.field === 'image_1' ? 'Banknote front' : 'Banknote back';
       panel.querySelector(':scope > span')?.remove();
       if (!img) panel.prepend(image);
+      window.ensureBanknoteCropControl?.(panel);
     });
   }
   const checkRunning = draft => draft.check_state === 'checking';
@@ -160,7 +161,13 @@
     (batch.items || []).forEach(draft => {
       const card = el('article', undefined, 'import-card'); card.dataset.draftId = draft.id;
       const photos = el('div', undefined, 'import-card-photos');
-      (draft.photos || []).slice(0, 2).forEach((photo, index) => appendPhoto(photos, photo, index, draft.detail_url));
+      const originals = draft.photos || [];
+      const previews = ['image_1','image_2'].map((field, index) => {
+        const filename = draft.fields?.[field];
+        return filename ? originals.find(photo => photo.filename === filename)
+          || {filename, url:'/uploads/' + encodeURIComponent(filename)} : originals[index];
+      }).filter(Boolean);
+      previews.forEach((photo, index) => appendPhoto(photos, photo, index, draft.detail_url));
       if (!photos.children.length) photos.append(el('span', checkRunning(draft) ? 'Loading purchased photos…' : 'Photos not yet available', 'import-photo-empty'));
       const body = el('div');
       body.append(el('h2', draft.title || [draft.fields?.country, draft.fields?.denomination].filter(Boolean).join(' · ') || 'Purchased banknote'));
@@ -279,18 +286,41 @@
       entries.append(li);
     });
     const editable = item.state === 'draft';
+    form?.querySelectorAll('.quad-fix-btn').forEach(button => {
+      button.hidden = !editable;
+      button.disabled = !editable || busy || checkRunning(item) || Boolean(conflict);
+    });
+    const openCollection = document.getElementById('banknoteImportOpenCollection');
+    if (openCollection) {
+      openCollection.hidden = item.state !== 'released' || !item.released_record_id;
+      if (!openCollection.hidden) openCollection.href = '/banknotes/' + encodeURIComponent(item.released_record_id);
+    }
+    const imageHelp = document.getElementById('banknoteImportImageHelp');
+    if (imageHelp) {
+      imageHelp.replaceChildren();
+      if (item.state === 'released' && item.released_record_id) {
+        const link = el('a', 'Edit photos in collection');
+        link.href = '/banknotes/' + encodeURIComponent(item.released_record_id); imageHelp.append(link);
+      } else {
+        imageHelp.textContent = item.fields?.image_1 || item.fields?.image_2
+          ? 'Use ✂ on either photo to adjust its crop. Changes stay in this draft until release.'
+          : 'Choose front and back from Purchased photos below, then use ✂ to adjust each crop.';
+      }
+    }
     const preserved = new Set(item.preserved_fields || []);
     gallery.querySelectorAll('figure[data-photo-filename]').forEach(figure => {
       const filename = figure.dataset.photoFilename;
       figure.querySelectorAll('[data-photo-selected]').forEach(badge => {
-        badge.hidden = !filename || item.fields?.[badge.dataset.photoSelected] !== filename;
+        const field = badge.dataset.photoSelected;
+        badge.hidden = !filename || (item.fields?.[field] !== filename && item.image_sources?.[field] !== filename);
       });
       const actions = figure.querySelector('.import-photo-actions');
       if (actions) actions.hidden = !editable;
       figure.querySelectorAll('[data-photo-side]').forEach(button => {
         const field = button.dataset.photoSide;
-        const selected = item.fields?.[field] === filename;
-        const opposite = item.fields?.[field === 'image_1' ? 'image_2' : 'image_1'] === filename;
+        const oppositeField = field === 'image_1' ? 'image_2' : 'image_1';
+        const selected = item.fields?.[field] === filename || item.image_sources?.[field] === filename;
+        const opposite = item.fields?.[oppositeField] === filename || item.image_sources?.[oppositeField] === filename;
         button.disabled = !editable || busy || checkRunning(item) || Boolean(conflict) || preserved.has(field) || selected || opposite;
         button.setAttribute('aria-pressed', String(selected));
         button.title = preserved.has(field) ? 'The existing record’s photo is preserved.' : selected
@@ -375,6 +405,35 @@
       actionError(error);
     } finally { busy = false; renderDetail(); }
   }
+  // The familiar crop editor delegates only its persistence for saved drafts.
+  // Hold the draft stable while it is open; bind Save to the revision and photo
+  // that supplied the visible corners, never a later background response.
+  window.banknoteImportCrop = {
+    async load(field) {
+      if (busy || conflict || checkRunning(item) || item.state !== 'draft') {
+        throw new Error('Finish the current draft action before editing this photo.');
+      }
+      busy = true; busyAction = 'crop'; renderDetail();
+      try {
+        await saveDraft();
+        return await request(item.detail_url + '/trim-quad/' + encodeURIComponent(field));
+      } catch (error) { actionError(error); throw error; }
+    },
+    async save(field, info, quad) {
+      try {
+        const result = await request(item.detail_url + '/trim-quad/' + encodeURIComponent(field), 'POST', {
+          revision:info.revision, trimmed:info.trimmed, quad,
+        });
+        if (!result.item) throw new Error('The crop save could not be confirmed. Refresh the saved status before trying again.');
+        if (setRemote(result.item)) say('Crop saved · not yet in collection');
+        return result;
+      } catch (error) { actionError(error); throw error; }
+    },
+    close() {
+      if (busyAction !== 'crop') return;
+      busy = false; busyAction = ''; renderDetail();
+    },
+  };
   function showConflict(remote) {
     document.getElementById('banknoteImportConflict')?.remove();
     const panel = el('section', undefined, 'import-evidence'); panel.id = 'banknoteImportConflict';
@@ -553,6 +612,7 @@
       if (!leftPage && (dirty() || saving)) { event.preventDefault(); event.returnValue = ''; }
     });
     renderDetail();
+    if (item.state === 'released') say('Released to collection. Open in Collection to edit this note or its photos.');
   }
   if (batchRunning()) pollTimer = setTimeout(() => pollStatus(), 1200);
 })();

@@ -21589,6 +21589,59 @@ def banknote_import_photo(batch_id,item_id):
     except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 
 
+
+def _render_import_crop(path,raw_quad):
+    # Keep the established crop transform and encoding used by collection pages.
+    import math
+    if (not isinstance(raw_quad,list) or len(raw_quad)!=4 or
+            any(not isinstance(point,(list,tuple)) or len(point)!=2 or
+                any(isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value)
+                    for value in point) for point in raw_quad)):
+        raise banknote_imports.ImportProblem('Corners are malformed.')
+    img=_flatten_image_for_jpeg(_open_upload_image(path.read_bytes()))
+    quad=_parse_client_quad(raw_quad,*img.size)
+    if quad is None:raise banknote_imports.ImportProblem('Corners are too close together or malformed.')
+    rect=_rectify_note_quad(img,quad)
+    if rect is None:raise banknote_imports.ImportProblem('Corners are too close together.')
+    output=_encode_trimmed_note(rect[0]);result=_open_upload_image(output)
+    return output,result.width,result.height,[[round(x,1),round(y,1)] for x,y in quad]
+
+
+@app.route('/banknotes/imports/<batch_id>/items/<item_id>/trim-quad/<field>',methods=['GET','POST'])
+def banknote_import_trim_quad(batch_id,item_id,field):
+    require_owner();db=get_db()
+    try:
+        if request.method=='POST':
+            data=request.get_json(silent=True)
+            if not isinstance(data,dict):raise banknote_imports.ImportProblem('Reopen the photo editor before saving this crop.')
+            result=banknote_imports.crop_image(db,batch_id,item_id,field,UPLOAD_FOLDER,data.get('revision'),
+                data.get('trimmed'),data.get('quad'),_render_import_crop)
+        else:
+            row,info=banknote_imports.image_info(db,batch_id,item_id,field,UPLOAD_FOLDER)
+            with open(os.path.join(UPLOAD_FOLDER,info['source']),'rb') as handle:
+                img=_flatten_image_for_jpeg(_open_upload_image(handle.read()))
+            width,height=img.size;quad=info['quad']
+            if not isinstance(quad,list) or len(quad)!=4:
+                mx,my=.02*width,.02*height
+                quad=[[mx,my],[width-mx,my],[width-mx,height-my],[mx,height-my]]
+            result=dict(source_url=url_for('banknote_import_trim_source',batch_id=batch_id,item_id=item_id,
+                field=field,revision=row['revision'],trimmed=info['trimmed']),width=width,height=height,
+                quad=quad,trimmed=info['trimmed'],revision=row['revision'])
+        response=jsonify(result);response.headers['Cache-Control']='no-store';return response
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
+
+
+@app.get('/banknotes/imports/<batch_id>/items/<item_id>/trim-source/<field>')
+def banknote_import_trim_source(batch_id,item_id,field):
+    require_owner()
+    try:
+        revision=request.args.get('revision',type=int);trimmed=request.args.get('trimmed')
+        if revision is None or not trimmed:raise banknote_imports.ImportProblem('Reopen the photo editor.')
+        _row,info=banknote_imports.image_info(get_db(),batch_id,item_id,field,UPLOAD_FOLDER,revision,trimmed)
+        response=send_from_directory(UPLOAD_FOLDER,info['source']);response.headers['Cache-Control']='no-store';return response
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
+
+
 @app.post('/banknotes/imports/<batch_id>/items/<item_id>/check')
 def banknote_import_check(batch_id,item_id):
     require_owner();data=request.get_json(silent=True) or {}
@@ -21612,12 +21665,14 @@ def banknote_import_refresh_existing(batch_id,item_id):
     except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 
 
-def _create_released_banknote(db,fields,existing=None):
+def _create_released_banknote(db,fields,existing=None,*,image_overrides=()):
     columns=_table_cols(db,'banknotes')
     allowed={field['name'] for field in _import_fields()}|{'order_number','marketplace','image_1','image_2'}
     values={key:value for key,value in fields.items() if key in columns and key in allowed}
     if existing:
-        values={key:value for key,value in values.items() if banknote_catalog_lookup.is_blank(existing.get(key))
+        values={key:value for key,value in values.items()
+                if (banknote_catalog_lookup.is_blank(existing.get(key)) or
+                    (key in ('image_1','image_2') and key in image_overrides))
                 and not banknote_catalog_lookup.is_blank(value)}
         if values:
             values['updated_at']=datetime.utcnow().isoformat()
@@ -30661,6 +30716,11 @@ def _upload_visible_to_current_user(filename):
             JOIN banknote_import_items i ON i.id=a.item_id
             JOIN ebay_purchase_account p ON p.id=1 AND lower(p.account_name)=i.account_name
             WHERE a.filename=? LIMIT 1''', (name,)).fetchone()
+        if not draft:
+            draft=db.execute('''SELECT 1 FROM banknote_import_image_edits e
+                JOIN banknote_import_items i ON i.id=e.item_id
+                JOIN ebay_purchase_account p ON p.id=1 AND lower(p.account_name)=i.account_name
+                WHERE e.filename=? LIMIT 1''',(name,)).fetchone()
         if draft:
             return True
 
@@ -33864,6 +33924,8 @@ def _collect_referenced_uploads(db):
     referenced = set()
     # Staged photos are durable user work even before collection release.
     referenced.update(row[0] for row in db.execute('SELECT filename FROM banknote_import_assets'))
+    for row in db.execute('SELECT filename,source_filename,base_filename FROM banknote_import_image_edits'):
+        referenced.update(row)
     for cat, fields in FIELDS.items():
         table = CATEGORIES[cat]['table']
         file_cols = [f['name'] for f in fields if f.get('type') == 'file']
