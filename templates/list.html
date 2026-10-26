@@ -213,10 +213,10 @@
   </div>
   {% endif %}
   {% if _bn_group and _bn_group.regional_heading %}
-  <section data-banknote-family-scope="eastern-caribbean" aria-label="Eastern Caribbean">
-  <div class="banknote-group-heading" data-banknote-family="eastern-caribbean">
-    <h2>Eastern Caribbean</h2>
-    <p>One regional currency family, with separate Currency Board, Currency Authority and Central Bank issues.</p>
+  <section data-banknote-family-scope="{{ _bn_group.regional.family_key }}" aria-label="{{ _bn_group.regional.family }}">
+  <div class="banknote-group-heading" data-banknote-family="{{ _bn_group.regional.family_key }}">
+    <h2>{{ _bn_group.regional.family }}</h2>
+    <p>{{ _bn_group.regional.family_description }}</p>
   </div>
   {% endif %}
   {% if _bn_group and _bn_group.regional_issuer_heading and not show_history %}
@@ -775,7 +775,7 @@
   <div class="us-series-divider" aria-hidden="true"></div>
   {% endif %}
   {% if _bn_group and _bn_group.regional_end %}
-  <div class="us-series-divider" data-banknote-family-end="eastern-caribbean" role="separator" aria-label="End of Eastern Caribbean"></div>
+  <div class="us-series-divider" data-banknote-family-end="{{ _bn_group.regional.family_key }}" role="separator" aria-label="End of {{ _bn_group.regional.family }}"></div>
   </section>
   {% endif %}
   {% if category == 'properties' %}{% set ns.prev = row['type'] %}{% endif %}

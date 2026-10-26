@@ -260,3 +260,35 @@ and nonissuer states, SQLite row support and unchanged inputs. The integration
 suite covers lifecycle, access restrictions, filtering, cross-group navigation
 and actual Pitcairn status. Isolated browser fixtures verify desktop/mobile
 layout and exact destination rows without changing real collection data.
+
+## Pacific lineage and African successor coverage
+
+Tahiti / French Oceania / French Polynesia now share one displayed coverage pill,
+**Tahiti / French Polynesia**. The original French Oceania and French Polynesia
+entity keys and issue periods remain available for existing candidate identities;
+`coverage_entity` merges their collection coverage only. A held or pending 1973
+Tahiti note retires the missing-lineage prompt without claiming it was issued
+before the 1957 name change. Sold and other disposed notes do not retire it.
+The shared missing-lineage prompt retains the existing French Oceania
+continuing-dependency period (from 1905, with no invented independence cutoff).
+The name change is not independence; existing candidate date and issuer gates
+still apply after the coverage-key comparison.
+New Caledonia and the common French Pacific issue area retain separate pills.
+
+The [IEOM territorial history](https://www.ieom.fr/IMG/pdf/livre_ieom_f_cfp_10.2014_-_web03_chapitre-2-p1825.pdf)
+and [IEOM transition to territorial/common notes](https://www.ieom.fr/IMG/pdf/livre_ieom_f_cfp_10.2014_-_web04_chapitre-3-p2637.pdf)
+underpin that lineage. It is not a cross-territory Pick-number equivalence; Market
+Scan still requires the saved country/catalogue namespace and complete reference.
+An IEOM label without an explicit territory supplies no inferred Pacific branch.
+
+African regional coverage follows the reviewed issuer and territory, independently
+of the display family’s French monetary lineage. BAO covers French West Africa;
+BCEAO covers West African States. CCFOM and the AEF/Cameroon issuing institute
+retain compatible historical territorial coverage. BEAC covers the new
+**Central African States — successor regional issues** entity, with no colonial
+scan period; it cannot credit French colonial Cameroon or another member country.
+See [African family sources and scope](banknote-africa.md) and the
+[BEAC historical notes](https://www.beac.int/billets-pieces/signes-monetaires/billets-de-type-ancien/).
+The roster contains 195 stable entity keys; the French Polynesia coverage alias
+is omitted from the displayed pill and active missing-entity lists to avoid a
+second misleading yellow pill.

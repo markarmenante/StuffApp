@@ -8,6 +8,7 @@ import re
 import math
 import unicodedata
 from functools import lru_cache
+import banknote_africa
 
 
 PUERTO_RICO_1928 = {
@@ -325,6 +326,10 @@ def country_spellings(value):
 
 
 def country_search(value):
+    # Collection discovery only. These lineage terms must not enter the
+    # canonical-country normalizer used by saved facts and catalogue matching.
+    if fold(value) in {fold(name) for name in ('Tahiti', 'French Oceania', 'French Polynesia', 'Tahiti / French Oceania')}:
+        return ' '.join((str(value), 'Tahiti French Oceania French Polynesia'))
     return ' '.join(country_spellings(value))
 
 
@@ -549,6 +554,130 @@ def eastern_caribbean_denomination(value):
     return words[match[1].lower()] + ' ' + match[2] if match else value
 
 
+_PACIFIC_BRANCHES = {
+    'polynesia': ('Tahiti / French Polynesia', 0, ('Tahiti', 'French Oceania', 'French Polynesia', 'Tahiti / French Oceania')),
+    'new-caledonia': ('New Caledonia', 1, ('New Caledonia', 'Nouvelle-Calédonie')),
+    'common': ('Common French Pacific issues', 2, ('French Pacific Territories',)),
+}
+_PACIFIC_COUNTRIES = {fold(name): key for key, (_, _, names) in _PACIFIC_BRANCHES.items() for name in names}
+_PACIFIC_IEOM = {fold(name) for name in ('IEOM', "Institut d'Émission d'Outre-Mer", "Institut d'Émission d'Outre-Mer (IEOM)")}
+_PACIFIC_BDI = {fold(name) for name in ("Banque de l'Indochine", "Banque de l'Indo-Chine")}
+_PACIFIC_BRANCH_ISSUERS = {
+    branch: {fold(name) for name in (
+        "Banque de l'Indochine, " + place, "Banque de l'Indochine " + place,
+        "Banque de l'Indochine (" + place + ")", "Banque de l'Indochine (" + place + " branch)")}
+    for branch, place in (('polynesia', 'Papeete'), ('new-caledonia', 'Nouméa'))
+}
+
+
+def french_pacific_issue(country, date=None, issuer=None, series=None):
+    """Display lineage only. An IEOM issuer/date never supplies a territory."""
+    branch = _PACIFIC_COUNTRIES.get(fold(country))
+    if not branch:
+        return None
+    label, rank, _names = _PACIFIC_BRANCHES[branch]
+    issuer_text = str(issuer or '').strip()
+    token = fold(issuer_text)
+    issuer_key = ('ieom' if token in _PACIFIC_IEOM else
+                  'bdi' if branch != 'common' and token in (_PACIFIC_BDI | _PACIFIC_BRANCH_ISSUERS[branch]) else 'unresolved')
+    if branch == 'polynesia':
+        history = ('Tahiti and Papeete issues belong to the French Oceania / French Polynesia territorial lineage. '
+                   'French Oceania was renamed French Polynesia in 1957. Banque de l’Indochine Papeete and later '
+                   'IEOM territorial notes remain distinct from Nouméa issues and later common French Pacific notes. '
+                   'This lineage grouping does not date a later note to the pre-1957 administration.')
+        entity_country = 'French Polynesia' if fold(country) == fold('French Polynesia') else 'French Oceania'
+    elif branch == 'new-caledonia':
+        history = ('New Caledonian notes are filed by their Nouméa territorial attribution. Banque de l’Indochine '
+                   'Nouméa issues and later IEOM territorial issues are distinct from Papeete / French Polynesia '
+                   'and from the common French Pacific issues. Original dates, issuer wording and full catalogue varieties are retained.')
+        entity_country = 'New Caledonia'
+    else:
+        history = ('This section contains notes explicitly attributed to the common French Pacific issue area. '
+                   'IEOM introduced a common 10,000-franc note in 1986 and later removed territorial distinctions '
+                   'across the note family. An IEOM issuer or date alone cannot distinguish these issues from earlier '
+                   'Papeete or Nouméa notes. New Hebrides remains a separate Anglo-French currency history.')
+        entity_country = 'French Pacific Territories'
+    result = {
+        'family_key': 'french-pacific', 'family': 'French Pacific', 'group': 'french',
+        'family_description': 'Separate Polynesian, New Caledonian and common regional issues; historical names and catalogue scopes are retained.',
+        'key': branch + '-' + issuer_key, 'branch': branch, 'rank': rank * 10 + {'bdi': 0, 'ieom': 1, 'unresolved': 9}[issuer_key],
+        'title': label + ' — ' + ({'bdi': 'Banque de l’Indochine', 'ieom': 'IEOM'}.get(issuer_key) or issuer_text or 'issuer not established'),
+        'span': '', 'history': history, 'entity_country': entity_country if issuer_key != 'unresolved' else None,
+        'catalogue_scope': branch, 'issuer_key': issuer_key,
+    }
+    if issuer_key == 'unresolved':
+        result['history'] += ' The issuing authority is not established by the recognized issuer labels; no issue roster is assumed.'
+    elif issuer_key == 'ieom':
+        result['denoms'] = ('500, 1,000, 5,000, 10,000 francs' if branch == 'common' else '100, 500, 1,000, 5,000 francs')
+        result['denoms_note'] = ('Common regional IEOM note family; not a territorial Pick-number equivalence.' if branch == 'common' else
+                                'IEOM territorial issues for this branch; denominations vary by series. The common 10,000-franc issue is filed separately.')
+    return result
+
+
+def collection_family_issue(country, date=None, issuer=None, series=None):
+    """Shared display metadata. Family membership is never catalogue identity."""
+    caribbean = eastern_caribbean_issue(country, date, issuer, series)
+    if caribbean:
+        return {**caribbean, 'family_key': 'eastern-caribbean', 'group': 'british',
+                'family_description': 'One regional currency family, with separate Currency Board, Currency Authority and Central Bank issues.',
+                'catalogue_scope': caribbean.get('entity_country')}
+    pacific = french_pacific_issue(country, date, issuer, series)
+    if pacific:
+        return pacific
+    return banknote_africa.regional_issue(country, date, issuer, series)
+
+
+def collection_family_for_row(row):
+    """Row-aware display scopes; original references never become aliases."""
+    values = dict(row)
+    family = collection_family_issue(*(values.get(k) for k in ('country', 'date_1', 'issuer', 'series')))
+    if not family:
+        return None
+    if family['family_key'] == 'french-pacific' and family['key'] == 'new-caledonia-bdi':
+        # Only explicit Pick references establish these researched type rosters.
+        # Other namespaces, unknown dates and contradictory ranges stay broad.
+        text = str(values.get('pick_number') or '').strip()
+        picks = {match.lower() for match in re.findall(
+            r'(?<![A-Za-z0-9])(?:Pick|P)\s*[#.-]?\s*(\d+[a-z]*)(?![A-Za-z0-9])', text, re.I)}
+        if not picks and re.fullmatch(r'\d+[a-z]*', text, re.I):
+            picks = {text.lower()}
+        ref = re.fullmatch(r'(48|49|50)([a-z]*)', next(iter(picks))) if len(picks) == 1 else None
+        year = exact_year(values.get('date_1'))
+        if ref and ref[1] in ('48', '49') and year == 1944:
+            family.update(section_key='new-caledonia-bdi-1944',
+                          title=family['title'] + ' — 1944 Australian-printed issue',
+                          denoms='5, 20 francs',
+                          denoms_note='Exact 1944 Australian-printed Pick 48 and 49 issue; not the full Banque de l’Indochine denomination range.')
+        elif ref and ref[1] == '50' and year and 1951 <= year <= 1963:
+            family.update(section_key='new-caledonia-bdi-p50',
+                          title=family['title'] + ' — 1951–1963 type',
+                          denoms='20 francs',
+                          denoms_note='Pick 50 type, dated 1951, 1954/1958 and 1963 by variety; the stored date and full suffix remain unchanged.')
+    return family
+
+
+def collection_family_section_key(family):
+    key = family['family_key'] + '-' + family.get('section_key', family['key'])
+    # Distinct unresolved authorities must not share report history identity.
+    if 'unresolved' in family['key']:
+        key += '-' + fold(family['title'])
+    return key
+
+
+def collection_family_series(country, date=None, issuer=None, series=None):
+    family = collection_family_issue(country, date, issuer, series)
+    if not family:
+        return ''
+    if family['family_key'] == 'eastern-caribbean':
+        return eastern_caribbean_series(country, date, issuer, series)
+    text = str(series or '').strip()
+    year = _year(text) or _year(date) or 99999
+    # Full design/range wording remains significant; plain dated/ND forms
+    # share a key with the same recorded year without rewriting either field.
+    suffix = '' if re.fullmatch(r'(?:ND\s*)?\(?\s*\d{4}\s*\)?', text, re.I) else fold(text)
+    return str(year) + ':' + suffix
+
+
 AMERICAN_COLONIES = {
     name: name + ' Colony' for name in (
         'Connecticut', 'Delaware', 'Georgia', 'Maryland', 'Massachusetts',
@@ -625,9 +754,11 @@ def classify(country, date=None, issuer=None, series=None):
         if exact and exact > 1978:
             return other('Independent Solomon Islands issue')
         return other('Date / issuer needed to establish pre-independence issue', True)
-    regional = eastern_caribbean_issue(country, date, issuer, series)
+    regional = collection_family_issue(country, date, issuer, series)
     if regional:
-        return result('british', regional['title'], regional['key'] == 'unresolved')
+        review = regional.get('review_note')
+        return result(regional['group'], regional['title'] + (' — ' + review if review else ''),
+                      'unresolved' in regional['key'] or bool(review))
     japanese = any(s in evidence for s in ('japanesegovernment', 'japaneseoccupation',
                    'southerndevelopmentbank', 'militaryyen', 'bankofchosen')) or (country == 'China' and y and 1938 <= y <= 1945
                     and any(s in evidence for s in ('federalreservebankofchina', 'centralreservebankofchina')))
@@ -737,8 +868,9 @@ def row_classification(row):
 def sort_country(country, date=None, issuer=None, series=None):
     # Domestic US issues lead their requested Philippine collection family.
     canonical = canonical_country(country) or 'zzz'
-    if eastern_caribbean_issue(country, date, issuer, series):
-        return 'Eastern Caribbean'
+    family = collection_family_issue(country, date, issuer, series)
+    if family:
+        return family['family']
     if fold(canonical) in _CONFEDERATE_COUNTRIES:
         return '0 United States Confederate States'
     colony = american_colonial_country(canonical, date, issuer, series)

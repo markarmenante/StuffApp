@@ -119,6 +119,37 @@ class ColonialTests(unittest.TestCase):
         self.assertTrue(policy.problem(note('United States', 1886, theme='entity-gap-other',
                                             entity_key='us-united-states')))
 
+    def test_polynesian_coverage_alias_accepts_the_same_lineage_without_widening_dates(self):
+        base = dict(country='French Polynesia', date_1=1973, empire='French',
+                    issuer="Institut d'Émission d'Outre-Mer (IEOM)", pick_number='P-24b',
+                    theme='entity-gap-french', entity_key='french-french-oceania',
+                    issue_year_start=1973, issue_year_end=1973,
+                    issue_date_source='https://catalogue.example/polynesia-24b',
+                    administration=dict(kind='dependency', name='French Polynesia',
+                        territory='French Polynesia', year_start=1957, year_end=2026,
+                        source='https://history.example/polynesia',
+                        evidence='Continuing French collectivity; exact issue reviewed'))
+        before = json.dumps(base, sort_keys=True)
+        self.assertFalse(policy.problem(base))
+        self.assertEqual(json.dumps(base, sort_keys=True), before)
+        # The older saved key remains accepted on its own original 1957+ scope.
+        self.assertFalse(policy.problem(dict(base, entity_key='french-french-polynesia')))
+        for country in ('New Caledonia', 'French Pacific Territories', 'New Hebrides'):
+            self.assertIn('requested historical entity', policy.problem(dict(base, country=country)))
+        for issuer in ('Unknown bank', "Banque de l'Indochine, Nouméa", 'BEAC'):
+            self.assertIn('requested historical entity', policy.problem(dict(base, issuer=issuer)))
+        # Even model-supplied broad administration dates cannot widen the
+        # primary French Polynesia period down to the shared lineage's 1905.
+        broad_admin = dict(base['administration'], year_start=1905)
+        for year in (1904, 1950, 1956):
+            for key in ('french-french-oceania', 'french-french-polynesia'):
+                self.assertIn('reviewed pre-independence period', policy.problem(dict(
+                    base, date_1=year, issue_year_start=year, issue_year_end=year,
+                    entity_key=key, administration=broad_admin)))
+        self.assertTrue(policy.problem(dict(base, issue_year_start=1956, issue_year_end=1973)))
+        self.assertTrue(policy.problem(dict(base, issue_date_source='')))
+        self.assertTrue(policy.problem(dict(base, theme='entity-gap-british')))
+
     def test_saved_legacy_wantlist_cards_remain_visible_without_new_entity_key(self):
         with stuff.app.app_context():
             db = stuff.get_db()

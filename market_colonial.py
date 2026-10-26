@@ -175,7 +175,9 @@ def _entity_gap_problem(item):
     entity = banknote_entities.ENTITY_BY_KEY.get(str(item.get('entity_key') or ''))
     primary = banknote_entities.entity_for_row(dict(item, date_1=years[0]))
     period = entity.get('scan_period') if entity else None
-    if (not entity or not primary or primary['key'] != entity['key'] or
+    if (not entity or not primary or
+            banknote_entities.coverage_entity(primary)['key'] !=
+            banknote_entities.coverage_entity(entity)['key'] or
             entity['issued'] is not True or not isinstance(period, dict)):
         return 'Missing-entity offer does not match its requested historical entity'
     family = ('british' if entity['group'] == 'british' else
@@ -194,6 +196,15 @@ def _entity_gap_problem(item):
     if entity['key'] in members and regional_board:
         return 'Shared Malaya and British Borneo Board issue is not a separate territorial issue'
     start, end = period['year_start'], period['year_end']
+    # A shared pill may request the territorial lineage under its earlier
+    # name. Matching that coverage alias must not widen either the requested
+    # period or the actual note's reviewed period (e.g. French Polynesia 1957+).
+    primary_period = primary.get('scan_period')
+    if isinstance(primary_period, dict):
+        start = max(start, primary_period['year_start'])
+        primary_end = primary_period['year_end']
+        if primary_end is not None:
+            end = min(end, primary_end) if end is not None else primary_end
     independence = entity.get('independence_date')
     if independence:
         independence_year = int(independence[:4])

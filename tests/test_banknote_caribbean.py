@@ -210,10 +210,10 @@ class CaribbeanTests(unittest.TestCase):
         unresolved = dict(row, issuer='')
         self.assertIn('East Caribbean States - Grenada', stuff._banknote_report_lines(unresolved)[0])
 
-    def test_v30_migration_changes_only_display_position_and_runs_once(self):
+    def test_v31_migration_changes_only_display_position_and_runs_once(self):
         self.fixture()
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v30'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v31'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.rows()}
         stuff.init_db()

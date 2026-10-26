@@ -31,7 +31,7 @@ class CatalogueTests(unittest.TestCase):
             self.assertIn('Confederate', info['period'])
         self.db.execute("UPDATE banknotes SET banknote_id='P 999', cat_id='B777', price='$42', denomination='$5'")
         self.db.execute("INSERT OR IGNORE INTO migration_state(key, applied_at) VALUES('banknote_display_number_v27', '2026-10-16')")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v30'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v31'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -242,7 +242,7 @@ class CatalogueTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET issue_type='National', denomination='$1' WHERE id='us1918'")
         self.db.execute("UPDATE banknotes SET status='Ordered' WHERE id IN ('pa1776','ct1776')")
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v30'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v31'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -895,7 +895,7 @@ class CatalogueTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET denomination='500 Francs' WHERE id='afars-second'")
         self.db.execute("INSERT OR IGNORE INTO migration_state(key, applied_at) "
                         "VALUES('banknote_display_number_v28', '2026-10-25')")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v30'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v31'")
         self.db.commit()
         before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
         with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
@@ -916,7 +916,7 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual([row['id'] for row in ordered],
                          ['british', 'afars-second', 'afars-held', 'independent'])
         self.assertEqual([row['banknote_id'] for row in ordered], ['P 001', 'P 002', 'P 003', 'P 004'])
-        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v30'").fetchone())
+        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v31'").fetchone())
         with patch.object(stuff, '_renumber_banknotes') as renumber:
             stuff.init_db()
         renumber.assert_not_called()
@@ -1095,7 +1095,7 @@ class CatalogueTests(unittest.TestCase):
         self.add('colonial', 'United States (Colonial - Pennsylvania)', 1772,
                  'Province of Pennsylvania')
         self.add('ny', 'United States of America', 1776, self.WATER_WORKS)
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v30'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v31'")
         self.db.commit()
         stuff.init_db()
         row = self.db.execute("SELECT country,banknote_id FROM banknotes WHERE id='french'").fetchone()

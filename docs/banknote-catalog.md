@@ -503,3 +503,56 @@ The combined catalogue field also accepts the verified cross-reference spelling
 `P-28b, TBB# 127 (type-level, per Numista)`. Only this recognized TBB127 source
 annotation is ignored for matching; uncertain or competing Pick attributions
 still reject the fallback, and the saved catalogue text is never rewritten.
+
+## French Pacific and African currency families
+
+The collection display now files the French Pacific under one family, retaining
+separate Tahiti / French Oceania / French Polynesia, New Caledonian, and explicit
+common French Pacific issue areas. Each territorial branch keeps its Banque de
+l’Indochine and IEOM sections. IEOM or a date alone does not supply a territory;
+unknown or contradictory issuers remain separate and do not borrow a denomination
+roster. New Hebrides remains in the Joint administrations family, and French
+Indo-China remains separate.
+
+The [IEOM history, chapter 2, pp. 19–25](https://www.ieom.fr/IMG/pdf/livre_ieom_f_cfp_10.2014_-_web03_chapitre-2-p1825.pdf)
+distinguishes the Nouméa and Papeete branches. [Chapter 3, pp. 27–28](https://www.ieom.fr/IMG/pdf/livre_ieom_f_cfp_10.2014_-_web04_chapitre-3-p2637.pdf)
+records the territorial IEOM 100, 500, 1,000 and 5,000-franc families and the
+common 10,000-franc issue introduced in 1986. The common regional header lists
+500, 1,000, 5,000 and 10,000 francs, corroborated by
+[IEOM’s denomination page](https://www.ieom.fr/Les-pieces-et-billets-en-circulation?lang=fr).
+Territorial withdrawal dates differ between official summaries, so the resolver
+uses explicit geography, never an assumed year boundary.
+
+The Nouméa Banque de l’Indochine headers use narrower, reference-backed rosters:
+[Pick 48, 5 francs](https://www.pmgnotes.com/priceguide/world-note-prices.aspx?deid=1744274)
+and [Pick 49, 20 francs](https://www.pmgnotes.com/priceguide/world-note-prices.aspx?deid=1744277)
+belong to the **1944 Australian-printed issue**; its issued set is 5 and 20 francs.
+[Pick 50](https://www.pmgnotes.com/priceguide/world-note-prices.aspx?deid=1787856&subcat=1951-nd-issue)
+is a separate **1951–1963 20-franc type**, including the 1963 P50c variety.
+Only a single unambiguous Pick attribution and a compatible recorded date enables
+these type labels. Other catalogue namespaces may accompany that Pick reference,
+but competing Pick references withhold the scoped roster. Stored text is retained.
+The [IEOM New Hebrides appendix, pp. 81–82](https://www.ieom.fr/IMG/pdf/livre_ieom_f_cfp_10.2014_-_web08_annexe-1-p80a87.pdf)
+confirms its distinct Anglo-French currency history and separate denominations.
+
+[The African family catalogue](banknote-africa.md) documents the West African
+BAO/BCEAO and Central African CCFOM/Institut d’Émission/BEAC sections. They are
+monetary lineages, with independent successor periods stated explicitly. Each
+review warning remains attached to its affected saved row in either History mode.
+BCEAO and BEAC notes cover their regional successor entities, not colonial member
+territories.
+
+`collection_family_issue` supplies display metadata; `collection_family_for_row`
+adds exact type scopes where supported. `collection_family_section_key` keeps
+unknown issuer identities separate in reports. List and PDF share family/issuer
+ordering, full series text, numeric denomination order, and complete catalogue
+references. Family sections close visibly and semantically before unrelated
+notes, including when a date-sorted view interrupts and reopens a family.
+
+Migration **v31** changes only the derived `banknote_id` display positions, once.
+Saved countries, dates, issuers, catalogue namespaces and suffixes, photos,
+prices, purchase state and notes are unchanged. Collection search treats Tahiti,
+French Oceania and French Polynesia as lineage search terms; this is isolated
+from `canonical_country`, intake normalization and Market Scan duplicate matching.
+The original Caribbean grouping, denomination rosters and family boundaries are
+unchanged. Coverage aliases are documented in [the entity catalogue](banknote-entities.md).

@@ -5575,16 +5575,16 @@ def _series_panel_for_row(row):
     year = _note_year(row)
     issuer = (_row_get(row, 'issuer') or '').strip()
     series_raw = (_row_get(row, 'series') or '').strip()
-    regional = banknote_catalog.eastern_caribbean_issue(country, year, issuer, series_raw)
+    regional = banknote_catalog.collection_family_for_row(row)
     if regional:
         return {
-            'country_key': 'eastern-caribbean', 'title': regional['title'],
-            'regional_issuer': regional['key'], 'title_span': regional['span'],
+            'country_key': regional['family_key'], 'title': regional['title'],
+            'regional_issuer': regional['key'], 'regional_family': regional['family_key'], 'title_span': regional['span'],
             'denoms': regional.get('denoms'), 'denoms_note': regional.get('denoms_note'),
             'series': series_raw, 'year': year, 'note_type': None,
             'note_class': None, 'clause': None, 'previous_clause': None,
             # The family's catalogued ND date is not a variety issue date.
-            'series_label': ('Catalogue family ND (1965)' if regional['key'] == 'ecca' and year == 1965
+            'series_label': ('Catalogue family ND (1965)' if regional['family_key'] == 'eastern-caribbean' and regional['key'] == 'ecca' and year == 1965
                              else series_raw or (str(year) if year else '')),
             'era': {'label': 'Regional currency history', 'span': regional['span'],
                     'body': regional['history']},
@@ -5808,13 +5808,15 @@ def banknote_grouping(rows):
     for row in rows:
         info = dict(banknote_catalog.row_classification(row))
         info['heading'] = info['key'] != previous
-        regional = banknote_catalog.eastern_caribbean_issue(*(_row_get(row, k) for k in ('country', 'date_1', 'issuer', 'series')))
+        regional = banknote_catalog.collection_family_for_row(row)
         if regional:
             info['regional'] = regional
-            info['regional_heading'] = previous_region != regional['family']
+            info['regional_heading'] = previous_region != regional['family_key']
+            if info['regional_heading'] and previous_region is not None:
+                placements[previous_row_id]['regional_end'] = True
             signature = (regional['key'], regional['title'])
             info['regional_issuer_heading'] = info['regional_heading'] or signature != previous_issuer
-            previous_region, previous_issuer = regional['family'], signature
+            previous_region, previous_issuer = regional['family_key'], signature
         else:
             if previous_region is not None:
                 placements[previous_row_id]['regional_end'] = True
@@ -5834,7 +5836,8 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
     sql, params = build_search_query('banknotes', '')
     collection = db.execute(sql, params).fetchall()
     visible_ids = {row['id'] for row in visible_rows}
-    entities = {entity['key']: dict(entity) for entity in banknote_entities.ENTITY_CATALOG}
+    entities = {entity['key']: dict(entity) for entity in banknote_entities.ENTITY_CATALOG
+                if not entity.get('coverage_alias_of')}
     holdings = {}
     regional_notes = {}
     for row in collection:
@@ -5851,6 +5854,7 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
                       'issued': None, 'note': 'Issuance history not yet established.'}
             matches = (entity,)
         for entity in matches:
+            entity = {**entity, **banknote_entities.coverage_entity(entity)}
             entities.setdefault(entity['key'], dict(entity))
             if purchase_states.held(row['status']):
                 holdings.setdefault(entity['key'], []).append((row['id'], classification['key']))
@@ -5919,11 +5923,11 @@ def _configure_db_connection(db):
     db.create_function('BANKNOTE_GROUP', 4,
                        lambda *v: banknote_catalog.classify(*v)['rank'], deterministic=True)
     db.create_function('BANKNOTE_COUNTRY', 4, banknote_catalog.sort_country, deterministic=True)
-    db.create_function('CARIBBEAN_ISSUER', 4,
-                       lambda *v: (banknote_catalog.eastern_caribbean_issue(*v) or {}).get('rank', -1), deterministic=True)
-    db.create_function('CARIBBEAN_ISSUER_NAME', 4,
-                       lambda *v: (banknote_catalog.eastern_caribbean_issue(*v) or {}).get('title', ''), deterministic=True)
-    db.create_function('CARIBBEAN_SERIES', 4, banknote_catalog.eastern_caribbean_series, deterministic=True)
+    db.create_function('COLLECTION_FAMILY_RANK', 4,
+                       lambda *v: (banknote_catalog.collection_family_issue(*v) or {}).get('rank', -1), deterministic=True)
+    db.create_function('COLLECTION_FAMILY_SECTION', 4,
+                       lambda *v: (banknote_catalog.collection_family_issue(*v) or {}).get('title', ''), deterministic=True)
+    db.create_function('COLLECTION_FAMILY_SERIES', 4, banknote_catalog.collection_family_series, deterministic=True)
     db.create_function('CATALOGUE_REFERENCE_SORT', 1, banknote_catalog.catalogue_reference_sort, deterministic=True)
     db.create_function('CARIBBEAN_DENOMINATION', 1, banknote_catalog.eastern_caribbean_denomination, deterministic=True)
     db.create_function('BANKNOTE_COUNTRY_SEARCH', 1, banknote_catalog.country_search, deterministic=True)
@@ -6891,9 +6895,10 @@ def init_db():
     # v28: Confederate issues join the US collection family, before Philippines.
     # v29: Afars and Issas spelling aliases join their existing French territory.
     # v30: Eastern Caribbean issuers/series/full references; Solomon 1977 protectorate.
+    # v31: French Pacific and African regional territorial/regional lineage, preserving catalogue scopes.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v30',),
+        ('banknote_display_number_v31',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6901,7 +6906,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v30', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v31', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -13041,30 +13046,30 @@ CATEGORY_ORDER_BY = {
     # scramble the denomination order within a set.
     'banknotes': ("BANKNOTE_GROUP(country, date_1, issuer, series), "
                   "BANKNOTE_COUNTRY(country, date_1, issuer, series) COLLATE NODIACRITIC, "
-                  "CARIBBEAN_ISSUER(country, date_1, issuer, series), "
-                  "CARIBBEAN_ISSUER_NAME(country, date_1, issuer, series) COLLATE NODIACRITIC, "
-                  "CARIBBEAN_SERIES(country, date_1, issuer, series) COLLATE NODIACRITIC, "
+                  "COLLECTION_FAMILY_RANK(country, date_1, issuer, series), "
+                  "COLLECTION_FAMILY_SECTION(country, date_1, issuer, series) COLLATE NODIACRITIC, "
+                  "COLLECTION_FAMILY_SERIES(country, date_1, issuer, series) COLLATE NODIACRITIC, "
                   "US_NOTE_GROUP(country, series, issuer, official, lettering, "
                   "lettering_translation, other_catalog, description) ASC, "
-                  "CASE WHEN CARIBBEAN_ISSUER(country, date_1, issuer, series) >= 0 THEN 0 "
+                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN 0 "
                   f"WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "
                   "COUNTRY_ERA_START(country, issuer, series, date_1, denomination) END ASC, "
-                  "CASE WHEN CARIBBEAN_ISSUER(country, date_1, issuer, series) >= 0 THEN 0 "
+                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN 0 "
                   f"WHEN {_US_EMERGENCY_SQL_CALL} THEN 1942 ELSE "
                   "COALESCE(NOTE_YEAR(series, country, date_1), 99999) END ASC, "
                   f"{_US_EMERGENCY_SQL_CALL} ASC, "
-                  "CASE WHEN CARIBBEAN_ISSUER(country, date_1, issuer, series) >= 0 THEN '' ELSE "
+                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN '' ELSE "
                   "COALESCE(NULLIF(country, ''), 'zzz') END COLLATE NODIACRITIC, "
-                  "CASE WHEN CARIBBEAN_ISSUER(country, date_1, issuer, series) >= 0 THEN 'zzz' "
+                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN 'zzz' "
                   f"WHEN {_US_EMERGENCY_SQL_CALL} THEN 'zzz' ELSE "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') END COLLATE NODIACRITIC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
-                  "CASE WHEN CARIBBEAN_ISSUER(country, date_1, issuer, series) >= 0 THEN "
+                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN "
                   "DENOM_AMOUNT(CARIBBEAN_DENOMINATION(denomination)) ELSE DENOM_AMOUNT(denomination) END ASC, "
                   "DENOM_UNIT(denomination) ASC, "
-                  "CASE WHEN CARIBBEAN_ISSUER(country, date_1, issuer, series) >= 0 THEN "
+                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN "
                   "CATALOGUE_REFERENCE_SORT(pick_number) ELSE '' END, "
-                  "CASE WHEN CARIBBEAN_ISSUER(country, date_1, issuer, series) >= 0 THEN "
+                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN "
                   "CATALOGUE_REFERENCE_SORT(other_catalog) ELSE '' END, "
                   "COALESCE(date_1, 99999) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
@@ -15800,7 +15805,8 @@ _WANTLIST_GROUP_TITLES = {
 def _banknote_wantlist_catalog():
     """Documented issuers with reviewed periods eligible for gap searches."""
     return tuple(entity for entity in banknote_entities.ENTITY_CATALOG
-                 if entity['issued'] is True and isinstance(entity.get('scan_period'), dict))
+                 if not entity.get('coverage_alias_of') and entity['issued'] is True
+                 and isinstance(entity.get('scan_period'), dict))
 
 
 def _banknote_wantlist_open(db):
@@ -15813,7 +15819,8 @@ def _banknote_wantlist_open(db):
     held_keys = set()
     for row in db.execute('SELECT * FROM banknotes').fetchall():
         if purchase_states.held(row['status']):
-            held_keys.update(entity['key'] for entity in banknote_entity_coverage.entities_for_row(row))
+            held_keys.update(banknote_entities.coverage_entity(entity)['key']
+                             for entity in banknote_entity_coverage.entities_for_row(row))
     return [entity for entity in _banknote_wantlist_catalog() if entity['key'] not in held_keys]
 
 
@@ -31142,8 +31149,8 @@ def _banknote_report_sections(db, query=None):
     sections = []
     for r in rows:
         country = (r['country'] or '').strip() or 'Unattributed'
-        regional = banknote_catalog.eastern_caribbean_issue(*(r[k] for k in ('country', 'date_1', 'issuer', 'series')))
-        key = 'eastern-caribbean-' + regional['key'] if regional else _country_key(country)
+        regional = banknote_catalog.collection_family_for_row(r)
+        key = banknote_catalog.collection_family_section_key(regional) if regional else _country_key(country)
         if regional:
             country = regional['title']
         if sections and sections[-1][0].lower() == country.lower() and sections[-1][1] == key:
@@ -31158,9 +31165,9 @@ def _banknote_report_history(country, key, rows):
     era bands of the nation the country files under (US notes get the
     US monetary eras), or the notes' own history context when the
     country has no panel."""
-    if rows and str(key or '').startswith('eastern-caribbean-'):
-        regional = banknote_catalog.eastern_caribbean_issue(*(rows[0][k] for k in ('country', 'date_1', 'issuer', 'series')))
-        if regional:
+    if rows:
+        regional = banknote_catalog.collection_family_for_row(rows[0])
+        if regional and key == banknote_catalog.collection_family_section_key(regional):
             return regional['title'], None, [(regional['span'], 'Regional currency history', regional['history'])]
     colonial = COUNTRY_COLONIAL.get(key) if key else None
     if key == 'us' or key == 'colonial-america':
@@ -31210,7 +31217,7 @@ def _banknote_report_lines(r):
              g('other_catalog'),
              issue_type if issue_type and issue_type.lower() != 'national' else '',
              g('municipality')]
-    if g('country') and g('country') not in line1 and banknote_catalog.eastern_caribbean_issue(g('country'), g('date_1'), g('issuer'), series):
+    if g('country') and g('country') not in line1 and banknote_catalog.collection_family_issue(g('country'), g('date_1'), g('issuer'), series):
         # A shared issuer heading must not hide the specimen's territory.
         line1.insert(4, g('country'))
     num = g('grade_numeric').replace('.0', '') if g('grade_numeric') else ''
@@ -31336,7 +31343,7 @@ def _build_banknote_report(path, query=None):
         story = [Paragraph('Banknote Collection', st_title),
                  Paragraph(dotline([date.today().strftime('%B %-d, %Y'),
                                     f'{total_notes} note{"s" if total_notes != 1 else ""}',
-                                    (f'{len(sections)} collection sections' if any(str(k or '').startswith('eastern-caribbean-') for _, k, _ in sections)
+                                    (f'{len(sections)} collection sections' if any(banknote_catalog.collection_family_issue(*(rows[0][field] for field in ('country','date_1','issuer','series'))) for _, _, rows in sections)
                                      else f'{len(sections)} {"countries and colonies" if len(sections) != 1 else "country or colony"}')]
                                    + scope), st_sub)]
         class _SectionMark(Flowable):
@@ -31358,8 +31365,10 @@ def _build_banknote_report(path, query=None):
                 story.append(Spacer(1, 14))
             title, colonial, eras = _banknote_report_history(country, key, rows)
             regional_head = []
-            if str(key or '').startswith('eastern-caribbean-') and (not i or not str(sections[i - 1][1] or '').startswith('eastern-caribbean-')):
-                regional_head = [Paragraph('Eastern Caribbean', st_title)]
+            regional = banknote_catalog.collection_family_issue(*(rows[0][field] for field in ('country','date_1','issuer','series')))
+            prior = banknote_catalog.collection_family_issue(*(sections[i - 1][2][0][field] for field in ('country','date_1','issuer','series'))) if i else None
+            if regional and (not prior or regional['family_key'] != prior['family_key']):
+                regional_head = [Paragraph(T(regional['family']), st_title)]
             # One heading line: the name on the note, " - N notes", then
             # what that place is called today, smaller and grey.
             now = _banknote_modern_name(country)

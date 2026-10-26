@@ -62,7 +62,7 @@ class BanknoteEntityTests(unittest.TestCase):
 
     def test_unique_evidence_bearing_roster_with_explicit_three_state_issuance(self):
         self.assertEqual(len(ENTITY_CATALOG), len(ENTITY_BY_KEY))
-        self.assertEqual(len(ENTITY_CATALOG), 194)
+        self.assertEqual(len(ENTITY_CATALOG), 195)
         for entity in ENTITY_CATALOG:
             with self.subTest(entity=entity['key']):
                 self.assertIn(entity['group'], filing.GROUP_BY_KEY)

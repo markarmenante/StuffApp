@@ -399,8 +399,25 @@ for _entry in _entries:
         # Broad collection-family membership is insufficient colonial identity.
         _entry['scan_period'] = None
 
+_entries.append({**_entity('french', 'Central African States',
+    label='Central African States — successor regional issues', sources=(BEAC,),
+    note='BEAC issues for independent Central African states; this regional coverage does not credit French colonial Cameroon or another member territory.'),
+    'scan_period': None, 'independence_date': None, 'independence_source': None})
 ENTITY_CATALOG = tuple(_entries)
 ENTITY_BY_KEY = {entity['key']: entity for entity in ENTITY_CATALOG}
+
+# One displayed/held lineage, without deleting historical entity keys or
+# widening legacy candidate periods. Catalogue matching retains raw countries.
+ENTITY_BY_KEY['french-french-oceania'].update(
+    label='Tahiti / French Polynesia',
+    countries=('French Oceania', 'Tahiti', 'Tahiti / French Oceania'),
+    note='Tahiti / Papeete territorial lineage, called French Oceania before French Polynesia. Shared coverage does not claim that a later note was issued before 1957.')
+ENTITY_BY_KEY['french-french-polynesia']['coverage_alias_of'] = 'french-french-oceania'
+
+
+def coverage_entity(entity):
+    """Shared pill/gap coverage only, never a catalogue or issuance-date alias."""
+    return ENTITY_BY_KEY.get(entity.get('coverage_alias_of'), entity)
 
 
 _BY_GROUP_COUNTRY = {
@@ -488,6 +505,21 @@ def entity_for_row(row, classification=None):
         if regional_key:
             return ENTITY_BY_KEY[regional_key]
         return None
+    pacific = catalog.french_pacific_issue(values.get('country'), values.get('date_1'),
+                                          values.get('issuer'), values.get('series'))
+    if pacific:
+        key = {'French Oceania': 'french-french-oceania',
+               'French Polynesia': 'french-french-polynesia',
+               'New Caledonia': 'french-new-caledonia',
+               'French Pacific Territories': 'french-french-pacific-territories'}.get(pacific.get('entity_country'))
+        return ENTITY_BY_KEY.get(key)
+    family = catalog.collection_family_issue(values.get('country'), values.get('date_1'),
+                                            values.get('issuer'), values.get('series'))
+    if family:
+        # Successor regional issues never fall through to a member territory's
+        # historical entity merely because its raw country name is retained.
+        entity_country = family.get('entity_country')
+        return _BY_GROUP_COUNTRY.get((family['group'], catalog.fold(entity_country))) if entity_country else None
     country = catalog.canonical_country(info.get('country') or values.get('country') or '')
     if country == 'Solomon Islands':
         # This shared name spans independence: only the reviewed dated filing
