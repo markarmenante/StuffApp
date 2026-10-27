@@ -28,6 +28,9 @@ _PREFIXES = {
     'rosenberg': r'Rosenberg', 'grabowski': r'Grabowski',
     'mehl': r'Mehl', 'funck': r'Funck', 'menzel': r'Menzel',
     'tieste': r'Tieste', 'lamb': r'Lamb',
+    # Smith-Matravers references are routinely printed beside Pick on
+    # Chinese holders. Preserve their bank/type hierarchy (T32-6 != T326).
+    'smith_matravers': r'(?:S\s*/\s*M|S-M|Smith(?:\s*[-&]\s*|\s+)Matravers)',
 }
 _NUMBER = r'[a-z]{0,3}[\s.-]*\d+(?:[a-z0-9.-]*[a-z0-9])?(?:\(\d+\))?\*?'
 
@@ -67,7 +70,7 @@ def web_fetch_tool(max_uses=MAX_FETCHES):
     return dict(type='web_fetch_20250910', name='web_fetch', max_uses=max_uses,
                 max_content_tokens=12000, citations={'enabled': True},
                 allowed_domains=['numista.com', 'banknoteindex.com', 'realbanknotes.com',
-                    'banknoteworld.com', 'banknoteworld.org', 'greysheet.com', 'pmgnotes.com', 'ha.com',
+                    'banknoteworld.com', 'banknoteworld.org', 'greysheet.com', 'pmgnotes.com', 'pcgs.com', 'ha.com',
                     'stacksbowers.com', 'spink.com', 'moneymuseum.com', 'atsnotes.com',
                     'noonans.co.uk', 'cgb.fr', 'numisbids.com', 'mma.gov.mv'])
 
@@ -476,7 +479,8 @@ def prompt(note):
         query_plan += '1. ' + ' '.join(part for part in ('site:numista.com', country, denomination_number.group() if denomination_number else denomination, year, 'banknote') if part) + '\n'
         if refs:
             namespace, ref_number = reference(refs[0]).split(':', 1)
-            semantic_ref = {'pick':'Pick', 'friedberg':'Friedberg', 'tbb':'TBB', 'criswell':'Criswell'}.get(namespace, namespace.title()) + ' ' + ref_number
+            semantic_ref = {'pick':'Pick', 'friedberg':'Friedberg', 'tbb':'TBB', 'criswell':'Criswell',
+                            'smith_matravers':'Smith-Matravers'}.get(namespace, namespace.title()) + ' ' + ref_number
             query_plan += '2. ' + country + ' ' + semantic_ref + ' banknote\n'
             compact_ref = ('P' + ref_number) if namespace == 'pick' else semantic_ref
             query_plan += '3. site:banknoteindex.com ' + country + ' ' + compact_ref + '\n'

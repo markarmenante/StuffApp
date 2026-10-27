@@ -42,6 +42,37 @@ def encoded(img, fmt='WEBP'):
     return buf.getvalue()
 
 
+# A pale left vignette can disappear from the engraving mask after a complete
+# paper quad was found. An unavailable model must not ship that partial design.
+whole = Image.new('RGB', (1162, 659), (240, 226, 198))
+draw = ImageDraw.Draw(whole)
+draw.rectangle((28, 28, 1134, 630), fill=(215, 175, 145))
+draw.text((40, 600), 'LEFT DENOMINATION', fill=(80, 60, 40))
+whole_bytes = encoded(whole)
+fragment = encoded(whole.crop((358, 20, 1162, 641)))
+with patch.object(stuffapp, '_trim_slab_note_cv', side_effect=[whole_bytes, None]), \
+        patch.object(stuffapp, '_trim_dark_slab_note', return_value=None), \
+        patch.object(stuffapp, '_trim_light_slab_note', return_value=None), \
+        patch.object(stuffapp, '_trim_note_design_crop', return_value=fragment):
+    result = stuffapp._trim_note_cv_cascade(Image.new('RGB', (1511, 1132), (55, 115, 120)))
+assert result == whole_bytes, 'A darker partial design must not replace the measured full sheet'
+# Small edge cleanup remains available; no blanket prohibition on later passes.
+tidied = encoded(whole.crop((3, 3, 1159, 656)))
+with patch.object(stuffapp, '_trim_slab_note_cv', side_effect=[whole_bytes, None, None]), \
+        patch.object(stuffapp, '_trim_dark_slab_note', return_value=None), \
+        patch.object(stuffapp, '_trim_light_slab_note', return_value=None), \
+        patch.object(stuffapp, '_trim_note_design_crop', side_effect=[tidied, None]):
+    result = stuffapp._trim_note_cv_cascade(Image.new('RGB', (1511, 1132), (55, 115, 120)))
+assert result == tidied, 'Small cleanup should preserve the established crop behavior'
+# A harmless first cleanup cannot discard the paper anchor for a later pass.
+with patch.object(stuffapp, '_trim_slab_note_cv', side_effect=[whole_bytes, None, None]), \
+        patch.object(stuffapp, '_trim_dark_slab_note', return_value=None), \
+        patch.object(stuffapp, '_trim_light_slab_note', return_value=None), \
+        patch.object(stuffapp, '_trim_note_design_crop', side_effect=[tidied, fragment]):
+    result = stuffapp._trim_note_cv_cascade(Image.new('RGB', (1511, 1132), (55, 115, 120)))
+assert result == tidied, 'Cumulative cleanup must retain the latest measured paper outline'
+
+
 for colour in ((180, 60, 45), (45, 45, 42)):
     img = holder(colour)
     expected = [(220, 300), (1400, 315), (1395, 855), (215, 840)]

@@ -550,7 +550,7 @@ def refresh_existing(db,batch_id,item_id,revision,existing_record_version):
 
 
 def _image_edits(db,row,fields):
-    """Only a crop explicitly saved for this exact draft side may replace it."""
+    """Only a display crop saved for this exact draft side may replace it."""
     result={}
     for field in ('image_1','image_2'):
         edit=db.execute('SELECT * FROM banknote_import_image_edits WHERE item_id=? AND field=? AND filename=?',
@@ -721,8 +721,11 @@ def _source_inputs(db,row,fields,folder,classify):
                 documents=[],images={},purchase=purchase,purchase_price_fill_only=True,purchase_price_blocked=not bool(paid)),assets,photos
 
 
-def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate):
+def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,prepare_photo=None):
     db=connect()
+    created=[]
+    retained=set()
+    committed=False
     try:
         batch,row=_item(db,batch_id,item_id)
         _validate_source(db,batch,row)
@@ -742,6 +745,28 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate):
         note={column[1]:None for column in db.execute('PRAGMA table_info(banknotes)')}
         note.update(fields);note.update(photos);note.update(id=item_id,_check_sources=prepared)
         result=evaluate(note,prepared)
+        # Vision reads the full saved originals first. Display preparation is
+        # only for newly selected empty slots, never an existing/manual crop.
+        # Detection runs outside the write lock; publication below still checks
+        # the draft revision/token. A stale result cannot replace newer edits.
+        display_edits={}
+        if prepare_photo:
+            crop_note={**note,**result.get('filled',{})}
+            for field,source in list(photos.items()):
+                try:
+                    raw=(Path(folder)/source).read_bytes()
+                    asset=next(asset for asset in assets if asset['filename']==source)
+                    if hashlib.sha256(raw).hexdigest()!=asset['sha256']:
+                        raise ValueError('Source image changed')
+                    crop=prepare_photo(raw,crop_note)
+                    if not crop:continue
+                    filename=uuid.uuid4().hex+'.jpg';path=Path(folder)/filename
+                    created.append(path);path.write_bytes(crop['data'])
+                    display_edits[field]=dict(filename=filename,source=source,
+                        quad=_json(crop.get('quad')),sha256=hashlib.sha256(crop['data']).hexdigest())
+                    photos[field]=filename
+                except Exception:
+                    prepared['warnings'].append('An imported photo could not be cropped; its original was retained.')
         db.execute('BEGIN IMMEDIATE')
         batch,current=_item(db,batch_id,item_id)
         _validate_source(db,batch,current)
@@ -751,6 +776,16 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate):
         for field,value in {**photos,**result.get('filled',{})}.items():
             if field in note and banknote_catalog_lookup.is_blank(current_fields.get(field)):
                 current_fields[field]=value
+        for field,edit in display_edits.items():
+            if current_fields.get(field)!=edit['filename']:
+                continue
+            db.execute('''INSERT INTO banknote_import_image_edits
+                (filename,item_id,field,base_filename,source_filename,quad_json,sha256,created_at)
+                VALUES(?,?,?,?,?,?,?,?)''',(edit['filename'],item_id,field,edit['source'],edit['source'],
+                edit['quad'],edit['sha256'],time.time()))
+            db.execute('INSERT INTO trimmed_image_sources(trimmed,source,quad) VALUES(?,?,?)',
+                (edit['filename'],edit['source'],edit['quad']))
+            retained.add(edit['filename'])
         proofs={field:proof for field,proof in result.get('catalogue',{}).get('fields',{}).items()
                 if field in result.get('filled',{}) and current_fields.get(field)==proof.get('value')}
         if proofs:
@@ -770,12 +805,16 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate):
             check_token=NULL,check_expires=0,checked_at=?,updated_at=? WHERE id=?''',
             (_json(current_fields),'partial' if warnings else 'done',' '.join(warnings),time.time(),time.time(),item_id))
         db.commit()
+        committed=True
     except Exception as error:
         db.rollback()
         message=str(error) if isinstance(error,ImportProblem) else 'Check could not finish. Your saved draft was kept; retry Check.'
         db.execute("UPDATE banknote_import_items SET check_state='failed',check_message=?,check_token=NULL,check_expires=0 WHERE id=? AND check_token=?",
                    (message,item_id,token));db.commit()
-    finally:db.close()
+    finally:
+        db.close()
+        for path in created:
+            if not committed or path.name not in retained:path.unlink(missing_ok=True)
 
 
 def claim_check(db,batch_id,item_id,revision):

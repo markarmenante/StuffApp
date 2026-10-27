@@ -51,6 +51,17 @@ owner/account-bound access. They are protected from orphan cleanup. Source text 
 untrusted evidence. A title without the usual banknote discovery words is retained;
 ambiguous quantities and bundles stay visible but blocked from release as one note.
 
+After Check reads the original holder photographs, newly selected front/back
+images pass through the same crop pipeline used for uploads. Only previously
+empty photo slots are eligible. Accepted display crops retain their original,
+corner transform and file hash in the draft; release copies the display crop
+and preserves the source for future Check and Adjust crop. Existing photographs
+and manual crops are never recropped by Check. Detection runs outside the draft
+write lock, and a changed revision discards its output without replacing edits.
+An engraving-only cleanup after a measured paper crop cannot remove a large
+side or substantially change that sheet's proportions, even without catalogue
+dimensions. Pale or low-contrast printing must remain inside the displayed note.
+
 The review list opens each saved draft in the existing banknote detail page,
 including its identification, side-by-side images, grading, purchase and reference
 fields. Save draft, Check, Release to Collection and Order review use draft routes;

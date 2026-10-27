@@ -78,6 +78,32 @@ class ValidationTests(unittest.TestCase):
         result = research(); result['fields']['printer']['source_url'] = 'https://invented.example/no'
         self.assertNotIn('printer', lookup.validate(NOTE, {}, result, sources())['fields'])
 
+    def test_smith_matravers_full_hierarchy_and_aliases_are_preserved(self):
+        expected = 'smith_matravers:t32-6'
+        for ref in ('S/M#T32-6', 'S/M T32-6', 'S-M T32-6',
+                    'Smith-Matravers T32-6', 'Smith & Matravers T32-6'):
+            with self.subTest(ref=ref):
+                self.assertEqual(lookup.reference(ref), expected)
+                self.assertTrue(lookup.reference_in('China 100 Yen ' + ref + '.', expected))
+        for ref in ('S/M#T32-7', 'S/M#T326', 'S/M#T32-6a'):
+            self.assertNotEqual(lookup.reference(ref), expected)
+        for ref in ('T32-6', 'S/N T32-6', 'Cert T32-6'):
+            self.assertIsNone(lookup.reference(ref))
+
+    def test_chinese_compound_reference_requires_both_exact_cited_references(self):
+        note = dict(country='China', pick_number='P-M30, S/M#T32-6',
+                    denomination='100 Yen', date_1=1945)
+        quote = 'China Japanese Imperial Government 100 Yen ND (1945) Pick M30 S/M T32-6. Printer: Japanese Imperial Printing Bureau.'
+        proof = dict(identity=dict(note, reference='P-M30', match='exact'), fields={
+            'printer':dict(value='Japanese Imperial Printing Bureau', scope='type',
+                           source_url=URL, quote=quote)})
+        self.assertEqual(lookup.validate(note, {}, proof, sources(quote))['fields']['printer']['value'],
+                         'Japanese Imperial Printing Bureau')
+        for changed in ('S/M T32-7', 'S/M T326', ''):
+            text = quote.replace('S/M T32-6', changed)
+            wrong = copy.deepcopy(proof); wrong['fields']['printer']['quote'] = text
+            self.assertEqual(lookup.validate(note, {}, wrong, sources(text))['fields'], {})
+
     def test_variety_field_requires_own_exact_reference_date_context(self):
         identity = QUOTE
         for quote in ('P-5a 1947. Watermark: repeating patterns.', 'Watermark: repeating patterns.',

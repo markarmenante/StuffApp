@@ -66,11 +66,79 @@ class DraftTests(unittest.TestCase):
         return dict(url=url,filename=filename,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),width=160,height=80)
     def classify(self,photos):
         return dict(photos=[dict(id=p['id'],side='front' if n==0 else 'back',confidence='high',complete_note=True,same_note=True,reason='different complete designs') for n,p in enumerate(photos)],front=photos[0]['id'],back=photos[1]['id'],pair_verified=True,pair_reason='Opposite sides of same note')
-    def check(self,batch,item,evaluate=None):
+    def check(self,batch,item,evaluate=None,prepare_photo=None):
         token=imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
         with patch.object(imports.listing_images,'download',side_effect=self.download):
-            imports.run_check(stuff.open_db_connection,batch['id'],item['id'],item['revision'],token,stuff.UPLOAD_FOLDER,self.classify,evaluate or (lambda *_:dict(filled=self.fills)))
+            imports.run_check(stuff.open_db_connection,batch['id'],item['id'],item['revision'],token,stuff.UPLOAD_FOLDER,self.classify,evaluate or (lambda *_:dict(filled=self.fills)),prepare_photo=prepare_photo)
         return self.client.get(batch['status_url']).json
+    def test_import_arrival_crop_keeps_originals_for_vision_and_copies_crop_on_release(self):
+        b=self.imported();item=b['items'][0];seen=[];quad=[[5,5],[154,5],[154,74],[5,74]]
+        def size(filename):
+            with Image.open(Path(stuff.UPLOAD_FOLDER)/filename) as image:return image.size
+        def evaluate(note,prepared):
+            for field in ('image_1','image_2'):
+                self.assertEqual(size(note[field]),(160,80));seen.append(note[field])
+            return dict(filled={**self.fills,'size_width':150,'size_height':70})
+        def crop(raw,note):
+            import io
+            self.assertEqual(len(seen),2)
+            self.assertEqual((note['size_width'],note['size_height']),(150,70))
+            image=Image.open(io.BytesIO(raw));self.assertEqual(image.size,(160,80))
+            output=io.BytesIO();image.crop((5,5,155,75)).save(output,format='JPEG')
+            return dict(data=output.getvalue(),quad=quad)
+        b=self.check(b,item,evaluate,crop);item=b['items'][0]
+        self.assertEqual(item['check_state'],'done')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(json.loads(self.db.execute('SELECT manual_photos_json FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0]),{})
+        for field,source in zip(('image_1','image_2'),seen):
+            cropped=item['fields'][field]
+            self.assertNotEqual(cropped,source)
+            self.assertEqual(size(cropped),(150,70))
+            self.assertEqual(size(source),(160,80))
+            self.assertEqual(stuff._banknote_vision_source(cropped),source)
+            info=imports.image_info(self.db,b['id'],item['id'],field,stuff.UPLOAD_FOLDER,item['revision'])
+            self.assertEqual(info[1]['source'],source);self.assertEqual(info[1]['quad'],quad)
+        response=self.release(b,[item]);self.assertEqual(response.status_code,200,response.json)
+        record=self.db.execute('SELECT * FROM banknotes').fetchone()
+        self.assertEqual(record['price'],'$599.89')
+        for field,source in zip(('image_1','image_2'),seen):
+            self.assertNotEqual(record[field],item['fields'][field])
+            self.assertEqual(size(record[field]),(150,70))
+            self.assertEqual(stuff._banknote_vision_source(record[field]),source)
+    def test_import_crop_noop_and_failure_keep_originals_and_warn_only_failure(self):
+        b=self.imported();calls=[]
+        def crop(raw,note):
+            calls.append(raw)
+            if len(calls)==2:raise RuntimeError('crop unavailable')
+            return None
+        b=self.check(b,b['items'][0],prepare_photo=crop);item=b['items'][0]
+        self.assertEqual(item['check_state'],'partial')
+        self.assertIn('could not be cropped',item['check_message'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_image_edits').fetchone()[0],0)
+        for field in ('image_1','image_2'):
+            self.assertTrue(self.db.execute('SELECT 1 FROM banknote_import_assets WHERE item_id=? AND filename=?',(item['id'],item['fields'][field])).fetchone())
+        with patch.object(stuff,'_prepare_import_photo') as again:
+            b=self.check(b,item,prepare_photo=again)
+        again.assert_not_called()
+    def test_stale_import_crop_is_discarded_without_changing_newer_draft(self):
+        b=self.imported();item=b['items'][0];before=set(Path(stuff.UPLOAD_FOLDER).iterdir());changed=False
+        def crop(raw,note):
+            nonlocal changed
+            if not changed:
+                changed=True
+                other=stuff.open_db_connection()
+                fields=json.loads(other.execute('SELECT fields_json FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0])
+                fields['issuer']='Newer edit'
+                other.execute('UPDATE banknote_import_items SET fields_json=?,revision=revision+1 WHERE id=?',(json.dumps(fields),item['id']))
+                other.commit();other.close()
+            return dict(data=raw,quad=None)
+        b=self.check(b,item,prepare_photo=crop);item=b['items'][0]
+        self.assertEqual(item['fields']['issuer'],'Newer edit')
+        self.assertFalse(item['fields'].get('image_1'));self.assertEqual(item['check_state'],'failed')
+        assets={Path(stuff.UPLOAD_FOLDER)/row['filename'] for row in self.db.execute('SELECT filename FROM banknote_import_assets')}
+        self.assertTrue(set(Path(stuff.UPLOAD_FOLDER).iterdir())-before<=assets)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_image_edits').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM trimmed_image_sources').fetchone()[0],0)
     def single_imported(self,mutate=None):
         def one(payload):
             for name in ('items','receipts','listings'):payload[name]=payload[name][1:2]
@@ -84,8 +152,10 @@ class DraftTests(unittest.TestCase):
         imports._CHECK_SLOTS.acquire()
         with patch.object(imports.listing_images,'download',side_effect=self.download), \
                 patch.object(stuff,'_classify_banknote_listing_photos',side_effect=self.classify), \
-                patch.object(stuff,'_evaluate_import_check',return_value=dict(filled=self.fills)):
+                patch.object(stuff,'_evaluate_import_check',return_value=dict(filled=self.fills)), \
+                patch.object(stuff,'_prepare_import_photo',side_effect=lambda raw,note:dict(data=raw,quad=None)) as crop:
             stuff._run_import_check(b['id'],item['id'],item['revision'],token)
+        self.assertEqual(crop.call_count,2)
         done=self.client.get(b['status_url']).json
         self.assertEqual(done['pending_count'],0);self.assertFalse(done['processing_single'])
         record=self.db.execute('SELECT * FROM banknotes').fetchone()
@@ -94,6 +164,8 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(record['order_number'],ORDERS[1]);self.assertEqual(record['pick_number'],'P14a')
         self.assertTrue(record['specs_searched_at'])
         self.assertTrue(record['image_1']);self.assertTrue(record['image_2'])
+        for field in ('image_1','image_2'):
+            self.assertNotEqual(stuff._banknote_vision_source(record[field]),record[field])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],1)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_assets').fetchone()[0],2)
         page=self.client.get(b['url']);self.assertEqual(page.status_code,302)

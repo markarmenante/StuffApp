@@ -9301,16 +9301,17 @@ def _object_isolation_crop(img):
 
 def _trim_note_cv_cascade(img, expect_aspect=None, steps=None):
     """Fallback trim without the vision model: the local detector
-    cascade, iterated to a fixed point (a fuzzy paper edge can leave a
-    sliver that only the next pass sees) so the stored image is final
-    and a later Check finds nothing left to shave. Each pass only ever
-    shrinks the image; 3 passes covers the worst real case. With the
+    cascade, with up to three cleanup passes (a fuzzy paper edge can
+    leave a sliver that only the next pass sees). Every pass only ever
+    shrinks the image; a measured paper outline bounds later ink-only
+    cleanup. Existing saved/manual crops are not reprocessed by Check. With the
     sheet's catalog ratio known, no later pass may move the crop AWAY
     from it — a detector that cuts a correctly-cropped note further
     (rembg segmenting an orange note's design out of its own paper)
     always breaks the ratio before anything else notices."""
     out = None
     obj_tried = False
+    measured_paper_size = None
     for i in range(3):
         step = _trim_slab_note_cv(img, expect_aspect=expect_aspect)
         which = 'cv'
@@ -9350,6 +9351,15 @@ def _trim_note_cv_cascade(img, expect_aspect=None, steps=None):
                             i + 1, '' if i else 'on original ', *img.size)
             break
         nxt = _flatten_image_for_jpeg(_open_upload_image(step))
+        # A measured paper quad already found the whole sheet. The fallback
+        # ink union may see only the darker half of a pale design (China M30),
+        # so it may tidy small surrounds but cannot redefine the sheet's shape
+        # or remove a substantial side when catalogue dimensions are absent.
+        if measured_paper_size and which == 'design' and (
+                min(nxt.width / measured_paper_size[0], nxt.height / measured_paper_size[1]) < 0.85 or
+                abs((nxt.width / nxt.height) / (measured_paper_size[0] / measured_paper_size[1]) - 1) > 0.08):
+            app.logger.info('trim: ink-only cleanup would cut the measured paper; keeping previous')
+            break
         # Once a crop is accepted, the catalog ratio is a one-way
         # gate: a later pass may approach it but never move away
         # (the original photo's own ratio is meaningless, so pass 1
@@ -9380,6 +9390,7 @@ def _trim_note_cv_cascade(img, expect_aspect=None, steps=None):
                         i + 1, which, *img.size)
         out = step
         img = nxt
+        if which == 'cv':measured_paper_size = nxt.size
         # Every accepted pass is kept (steps): a later pass can be the
         # one that over-crops, and the caller's validator then falls
         # back to an earlier, wider crop instead of shipping nothing.
@@ -21457,11 +21468,19 @@ def _evaluate_import_check(note,prepared):
     return response.get_json()
 
 
+def _prepare_import_photo(data,note):
+    """Use the arrival crop pipeline for a newly selected draft photo only."""
+    meta={}
+    image=_trim_slabbed_note_image(data,expect_aspect=_banknote_expect_aspect(note),meta=meta)
+    return dict(data=image,quad=meta.get('quad')) if image else None
+
+
 def _run_import_check(batch_id,item_id,revision,token):
     try:
         with app.app_context():
             banknote_imports.run_check(open_db_connection,batch_id,item_id,revision,token,
-                                      UPLOAD_FOLDER,_classify_banknote_listing_photos,_evaluate_import_check)
+                                      UPLOAD_FOLDER,_classify_banknote_listing_photos,_evaluate_import_check,
+                                      prepare_photo=_prepare_import_photo)
             _finish_single_import(get_db(),batch_id)
     finally:banknote_imports._CHECK_SLOTS.release()
 

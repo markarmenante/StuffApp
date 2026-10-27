@@ -23,6 +23,7 @@ PREFIXES = {
     'grabowski': ('Grabowski ', 'Grabowski '), 'mehl': ('Mehl ', 'Mehl '),
     'funck': ('Funck ', 'Funck '), 'menzel': ('Menzel ', 'Menzel '),
     'tieste': ('Tieste ', 'Tieste '), 'lamb': ('Lamb ', 'Lamb '),
+    'smith_matravers': ('S/M ', 'Smith-Matravers '),
 }
 
 

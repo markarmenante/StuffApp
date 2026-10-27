@@ -269,6 +269,11 @@ call: actual cited excerpts or provider-fetched public catalogue text, exact
 namespace and suffix, known issue context, and dated-variety evidence for
 signatures/watermarks/dates. It never obtains
 grade, certificate, serial, purchase price or photos from catalogue research.
+Chinese Smith-Matravers references (`S/M#T32-6`) are recognized alongside Pick
+without dropping their specialist hierarchy or any cross-reference. Compound
+references remain searchable and eligible for directory navigation; accepted
+facts must still cite every exact saved reference. PCGS NoteFacts joins the
+public catalogue allowlist alongside PMG as a primary type-reference source.
 The vision/search call and its bounded fetch-only follow-up share one 75-second
 budget, at most four searches, one search pause continuation, and no automatic
 whole-call retries. The follow-up selects actual observed public source URLs;

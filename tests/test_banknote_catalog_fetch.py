@@ -119,6 +119,17 @@ class CandidateTests(unittest.TestCase):
         fake['fields']['printer']['source_url'] = lookup.BNI_COUNTRY_DIRECTORY
         self.assertEqual(lookup.validate(NOTE, {}, fake, source)['fields'], {})
 
+    def test_chinese_compound_reference_keeps_directory_and_exact_pcgs_source(self):
+        note = dict(country='China', pick_number='P-M30, S/M#T32-6',
+                    denomination='100 Yen', date_1=1945)
+        url = 'https://www.pcgs.com/notefacts/detail/china/pick-m30/707203'
+        src = dict(title='China Pick M30 100 Yen Japanese Imperial Government',
+                   quotes=['China Pick M30 S/M T32-6 100 Yen ND (1945)'])
+        self.assertEqual(lookup.fetch_candidates(note, {}, {url:src}),
+                         [lookup.BNI_COUNTRY_DIRECTORY, url])
+        self.assertEqual(lookup.fetch_candidates(note, {}, {
+            'https://pcgs.com.evil.test/notefacts/707203':src}), [lookup.BNI_COUNTRY_DIRECTORY])
+
     def test_failed_server_calls_spend_budget_but_text_claims_do_not(self):
         calls = [dict(content=[dict(type='server_tool_use', name='web_fetch'),
             dict(type='web_fetch_tool_result', content=dict(type='web_fetch_tool_result_error')),

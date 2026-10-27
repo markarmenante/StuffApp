@@ -45,6 +45,19 @@ class SearchTests(unittest.TestCase):
                                             citations=[URL])), {})
         self.assertEqual(search.sources(payload(snippet='')), {})
 
+    def test_chinese_pick_and_smith_matravers_compound_reference_is_searchable(self):
+        note = dict(country='China', pick_number='P-M30, S/M#T32-6',
+                    denomination='100 Yen', date_1=1945, slab_number='PRIVATE-CERT')
+        original = copy.deepcopy(note)
+        self.assertEqual(search.queries(note), [
+            'China "Pm30" "S/M t32-6"',
+            'China "Pick m30" "Smith-Matravers t32-6"'])
+        self.assertEqual(note, original)
+        for refs in ('P-M30, S/M#T32-6, S/M#T32-7', 'P-M30, S/M#T32-6 or T32-7',
+                     'P-M30, unknown reference'):
+            with self.subTest(refs=refs):
+                self.assertEqual(search.queries(dict(note, pick_number=refs)), [])
+
     def test_unsafe_and_wrong_domain_urls_are_discarded(self):
         for url in ('http://en.numista.com/223321', 'https://numista.com.evil.test/223321',
                     'https://evil.test/en.numista.com/223321', 'https://127.0.0.1/223321',
@@ -53,6 +66,11 @@ class SearchTests(unittest.TestCase):
                     'https://en.numista.com/\n223321', 'https://[bad'):
             with self.subTest(url=url):
                 self.assertEqual(search.sources(payload(url=url)), {})
+
+    def test_primary_pcgs_notefacts_source_is_allowed_without_unrelated_hosts(self):
+        url = 'https://www.pcgs.com/notefacts/detail/china/pick-m30/707203'
+        self.assertIn(url, search.sources(payload(url=url)))
+        self.assertEqual(search.sources(payload(url='https://pcgs.com.evil.test/notefacts/707203')), {})
 
     def test_malformed_oversized_and_duplicate_results(self):
         for bad in (None, [], {'results':None}, {'results':{}}, {'results':[None]},
