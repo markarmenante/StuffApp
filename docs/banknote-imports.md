@@ -1,9 +1,30 @@
 # Banknote order review
 
 Entering an exact eBay order on **Order review**, or pressing Check on an otherwise
-blank banknote form with an order number, creates a saved review batch. It does not
-create collection records. The order-only new form stays local until import; an
-existing failed form is preserved.
+blank banknote form with an order number, reads the complete checkout first.
+When it contains exactly one verified banknote, Check runs and the ordinary
+collection detail editor opens directly. There is no separate review or Release
+step for that single note. Missing catalogue fields, an unavailable paid amount,
+or uncertain photo sides remain blank with current warnings in that editor;
+provider failures remain retryable through its normal Check control.
+
+Multiple-item orders keep the saved draft review and explicit Release workflow.
+Unknown item types, possible bundles, ambiguous quantities, account/membership
+failures, changed source facts and conflicting existing records also stay saved
+for review. One pending item from a multi-item checkout is still a multi-item
+order. The order-only form stays local and prevents new edits/autosave while
+processing; an existing failed form is preserved.
+
+Single-note completion is enabled by an explicit import/resume POST, including
+clicking a saved order or re-entering its number. Existing checked single drafts
+can finish without repeating Check. Historical drafts default to review and are
+never published by a GET or an unrelated startup sweep. A previously authorized
+single import can resume completion after restart. Publication uses the same
+atomic source/account/revision/duplicate guards and exact purchase/photo copying
+as Release; concurrent finishers create or complete one record once. Normal detail
+opens with Ordered status, never automatically Owned. Successful Check timestamps
+and resolved same-source failure cleanup carry through; unresolved enrichment
+warnings remain visible until a newer successful normal Check.
 
 An order with no imported items says that no items have been saved for review yet.
 Retrieval, sign-in, verification and failure messages remain visible, with Retry
@@ -18,7 +39,10 @@ paid unit amount and original listing. Shipping, tax, order totals and listing
 asking prices cannot supply an item price. A missing receipt leaves the price blank.
 A partial or old-reader response without checkout membership is rejected atomically.
 
-All drafts are committed before automatic Check begins. At most two checks run
+All source drafts are committed before automatic Check begins. Single-note drafts
+are the durable processing record; successful or partially enriched known notes
+finish automatically under the rules above. Multiple-item drafts remain isolated
+until explicit Release. At most two checks run
 concurrently; each batch contains at most 25 items and each Check has a five-minute
 publication lease. Check uses the existing photo-side classifier and catalogue
 validator, fills blank draft fields only, and saves accepted catalogue proof.
@@ -96,7 +120,11 @@ No existing collection record or photo is removed by this workflow.
 ## Routes and runtime
 
 - `GET /banknotes/imports/new`: new/resume order review.
-- `POST /banknotes/imports`: `{order_number, refresh?:true}`; resume by default.
+- `POST /banknotes/imports`: `{order_number, refresh?:true}`; resume by default and
+  authorize direct completion only if the complete checkout proves one banknote.
+  Responses expose `processing_single` and `completion_url`; ordinary status GETs
+  only read progress. The entry page waits for a single note and opens its normal
+  detail URL; multiple items open the saved review.
 - `GET /banknotes/imports/<batch>` and `/status`: review HTML and read-only state.
 - `GET /banknotes/imports/<batch>/items/<item>`: saved draft detail.
   Once released, GET redirects to the real banknote detail page with a return

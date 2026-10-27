@@ -71,6 +71,163 @@ class DraftTests(unittest.TestCase):
         with patch.object(imports.listing_images,'download',side_effect=self.download):
             imports.run_check(stuff.open_db_connection,batch['id'],item['id'],item['revision'],token,stuff.UPLOAD_FOLDER,self.classify,evaluate or (lambda *_:dict(filled=self.fills)))
         return self.client.get(batch['status_url']).json
+    def single_imported(self,mutate=None):
+        def one(payload):
+            for name in ('items','receipts','listings'):payload[name]=payload[name][1:2]
+            payload['checkout']['orders']=payload['checkout']['orders'][1:2]
+            if mutate:mutate(payload)
+        return self.imported(one)
+    def test_single_note_worker_finishes_check_and_opens_normal_detail_without_review(self):
+        b=self.single_imported();item=b['items'][0]
+        self.assertTrue(b['processing_single']);self.assertIsNone(b['completion_url'])
+        token=imports.claim_check(self.db,b['id'],item['id'],item['revision'])
+        imports._CHECK_SLOTS.acquire()
+        with patch.object(imports.listing_images,'download',side_effect=self.download), \
+                patch.object(stuff,'_classify_banknote_listing_photos',side_effect=self.classify), \
+                patch.object(stuff,'_evaluate_import_check',return_value=dict(filled=self.fills)):
+            stuff._run_import_check(b['id'],item['id'],item['revision'],token)
+        done=self.client.get(b['status_url']).json
+        self.assertEqual(done['pending_count'],0);self.assertFalse(done['processing_single'])
+        record=self.db.execute('SELECT * FROM banknotes').fetchone()
+        self.assertEqual(done['completion_url'],'/banknotes/'+record['id'])
+        self.assertEqual(record['price'],'$125.37');self.assertEqual(record['status'],'Ordered')
+        self.assertEqual(record['order_number'],ORDERS[1]);self.assertEqual(record['pick_number'],'P14a')
+        self.assertTrue(record['specs_searched_at'])
+        self.assertTrue(record['image_1']);self.assertTrue(record['image_2'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],1)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_assets').fetchone()[0],2)
+        page=self.client.get(b['url']);self.assertEqual(page.status_code,302)
+        self.assertEqual(page.location,done['completion_url'])
+        self.assertIn('no-store',page.headers['Cache-Control'])
+        self.assertEqual(self.client.get(done['completion_url']).status_code,200)
+        again=self.batch();self.assertEqual(again['completion_url'],done['completion_url'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+    def test_historical_single_draft_requires_explicit_resume_and_status_get_is_read_only(self):
+        b=self.single_imported();b=self.check(b,b['items'][0])
+        self.db.execute('UPDATE banknote_import_batches SET auto_single=0 WHERE id=?',(b['id'],));self.db.commit()
+        self.assertIsNone(stuff._finish_single_import(self.db,b['id']))
+        for _ in range(2):
+            self.assertIsNone(self.client.get(b['status_url']).json['completion_url'])
+            self.assertEqual(self.client.get(b['url']).status_code,200)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        with patch.object(stuff,'_start_import_checks') as checks:
+            resumed=self.batch()
+        self.assertTrue(resumed['completion_url']);self.assertEqual(resumed['id'],b['id'])
+        self.assertEqual(resumed['items'][0]['check_state'],'done')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+    def test_one_pending_item_in_multi_item_checkout_still_requires_review(self):
+        b=self.imported();self.assertEqual(self.release(b,b['items'][:2]).status_code,200)
+        b=self.client.get(b['status_url']).json;b=self.check(b,b['items'][2])
+        resumed=self.batch()
+        self.assertEqual(resumed['pending_count'],1);self.assertFalse(resumed['processing_single'])
+        self.assertIsNone(resumed['completion_url']);self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],2)
+    def test_single_unknown_partial_failed_or_quantity_ambiguous_purchase_never_auto_adds(self):
+        b=self.single_imported(lambda p:p['items'][0].update(title='Unknown collectible'))
+        b=self.check(b,b['items'][0],lambda *_:dict(filled={}))
+        self.assertEqual(b['items'][0]['check_state'],'done')
+        self.assertIsNone(self.batch()['completion_url'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        item=b['items'][0]
+        b=self.check(b,item,lambda *_:dict(filled={},lookup_error='Provider incomplete'))
+        self.assertEqual(b['items'][0]['check_state'],'partial');self.assertIsNone(self.batch()['completion_url'])
+        def failed(*_):raise RuntimeError('provider failed')
+        b=self.check(b,b['items'][0],failed)
+        self.assertEqual(b['items'][0]['check_state'],'failed');self.assertIsNone(self.batch()['completion_url'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+    def test_single_completion_revalidates_source_membership_quantity_and_current_revision(self):
+        b=self.single_imported();b=self.check(b,b['items'][0]);item=b['items'][0]
+        self.db.execute("UPDATE banknote_import_batches SET snapshot_json='[]' WHERE id=?",(b['id'],));self.db.commit()
+        self.assertIsNone(stuff._finish_single_import(self.db,b['id']))
+        self.db.execute('UPDATE banknote_import_batches SET snapshot_json=? WHERE id=?',(json.dumps([[ORDERS[1],IDS[1]]]),b['id']))
+        self.db.execute('UPDATE ebay_order_items SET quantity=2 WHERE item_id=?',(IDS[1],));self.db.commit()
+        self.assertIsNone(stuff._finish_single_import(self.db,b['id']))
+        self.assertFalse(self.client.get(b['status_url']).json['processing_single'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+    def test_single_manual_price_disagreement_requires_review(self):
+        b=self.single_imported();b=self.check(b,b['items'][0]);item=b['items'][0]
+        for change in ({'price':'$1'},):
+            original=json.loads(self.db.execute('SELECT fields_json FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0])
+            fields={**original,**change}
+            self.db.execute('UPDATE banknote_import_items SET fields_json=? WHERE id=?',(json.dumps(fields),item['id']));self.db.commit()
+            self.assertIsNone(stuff._finish_single_import(self.db,b['id']))
+            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+            self.db.execute('UPDATE banknote_import_items SET fields_json=? WHERE id=?',(json.dumps(original),item['id']));self.db.commit()
+    def test_known_single_partial_check_opens_detail_with_current_warnings_and_missing_fields(self):
+        b=self.single_imported(lambda p:p['receipts'].clear())
+        b=self.check(b,b['items'][0],lambda *_:dict(filled={},lookup_error='Catalogue lookup is incomplete.'))
+        self.assertEqual(b['items'][0]['check_state'],'partial')
+        done=self.batch();self.assertTrue(done['completion_url'])
+        record=self.db.execute('SELECT * FROM banknotes').fetchone()
+        self.assertFalse(record['price']);self.assertFalse(record['pick_number']);self.assertFalse(record['specs_searched_at'])
+        html=self.client.get(done['completion_url']).data.decode()
+        self.assertIn('Catalogue lookup is incomplete.',html)
+        self.assertIn('exact paid item amount is unavailable',html)
+        self.db.execute("UPDATE banknotes SET specs_searched_at=? WHERE id=?",(time.strftime('%Y-%m-%dT%H:%M:%S',time.gmtime(time.time()+2)),record['id']));self.db.commit()
+        self.assertNotIn('Catalogue lookup is incomplete.',self.client.get(done['completion_url']).data.decode())
+    def test_known_single_provider_exception_still_opens_normal_editor_with_retry_warning(self):
+        b=self.single_imported()
+        with patch.object(stuff,'fetch_banknote_specs',side_effect=RuntimeError('provider unavailable')):
+            b=self.check(b,b['items'][0],stuff._evaluate_import_check)
+        self.assertEqual(b['items'][0]['check_state'],'partial')
+        done=self.batch();self.assertTrue(done['completion_url'])
+        html=self.client.get(done['completion_url']).data.decode()
+        self.assertIn('provider could not finish Check',html)
+        self.assertFalse(self.db.execute('SELECT specs_searched_at FROM banknotes').fetchone()[0])
+    def test_known_single_without_photo_pair_opens_normal_detail_preserving_originals(self):
+        b=self.single_imported();item=b['items'][0]
+        token=imports.claim_check(self.db,b['id'],item['id'],item['revision'])
+        with patch.object(imports.listing_images,'download',side_effect=self.download):
+            imports.run_check(stuff.open_db_connection,b['id'],item['id'],item['revision'],token,
+                stuff.UPLOAD_FOLDER,lambda _:None,lambda *_:dict(filled={}))
+        done=self.batch();self.assertTrue(done['completion_url'])
+        self.assertEqual(len(done['items'][0]['photos']),2)
+        record=self.db.execute('SELECT * FROM banknotes').fetchone()
+        self.assertFalse(record['image_1']);self.assertFalse(record['image_2'])
+        self.assertIn('Listing-photo sides could not be verified',self.client.get(done['completion_url']).data.decode())
+    def test_two_single_finishers_are_idempotent_even_with_stale_revision(self):
+        b=self.single_imported();b=self.check(b,b['items'][0])
+        release=imports.release
+        def simultaneous(*args,**kwargs):
+            release(*args,**kwargs)
+            return release(*args,**kwargs)
+        with patch.object(imports,'release',side_effect=simultaneous):
+            self.assertTrue(stuff._finish_single_import(self.db,b['id']))
+        done=self.client.get(b['status_url']).json
+        self.assertTrue(done['completion_url'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+        self.assertEqual(self.db.execute('SELECT auto_single FROM banknote_import_batches').fetchone()[0],1)
+    def test_single_lot_quantity_and_mixed_type_titles_never_take_direct_path(self):
+        for title in ('Lot of 10 banknotes','Set of 100 banknotes','Two banknotes PMG','PMG banknote and coin',
+                      'PMG assorted banknotes','Banknote lot of notes','Collection of PMG banknotes','PMG banknotes collection'):
+            with self.subTest(title=title):
+                b=self.single_imported(lambda p:p['items'][0].update(title=title))
+                row=self.db.execute('SELECT * FROM banknote_import_items WHERE batch_id=?',(b['id'],)).fetchone()
+                self.db.execute("UPDATE banknote_import_items SET check_state='done' WHERE id=?",(row['id'],));self.db.commit()
+                self.assertIsNone(stuff._finish_single_import(self.db,b['id']))
+                self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+                self.db.execute('DELETE FROM banknote_import_items');self.db.execute('DELETE FROM banknote_import_batches')
+                self.db.execute('DELETE FROM ebay_purchase_request_sessions');self.db.execute('DELETE FROM ebay_purchase_requests')
+                self.db.execute('DELETE FROM ebay_order_items');self.db.execute('DELETE FROM ebay_purchase_observations')
+                self.db.execute('DELETE FROM ebay_purchase_prices');self.db.execute('DELETE FROM ebay_listing_captures');self.db.commit()
+    def test_single_note_with_collection_provenance_is_not_mistaken_for_a_bundle(self):
+        b=self.single_imported(lambda p:p['items'][0].update(title='Lot 123 Netherlands Antilles 1 Gulden PMG 67 ex Smith Collection'))
+        b=self.check(b,b['items'][0],lambda *_:dict(filled={}))
+        self.assertTrue(self.batch()['completion_url'])
+    def test_linked_record_does_not_bypass_current_source_or_quantity_validation(self):
+        b=self.single_imported();b=self.check(b,b['items'][0]);done=self.batch()
+        self.assertTrue(done['completion_url'])
+        self.db.execute('UPDATE ebay_order_items SET quantity=2 WHERE item_id=?',(IDS[1],));self.db.commit()
+        self.assertIsNone(self.client.get(b['status_url']).json['completion_url'])
+        self.assertEqual(self.client.get(b['url']).status_code,200)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+    def test_checked_single_draft_with_new_existing_record_does_not_duplicate(self):
+        b=self.single_imported();b=self.check(b,b['items'][0])
+        self.db.execute("INSERT INTO banknotes(id,order_number,marketplace) VALUES('concurrent',?,'eBay')",(ORDERS[1],))
+        self.db.execute("INSERT INTO banknote_original_listings(banknote_id,url) VALUES('concurrent',?)",('https://www.ebay.com/itm/'+IDS[1],));self.db.commit()
+        resumed=self.batch()
+        self.assertIsNone(resumed['completion_url']);self.assertFalse(resumed['processing_single'])
+        self.assertEqual(resumed['items'][0]['state'],'draft')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
     def test_complete_checkout_is_staged_with_exact_cents_and_actual_seller_orders(self):
         b=self.imported();self.assertEqual(len(b['items']),3)
         self.assertEqual({i['order_number'] for i in b['items']},set(ORDERS))

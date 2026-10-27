@@ -1694,7 +1694,7 @@ document.addEventListener('DOMContentLoaded', function () {
   {% endif %}
 
   <!-- Grade, Conditions -->
-  <p id="banknoteCheckSources" role="status" hidden style="padding:8px 12px;white-space:pre-line;overflow-wrap:anywhere"></p>
+  <p id="banknoteCheckSources" role="status"{% if not banknote_import_check_warning|default('', true) %} hidden{% endif %} style="padding:8px 12px;white-space:pre-line;overflow-wrap:anywhere">{{ banknote_import_check_warning|default('', true) }}</p>
   <details id="banknoteCatalogueSources" hidden style="padding:8px 12px;overflow-wrap:anywhere">
     <summary>Catalogue reference</summary>
     <div></div>
@@ -8238,11 +8238,27 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       btn.setAttribute('aria-busy', 'true');
       try {
         if (window.banknoteOrderDraftCandidate?.()) {
-          btn.textContent = 'Saving order…';
-          const orderNumber = document.querySelector('#mainForm [name="order_number"]').value;
-          const saved = await window.startBanknoteOrderReview(orderNumber);
-          window.__stuffAllowUnload = true;
-          window.location.assign(saved.url);
+          btn.textContent = 'Retrieving order…';
+          const orderForm = document.getElementById('mainForm');
+          const orderNumber = orderForm.querySelector('[name="order_number"]').value;
+          const formValues = () => JSON.stringify([...new FormData(orderForm)].map(([name, value]) =>
+            [name, typeof value === 'string' ? value : value.name ? [value.name, value.size, value.lastModified] : null]));
+          const startedValues = formValues();
+          const wasInert = orderForm.inert;
+          // Editing identification while the order is importing could trigger
+          // ordinary new-record autosave and duplicate the purchased note.
+          orderForm.inert = true;
+          try {
+            const saved = await window.startBanknoteOrderReview(orderNumber,
+              {onProgress: message => { btn.textContent = message; }});
+            if (formValues() !== startedValues) {
+              throw new Error('The order is saved. Your newer edits are kept here. Open Order review to continue.');
+            }
+            window.__stuffAllowUnload = true;
+            window.location.assign(saved.url);
+          } finally {
+            orderForm.inert = wasInert;
+          }
           return;
         }
         await ensureCoinSpecUrl(btn);

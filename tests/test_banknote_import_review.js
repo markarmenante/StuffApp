@@ -19,11 +19,12 @@ function page(initial, replies = []) {
     'banknoteImportList', 'banknoteImportRetry', 'banknoteImportRefresh', 'banknoteImportRefreshOrder'];
   const elements = Object.fromEntries(ids.map(id => [id, element()]));
   elements['banknote-import-data'] = {textContent: JSON.stringify({batch: initial})};
-  const requests = [], timers = [];
+  const requests = [], timers = [], navigations = [];
   vm.runInNewContext(source, {
     document: {querySelector: () => ({dataset: {importMode: 'review'}}),
       getElementById: id => elements[id], createElement: element, createDocumentFragment: element},
-    window: {location: {href: 'https://stuff.test/banknotes/imports/test', origin: 'https://stuff.test'}},
+    window: {location: {href: 'https://stuff.test/banknotes/imports/test', origin: 'https://stuff.test',
+      assign: url => navigations.push(url)}},
     URL, clearTimeout() {}, setTimeout(fn) { timers.push(fn); return timers.length; },
     fetch: async (url, options) => {
       requests.push({url, method: options.method});
@@ -33,7 +34,7 @@ function page(initial, replies = []) {
   });
   return {intro: elements.banknoteImportIntro, status: elements.banknoteImportStatus,
     retry: elements.banknoteImportRetry, refreshOrder: elements.banknoteImportRefreshOrder,
-    list: elements.banknoteImportList, requests, timers};
+    list: elements.banknoteImportList, requests, timers, navigations};
 }
 
 (async () => {
@@ -83,6 +84,18 @@ function page(initial, replies = []) {
   assert.equal(interrupted.status.textContent, 'Chrome access failed.');
   assert.equal(interrupted.retry.hidden, false);
   assert.equal(interrupted.timers.length, 0, 'A failed read does not poll or retry by itself');
+
+  const processing = batch({state: 'review', processing_single: true, items: [draft({check_state: 'checking'})]});
+  const completedSingle = page(processing, [batch({state: 'complete', completion_url: '/banknotes/exact-note',
+    items: [draft({state: 'released', released_record_id: 'exact-note'})]})]);
+  await completedSingle.timers.shift()();
+  assert.deepEqual(completedSingle.navigations, ['/banknotes/exact-note']);
+  assert.equal(completedSingle.timers.length, 0, 'No more polling after navigation');
+  assert.deepEqual(completedSingle.requests, [{url: '/banknotes/imports/test/status', method: 'GET'}]);
+  const unsafeCompletion = page(processing, [batch({state: 'complete', completion_url: '//other.test/note'})]);
+  await unsafeCompletion.timers.shift()();
+  assert.deepEqual(unsafeCompletion.navigations, [], 'Review polling rejects a cross-origin completion');
+  assert.match(unsafeCompletion.status.textContent, /invalid link/);
 
   // A failed refresh keeps already saved items visible without claiming completion.
   const refreshFailed = page(batch({state: 'failed', items: saved.items, pending_count: 1}));

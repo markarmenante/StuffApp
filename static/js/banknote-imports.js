@@ -1,4 +1,4 @@
-/* Saved banknote order drafts: collection writes require explicit Release. */
+/* Saved order drafts; verified single-note processing is authorized on entry. */
 (() => {
   'use strict';
   const sameOrigin = value => {
@@ -12,11 +12,12 @@
     try { const url = new URL(value, window.location.href); return ['https:', 'http:'].includes(url.protocol) ? url.href : ''; }
     catch (_) { return ''; }
   };
-  async function request(url, method = 'GET', body) {
+  async function request(url, method = 'GET', body, signal) {
     const response = await fetch(sameOrigin(url), {
       method, credentials: 'same-origin', cache: 'no-store',
       headers: {Accept: 'application/json', ...(body ? {'Content-Type': 'application/json'} : {})},
       ...(body ? {body: JSON.stringify(body)} : {}),
+      ...(signal ? {signal} : {}),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.error) {
@@ -30,8 +31,37 @@
     const value = String(orderNumber || '').trim();
     if (!value) throw new Error('Enter the eBay order number first.');
     const data = await request('/banknotes/imports', 'POST', {order_number: value, ...(options.refresh === true ? {refresh:true} : {})});
-    if (!data.url) throw new Error('The order was saved but its review link was missing. Open Order review to resume.');
-    return {...data, url: sameOrigin(data.url)};
+    let current = data.batch || data;
+    if (!current.url) throw new Error('The order was saved but its review link was missing. Open Order review to resume.');
+    const reviewUrl = sameOrigin(current.url);
+    const statusUrl = sameOrigin(current.status_url || reviewUrl + '/status');
+    const deadline = Date.now() + 10 * 60 * 1000;
+    const saved = () => ({...data, ...current, url: reviewUrl});
+    while (true) {
+      if (current.completion_url) return {...saved(), url: sameOrigin(current.completion_url)};
+      const items = current.items || [];
+      const needsReview = current.state === 'failed' || items.length > 1
+        || items.some(item => item.state === 'blocked');
+      const readingOrder = !items.length && ['queued', 'sign_in_required', 'challenge_required'].includes(current.state);
+      if (needsReview || (!readingOrder && current.processing_single !== true)) return saved();
+      const message = current.state === 'sign_in_required' ? 'Sign in to eBay to continue…'
+        : current.state === 'challenge_required' ? 'Complete eBay verification to continue…'
+        : current.processing_single ? 'Checking banknote…' : 'Retrieving order…';
+      options.onProgress?.(message, current);
+      if (Date.now() >= deadline) return saved();
+      await new Promise(resolve => setTimeout(resolve, Math.min(2500, deadline - Date.now())));
+      if (Date.now() >= deadline) return saved();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), deadline - Date.now());
+      try {
+        // The entry POST authorizes processing. Polls only read saved status;
+        // the browser never posts an automatic collection release.
+        const next = await request(statusUrl, 'GET', undefined, controller.signal);
+        current = next.batch || next;
+      } catch (_) {
+        return saved();
+      } finally { clearTimeout(timeout); }
+    }
   };
   const root = document.querySelector('[data-import-mode]');
   if (!root) return;
@@ -48,16 +78,27 @@
     return node;
   };
   if (mode === 'new') {
-    document.getElementById('banknoteImportOrderForm').addEventListener('submit', async event => {
-      event.preventDefault();
-      const button = document.getElementById('banknoteImportStart');
-      if (button.disabled) return;
-      button.disabled = true; say('Saving order for review…');
+    const button = document.getElementById('banknoteImportStart');
+    const orderInput = document.getElementById('banknoteImportOrderNumber');
+    let starting = false;
+    const openOrder = async orderNumber => {
+      if (starting) return;
+      starting = true; button.disabled = true; orderInput.readOnly = true; say('Retrieving order…');
       try {
-        const batch = await window.startBanknoteOrderReview(document.getElementById('banknoteImportOrderNumber').value);
+        const batch = await window.startBanknoteOrderReview(orderNumber,
+          {onProgress: message => say(message)});
         window.location.assign(batch.url);
-      } catch (error) { say(error.message, true); button.disabled = false; }
+      } catch (error) {
+        say(error.message, true); starting = false; button.disabled = false; orderInput.readOnly = false;
+      }
+    };
+    document.getElementById('banknoteImportOrderForm').addEventListener('submit', event => {
+      event.preventDefault(); openOrder(orderInput.value);
     });
+    document.querySelectorAll('[data-saved-batch][data-order-number]').forEach(link => link.addEventListener('click', event => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button > 0) return;
+      event.preventDefault(); openOrder(link.dataset.orderNumber);
+    }));
     return;
   }
   const seed = JSON.parse(document.getElementById('banknote-import-data').textContent);
@@ -121,7 +162,7 @@
     });
   }
   const checkRunning = draft => draft.check_state === 'checking';
-  const batchRunning = () => ['queued', 'sign_in_required', 'challenge_required'].includes(batch.state)
+  const batchRunning = () => batch.processing_single === true || ['queued', 'sign_in_required', 'challenge_required'].includes(batch.state)
     || (batch.items || []).some(draft => draft.state === 'draft' && ['idle', 'checking'].includes(draft.check_state));
   const stateLabel = draft => draft.state === 'released' ? 'In collection' : draft.state === 'blocked'
     ? 'Needs attention' : checkRunning(draft) ? 'Checking…' : draft.check_state === 'failed'
@@ -475,6 +516,10 @@
     polling = true;
     try {
       const next = await request(statusUrl); batch = next.batch || next; pollFailures = 0;
+      if (batch.completion_url && !dirty() && !saving && !busy && !conflict) {
+        const destination = sameOrigin(batch.completion_url);
+        leftPage = true; window.location.assign(destination); return;
+      }
       if (mode === 'review') renderList();
       else {
         const remote = (batch.items || []).find(draft => String(draft.id) === String(item.id));
@@ -506,7 +551,8 @@
       const button = event.currentTarget; button.disabled = true;
       try {
         say('Refreshing the exact purchased items. Saved draft edits are kept…');
-        const saved = await window.startBanknoteOrderReview(batch.order_number, {refresh:forceRefresh});
+        const saved = await window.startBanknoteOrderReview(batch.order_number,
+          {refresh:forceRefresh, onProgress: message => say(message)});
         if (saved.url !== batchUrl) window.location.assign(saved.url); else await pollStatus(true);
       } catch (error) { say(error.message,true); }
       finally { button.disabled = button.id === 'banknoteImportRefreshOrder' && ['queued','sign_in_required','challenge_required'].includes(batch.state); }

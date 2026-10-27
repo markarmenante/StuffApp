@@ -6,6 +6,15 @@
 session's opening context. Keep it the first section of this file, and
 fold new standing instructions in here — nowhere else.)
 
+- **Single-banknote orders** (2026-10-27): when the verified complete eBay
+  checkout contains exactly one banknote, process it through Check and open its
+  normal collection detail page directly, without a separate review/Release step.
+  Ordinary missing catalogue details, price or photo sides remain blank with
+  current warnings and normal Check retry. Multiple-note orders retain saved draft
+  review and explicit Release. Unknown type, mixed/bundled quantities, unverified
+  membership/account and duplicate/concurrent-record conflicts remain protected.
+  Adopt an existing single draft only through an explicit import/resume action;
+  viewing or startup must not publish unrelated historical drafts.
 - **Purchase Check authority** (2026-10-17): the entered eBay order number is
   the source of truth. Read that exact order, retaining purchased items even when
   their titles lack the bulk banknote-discovery keywords. Preserve account,

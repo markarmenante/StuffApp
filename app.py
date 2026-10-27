@@ -21462,6 +21462,7 @@ def _run_import_check(batch_id,item_id,revision,token):
         with app.app_context():
             banknote_imports.run_check(open_db_connection,batch_id,item_id,revision,token,
                                       UPLOAD_FOLDER,_classify_banknote_listing_photos,_evaluate_import_check)
+            _finish_single_import(get_db(),batch_id)
     finally:banknote_imports._CHECK_SLOTS.release()
 
 
@@ -21475,6 +21476,21 @@ def _queue_import_check(db,batch_id,item_id,revision):
         banknote_imports._CHECK_SLOTS.release();return
     threading.Thread(target=_run_import_check,args=(batch_id,item_id,revision,token),daemon=True,
                      name='banknote-draft-check').start()
+
+
+def _finish_single_import(db,batch_id):
+    try:
+        return banknote_imports.finish_single(db,batch_id,UPLOAD_FOLDER,_create_released_banknote)
+    except (banknote_imports.ImportProblem,OSError,sqlite3.Error):
+        # A concurrent source/record change keeps the saved draft for review.
+        # No partial publication or guessed duplicate may escape the transaction.
+        db.rollback()
+        try:account=banknote_imports._account(db)
+        except banknote_imports.ImportProblem:return None
+        db.execute("UPDATE banknote_import_batches SET auto_single=0,message=? WHERE id=? AND account_name=? AND state!='complete'",
+                   ('This order changed before it could be added. Your saved item was kept; review it before continuing.',batch_id,account))
+        db.commit()
+        return None
 
 
 def _start_import_checks(batch_id):
@@ -21561,6 +21577,7 @@ def banknote_import_create():
     require_owner();data=request.get_json(silent=True) or request.form
     try:
         ident=banknote_imports.begin(get_db(),data.get('order_number'),refresh=data.get('refresh') is True)
+        _finish_single_import(get_db(),ident)
         _start_import_checks(ident)
         return jsonify(banknote_imports.status(get_db(),ident))
     except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
@@ -21571,6 +21588,8 @@ def banknote_import_review(batch_id):
     require_owner()
     try:batch=banknote_imports.status(get_db(),batch_id)
     except banknote_imports.ImportProblem:abort(404)
+    if batch.get('completion_url'):
+        response=redirect(batch['completion_url']);response.headers['Cache-Control']='no-store';return response
     return render_template('banknote_import_review.html',**_import_context(batch))
 
 
@@ -22467,6 +22486,7 @@ def detail_view(category, record_id):
         pedigree_purchase = _provenance_purchase_event(record)
 
     return render_template('detail.html',
+                           banknote_import_check_warning=banknote_imports.collection_check_warning(db,record) if category=='banknotes' else '',
                            category=category,
                            cat_info=cat_info,
                            record=record,
@@ -43028,7 +43048,8 @@ with app.app_context():
     market_ebay_feed.init_schema(get_db())
     original_listings.init_schema(get_db())
     if os.environ.get('BANKNOTE_IMPORT_WORKER','1')!='0':
-        for batch in get_db().execute("SELECT DISTINCT batch_id FROM banknote_import_items WHERE state='draft' AND check_state='idle' LIMIT 25").fetchall():
+        for batch in get_db().execute("SELECT DISTINCT i.batch_id FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE i.state='draft' AND (i.check_state='idle' OR (b.auto_single=1 AND i.check_state IN ('done','partial'))) LIMIT 25").fetchall():
+            _finish_single_import(get_db(),batch[0])
             _start_import_checks(batch[0])
 
 _ebay_order_sync.start()

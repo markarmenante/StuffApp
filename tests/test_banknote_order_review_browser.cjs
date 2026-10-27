@@ -21,7 +21,7 @@ const {createHash} = require('node:crypto');
   const hashes=()=>Object.fromEntries(sourceFiles.map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(repo,file))).digest('hex')]));
   const evidence={passed:[],failures:[],errors:[],externalRequests:[],filter:process.env.ORDER_REVIEW_TEST_FILTER||null,sourceBefore:hashes()};
   const python = String.raw`
-import hashlib,json,logging,os,sys,tempfile,time,types
+import contextlib,hashlib,json,logging,os,sys,tempfile,time,types
 from pathlib import Path
 from unittest.mock import patch
 repo=Path(sys.argv[1]);sys.path.insert(0,str(repo));os.chdir(repo)
@@ -72,7 +72,9 @@ def specs(note):
 stuff.fetch_banknote_specs=specs
 def queue_check(db,batch_id,item_id,revision):
  token=banknote_imports.claim_check(db,batch_id,item_id,revision)
- if token:banknote_imports.run_check(stuff.open_db_connection,batch_id,item_id,revision,token,stuff.UPLOAD_FOLDER,classify,stuff._evaluate_import_check)
+ if token:
+  banknote_imports.run_check(stuff.open_db_connection,batch_id,item_id,revision,token,stuff.UPLOAD_FOLDER,classify,stuff._evaluate_import_check)
+  stuff._finish_single_import(db,batch_id)
 stuff._queue_import_check=queue_check
 # Network must never be used by the fixture's application process.
 import urllib.request
@@ -110,8 +112,9 @@ def fixture_complete():
  assert job['order_id']==number,(job,number)
  observed=ebay_orders.now_iso();items=[];receipts=[];listings=[]
  checkout_id='98-7654-'+number[-5:]+'0'
- seller_orders=[number[:-5]+str(int(number[-5:])+offset).zfill(5) for offset in (-1,0,1)]
- for index,(title,amount) in enumerate((('Tonga 1 Pound 1966 P-12b PMG 64 EPQ','599.89'),('Seychelles 5 Rupees 1968 P-14a PMG 64 EPQ','125.37'),('Maldives 10 Rufiyaa 1960 P-5b PMG 64 EPQ','38.11'))):
+ seller_orders=[number] if data.get('single') else [number[:-5]+str(int(number[-5:])+offset).zfill(5) for offset in (-1,0,1)]
+ examples=(('Tonga 1 Pound 1966 P-12b PMG 64 EPQ','599.89'),('Seychelles 5 Rupees 1968 P-14a PMG 64 EPQ','125.37'),('Maldives 10 Rufiyaa 1960 P-5b PMG 64 EPQ','38.11'))
+ for index,(title,amount) in enumerate(examples[:1] if data.get('single') else examples):
   actual_order=seller_orders[index]
   ident=str(177000000000+int(number[-5:])*10+index)
   details='https://order.ebay.com/ord/show?orderId='+actual_order+'&purchaseOrderId='+checkout_id
@@ -128,10 +131,17 @@ def fixture_complete():
   if response.status_code==200:
    fresh=stuff.open_db_connection()
    drafts=[dict(row) for row in fresh.execute('SELECT i.* FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE b.order_id=?',(number,))];fresh.close()
-   for draft in drafts:
-    check=client.post('/banknotes/imports/'+draft['batch_id']+'/items/'+draft['id']+'/check',json={'revision':draft['revision']})
-    assert check.status_code==202,(check.status_code,check.get_json())
+   with patch.object(stuff,'fetch_banknote_specs',side_effect=RuntimeError('Synthetic provider interruption')) if data.get('partial') else contextlib.nullcontext():
+    for draft in drafts:
+     check=client.post('/banknotes/imports/'+draft['batch_id']+'/items/'+draft['id']+'/check',json={'revision':draft['revision']})
+     assert check.status_code==202,(check.status_code,check.get_json())
   return jsonify(status=response.status_code,body=response.get_json(),items=items),response.status_code
+
+@stuff.app.post('/__fixture/legacy-import')
+def fixture_legacy_import():
+ db=stuff.get_db();data=request.get_json()
+ db.execute('UPDATE banknote_import_batches SET auto_single=0 WHERE id=?',(data['batch'],));db.commit()
+ return jsonify(ok=True)
 
 @stuff.app.post('/__fixture/partial-record')
 def fixture_partial_record():
@@ -221,6 +231,7 @@ finally:server.server_close();temporary.cleanup()
     const captureDialog=async dialog=>{diagnostics.dialogs.push(dialog.message());await dialog.dismiss();};
     t.page.on('request',captureRequest);t.page.on('dialog',captureDialog);
     await t.page.goto(origin+(fromBlank?'/banknotes/new':'/banknotes/imports/new'));
+    const created=t.page.waitForResponse(response=>new URL(response.url()).pathname==='/banknotes/imports'&&response.request().method()==='POST');
     if(fromBlank){
       await t.page.locator('[name="order_number"]').fill(number);
       await t.page.locator('[name="order_number"]').blur();await t.page.waitForTimeout(850);
@@ -237,6 +248,11 @@ finally:server.server_close();temporary.cleanup()
       await t.page.locator('#banknoteImportOrderNumber').fill(number);
       await t.page.locator('#banknoteImportStart').click();
     }
+    const started=await created;assert.equal(started.status(),200);
+    const startedBatch=(await t.state()).batches.find(saved=>saved.order_id===number);
+    assert.ok(startedBatch,'entry saved the exact order batch');
+    const response=await t.context.request.post(origin+'/__fixture/complete',{data:{order:number}});
+    assert.equal(response.status(),200,await response.text());
     try{await t.page.waitForURL(/\/banknotes\/imports\/[a-f0-9]{32}$/);}
     catch(error){
       diagnostics.url=t.page.url();diagnostics.form=await t.page.evaluate(()=>({candidate:window.banknoteOrderDraftCandidate?.(),fields:Object.fromEntries([...document.querySelectorAll('#mainForm [name]')].filter(field=>field.value&&field.type!=='file').map(field=>[field.name,field.value]))}));
@@ -244,8 +260,7 @@ finally:server.server_close();temporary.cleanup()
       await t.page.screenshot({path:path.join(artifacts,'navigation-failure-'+number+'.png'),fullPage:true});throw error;
     }finally{t.page.off('request',captureRequest);t.page.off('dialog',captureDialog);}
     const id=t.page.url().split('/').at(-1);
-    const response=await t.context.request.post(origin+'/__fixture/complete',{data:{order:number}});
-    assert.equal(response.status(),200,await response.text());
+    assert.equal(id,startedBatch.id);
     await t.page.locator('article[data-draft-id]').nth(2).waitFor();
     const batch=await batchStatus(t,id);
     assert.equal(batch.pending_count,3);assert.equal(batch.items.length,3);
@@ -276,6 +291,83 @@ finally:server.server_close();temporary.cleanup()
         assert.equal((await response).status(),200);
         await t.page.reload();
         assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Existing collection detail still saves');
+      }finally{await t.close();}
+    });
+    for (const [name,number,mobile,fromBlank,partial,edit] of [
+      ['single desktop blank Check opens exact banknote','98-76543-41010',false,true,false,false],
+      ['single mobile order entry opens exact banknote','98-76543-41020',true,false,false,false],
+      ['single partial Check keeps its warning in normal editor','98-76543-41030',false,false,true,false],
+      ['single blank Check preserves newer form edits','98-76543-41040',false,true,false,true],
+    ]) {
+      await run(name,async()=>{
+        const t=await setup(mobile);try{
+          const before=await t.state(),navigation=[],posts=[],dialogs=[];
+          t.page.on('framenavigated',frame=>{if(frame===t.page.mainFrame())navigation.push(new URL(frame.url()).pathname);});
+          t.page.on('request',request=>{if(request.method()==='POST')posts.push(new URL(request.url()).pathname);});
+          t.page.on('dialog',async dialog=>{dialogs.push(dialog.message());await dialog.dismiss();});
+          await t.page.goto(origin+(fromBlank?'/banknotes/new':'/banknotes/imports/new'));
+          const created=t.page.waitForResponse(response=>new URL(response.url()).pathname==='/banknotes/imports'&&response.request().method()==='POST');
+          if(fromBlank){await t.page.locator('[name="order_number"]').fill(number);await checkButton(t.page);}
+          else{await t.page.locator('#banknoteImportOrderNumber').fill(number);await t.page.locator('#banknoteImportStart').click();}
+          const initial=await created;assert.equal(initial.status(),200);const started=await initial.json();
+          if(fromBlank){
+            assert.equal(await t.page.locator('#mainForm').evaluate(form=>form.inert),true,'pending import prevents ordinary form edits/autosave');
+            assert.equal(await t.page.locator('[name="country"]').evaluate(input=>{input.focus();return document.activeElement===input;}),false,'identifying field cannot receive typing during import');
+            assert.equal(posts.includes('/banknotes/new'),false,'import does not autosave a duplicate ordinary record');
+          }
+          // An unrelated script could still modify a value despite the inert
+          // form; keep that value and suppress navigation as a final guard.
+          if(edit)await t.page.locator('[name="notes"]').evaluate(input=>{input.value='Keep my newer inspection notes.';});
+          const response=await t.context.request.post(origin+'/__fixture/complete',{data:{order:number,single:true,partial}});
+          assert.equal(response.status(),200,await response.text());
+          const saved=await batchStatus(t,started.id);
+          assert.equal(saved.items.length,1);assert.equal(saved.items[0].state,'released');
+          assert.ok(saved.completion_url,'single has a direct completion destination');
+          const recordId=saved.items[0].released_record_id;
+          if(edit){
+            await t.page.waitForFunction(()=>!document.querySelector('.coin-spec-check-btn').disabled);
+            assert.equal(new URL(t.page.url()).pathname,'/banknotes/new');
+            assert.equal(await t.page.locator('[name="notes"]').inputValue(),'Keep my newer inspection notes.');
+            assert.match(dialogs.join('\n'),/newer edits are kept here/);
+            assert.equal(await t.page.locator('#mainForm').evaluate(form=>form.inert),false,'form interaction is restored after stopping navigation');
+          }else{
+            await t.page.waitForURL(origin+saved.completion_url);
+            assert.equal(await t.page.locator('[data-import-mode]').count(),0,'normal collection editor opens');
+            assert.equal(await t.page.locator('#banknoteImportRelease').count(),0,'single does not require Release');
+            assert.equal(await t.page.locator('[name="order_number"]').inputValue(),number);
+            assert.equal(numberValue(await t.page.locator('[name="price"]').inputValue()),599.89);
+            if(partial){
+              assert.equal(await t.page.locator('#banknoteCheckSources').isVisible(),true);
+              assert.match(await t.page.locator('#banknoteCheckSources').innerText(),/could not finish Check|provider/i);
+            }
+            await noOverflow(t.page);
+          }
+          assert.equal(navigation.some(url=>/^\/banknotes\/imports\/[a-f0-9]{32}$/.test(url)),false,'single never visits review list');
+          assert.equal(posts.filter(url=>url.endsWith('/release')).length,0,'browser never posts automatic release');
+          const after=await t.state();
+          // The ordinary collection write recalculates its display sequence.
+          const recordFacts=rows=>rows.map(({banknote_id,...facts})=>facts);
+          assert.deepEqual(recordFacts(after.rows.filter(row=>row.id!==recordId)),recordFacts(before.rows),'unrelated collection facts are preserved');
+          assert.equal(after.rows.length,before.rows.length+1,'one exact purchased record is created');
+          assert.equal(after.links.filter(link=>link.banknote_id===recordId).length,1,'one exact purchase link');
+          await t.page.screenshot({path:path.join(artifacts,name.replaceAll(' ','-')+'.png'),fullPage:true});
+        }finally{await t.close();}
+      });
+    }
+    await run('single saved-order click resumes a legacy draft directly',async()=>{
+      const t=await setup(false);try{
+        const number='98-76543-41050';
+        const begin=await t.context.request.post(origin+'/banknotes/imports',{data:{order_number:number}});
+        assert.equal(begin.status(),200);const saved=await begin.json();
+        assert.equal((await t.context.request.post(origin+'/__fixture/legacy-import',{data:{batch:saved.id}})).status(),200);
+        const response=await t.context.request.post(origin+'/__fixture/complete',{data:{order:number,single:true}});
+        assert.equal(response.status(),200,await response.text());
+        const before=await batchStatus(t,saved.id);assert.equal(before.items[0].state,'draft');
+        await t.page.goto(origin+'/banknotes/imports/new');
+        await t.page.locator('[data-saved-batch="'+saved.id+'"]').click();
+        await t.page.waitForURL(url=>/^\/banknotes\/[a-f0-9-]{32,36}$/.test(url.pathname));
+        assert.equal((await batchStatus(t,saved.id)).items[0].state,'released');
+        assert.equal(await t.page.locator('[data-import-mode]').count(),0);
       }finally{await t.close();}
     });
     for(const mobile of [false,true]){

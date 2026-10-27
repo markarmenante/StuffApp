@@ -7,17 +7,17 @@
     <h1>Banknote order review</h1>
     <a class="toolbar-btn pill" href="/banknotes">Collection</a>
   </header>
-  <p class="import-intro">Save the purchased banknotes from your exact eBay order, review each item, then release it to your collection.</p>
+  <p class="import-intro">Enter your exact eBay order. One verified banknote opens in the collection after Check; orders with multiple notes are saved for review.</p>
   <form class="import-form" id="banknoteImportOrderForm" action="/banknotes/imports" method="post">
     <label for="banknoteImportOrderNumber">eBay order number</label>
     <input id="banknoteImportOrderNumber" name="order_number" type="text" value="{{ order_number|default('') }}" placeholder="24-15335-90978" required autocomplete="off" spellcheck="false">
-    <button id="banknoteImportStart" class="toolbar-btn pill active" type="submit">Save order for review</button>
+    <button id="banknoteImportStart" class="toolbar-btn pill active" type="submit">Import order</button>
   </form>
   <p class="import-status" id="banknoteImportStatus" role="status" aria-live="polite"></p>
   <section class="import-pending" aria-labelledby="pendingTitle">
     <h2 id="pendingTitle">Saved orders</h2>
     {% for saved in pending_batches|default([]) %}
-    <a href="{{ saved.url|default('/banknotes/imports/' ~ saved.id) }}" data-saved-batch="{{ saved.id }}">Order {{ saved.order_number }}{% if saved.pending_count is defined %} · {{ saved.pending_count }} pending{% endif %}{% if saved.state == 'queued' %} · Checking order…{% endif %}</a>
+    <a href="{{ saved.url|default('/banknotes/imports/' ~ saved.id) }}" data-saved-batch="{{ saved.id }}" data-order-number="{{ saved.order_number }}">Order {{ saved.order_number }}{% if saved.pending_count is defined %} · {{ saved.pending_count }} pending{% endif %}{% if saved.state == 'queued' %} · Checking order…{% endif %}</a>
     {% else %}<p>No orders waiting for review.</p>{% endfor %}
   </section>
 </div>

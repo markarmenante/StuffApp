@@ -32,7 +32,10 @@ PHOTO_SIDE_WARNINGS = (
     'Listing-photo sides could not be verified. Existing photos and all originals were retained; run Check again or choose the photos manually.',
 )
 _ORDER = re.compile(r'\d{2}-\d{5}-\d{5}')
-_BUNDLE = re.compile(r'\b(?:lot|set|bundle|pair)\s*(?:of\s*)?[2-9]\d*\b|\bpair of\b|\b[2-9]\d*\s+(?:consecutive\s+)?(?:serial\s+)?(?:notes|banknotes)\b', re.I)
+_MULTIPLE = r'(?:[2-9]\d*|1\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|hundred)'
+_BUNDLE = re.compile(r'\b(?:set|bundle)\s*(?:of\s*)?'+_MULTIPLE+r'\b|\blot\s+of\s+'+_MULTIPLE+r'\b|\bpair of\b|\b'+_MULTIPLE+r'\s+(?:consecutive\s+)?(?:serial\s+)?(?:notes|banknotes)\b', re.I)
+_AUTO_AMBIGUOUS = re.compile(r'\b(?:set|bundle|pair|assortment|assorted|coins?|stamps?|medals?|empty|holder only)\b|\blot\s+(?:of\s+)?(?:notes|banknotes)\b|\bcollection\s+of\s+(?:\w+\s+){0,4}(?:notes|banknotes)\b|\b(?:notes|banknotes)\s+collection\b', re.I)
+_NOTE_TITLE = re.compile(r'\b(?:banknotes?|paper money|PMG|Friedberg)\b|\bPick\s*[#-]?\s*\d', re.I)
 
 
 class ImportProblem(ValueError):
@@ -59,7 +62,8 @@ def init_schema(db):
     CREATE TABLE IF NOT EXISTS banknote_import_batches (
         id TEXT PRIMARY KEY, account_name TEXT NOT NULL, order_id TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'queued', request_id TEXT, message TEXT NOT NULL DEFAULT '',
-        snapshot_json TEXT NOT NULL DEFAULT '[]', created_at REAL NOT NULL, updated_at REAL NOT NULL,
+        snapshot_json TEXT NOT NULL DEFAULT '[]', auto_single INTEGER NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL, updated_at REAL NOT NULL,
         UNIQUE(account_name,order_id));
     CREATE TABLE IF NOT EXISTS banknote_import_items (
         id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES banknote_import_batches(id),
@@ -91,6 +95,8 @@ def init_schema(db):
         identity_json TEXT NOT NULL DEFAULT '{}',
         PRIMARY KEY(item_id,field));
     ''')
+    if 'auto_single' not in {row[1] for row in db.execute('PRAGMA table_info(banknote_import_batches)')}:
+        db.execute('ALTER TABLE banknote_import_batches ADD COLUMN auto_single INTEGER NOT NULL DEFAULT 0')
     if 'identity_json' not in {row[1] for row in db.execute('PRAGMA table_info(banknote_import_evidence)')}:
         db.execute("ALTER TABLE banknote_import_evidence ADD COLUMN identity_json TEXT NOT NULL DEFAULT '{}'")
     columns={row[1] for row in db.execute('PRAGMA table_info(banknote_import_items)')}
@@ -165,11 +171,13 @@ def begin(db, order_number, refresh=False):
                 WHERE b.account_name=? AND json_extract(i.source_json,'$.order_id')=?
                 AND b.state IN ('review','complete') LIMIT 1''',(account,number)).fetchone()
         if existing and existing['state'] in ('review','complete') and not refresh:
+            db.execute('UPDATE banknote_import_batches SET auto_single=1 WHERE id=?',(existing['id'],))
             db.commit()
             return existing['id']
         if existing and existing['request_id']:
             request = db.execute("SELECT q.*,s.expires_at FROM ebay_purchase_requests q LEFT JOIN ebay_purchase_request_sessions s ON s.request_id=q.id WHERE q.id=?", (existing['request_id'],)).fetchone()
             if request and request['status'] in ('queued','reading') and (request['expires_at'] or request['requested_at']+120) > now:
+                db.execute('UPDATE banknote_import_batches SET auto_single=1 WHERE id=?',(existing['id'],))
                 db.commit()
                 return existing['id']
         paused = db.execute('SELECT enabled FROM ebay_mail_connection WHERE id=1').fetchone()
@@ -194,9 +202,9 @@ def begin(db, order_number, refresh=False):
                 requested_at=excluded.requested_at,status=excluded.status,message=excluded.message''',
                 (request_id,number,now,'Reading all purchased items from this exact eBay order…'))
             db.execute('INSERT INTO ebay_purchase_request_sessions(request_id,expires_at) VALUES(?,?)', (request_id,now+600))
-        db.execute('''INSERT INTO banknote_import_batches(id,account_name,order_id,request_id,created_at,updated_at)
-            VALUES(?,?,?,?,?,?) ON CONFLICT(account_name,order_id) DO UPDATE SET request_id=excluded.request_id,
-            state='queued',message='',updated_at=excluded.updated_at''', (batch_id,account,number,request_id,now,now))
+        db.execute('''INSERT INTO banknote_import_batches(id,account_name,order_id,request_id,created_at,updated_at,auto_single)
+            VALUES(?,?,?,?,?,?,1) ON CONFLICT(account_name,order_id) DO UPDATE SET request_id=excluded.request_id,
+            state='queued',message='',auto_single=1,updated_at=excluded.updated_at''', (batch_id,account,number,request_id,now,now))
         db.commit()
         return batch_id
     except Exception:
@@ -359,6 +367,68 @@ def _public_item(db, row):
                 image_sources={field:edit['source_filename'] for field,edit in _image_edits(db,row,fields).items()})
 
 
+def _single_item(db,batch):
+    """Complete checkout cardinality, never a filtered banknote/pending count."""
+    if not batch.get('auto_single') or batch['state'] not in ('review','complete'):
+        return None
+    membership=json.loads(batch['snapshot_json'])
+    rows=db.execute('SELECT * FROM banknote_import_items WHERE batch_id=?',(batch['id'],)).fetchall()
+    if len(membership)!=1 or len(rows)!=1:
+        return None
+    row=dict(rows[0])
+    if membership != [[json.loads(row['source_json'])['order_id'],row['item_id']]]:
+        return None
+    return row
+
+
+def _single_ready(db,batch,row):
+    if row['state']!='draft' or row['check_state'] not in ('done','partial') or row['warning']:
+        return False
+    source=_validate_source(db,batch,row)
+    fields=json.loads(row['fields_json'])
+    # Positive banknote identity is separate from complete enrichment. A known
+    # note may keep a blank catalogue field or uncertain photo side in its normal
+    # editor; an unknown item or a potentially mixed lot still needs review.
+    if _AUTO_AMBIGUOUS.search(source['title']):
+        return False
+    identified=(all(str(fields.get(key) or '').strip() for key in ('country','denomination'))
+                and any(str(fields.get(key) or '').strip() for key in ('pick_number','other_catalog','issue_type')))
+    if not (_NOTE_TITLE.search(source['title']) or identified):
+        return False
+    paid=ebay_purchase_prices.for_item(db,source)
+    if paid and fields.get('price')!=paid['price']:
+        return False
+    return True
+
+
+def finish_single(db,batch_id,folder,create):
+    """Finish an explicitly requested, proven single-banknote import once.
+
+    This is called only by POST processing or its Check worker, never a GET.
+    The existing release transaction repeats every guard under its write lock.
+    """
+    batch=_batch(db,batch_id)
+    row=_single_item(db,batch)
+    if not row or not _single_ready(db,batch,row):
+        return None
+    return release(db,batch_id,[dict(id=row['id'],revision=row['revision'])],folder,create,automatic_single=True)
+
+
+def collection_check_warning(db,record):
+    """Show only unresolved import enrichment warnings in the ordinary editor."""
+    row=db.execute("SELECT check_message,checked_at FROM banknote_import_items WHERE released_record_id=? AND state='released' AND check_state IN ('partial','failed') ORDER BY checked_at DESC LIMIT 1",(record['id'],)).fetchone()
+    if not row or not row['check_message']:
+        return ''
+    completed=dict(record).get('specs_searched_at')
+    if completed:
+        from datetime import datetime, timezone
+        try:
+            if datetime.fromisoformat(completed.replace('Z','+00:00')).replace(tzinfo=timezone.utc).timestamp() >= (row['checked_at'] or 0):
+                return ''
+        except (TypeError,ValueError):pass
+    return row['check_message']
+
+
 def status(db,batch_id):
     batch = _batch(db,batch_id)
     state,message=batch['state'],batch['message']
@@ -372,7 +442,25 @@ def status(db,batch_id):
             if progress.get('expires_at',0) < time.time():
                 state,message='failed','This order read expired. Keep the Today Mac awake, then retry the import.'
     items=[_public_item(db,row) for row in db.execute('SELECT * FROM banknote_import_items WHERE batch_id=? ORDER BY created_at,item_id',(batch_id,))]
+    single=_single_item(db,batch)
+    processing_single=False
+    completion_url=None
+    if single:
+        if single['state']=='released' and items[0].get('collection_url') and not single['warning']:
+            try:
+                source=_validate_source(db,batch,single)
+                if not _AUTO_AMBIGUOUS.search(source['title']):
+                    completion_url='/banknotes/'+quote(single['released_record_id'],safe='')
+            except ImportProblem:pass
+        elif single['state']=='draft' and not single['warning']:
+            processing_single=single['check_state'] in ('idle','checking')
+            if single['check_state'] in ('done','partial'):
+                try:processing_single=_single_ready(db,batch,single)
+                except ImportProblem:processing_single=False
+            if single['check_state']=='checking' and single['check_expires']<=time.time():
+                processing_single=False
     return dict(id=batch_id,order_number=batch['order_id'],state=state,message=message,items=items,
+                processing_single=processing_single,completion_url=completion_url,
                 pending_count=sum(item['state']!='released' for item in items),
                 url=f'/banknotes/imports/{batch_id}',status_url=f'/banknotes/imports/{batch_id}/status')
 
@@ -705,7 +793,7 @@ def claim_check(db,batch_id,item_id,revision):
     except Exception:db.rollback();raise
 
 
-def release(db,batch_id,selected,folder,create):
+def release(db,batch_id,selected,folder,create,*,automatic_single=False):
     if not isinstance(selected,list) or not 1<=len(selected)<=MAX_ITEMS:raise ImportProblem('Select the draft notes to release.')
     if any(not isinstance(entry,dict) or not isinstance(entry.get('id'),str) or type(entry.get('revision')) is not int for entry in selected):
         raise ImportProblem('Release requires exact drafts and their current revisions.')
@@ -714,6 +802,14 @@ def release(db,batch_id,selected,folder,create):
     db.execute('BEGIN IMMEDIATE')
     try:
         batch=_batch(db,batch_id)
+        if automatic_single:
+            single=_single_item(db,batch)
+            same_item=bool(single and len(selected)==1 and selected[0]['id']==single['id'])
+            already_finished=bool(same_item and single['state']=='released' and single['released_record_id']
+                and db.execute('SELECT 1 FROM banknotes WHERE id=?',(single['released_record_id'],)).fetchone())
+            if not already_finished and (not same_item
+                    or selected[0]['revision']!=single['revision'] or not _single_ready(db,batch,single)):
+                raise ImportProblem('This order needs review before it can be added to the collection.')
         for entry in selected:
             _,row=_item(db,batch_id,entry['id'])
             if row['state']=='released':
@@ -763,6 +859,13 @@ def release(db,batch_id,selected,folder,create):
                         db.execute('INSERT INTO trimmed_image_sources(trimmed,source,quad) VALUES(?,?,?)',
                                    (filename,transform['source'],transform['quad']))
             ident=create(db,fields,existing,image_overrides=tuple(image_edits))
+            if automatic_single and row['check_state']=='done' and row['checked_at']:
+                from datetime import datetime, timezone
+                checked=datetime.fromtimestamp(row['checked_at'],timezone.utc).replace(tzinfo=None).isoformat()
+                db.execute('UPDATE banknotes SET specs_searched_at=? WHERE id=?',(checked,ident))
+                record=db.execute('SELECT * FROM banknotes WHERE id=?',(ident,)).fetchone()
+                original_listings.listing_checks.clear_failed_after_check(db,'banknotes',record,
+                    ['https://www.ebay.com/itm/'+source['item_id']])
             identity=banknote_catalog_lookup.identity_snapshot(fields)
             proofs={proof['field']:json.loads(proof['proof_json']) for proof in db.execute(
                 'SELECT * FROM banknote_import_evidence WHERE item_id=?',(row['id'],))
