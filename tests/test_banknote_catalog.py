@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='stuff-catalog-test-')
 os.environ.pop('ANTHROPIC_API_KEY', None)
@@ -14,6 +15,179 @@ import app as stuff
 
 class CatalogueTests(unittest.TestCase):
     WATER_WORKS = 'Mayor, Aldermen, and Commonalty of the City of New-York (Water Works)'
+
+    def test_netherlands_antilles_filing_preserves_identity_and_distinguishes_issue_periods(self):
+        issuer = 'Bank van de Nederlandse Antillen'
+        for year, phrase, uncertain in (
+                (1949, 'colonial territorial', False),
+                (1953, 'colonial territorial', False),
+                (1954, 'transition (1954)', True),
+                (1955, 'autonomous country', False),
+                (1984, 'autonomous country', False),
+                (2010, 'constitutional transition (2010)', True),
+                (2011, 'successor Kingdom currency area', False),
+                (None, 'Dutch Caribbean / Kingdom currency area', False),
+                ('', 'Dutch Caribbean / Kingdom currency area', False),
+                ('ND', 'Dutch Caribbean / Kingdom currency area', False),
+                ('1953–1955', 'Dutch Caribbean / Kingdom currency area', False)):
+            with self.subTest(year=year):
+                row = dict(country='Netherlands Antilles', date_1=year, issuer=issuer,
+                           series='1949–1984 printed series', denomination='2.5 Gulden',
+                           pick_number='P-21a', price='$34.17', image_1='original-front.jpg',
+                           image_2='manual-crop.jpg', status='Ordered')
+                before = dict(row)
+                info = catalog.row_classification(row)
+                self.assertEqual((info['key'], info['country']), ('dutch', 'Netherlands Antilles'))
+                self.assertIn(phrase, info['period'])
+                self.assertEqual(info['uncertain'], uncertain)
+                self.assertEqual(row, before)
+                self.assertEqual(stuff._banknote_empire(row['country'], year, issuer, row['series']), 'Dutch')
+
+    def test_antilles_filing_does_not_expand_identity_or_market_scan_periods(self):
+        issuer = 'Bank van de Nederlandse Antillen'
+        for country in ('Netherlands', 'French Antilles', 'Antilles', 'Belgium', '', None):
+            with self.subTest(country=country):
+                info = catalog.classify(country, 1984, issuer)
+                self.assertNotEqual(info['key'], 'dutch')
+                self.assertNotEqual(info['country'], 'Netherlands Antilles')
+        for country in ('Curaçao', 'Aruba', 'Netherlands Indies', 'Suriname', 'Netherlands Antilles'):
+            self.assertEqual(catalog.canonical_country(country), country)
+            self.assertEqual(catalog.classify(country, 1949)['country'], country)
+        self.assertNotIn('Netherlands Antilles', catalog.PERIODS)
+        self.assertIsNone(stuff.banknote_entities.ENTITY_BY_KEY['dutch-netherlands-antilles']['scan_period'])
+        self.assertNotIn('dutch-netherlands-antilles', {e['key'] for e in stuff._banknote_wantlist_catalog()})
+
+    def test_antilles_history_and_issuing_seat_do_not_inherit_metropolitan_netherlands(self):
+        self.assertEqual(stuff._country_key('Netherlands Antilles'), 'netherlands-antilles')
+        self.assertEqual(stuff._country_key('Netherlands Antilles (Caribbean)'), 'netherlands-antilles')
+        self.assertIsNone(stuff._state_names_key('Netherlands Antilles'))
+        self.assertEqual(stuff._country_key('Netherlands'), 'netherlands')
+        for ident, year, expected in (
+                ('antilles-1950', 1950, 'Dutch Caribbean currency'),
+                ('antilles-1984', 1984, 'Bank van de Nederlandse Antillen'),
+                ('antilles-undated', None, None)):
+            self.add(ident, 'Netherlands Antilles', year, 'Bank van de Nederlandse Antillen')
+            row = self.db.execute('SELECT * FROM banknotes WHERE id=?', (ident,)).fetchone()
+            panel = stuff._series_panel_for_row(row)
+            if expected is None:
+                self.assertIsNone(panel)  # Do not invent an era for an undated note.
+            else:
+                self.assertEqual(panel['country_key'], 'netherlands-antilles')
+                self.assertEqual(panel['era']['label'], expected)
+                self.assertNotIn('euro', panel['era']['body'].lower())
+                self.assertNotIn('Lieftinck', panel['era']['body'])
+            for country in ('Netherlands Antilles', 'Netherlands Antilles (Caribbean)'):
+                self.assertEqual(stuff._banknote_pin(country, year),
+                                 {'city': 'Willemstad', 'latlng': [12.11, -68.93]})
+        self.add('metropolitan-history', 'Netherlands', 1984, 'De Nederlandsche Bank')
+        before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        html = stuff.app.test_client().get('/banknotes?filter=heritage_dutch&history=1').get_data(as_text=True)
+        self.assertIn('Dutch Caribbean currency', html)
+        self.assertIn('distinct Caribbean currency', html)
+        self.assertNotIn('Lieftinck', html)
+        self.assertNotIn('Money purge to euro', html)
+        self.assertNotIn('guilder was replaced by the euro', html)
+        sections = stuff._banknote_report_sections(self.db)
+        antilles = next(section for section in sections if section[0] == 'Netherlands Antilles')
+        self.assertEqual(antilles[1], 'netherlands-antilles')
+        title, colonial, eras = stuff._banknote_report_history(*antilles)
+        self.assertEqual(title, 'Netherlands Antilles')
+        history = ' '.join(' '.join(era) for era in eras)
+        self.assertIn('Willemstad', history)
+        self.assertIn('Bank van de Nederlandse Antillen', history)
+        self.assertIn('Caribbean guilder in 2025', history)
+        self.assertNotIn('euro', history.lower())
+        self.assertNotIn('Lieftinck', history)
+        metropolitan = next(section for section in sections if section[0] == 'Netherlands')
+        self.assertEqual(metropolitan[1], 'netherlands')
+        self.assertIn('Lieftinck', str(stuff._banknote_report_history(*metropolitan)))
+        metro_panel = stuff._series_panel_for_row(metropolitan[2][0])
+        self.assertEqual(metro_panel['era']['label'], 'Money purge to euro')
+        self.assertEqual(stuff._banknote_pin('Netherlands', 1984)['city'], 'Amsterdam')
+        self.assertEqual(before, {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')})
+
+    def test_undated_antilles_notes_share_dutch_list_filter_pill_report_and_analysis(self):
+        antilles = ['antilles-one', 'antilles-two-half', 'antilles-five']
+        for ident, denomination, status in zip(antilles, ('1 Gulden', '2.5 Gulden', '5 Gulden'), ('Own', 'Ordered', 'Shipped')):
+            self.add(ident, 'Netherlands Antilles', None, 'Bank van de Nederlandse Antillen')
+            self.db.execute('UPDATE banknotes SET denomination=?,status=? WHERE id=?', (denomination, status, ident))
+        self.add('british', 'Canada', 1967, 'Bank of Canada')
+        self.add('metropolitan', 'Netherlands', 1984, 'De Nederlandsche Bank')
+        self.db.commit()
+        before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        rows = self.db.execute('SELECT * FROM banknotes ORDER BY ' + stuff.CATEGORY_ORDER_BY['banknotes']).fetchall()
+        expected = ['british'] + antilles + ['metropolitan']
+        self.assertEqual([row['id'] for row in rows], expected)
+        client = stuff.app.test_client()
+        for history in ('0', '1'):
+            response = client.get('/banknotes', query_string={'filter': 'heritage_dutch', 'history': history})
+            self.assertEqual(response.status_code, 200)
+            html = response.get_data(as_text=True)
+            self.assertIn('data-banknote-group="dutch"', html)
+            self.assertIn('Netherlands overseas territories', html)
+            self.assertEqual(html.count('data-entity-key="dutch-netherlands-antilles"'), 1)
+            positions = [html.index('id="item-' + ident + '"') for ident in antilles]
+            self.assertEqual(positions, sorted(positions))
+            self.assertNotIn('id="item-british"', html)
+            self.assertNotIn('id="item-metropolitan"', html)
+            other = client.get('/banknotes', query_string={'filter': 'heritage_other', 'history': history}).get_data(as_text=True)
+            self.assertIn('id="item-metropolitan"', other)
+            for ident in antilles:self.assertNotIn('id="item-' + ident + '"', other)
+        with stuff.app.test_request_context('/banknotes'):
+            stuff.g.current_user = {'role': 'owner'}
+            pills = stuff.banknote_entity_pills(self.db, rows)
+            pill = next(p for p in pills['dutch'] if p['key'] == 'dutch-netherlands-antilles')
+            self.assertEqual(pill['coverage'], 'held')
+            self.assertIn('3 notes', pill['status'])
+            self.assertEqual(pill['href'], '#item-antilles-one')
+            hidden = next(p for p in stuff.banknote_entity_pills(self.db, [], False)['dutch']
+                          if p['key'] == 'dutch-netherlands-antilles')
+            destination = urlsplit(hidden['href'])
+            self.assertEqual(destination.path, '/banknotes')
+            self.assertEqual(destination.fragment, 'item-antilles-one')
+            self.assertEqual(parse_qs(destination.query), {'filter': ['heritage_dutch'], 'history': ['0']})
+        sections = stuff._banknote_report_sections(self.db)
+        self.assertEqual([row['id'] for _, _, group in sections for row in group], expected)
+        antilles_sections = [(country, group) for country, _, group in sections if country == 'Netherlands Antilles']
+        self.assertEqual(len(antilles_sections), 1)
+        self.assertEqual([row['id'] for row in antilles_sections[0][1]], antilles)
+        profile = stuff._analysis_banknotes_profile(self.db)
+        dutch = next(group for group in profile['empires'] if group['empire'] == 'Dutch')
+        self.assertEqual(dutch['count'], 3)
+        self.assertEqual({item['country'] for item in profile['items_colonial'] if item['empire'] == 'Dutch'}, {'Netherlands Antilles'})
+        self.assertEqual(before, {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')})
+
+    def test_antilles_v32_resequences_once_without_changing_any_other_saved_field(self):
+        self.add('antilles', 'Netherlands Antilles', None, 'Bank van de Nederlandse Antillen')
+        self.add('independent', 'Austria', 1922, 'Oesterreichische Nationalbank')
+        self.add('british', 'Canada', 1967, 'Bank of Canada')
+        self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
+        self.db.execute("UPDATE banknotes SET cat_id='B430', denomination='2.5 Gulden', pick_number='P-21a', "
+                        "series='1949 series', price='$34.17', image_1='original-front.jpg', image_2='manual-crop.jpg', "
+                        "status='Ordered', grade='Superb Gem UNC', grading_authority='PMG', grade_numeric=67, "
+                        "grade_modifier='EPQ', serial_number='123456', slab_number='777777-001', "
+                        "vendor='Exact seller', order_number='24-15335-90978', marketplace='eBay', "
+                        "notes='Preserve the entered note', created_at='2026-10-26', updated_at='2026-10-26' WHERE id='antilles'")
+        self.db.execute("INSERT OR REPLACE INTO migration_state(key, applied_at) VALUES('banknote_display_number_v31', '2026-10-26')")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
+        self.db.commit()
+        before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
+            stuff.init_db()
+        self.assertEqual(renumber.call_count, 1)
+        rows = self.db.execute('SELECT * FROM banknotes ORDER BY ' + stuff.CATEGORY_ORDER_BY['banknotes']).fetchall()
+        self.assertEqual([row['id'] for row in rows], ['british', 'antilles', 'independent'])
+        self.assertEqual([row['banknote_id'] for row in rows], ['P 001', 'P 002', 'P 003'])
+        after = {row['id']: dict(row) for row in rows}
+        for ident, original in before.items():
+            self.assertEqual({k: v for k, v in after[ident].items() if k != 'banknote_id'},
+                             {k: v for k, v in original.items() if k != 'banknote_id'}, ident)
+        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v32'").fetchone())
+        self.assertEqual(self.db.execute("SELECT applied_at FROM migration_state WHERE key='banknote_display_number_v31'").fetchone()[0], '2026-10-26')
+        with patch.object(stuff, '_renumber_banknotes') as renumber:
+            stuff.init_db()
+        renumber.assert_not_called()
+        self.assertEqual(after, {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')})
 
     def test_confederate_issues_join_us_family_and_resequence_once(self):
         notes = [
@@ -31,7 +205,7 @@ class CatalogueTests(unittest.TestCase):
             self.assertIn('Confederate', info['period'])
         self.db.execute("UPDATE banknotes SET banknote_id='P 999', cat_id='B777', price='$42', denomination='$5'")
         self.db.execute("INSERT OR IGNORE INTO migration_state(key, applied_at) VALUES('banknote_display_number_v27', '2026-10-16')")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v31'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -242,7 +416,7 @@ class CatalogueTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET issue_type='National', denomination='$1' WHERE id='us1918'")
         self.db.execute("UPDATE banknotes SET status='Ordered' WHERE id IN ('pa1776','ct1776')")
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v31'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -895,7 +1069,7 @@ class CatalogueTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET denomination='500 Francs' WHERE id='afars-second'")
         self.db.execute("INSERT OR IGNORE INTO migration_state(key, applied_at) "
                         "VALUES('banknote_display_number_v28', '2026-10-25')")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v31'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
         self.db.commit()
         before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
         with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
@@ -916,7 +1090,7 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual([row['id'] for row in ordered],
                          ['british', 'afars-second', 'afars-held', 'independent'])
         self.assertEqual([row['banknote_id'] for row in ordered], ['P 001', 'P 002', 'P 003', 'P 004'])
-        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v31'").fetchone())
+        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v32'").fetchone())
         with patch.object(stuff, '_renumber_banknotes') as renumber:
             stuff.init_db()
         renumber.assert_not_called()
@@ -1095,7 +1269,7 @@ class CatalogueTests(unittest.TestCase):
         self.add('colonial', 'United States (Colonial - Pennsylvania)', 1772,
                  'Province of Pennsylvania')
         self.add('ny', 'United States of America', 1776, self.WATER_WORKS)
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v31'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
         self.db.commit()
         stuff.init_db()
         row = self.db.execute("SELECT country,banknote_id FROM banknotes WHERE id='french'").fetchone()

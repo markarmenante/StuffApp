@@ -50,6 +50,9 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-entity-browser-db-') as tempor
    ('djibouti-modern','Djibouti',2000,'Banque Centrale de Djibouti','Own','Independent successor fixture'),
    ('mbb-delivered','Malaya and British Borneo',1953,'Board of Commissioners of Currency, Malaya and British Borneo','Delivered','North Borneo regional board fixture'),
    ('mbb-ordered','Malaya and British Borneo',1959,'Board of Commissioners of Currency, Malaya and British Borneo','Ordered','North Borneo regional board fixture'),
+   ('antilles-one','Netherlands Antilles',1970,'Gouvernement van de Nederlandse Antillen','Delivered','Dutch Caribbean one gulden fixture'),
+   ('antilles-two-half','Netherlands Antilles',1970,'Gouvernement van de Nederlandse Antillen','Ordered','Dutch Caribbean two and a half gulden fixture'),
+   ('antilles-five','Netherlands Antilles',1984,'Bank van de Nederlandse Antillen','Own','Dutch Caribbean central bank fixture'),
   ]
   for number in range(30):
    rows.append(('india-filler-'+str(number),'India',1921+number%10,'Government of India','Own','Long collection fixture'))
@@ -58,12 +61,16 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-entity-browser-db-') as tempor
               (ident,'Fixture '+str(index),country,year,issuer,status,'1000 Francs' if ident=='afars-held' else '1 Rupee' if country=='India' else '1 Dollar',description,'42.37'))
   db.execute("UPDATE banknotes SET pick_number='P34',cat_id='B413' WHERE id='afars-held'")
   db.executemany('UPDATE banknotes SET cat_id=? WHERE id=?', [('B292','mbb-delivered'),('B321','mbb-ordered')])
+  db.executemany('UPDATE banknotes SET denomination=?,pick_number=?,cat_id=? WHERE id=?', [
+   ('1 Gulden','P-20a','BA001','antilles-one'),
+   ('2.5 Gulden','P-21a','BA002','antilles-two-half'),
+   ('5 Gulden','P-15b','BA003','antilles-five')])
   db.commit()
   before=[dict(row) for row in db.execute('SELECT * FROM banknotes ORDER BY id')]
   db.execute('PRAGMA query_only=ON')
   client=stuff.app.test_client()
   urls=[]
-  for query in ('filter=all','filter=heritage_british','filter=own&q_banknotes=VisibleOnly','filter=all&q_banknotes=North%20Borneo'):
+  for query in ('filter=all','filter=heritage_british','filter=heritage_dutch','filter=heritage_other','filter=own&q_banknotes=VisibleOnly','filter=all&q_banknotes=North%20Borneo'):
    urls.extend(['/banknotes?'+query,'/banknotes?'+query+'&history=0','/banknotes?'+query+'&history=1'])
   pages={}
   for url in urls:
@@ -249,6 +256,51 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-entity-browser-db-') as tempor
           assert.equal(t.requests.filter(request=>request.path.startsWith('/banknotes?')).length,1,'the canonical pill must jump directly to the saved note');
         }finally{await t.close();}
       });
+      for(const history of ['0','1']) {
+        await run(device+': Netherlands Antilles notes stay together under Dutch with History '+(history==='0'?'off':'on'),async()=>{
+          const t=await setup(mobile,origin+'/banknotes?filter=heritage_dutch&history='+history);try {
+            assert.equal(await t.page.locator('.item-list-banknotes .item-row').count(),3,'Dutch filter includes all three Antillean notes');
+            assert.equal(await t.page.locator('[data-banknote-group="dutch"]').count(),1);
+            assert.equal(await t.page.locator('[data-banknote-group="other"]').count(),0);
+            const historyPanels=t.page.locator('.us-series-panel');
+            if(history==='0')assert.equal(await historyPanels.count(),0,'History off hides era panels');
+            else {
+              assert.equal(await historyPanels.count(),1,'Antilles has its own historical era panel');
+              const historicalText=await historyPanels.innerText();
+              assert(!/euro|Lieftinck|money purge/i.test(historicalText),'Antilles must never inherit metropolitan Netherlands history: '+historicalText);
+              assert(historicalText.includes('1962–2009'),historicalText);
+              assert(/Bank van de Nederlandse Antillen/i.test(historicalText),historicalText);
+              assert(historicalText.includes('distinct Caribbean currency'),historicalText);
+            }
+            for(const [id,denomination,pick,issuer] of [
+              ['antilles-one','1 Gulden','P-20a','Gouvernement van de Nederlandse Antillen'],
+              ['antilles-two-half','2.5 Gulden','P-21a','Gouvernement van de Nederlandse Antillen'],
+              ['antilles-five','5 Gulden','P-15b','Bank van de Nederlandse Antillen'],
+            ]) {
+              const row=t.page.locator('#item-'+id);assert.equal(await row.count(),1);
+              const content=await row.innerText();
+              assert(content.includes(denomination),content);assert(content.includes(pick),content);assert(content.includes(issuer),content);
+            }
+            const link=pill(t.page,'dutch-netherlands-antilles');
+            assert.equal(await link.count(),1);assert.equal(await link.getAttribute('data-coverage'),'held');
+            assert.equal(await link.locator('xpath=ancestor::*[@data-banknote-group]').getAttribute('data-banknote-group'),'dutch');
+            const target=await link.getAttribute('href');assert.match(target,/^#item-antilles-(one|two-half|five)$/);
+            const color=await link.evaluate(element=>getComputedStyle(element).backgroundColor.match(/\d+/g).map(Number));
+            assert(color[1]>color[0]&&color[1]>color[2],JSON.stringify(color));
+            await link.click();assert.equal(new URL(t.page.url()).hash,target);
+            await targetVisible(t.page,target.slice(1));
+            assert.equal(new URL(t.page.url()).searchParams.get('history'),history);
+            assert.equal(t.requests.filter(request=>request.path.startsWith('/banknotes?')).length,1,'green pill navigates without reloading');
+            assert(await t.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'no horizontal page overflow');
+            await t.page.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));
+            await t.page.screenshot({path:path.join(artifacts,'antilles-'+device+'-history-'+history+'.png'),fullPage:true});
+            await t.page.goto(origin+'/banknotes?filter=heritage_other&history='+history,{waitUntil:'load'});
+            for(const id of ['antilles-one','antilles-two-half','antilles-five'])assert.equal(await t.page.locator('#item-'+id).count(),0,'Other excludes Antillean notes');
+            assert.equal(await t.page.locator('[data-banknote-group="other"] .banknote-entity-pill').filter({hasText:/Netherlands Antilles/i}).count(),0,'Other has no duplicate Antilles pill');
+            assert.equal(await t.page.locator('#item-djibouti-modern').count(),1,'independent entries stay in Other');
+          }finally{await t.close();}
+        });
+      }
       await run(device+': North Borneo regional coverage links to the exact held board note',async()=>{
         const t=await setup(mobile,origin+'/banknotes?filter=all&q_banknotes=North%20Borneo&history=0');try {
           assert.equal(await t.page.locator('.item-list-banknotes .item-row').count(),2);

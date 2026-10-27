@@ -3101,6 +3101,8 @@ COUNTRY_KEYS = {
     'spain': ('spain', 'kingdom of spain'),
     'portugal': ('portugal',),
     'netherlands': ('netherlands', 'holland', 'kingdom of the netherlands'),
+    # Exact territorial match must precede the forgiving Netherlands prefix.
+    'netherlands-antilles': ('netherlands antilles',),
     # The Netherlands Indies files as its own nation, like Ceylon and
     # French Indochina — collectors know the JIM-era paper under the
     # territory's name, and modern Indonesia has its own panel.
@@ -3893,6 +3895,25 @@ COUNTRY_ERAS = {
         (1945, 2001, 'Money purge to euro',
          'The 1945 Lieftinck reform briefly withdrew all cash to tax '
          'wartime gains. The guilder was replaced by the euro in 2002.'),
+    )),
+    # CBCS Money Museum currency history and Royal House Charter history;
+    # see docs/banknote-catalog.md. Never inherit metropolitan euro history.
+    'netherlands-antilles': ('Netherlands Antilles', (
+        (1828, 1953, 'Dutch Caribbean currency',
+         'The circulation bank opened in Willemstad in 1828. Curaçaosche Bank '
+         'notes and government treasury notes served the Dutch Caribbean islands.'),
+        (1954, 1961, 'Autonomy within the Kingdom',
+         'The 1954 Charter established autonomy within the Kingdom of the Netherlands. '
+         'The name Nederlandse Antillen appeared on 1954 banknotes and on the '
+         '1955 treasury notes; autonomy was not independence.'),
+        (1962, 2009, 'Bank van de Nederlandse Antillen',
+         'The Bank van de Nederlandse Antillen succeeded the Curaçaosche Bank '
+         'in 1962. Aruba became a separate country within the Kingdom in 1986. '
+         'Netherlands Antillean guilder notes remained a distinct Caribbean currency.'),
+        (2010, 2100, 'Successor Kingdom currency area',
+         'The Netherlands Antilles dissolved on 10 October 2010. Curaçao and '
+         'Sint Maarten continued using the Netherlands Antillean guilder, '
+         'succeeded by the Caribbean guilder in 2025.'),
     )),
     'netherlands-indies': ('Netherlands Indies', (
         (1828, 1941, 'The gulden',
@@ -6897,9 +6918,10 @@ def init_db():
     # v29: Afars and Issas spelling aliases join their existing French territory.
     # v30: Eastern Caribbean issuers/series/full references; Solomon 1977 protectorate.
     # v31: French Pacific and African regional territorial/regional lineage, preserving catalogue scopes.
+    # v32: Netherlands Antilles joins the Dutch overseas collection group.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v31',),
+        ('banknote_display_number_v32',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6907,7 +6929,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v31', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v32', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -23927,6 +23949,7 @@ BANKNOTE_CAPITALS = {
     'spain': ('Madrid', 40.42, -3.70),
     'portugal': ('Lisbon', 38.72, -9.14),
     'netherlands': ('Amsterdam', 52.37, 4.90),
+    'netherlands-antilles': ('Willemstad', 12.11, -68.93),
     'netherlands-indies': ('Batavia (Jakarta)', -6.18, 106.83),
     'belgium': ('Brussels', 50.85, 4.35),
     'czechoslovakia': ('Prague', 50.08, 14.44),
@@ -24831,6 +24854,7 @@ BANKNOTE_STATE_NAMES = {
 # state it is, so its year need not decide. Checked before the key
 # bands, like BANKNOTE_SPELLING_PINS. (native, english) pairs.
 BANKNOTE_STATE_SPELLINGS = {
+    'netherlands antilles': ('Nederlandse Antillen', 'Netherlands Antilles'),
     'british west africa': (None, 'British West Africa'),
     'danzig': ('Freie Stadt Danzig', 'Free City of Danzig'),
     'free city of danzig': ('Freie Stadt Danzig', 'Free City of Danzig'),

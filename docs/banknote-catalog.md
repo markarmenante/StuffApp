@@ -556,3 +556,24 @@ French Oceania and French Polynesia as lineage search terms; this is isolated
 from `canonical_country`, intake normalization and Market Scan duplicate matching.
 The original Caribbean grouping, denomination rosters and family boundaries are
 unchanged. Coverage aliases are documented in [the entity catalogue](banknote-entities.md).
+
+### Netherlands Antilles collection filing
+
+Netherlands Antilles issues belong to **Netherlands overseas territories**,
+including notes without a saved date. The date-specific line distinguishes
+colonial issues, the 1954 transition, the autonomous Kingdom period, and later
+Antillean currency. The [Royal House's Charter history](https://www.royal-house.nl/topics/legislation/charter-for-the-kingdom-of-the-netherlands)
+documents autonomy within the Kingdom from 1954 and the 2010 dissolution;
+neither event is an independence date. The [central bank's currency account](https://www.centralbank.cw/functions/banknotes-coins/caribbean-guilder)
+documents the continuation of Netherlands Antillean currency after 2010.
+An exact territorial history key prevents the generic Netherlands prefix from
+substituting metropolitan history. Its panels follow the [CBCS Money Museum's
+banknote history](https://www.moneymuseum.cw/history/curacao-banknotes-history)
+and retain Willemstad as the issuing seat.
+
+This is collection filing only. It preserves distinct country, issuer, series,
+catalogue reference and specimen details and leaves the existing Market Scan
+periods and eligibility unchanged. French Antilles, Curaçao, Aruba, and the
+Netherlands are not merged into Netherlands Antilles. Migration **v32** updates
+only the derived `banknote_id` display positions once, preserving permanent
+`cat_id` identifiers and all other saved fields, photographs and crops.

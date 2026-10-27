@@ -733,6 +733,24 @@ def classify(country, date=None, issuer=None, series=None):
         return {**GROUP_BY_KEY[key], 'country': country, 'period': label, 'uncertain': uncertain}
     def other(label='Independent or other issue; administration not assigned', uncertain=False):
         return result('other', label, uncertain)
+    if country == 'Netherlands Antilles':
+        # Collection family, not a pre-independence Market Scan period. The
+        # 1954 Charter granted autonomy within the Kingdom, not independence;
+        # Antillean currency continued after the country's 2010 dissolution.
+        # Sources: Royal House Charter history and CBCS currency history;
+        # see docs/banknote-catalog.md. Keep country, issuer and series intact.
+        exact = exact_year(date)
+        if exact is not None and exact < 1954:
+            return result('dutch', 'Dutch Caribbean — colonial territorial issue')
+        if exact == 1954:
+            return result('dutch', 'Netherlands Antilles — colonial / autonomous Kingdom transition (1954)', True)
+        if exact is not None and exact < 2010:
+            return result('dutch', 'Netherlands Antilles — autonomous country within the Kingdom of the Netherlands')
+        if exact == 2010:
+            return result('dutch', 'Netherlands Antilles — Kingdom constitutional transition (2010)', True)
+        if exact is not None:
+            return result('dutch', 'Netherlands Antillean currency — successor Kingdom currency area')
+        return result('dutch', 'Netherlands Antilles — Dutch Caribbean / Kingdom currency area')
     if country == 'Solomon Islands':
         # Source: CBSI Currency Overview and research paper RP-012014; the
         # Solomon Islands Independence Order 1978 fixes 7 July 1978. SIMA
