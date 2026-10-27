@@ -21994,7 +21994,9 @@ def new_record(category):
             }
             return jsonify({'ok': True, 'id': record_id,
                             'detail_url': detail_url, 'save_url': save_url,
-                            'generated': generated, 'similar': similar})
+                            'generated': generated, 'similar': similar,
+                            'uploaded_files': {name: data[name] for name in file_originals
+                                               if data.get(name)}})
         flash(f"Record created successfully.", 'success')
         if similar:
             flash('Similar banknote already in the collection: '

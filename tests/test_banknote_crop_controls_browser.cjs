@@ -16,7 +16,9 @@ const os = require('node:os');
   const repo = path.resolve(__dirname, '..');
   const artifacts = process.env.BANKNOTE_CROP_TEST_ARTIFACTS || mkdtempSync(path.join(os.tmpdir(), 'banknote-crop-controls-'));
   mkdirSync(artifacts, {recursive: true});
-  const sourceHash = () => createHash('sha256').update(readFileSync(path.join(repo, 'templates/detail.html'))).digest('hex');
+  const sourceHash = () => createHash('sha256')
+    .update(readFileSync(path.join(repo, 'templates/detail.html')))
+    .update(readFileSync(path.join(repo, 'static/js/detail-save.js'))).digest('hex');
   const sourceBefore = sourceHash();
   const render = String.raw`
 import json,sys
@@ -36,11 +38,12 @@ app=Flask(__name__)
 app.jinja_env.filters['is_image']=lambda name:bool(name)
 app.add_url_rule('/<category>/<record_id>/upload-image','upload_image',lambda **kwargs:'')
 app.add_url_rule('/uploads/<filename>','uploaded_file',lambda **kwargs:'')
-template='<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"><main style="max-width:1000px;margin:auto">'+block+'</main><script>'+upload+'\nfunction fixtureCheckImages(images){const data={images};'+check+'}\n</script>'
+coordinator=(repo/'static/js/detail-save.js').read_text()
+template='<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"><main style="max-width:1000px;margin:auto"><form id="mainForm">'+block+'</form></main><script>'+coordinator+'</script><script>'+upload+'\nfunction fixtureCheckImages(images){const data={images}, checkpoint=null;'+check+'}\n</script>'
 result={}
 with app.test_request_context('/'):
  for variant in ('empty','existing','new'):
-  result[variant]=render_template_string(template,category='banknotes',is_new=variant=='new',r={'id':'fixture-note','image_1':'existing.png' if variant=='existing' else None,'image_2':None})
+  result[variant]=render_template_string(template,category='banknotes',is_new=variant=='new',import_draft=False,r={'id':'fixture-note','image_1':'existing.png' if variant=='existing' else None,'image_2':None})
 print(json.dumps(result))
 `;
   const fixtures = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c', render, repo], {

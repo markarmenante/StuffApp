@@ -501,3 +501,16 @@ or completes a collection record. Retries and release are idempotent, edits are
 revision guarded, and drafts stay outside totals/reports/Market Scan coverage.
 See [banknote order review](docs/banknote-imports.md) for source membership, existing
 partial-form recovery, lifecycle, owner access and runtime contracts.
+
+## Detail save and uploaded local files (2026-10-27)
+
+The detail save coordinator (`static/js/detail-save.js`) waits for pending image,
+document and first-record uploads before native form submission. Successful upload
+responses clear only the exact acknowledged file selection; newer or failed files
+remain selected. The create response lists only persisted `uploaded_files`. Pending
+local files are read before navigation, with an in-page reselection message if a
+source file disappeared. Cmd/Ctrl+S uses `requestSubmit()` so normal validation and
+submit handlers still run. Do not restore raw `form.submit()` or re-send already
+uploaded photos: a stale screenshot file can cause Chrome `ERR_FILE_NOT_FOUND`,
+and re-uploading can replace a saved crop. Browser regression:
+`tests/test_detail_save_browser.cjs` (isolated temporary database and browser).

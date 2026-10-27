@@ -3500,6 +3500,7 @@ document.addEventListener('DOMContentLoaded', function () {
 </div>
 
 {% if not import_draft %}
+<script src="{{ url_for('static', filename='js/detail-save.js') }}?v={{ asset_v('js/detail-save.js') }}"></script>
 <script>
 function confirmDelete(btn) {
   // Two-click confirm using the shared arm/disarm helpers (defined
@@ -4947,6 +4948,7 @@ window.banknoteDeferOrderDraft = function () {
   function ensureRecord() {
     if (recordExists) return Promise.resolve();
     if (creatingPromise) return creatingPromise;
+    const selectedFiles = window.detailSave.snapshot();
     const fd = new FormData(form);
     // keepalive lets a Back-click race still land the create, BUT
     // keepalive bodies are hard-capped at 64KiB and the fetch REJECTS
@@ -4956,7 +4958,7 @@ window.banknoteDeferOrderDraft = function () {
     // file-less bodies; the pagehide beacon covers leave-page creates.
     const hasFiles = Array.from(form.querySelectorAll('input[type=file]'))
       .some(inp => inp.files && inp.files.length > 0);
-    creatingPromise = fetch(form.action, {
+    creatingPromise = window.detailSave.track(fetch(form.action, {
       method: 'POST',
       headers: { 'Accept': 'application/json' },
       body: fd,
@@ -4986,6 +4988,7 @@ window.banknoteDeferOrderDraft = function () {
         // Future file uploads need a real record_id; rewrite form action
         // and any per-field upload URLs (data-upload-url on .drop-zone).
         form.action = d.detail_url;
+        window.detailSave.clear(selectedFiles, Object.keys(d.uploaded_files || {}));
         form.querySelectorAll('.drop-zone').forEach(zone => {
           if (!zone.dataset.uploadUrl) zone.dataset.uploadUrl = d.detail_url + '/upload-image';
         });
@@ -5010,7 +5013,7 @@ window.banknoteDeferOrderDraft = function () {
         creatingPromise = null;
         console.warn('Create failed:', err);
         throw err;
-      });
+      }));
     return creatingPromise;
   }
   window.ensureRecord = ensureRecord;
@@ -5185,6 +5188,7 @@ window.banknoteDeferOrderDraft = function () {
   // reliably (incl. Safari); saveField's keepalive fetch survives the
   // navigation. Non-empty values only — this can add, never erase.
   window.addEventListener('pagehide', function () {
+    if (formSubmitting) return; // The native POST already carries this form.
     if (!recordExists && window.banknoteDeferOrderDraft()) return;
     // Record not created yet (images-first add, then straight to Back):
     // beacon a text-only copy of the form so the row still lands.
@@ -5720,14 +5724,6 @@ window.banknoteDeferOrderDraft = function () {
   {% endif %}
 }());
 
-// Cmd/Ctrl+S still triggers full save (needed for file uploads)
-document.addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-    e.preventDefault();
-    document.getElementById('mainForm').submit();
-  }
-});
-
 // Beat -> Hz live update
 (function() {
   const beatSel = document.querySelector('select[name="beat"]');
@@ -6054,10 +6050,16 @@ function uploadViaInput(input, uploadUrl, field) {
   const fd = new FormData();
   fd.append('image', file);
   if (field) fd.append('field', field);
-  fetch(uploadUrl, { method: 'POST', body: fd })
-    .then(r => r.json())
+  const selectedFiles = [{input, files: [...input.files]}];
+  const upload = window.detailSave.upload(zone || input, () => fetch(uploadUrl, { method: 'POST', body: fd })
+    .then(async r => {
+      const data = await r.json();
+      if (!r.ok || !data.url) throw new Error(data.error || 'Upload failed');
+      return data;
+    })
     .then(data => {
       if (zone) zone.style.opacity = '';
+      window.detailSave.clear(selectedFiles);
       if (data.url && zone) {
         let img = zone.querySelector('img');
         const placeholder = zone.querySelector('span:not(.panel-lbl)');
@@ -6070,12 +6072,13 @@ function uploadViaInput(input, uploadUrl, field) {
         }
         window.ensureBanknoteCropControl?.(zone);
       } else if (!data.url) { alert('Upload failed: ' + (data.error || 'unknown')); }
-    })
-    .catch(() => { if (zone) zone.style.opacity = ''; alert('Upload failed.'); });
+    }));
+  return upload
+    .catch(() => { if (zone) zone.style.opacity = ''; alert('Upload failed. Choose the file again or retry Save.'); });
 }
 
 // Drag-and-drop + click-to-upload on .drop-zone panels
-function uploadFileToZone(zone, file) {
+function uploadFileToZone(zone, file, input = null) {
   const uploadUrl = zone.dataset.uploadUrl;
   const field = zone.dataset.field;
   if (!uploadUrl || !file) return;
@@ -6090,10 +6093,16 @@ function uploadFileToZone(zone, file) {
   const fd = new FormData();
   fd.append('image', file);
   if (field) fd.append('field', field);
-  fetch(uploadUrl, { method: 'POST', body: fd })
-    .then(r => r.json())
+  const selectedFiles = input ? [{input, files: [...input.files]}] : [];
+  const upload = window.detailSave.upload(zone, () => fetch(uploadUrl, { method: 'POST', body: fd })
+    .then(async r => {
+      const data = await r.json();
+      if (!r.ok || !data.url) throw new Error(data.error || 'Upload failed');
+      return data;
+    })
     .then(data => {
       zone.style.opacity = '';
+      window.detailSave.clear(selectedFiles);
       if (!data.url) { alert('Upload failed: ' + (data.error || 'unknown')); return; }
       const labelEl = zone.querySelector('label.file-upload-lbl');
       if (allowPdf && isPdf) {
@@ -6141,8 +6150,9 @@ function uploadFileToZone(zone, file) {
         }
         window.ensureBanknoteCropControl?.(zone);
       }
-    })
-    .catch(() => { zone.style.opacity = ''; alert('Upload failed.'); });
+    }));
+  return upload
+    .catch(() => { zone.style.opacity = ''; alert('Upload failed. Choose the file again or retry Save.'); });
 }
 
 // Local preview helper used when there's no uploadUrl yet (new records):
@@ -6250,8 +6260,7 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
       const file = input.files && input.files[0];
       if (!file) return;
       if (zone.dataset.uploadUrl) {
-        uploadFileToZone(zone, file);
-        input.value = '';
+        uploadFileToZone(zone, file, input);
       } else {
         // New record: keep the file in the input so it submits, just preview.
         previewInZone(zone, file);
@@ -7198,10 +7207,12 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     return row.querySelector('.dyn-doc-row-empty');
   }
   async function postFD(url, fd) {
-    const r = await fetch(url, { method: 'POST', body: fd });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
-    return d;
+    return window.detailSave.track((async () => {
+      const r = await fetch(url, { method: 'POST', body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      return d;
+    })());
   }
   async function postJSON(url, body) {
     const r = await fetch(url, {
@@ -7387,6 +7398,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const inp = ev.target.closest('.dyn-doc-file');
     if (!inp || !inp.files || !inp.files[0]) return;
     const file = inp.files[0];
+    const selectedFiles = [{input: inp, files: [...inp.files]}];
     const tile = inp.closest('.dyn-doc');
     const idx = parseInt(tile.dataset.docIdx, 10);
     try {
@@ -7414,11 +7426,10 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
           if (titleInp && !titleInp.value.trim()) titleInp.value = d.title;
         }
       }
+      window.detailSave.clear(selectedFiles);
     } catch (err) {
       alert('Upload failed: ' + (err.message || err));
     }
-    // Reset the file input so picking the same file twice still fires.
-    inp.value = '';
   });
 
   // × delete on existing tiles — two-click arm + confirm pattern.
