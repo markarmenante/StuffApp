@@ -42,7 +42,13 @@ draft image, retains the original photograph and records the crop transform.
 Further adjustments start from that original, and Check can still read its holder
 label. Cancel leaves the image unchanged. Draft revisions and image identity
 protect against stale editors; cropping is unavailable during Check or after
-release. Released reviews link to the collection's photo editor.
+release. Released items open directly in the ordinary collection detail page,
+including its photo editor and all other normal controls. Back returns to the
+order review list, including after a full-form save. Older bookmarked review
+links resolve to the same collection record; they do not reopen a locked copy.
+Released cards display that record's current fields and photo previews when you
+return to review. The saved import snapshot and verified purchase source remain
+retained separately.
 
 An explicit crop of a preserved unfinished-record photo remains in the draft
 until Release to Collection. Release applies only that reviewed photo change,
@@ -88,6 +94,8 @@ No existing collection record or photo is removed by this workflow.
 - `POST /banknotes/imports`: `{order_number, refresh?:true}`; resume by default.
 - `GET /banknotes/imports/<batch>` and `/status`: review HTML and read-only state.
 - `GET /banknotes/imports/<batch>/items/<item>`: saved draft detail.
+  Once released, GET redirects to the real banknote detail page with a return
+  link to this order review; draft writes remain rejected after release.
 - `POST` or `PATCH` the item URL: `{revision, updates}`.
 - `POST` the item URL plus `/check`: `{revision}`, asynchronous status 202.
 - `POST` the item URL plus `/photos`: `{revision, field, filename}` selects

@@ -11,6 +11,7 @@ import re
 import shutil
 import threading
 import time
+from urllib.parse import quote, urlencode
 import uuid
 
 import banknote_catalog_lookup
@@ -310,6 +311,15 @@ def _public_item(db, row):
     row = dict(row)
     source = json.loads(row['source_json'])
     fields = json.loads(row['fields_json'])
+    released_record = None
+    if row['state'] == 'released' and row['released_record_id']:
+        released_record = db.execute('SELECT * FROM banknotes WHERE id=?',
+                                     (row['released_record_id'],)).fetchone()
+        if released_record:
+            # Review history keeps its original draft and purchase evidence;
+            # its displayed fields follow subsequent edits to the real note.
+            fields.update({key: value for key, value in dict(released_record).items()
+                           if key not in ('id', 'cat_id', 'created_at', 'updated_at')})
     check_state, message = row['check_state'],row['check_message']
     if check_state == 'checking' and row['check_expires'] <= time.time():
         check_state,message='failed','Check was interrupted or expired. Your draft was kept; press Check to retry.'
@@ -333,9 +343,14 @@ def _public_item(db, row):
     purchase=dict(price=paid['price'] if paid else None,vendor=source['seller'],purchase_date=(source.get('ordered_at') or '')[:10])
     preserved_fields=[key for key,value in json.loads(row['existing_snapshot_json'] or '{}').items()
                       if not banknote_catalog_lookup.is_blank(value)]
+    collection_url = None
+    if released_record:
+        collection_url = '/banknotes/' + quote(row['released_record_id'], safe='') + '?' + urlencode(
+            {'report_back': f"/banknotes/imports/{row['batch_id']}"})
     return dict(id=row['id'],state=row['state'],revision=row['revision'],fields=fields,title=source['title'],
                 listing_url='https://www.ebay.com/itm/'+row['item_id'],order_number=source['order_id'],
                 detail_url=f"/banknotes/imports/{row['batch_id']}/items/{row['id']}",
+                collection_url=collection_url,
                 released_record_id=row['released_record_id'],existing_record_id=row.get('existing_record_id'),photos=photos,check_state=check_state,
                 existing_record_changes=existing_changes,existing_record_version=existing_version,
                 existing_record_url='/banknotes/'+row['existing_record_id'] if row.get('existing_record_id') else None,

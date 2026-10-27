@@ -126,6 +126,9 @@
   const stateLabel = draft => draft.state === 'released' ? 'In collection' : draft.state === 'blocked'
     ? 'Needs attention' : checkRunning(draft) ? 'Checking…' : draft.check_state === 'failed'
     ? 'Check needs retry' : draft.check_state === 'partial' ? 'Review needed' : 'Saved draft';
+  const collectionUrl = draft => draft.collection_url || '/banknotes/' + encodeURIComponent(draft.released_record_id)
+    + '?report_back=' + encodeURIComponent(batchUrl);
+  const reviewUrl = draft => draft.state === 'released' && draft.released_record_id ? collectionUrl(draft) : draft.detail_url;
   function appendPhoto(parent, photo, index, detailUrl, large = false) {
     let src; try { src = sameOrigin(photo.url); } catch (_) { return; }
     const anchor = el('a'); anchor.href = large ? src : sameOrigin(detailUrl);
@@ -165,9 +168,9 @@
       const previews = ['image_1','image_2'].map((field, index) => {
         const filename = draft.fields?.[field];
         return filename ? originals.find(photo => photo.filename === filename)
-          || {filename, url:'/uploads/' + encodeURIComponent(filename)} : originals[index];
+          || {filename, url:'/uploads/' + encodeURIComponent(filename)} : draft.state === 'released' ? null : originals[index];
       }).filter(Boolean);
-      previews.forEach((photo, index) => appendPhoto(photos, photo, index, draft.detail_url));
+      previews.forEach((photo, index) => appendPhoto(photos, photo, index, reviewUrl(draft)));
       if (!photos.children.length) photos.append(el('span', checkRunning(draft) ? 'Loading purchased photos…' : 'Photos not yet available', 'import-photo-empty'));
       const body = el('div');
       body.append(el('h2', draft.title || [draft.fields?.country, draft.fields?.denomination].filter(Boolean).join(' · ') || 'Purchased banknote'));
@@ -179,8 +182,8 @@
       const absent = missing(draft);
       if (absent.length && draft.state !== 'released') body.append(el('p', 'Missing: ' + absent.join(', ')));
       const actions = el('div', undefined, 'import-actions');
-      const review = el('a', draft.state === 'released' ? 'View reviewed item' : 'Review details', 'toolbar-btn pill active');
-      review.href = sameOrigin(draft.detail_url); review.dataset.reviewDraft = draft.id;
+      const review = el('a', draft.state === 'released' ? 'Open banknote' : 'Review details', 'toolbar-btn pill active');
+      review.href = sameOrigin(reviewUrl(draft)); review.dataset.reviewDraft = draft.id;
       actions.append(review, el('span', stateLabel(draft), 'import-badge'));
       if (draft.existing_record_id) {
         const existing = el('a', 'Completes existing record', 'import-badge');
@@ -293,14 +296,14 @@
     const openCollection = document.getElementById('banknoteImportOpenCollection');
     if (openCollection) {
       openCollection.hidden = item.state !== 'released' || !item.released_record_id;
-      if (!openCollection.hidden) openCollection.href = '/banknotes/' + encodeURIComponent(item.released_record_id);
+      if (!openCollection.hidden) openCollection.href = sameOrigin(collectionUrl(item));
     }
     const imageHelp = document.getElementById('banknoteImportImageHelp');
     if (imageHelp) {
       imageHelp.replaceChildren();
       if (item.state === 'released' && item.released_record_id) {
         const link = el('a', 'Edit photos in collection');
-        link.href = '/banknotes/' + encodeURIComponent(item.released_record_id); imageHelp.append(link);
+        link.href = sameOrigin(collectionUrl(item)); imageHelp.append(link);
       } else {
         imageHelp.textContent = item.fields?.image_1 || item.fields?.image_2
           ? 'Use ✂ on either photo to adjust its crop. Changes stay in this draft until release.'

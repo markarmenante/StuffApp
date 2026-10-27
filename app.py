@@ -21571,7 +21571,13 @@ def banknote_import_detail(batch_id,item_id):
         batch=banknote_imports.status(db,batch_id)
         item=next((i for i in batch['items'] if i['id']==item_id),None)
         if not item:abort(404)
-        response=app.make_response(render_template('detail.html',**_import_detail_context(batch,item)))
+        if item['state']=='released':
+            # A completed review opens the actual collection record, including
+            # its normal editor and current photographs, never a frozen draft.
+            if not item.get('collection_url'):abort(404)
+            response=redirect(item['collection_url'])
+        else:
+            response=app.make_response(render_template('detail.html',**_import_detail_context(batch,item)))
         response.headers['Cache-Control']='no-store'
         return response
     except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
@@ -22020,6 +22026,16 @@ def detail_view(category, record_id):
     if not _user_can_see_row(category, record):
         abort(404)
 
+    # Keep the caller's local return destination through both ordinary form
+    # saves and detail navigation (including items opened from order review).
+    detail_report_back = request.args.get('report_back')
+    if request.method == 'POST':
+        detail_report_back = request.form.get('_detail_report_back', detail_report_back)
+    detail_report_back = (detail_report_back or '').strip()
+    if (not detail_report_back.startswith('/') or detail_report_back.startswith('//')
+            or '\\' in detail_report_back or any(ord(c) < 32 for c in detail_report_back)):
+        detail_report_back = None
+
     if category in SELL_PANEL_CATEGORIES:
         # sale_plans is the source of truth for the sell panel — the
         # frozen legacy columns on the row must not shadow it.
@@ -22203,7 +22219,8 @@ def detail_view(category, record_id):
             _renumber_banknotes(db)
         db.commit()
         flash("Record saved.", 'success')
-        return redirect(url_for('detail_view', category=category, record_id=record_id))
+        return redirect(url_for('detail_view', category=category, record_id=record_id,
+                                report_back=detail_report_back))
 
     # GET
     hertz = None
@@ -22257,9 +22274,8 @@ def detail_view(category, record_id):
 
     # Report pages pass their current path here so Detail's Back button
     # returns to the report instead of falling through to the category list.
-    report_back = (request.args.get('report_back') or '').strip()
-    if back_href is None and report_back.startswith('/') and not report_back.startswith('//'):
-        back_href = report_back
+    if back_href is None and detail_report_back:
+        back_href = detail_report_back
 
     # Preserve the list's search/filter when returning via Back, so
     # "search Gela → click coin → Back" lands on the same filtered list
@@ -22437,6 +22453,7 @@ def detail_view(category, record_id):
                            pedigree_purchase=pedigree_purchase,
                            current_category=category,
                            categories=CATEGORIES,
+                           detail_report_back=detail_report_back,
                            fields=visible_fields(category),
                            is_new=False,
                            prev_id=prev_id,

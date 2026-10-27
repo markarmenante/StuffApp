@@ -19,7 +19,7 @@ const {createHash} = require('node:crypto');
   const sourceFiles = ['app.py','banknote_imports.py','ebay_purchase_lookup.py','purchase_orders.py',
     'static/js/banknote-imports.js','templates/banknote_import_new.html','templates/banknote_import_review.html','templates/partials/banknote_import_detail_header.html','templates/partials/banknote_import_detail_sources.html','templates/partials/banknote_import_styles.html','templates/partials/collection_toolbar.html','templates/detail.html'].filter(file=>fs.existsSync(path.join(repo,file)));
   const hashes=()=>Object.fromEntries(sourceFiles.map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(repo,file))).digest('hex')]));
-  const evidence={passed:[],failures:[],errors:[],externalRequests:[],sourceBefore:hashes()};
+  const evidence={passed:[],failures:[],errors:[],externalRequests:[],filter:process.env.ORDER_REVIEW_TEST_FILTER||null,sourceBefore:hashes()};
   const python = String.raw`
 import hashlib,json,logging,os,sys,tempfile,time,types
 from pathlib import Path
@@ -159,6 +159,13 @@ def fixture_ambiguous_photos():
  db.execute("UPDATE banknote_import_items SET fields_json=?,revision=revision+1,check_state='partial',check_message=? WHERE id=?",(json.dumps(fields),message,data['item']));db.commit()
  return jsonify(ok=True)
 
+@stuff.app.post('/__fixture/clear-released-back')
+def fixture_clear_released_back():
+ data=request.get_json();db=stuff.get_db()
+ assert db.execute("SELECT 1 FROM banknote_import_items WHERE state='released' AND released_record_id=?",(data['record_id'],)).fetchone()
+ db.execute("UPDATE banknotes SET image_2='' WHERE id=?",(data['record_id'],));db.commit()
+ return jsonify(ok=True)
+
 server=make_server('127.0.0.1',0,stuff.app,threaded=True)
 print('FIXTURE_ORIGIN=http://127.0.0.1:'+str(server.server_port),flush=True)
 try:server.serve_forever()
@@ -173,7 +180,7 @@ finally:server.server_close();temporary.cleanup()
   });
   const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright');
   const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL?{channel:process.env.BROWSER_CHANNEL}:{})});
-  async function run(name,fn){try{await fn();evidence.passed.push(name);console.log('PASS '+name);}catch(error){evidence.failures.push({name,error:error.stack});console.log('FAIL '+name+': '+error.stack);}}
+  async function run(name,fn){if(evidence.filter&&!name.includes(evidence.filter))return;try{await fn();evidence.passed.push(name);console.log('PASS '+name);}catch(error){evidence.failures.push({name,error:error.stack});console.log('FAIL '+name+': '+error.stack);}}
   async function setup(mobile){
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width:mobile?390:1440,height:900},isMobile:mobile,hasTouch:mobile});
     const releaseResults=[], draftWrites=[];
@@ -653,17 +660,84 @@ finally:server.server_close();temporary.cleanup()
             const response=await t.context.request.get(origin+'/banknotes/'+collectionRow.id+'/trim-quad/'+field);assert.equal(response.status(),200);
             const info=await response.json();assert.equal(info.width,480);assert.equal(info.height,220,'released editor retains original');
           }
-          await t.page.goto(origin+draft.detail_url);
-          assert.equal(await t.page.locator('.quad-fix-btn:visible').count(),0,'released review is immutable');
-          const collectionLink=t.page.locator('#banknoteImportOpenCollection');assert.equal(await collectionLink.isVisible(),true);
-          assert.equal(await collectionLink.getAttribute('href'),'/banknotes/'+collectionRow.id);
-          assert.equal(await t.page.getByRole('link',{name:'Edit photos in collection'}).isVisible(),true);
-          await collectionLink.click();await t.page.waitForURL(origin+'/banknotes/'+collectionRow.id);
-          await t.page.locator('.banknote-imgs [data-field="image_1"]').hover();await crop('image_1').click();await t.page.locator('.quad-modal canvas').waitFor();
-          await t.page.locator('.qm-cancel').click();
+          const collectionUrl=released.collection_url;
+          assert(collectionUrl,'released item links to the actual collection record');
+          assert.equal(new URL(collectionUrl,origin).pathname,'/banknotes/'+collectionRow.id);
+          assert.equal(new URL(collectionUrl,origin).searchParams.get('report_back'),'/banknotes/imports/'+id);
+          const card=t.page.locator('article[data-draft-id="'+draft.id+'"]');
+          const open=card.getByRole('link',{name:'Open banknote',exact:true});
+          assert.equal(await open.getAttribute('href'),collectionUrl);
+          for(const href of await card.locator('.import-card-photos a').evaluateAll(links=>links.map(link=>link.getAttribute('href'))))assert.equal(href,collectionUrl,'released thumbnails open the same collection editor');
+          await open.click();await t.page.waitForURL(origin+collectionUrl);
+          assert.equal(await t.page.locator('[data-import-mode]').count(),0,'released item uses the real collection detail page');
+          assert.equal(await t.page.locator('#banknoteImportRelease').count(),0);
+          const formAction=new URL(await t.page.locator('#mainForm').getAttribute('action'),origin);
+          assert.equal(formAction.pathname,'/banknotes/'+collectionRow.id);
+          assert.equal(formAction.search,'','child actions keep the ordinary query-free form URL');
+          assert.equal(await t.page.locator('input[type="hidden"][name="_detail_report_back"]').inputValue(),'/banknotes/imports/'+id,'full-form saves retain order review return context');
+          assert.equal(await t.page.locator('#mainForm input[type="file"][name="image_1"]').count(),1,'normal photo upload is available');
+          assert.equal(await t.page.locator('#mainForm input.date-overlay-input[name="purchase_date"]').count(),1);
+          assert.equal(await t.page.locator('.coin-spec-check-btn').count(),1,'normal Check is available');
+          assert.equal(await t.page.locator('[name="notes"]').evaluate(field=>field.readOnly),false,'released details are editable');
+          const draftSnapshot=(await t.state()).drafts.find(row=>row.id===draft.id).fields_json;
+          const saveDetail=t.page.waitForResponse(response=>new URL(response.url()).pathname==='/banknotes/'+collectionRow.id+'/save-field'&&response.request().method()==='POST');
+          await t.page.locator('[name="printer"]').fill(label+' released note inspection');
+          await t.page.locator('[name="printer"]').blur();assert.equal((await saveDetail).status(),200);
+          assert.equal((await t.state()).rows.find(row=>row.id===collectionRow.id).printer,label+' released note inspection');
+          await t.page.locator('.banknote-imgs [data-field="image_1"]').hover();
+          await crop('image_1').focus();
+          await t.page.waitForFunction(()=>document.activeElement?.classList.contains('quad-fix-btn')&&Number(getComputedStyle(document.activeElement).opacity)===1);
+          await crop('image_1').click();await t.page.locator('.quad-modal canvas').waitFor();
+          const saveCollectionCrop=t.page.waitForResponse(response=>new URL(response.url()).pathname==='/banknotes/'+collectionRow.id+'/trim-quad/image_1'&&response.request().method()==='POST');
+          await t.page.locator('.qm-save').click();assert.equal((await saveCollectionCrop).status(),200);
+          await t.page.locator('.quad-modal').waitFor({state:'detached'});
+          const afterEdit=await t.state(),editedRow=afterEdit.rows.find(row=>row.id===collectionRow.id);
+          assert.notEqual(editedRow.image_1,collectionRow.image_1,'normal crop writes the released collection record');
+          assert.equal(afterEdit.drafts.find(row=>row.id===draft.id).fields_json,draftSnapshot,'editing a released note preserves the import snapshot');
+          await t.page.locator('.back-link').first().click();await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+          assert.equal((await batchStatus(t,id)).pending_count,2,'return goes to remaining pending notes');
+          assert.equal(await t.page.locator('article[data-draft-id="'+draft.id+'"] img[src="/uploads/'+editedRow.image_1+'"]').count(),1,'review list shows the current collection crop');
+          await t.page.locator('article[data-draft-id="'+draft.id+'"] .import-card-photos a').first().click();await t.page.waitForURL(origin+collectionUrl);
+          assert.equal(await t.page.locator('[name="printer"]').inputValue(),label+' released note inspection');
+          await t.page.goto(origin+draft.detail_url);await t.page.waitForURL(origin+collectionUrl);
+          assert.equal(await t.page.locator('.banknote-imgs [data-field="image_1"] img').getAttribute('src'),'/uploads/'+editedRow.image_1,'old review bookmark opens current collection photos');
+          await t.page.screenshot({path:path.join(artifacts,label+'-released-banknote-detail.png'),fullPage:true});
+          assert.equal((await t.context.request.post(origin+'/__fixture/clear-released-back',{data:{record_id:collectionRow.id}})).status(),200);
+          await t.page.locator('.back-link').first().click();await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+          const currentPhotos=t.page.locator('article[data-draft-id="'+draft.id+'"] .import-card-photos img');
+          assert.equal(await currentPhotos.count(),1,'a cleared collection side never falls back to the old purchased photo');
+          assert.equal(await currentPhotos.getAttribute('src'),'/uploads/'+editedRow.image_1);
+          assert.equal((await t.state()).drafts.find(row=>row.id===draft.id).fields_json,draftSnapshot,'clearing a released collection image leaves the draft snapshot intact');
         }finally{await t.close();}
       });
     }
+    await run('released banknote full-form save preserves its return to the order review list',async()=>{
+      const t=await setup(false);try{
+        const {id,batch}=await newCheckout(t,'98-76543-31510',false),draft=batch.items[0];
+        await t.page.goto(origin+draft.detail_url);
+        const released=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
+        await t.page.locator('#banknoteImportRelease').click();assert.equal((await released).status(),200);
+        await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+        const item=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+        await t.page.locator('[data-review-draft="'+draft.id+'"]').click();await t.page.waitForURL(origin+item.collection_url);
+        const draftBefore=(await t.state()).drafts.find(row=>row.id===draft.id).fields_json;
+        // Native Cmd/Ctrl+S performs the same ordinary multipart form save used
+        // by collection detail pages, including uploads, instead of a draft API.
+        await t.page.locator('[name="printer"]').fill('Full form save from released review');
+        const sameCollectionPage=url=>url.pathname==='/banknotes/'+item.released_record_id&&url.searchParams.get('report_back')==='/banknotes/imports/'+id;
+        const saved=t.page.waitForResponse(response=>new URL(response.url()).pathname==='/banknotes/'+item.released_record_id&&response.request().method()==='POST');
+        const navigation=t.page.waitForNavigation({waitUntil:'domcontentloaded'});
+        await t.page.keyboard.press(process.platform==='darwin'?'Meta+s':'Control+s');
+        assert.equal((await saved).status(),302);
+        await navigation;
+        await t.page.waitForURL(sameCollectionPage);
+        assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Full form save from released review');
+        assert.equal(await t.page.locator('.back-link').first().getAttribute('href'),'/banknotes/imports/'+id);
+        const state=await t.state();assert.equal(state.rows.find(row=>row.id===item.released_record_id).printer,'Full form save from released review');
+        assert.equal(state.drafts.find(row=>row.id===draft.id).fields_json,draftBefore,'normal form does not edit the released draft');
+        await t.page.locator('.back-link').first().click();await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+      }finally{await t.close();}
+    });
     await run('stale crop editor rejects a newer draft without losing its saved photo',async()=>{
       const t=await setup(false);try{
         const {before,id,batch}=await newCheckout(t,'98-76543-32010',false),draft=batch.items[0];

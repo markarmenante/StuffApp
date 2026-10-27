@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 os.environ['DATA_DIR']=tempfile.mkdtemp(prefix='stuff-import-tests-')
@@ -474,6 +475,125 @@ class DraftTests(unittest.TestCase):
         self.assertFalse(history.called);self.assertFalse(start.called);self.assertFalse(check.called)
         self.assertEqual(before,[tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items ORDER BY id')])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+
+    def test_released_review_opens_real_detail_with_normal_controls_and_review_return(self):
+        batch=self.imported();item=batch['items'][0]
+        batch=self.check(batch,item);item=self.current_item(batch,item)
+        released=self.release(batch,[item]);self.assertEqual(released.status_code,200,released.json)
+        record_id=released.json['released'][0]['record_id']
+        self.db.execute('UPDATE banknotes SET notes=? WHERE id=?',('Current collection edit',record_id));self.db.commit()
+        before=[tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items ORDER BY id')]
+        live_before=dict(self.db.execute('SELECT * FROM banknotes WHERE id=?',(record_id,)).fetchone())
+        redirect=self.client.get(item['detail_url'])
+        self.assertEqual(redirect.status_code,302)
+        self.assertEqual(redirect.headers['Cache-Control'],'no-store')
+        destination=urlsplit(redirect.headers['Location'])
+        self.assertEqual(destination.path,'/banknotes/'+record_id)
+        self.assertEqual(parse_qs(destination.query),{'report_back':[batch['url']]})
+        with patch.object(stuff,'render_template',wraps=stuff.render_template) as render:
+            response=self.client.get(redirect.headers['Location'])
+        self.assertEqual(response.status_code,200)
+        context=render.call_args.kwargs
+        self.assertEqual(render.call_args.args[0],'detail.html')
+        self.assertFalse(context.get('import_draft',False))
+        self.assertEqual(context['record']['id'],record_id)
+        self.assertEqual(context['back_href'],batch['url'])
+        self.assertEqual(context['detail_report_back'],batch['url'])
+        html=response.get_data(as_text=True)
+        self.assertIn('Current collection edit',html)
+        self.assertIn('class="serial-scan-btn"',html)
+        self.assertIn('class="coin-img-panel drop-zone"',html)
+        self.assertIn('aria-label="Adjust front crop"',html)
+        self.assertNotIn('id="banknote-import-data"',html)
+        self.assertEqual(before,[tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items ORDER BY id')])
+        self.assertEqual(live_before,dict(self.db.execute('SELECT * FROM banknotes WHERE id=?',(record_id,)).fetchone()))
+
+    def test_released_review_status_uses_live_fields_without_rewriting_draft_or_purchase(self):
+        batch=self.imported();item=batch['items'][0]
+        self.assertIsNone(item['collection_url'])
+        result=self.release(batch,[item]);record_id=result.json['released'][0]['record_id']
+        frozen=dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+        self.db.execute('UPDATE banknotes SET country=?,notes=?,image_1=?,price=? WHERE id=?',
+                        ('Current country','Saved after review','new-collection-crop.jpg','$615.25',record_id));self.db.commit()
+        current=self.current_item(batch,item)
+        self.assertEqual(current['fields']['country'],'Current country')
+        self.assertEqual(current['fields']['notes'],'Saved after review')
+        self.assertEqual(current['fields']['image_1'],'new-collection-crop.jpg')
+        self.assertEqual(current['fields']['price'],'$615.25')
+        self.assertEqual(current['purchase'],item['purchase'])
+        self.assertEqual(current['detail_url'],item['detail_url'])
+        self.assertEqual(urlsplit(current['collection_url']).path,'/banknotes/'+record_id)
+        self.assertEqual(parse_qs(urlsplit(current['collection_url']).query),{'report_back':[batch['url']]})
+        self.assertEqual(frozen,dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()))
+        self.db.execute('UPDATE banknotes SET country=NULL,notes=NULL,image_1=NULL WHERE id=?',(record_id,));self.db.commit()
+        cleared=self.current_item(batch,item)
+        for field in ('country','notes','image_1'):self.assertIsNone(cleared['fields'][field])
+
+    def test_released_review_original_write_urls_still_reject_draft_mutation(self):
+        batch=self.imported();item=batch['items'][0]
+        self.assertEqual(self.release(batch,[item]).status_code,200)
+        current=self.current_item(batch,item)
+        before=[tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items ORDER BY id')]
+        live_before=[tuple(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        for method in (self.client.post,self.client.patch):
+            response=method(item['detail_url'],json={'revision':current['revision'],'updates':{'notes':'Must not save'}})
+            self.assertEqual(response.status_code,409)
+            self.assertEqual(response.json['code'],'draft_changed')
+        self.assertEqual(before,[tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items ORDER BY id')])
+        self.assertEqual(live_before,[tuple(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')])
+
+    def test_deleted_released_record_does_not_reopen_snapshot_or_create_a_replacement(self):
+        batch=self.imported();item=batch['items'][0]
+        result=self.release(batch,[item]);record_id=result.json['released'][0]['record_id']
+        frozen=dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+        self.db.execute('DELETE FROM banknotes WHERE id=?',(record_id,));self.db.commit()
+        current=self.current_item(batch,item)
+        self.assertEqual(current['state'],'released');self.assertIsNone(current['collection_url'])
+        response=self.client.get(item['detail_url'])
+        self.assertEqual(response.status_code,404);self.assertNotIn('Location',response.headers)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(frozen,dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()))
+
+    def test_released_review_redirect_requires_owner_and_matching_purchase_account(self):
+        batch=self.imported();item=batch['items'][0]
+        self.assertEqual(self.release(batch,[item]).status_code,200)
+        self.db.execute("INSERT OR REPLACE INTO users(id,email,display_name,role,categories) VALUES('review-member','review-member@example.test','Review member','member','banknotes')")
+        self.db.commit()
+        response=self.client.get(item['detail_url'],headers={'Cf-Access-Authenticated-User-Email':'review-member@example.test'})
+        self.assertEqual(response.status_code,403);self.assertNotIn('Location',response.headers)
+        self.db.execute("UPDATE ebay_purchase_account SET account_name='other'");self.db.commit()
+        response=self.client.get(item['detail_url'])
+        self.assertEqual(response.status_code,409);self.assertNotIn('Location',response.headers)
+
+    def test_normal_detail_full_form_save_keeps_safe_review_return_destination(self):
+        batch=self.imported();item=batch['items'][0]
+        self.assertEqual(self.release(batch,[item]).status_code,200)
+        current=self.current_item(batch,item)
+        form_action=urlsplit(current['collection_url']).path
+        response=self.client.post(form_action,data={'notes':'Saved with normal form','_detail_report_back':batch['url']})
+        self.assertEqual(response.status_code,302,response.get_data(as_text=True))
+        self.assertEqual(parse_qs(urlsplit(response.headers['Location']).query),{'report_back':[batch['url']]})
+        self.assertEqual(self.db.execute('SELECT notes FROM banknotes WHERE id=?',(current['released_record_id'],)).fetchone()[0],'Saved with normal form')
+        with patch.object(stuff,'render_template',wraps=stuff.render_template) as render:
+            self.assertEqual(self.client.get(response.headers['Location']).status_code,200)
+        self.assertEqual(render.call_args.kwargs['back_href'],batch['url'])
+        # Older callers may still submit the return path on the request URL.
+        fallback=self.client.post(current['collection_url'],data={'notes':'Query fallback'})
+        self.assertEqual(fallback.status_code,302)
+        self.assertEqual(parse_qs(urlsplit(fallback.headers['Location']).query),{'report_back':[batch['url']]})
+        for unsafe in ('https://example.invalid/','//example.invalid/','/\\example.invalid/','/\x01example.invalid/'):
+            with self.subTest(unsafe=unsafe):
+                url='/banknotes/'+current['released_record_id']+'?'+urlencode({'report_back':unsafe})
+                with patch.object(stuff,'render_template',wraps=stuff.render_template) as render:
+                    self.assertEqual(self.client.get(url).status_code,200)
+                self.assertIsNone(render.call_args.kwargs['detail_report_back'])
+                response=self.client.post(url,data={'notes':'Still ordinary form'})
+                self.assertEqual(response.status_code,302)
+                self.assertNotIn('report_back',parse_qs(urlsplit(response.headers['Location']).query))
+                for target in (form_action,current['collection_url']):
+                    response=self.client.post(target,data={'notes':'Safe hidden field handling','_detail_report_back':unsafe})
+                    self.assertEqual(response.status_code,302)
+                    self.assertNotIn('report_back',parse_qs(urlsplit(response.headers['Location']).query))
 
     def test_recovery_detail_renders_saved_draft_snapshot_not_existing_live_identity(self):
         self.partial_record();b=self.imported();item=next(i for i in b['items'] if i.get('existing_record_id'))

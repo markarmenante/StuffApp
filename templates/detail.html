@@ -438,6 +438,9 @@
       enctype="multipart/form-data" id="mainForm" autocomplete="off"
       data-category="{{ category }}"
       data-is-new="{{ 'true' if is_new else 'false' }}">
+  {% if not import_draft and not is_new and detail_report_back|default(none) %}
+  <input type="hidden" name="_detail_report_back" value="{{ detail_report_back }}">
+  {% endif %}
 
   {% if _purchase_state %}
   <aside class="purchase-status-notice" data-purchase-status-notice hidden aria-live="polite">
