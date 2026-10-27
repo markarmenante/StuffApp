@@ -5,6 +5,11 @@ blank banknote form with an order number, creates a saved review batch. It does 
 create collection records. The order-only new form stays local until import; an
 existing failed form is preserved.
 
+An order with no imported items says that no items have been saved for review yet.
+Retrieval, sign-in, verification and failure messages remain visible, with Retry
+order after failure. A zero pending count means review is complete only when the
+batch actually contains items and every item has been released.
+
 A fresh authenticated read is required. An eBay checkout can contain several seller
 orders: the reader verifies each seller order's details link has the same observed
 `purchaseOrderId`, and the returned item membership must match those verified links

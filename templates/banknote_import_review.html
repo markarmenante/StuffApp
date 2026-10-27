@@ -10,7 +10,7 @@
     <a class="toolbar-btn pill" href="/banknotes/imports/new">Saved orders</a>
     <a class="toolbar-btn pill" href="/banknotes">Collection</a>
   </header>
-  <p class="import-intro">Saved for review. Open each item to inspect its photos and details before releasing it to the collection.</p>
+  <p class="import-intro" id="banknoteImportIntro">{% if batch['items'] %}Saved for review. Open each item to inspect its photos and details before releasing it to the collection.{% else %}No items have been saved for review yet.{% endif %}</p>
   <p class="import-status" id="banknoteImportStatus" role="status" aria-live="polite">{{ batch.message or '' }}</p>
   <div class="import-actions" style="margin:0 16px 12px">
     <button class="toolbar-btn pill" id="banknoteImportRetry" type="button" hidden>Retry order</button>

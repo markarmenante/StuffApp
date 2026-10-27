@@ -169,6 +169,26 @@ class DraftTests(unittest.TestCase):
             for _ in range(3):self.assertEqual(self.client.get(b['status_url']).status_code,200)
         self.assertFalse(start.called);self.assertFalse(check.called)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+    def test_empty_order_review_does_not_claim_saved_items_before_or_after_failure(self):
+        batch=self.batch()
+        queued=self.client.get(batch['url']).get_data(as_text=True)
+        self.assertIn('No items have been saved for review yet.',queued)
+        self.assertNotIn('Saved for review.',queued)
+        request=self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request']
+        failed=self.client.post('/ebay/today/requests',json={'action':'complete','id':request['id'],'error':'browser'},headers=HEADERS)
+        self.assertEqual(failed.status_code,200)
+        state=self.client.get(batch['status_url']).json
+        self.assertEqual(state['state'],'failed');self.assertEqual(state['items'],[])
+        html=self.client.get(batch['url']).get_data(as_text=True)
+        self.assertIn('No items have been saved for review yet.',html)
+        self.assertNotIn('Saved for review.',html)
+        self.assertIn(state['message'],html)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+    def test_review_intro_claims_saved_items_only_after_import(self):
+        batch=self.imported()
+        html=self.client.get(batch['url']).get_data(as_text=True)
+        self.assertIn('Saved for review.',html)
+        self.assertNotIn('No items have been saved for review yet.',html)
     def test_all_drafts_saved_before_automatic_workers_are_dispatched(self):
         b=self.imported();seen=[]
         def worker(batch_id,item_id,revision,token):

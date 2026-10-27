@@ -1,23 +1,25 @@
 # Shared connections and pathways
 
-This public repository intentionally contains only a reference, not a private
-account or credential inventory.
+This public repository contains only a pointer to the private
+[shared-services catalog](https://github.com/markarmenante/shared-services),
+with its [discovery and reuse contract](https://github.com/markarmenante/shared-services/blob/main/docs/security-and-reuse.md).
+The existing Boardroom connector reference also points there. Do not publish the
+private catalog, its exports, account inventory, costs or credentials here.
 
-- Canonical local registry: `../boardroom/CONNECTORS.md` in the sibling checkout.
-- Canonical Mac location: `~/GitHub/boardroom/CONNECTORS.md`.
-- Authorized remote access: [Boardroom connection registry](https://github.com/markarmenante/boardroom/blob/main/CONNECTORS.md).
+Before integration work, use existing authorized access to read the catalog.
+Inspect the owning adapter and documented protected storage location before
+requesting credentials or creating a provider app. Missing local authorization
+does not establish that an existing integration needs replacing.
 
-Before integration work, read the canonical registry's shared discovery/reuse
-contract. Inspect existing adapters and the specifically documented credential
-location before requesting credentials or creating a provider app. An existing
-app may need authorization on a new machine without needing a replacement.
+Reuse is limited to approved accounts, owners, scopes and runtimes. Keep secret
+values in their existing protected stores, out of source, documentation, browser
+code and chat. Do not combine tenants' credentials, stores or private data.
+A catalog reference grants no runtime access.
 
-Reuse is limited to approved accounts, owners, scopes and runtimes. Do not copy
-secrets into documentation, source, browser code or chat; do not combine tenants'
-credentials, stores or private data. A registry reference grants no runtime access.
-
-Update the canonical entry in the same task whenever a pathway, adapter,
-endpoint, consumer, schedule or credential location changes, and commit/push
-that update alongside the app change. Record verification date and environment.
-If the canonical registry is inaccessible, report that limitation instead of
-creating a duplicate integration or publishing a local copy of private details.
+This documentation change does not migrate an app runtime, change deployment
+ownership or introduce a new paid host. Update the private central catalog in
+the same task when a connector, adapter, consumer, scope or protected storage
+reference changes. Record verification date and environment there, and
+commit/push the relevant documentation alongside the app change. If private
+access is unavailable, report the limitation instead of copying private details
+here or creating a duplicate integration.

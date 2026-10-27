@@ -160,8 +160,9 @@
     .filter(([name]) => !text(draft.fields?.[name]).trim()).map(([,label]) => label);
   function renderList() {
     const list = document.getElementById('banknoteImportList');
+    const items = batch.items || [];
     const fragment = document.createDocumentFragment();
-    (batch.items || []).forEach(draft => {
+    items.forEach(draft => {
       const card = el('article', undefined, 'import-card'); card.dataset.draftId = draft.id;
       const photos = el('div', undefined, 'import-card-photos');
       const originals = draft.photos || [];
@@ -201,8 +202,16 @@
     list.replaceChildren(fragment);
     if (focused) [...list.querySelectorAll('[data-review-draft]')].find(link => link.dataset.reviewDraft === focused)?.focus({preventScroll:true});
     document.getElementById('banknoteImportCount').textContent = batch.pending_count + ' pending';
+    document.getElementById('banknoteImportIntro').textContent = items.length
+      ? 'Saved for review. Open each item to inspect its photos and details before releasing it to the collection.'
+      : 'No items have been saved for review yet.';
     say(batch.message || (batch.state === 'queued' ? 'Retrieving the purchased items…'
-      : batch.pending_count ? 'Drafts saved. Review each item before releasing it.' : 'All reviewed items are in the collection.'));
+      : batch.state === 'sign_in_required' ? 'Sign in to eBay in the opened browser to continue retrieving this order.'
+      : batch.state === 'challenge_required' ? 'Complete the eBay verification in the opened browser to continue retrieving this order.'
+      : batch.state === 'failed' ? 'The order could not be retrieved. Use Retry order to try again.'
+      : items.length && items.every(draft => draft.state === 'released') ? 'All reviewed items are in the collection.'
+      : items.length ? 'Drafts saved. Review each item before releasing it.'
+      : 'No purchased items are available to review. Refresh the eBay order to try again.'), batch.state === 'failed');
     document.getElementById('banknoteImportRetry').hidden = batch.state !== 'failed';
     document.getElementById('banknoteImportRefreshOrder').disabled = ['queued','sign_in_required','challenge_required'].includes(batch.state);
   }
