@@ -172,6 +172,17 @@ class ProviderBudgetTests(unittest.TestCase):
             self.assertEqual(factory.call_args.kwargs['max_retries'], 0)
         return result, calls
 
+    def test_check_prompt_preserves_established_hong_kong_occupation_filing(self):
+        note = dict(country='Hong Kong', issuer='Japanese Imperial Government',
+                    issue_type='Military / Occupation', denomination='100 Yen',
+                    date_1=1945, pick_number='P-M30, S/M#T32-6')
+        _, calls = self.call([response({}), response({})], note=note)
+        prompt = calls[0]['messages'][0]['content'][-1]['text']
+        self.assertIn('Preserve an established Hong Kong filing for a Japanese occupation issue', prompt)
+        self.assertIn('a grading label saying China alone does not change it to China', prompt)
+        self.assertIn('Federal Reserve Bank of China, Central Reserve Bank, Mengchiang Bank, Hua Hsing', prompt)
+        self.assertIn('Never infer Hong Kong from Japanese military yen or a China label alone', prompt)
+
     def test_followup_fetch_only_preserves_direct_facts_and_ignores_top_level_changes(self):
         first = dict(serial_number='C136027', price='$199.99', printer='Direct Print',
                      direct_evidence={'printer':dict(source='dealer', quote='Printer: Direct Print')},

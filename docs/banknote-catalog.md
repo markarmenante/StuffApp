@@ -577,3 +577,26 @@ periods and eligibility unchanged. French Antilles, Curaçao, Aruba, and the
 Netherlands are not merged into Netherlands Antilles. Migration **v32** updates
 only the derived `banknote_id` display positions once, preserving permanent
 `cat_id` identifiers and all other saved fields, photographs and crops.
+
+### Hong Kong Japanese occupation filing
+
+An established Hong Kong record with issuer `Japanese Imperial Government`
+belongs to **Japanese empire & occupation issues** and the Japanese Hong Kong
+coverage pill. The shared classifier recognizes that issuer spelling alongside
+`The Japanese Government`; it does not rewrite the saved issuer, series, full
+catalogue references or country. Ordinary Government of Hong Kong and Hongkong
+and Shanghai Banking Corporation notes retain their British collection filing.
+
+Check preserves an established Hong Kong occupation filing rather than treating
+a broad China catalogue heading or a grading label's China attribution as grounds
+to change the country. A Japanese military-yen label alone does not establish a
+Hong Kong attribution; other occupied-China issuers retain their existing scope.
+
+The detail map uses the record's positive Japanese classification to label a
+1945 Hong Kong occupation note. Its year-only fallback, ordinary British notes,
+and other years retain their existing behavior. The inner collection history
+panel uses a Japanese occupation band for 1941–1945 only with positive Japanese
+issuer or series evidence; blank or generic context retains the existing era.
+Migration **v33** refreshes only derived `banknote_id` display positions once;
+permanent `cat_id` identifiers, country, issuer, catalogue details, photographs,
+crops and all other saved note fields remain unchanged.

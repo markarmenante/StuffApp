@@ -5468,6 +5468,15 @@ def _country_era(country_key, year, context=''):
     title, eras = entry
     context = (context or '').strip().lower()
 
+    # The generic Hong Kong sterling era overlaps the occupation. Require
+    # positive issuer/series evidence here; the ordinary keyword-band rule
+    # deliberately accepts missing context and would misfile unidentified notes.
+    if (country_key == 'hong-kong' and 1941 <= year <= 1945 and context
+            and banknote_catalog.classify('Hong Kong', year, context)['key'] == 'japanese'):
+        return {'label': 'Japanese occupation',
+                'body': 'Japanese military yen circulated in Hong Kong during the Japanese occupation of 1941–1945.',
+                'start': 1941, 'span': '1941–1945', 'gated': True}
+
     def _claims(era_row):
         keywords = era_row[4] if len(era_row) > 4 else None
         if not keywords or not context:
@@ -6919,9 +6928,11 @@ def init_db():
     # v30: Eastern Caribbean issuers/series/full references; Solomon 1977 protectorate.
     # v31: French Pacific and African regional territorial/regional lineage, preserving catalogue scopes.
     # v32: Netherlands Antilles joins the Dutch overseas collection group.
+    # v33: Japanese Imperial Government issues join their occupation group;
+    # Hong Kong's issuer-aware occupation era retains matching P positions.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v32',),
+        ('banknote_display_number_v33',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6929,7 +6940,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v32', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v33', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -22497,7 +22508,7 @@ def detail_view(category, record_id):
         banknote_origin = {'pin': pin, 'geo_query': geo_query,
                            'year': year,
                            'country': country,
-                           'state': _banknote_state_name(country, year)}
+                           'state': _banknote_state_name(country, year, record)}
 
     # Provenance chain for the Provenance & Pedigree panel (coins and
     # banknotes): stored events plus the owner's own purchase off the record.
@@ -25029,11 +25040,19 @@ def _state_span(country, english):
     return None
 
 
-def _banknote_state_name(country, year):
+def _banknote_state_name(country, year, row=None):
     """{'native', 'english', 'span'} for the state a note was issued
     under as of `year`: a stored spelling that names the polity wins,
     then the country key's era bands (built-in, else generated), then
     None. `native` is None when the original name is English."""
+    # Hong Kong changed administration during 1945. A year alone retains the
+    # existing country timeline; a positively identified occupation issuer can
+    # name the administration of this particular note without moving others.
+    if year == 1945 and banknote_catalog.canonical_country(country) == 'Hong Kong' and row is not None:
+        classification = banknote_catalog.row_classification(row)
+        if classification['key'] == 'japanese' and classification['country'] == 'Hong Kong':
+            return {'native': '香港占領地', 'english': 'Japanese-occupied Hong Kong',
+                    'span': '1941–1945'}
     raw = (country or '').strip().lower().rstrip('.')
     if not raw:
         return None
@@ -27730,7 +27749,7 @@ Rules:
 6. For purchase price use the exact item's paid unit price and currency, not the whole order total including shipping/tax or other items, and not an asking price or converted amount. Return purchase_evidence as an object mapping vendor, price, purchase_date to short literal quotes from the supplied purchase sources when used. Quotes must distinguish the item amount from totals. A saved PDF is historical evidence, not a live check; say so in sources. Identify any conflicts rather than assuming all fields were verified.
 
 Target fields:
-- country: issuing country as commonly catalogued (e.g. "Iran", "Germany"). Notes of the Central Bank of Manchou (Manchukuo, 1932–45) are "Manchukuo", not China; Japanese military yen and the Japanese-sponsored banks of occupied China (Federal Reserve Bank of China, Central Reserve Bank, Mengchiang Bank, Hua Hsing) stay "China" with issue_type "Military / Occupation".
+- country: issuing country or established historical territory as catalogued (e.g. "Iran", "Germany", "Hong Kong"). Preserve an established Hong Kong filing for a Japanese occupation issue: a catalogue's broad China heading or a grading label saying China alone does not change it to China. Keep its actual Japanese issuing authority and issue_type "Military / Occupation". Notes of the Central Bank of Manchou (Manchukuo, 1932–45) are "Manchukuo", not China; military yen filed under China and Japanese-sponsored banks of occupied China (Federal Reserve Bank of China, Central Reserve Bank, Mengchiang Bank, Hua Hsing) remain "China" unless exact territorial evidence establishes otherwise. Never infer Hong Kong from Japanese military yen or a China label alone.
 - municipality: the issuing town / locality for notgeld, emergency, or municipal issues (e.g. "Bielefeld") — usually printed prominently on the note itself. Null for national issues.
 - issue_type: EXACTLY one of [{issue_types}]. German/Austrian emergency money is "Notgeld"; sovereign national-government or central-bank issues are "National". Issues of a subnational state government, such as the Commonwealth of Virginia treasury notes, are "State". A state treasury note is not a national Confederate or United States federal Treasury (Coin) Note merely because it says Treasury. Virginia state notes may be catalogued under United States or Confederate States; retain that existing broader country grouping when supported, with the precise issuing state in issuer. A sovereign government or a bank whose name contains State/État is not automatically a subnational State issue. Null if unclear.
 - issuer: the issuing bank or authority (e.g. "Bank Melli Iran (National Bank)", "Stadt Bielefeld").

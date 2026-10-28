@@ -47,6 +47,14 @@ class BanknoteEntityTests(unittest.TestCase):
         self.assertIsNone(self.match('East Caribbean States', 1965,
                                      'Unidentified private bank'))
 
+    def test_hong_kong_occupation_credits_only_japanese_entity(self):
+        self.assertEqual(self.key('Hong Kong', 1945, 'Japanese Imperial Government',
+                                  'ND (1945) · Four-character military overprint · Block 17'),
+                         'japanese-hong-kong')
+        for issuer in ('Government of Hong Kong', 'The Hongkong and Shanghai Banking Corporation'):
+            with self.subTest(issuer=issuer):
+                self.assertEqual(self.key('Hong Kong', 1945, issuer), 'british-hong-kong')
+
     def test_solomon_1977_pre_independence_issue_counts_without_successor_credit(self):
         for issuer in ('', 'Solomon Islands Monetary Authority'):
             self.assertEqual(self.key('Solomon Islands', 1977, issuer),

@@ -157,7 +157,7 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual({item['country'] for item in profile['items_colonial'] if item['empire'] == 'Dutch'}, {'Netherlands Antilles'})
         self.assertEqual(before, {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')})
 
-    def test_antilles_v32_resequences_once_without_changing_any_other_saved_field(self):
+    def test_antilles_current_migration_resequences_once_without_changing_any_other_saved_field(self):
         self.add('antilles', 'Netherlands Antilles', None, 'Bank van de Nederlandse Antillen')
         self.add('independent', 'Austria', 1922, 'Oesterreichische Nationalbank')
         self.add('british', 'Canada', 1967, 'Bank of Canada')
@@ -169,7 +169,7 @@ class CatalogueTests(unittest.TestCase):
                         "vendor='Exact seller', order_number='24-15335-90978', marketplace='eBay', "
                         "notes='Preserve the entered note', created_at='2026-10-26', updated_at='2026-10-26' WHERE id='antilles'")
         self.db.execute("INSERT OR REPLACE INTO migration_state(key, applied_at) VALUES('banknote_display_number_v31', '2026-10-26')")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v33'")
         self.db.commit()
         before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
         with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
@@ -182,7 +182,7 @@ class CatalogueTests(unittest.TestCase):
         for ident, original in before.items():
             self.assertEqual({k: v for k, v in after[ident].items() if k != 'banknote_id'},
                              {k: v for k, v in original.items() if k != 'banknote_id'}, ident)
-        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v32'").fetchone())
+        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v33'").fetchone())
         self.assertEqual(self.db.execute("SELECT applied_at FROM migration_state WHERE key='banknote_display_number_v31'").fetchone()[0], '2026-10-26')
         with patch.object(stuff, '_renumber_banknotes') as renumber:
             stuff.init_db()
@@ -205,7 +205,7 @@ class CatalogueTests(unittest.TestCase):
             self.assertIn('Confederate', info['period'])
         self.db.execute("UPDATE banknotes SET banknote_id='P 999', cat_id='B777', price='$42', denomination='$5'")
         self.db.execute("INSERT OR IGNORE INTO migration_state(key, applied_at) VALUES('banknote_display_number_v27', '2026-10-16')")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v33'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -416,7 +416,7 @@ class CatalogueTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET issue_type='National', denomination='$1' WHERE id='us1918'")
         self.db.execute("UPDATE banknotes SET status='Ordered' WHERE id IN ('pa1776','ct1776')")
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v33'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.db.execute('SELECT * FROM banknotes')}
         stuff.init_db()
@@ -1018,6 +1018,96 @@ class CatalogueTests(unittest.TestCase):
             self.assertEqual(result['key'], 'us')
             self.assertIn(phrase, result['period'])
 
+    def test_hong_kong_imperial_government_occupation_preserves_saved_identity(self):
+        row = dict(id='hong-kong-occupation', country='Hong Kong', date_1=1945,
+                   issuer='Japanese Imperial Government', issue_type='Military / Occupation',
+                   series='ND (1945) · Four-character military overprint · Block 17',
+                   pick_number='P-M30, S/M#T32-6', denomination='100 Yen')
+        before = dict(row)
+        self.assertEqual(stuff.canonicalize_banknote_fields(dict(row)), before)
+        info = catalog.row_classification(row)
+        self.assertEqual((info['key'], info['country']), ('japanese', 'Hong Kong'))
+        self.assertEqual(info['period'], 'Japanese occupation / military currency')
+        self.assertEqual(stuff.banknote_grouping([row])[row['id']]['key'], 'japanese')
+        panel = stuff._series_panel_for_row(row)
+        self.assertEqual(panel['title'], 'Hong Kong')
+        self.assertEqual(panel['era']['label'], 'Japanese occupation')
+        self.assertEqual(panel['era']['span'], '1941–1945')
+        self.assertNotIn('sterling', panel['era']['body'].lower())
+        self.assertEqual(stuff._banknote_era_start('Hong Kong', row['issuer'], row['series'], 1945),
+                         1941.5)
+        self.assertEqual(stuff._banknote_state_name('Hong Kong', 1945, row),
+                         {'native': '香港占領地', 'english': 'Japanese-occupied Hong Kong',
+                          'span': '1941–1945'})
+        baseline = stuff._banknote_state_name('Hong Kong', 1945)
+        self.assertEqual(baseline['english'], 'British Hong Kong (Crown colony)')
+        self.assertEqual(stuff._banknote_state_name('Hong Kong', 1946, row)['english'],
+                         'British Hong Kong (Crown colony)')
+        self.assertEqual(stuff._banknote_state_name('Hong Kong', 1945, dict(row, country='China')),
+                         baseline)
+        self.assertEqual(row, before)
+        for issuer in ('Government of Hong Kong', 'The Hongkong and Shanghai Banking Corporation'):
+            with self.subTest(issuer=issuer):
+                self.assertEqual(catalog.classify('Hong Kong', 1945, issuer)['key'], 'british')
+                british_row = dict(row, issuer=issuer, series='', issue_type='Colonial')
+                self.assertEqual(stuff._banknote_state_name('Hong Kong', 1945, british_row), baseline)
+                self.assertEqual(stuff._series_panel_for_row(british_row)['era']['label'],
+                                 'Off silver, into sterling')
+
+    def test_hong_kong_v33_resequences_existing_positions_without_changing_saved_facts(self):
+        self.add('hk-british', 'Hong Kong', 1945, 'Government of Hong Kong')
+        self.add('hk-occupation', 'Hong Kong', 1945, 'Japanese Imperial Government')
+        self.add('jamaica', 'Jamaica', 1945, 'Government of Jamaica')
+        self.db.execute("UPDATE banknotes SET issue_type='Colonial' WHERE id='hk-british'")
+        for ident, position in (('hk-british', 'P 001'), ('hk-occupation', 'P 002'), ('jamaica', 'P 003')):
+            self.db.execute('UPDATE banknotes SET banknote_id=? WHERE id=?', (position, ident))
+        self.db.execute("UPDATE banknotes SET cat_id='B434', denomination='100 Yen', "
+                        "pick_number='P-M30, S/M#T32-6', issue_type='Military / Occupation', "
+                        "series='ND (1945) · Four-character military overprint · Block 17', "
+                        "price='$60', image_1='manual-front.jpg', image_2='manual-back.jpg', "
+                        "status='Ordered', grade='Choice UNC', grading_authority='PMG', grade_numeric=64, "
+                        "slab_number='7054338-045', vendor='Exact seller', order_number='24-15341-37695', "
+                        "marketplace='eBay', notes='Preserve source references', "
+                        "created_at='2026-10-27', updated_at='2026-10-28' WHERE id='hk-occupation'")
+        self.db.execute("INSERT OR REPLACE INTO migration_state(key, applied_at) "
+                        "VALUES('banknote_display_number_v32', '2026-10-27')")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v33'")
+        self.db.commit()
+        before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
+            stuff.init_db()
+        self.assertEqual(renumber.call_count, 1)
+        rows = self.db.execute('SELECT * FROM banknotes ORDER BY ' + stuff.CATEGORY_ORDER_BY['banknotes']).fetchall()
+        self.assertEqual([row['id'] for row in rows], ['hk-british', 'jamaica', 'hk-occupation'])
+        self.assertEqual([row['banknote_id'] for row in rows], ['P 001', 'P 002', 'P 003'])
+        after = {row['id']: dict(row) for row in rows}
+        for ident, original in before.items():
+            self.assertEqual({k: v for k, v in after[ident].items() if k != 'banknote_id'},
+                             {k: v for k, v in original.items() if k != 'banknote_id'}, ident)
+        self.assertEqual(self.db.execute("SELECT applied_at FROM migration_state "
+                                         "WHERE key='banknote_display_number_v32'").fetchone()[0], '2026-10-27')
+        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state "
+                                            "WHERE key='banknote_display_number_v33'").fetchone())
+        with patch.object(stuff, '_renumber_banknotes') as renumber:
+            stuff.init_db()
+        renumber.assert_not_called()
+        self.assertEqual(after, {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')})
+
+    def test_hong_kong_occupation_era_requires_positive_context(self):
+        for year in (1941, 1942, 1945):
+            for context in ('Japanese Imperial Government', 'The Japanese Government',
+                            'Japanese occupation military overprint', 'Military yen'):
+                with self.subTest(year=year, context=context):
+                    self.assertEqual(stuff._country_era('hong-kong', year, context)['label'],
+                                     'Japanese occupation')
+            for context in ('', 'Government of Hong Kong', '100 Yen', 'Military / Occupation'):
+                with self.subTest(year=year, context=context):
+                    self.assertEqual(stuff._country_era('hong-kong', year, context)['label'],
+                                     'Off silver, into sterling')
+        for year in (1940, 1946):
+            self.assertEqual(stuff._country_era('hong-kong', year, 'Japanese Imperial Government')['label'],
+                             'Off silver, into sterling')
+
     def test_accurate_status_and_uncertainty(self):
         self.assertIn('Crown Dependency', catalog.classify('Guernsey', 2013)['period'])
         self.assertIn('protected state', catalog.classify('Maldives', 1960)['period'])
@@ -1069,7 +1159,7 @@ class CatalogueTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET denomination='500 Francs' WHERE id='afars-second'")
         self.db.execute("INSERT OR IGNORE INTO migration_state(key, applied_at) "
                         "VALUES('banknote_display_number_v28', '2026-10-25')")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v33'")
         self.db.commit()
         before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
         with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
@@ -1090,7 +1180,7 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual([row['id'] for row in ordered],
                          ['british', 'afars-second', 'afars-held', 'independent'])
         self.assertEqual([row['banknote_id'] for row in ordered], ['P 001', 'P 002', 'P 003', 'P 004'])
-        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v32'").fetchone())
+        self.assertIsNotNone(self.db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v33'").fetchone())
         with patch.object(stuff, '_renumber_banknotes') as renumber:
             stuff.init_db()
         renumber.assert_not_called()
@@ -1269,7 +1359,7 @@ class CatalogueTests(unittest.TestCase):
         self.add('colonial', 'United States (Colonial - Pennsylvania)', 1772,
                  'Province of Pennsylvania')
         self.add('ny', 'United States of America', 1776, self.WATER_WORKS)
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v33'")
         self.db.commit()
         stuff.init_db()
         row = self.db.execute("SELECT country,banknote_id FROM banknotes WHERE id='french'").fetchone()

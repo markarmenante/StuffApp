@@ -213,7 +213,7 @@ class CaribbeanTests(unittest.TestCase):
     def test_v32_migration_changes_only_display_position_and_runs_once(self):
         self.fixture()
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v32'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v33'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.rows()}
         stuff.init_db()

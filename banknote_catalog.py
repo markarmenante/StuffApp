@@ -777,7 +777,7 @@ def classify(country, date=None, issuer=None, series=None):
         review = regional.get('review_note')
         return result(regional['group'], regional['title'] + (' — ' + review if review else ''),
                       'unresolved' in regional['key'] or bool(review))
-    japanese = any(s in evidence for s in ('japanesegovernment', 'japaneseoccupation',
+    japanese = any(s in evidence for s in ('japanesegovernment', 'japaneseimperialgovernment', 'japaneseoccupation',
                    'southerndevelopmentbank', 'militaryyen', 'bankofchosen')) or (country == 'China' and y and 1938 <= y <= 1945
                     and any(s in evidence for s in ('federalreservebankofchina', 'centralreservebankofchina')))
     if country == 'Philippines':
