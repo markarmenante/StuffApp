@@ -11678,7 +11678,25 @@ def _paper_on_dark_backdrop_quad(img, expect_aspect=None):
             pout = rgb[outside[:, 1], outside[:, 0]].astype(float)
             paper = (pin.mean(axis=1) > 150) & (np.ptp(pin, axis=1) < 60)
             dark = pout.mean(axis=1) < 65
-            if (paper.mean() < 0.90 or dark.mean() < 0.90 or
+            dark_supported = dark.mean() >= 0.90
+            # A narrow reflective holder seam can cross the first probe.
+            # Keep this measured paper edge: only a separately labelled
+            # holder with mostly dark immediate backing may look slightly
+            # farther out, and BOTH bounded probes must confirm the dark
+            # surround. A broad gray border or isolated dark stripe fails.
+            if (not dark_supported and dark.mean() >= 0.75 and
+                    np.median(pout.mean(axis=1)) < 65 and
+                    _dark_holder_has_label(rgb, quad)):
+                farther_supported = True
+                for multiplier in (2.0, 2.5):
+                    farther = np.rint(samples - multiplier * max(3.0, 0.010 * min(lengths)) * normal).astype(int)
+                    if ((farther[:, 0] < 0).any() or (farther[:, 0] >= w).any() or
+                            (farther[:, 1] < 0).any() or (farther[:, 1] >= h).any() or
+                            np.mean(rgb[farther[:, 1], farther[:, 0]].mean(axis=1) < 65) < 0.90):
+                        farther_supported = False
+                        break
+                dark_supported = farther_supported
+            if (paper.mean() < 0.90 or not dark_supported or
                     np.median(pin.mean(axis=1)) - np.median(pout.mean(axis=1)) < 100):
                 supported = False
                 break

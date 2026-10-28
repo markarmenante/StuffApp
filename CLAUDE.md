@@ -351,6 +351,11 @@ a grading label alone, dark designs and printed borders on a full sheet do not
 justify a crop. Existing photos and manual crops remain unchanged by Check;
 this path applies when a new image arrives. Regression coverage is in
 `tests/test_banknote_image_quality.py`.
+For labelled holders with a narrow seam crossing the nearest exterior sample,
+at least 75% of that immediate backing must still be dark, and two farther
+bounded samples must each be at least 90% dark. All four paper-rim, geometry,
+contrast and label checks remain required; neither the paper edge nor a saved
+manual crop moves to accommodate the reflection (Egypt PCGS, 2026-10-28).
 
 
 ## Collection report (banknotes)

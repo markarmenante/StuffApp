@@ -291,6 +291,38 @@ for ink in ((35, 65, 85), (20, 20, 20)):
         assert JpegImagePlugin.get_sampling(result) == 0
         assert min(result.getpixel((result.width // 2, result.height // 2))) < 120
 
+# Egypt 1945 PCGS: a thin reflective seam below the paper crosses the
+# immediate backdrop probe. Its bounded farther backing is still black;
+# do not move the complete paper edge inward to avoid the reflection.
+seam_holder, seam_quad = clipped_dark_holder()
+ImageDraw.Draw(seam_holder).rectangle((250, 928, 450, 934), fill=(115, 115, 115))
+meta = {}
+with patch.object(stuffapp, '_trim_note_v2', side_effect=AssertionError('model fallback')), \
+        patch.object(stuffapp, '_trim_note_cv_cascade', side_effect=AssertionError('design fallback')):
+    output = stuffapp._trim_slabbed_note_image(encoded(seam_holder), meta=meta)
+assert output and meta['engine'] == 'paper-on-dark-backdrop', meta
+assert all(math.dist(a, b) < 3 for a, b in zip(meta['quad'], seam_quad)), meta
+assert all(abs(a - b) < 3 for a, b in zip(Image.open(io.BytesIO(output)).size, (1122, 614)))
+assert stuffapp._paper_on_dark_backdrop_quad(Image.open(io.BytesIO(output))) is None
+# A seam allowance never substitutes for label evidence or permits wider
+# glare/gray backing. Both farther probes must pass independently.
+no_label, _ = clipped_dark_holder(label=False)
+ImageDraw.Draw(no_label).rectangle((250, 928, 450, 934), fill=(115, 115, 115))
+assert stuffapp._paper_on_dark_backdrop_quad(no_label) is None
+wide_seam, _ = clipped_dark_holder()
+ImageDraw.Draw(wide_seam).rectangle((250, 928, 650, 934), fill=(115, 115, 115))
+assert stuffapp._paper_on_dark_backdrop_quad(wide_seam) is None
+deep_gray = seam_holder.copy()
+ImageDraw.Draw(deep_gray).rectangle((250, 928, 450, 945), fill=(115, 115, 115))
+assert stuffapp._paper_on_dark_backdrop_quad(deep_gray) is None
+second_probe_gray = seam_holder.copy()
+ImageDraw.Draw(second_probe_gray).rectangle((250, 937, 450, 941), fill=(115, 115, 115))
+assert stuffapp._paper_on_dark_backdrop_quad(second_probe_gray) is None
+# The normal near-probe path may accept a tight scan; the seam exception
+# must reject it when either farther probe would leave the actual photograph.
+assert stuffapp._paper_on_dark_backdrop_quad(clipped_dark_holder()[0].crop((0, 0, 1280, 933))) is not None
+assert stuffapp._paper_on_dark_backdrop_quad(seam_holder.crop((0, 0, 1280, 933))) is None
+
 broad, _ = clipped_dark_holder()
 assert stuffapp._paper_on_dark_backdrop_quad(broad, expect_aspect=3.4) is None
 assert stuffapp._paper_on_dark_backdrop_quad(broad.crop((30, 0, 1280, 1000))) is None, 'Never invent a clipped paper edge'
