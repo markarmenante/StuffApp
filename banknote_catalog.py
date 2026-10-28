@@ -797,7 +797,7 @@ def classify(country, date=None, issuer=None, series=None):
             label = 'Philippine issue — period not established'
         return result('us', label, not bool(y))
     if japanese and country in {'Burma', 'Malaya', 'Netherlands Indies', 'China',
-                                'French Indo-China', 'Hong Kong', 'Korea'}:
+                                'French Indo-China', 'Hong Kong', 'Korea', 'Oceania'}:
         return result('japanese', 'Japanese occupation / military currency')
     if country == 'Manchukuo':
         return result('japanese', 'Manchukuo — Japanese-dependent state')

@@ -600,3 +600,12 @@ issuer or series evidence; blank or generic context retains the existing era.
 Migration **v33** refreshes only derived `banknote_id` display positions once;
 permanent `cat_id` identifiers, country, issuer, catalogue details, photographs,
 crops and all other saved note fields remain unchanged.
+
+### Oceania Japanese occupation filing (2026-10-28)
+
+Oceania notes naming `The Japanese Government` or `Japanese Imperial Government`
+file under **Japanese empire & occupation issues**, including undated notes. The
+shared issuer rule drives list/report grouping, filters, analysis and entity
+coverage. Oceania without Japanese issuer/series evidence remains unresolved;
+French Oceania retains its separate French filing. The v34 position refresh
+changes only display positions, preserving country, issuer and all saved facts.
