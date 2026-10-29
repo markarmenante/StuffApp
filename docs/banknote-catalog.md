@@ -45,6 +45,23 @@ type fact can use a publisher's country-only issuer heading; an explicitly
 different named institution is rejected. Existing parenthetical authority names
 are accepted only as complete stored alternatives, never by dropping bank names.
 
+The direct response template explicitly includes `direct_evidence`, including
+the issuer, design and inscriptions read from both images. First-pass research
+is retained separately from the fetch pass: each pass is validated independently,
+so an empty or partial follow-up cannot erase earlier supported fields. Conflicting
+supported values stay blank. Provider-produced private properties cannot inject
+an earlier pass or authorize source text.
+
+When a model misses explicitly labelled type facts, Check also reads the Features,
+Printer and design sections of actual retrieved single-entry Numista text. This
+bounded parser can recover issuer, paper/material, dimensions, printer and design;
+the same exact country, full reference, denomination, issuer, blank-field and
+literal-source checks still apply. Location and issuing institution are separate:
+the French Equatorial Africa issuer also names Cameroon. Collection/variety/sale
+tables cannot establish the type header. The 1957 50 Francs P-31 regression
+recovers six type fields without inventing a P-31a attribution or signatures.
+This adds no network request, remembered per-note values or automatic backfill.
+
 Printer, material, dimensions and other type facts can use a matching type-wide
 source. Signatures, watermark, date and series need the exact dated variety in
 their own cited context; a nearby variant or a series-wide list is insufficient.
@@ -86,7 +103,7 @@ Observed legacy Numista note URLs retain their exact numeric record identity
 when normalized to the current URL form. Country indexes can be useful discovery
 sources; for missing dimensions with explicit unambiguous Pick/TBB identity,
 the verified public Banknote Index Country directory is a configured navigation
-fallback and takes priority even if search did not rediscover it. It is labeled
+fallback after promising observed entry pages, even if search did not rediscover it. It is labeled
 separately from observed URLs and never added to the evidence map merely because
 it is configured. The fetch phase follows its actual country/historical-territory
 link and then the matching complete-reference entry. It never guesses country
@@ -99,6 +116,7 @@ inaccessible and conflicting results stay blank rather than becoming guesses;
 the former uncited secondary dimensions lookup is removed. Regressions are in
 `tests/test_banknote_catalog_lookup.py`, `tests/test_banknote_catalog_fetch.py`,
 `tests/test_banknote_catalog_search.py`,
+`tests/test_banknote_catalog_recovery.py`,
 existing purchase/photo Check suites
 and the detail-page browser fixture.
 

@@ -27814,6 +27814,8 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
   "sheet_position": null, "label_comments": null,
   "lettering": null, "lettering_translation": null, "history_context": null,
   "vendor": null, "price": null, "purchase_date": null, "obv_rev": null,
+  "direct_evidence": {{}},
+  "catalogue_research": {{"identity": {{"match": "unresolved"}}, "fields": {{}}}},
   "purchase_evidence": {{}},
   "sources": "one-line note of where each value came from (note images vs dealer text vs which web source); identify unverified fields and inaccessible sources"
 }}
@@ -27881,6 +27883,9 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
     # Direct origin flags are checked against the text/images actually sent.
     # A model's ordinary top-level web guess cannot bypass the research gate.
     result['_catalogue_direct_fields'] = banknote_catalog_lookup.direct_fields(result, dealer_text, bool(images))
+    # Retain the real first pass, overwriting any model-supplied private key.
+    # A later empty/partial extraction must not erase already sourced facts.
+    result['_catalogue_previous_research'] = result.get('catalogue_research')
     # Only actual provider web-tool/citation metadata can authorize research.
     # Never trust an identically named private property in model-produced JSON.
     result['_catalogue_sources'] = banknote_catalog_lookup.actual_sources(responses)[0]
@@ -27941,6 +27946,8 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
         'fetch_attempted=%s fetch_stop=%s fetch_failed=%s claimed_fields=%s',
         len(native_sources), len(result['_catalogue_sources']), len(candidates),
         fetch_attempted, fetch_stop, fetch_failed, ','.join(claimed_fields))
+    app.logger.info('Banknote direct evidence summary: accepted_fields=%s',
+        ','.join(sorted(result['_catalogue_direct_fields'])))
     return result
 
 
@@ -28367,8 +28374,9 @@ def _banknote_check_result(note, prepared, suggestions, lookup_error=None, looku
     # supplies this individual note's grade, serial, certificate or price.
     direct_identity = {**filled, **{key: value['new'] for key, value in overwritten.items()}}
     try:
-        catalogue = banknote_catalog_lookup.validate(note, direct_identity,
-            suggestions.get('catalogue_research'), suggestions.get('_catalogue_sources'))
+        catalogue = banknote_catalog_lookup.validate_all(note, direct_identity,
+            suggestions.get('catalogue_research'), suggestions.get('_catalogue_sources'),
+            previous=suggestions.get('_catalogue_previous_research'))
     except (TypeError, ValueError, KeyError):
         catalogue = dict(state='unresolved', message='Catalogue details could not be confirmed for this exact note.', fields={})
     if lookup_error:

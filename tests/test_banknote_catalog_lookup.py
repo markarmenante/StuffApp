@@ -231,7 +231,7 @@ class ValidationTests(unittest.TestCase):
             index: dict(title='Seychelles banknotes - paper money catalog', quotes=[]),
         }
         note = dict(country='Seychelles', denomination='5 Rupees', pick_number='P-14a')
-        self.assertEqual(lookup.fetch_candidates(note, {}, candidates), [lookup.BNI_COUNTRY_DIRECTORY, index])
+        self.assertEqual(lookup.fetch_candidates(note, {}, candidates), [index, lookup.BNI_COUNTRY_DIRECTORY])
 
     def test_fetched_document_overcomes_truncated_search_citations(self):
         note = dict(country='Seychelles', pick_number='P-14a', denomination='5 Rupees',

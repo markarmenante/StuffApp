@@ -60,7 +60,7 @@ class CandidateTests(unittest.TestCase):
         raw = dict(catalogue_research=research())
         raw['catalogue_research']['fields']['size_width'] = dict(source_url='https://en.numista.com/999999')
         selected = lookup.fetch_candidates(NOTE, raw, sources)
-        self.assertEqual(selected, [lookup.BNI_COUNTRY_DIRECTORY, URL])
+        self.assertEqual(selected, [URL, INDEX])
         self.assertNotIn('https://en.numista.com/999999', selected)
 
     def test_observed_country_directory_can_resolve_missing_dimensions(self):
@@ -78,7 +78,7 @@ class CandidateTests(unittest.TestCase):
             URL:dict(title='10 Rupees - Maldives', quotes=[]),
             'https://en.numista.com/other':dict(title='Bermuda 10 Rupees P-5b', quotes=[]),
         })
-        self.assertEqual(selected, [lookup.BNI_COUNTRY_DIRECTORY, URL])
+        self.assertEqual(selected, [URL, lookup.BNI_COUNTRY_DIRECTORY])
         self.assertEqual(note, NOTE)
 
     def test_discovery_rejects_neighboring_type_currency_and_coin(self):
@@ -91,7 +91,7 @@ class CandidateTests(unittest.TestCase):
     def test_observed_legacy_numista_note_url_keeps_same_numeric_identity(self):
         old = 'https://en.numista.com/catalogue/note223321.html'
         self.assertEqual(lookup.fetch_candidates(NOTE, {}, {
-            old:dict(title='Maldives 10 Rufiyaa P-5b', quotes=[])}), [lookup.BNI_COUNTRY_DIRECTORY, URL])
+            old:dict(title='Maldives 10 Rufiyaa P-5b', quotes=[])}), [URL, lookup.BNI_COUNTRY_DIRECTORY])
 
     def test_configured_directory_requires_explicit_unambiguous_country_and_reference(self):
         for change in ({'country':''}, {'pick_number':''}, {'pick_number':'64'},
@@ -126,7 +126,7 @@ class CandidateTests(unittest.TestCase):
         src = dict(title='China Pick M30 100 Yen Japanese Imperial Government',
                    quotes=['China Pick M30 S/M T32-6 100 Yen ND (1945)'])
         self.assertEqual(lookup.fetch_candidates(note, {}, {url:src}),
-                         [lookup.BNI_COUNTRY_DIRECTORY, url])
+                         [url, lookup.BNI_COUNTRY_DIRECTORY])
         self.assertEqual(lookup.fetch_candidates(note, {}, {
             'https://pcgs.com.evil.test/notefacts/707203':src}), [lookup.BNI_COUNTRY_DIRECTORY])
 
@@ -171,6 +171,31 @@ class ProviderBudgetTests(unittest.TestCase):
                 native_calls.extend(native_search.call_args_list)
             self.assertEqual(factory.call_args.kwargs['max_retries'], 0)
         return result, calls
+
+    def test_empty_followup_retains_first_pass_proofs_without_trusting_private_model_keys(self):
+        first = dict(catalogue_research=research(), _catalogue_previous_research={'invented':True})
+        result, calls = self.call([response(first, search_blocks()), response(
+            {'catalogue_research':{'identity':{'match':'unresolved'},'fields':{}},
+             '_catalogue_previous_research':{'also_invented':True}}, fetch_blocks())])
+        self.assertEqual(result['_catalogue_previous_research'], research())
+        valid = lookup.validate_all(NOTE, {}, result['catalogue_research'], result['_catalogue_sources'],
+                                    previous=result['_catalogue_previous_research'])
+        self.assertEqual(valid['fields']['printer']['value'], 'Bradbury Wilkinson')
+        self.assertEqual(len(calls), 2)
+        prompt = calls[0]['messages'][0]['content'][-1]['text']
+        template = prompt.split('Reply with a JSON object, without code fences.', 1)[1].split('EXECUTE THESE', 1)[0]
+        self.assertIn('"direct_evidence": {}', template)
+        self.assertIn('"catalogue_research":', template)
+
+    def test_empty_cameroon_extraction_recovers_native_page_without_extra_provider_calls(self):
+        from test_banknote_catalog_recovery import NOTE as cameroon, sources as cameroon_sources
+        result, calls = self.call([response(), response({'catalogue_research':{'fields':{}}})],
+            note=cameroon, native=cameroon_sources(), search_key='synthetic-key', ticks=(100,101,110,112))
+        valid = lookup.validate_all(cameroon, {}, result['catalogue_research'], result['_catalogue_sources'])
+        self.assertEqual(set(valid['fields']), {'issuer','printer','material','size_width','size_height','obv_rev'})
+        self.assertEqual(len(calls), 2)
+        self.assertLessEqual(calls[1]['timeout'], 75)
+        self.assertIn('most promising observed exact type page FIRST', calls[1]['messages'][0]['content'])
 
     def test_check_prompt_preserves_established_hong_kong_occupation_filing(self):
         note = dict(country='Hong Kong', issuer='Japanese Imperial Government',
