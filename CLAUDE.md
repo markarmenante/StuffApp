@@ -245,20 +245,18 @@ scan had none or the fetch failed; the liveness probe harvests the same
 photos for a candidate the model gave no image for, so the list shows a
 thumbnail. Banknote photos are trimmed on Buy like an upload. Every
 image attempt logs `market buy image: …`. Test: `tests/test_market_images.py`.
-eBay liveness (2026-09-12): eBay walls the scan's page fetch with a
-redirect to /splashui/captcha and keeps ended item pages up (title,
-photos, price, an ENDED badge), so an "unknown" verdict — which never
-drops — let months-old ended eBay lots through (ten of thirteen
-candidates on 2026-09-11 were eBay; the French Guinea specimen had
-ended 2024-12-25). Now the captcha bounce counts as a challenge by URL,
-a readable eBay page with no buy/bid control is ended, an unreadable
-eBay page gets one retry and then keeps its item only on the model's
-own live evidence (`closes` in the future, or `live_evidence` quoting
-Buy It Now / bids / time left — the prompt now demands it for eBay),
-and every probe logs `market scan verify: <state> status= len=
-challenged= why=` so a scan's logs show what each venue served. Test:
-`tests/test_market_ebay_liveness.py`. The container's egress proxy
-refuses ebay.com, so eBay can only be checked in production's logs.
+eBay liveness and inspection (updated 2026-10-30): eBay can block the
+server with a challenge while leaving the exact item readable in the owner's
+browser. Recommendations and Buy require independently observed live evidence;
+model claims and future closing dates cannot establish availability. The earlier
+model-evidence fallback was removed after an ended listing passed it in September.
+Candidate row links and View listing retain exact URL, identity, eligibility and
+known ended/invalid checks, but may open the original saved exact item when only
+availability is unknown. That result clears `verified` and moves a current
+candidate to Earlier, without filing a purchase or changing dismissal history.
+Buy remains blocked until live evidence is available; Bought retains its explicit
+already-paid behavior. Every scan probe logs its state and challenge outcome.
+See `docs/market-validation.md` and `tests/test_market_ebay_verification.py`.
 
 ## What the model sees for a banknote (Check, serial scan)
 

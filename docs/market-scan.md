@@ -26,10 +26,14 @@ eBay buy candidates require a live verdict from a readable exact listing page.
 A fresh exact-item observation from the authenticated signed-in browser may resolve
 a server-side challenge, but never override an ended or invalid listing. Search
 snippets, model-written live evidence and future closing dates cannot establish
-availability. Older unverified eBay candidates
-move to Earlier candidates; Buy and View listing recheck current availability.
-Bought can still file a purchase already made. Other unreadable venues retain
-the existing unverified state.
+availability. Older unverified eBay candidates move to Earlier candidates.
+Buy still requires current live evidence. Candidate row links and View listing
+check the exact URL, identity and eligibility, then open the saved exact item
+when availability alone is unknown because of a challenge, HTTP failure or timeout.
+That observation clears `verified` and moves a current candidate to Earlier;
+it does not file a purchase or establish availability. Known ended, invalid,
+identity-conflicting and ineligible offers remain blocked. Bought can still file
+a purchase already made. Other unreadable venues retain the existing unverified state.
 
 Coin archive enrichment runs after candidates are visible, for at most another
 60 seconds within the overall scan budget. It uses cached archive queries and

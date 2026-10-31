@@ -9,8 +9,12 @@ or seller evidence reject the offer. Recommendation sections cannot supply
 buy/bid wording. A bot challenge on an exact item remains unknown, not ended.
 
 Saved generic candidates are marked `unavailable` when the market is read. Both
-row links and View listing pass through a fresh check, and Buy checks before
-creating an Ordered record. Unavailable/generic candidates cannot be filed.
+row links and View listing pass through a fresh exact-item, identity and eligibility
+check. If only eBay availability is unknown, they open the original saved item URL
+for inspection. They never redirect to a fetched challenge or search destination.
+Known ended, invalid, mismatched and ineligible offers remain blocked. Buying an
+eBay offer still requires live availability before creating an Ordered record.
+Unavailable/generic candidates cannot be filed.
 Bought explicitly records a purchase already made and may therefore file an
 otherwise valid exact listing after it ends. Photo extraction uses the primary
 Product JSON-LD, page image metadata or an identified gallery, never arbitrary
@@ -24,11 +28,13 @@ Buy It Now listing" and the old fallback admitted it with `verified: false`.
 The row was marked unavailable without deleting its history. eBay now requires
 an independently readable live listing: no model wording or future close can
 override an unknown verdict. Legacy unverified offers move to Earlier
-candidates instead of appearing as current recommendations. Buy and View
-listing also reject unknown availability; a transient block preserves the
-record for retries and Bought. Regression tests cover this exact 403, captcha,
-timeout, ended banners with recommendation controls, existing saved rows,
-and recording purchases already made.
+candidates instead of appearing as current recommendations. Buy rejects unknown
+availability. View listing can open a known exact item during that transient
+block, while clearing `verified` and moving a current candidate to Earlier.
+The saved record remains available for retries and Bought; viewing creates no
+collection record. Regression tests cover this exact 403, captcha, timeout,
+inspection after a failed Buy, ended banners with recommendation controls,
+existing saved rows, and recording purchases already made.
 
 On 20 September 2026, the Martha Washington offer linked an eBay search page.
 The matching exact item, [375423430457](https://www.ebay.com/itm/375423430457),

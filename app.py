@@ -19598,7 +19598,7 @@ def _market_create_record(db, category, item, location=None, images=None, vendor
     return record_id
 
 
-def _market_action_problem(db, row, item, already_paid=False):
+def _market_action_problem(db, row, item, already_paid=False, *, allow_unverified_view=False):
     problem = _market_listing_url_problem(item.get('listing_url'))
     problem_kind = 'eligibility'
     if row['category'] == 'banknotes':
@@ -19628,6 +19628,9 @@ def _market_action_problem(db, row, item, already_paid=False):
                            "status = CASE WHEN status = 'new' THEN 'superseded' ELSE status END "
                            "WHERE id = ? AND status != 'ordered'", [json.dumps(item), row['id']])
                 db.commit()
+                # Viewing the exact seller URL does not require claiming it is live.
+                if allow_unverified_view:
+                    return ''
                 return 'Current eBay availability could not be verified. Try again later.'
         if not problem:
             item['_checkout_url'] = market_checkout.checkout_url(item['listing_url'], probe)
@@ -19645,7 +19648,7 @@ def market_item_listing(category, item_id):
     db = get_db()
     row = _market_item_or_404(db, category, item_id)
     item = json.loads(row['payload'])
-    problem = _market_action_problem(db, row, item)
+    problem = _market_action_problem(db, row, item, allow_unverified_view=True)
     if problem:
         from markupsafe import escape
         return 'This offer could not be matched to a currently available specific item. ' + str(escape(problem)) + ' Return to Market Scan for other candidates.', 410
