@@ -1,5 +1,10 @@
 # Banknote order review
 
+The **++** button beside **+** in the Banknotes collection opens an eBay order-number
+window. Enter the order and press Enter or **Process order** to start the same exact-order
+import below. The window shows progress, prevents duplicate submissions and retains the
+entered number if the request fails. Cancel or Escape closes it before processing.
+
 Entering an exact eBay order on **Order review**, or pressing Check on an otherwise
 blank banknote form with an order number, reads the complete checkout first.
 When it contains exactly one verified banknote, Check runs and the ordinary

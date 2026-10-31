@@ -4437,3 +4437,20 @@ input[type="date"] { -webkit-appearance: none; }
 .purchase-status-notice a { display:block; margin-top:6px; font-weight:600; }
 .purchase-status-notice button { position:absolute; top:7px; right:7px; border:0; background:none; color:inherit; font-size:22px; cursor:pointer; }
 .purchase-status-badge { margin:2px 0; font-size:12px; }
+
+/* Quick eBay order entry from the Banknotes collection. */
+.banknote-order-dialog {
+  width: min(400px, calc(100% - 32px)); box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 10px; padding: 22px;
+  background: var(--bg, #fff); color: var(--text);
+}
+.banknote-order-dialog::backdrop { background: rgba(0,0,0,.35); }
+.banknote-order-dialog form { display: grid; gap: 12px; }
+.banknote-order-dialog h2 { margin: 0 0 4px; font-size: 20px; }
+.banknote-order-dialog label { font-size: 14px; font-weight: 600; }
+.banknote-order-dialog input { width: 100%; min-width: 0; box-sizing: border-box; padding: 9px 10px; font: inherit; }
+.banknote-order-dialog p { margin: 0; font-size: 14px; line-height: 1.5; }
+.banknote-order-dialog [data-error="true"] { color: var(--red, #b42318); }
+.banknote-order-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.banknote-order-actions .toolbar-btn { height: 34px; }
+.banknote-order-actions button:disabled { opacity: .6; cursor: wait; }

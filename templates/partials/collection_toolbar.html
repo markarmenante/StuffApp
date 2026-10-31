@@ -61,4 +61,9 @@
 <span class="collection-toolbar-separator" aria-hidden="true">|</span>
 <a href="{{ url_for('new_record', category=category) }}" class="toolbar-btn add"
    title="Add {{ cat_info.singular }}" aria-label="Add {{ cat_info.singular }}">+</a>
+{% if category == 'banknotes' and g.current_user and g.current_user.role == 'owner' %}
+<button type="button" id="banknoteOrderAdd" class="toolbar-btn add"
+        title="Import banknotes from an eBay order" aria-label="Import banknotes from an eBay order"
+        aria-haspopup="dialog" aria-controls="banknoteOrderDialog">++</button>
+{% endif %}
 {% endif %}

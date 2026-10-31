@@ -1,0 +1,14 @@
+<dialog id="banknoteOrderDialog" class="banknote-order-dialog" aria-labelledby="banknoteOrderTitle">
+  <form id="banknoteOrderForm" action="/banknotes/imports" method="post">
+    <h2 id="banknoteOrderTitle">Import banknotes</h2>
+    <label for="banknoteOrderNumber">eBay order number</label>
+    <input id="banknoteOrderNumber" name="order_number" type="text" required
+           placeholder="24-15335-90978" autocomplete="off" spellcheck="false"
+           aria-describedby="banknoteOrderStatus">
+    <p id="banknoteOrderStatus" role="status" aria-live="polite"></p>
+    <div class="banknote-order-actions">
+      <button type="button" id="banknoteOrderCancel" class="toolbar-btn pill">Cancel</button>
+      <button type="submit" id="banknoteOrderProcess" class="toolbar-btn pill active">Process order</button>
+    </div>
+  </form>
+</dialog>

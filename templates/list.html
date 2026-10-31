@@ -164,6 +164,12 @@
   {% endif %}
 </div>
 
+{% if category == 'banknotes' and not at_property and not _market and not _analysis and g.current_user and g.current_user.role == 'owner' %}
+{% include 'partials/banknote_order_dialog.html' %}
+<script src="{{ url_for('static', filename='js/banknote-imports.js') }}?v={{ asset_v('js/banknote-imports.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/banknote-order-dialog.js') }}?v={{ asset_v('js/banknote-order-dialog.js') }}" defer></script>
+{% endif %}
+
 <!-- List -->
 {% if _market and market_ebay_enabled and not market_earlier %}
 <section id="marketEbaySession" class="market-session" hidden aria-label="eBay session">
