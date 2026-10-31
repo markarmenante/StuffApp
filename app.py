@@ -26,6 +26,7 @@ import banknote_catalog_lookup
 import banknote_catalog_search
 import banknote_catalog_proposals
 import banknote_entities
+import banknote_entity_dates
 import banknote_entity_coverage
 import banknote_printers
 import ebay_orders
@@ -5919,9 +5920,15 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
             coverage, status = 'nonissuer', 'Did not issue its own banknotes.'
         else:
             coverage, status = 'unknown', 'Banknote issuance not yet established.'
+        date_display = banknote_entity_dates.pill_date(entity)
+        title_parts = [status, entity.get('note'), date_display['date_note']]
+        if date_display['date_source']:
+            title_parts.append('Source: ' + date_display['date_source'])
         groups.setdefault(entity['group'], []).append({
             **entity, 'coverage': coverage, 'status': status, 'href': href,
-            'title': status + (' ' + entity['note'] if entity.get('note') else ''),
+            **date_display,
+            'accessible_status': ' '.join(filter(None, [status, date_display['date_note']])),
+            'title': ' '.join(filter(None, title_parts)),
         })
     for pills in groups.values():
         pills.sort(key=lambda entity: banknote_catalog.fold(entity['label']))

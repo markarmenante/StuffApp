@@ -1,4 +1,5 @@
 """Historical-entity coverage and navigation use the authorized whole collection."""
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -23,16 +24,80 @@ class Pills(HTMLParser):
     def __init__(self, html):
         super().__init__()
         self.pills, self.targets, self.regions = {}, set(), []
+        self._pill_key, self._pill_depth = None, 0
         self.feed(html)
 
     def handle_starttag(self, tag, attributes):
         attrs = dict(attributes)
+        if self._pill_key:
+            self._pill_depth += 1
         if attrs.get('data-entity-key'):
-            self.pills[attrs['data-entity-key']] = dict(attrs, tag=tag)
+            self._pill_key, self._pill_depth = attrs['data-entity-key'], 1
+            self.pills[self._pill_key] = dict(attrs, tag=tag, text='')
         if 'item-row' in attrs.get('class', '').split():
             self.targets.add(attrs['id'])
         if 'banknote-entity-pills' in attrs.get('class', '').split():
             self.regions.append(attrs)
+
+    def handle_data(self, text):
+        if self._pill_key and self._pill_depth == 1:
+            self.pills[self._pill_key]['text'] += text
+
+    def handle_endtag(self, tag):
+        if self._pill_key:
+            self._pill_depth -= 1
+            if not self._pill_depth:
+                self._pill_key = None
+
+
+class PillDateTests(unittest.TestCase):
+    def test_reviewed_display_metadata_uses_known_keys_and_keeps_sources(self):
+        catalog_keys = {entity['key'] for entity in stuff.banknote_entities.ENTITY_CATALOG}
+        dates = stuff.banknote_entity_dates.PILL_DATES
+        exclusions = stuff.banknote_entity_dates.PILL_DATE_EXCLUSIONS
+        self.assertFalse(set(dates) - catalog_keys, 'Unknown date keys would silently leave the real pill undated')
+        self.assertFalse(set(exclusions) - catalog_keys)
+        self.assertFalse(set(dates) & set(exclusions), 'A reviewed year and an exclusion must not conflict')
+        for key, transition in dates.items():
+            with self.subTest(key=key):
+                self.assertTrue(str(transition['year']).strip())
+                self.assertTrue(transition['note'].strip())
+                self.assertTrue(transition['source'].startswith('https://'))
+
+    def test_verified_independence_fallback_does_not_mutate_the_entity(self):
+        entity = dict(key='fixture-colony', group='british', label='Fixture colony',
+                      issued=True, independence_date='1981-09-21',
+                      independence_source='https://history.state.gov/countries/belize',
+                      scan_period={'year_end': 1900, 'end_kind': 'renaming'})
+        before = deepcopy(entity)
+        display = stuff.banknote_entity_dates.pill_date(entity)
+        self.assertEqual(display['display_label'], 'Fixture colony (1981)')
+        self.assertEqual(display['date_note'], 'Independence: 1981-09-21.')
+        self.assertEqual(display['date_source'], entity['independence_source'])
+        self.assertEqual(entity, before)
+
+    def test_scan_ends_and_unsourced_dates_do_not_become_independence_labels(self):
+        base = dict(key='fixture-colony', group='british', label='Fixture colony',
+                    issued=True, scan_period={'year_end': 1954, 'end_kind': 'administration_end'})
+        for changes in ({}, {'independence_date': '1954-01-01'},
+                        {'independence_date': 'not-a-date', 'independence_source': 'https://example.test'},
+                        {'group': 'other', 'independence_date': '1954-01-01', 'independence_source': 'https://example.test'},
+                        {'group': 'us', 'independence_date': '1954-01-01', 'independence_source': 'https://example.test'}):
+            with self.subTest(changes=changes):
+                display = stuff.banknote_entity_dates.pill_date({**base, **changes})
+                self.assertEqual(display['display_label'], base['label'])
+                self.assertFalse(display['date_note'])
+
+    def test_reviewed_exclusion_prevents_a_false_independence_label(self):
+        entity = dict(key='fixture-colony', group='british', label='Fixture colony',
+                      issued=True, independence_date='1954-01-01',
+                      independence_source='https://example.test')
+        note = 'Continuing territory; no independence date.'
+        with patch.dict(stuff.banknote_entity_dates.PILL_DATE_EXCLUSIONS,
+                        {'fixture-colony': {'note': note, 'source': 'https://example.test'}}):
+            display = stuff.banknote_entity_dates.pill_date(entity)
+        self.assertEqual(display['display_label'], entity['label'])
+        self.assertEqual(display['date_note'], note)
 
 
 class EntityPillTests(unittest.TestCase):
@@ -69,6 +134,47 @@ class EntityPillTests(unittest.TestCase):
             self.assertIn(pill['href'][1:], page.targets)
             self.assertIn('includes owned and pending purchases', pill['aria-label'])
             self.assertTrue(all(region['tabindex'] == '0' for region in page.regions))
+
+    def test_years_are_visible_and_explain_independence_versus_handover(self):
+        self.note('india')
+        self.note('hong-kong', country='Hong Kong', year=1980,
+                  issuer='The Hongkong and Shanghai Banking Corporation')
+        self.note('bermuda', country='Bermuda', year=1982)
+        roster_before = deepcopy(stuff.banknote_entities.ENTITY_CATALOG)
+        records_before = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        for history in ('0', '1'):
+            page = self.page('/banknotes?history=' + history)
+            for key, text, target, event in (
+                    ('british-india', 'India (1947)', 'india', 'independence'),
+                    ('british-hong-kong', 'Hong Kong (1997)', 'hong-kong', 'handover')):
+                pill = page.pills[key]
+                self.assertEqual(pill['text'], text)
+                self.assertTrue(pill['aria-label'].startswith(text + ': '))
+                self.assertIn(event, pill['title'].lower())
+                self.assertIn(event, pill['aria-label'].lower())
+                self.assertIn('Source: https://', pill['title'])
+                self.assertEqual((pill['tag'], pill['data-coverage'], pill['href']),
+                                 ('a', 'held', '#item-' + target))
+            bermuda = page.pills['british-bermuda']
+            self.assertEqual(bermuda['text'], 'Bermuda')
+            self.assertEqual(bermuda['href'], '#item-bermuda')
+            self.assertEqual(page.pills['british-bahamas']['text'], 'Bahamas (1973)')
+            self.assertEqual(page.pills['british-bahamas']['data-coverage'], 'missing')
+            self.assertNotIn('href', page.pills['british-bahamas'])
+        self.assertEqual(stuff.banknote_entities.ENTITY_CATALOG, roster_before)
+        self.assertEqual(records_before, [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')])
+
+    def test_historical_alias_uses_the_canonical_dated_pill_without_renaming_records(self):
+        self.note('afars', country='French Afars & Issas', year=1975, issuer='Trésor Public')
+        for history in ('0', '1'):
+            page = self.page('/banknotes?history=' + history)
+            pill = page.pills['french-french-territory-of-the-afars-and-issas']
+            self.assertEqual(pill['text'], 'French Territory of the Afars and Issas (1977)')
+            self.assertEqual(pill['href'], '#item-afars')
+            self.assertEqual(pill['data-coverage'], 'held')
+            self.assertEqual(len([key for key in page.pills if 'afars' in key]), 1)
+        self.assertEqual(self.db.execute("SELECT country FROM banknotes WHERE id='afars'").fetchone()[0],
+                         'French Afars & Issas')
 
     def test_coverage_counts_all_purchase_phases_but_no_disposed_notes(self):
         for index, status in enumerate(('Own', 'Owned', '', None, 'Ordered', 'Shipped', 'Delivered',
@@ -197,6 +303,20 @@ class EntityPillTests(unittest.TestCase):
         self.assertEqual(page.pills['fixture-unknown']['data-coverage'], 'unknown')
         self.assertIn('not yet established', page.pills['fixture-unknown']['title'])
         self.assertNotIn('href', page.pills['fixture-none'])
+
+    def test_known_political_date_preserves_unknown_banknote_issuance(self):
+        self.note('india')
+        fixture = dict(key='fixture-colony', group='british', label='Fixture colony',
+                       countries=('Fixture colony',), issued=None, note='')
+        transition = dict(year=1963, note='Independence: 1963.', source='https://example.test/history')
+        with patch.object(stuff.banknote_entities, 'ENTITY_CATALOG', (fixture,)), \
+                patch.dict(stuff.banknote_entity_dates.PILL_DATES, {'fixture-colony': transition}):
+            pill = self.page().pills['fixture-colony']
+        self.assertEqual(pill['text'], 'Fixture colony (1963)')
+        self.assertEqual((pill['tag'], pill['data-coverage']), ('span', 'unknown'))
+        self.assertIn('Banknote issuance not yet established', pill['title'])
+        self.assertIn('Independence: 1963.', pill['aria-label'])
+        self.assertNotIn('href', pill)
 
     def test_pitcairn_is_a_documented_nonissuer_without_a_collection_link(self):
         self.note('india')

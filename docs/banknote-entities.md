@@ -149,6 +149,28 @@ row. A filtered-out target links to its existing historical group and exact row
 anchor, retaining the History setting. A cross-group historical identity links
 to the record's actual filing; the coverage helper never silently refiles it.
 
+## Years displayed on entity pills
+
+The collection's historical entity pills append a reviewed year to their visible
+name, for example **India (1947)** and **Hong Kong (1997)**. The tooltip and
+accessible description identify the actual event: Hong Kong's 1997 handover to
+China is not described as independence. Tooltips also retain the supporting
+source URL. Continuing territories and regions without one defensible common
+year keep their names without an invented independence date.
+
+`banknote_entity_date_data.py` holds the display-only, source-backed events and
+explicit exclusions. `banknote_entity_dates.pill_date` can also reuse an existing
+verified exact `independence_date` with its source for an issuing colonial entity
+or the Philippines. It never derives an independence year from `scan_period`,
+whose final year may instead concern a rename, an occupation or a documented
+issue. Reviewed display events apply even where banknote issuance remains
+unverified; the question mark and existing coverage meaning still apply.
+
+These parenthetical years change only presentation. Canonical entity labels and
+keys, sorting, coverage, alias resolution, list filters, exact-note links and
+History behavior retain their existing rules. No collection field or Market
+Scan cutoff is rewritten. Date explanations are available with History on or off.
+
 ## Missing entities and dated Market Scan priorities
 
 The scan uses the same roster and full authorized collection coverage as the
@@ -260,6 +282,10 @@ and nonissuer states, SQLite row support and unchanged inputs. The integration
 suite covers lifecycle, access restrictions, filtering, cross-group navigation
 and actual Pitcairn status. Isolated browser fixtures verify desktop/mobile
 layout and exact destination rows without changing real collection data.
+The same tests check visible independence years, Hong Kong's handover wording,
+undated continuing territories, canonical aliases and preserved dated-pill links
+with History on and off. The display helper rejects unsourced date fallbacks and
+does not infer dates from scan periods or mutate the roster.
 
 ## Pacific lineage and African successor coverage
 

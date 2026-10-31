@@ -18,7 +18,7 @@ const os = require('node:os');
   const repo = path.resolve(__dirname, '..');
   const artifacts = process.env.ENTITY_PILLS_TEST_ARTIFACTS || mkdtempSync(path.join(os.tmpdir(), 'banknote-entity-pills-'));
   mkdirSync(artifacts, {recursive:true});
-  const sourceFiles = ['app.py','banknote_catalog.py','banknote_entities.py','banknote_entity_coverage.py','templates/list.html','static/css/style.css','static/js/banknote-history-position.js'];
+  const sourceFiles = ['app.py','banknote_catalog.py','banknote_entities.py','banknote_entity_dates.py','banknote_entity_date_data.py','banknote_entity_coverage.py','templates/list.html','static/css/style.css','static/js/banknote-history-position.js'];
   const hashes = () => Object.fromEntries(sourceFiles.map(file => [file, createHash('sha256').update(readFileSync(path.join(repo,file))).digest('hex')]));
   const sourceBefore = hashes();
   const render = String.raw`
@@ -43,6 +43,7 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-entity-browser-db-') as tempor
   rows=[
    ('india-held','India',1920,'Government of India','Own','Historic India fixture'),
    ('india-modern','India',1960,'Reserve Bank of India','Own','Independent India fixture'),
+   ('hong-kong-held','Hong Kong',1980,'The Hongkong and Shanghai Banking Corporation','Own','Hong Kong fixture'),
    ('cuba-held','Cuba',1896,'Banco Español de la Isla de Cuba','Own','Historic Cuba fixture'),
    ('cuba-modern','Cuba',1960,'Banco Nacional de Cuba','Own','Independent Cuba fixture'),
    ('canada-held','Canada',1967,'Bank of Canada','Own','VisibleOnly companion fixture'),
@@ -154,6 +155,29 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-entity-browser-db-') as tempor
   try {
     for(const mobile of [false,true]) {
       const device=mobile?'mobile':'desktop';
+      await run(device+': independence years and Hong Kong handover appear on the existing pills',async()=>{
+        const t=await setup(mobile);try {
+          for(const [key,label,event] of [
+            ['british-india','India (1947)','independence'],
+            ['british-hong-kong','Hong Kong (1997)','handover'],
+          ]) {
+            const item=pill(t.page,key);
+            assert.equal(await item.evaluate(element=>element.firstChild.textContent),label);
+            assert((await item.getAttribute('aria-label')).startsWith(label+': '));
+            assert((await item.getAttribute('title')).toLowerCase().includes(event));
+            assert((await item.getAttribute('aria-label')).toLowerCase().includes(event));
+            assert.match(await item.getAttribute('title'),/Source: https:\/\//);
+            assert.equal(await item.getAttribute('data-coverage'),'held');
+          }
+          assert.equal(await pill(t.page,'british-bermuda').evaluate(element=>element.firstChild.textContent),'Bermuda');
+          assert.equal(await pill(t.page,'british-east-caribbean-states').evaluate(element=>element.firstChild.textContent),'East Caribbean States');
+          const hongKong=pill(t.page,'british-hong-kong');
+          assert.equal(await hongKong.getAttribute('href'),'#item-hong-kong-held');
+          await hongKong.click();
+          await targetVisible(t.page,'item-hong-kong-held');
+          assert.equal(new URL(t.page.url()).hash,'#item-hong-kong-held');
+        }finally{await t.close();}
+      });
       await run(device+': held, missing and nonissuer statuses use distinct colors and semantic links',async()=>{
         const t=await setup(mobile);try {
           const held=pill(t.page,'british-india'),missing=pill(t.page,'british-bahamas'),neutral=pill(t.page,'fixture-nonissuer');
@@ -350,6 +374,7 @@ with tempfile.TemporaryDirectory(prefix='stuffapp-entity-browser-db-') as tempor
           await t.page.waitForFunction(({id,offset})=>Math.abs(document.getElementById(id).getBoundingClientRect().top-offset)<2,retained,{timeout:3000});
           assert.equal(await t.page.locator('.us-series-panel').count(),0);
           assert.equal(await pill(t.page,'british-india').count(),1);
+          assert.equal(await pill(t.page,'british-india').evaluate(element=>element.firstChild.textContent),'India (1947)');
           await t.page.locator('#banknoteHistoryToggle').click();
           await t.page.waitForURL(url=>url.searchParams.get('history')!=='0');
           await t.page.waitForFunction(({id,offset})=>Math.abs(document.getElementById(id).getBoundingClientRect().top-offset)<2,retained,{timeout:3000});

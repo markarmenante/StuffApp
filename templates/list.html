@@ -212,7 +212,7 @@
     {% if _entity_pills %}
     <ul class="banknote-entity-pills" aria-label="{{ _bn_group.title }} entities. Green: in collection, including pending purchases. Yellow: issued banknotes, not held. Neutral: did not issue its own banknotes. Question mark: issuance not yet established." tabindex="0">
       {% for entity in _entity_pills %}
-      <li>{% if entity.href %}<a href="{{ entity.href }}"{% else %}<span{% endif %} class="banknote-entity-pill entity-{{ entity.coverage }}" data-entity-key="{{ entity.key }}" data-coverage="{{ entity.coverage }}" title="{{ entity.title }}" aria-label="{{ entity.label }}: {{ entity.status }}">{{ entity.label }}<span class="banknote-entity-status">: {{ entity.status }}</span>{% if entity.coverage == 'unknown' %}<span aria-hidden="true"> ?</span>{% endif %}{% if entity.href %}</a>{% else %}</span>{% endif %}</li>
+      <li>{% if entity.href %}<a href="{{ entity.href }}"{% else %}<span{% endif %} class="banknote-entity-pill entity-{{ entity.coverage }}" data-entity-key="{{ entity.key }}" data-coverage="{{ entity.coverage }}" title="{{ entity.title }}" aria-label="{{ entity.display_label }}: {{ entity.accessible_status }}">{{ entity.display_label }}<span class="banknote-entity-status">: {{ entity.accessible_status }}</span>{% if entity.coverage == 'unknown' %}<span aria-hidden="true"> ?</span>{% endif %}{% if entity.href %}</a>{% else %}</span>{% endif %}</li>
       {% endfor %}
     </ul>
     {% endif %}
