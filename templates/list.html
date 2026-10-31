@@ -94,7 +94,13 @@
     {%- endif -%}
     {%- if market_wantlist and not market_earlier %} · missing entities: {{ market_wantlist.open }} of {{ market_wantlist.total }} · US large-size types: {{ market_wantlist.us_open }} of {{ market_wantlist.us_total }} still open{% endif -%}
   </span>
-  <span class="market-status" id="marketUnwatchStatus" role="status" aria-live="polite" hidden></span>
+  <div class="market-status market-unwatch-status" id="marketUnwatchStatus" role="status" aria-live="polite" hidden>
+    <details>
+      <summary></summary>
+      <p class="market-unwatch-notice" hidden></p>
+      <ul></ul>
+    </details>
+  </div>
   {% endif %}
   {# Drilled in from a Property — give a one-tap way back. #}
   {% if at_property and at_property_url %}
@@ -892,22 +898,41 @@
 
   const unwatchStatus = document.getElementById('marketUnwatchStatus');
   let unwatchTimer = null, unwatchGeneration = 0;
+  let unwatchEntries = [];
+  function unwatchSummary(unavailable = false) {
+    const pending = unwatchEntries.filter(row => row.active).length;
+    const attention = unwatchEntries.filter(row => !row.active && !['removed', 'already_unwatched'].includes(row.state)).length;
+    const parts = [unwatchEntries.length + ' recent listing' + (unwatchEntries.length === 1 ? '' : 's') + ' deleted'];
+    if (pending) parts.push(pending + ' eBay removal' + (pending === 1 ? '' : 's') + ' pending');
+    if (attention) parts.push(attention + ' eBay removal' + (attention === 1 ? ' needs' : 's need') + ' attention');
+    if (!pending && !attention) parts.push('eBay watchlist confirmed');
+    if (unavailable) parts.push('eBay status unavailable');
+    unwatchStatus.querySelector('summary').textContent = parts.join(' · ');
+  }
   function showUnwatch(requests) {
     if (!unwatchStatus) return;
-    const entries = (requests || []).filter(row => row && row.message);
-    unwatchStatus.hidden = !entries.length;
-    unwatchStatus.replaceChildren();
-    entries.slice(0, 5).forEach((row, index) => {
-      if (index) unwatchStatus.appendChild(document.createElement('br'));
+    unwatchEntries = (requests || []).filter(row => row && row.message);
+    unwatchStatus.hidden = !unwatchEntries.length;
+    const notice = unwatchStatus.querySelector('.market-unwatch-notice');
+    notice.hidden = true;
+    notice.textContent = '';
+    const list = unwatchStatus.querySelector('ul');
+    list.replaceChildren();
+    unwatchStatus.querySelector('summary').textContent = '';
+    if (!unwatchEntries.length) return;
+    unwatchSummary();
+    unwatchEntries.forEach(row => {
+      const item = document.createElement('li');
       const text = document.createElement('span');
-      text.textContent = (entries.length > 1 ? 'Item ' + row.item_id + ': ' : '') + row.message;
-      unwatchStatus.appendChild(text);
-      if (!row.active && !['removed', 'already_unwatched'].includes(row.state) && /^https:\/\/www\.ebay\.com\/itm\/\d{9,15}$/.test(row.listing_url || '')) {
+      text.textContent = (unwatchEntries.length > 1 ? 'Item ' + row.item_id + ': ' : '') + row.message;
+      item.appendChild(text);
+      if (!row.active && !['removed', 'already_unwatched'].includes(row.state) && /^https:\/\/www\.ebay\.com\/itm\/\d{9,15}$/.test(row.listing_url || '') && row.listing_url === 'https://www.ebay.com/itm/' + row.item_id) {
         const link = document.createElement('a');
         link.href = row.listing_url; link.target = '_blank'; link.rel = 'noopener';
         link.textContent = ' Open item';
-        unwatchStatus.appendChild(link);
+        item.appendChild(link);
       }
+      list.appendChild(item);
     });
   }
   async function pollUnwatch(generation = unwatchGeneration) {
@@ -922,7 +947,12 @@
       if (data.active) unwatchTimer = setTimeout(() => pollUnwatch(generation), 3000);
     } catch (_) {
       if (generation === unwatchGeneration) {
-        if (!unwatchStatus.hidden) unwatchStatus.textContent = 'Deleted here. eBay watchlist removal status is unavailable; confirmation is pending.';
+        if (!unwatchStatus.hidden) {
+          unwatchSummary(true);
+          const notice = unwatchStatus.querySelector('.market-unwatch-notice');
+          notice.textContent = 'eBay watchlist removal status is unavailable; confirmation is pending for unfinished removals. Last known results are shown below.';
+          notice.hidden = false;
+        }
         unwatchTimer = setTimeout(() => pollUnwatch(generation), 10000);
       }
     }
@@ -1260,8 +1290,8 @@
           setStatus('Deleted. This listing will no longer be recommended.');
           if (d.unwatch) {
             unwatchGeneration += 1;
-            showUnwatch([d.unwatch]);
-            if (d.unwatch.active) pollUnwatch(unwatchGeneration);
+            showUnwatch([d.unwatch, ...unwatchEntries.filter(entry => entry.item_id !== d.unwatch.item_id)]);
+            if (unwatchEntries.some(entry => entry.active)) pollUnwatch(unwatchGeneration);
           }
         })
         .catch(() => {

@@ -35,6 +35,17 @@ it does not file a purchase or establish availability. Known ended, invalid,
 identity-conflicting and ineligible offers remain blocked. Bought can still file
 a purchase already made. Other unreadable venues retain the existing unverified state.
 
+Witter currency categories are discovery pages, never exact offers. A unique
+observed product link can resolve a category candidate only when its explicit
+Friedberg number, year, denomination, grader, grade and EPQ/PPQ status all match.
+The exact product page must independently confirm the same identity and live
+availability. Existing current candidates receive the resolved link and photos
+once, guarded against concurrent Delete/purchase; prices, collection records,
+Earlier history and durable dismissals remain unchanged. Missing or ambiguous
+evidence cannot borrow the category's other note. Photos come from the primary
+Product, page metadata or an identified exact-item gallery, including Witter's
+product gallery. Arbitrary image tags and related-product cards are excluded.
+
 Coin archive enrichment runs after candidates are visible, for at most another
 60 seconds within the overall scan budget. It uses cached archive queries and
 metadata-only provenance results; it does not download full lot descriptions
@@ -304,7 +315,11 @@ expired requests and ambiguous results never count as confirmed removal.
 The owner-only `GET /banknotes/market/ebay-unwatch/status` is read-only and shared
 by both Market Scan categories. The page
 shows pending, verified or needs-attention text after removing the recommendation,
-and restores recent status on reload. A terminal failure leaves the listing
+and restores recent status on reload. A collapsed summary counts recent deletions,
+pending removals and removals needing attention; its expandable details retain
+each result and exact-item link. An already-unwatched observation is a verified
+success. Polling preserves the open/collapsed state and a status-fetch failure
+retains the last known results. A terminal failure leaves the listing
 suppressed and directs the owner to check eBay; it does not launch a retry or undo
 suppression. No purchase, bid, feedback or other eBay action is authorized by this
 queue. Verification uses synthetic writes and intercepted browser requests.

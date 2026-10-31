@@ -75,9 +75,9 @@ with tempfile.TemporaryDirectory(prefix='market-unwatch-db-') as temporary:
     '345678901234':'https://www.ebay.com/itm/345678901234',
   };
   const endpoint = (id, category='banknotes') => '/'+category+'/market/' + (id.length === 12 ? 'ebay-feed/' : '') + id + '/dismiss';
-  const request = (id, state='pending', message='Deleted here. Removing from your eBay watchlist…') => ({
+  const request = (id, state='queued', message='Deleted here. Removing from your eBay watchlist…') => ({
     id:'unwatch-'+id, item_id:urls[id].split('/').at(-1), listing_url:urls[id], canonical_url:urls[id],
-    state, active:['pending','claimed','running'].includes(state), message,
+    state, active:['queued','claimed'].includes(state), message,
   });
   const evidence = {passed:[], failures:[], errors:[], unexpectedRequests:[], externalRequests:[], simulatedPosts:[], sourceBefore, queryOnly:fixtures.queryOnly, sourceRowsPreserved:fixtures.sourceRowsPreserved};
   let currentCase = '';
@@ -168,6 +168,7 @@ with tempfile.TemporaryDirectory(prefix='market-unwatch-db-') as temporary:
           t.setRequests([request('234567890123','failed','Deleted here. Could not verify removal from eBay. Sign in on your Mac to retry.')]);
           await waitForStatus(t.page,'Could not verify removal');
           assert.doesNotMatch(await t.page.locator('#marketUnwatchStatus').textContent(),/Removed from your eBay watchlist\./);
+          await t.page.locator('#marketUnwatchStatus summary').click();
           const exactLink=t.page.locator('#marketUnwatchStatus').getByRole('link',{name:'Open item'});
           assert.equal(await exactLink.getAttribute('href'),urls['234567890123']);
           assert.match(await exactLink.getAttribute('rel'),/noopener/);
@@ -211,6 +212,7 @@ with tempfile.TemporaryDirectory(prefix='market-unwatch-db-') as temporary:
           const status=t.page.locator('#marketUnwatchStatus');
           assert.equal(await status.getAttribute('role'),'status');assert.equal(await status.getAttribute('aria-live'),'polite');
           assert.equal(await status.locator('span').textContent(),message);assert.equal(await status.locator('img').count(),0);
+          await status.locator('summary').click();
           assert.equal(await status.getByRole('link',{name:'Open item'}).getAttribute('href'),urls.researched);
           assert.equal(await t.page.evaluate(()=>Boolean(window.fixtureInjected)),false);assert.equal(t.posts.length,0);
         }finally{await t.close();}
@@ -255,6 +257,105 @@ with tempfile.TemporaryDirectory(prefix='market-unwatch-db-') as temporary:
           await t.page.clock.runFor(10020);await waitForStatus(t.page,'Removing');
           assert.equal(t.reads(),2);assert.equal(t.posts.length,0);assert.equal(await t.row('researched').count(),0);
           assert.equal(await t.row('dealer').count(),1);assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': recent removals stay compact with accurate mixed counts and every item available on expansion',async()=>{
+        const states=['removed','already_unwatched','queued','claimed','failed','expired','sign_in_required','challenge_required','uncertain','unavailable'];
+        const requests=states.map((state,index)=>{
+          const item_id=String(456789012300+index);
+          return {...request('researched',state,'Result for '+state+'.'),id:'recent-'+index,item_id,listing_url:'https://www.ebay.com/itm/'+item_id};
+        });
+        const t=await setup(mobile,{virtualClock:true,requests});try {
+          await waitForStatus(t.page,'Result for unavailable.');
+          const status=t.page.locator('#marketUnwatchStatus'),details=status.locator('details'),summary=status.locator('summary');
+          assert.equal(await summary.textContent(),'10 recent listings deleted · 2 eBay removals pending · 6 eBay removals need attention');
+          assert.equal(await details.getAttribute('open'),null);
+          assert.equal(await status.locator('li').count(),10);
+          assert.equal(await status.locator('li').first().isVisible(),false);
+          assert.doesNotMatch(await summary.textContent(),/confirmed/);
+          await t.page.screenshot({path:path.join(artifacts,device+'-recent-collapsed.png'),fullPage:true});
+          await summary.focus();await summary.press('Enter');
+          assert.equal(await status.locator('li').last().isVisible(),true);
+          assert.equal(await status.getByRole('link',{name:'Open item'}).count(),6);
+          for (let index=0;index<requests.length;index++) {
+            const row=status.locator('li').nth(index);
+            assert.equal(await row.locator('span').textContent(),'Item '+requests[index].item_id+': '+requests[index].message);
+            assert.equal(await row.locator('a').count(),index<4?0:1);
+            if(index>=4) assert.equal(await row.locator('a').getAttribute('href'),requests[index].listing_url);
+          }
+          await t.page.screenshot({path:path.join(artifacts,device+'-recent-expanded.png'),fullPage:true});
+          t.setRequests(requests.map(row=>row.active?{...row,state:'claimed',message:'Still checking '+row.item_id+'.'}:row));
+          await t.page.clock.runFor(3020);await waitForStatus(t.page,'Still checking');
+          assert.equal(await details.getAttribute('open'),'');
+          await summary.press('Enter');
+          assert.equal(await details.getAttribute('open'),null);
+          t.setRequests(requests.map(row=>row.active?{...row,state:'removed',active:false,message:'Verified off the eBay watchlist.'}:row));
+          await t.page.clock.runFor(3020);await waitForStatus(t.page,'Verified off the eBay watchlist.');
+          assert.equal(await details.getAttribute('open'),null);
+          assert.equal(await summary.textContent(),'10 recent listings deleted · 6 eBay removals need attention');
+          assert.equal(await status.locator('li').count(),10);
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+          const layout=await t.page.evaluate(()=>({width:innerWidth,page:document.documentElement.scrollWidth}));assert(layout.page<=layout.width+1,JSON.stringify(layout));
+        }finally{await t.close();}
+      });
+      await run(device+': transport errors retain known results and exact links without reopening collapsed details',async()=>{
+        const requests=[request('researched'),request('234567890123','failed','Manual eBay check needed.'),request('345678901234','removed','Verified off the eBay watchlist.')];
+        const options={virtualClock:true,requests};
+        const t=await setup(mobile,options);try {
+          await waitForStatus(t.page,'Manual eBay check needed.');
+          const status=t.page.locator('#marketUnwatchStatus'),details=status.locator('details'),summary=status.locator('summary');
+          await summary.click();
+          options.statusFailure=true;
+          await t.page.clock.runFor(3020);await waitForStatus(t.page,'Last known results');
+          assert.equal(await details.getAttribute('open'),'');
+          assert.equal(await summary.textContent(),'3 recent listings deleted · 1 eBay removal pending · 1 eBay removal needs attention · eBay status unavailable');
+          assert.equal(await status.locator('li').count(),3);
+          assert.equal(await status.getByRole('link',{name:'Open item'}).getAttribute('href'),urls['234567890123']);
+          await summary.click();
+          options.statusFailure=false;
+          t.setRequests(requests.map(row=>row.active?{...row,state:'removed',active:false,message:'New removal verified.'}:row));
+          await t.page.clock.runFor(10020);await waitForStatus(t.page,'New removal verified.');
+          assert.equal(await details.getAttribute('open'),null);
+          assert.equal(await summary.textContent(),'3 recent listings deleted · 1 eBay removal needs attention');
+          assert.equal(await status.locator('.market-unwatch-notice').textContent(),'');
+          assert.equal(await status.locator('li').count(),3);assert.equal(t.posts.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': verified outcomes are neutral and unsafe or mismatched item URLs never become links',async()=>{
+        const safeResults=[request('researched','removed','Removed from your eBay watchlist.'),request('234567890123','already_unwatched','This listing is already off your eBay watchlist.')];
+        const t=await setup(mobile,{requests:safeResults});try {
+          await waitForStatus(t.page,'already off your eBay watchlist');
+          const status=t.page.locator('#marketUnwatchStatus');
+          assert.equal(await status.locator('summary').textContent(),'2 recent listings deleted · eBay watchlist confirmed');
+          assert.equal(await status.locator('details').getAttribute('open'),null);
+          assert.equal(await status.locator('a').count(),0);
+          assert.equal(await status.locator('[role="alert"]').count(),0);
+          const unsafe=['javascript:alert(1)','https://www.ebay.com.evil.example/itm/123456789012',urls.researched+'?tracking=1',urls['345678901234']];
+          t.setRequests(unsafe.map((listing_url,index)=>({...request('researched','failed','Check this exact item.'),id:'unsafe-'+index,listing_url})));
+          await t.page.reload();await waitForStatus(t.page,'Check this exact item.');
+          await status.locator('summary').click();
+          assert.equal(await status.locator('li').count(),4);assert.equal(await status.locator('a').count(),0);
+          assert.equal(t.posts.length,0);assert.equal(t.popups.length,0);
+        }finally{await t.close();}
+      });
+      await run(device+': a terminal Delete result preserves polling for another active removal',async()=>{
+        const terminal=request('234567890123','failed','Check the watched item on eBay.');
+        const options={virtualClock:true,requests:[request('researched')],postHandler:async(route)=>{
+          await route.fulfill({json:{ok:true,canonical_url:urls['234567890123'],unwatch:terminal}});return true;
+        }};
+        const t=await setup(mobile,options);try {
+          await waitForStatus(t.page,'Removing');
+          t.setRequests([terminal,request('researched')]);
+          await t.row('234567890123').getByRole('button',{name:'Delete',exact:true}).click();
+          await t.row('234567890123').waitFor({state:'detached'});
+          await waitForStatus(t.page,'Check the watched item on eBay.');
+          const status=t.page.locator('#marketUnwatchStatus');
+          assert.equal(await status.locator('summary').textContent(),'2 recent listings deleted · 1 eBay removal pending · 1 eBay removal needs attention');
+          t.setRequests([terminal,request('researched','removed','The earlier removal is now verified.')]);
+          await t.page.clock.runFor(3020);await waitForStatus(t.page,'The earlier removal is now verified.');
+          assert.equal(await status.locator('summary').textContent(),'2 recent listings deleted · 1 eBay removal needs attention');
+          assert.equal(await status.locator('details').getAttribute('open'),null);
+          assert.deepEqual(t.posts,[{path:endpoint('234567890123'),body:null}]);assert.equal(t.popups.length,0);
         }finally{await t.close();}
       });
     }

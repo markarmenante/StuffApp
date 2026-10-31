@@ -17,6 +17,7 @@ import market_valuation
 import market_estimates
 import market_slab_labels
 import market_unwatch
+import market_dealer_listing
 import cloudflare_access
 import market_checkout
 import market_purchase_capture
@@ -16879,8 +16880,8 @@ def _market_page_seller(listing_url, html=None):
 
 def _market_page_image_urls(listing_url, html=None):
     """Direct photo URLs read off the listing page itself, best first:
-    the JSON-LD / og:image, then eBay's image-gallery files, then any
-    large image the page references. Used when the scan stored no image
+    the primary Product, identified galleries and page image metadata.
+    Used when the scan stored no image
     for a candidate (search snippets rarely carry one) — so Buy still
     brings the note's photos over (Mark, 2026-09-12)."""
     if _market_listing_url_problem(listing_url):
@@ -16893,19 +16894,66 @@ def _market_page_image_urls(listing_url, html=None):
             return []
         if market_runtime.canonical_url(getattr(_MARKET_LAST_URL, 'final', listing_url)) != market_runtime.canonical_url(listing_url):
             return []
+    from html.parser import HTMLParser
+    from urllib.parse import urljoin, urlsplit
+    parsed_url = urlsplit(listing_url)
+    witter_item = (parsed_url.hostname in ('wittercoin.com', 'www.wittercoin.com')
+                   and re.fullmatch(r'/item/[^/]+/\d+/?', parsed_url.path))
+
+    class PagePhotos(HTMLParser):
+        """Read metadata and a known dealer's primary gallery, never all img tags."""
+        void_tags = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+                     'link', 'meta', 'param', 'source', 'track', 'wbr'}
+
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.meta, self.gallery, self.stack = [], [], []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            classes = (attrs.get('class') or '').split()
+            gallery = bool(self.stack and self.stack[-1][1])
+            if witter_item and tag == 'div' and 'product-single-gallery' in classes:
+                gallery = True
+            if tag == 'meta' and (attrs.get('property') or attrs.get('name') or '').lower() in ('og:image', 'twitter:image'):
+                self.meta.append(attrs.get('content') or '')
+            if gallery and tag == 'img' and 'product-single-image' in classes:
+                value = attrs.get('data-zoom-image') or attrs.get('src') or ''
+                try:
+                    image = urlsplit(urljoin(listing_url, value))
+                except ValueError:
+                    return
+                # This is Witter's observed product CDN, separate from its
+                # related-product cards and site decoration.
+                if (image.scheme == 'https' and image.hostname == 'x42solutions.blob.core.windows.net'
+                        and image.path.startswith('/productimages/')):
+                    self.gallery.append(value)
+            if tag not in self.void_tags:
+                self.stack.append((tag, gallery))
+
+        def handle_endtag(self, tag):
+            for i in range(len(self.stack) - 1, -1, -1):
+                if self.stack[i][0] == tag:
+                    del self.stack[i:]
+                    break
+
+    parser = PagePhotos()
+    parser.feed(html)
     found = []
 
     def add(u):
-        u = _market_full_size_url(u.replace('&amp;', '&'))
+        try:
+            u = _market_full_size_url(urljoin(listing_url, html_lib.unescape(u)))
+        except ValueError:
+            return
         if re.match(r'^https?://', u) and _market_image_key(u) not in {_market_image_key(f) for f in found}:
             found.append(u)
     jsonld = _market_jsonld_images(html, listing_url)
     for u in jsonld:
         add(u)
-    for m in re.finditer(r'<meta[^>]+(?:property|name)="(?:og:image|twitter:image)"[^>]+content="([^"]+)"', html, re.IGNORECASE):
-        add(m.group(1))
-    for m in re.finditer(r'<meta[^>]+content="([^"]+)"[^>]+(?:property|name)="(?:og:image|twitter:image)"', html, re.IGNORECASE):
-        add(m.group(1))
+    for u in parser.gallery + parser.meta:
+        if u:
+            add(u)
     if 'ebayimg.com' in html and not jsonld:
         gallery = re.search(r'<(?:div|section)[^>]+(?:id|class)=["\'][^"\']*(?:ux-image-carousel|ux-image-filmstrip|icImg)[^"\']*["\'][^>]*>(.*?)</(?:div|section)>', html, re.I | re.S)
         for m in re.finditer(r'https?://i\.ebayimg\.com/images/g/[A-Za-z0-9~_-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', gallery.group(1) if gallery else ''):
@@ -17265,6 +17313,8 @@ def _market_listing_url_problem(url):
     if parsed.scheme not in ('http', 'https') or not parsed.hostname:
         return 'Invalid listing URL'
     path = parsed.path.rstrip('/').lower()
+    if parsed.hostname.lower() in market_dealer_listing.HOSTS and not market_dealer_listing.exact_url(url):
+        return 'Dealer inventory or category page, not an exact item'
     if parsed.hostname.lower() in ('sanchezcurrency.com', 'www.sanchezcurrency.com') and not re.fullmatch(r'/product/[^/]+', path):
         return 'Dealer inventory or category page, not an exact item'
     if _market_is_ebay(url):
@@ -17296,6 +17346,37 @@ def _market_listing_url_problem(url):
             or any(k in query for k in ('q', 'query', 'search', 'keyword', 'keywords', '_nkw'))):
         return 'Search or inventory page, not an exact item'
     return ''
+
+
+def _market_recover_dealer_item(item):
+    """Recover a Witter discovery link only through one fully matching product.
+
+    Existing current candidates can acquire their exact link and photos without
+    another model scan. No collection records, prices or dismissals are changed.
+    """
+    url = item.get('listing_url')
+    if not market_dealer_listing.discovery_url(url):
+        return item
+    _MARKET_LAST_URL.final = url
+    status, html = _market_fetch_page(url)
+    if (status != 200 or not html or _market_page_challenged(status, html)
+            or market_runtime.canonical_url(getattr(_MARKET_LAST_URL, 'final', url)) != market_runtime.canonical_url(url)):
+        return item
+    exact = market_dealer_listing.resolve(url, item.get('title'), html)
+    if not exact:
+        return item
+    probe = _market_listing_probe(exact)
+    if (probe['state'] != 'live' or not market_dealer_listing.exact_url(probe.get('final'))
+            or market_runtime.canonical_url(probe['final']) != market_runtime.canonical_url(exact)
+            or market_dealer_listing.identity(probe.get('title')) != market_dealer_listing.identity(item.get('title'))):
+        return item
+    recovered = dict(item, listing_url=exact, discovery_url=url, verified=True,
+                     image_urls=[], image_url=None)
+    if probe.get('images'):
+        recovered.update(image_urls=probe['images'][:2], image_url=probe['images'][0])
+    # A scan's category-page explanation is obsolete after exact resolution.
+    recovered['why'] = re.sub(r"\s*The URL is the dealer's category page[^.]*\.", '', str(item.get('why') or ''))
+    return recovered
 
 
 def _market_listing_identity_problem(item, probe):
@@ -17577,6 +17658,10 @@ def _market_normalize_item(db, category, raw):
     url = str(raw.get('listing_url') or '').strip()
     if not re.match(r'^https?://', url):
         return _market_drop(raw, 'no listing URL')
+    if market_runtime.is_dismissed(db, category, url):
+        return _market_drop(raw, 'listing deleted from recommendations')
+    raw = _market_recover_dealer_item(raw)
+    url = raw.get('listing_url', url)
     problem = _market_listing_url_problem(url)
     if problem:
         return _market_drop(raw, problem)
@@ -18884,6 +18969,18 @@ def _market_items(db, category, earlier=False):
         if key in deleted and not earlier:
             continue
         item = json.loads(r['payload'])
+        if not earlier and market_dealer_listing.discovery_url(item.get('listing_url')):
+            recovered = _market_recover_dealer_item(item)
+            if recovered is item:
+                continue  # Hide an unresolved category, retaining it for a later read.
+            exact_key = market_runtime.canonical_url(recovered['listing_url'])
+            changed = db.execute("UPDATE market_scan_items SET listing_url = ?, canonical_url = ?, payload = ? "
+                "WHERE id = ? AND status = 'new' AND payload = ? AND NOT EXISTS "
+                "(SELECT 1 FROM market_dismissals WHERE category = ? AND canonical_url = ?)",
+                (recovered['listing_url'], exact_key, json.dumps(recovered), r['id'], r['payload'], category, exact_key))
+            if not changed.rowcount:
+                continue  # A concurrent Delete/purchase keeps precedence.
+            item, key = recovered, exact_key
         item['canonical_url'] = key
         if category == 'banknotes':
             item['collection_matches'] = _market_collection_matches(db, item, owned_rows)

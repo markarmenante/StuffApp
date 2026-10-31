@@ -4036,6 +4036,12 @@ input[type="date"] { -webkit-appearance: none; }
 .market-row { cursor: pointer; }
 .list-toolbar-market { flex-wrap: wrap; min-width: 0; }
 .list-toolbar-market .market-status { white-space: normal; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
+.market-unwatch-status { flex-basis: 100%; }
+.market-unwatch-status summary { cursor: pointer; }
+.market-unwatch-status summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.market-unwatch-status ul { margin: 8px 0 0; padding-left: 20px; }
+.market-unwatch-status li + li { margin-top: 6px; }
+.market-unwatch-notice { margin: 8px 0 0; }
 .market-row .item-body { min-width: 0; flex: 1; }
 .market-row .item-line1 { flex-wrap: wrap; }
 .market-row .item-body, .market-row .idr, .market-row .idr span,

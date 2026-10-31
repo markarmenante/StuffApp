@@ -83,6 +83,28 @@ assert all('logo' not in u for u in urls)
 assert not any('CCC' in u or 'DDD' in u for u in urls), urls
 urls = stuffapp._market_page_image_urls('https://dealer.example/notes/2')
 assert urls == ['https://dealer.example/photos/front.jpg'], urls  # a bare <img> on a non-eBay page is not trusted
+# HTML metadata permits either quotation style, attribute order and relative URLs.
+metadata = "<META content='/photos/front.jpg?one=1&amp;two=2' property='OG:IMAGE'>"
+assert stuffapp._market_page_image_urls('https://dealer.example/notes/2', metadata) == ['https://dealer.example/photos/front.jpg?one=1&two=2']
+
+# Witter's exact product page has a two-sided identified gallery. Its
+# related-product cards repeat the same image classes outside that gallery.
+WITTER_URL = 'https://wittercoin.com/item/fr-245-1891-2-silver-certificate-pmg-64-epq/1859590001'
+WITTER_FRONT = 'https://x42solutions.blob.core.windows.net/productimages/59c8c577-4a41-4fe5-8696-1ecc14550f63_800.jpeg'
+WITTER_BACK = 'https://x42solutions.blob.core.windows.net/productimages/62efdcb0-e226-4dd9-92e5-1dc2de5e3a70_800.jpeg'
+WITTER_OTHER = 'https://x42solutions.blob.core.windows.net/productimages/other-note_800.jpeg'
+WITTER_PAGE = ('<h1>Fr. 245 1891 $2 Silver Certificate PMG 64 EPQ</h1>'
+               '<meta property="og:image" content="' + WITTER_FRONT + '">'
+               '<div class="col-lg-6 product-single-gallery"><div class="product-single-carousel">'
+               '<div class="product-item"><img class="product-single-image backup_picture" src="' + WITTER_FRONT + '" data-zoom-image="' + WITTER_FRONT + '"></div>'
+               '<div class="product-item"><img class="product-single-image" src="' + WITTER_BACK + '"></div></div></div>'
+               '<div class="related-products"><img class="product-single-image" src="' + WITTER_OTHER + '"></div>'
+               '<img src="https://wittercoin.com/assets/images/logo.png">Add to cart')
+assert stuffapp._market_page_image_urls(WITTER_URL, WITTER_PAGE) == [WITTER_FRONT, WITTER_BACK]
+assert stuffapp._market_page_image_urls('https://dealer.example/item/note/1859590001', WITTER_PAGE) == [WITTER_FRONT]
+PAGES[WITTER_URL] = (200, WITTER_PAGE)
+IMAGES[WITTER_FRONT] = FRONT
+IMAGES[WITTER_BACK] = BACK
 print('PAGE IMAGES OK')
 
 # Buy: scan URL (thumbnail size) upgraded and stored; second photo from the page.
@@ -200,6 +222,14 @@ with stuffapp.app.app_context():
 with stuffapp.app.app_context(),patch.object(stuffapp,'_market_fetch_page',return_value=(None,'')):
     unverified=stuffapp._market_store_images({'listing_url':'https://www.ebay.com/itm/111111111111','image_urls':[four_urls[0],four_urls[1]]},category='banknotes')
     assert unverified=={},unverified
+# Dealer acquisition uses only that exact product's two gallery images.
+with stuffapp.app.app_context():
+    del FETCHED[:]
+    dealer = {'listing_url': WITTER_URL, 'image_urls': []}
+    dealer_images = stuffapp._market_store_images(dealer, category='banknotes')
+    assert set(dealer_images) == {'image_1', 'image_2'}, dealer_images
+    assert FETCHED == [WITTER_FRONT, WITTER_BACK], FETCHED
+    assert len(dealer['_listing_photo_assets']) == 2
 # Exact-item redirects are not gallery evidence for the requested item.
 def wrong_item(url,limit=0):
     stuffapp._MARKET_LAST_URL.final='https://www.ebay.com/itm/999999999999'
