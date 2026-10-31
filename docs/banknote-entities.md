@@ -166,6 +166,32 @@ whose final year may instead concern a rename, an occupation or a documented
 issue. Reviewed display events apply even where banknote issuance remains
 unverified; the question mark and existing coverage meaning still apply.
 
+All ten German entries show **1919**, the postwar Treaty of Versailles settlement,
+including **German South West Africa (1919)**. This replaces Namibia's much later
+independence year. [Article 119](https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1)
+records Germany's renunciation of its colonial rights; Kiautschou's leased-territory
+rights were transferred to Japan under
+[Articles 156–158](https://avalon.law.yale.edu/imt/partiv.asp). The tooltips distinguish
+the [28 June 1919 signature from entry into force on 10 January 1920](https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf).
+The caption does not use the earlier wartime occupation dates or later successor
+independence dates. Unknown banknote issuance retains its question mark.
+
+All ten Japanese entries show **1945**, marking the end of Japanese rule or
+occupation in the year of the [2 September surrender](https://www.archives.gov/milestone-documents/surrender-of-japan).
+These dates concern the Japanese administration: Japanese Hong Kong shows 1945,
+while British Hong Kong retains its separate 1997 handover date. They do not
+describe the affected territories as becoming independent in 1945.
+
+Italian Eritrea, Libya, Somaliland and the Dodecanese show **1947**, the formal
+[Treaty of Peace settlement signed 10 February and effective 15 September](https://treaties.un.org/Pages/showDetails.aspx?objid=080000028028c6f9).
+Article 23 renounced colonial rights in Eritrea, Libya and Somaliland; Article 14
+ceded the Dodecanese to Greece. Somaliland's later Italian administration was a
+[UN trusteeship in 1950–1960](https://research.un.org/en/docs/tc/somaliland).
+**Italian East Africa (1941)** instead dates the end of that combined colonial
+administration through [Allied conquest](https://researchcentre.army.gov.au/library/australian-army-journal-aaj/number-1-july-1948/ex-italian-colonies-africa).
+The tooltips identify these different events rather than substituting later
+independence dates.
+
 These parenthetical years change only presentation. Canonical entity labels and
 keys, sorting, coverage, alias resolution, list filters, exact-note links and
 History behavior retain their existing rules. No collection field or Market

@@ -2,8 +2,8 @@
 
 Verified 30 October 2026 against the linked primary sources. Existing exact
 independence dates in banknote_entities remain the first source of date evidence.
-Territories and regional issuers without a single independence year retain an
-undated caption and an explanatory tooltip.
+Territories and regional issuers without a reviewed common transition year
+retain an undated caption and an explanatory tooltip.
 """
 PILL_DATES = {'belgian-belgian-congo': {'note': 'Independence in 1960.',
                            'source': 'https://history.state.gov/countries/congo-democratic-republic',
@@ -205,32 +205,158 @@ PILL_DATES = {'belgian-belgian-congo': {'note': 'Independence in 1960.',
                                 'Faso.',
                         'source': 'https://history.state.gov/historicaldocuments/frus1958-60v14/d66',
                         'year': '1960'},
- 'german-german-south-west-africa': {'note': 'Independence as Namibia in 1990.',
-                                     'source': 'https://history.state.gov/countries/namibia',
-                                     'year': '1990'},
- 'italian-italian-eritrea': {'note': 'Eritrean independence in 1993.',
-                             'source': 'https://history.state.gov/countries/eritrea',
-                             'year': '1993'},
- 'italian-italian-libya': {'note': 'Independence in 1951.',
-                           'source': 'https://history.state.gov/countries/libya',
-                           'year': '1951'},
- 'italian-italian-somaliland': {'note': 'Independence as Somalia on 1 July 1960.',
-                                'source': 'https://history.state.gov/countries/somalia',
-                                'year': '1960'},
- 'japanese-burma': {'note': 'Independence of Burma (Myanmar) in 1948.',
-                    'source': 'https://history.state.gov/countries/burma',
-                    'year': '1948'},
- 'japanese-hong-kong': {'note': 'Handover to China on 1 July 1997.',
-                        'source': 'https://www.basiclaw.gov.hk/en/basiclaw/preamble.html',
-                        'year': '1997'},
- 'japanese-malaya': {'note': 'Independence in 1957.',
-                     'source': 'https://www.malaysia.gov.my/en/government/learn-about-malaysia/malaysian-history',
-                     'year': '1957'},
- 'japanese-netherlands-indies': {'note': 'Indonesian independence declared in 1945; recognized by the '
-                                         'United States in 1949.',
-                                 'source': 'https://timor-leste.gov.tl/?p=29&lang=en; '
-                                           'https://history.state.gov/countries/indonesia',
-                                 'year': '1945'},
+ 'german-german-caroline-islands': {'note': 'Germany renounced its colonial rights under Article 119 of the Treaty '
+                               'of Versailles, signed 28 June 1919; the treaty entered into force '
+                               'on 10 January 1920. This dates the postwar settlement, not later '
+                               'national independence.',
+                       'source': 'https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'german-german-east-africa': {'note': 'Germany renounced its colonial rights under Article 119 of the Treaty '
+                               'of Versailles, signed 28 June 1919; the treaty entered into force '
+                               'on 10 January 1920. This dates the postwar settlement, not later '
+                               'national independence.',
+                       'source': 'https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'german-german-mariana-islands': {'note': 'Germany renounced its colonial rights under Article 119 of the Treaty '
+                               'of Versailles, signed 28 June 1919; the treaty entered into force '
+                               'on 10 January 1920. This dates the postwar settlement, not later '
+                               'national independence.',
+                       'source': 'https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'german-german-marshall-islands': {'note': 'Germany renounced its colonial rights under Article 119 of the Treaty '
+                               'of Versailles, signed 28 June 1919; the treaty entered into force '
+                               'on 10 January 1920. This dates the postwar settlement, not later '
+                               'national independence.',
+                       'source': 'https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'german-german-new-guinea': {'note': 'Germany renounced its colonial rights under Article 119 of the Treaty '
+                               'of Versailles, signed 28 June 1919; the treaty entered into force '
+                               'on 10 January 1920. This dates the postwar settlement, not later '
+                               'national independence.',
+                       'source': 'https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'german-german-samoa': {'note': 'Germany renounced its colonial rights under Article 119 of the Treaty '
+                               'of Versailles, signed 28 June 1919; the treaty entered into force '
+                               'on 10 January 1920. This dates the postwar settlement, not later '
+                               'national independence.',
+                       'source': 'https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'german-german-south-west-africa': {'note': 'Germany renounced its colonial rights under Article 119 of the Treaty '
+                               'of Versailles, signed 28 June 1919; the treaty entered into force '
+                               'on 10 January 1920. This dates the postwar settlement, not later '
+                               'national independence.',
+                       'source': 'https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'german-kamerun': {'note': 'Germany renounced its colonial rights under Article 119 of the Treaty '
+                               'of Versailles, signed 28 June 1919; the treaty entered into force '
+                               'on 10 January 1920. This dates the postwar settlement, not later '
+                               'national independence.',
+                       'source': 'https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'german-kiautschou': {'note': 'German leased-territory rights in Kiautschou transferred to Japan under '
+                               'Articles 156–158 of the Treaty of Versailles, signed 28 June 1919; '
+                               'the treaty entered into force on 10 January 1920. This dates the '
+                               'postwar settlement, not later national independence.',
+                       'source': 'https://avalon.law.yale.edu/imt/partiv.asp; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'german-togoland': {'note': 'Germany renounced its colonial rights under Article 119 of the Treaty '
+                               'of Versailles, signed 28 June 1919; the treaty entered into force '
+                               'on 10 January 1920. This dates the postwar settlement, not later '
+                               'national independence.',
+                       'source': 'https://history.state.gov/historicaldocuments/frus1919Parisv13/ch13subch1; '
+                                 'https://researchbriefings.files.parliament.uk/documents/LLN-2019-0079/LLN-2019-0079.pdf',
+                       'year': '1919'},
+ 'italian-italian-dodecanese': {'note': 'Italy ceded the Dodecanese to Greece under Article 14 of the Treaty '
+                                      'of Peace with Italy, signed 10 February 1947 and effective '
+                                      '15 September 1947. This marks the formal postwar settlement, '
+                                      'not an independence date.',
+                              'source': 'https://treaties.un.org/Pages/showDetails.aspx?objid=080000028028c6f9',
+                              'year': '1947'},
+ 'italian-italian-east-africa': {'note': 'Italian East African colonial administration ended after Allied '
+                                       'conquest in 1941. This dates the end of that administration, '
+                                       'not the later formal peace settlement or successor independence.',
+                               'source': 'https://researchcentre.army.gov.au/library/australian-army-journal-aaj/number-1-july-1948/ex-italian-colonies-africa; '
+                                         'https://collection.nam.ac.uk/detail.php?acc=1996-08-388&acc=1996-08-388-25',
+                               'year': '1941'},
+ 'italian-italian-eritrea': {'note': 'Italy renounced its colonial rights under Article 23 of the Treaty '
+                                   'of Peace with Italy, signed 10 February 1947 and effective '
+                                   '15 September 1947. Wartime control had ended earlier; this dates '
+                                   'the formal postwar settlement, not later independence.',
+                           'source': 'https://treaties.un.org/Pages/showDetails.aspx?objid=080000028028c6f9',
+                           'year': '1947'},
+ 'italian-italian-libya': {'note': 'Italy renounced its colonial rights under Article 23 of the Treaty '
+                                 'of Peace with Italy, signed 10 February 1947 and effective '
+                                 '15 September 1947. Wartime control had ended earlier; this dates '
+                                 'the formal postwar settlement, not later independence.',
+                         'source': 'https://treaties.un.org/Pages/showDetails.aspx?objid=080000028028c6f9',
+                         'year': '1947'},
+ 'italian-italian-somaliland': {'note': 'Italy renounced its colonial rights under Article 23 of the Treaty '
+                                      'of Peace with Italy, signed 10 February 1947 and effective '
+                                      '15 September 1947. The later 1950–1960 Italian administration '
+                                      'was a UN trusteeship, not restored colonial sovereignty; this '
+                                      'dates the formal postwar settlement, not later independence.',
+                              'source': 'https://treaties.un.org/Pages/showDetails.aspx?objid=080000028028c6f9; '
+                                        'https://research.un.org/en/docs/tc/somaliland',
+                              'year': '1947'},
+ 'japanese-burma': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
+ 'japanese-china': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
+ 'japanese-french-indo-china': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
+ 'japanese-hong-kong': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
+ 'japanese-korea': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
+ 'japanese-malaya': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
+ 'japanese-manchukuo': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
+ 'japanese-netherlands-indies': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
+ 'japanese-oceania': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
+ 'japanese-taiwan': {'note': 'Japanese rule or occupation ended in 1945, the year of Japan\'s '
+                               'surrender signed on 2 September 1945. This marks the end of '
+                               'Japanese control, not a later independence date.',
+                       'source': 'https://www.archives.gov/milestone-documents/surrender-of-japan',
+                       'year': '1945'},
  'joint-new-hebrides': {'note': 'Independence as Vanuatu in 1980.',
                         'source': 'https://history.state.gov/countries/vanuatu',
                         'year': '1980'},

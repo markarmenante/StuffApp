@@ -76,6 +76,35 @@ class PillDateTests(unittest.TestCase):
         self.assertEqual(display['date_source'], entity['independence_source'])
         self.assertEqual(entity, before)
 
+    def test_german_dates_use_the_postwar_settlement_without_changing_successor_dates(self):
+        roster_before = deepcopy(stuff.banknote_entities.ENTITY_CATALOG)
+        german_entities = [entity for entity in roster_before if entity['group'] == 'german']
+        self.assertEqual(len(german_entities), 10)
+        for entity in german_entities:
+            with self.subTest(key=entity['key']):
+                display = stuff.banknote_entity_dates.pill_date(entity)
+                self.assertEqual(display['display_label'], entity['label'] + ' (1919)')
+                self.assertIn('28 June 1919', display['date_note'])
+                self.assertIn('10 January 1920', display['date_note'])
+                self.assertIn('not later national independence', display['date_note'])
+                if entity['key'] == 'german-kiautschou':
+                    self.assertIn('leased-territory rights', display['date_note'])
+                    self.assertIn('transferred to Japan', display['date_note'])
+                    self.assertIn('Articles 156–158', display['date_note'])
+                    self.assertNotIn('Article 119', display['date_note'])
+                else:
+                    self.assertIn('renounced its colonial rights under Article 119', display['date_note'])
+                self.assertIn('https://', display['date_source'])
+        for key, label in (
+                ('british-tanganyika', 'Tanganyika (1961)'),
+                ('french-cameroon', 'Cameroon (1960)'),
+                ('french-togo', 'Togo (1960)'),
+                ('british-western-samoa', 'Western Samoa (1962)')):
+            with self.subTest(key=key):
+                entity = stuff.banknote_entities.ENTITY_BY_KEY[key]
+                self.assertEqual(stuff.banknote_entity_dates.pill_date(entity)['display_label'], label)
+        self.assertEqual(stuff.banknote_entities.ENTITY_CATALOG, roster_before)
+
     def test_scan_ends_and_unsourced_dates_do_not_become_independence_labels(self):
         base = dict(key='fixture-colony', group='british', label='Fixture colony',
                     issued=True, scan_period={'year_end': 1954, 'end_kind': 'administration_end'})
@@ -87,6 +116,57 @@ class PillDateTests(unittest.TestCase):
                 display = stuff.banknote_entity_dates.pill_date({**base, **changes})
                 self.assertEqual(display['display_label'], base['label'])
                 self.assertFalse(display['date_note'])
+
+    def test_japanese_dates_mark_the_end_of_control_without_changing_other_administrations(self):
+        roster_before = deepcopy(stuff.banknote_entities.ENTITY_CATALOG)
+        japanese_entities = [entity for entity in roster_before if entity['group'] == 'japanese']
+        self.assertEqual(len(japanese_entities), 10)
+        for entity in japanese_entities:
+            with self.subTest(key=entity['key']):
+                display = stuff.banknote_entity_dates.pill_date(entity)
+                self.assertEqual(display['display_label'], entity['label'] + ' (1945)')
+                self.assertIn('Japanese rule or occupation ended in 1945', display['date_note'])
+                self.assertIn('surrender signed on 2 September 1945', display['date_note'])
+                self.assertIn('not a later independence date', display['date_note'])
+                self.assertEqual(display['date_source'],
+                                 'https://www.archives.gov/milestone-documents/surrender-of-japan')
+        for key, label, event in (
+                ('british-hong-kong', 'Hong Kong (1997)', 'Handover'),
+                ('british-burma', 'Burma (1948)', 'Independence'),
+                ('dutch-netherlands-indies', 'Netherlands Indies (1945)', 'independence declared')):
+            with self.subTest(key=key):
+                entity = stuff.banknote_entities.ENTITY_BY_KEY[key]
+                display = stuff.banknote_entity_dates.pill_date(entity)
+                self.assertEqual(display['display_label'], label)
+                self.assertIn(event, display['date_note'])
+        self.assertEqual(stuff.banknote_entities.ENTITY_CATALOG, roster_before)
+
+    def test_italian_dates_distinguish_the_1941_administration_end_and_1947_settlement(self):
+        roster_before = deepcopy(stuff.banknote_entities.ENTITY_CATALOG)
+        italian_entities = [entity for entity in roster_before if entity['group'] == 'italian']
+        self.assertEqual(len(italian_entities), 5)
+        for entity in italian_entities:
+            with self.subTest(key=entity['key']):
+                display = stuff.banknote_entity_dates.pill_date(entity)
+                if entity['key'] == 'italian-italian-east-africa':
+                    self.assertEqual(display['display_label'], 'Italian East Africa (1941)')
+                    self.assertIn('administration ended after Allied conquest in 1941', display['date_note'])
+                    self.assertIn('not the later formal peace settlement', display['date_note'])
+                    self.assertIn('https://researchcentre.army.gov.au/', display['date_source'])
+                    continue
+                self.assertEqual(display['display_label'], entity['label'] + ' (1947)')
+                self.assertIn('10 February 1947', display['date_note'])
+                self.assertIn('15 September 1947', display['date_note'])
+                self.assertIn('formal postwar settlement', display['date_note'])
+                self.assertIn('https://treaties.un.org/', display['date_source'])
+                if entity['key'] == 'italian-italian-dodecanese':
+                    self.assertIn('ceded the Dodecanese to Greece under Article 14', display['date_note'])
+                else:
+                    self.assertIn('renounced its colonial rights under Article 23', display['date_note'])
+                if entity['key'] == 'italian-italian-somaliland':
+                    self.assertIn('1950–1960', display['date_note'])
+                    self.assertIn('UN trusteeship, not restored colonial sovereignty', display['date_note'])
+        self.assertEqual(stuff.banknote_entities.ENTITY_CATALOG, roster_before)
 
     def test_reviewed_exclusion_prevents_a_false_independence_label(self):
         entity = dict(key='fixture-colony', group='british', label='Fixture colony',
@@ -175,6 +255,69 @@ class EntityPillTests(unittest.TestCase):
             self.assertEqual(len([key for key in page.pills if 'afars' in key]), 1)
         self.assertEqual(self.db.execute("SELECT country FROM banknotes WHERE id='afars'").fetchone()[0],
                          'French Afars & Issas')
+
+    def test_all_german_pills_show_1919_and_preserve_coverage_and_note_links(self):
+        self.note('german-east-africa', country='German East Africa', year=1910)
+        self.note('german-swa', country='German South West Africa', year=1910)
+        records_before = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        german_entities = [entity for entity in stuff.banknote_entities.ENTITY_CATALOG
+                           if entity['group'] == 'german']
+        for history in ('0', '1'):
+            page = self.page('/banknotes?history=' + history)
+            for entity in german_entities:
+                with self.subTest(history=history, key=entity['key']):
+                    pill = page.pills[entity['key']]
+                    self.assertEqual(pill['text'], entity['label'] + ' (1919)')
+                    for attribute in ('title', 'aria-label'):
+                        self.assertIn('Treaty of Versailles', pill[attribute])
+                        self.assertIn('28 June 1919', pill[attribute])
+                        self.assertIn('10 January 1920', pill[attribute])
+                    self.assertIn('Source: https://', pill['title'])
+                    if entity['issued'] is None:
+                        self.assertEqual((pill['tag'], pill['data-coverage']), ('span', 'unknown'))
+                        self.assertIn('Banknote issuance not yet established', pill['title'])
+                        self.assertNotIn('href', pill)
+            swa = page.pills['german-german-south-west-africa']
+            self.assertEqual(swa['text'], 'German South West Africa (1919)')
+            self.assertNotIn('1990', swa['title'])
+            self.assertEqual((swa['tag'], swa['data-coverage'], swa['href']),
+                             ('a', 'held', '#item-german-swa'))
+            self.assertIn('item-german-swa', page.targets)
+        self.assertEqual(records_before, [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')])
+
+    def test_japanese_and_italian_pills_show_the_end_of_each_administration(self):
+        self.note('manchukuo', country='Manchukuo', year=1940)
+        self.note('italian-east-africa', country='Italian East Africa', year=1938)
+        self.note('italian-somaliland', country='Italian Somaliland', year=1930)
+        records_before = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        entities = [entity for entity in stuff.banknote_entities.ENTITY_CATALOG
+                    if entity['group'] in ('japanese', 'italian')]
+        for history in ('0', '1'):
+            page = self.page('/banknotes?history=' + history)
+            for entity in entities:
+                with self.subTest(history=history, key=entity['key']):
+                    year = '1945' if entity['group'] == 'japanese' else '1947'
+                    if entity['key'] == 'italian-italian-east-africa':
+                        year = '1941'
+                    pill = page.pills[entity['key']]
+                    self.assertEqual(pill['text'], entity['label'] + ' (' + year + ')')
+                    for attribute in ('title', 'aria-label'):
+                        self.assertIn(year, pill[attribute])
+                    self.assertIn('Source: https://', pill['title'])
+                    if entity['issued'] is None:
+                        self.assertEqual((pill['tag'], pill['data-coverage']), ('span', 'unknown'))
+                        self.assertIn('Banknote issuance not yet established', pill['title'])
+                        self.assertNotIn('href', pill)
+            self.assertNotIn('1997', page.pills['japanese-hong-kong']['title'])
+            self.assertNotIn('1993', page.pills['italian-italian-eritrea']['title'])
+            self.assertNotIn('1951', page.pills['italian-italian-libya']['title'])
+            for key, target in (('japanese-manchukuo', 'manchukuo'),
+                                ('italian-italian-east-africa', 'italian-east-africa')):
+                pill = page.pills[key]
+                self.assertEqual((pill['tag'], pill['data-coverage'], pill['href']),
+                                 ('a', 'held', '#item-' + target))
+                self.assertIn('item-' + target, page.targets)
+        self.assertEqual(records_before, [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')])
 
     def test_coverage_counts_all_purchase_phases_but_no_disposed_notes(self):
         for index, status in enumerate(('Own', 'Owned', '', None, 'Ordered', 'Shipped', 'Delivered',
