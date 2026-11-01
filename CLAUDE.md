@@ -368,6 +368,11 @@ Issuer, series, numeric denomination and full reference determine filing;
 v30 refreshes P positions only. See `docs/banknote-catalog.md` and the Caribbean
 tests for preservation and boundary cases.
 
+Currency Board issuer alias (2026-11-01): `Currency Board of Eastern Caribbean
+Territories` shares the BCCB section across King George VI and Elizabeth II
+series. The distinct series labels and chronology remain visible; ECCA and
+ECCB retain separate issuer sections. v35 refreshes only derived P positions.
+
 The Report pill on the Banknotes list (owner only; Mark, 2026-09-12)
 builds a PDF of the whole collection: one country / colony per section
 on a fresh page (grouped by the stored `country`, in the list's order),

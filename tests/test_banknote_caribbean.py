@@ -46,6 +46,73 @@ class CaribbeanTests(unittest.TestCase):
         self.add('central10', 'East Caribbean States', 'Eastern Caribbean Central Bank', '10 Dollars', 'P-18a', 1984)
         self.add('central5', 'Eastern Caribbean Central Bank', '', '5 Dollars', 'P-17a', 1984)
 
+    def board_monarch_fixture(self):
+        self.add('qeii1', 'British Caribbean Territories', 'British Caribbean Currency Board',
+                 '1 Dollar', 'P-7b', 1956, '1953–1964 Elizabeth II issue')
+        self.add('kgvi20', 'British Caribbean Territories', 'Currency Board of Eastern Caribbean Territories',
+                 '20 Dollars', 'P-5a', 1951, '1950–1952 King George VI issue')
+        self.add('qeii5', None, 'Currency Board of Eastern Caribbean Territories',
+                 '5 Dollars', 'P-9b', 1957, '1953–1964 Elizabeth II issue')
+        self.add('kgvi1', 'British Caribbean Territories (Eastern Group)',
+                 'Board of Commissioners of Currency, British Caribbean Territories (Eastern Group)',
+                 '1 Dollar', 'P-1a', 1951, '1950–1952 King George VI issue')
+        self.add('authority1', 'East Caribbean States', 'East Caribbean Currency Authority',
+                 '1 Dollar', 'P-13g', 1965, 'Queen Elizabeth II issue')
+        self.add('central5', 'East Caribbean States', 'Eastern Caribbean Central Bank',
+                 '5 Dollars', 'P-17a', 1984, 'Queen Elizabeth II issue')
+
+    def test_currency_board_alias_requires_explicit_issuer_and_compatible_country(self):
+        issuer = 'Currency Board of Eastern Caribbean Territories'
+        for country in ('British Caribbean Territories', 'British Caribbean Territories (Eastern Group)',
+                        'East Caribbean States', 'Grenada', None, issuer):
+            with self.subTest(country=country):
+                resolved = catalog.eastern_caribbean_issue(country, None, issuer)
+                self.assertEqual((resolved['key'], resolved['entity_country']),
+                                 ('bccb', 'British Caribbean Territories'))
+                self.assertEqual(catalog.canonical_country(country), country)
+        self.assertIsNone(catalog.eastern_caribbean_issue('Canada', 1951, issuer))
+        self.assertIsNone(catalog.eastern_caribbean_issue('East Caribbean States - Atlantis', 1951, issuer))
+        for ambiguous in ('Currency Board', issuer + ' or ECCA', issuer + ' (unconfirmed)'):
+            with self.subTest(issuer=ambiguous):
+                resolved = catalog.eastern_caribbean_issue('British Caribbean Territories', 1951, ambiguous)
+                self.assertEqual(resolved['key'], 'unresolved')
+                self.assertNotIn('denoms', resolved)
+
+    def test_king_george_vi_and_elizabeth_ii_share_one_board_section(self):
+        self.board_monarch_fixture()
+        before = {row['id']: dict(row) for row in self.rows()}
+        rows = self.rows()
+        self.assertEqual([row['id'] for row in rows],
+                         ['kgvi1', 'kgvi20', 'qeii1', 'qeii5', 'authority1', 'central5'])
+        panels = [placement['panel'] for placement in stuff.series_panels(rows).values()
+                  if 'panel' in placement]
+        self.assertEqual([panel['regional_issuer'] for panel in panels], ['bccb', 'ecca', 'eccb'])
+        self.assertEqual(panels[0]['series_list'],
+                         ['1950–1952 King George VI issue', '1953–1964 Elizabeth II issue'])
+        sections = stuff._banknote_report_sections(self.db)
+        self.assertEqual([key for _, key, _ in sections],
+                         ['eastern-caribbean-bccb', 'eastern-caribbean-ecca', 'eastern-caribbean-eccb'])
+        self.assertEqual([row['id'] for row in sections[0][2]], ['kgvi1', 'kgvi20', 'qeii1', 'qeii5'])
+        for row in sections[0][2]:
+            self.assertIn(row['series'], stuff._banknote_report_lines(row)[0])
+        for history in ('0', '1'):
+            with self.subTest(history=history):
+                response = stuff.app.test_client().get('/banknotes', query_string={'history': history})
+                self.assertEqual(response.status_code, 200)
+                html = response.get_data(as_text=True)
+                self.assertEqual(html.count('data-banknote-family="eastern-caribbean"'), 1)
+                for issuer in ('bccb', 'ecca', 'eccb'):
+                    self.assertEqual(html.count('data-banknote-issuer="' + issuer + '"'), 1)
+                self.assertNotIn('data-banknote-issuer="unresolved"', html)
+                positions = [html.index('id="item-' + row['id'] + '"') for row in rows]
+                self.assertEqual(positions, sorted(positions))
+                for text in ('P-1a', 'P-5a', 'P-7b', 'P-9b'):
+                    self.assertTrue(text in html, text)
+                if history == '1':
+                    for text in panels[0]['series_list']:
+                        self.assertTrue(text in html, text)
+        self.assertEqual({row['id']: dict(row) for row in self.rows()}, before)
+
     def test_exact_regional_names_and_explicit_blank_country_issuer(self):
         for country in ('East Caribbean States', 'East Caribbean States - Grenada',
                         'Eastern Caribbean States (Grenada)', 'East Caribbean Currency Authority', None):
@@ -210,15 +277,21 @@ class CaribbeanTests(unittest.TestCase):
         unresolved = dict(row, issuer='')
         self.assertIn('East Caribbean States - Grenada', stuff._banknote_report_lines(unresolved)[0])
 
-    def test_v32_migration_changes_only_display_position_and_runs_once(self):
-        self.fixture()
+    def test_v35_migration_changes_only_display_position_and_runs_once(self):
+        self.board_monarch_fixture()
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v34'")
+        self.db.execute("INSERT OR IGNORE INTO migration_state (key, applied_at) "
+                        "VALUES ('banknote_display_number_v34', '2026-10-28')")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v35'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.rows()}
         stuff.init_db()
         rows = self.rows()
-        self.assertEqual([r['banknote_id'] for r in rows], [f'P {i:03}' for i in range(1, 9)])
+        self.assertEqual([r['id'] for r in rows],
+                         ['kgvi1', 'kgvi20', 'qeii1', 'qeii5', 'authority1', 'central5'])
+        self.assertEqual([r['banknote_id'] for r in rows], [f'P {i:03}' for i in range(1, 7)])
+        self.assertIsNotNone(self.db.execute(
+            "SELECT 1 FROM migration_state WHERE key='banknote_display_number_v35'").fetchone())
         for row in rows:
             self.assertEqual({k: v for k, v in dict(row).items() if k != 'banknote_id'},
                              {k: v for k, v in before[row['id']].items() if k != 'banknote_id'})

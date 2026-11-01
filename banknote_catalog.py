@@ -464,6 +464,7 @@ EASTERN_CARIBBEAN_ISSUERS = {
 }
 _CARIBBEAN_ISSUER_NAMES = {
     'bccb': ('British Caribbean Currency Board', 'BCCB',
+             'Currency Board of Eastern Caribbean Territories',
              'British Caribbean Territories Currency Board',
              'British Caribbean Currency Board (The British Caribbean Territories, Eastern Group)',
              'Board of Commissioners of Currency, British Caribbean Territories (Eastern Group)',

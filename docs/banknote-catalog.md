@@ -268,6 +268,15 @@ attribution, issuer, series, full Pick suffix, photos, purchase details and
 permanent B numbers are retained. The report repeats each note's raw country
 within its shared issuer section so a territorial qualifier is still visible.
 
+The explicit issuer spelling `Currency Board of Eastern Caribbean Territories`
+also resolves to BCCB. King George VI and Queen Elizabeth II notes share one
+Board section in the list, with History on or off, and in the report. Their
+individual series labels and chronological order remain intact. This bounded
+display alias does not merge ECCA or ECCB, accept an unrelated country, or
+rewrite the stored country or issuer. Migration **v35** refreshes only derived
+P positions once, preserving permanent B numbers, full catalogue references,
+photos, prices and all other saved record fields.
+
 Within an issuer, equivalent dated/undated series labels file together before
 numeric denominations and the full natural-order catalogue reference. Written
 dollar denominations such as `Five Dollars` compare with `$5` in this regional

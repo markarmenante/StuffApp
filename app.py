@@ -6942,9 +6942,10 @@ def init_db():
     # v33: Japanese Imperial Government issues join their occupation group;
     # Hong Kong's issuer-aware occupation era retains matching P positions.
     # v34: Oceania with a Japanese occupation issuer joins the Japanese group.
+    # v35: The Eastern Caribbean Territories Currency Board alias joins BCCB.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v34',),
+        ('banknote_display_number_v35',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6952,7 +6953,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v34', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v35', datetime.utcnow().isoformat()),
         )
         db.commit()
 
