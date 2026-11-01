@@ -15,3 +15,11 @@ stuffapp-backup-*.zip
 .claude/worktrees/
 ios/Stuff.xcodeproj/project.xcworkspace/
 ios/Stuff.xcodeproj/xcuserdata/
+
+# Synthetic browser test output
+/playwright-report/
+/test-results/
+/browser-artifacts/
+
+/browser-tests/playwright-report/
+/browser-tests/test-results/

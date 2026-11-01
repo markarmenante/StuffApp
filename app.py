@@ -53,6 +53,9 @@ except Exception:
     pass
 
 app = Flask(__name__)
+# Only this instance's configured Sentry project can receive sanitized diagnostics.
+from monitoring import initialize_monitoring
+initialize_monitoring()
 # Without this, app.logger sits at the root default (WARNING) under
 # gunicorn and every app.logger.info diagnostic — image optimization,
 # slab-trim decisions — is silently dropped in production.
@@ -15386,7 +15389,12 @@ def healthz():
     200: the root path 302-redirects to the landing category, which
     the checker now counts as failure (every deploy after the platform
     change hung in DEPLOYING and the site served 502s)."""
-    return Response('ok', mimetype='text/plain')
+    response = Response('ok', mimetype='text/plain')
+    response.headers['Cache-Control'] = 'no-store'
+    commit = os.environ.get('RAILWAY_GIT_COMMIT_SHA', '')
+    if re.fullmatch(r'[a-f0-9]{40}', commit):
+        response.headers['X-App-Commit'] = commit
+    return response
 
 
 @app.route('/')

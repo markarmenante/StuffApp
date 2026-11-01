@@ -1,0 +1,4 @@
+# Hosted Sentry MCP; the client performs its normal browser OAuth sign-in.
+# Tokens are stored by the client, never in the repository.
+[mcp_servers.sentry]
+url = "https://mcp.sentry.dev/mcp"

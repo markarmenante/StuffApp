@@ -1,0 +1,13 @@
+{
+  "name": "stuffapp-development",
+  "version": "1.0.0",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "browsers:install": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.0"
+  },
+  "private": true
+}

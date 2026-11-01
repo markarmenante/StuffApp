@@ -1,0 +1,75 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+  DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python scripts/install-test-dependencies.py
+      - run: python scripts/test-regressions.py
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: browser-tests/package-lock.json
+      - run: npm --prefix browser-tests ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python scripts/install-test-dependencies.py
+      - run: npm --prefix browser-tests run browsers:install
+      - run: npm --prefix browser-tests run test:e2e
+      - run: node tests/test_banknote_crop_controls_browser.cjs
+        env:
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/browser-tests/node_modules/playwright/index.mjs
+          BANKNOTE_CROP_TEST_ARTIFACTS: browser-artifacts/crop
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-${{ github.job }}
+          path: |
+            browser-tests/playwright-report/
+            browser-tests/test-results/
+            browser-artifacts/
+          retention-days: 7
+  verify-production:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [checks, browser]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/verify-deployment.mjs
