@@ -288,6 +288,42 @@ class LookupTests(unittest.TestCase):
                 self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0], 0)
                 job = self.retry_request()
 
+    def test_attention_receipt_still_rejects_normal_collection_check_atomically(self):
+        job = lookup.ensure(self.db, self.note)
+        self.post(action='claim')
+        response = self.complete(job, items=[self.item(status_text='Estimated delivery')],
+                                 receipt=self.receipt(), listing=self.cached_listing())
+        self.assertEqual(response.status_code, 409, response.json)
+        self.assertEqual(response.json['error'], 'Receipt purchase requires review')
+        for table in ('ebay_order_items', 'ebay_purchase_observations', 'ebay_listing_captures',
+                      'ebay_purchase_prices'):
+            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0], 0, table)
+        self.assertEqual(self.client.get('/banknotes/note/purchase-refresh/' + job['id']).json['status'], 'failed')
+
+    def test_review_receipt_validates_evidence_without_changing_existing_price_or_flag(self):
+        import ebay_purchase_prices as prices
+        job = lookup.ensure(self.db, self.note)
+        self.post(action='claim')
+        self.assertEqual(self.complete(job, receipt=self.receipt()).status_code, 200)
+        self.db.execute("UPDATE ebay_order_items SET attention='Estimated delivery; shipment or delivery not confirmed'")
+        self.db.commit()
+        item = dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone())
+        saved = tuple(self.db.execute('SELECT * FROM ebay_purchase_prices').fetchone())
+        with self.assertRaises(prices.ReceiptPurchaseNeedsReview):
+            prices.save(self.db, self.receipt(), [item], time.time() - 10)
+        self.assertIsNone(prices.for_item(self.db, item))
+        good = self.receipt()['evidence']
+        for change in (dict(unit_amount='619.89'),
+                       dict(evidence=good.replace('Unit price USD 599.89', 'Order total USD 599.89')),
+                       dict(evidence=good + '\nCoupon USD 10.00'),
+                       dict(evidence=good + '\nPartially refunded'),
+                       dict(evidence=good.replace('178536931638', '178536931639'))):
+            with self.subTest(change=change), self.assertRaises(ValueError) as error:
+                prices.save(self.db, self.receipt(**change), [item], time.time() - 10)
+            self.assertNotIsInstance(error.exception, prices.ReceiptPurchaseNeedsReview)
+        self.assertEqual(tuple(self.db.execute('SELECT * FROM ebay_purchase_prices').fetchone()), saved)
+        self.assertEqual(dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone()), item)
+
     def test_receipt_cannot_cross_account_or_bypass_bridge_token(self):
         job = lookup.ensure(self.db, self.note)
         self.post(action='claim')

@@ -236,8 +236,18 @@ def complete(db, payload):
             if result['skipped'] or result['items_accepted'] != len(subset) or any(i['item_id'] not in stored for i in subset):
                 db.rollback()
                 raise ValueError('Purchase identity could not be confirmed')
+        def save_receipt(capture, purchased_items):
+            try:
+                ebay_purchase_prices.save(db, capture, purchased_items, row['requested_at'])
+            except ebay_purchase_prices.ReceiptPurchaseNeedsReview:
+                if not importing:
+                    raise
+                # The complete checkout still belongs in saved review. Its
+                # flagged item remains blocked and this amount is not saved.
+                # Identity, quantity and invalid price evidence still reject
+                # the whole response through their ordinary ValueError path.
         ebay_listing_captures.save(db, payload.get('listing'), items)
-        ebay_purchase_prices.save(db, payload.get('receipt'), items, row['requested_at'])
+        save_receipt(payload.get('receipt'), items)
         by_id={item['item_id']:item for item in items}
         if len(by_id)!=len(items):raise ValueError('Repeated item identity requires review')
         for name,save in (('listings',ebay_listing_captures.save),('receipts',ebay_purchase_prices.save)):
@@ -248,8 +258,10 @@ def complete(db, payload):
                 ident=capture.get('item_id') if isinstance(capture,dict) else None
                 if ident not in by_id or ident in seen:raise ValueError('Capture does not identify one purchased item')
                 seen.add(ident)
-                args=(db,capture,[by_id[ident]])
-                save(*args,row['requested_at']) if name=='receipts' else save(*args)
+                if name=='receipts':
+                    save_receipt(capture,[by_id[ident]])
+                else:
+                    save(db,capture,[by_id[ident]])
         if importing:
             if importing['account_name']!=account.lower():raise ValueError('Import account does not match the verified order')
             import banknote_imports

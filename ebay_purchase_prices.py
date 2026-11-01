@@ -8,6 +8,10 @@ import time
 SYMBOLS = {'$': '$', 'USD': '$', 'EUR': '€', 'GBP': '£'}
 
 
+class ReceiptPurchaseNeedsReview(ValueError):
+    """Valid receipt evidence cannot supply a price while its status needs review."""
+
+
 def save(db, capture, items, requested_at):
     if capture is None:
         return
@@ -37,7 +41,10 @@ def save(db, capture, items, requested_at):
         raise ValueError('Receipt evidence is not from this purchase check')
     stored = db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=? AND ignored=0',
                         (item['order_id'], item['item_id'])).fetchall()
-    if len(stored) != 1 or stored[0]['quantity'] != 1 or stored[0]['attention']:
+    # Purchases normalizes its ambiguous-row flag into this attention reason.
+    # An identity conflict is never a recoverable status warning.
+    if (len(stored) != 1 or stored[0]['quantity'] != 1
+            or stored[0]['attention'].startswith('Multiple purchase rows')):
         raise ValueError('Receipt purchase requires review')
     currency_tokens = {'$': r'\$', 'USD': r'US\s*\$|USD', 'EUR': r'EUR|€', 'GBP': r'GBP|£'}
     if not re.search(r'(?:Unit price\s+(?:' + currency_tokens[currency] + r')|Currency:\s*' + re.escape(currency) + r'(?:\s|$))', evidence, re.I):
@@ -45,12 +52,17 @@ def save(db, capture, items, requested_at):
     # Reuse the exact-item receipt parser. It excludes totals, other orders,
     # sibling items, coupons/refunds, missing currency and ambiguous amounts.
     from banknote_check_sources import ebay_receipt_unit_price
-    price = ebay_receipt_unit_price(evidence, stored[0])
+    # Validate the receipt's exact identity and amount even when its purchase
+    # needs review. This copy is only a parser input: the original review flag
+    # still prevents the amount from being saved or used below.
+    price = ebay_receipt_unit_price(evidence, dict(stored[0], attention=''))
     expected = SYMBOLS[currency] + format(Decimal(amount), ',.2f')
     if expected.endswith('.00'):
         expected = expected[:-3]
     if price != expected:
         raise ValueError('Receipt unit amount disagrees with its source evidence')
+    if stored[0]['attention']:
+        raise ReceiptPurchaseNeedsReview('Receipt purchase requires review')
     db.execute('INSERT INTO ebay_purchase_prices(line_key,currency,unit_amount_minor,source_url,observed_at,evidence) '
                'VALUES(?,?,?,?,?,?) ON CONFLICT(line_key) DO UPDATE SET currency=excluded.currency,'
                'unit_amount_minor=excluded.unit_amount_minor,source_url=excluded.source_url,'

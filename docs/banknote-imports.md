@@ -42,6 +42,13 @@ orders: the reader verifies each seller order's details link has the same observ
 exactly. Every draft retains its own actual seller order, exact item ID, seller,
 paid unit amount and original listing. Shipping, tax, order totals and listing
 asking prices cannot supply an item price. A missing receipt leaves the price blank.
+A receipt with valid exact-item evidence cannot supply a price while that purchase
+has a status review warning. The complete checkout is still saved, with the flagged
+item blocked for review and its receipt amount withheld; valid sibling items retain
+their own accepted amounts. Wrong receipt identity, quantity, currency, freshness
+or unit-price evidence still rejects the response atomically. Ambiguous or previously
+excluded purchases remain protected. A normal collection Check retains its strict receipt
+rejection; this handling applies only to a verified checkout import.
 A partial or old-reader response without checkout membership is rejected atomically.
 
 All source drafts are committed before automatic Check begins. Single-note drafts

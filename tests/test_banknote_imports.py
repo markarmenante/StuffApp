@@ -340,6 +340,131 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(response.status_code,409)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_items').fetchone()[0],0)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0],0)
+    def test_receipt_attention_keeps_blocked_item_and_exact_clean_siblings(self):
+        b=self.imported(lambda p:p['items'][0].update(status_text='Delivered',delivery_text=''))
+        self.assertEqual(b['state'],'review');self.assertEqual(len(b['items']),3)
+        blocked=next(i for i in b['items'] if i['order_number']==ORDERS[0])
+        self.assertEqual(blocked['state'],'blocked');self.assertEqual(blocked['check_state'],'idle')
+        self.assertIn('Delivered; shipment or delivery not confirmed',' '.join(blocked['warnings']))
+        self.assertFalse(blocked['fields'].get('price'));self.assertIsNone(blocked['purchase']['price'])
+        source=self.db.execute('SELECT * FROM ebay_order_items WHERE item_id=?',(IDS[0],)).fetchone()
+        self.assertEqual(source['attention'],'Delivered; shipment or delivery not confirmed')
+        self.assertEqual(source['delivery_status'],'Ordered')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_purchase_prices WHERE line_key=?',(source['line_key'],)).fetchone()[0],0)
+        clean=[i for i in b['items'] if i['state']=='draft']
+        self.assertEqual({i['order_number']:i['fields']['price'] for i in clean},{ORDERS[1]:'$125.37',ORDERS[2]:'$30'})
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_listing_captures').fetchone()[0],3)
+        self.assertEqual(self.client.post(blocked['detail_url']+'/check',json={'revision':blocked['revision']}).status_code,409)
+        self.assertEqual(self.release(b,[blocked]).status_code,409)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.release(b,clean).status_code,200)
+        self.assertEqual({r['order_number']:r['price'] for r in self.db.execute('SELECT order_number,price FROM banknotes')},
+                         {ORDERS[1]:'$125.37',ORDERS[2]:'$30'})
+        latest=self.client.get(b['status_url']).json
+        self.assertEqual(latest['pending_count'],1);self.assertFalse(latest['processing_single'])
+        self.assertIsNone(latest['completion_url'])
+    def test_single_receipt_attention_cannot_check_release_or_automatically_publish(self):
+        b=self.single_imported(lambda p:p['items'][0].update(status_text='Payment pending'))
+        item=b['items'][0]
+        self.assertEqual(item['state'],'blocked');self.assertFalse(b['processing_single'])
+        self.assertIsNone(b['completion_url']);self.assertIsNone(item['purchase']['price'])
+        self.assertIn('Payment pending',' '.join(item['warnings']))
+        self.assertEqual(self.client.post(item['detail_url']+'/check',json={'revision':item['revision']}).status_code,409)
+        self.assertEqual(self.release(b,[item]).status_code,409)
+        self.assertIsNone(stuff._finish_single_import(self.db,b['id']))
+        resumed=self.batch()
+        self.assertEqual(resumed['items'][0]['state'],'blocked')
+        self.assertFalse(resumed['processing_single']);self.assertIsNone(resumed['completion_url'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_purchase_prices').fetchone()[0],0)
+    def test_attention_receipt_does_not_hide_invalid_evidence_or_checkout_identity(self):
+        changes=[
+            ('wrong order',lambda p:p['receipts'][0].update(order_id=ORDERS[1])),
+            ('wrong item',lambda p:p['receipts'][0].update(item_id='999999999999')),
+            ('wrong amount',lambda p:p['receipts'][0].update(unit_amount='999.99')),
+            ('wrong currency',lambda p:p['receipts'][0].update(currency='EUR')),
+            ('missing unit amount',lambda p:p['receipts'][0].update(evidence=p['receipts'][0]['evidence'].replace('Unit price','Order total'))),
+            ('wrong evidence item',lambda p:p['receipts'][0].update(evidence=p['receipts'][0]['evidence'].replace(IDS[0],IDS[1]))),
+            ('coupon',lambda p:p['receipts'][0].update(evidence=p['receipts'][0]['evidence']+'\nCoupon USD 5.00')),
+            ('refund',lambda p:p['receipts'][0].update(evidence=p['receipts'][0]['evidence']+'\nPartially refunded')),
+            ('stale receipt',lambda p:p['receipts'][0].update(observed_at='2020-01-01T00:00:00Z')),
+            ('multiple quantity',lambda p:(p['items'][0].update(quantity=2),p['listings'].clear())),
+            ('ambiguous identity',lambda p:p['items'][0].update(identity_ambiguous=True)),
+            ('wrong account',lambda p:p.update(account='different-buyer')),
+            ('wrong membership',lambda p:p['checkout']['orders'][0].update(item_ids=['999999999999'])),
+        ]
+        for name,mutate in changes:
+            with self.subTest(reason=name):
+                b=self.batch()
+                q=self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request']
+                payload=self.payload(q);payload['items'][0]['status_text']='Payment pending';mutate(payload)
+                response=self.client.post('/ebay/today/requests',json=payload,headers=HEADERS)
+                self.assertEqual(response.status_code,409,response.json)
+                self.assertEqual(self.client.get(b['status_url']).json['state'],'failed')
+                for table in ('ebay_order_items','ebay_purchase_observations','ebay_listing_captures',
+                              'ebay_purchase_prices','banknote_import_items','banknotes','banknote_ebay_links'):
+                    self.assertEqual(self.db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0],0,table)
+    def test_ignored_purchase_receipt_still_rejects_checkout_atomically(self):
+        self.db.execute('INSERT INTO ebay_order_items(line_key,order_id,item_id,title,seller,quantity,delivery_status,attention,last_seen,ignored) '
+                        "VALUES('ignored',?,?,?,'dealer0',1,'Ordered','Prior review','2026-01-01T00:00:00Z',1)",
+                        (ORDERS[0],IDS[0],'Netherlands Antilles 1 Gulden PMG 67 EPQ'))
+        self.db.commit();before=dict(self.db.execute("SELECT * FROM ebay_order_items WHERE line_key='ignored'").fetchone())
+        b=self.batch();q=self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request']
+        payload=self.payload(q);payload['items'][0]['status_text']='Payment pending'
+        response=self.client.post('/ebay/today/requests',json=payload,headers=HEADERS)
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(self.client.get(b['status_url']).json['state'],'failed')
+        self.assertEqual(dict(self.db.execute("SELECT * FROM ebay_order_items WHERE line_key='ignored'").fetchone()),before)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0],1)
+        for table in ('ebay_purchase_observations','ebay_listing_captures','ebay_purchase_prices','banknote_import_items','banknotes'):
+            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0],0,table)
+    def test_duplicate_stored_purchase_still_rejects_checkout_atomically(self):
+        for key in ('first','duplicate'):
+            self.db.execute('INSERT INTO ebay_order_items(line_key,order_id,item_id,title,seller,quantity,delivery_status,attention,last_seen) '
+                            "VALUES(?,?,?,?,'dealer0',1,'Ordered','Prior review','2026-01-01T00:00:00Z')",
+                            (key,ORDERS[0],IDS[0],'Netherlands Antilles 1 Gulden PMG 67 EPQ'))
+        self.db.commit()
+        before=[dict(row) for row in self.db.execute('SELECT * FROM ebay_order_items ORDER BY line_key')]
+        b=self.batch();q=self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request']
+        payload=self.payload(q);payload['items'][0]['status_text']='Payment pending'
+        response=self.client.post('/ebay/today/requests',json=payload,headers=HEADERS)
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(self.client.get(b['status_url']).json['state'],'failed')
+        self.assertEqual([dict(row) for row in self.db.execute('SELECT * FROM ebay_order_items ORDER BY line_key')],before)
+        for table in ('ebay_purchase_observations','ebay_listing_captures','ebay_purchase_prices','banknote_import_items','banknotes'):
+            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0],0,table)
+    def test_newer_stored_identity_warning_cannot_be_treated_as_status_review(self):
+        self.db.execute('INSERT INTO ebay_order_items(line_key,order_id,item_id,title,seller,quantity,delivery_status,attention,last_seen) '
+                        "VALUES('ambiguous',?,?,?,'dealer0',1,'Ordered',?,'2026-01-01T00:00:00Z')",
+                        (ORDERS[0],IDS[0],'Netherlands Antilles 1 Gulden PMG 67 EPQ',
+                         'Multiple purchase rows share this identity; review required'))
+        observed=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(time.time()+60))
+        self.db.execute('INSERT INTO ebay_purchase_observations VALUES(?,?,?,?)',('ambiguous',observed,'Paid',''))
+        self.db.commit();before=dict(self.db.execute("SELECT * FROM ebay_order_items WHERE line_key='ambiguous'").fetchone())
+        b=self.batch();q=self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request']
+        payload=self.payload(q)
+        self.assertNotIn('identity_ambiguous',payload['items'][0])
+        response=self.client.post('/ebay/today/requests',json=payload,headers=HEADERS)
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(response.json['error'],'Receipt purchase requires review')
+        self.assertEqual(dict(self.db.execute("SELECT * FROM ebay_order_items WHERE line_key='ambiguous'").fetchone()),before)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0],1)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_purchase_observations').fetchone()[0],1)
+        for table in ('ebay_listing_captures','ebay_purchase_prices','banknote_import_items','banknotes'):
+            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0],0,table)
+    def test_explicit_fresh_order_read_can_resolve_blocked_receipt_attention(self):
+        b=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
+        blocked=next(i for i in b['items'] if i['state']=='blocked')
+        self.assertEqual(self.batch()['items'][0]['state'],'blocked')
+        self.db.execute("UPDATE ebay_purchase_observations SET observed_at='2026-01-01T00:00:00Z'");self.db.commit()
+        refreshed=self.refresh(b)
+        item=next(i for i in refreshed['items'] if i['id']==blocked['id'])
+        self.assertEqual(item['state'],'draft');self.assertFalse(item['warnings'])
+        self.assertGreater(item['revision'],blocked['revision'])
+        self.assertEqual(item['purchase']['price'],'$599.89')
+        self.assertEqual(self.db.execute('SELECT attention FROM ebay_order_items WHERE item_id=?',(IDS[0],)).fetchone()[0],'')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
     def test_old_reader_without_membership_proof_cannot_import_partial_checkout(self):
         b=self.batch();q=self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request'];payload=self.payload(q)
         payload.pop('checkout');payload['items']=payload['items'][1:2];payload['receipts']=[];payload['listings']=[]
