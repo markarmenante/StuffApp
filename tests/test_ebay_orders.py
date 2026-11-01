@@ -268,6 +268,43 @@ class PurchaseNumberCaptureTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_automatic_clock_uses_new_york_and_daylight_saving(self):
+        for instant, expected in (
+            ('2026-01-03T12:00:00+00:00', '2026-01-03'),
+            ('2026-07-03T11:00:59+00:00', '2026-07-03'),
+            ('2026-03-08T11:00:00+00:00', '2026-03-08'),
+            ('2026-11-01T12:00:00+00:00', '2026-11-01'),
+            ('2026-11-01T11:00:00+00:00', None),
+            ('2026-07-03T10:59:59+00:00', None),
+            ('2026-07-03T11:01:00+00:00', None),
+        ):
+            with self.subTest(instant=instant):
+                day = ebay.automatic_purchase_day(datetime.fromisoformat(instant))
+                self.assertEqual(day.isoformat() if day else None, expected)
+
+    def test_automatic_attempt_survives_failure_and_worker_restart(self):
+        today = datetime.now(ebay.PURCHASE_TIMEZONE).date()
+        with patch.object(ebay, 'automatic_purchase_day', return_value=today), \
+                patch.object(self.client, 'orders', side_effect=ebay.EbayError('Network unavailable')) as orders:
+            self.assertEqual(self.sync.run_once(automatic=True)['status'], 'failed')
+            restarted = ebay.OrderSync(Mock(), self.open_db, self.tmp.name, self.client)
+            self.assertEqual(restarted.run_once(automatic=True)['status'], 'not_due')
+            self.assertEqual(orders.call_count, 1)
+        # Even a previous attempt outside the interval cannot repeat on this NY date.
+        db = self.open_db()
+        db.execute('UPDATE ebay_connection SET last_attempt=?',
+                   (datetime.combine(today, datetime.min.time(), ebay.PURCHASE_TIMEZONE).isoformat(),))
+        db.commit(); db.close()
+        with patch.object(ebay, 'automatic_purchase_day', return_value=today), \
+                patch.object(self.client, 'orders', return_value=parsed()) as orders:
+            self.assertEqual(restarted.run_once(automatic=True)['status'], 'not_due')
+            orders.assert_not_called()
+        with patch.object(ebay, 'automatic_purchase_day', return_value=None), \
+                patch.object(self.client, 'orders', return_value=parsed()) as orders:
+            self.assertEqual(restarted.run_once(automatic=True)['status'], 'not_due')
+            self.assertEqual(restarted.run_once(force=True)['status'], 'done')
+            orders.assert_called_once()
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.path = str(Path(self.tmp.name) / 'test.db')

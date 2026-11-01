@@ -23,6 +23,7 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 import uuid
 import xml.etree.ElementTree as ET
+from zoneinfo import ZoneInfo
 
 from cryptography.fernet import Fernet, InvalidToken
 from defusedxml.ElementTree import fromstring
@@ -34,6 +35,13 @@ NS = 'urn:ebay:apis:eBLBaseComponents'
 RANK = {'Ordered': 0, 'Shipped': 1, 'Delivered': 2}
 NOTE_WORDS = re.compile(r'\b(banknotes?|paper money|legal tender|friedberg|currency|PMG|Pick[ -]?\d|piastres?|francs?|rupees?|shillings?)\b', re.I)
 EBAY_HOST = re.compile(r'(?:[a-z0-9-]+\.)*ebay\.(?:com|ca|co\.uk|com\.au|de|fr|it|es|at|be|ch|ie|nl|pl|com\.sg|com\.hk)$', re.I)
+
+PURCHASE_TIMEZONE = ZoneInfo('America/New_York')
+
+
+def automatic_purchase_day(now=None):
+    local = (now or datetime.now(timezone.utc)).astimezone(PURCHASE_TIMEZONE)
+    return local.date() if (local.hour, local.minute) == (7, 0) else None
 
 
 def now_iso():
@@ -608,18 +616,22 @@ class OrderSync:
         db.commit()
         return token['access_token']
 
-    def run_once(self, force=False):
+    def run_once(self, force=False, automatic=False):
         with self.exclusive() as acquired:
             if not acquired:
                 return {'status': 'busy'}
+            day = automatic_purchase_day() if automatic else None
+            if automatic and day is None:
+                return {'status': 'not_due'}
             db, run_id = self.open_db(), None
             try:
                 conn = db.execute('SELECT * FROM ebay_connection WHERE id=1').fetchone()
                 if not conn or not conn['enabled'] or not conn['refresh_token'] or not self.client.configured:
                     return {'status': 'not_connected_or_paused'}
                 if conn['last_attempt'] and not force:
-                    last = datetime.fromisoformat(conn['last_attempt'].replace('Z', '+00:00')).timestamp()
-                    if time.time() - last < self.interval:
+                    last = datetime.fromisoformat(conn['last_attempt'].replace('Z', '+00:00'))
+                    if (time.time() - last.timestamp() < self.interval
+                            or (automatic and last.astimezone(PURCHASE_TIMEZONE).date() >= day)):
                         return {'status': 'not_due'}
                 run_id, started = str(uuid.uuid4()), now_iso()
                 db.execute("UPDATE ebay_sync_runs SET status='interrupted', finished_at=?, error=? WHERE status='running'",
@@ -661,7 +673,7 @@ class OrderSync:
             self.wake.wait(60)
             self.wake.clear()
             try:
-                self.run_once()
+                self.run_once(automatic=True)
             except Exception:
                 self.app.logger.error('eBay order scheduler could not complete a check; will retry.')
 
@@ -748,7 +760,7 @@ def register(app, get_db, open_db, require_owner, data_dir):
         _, suggestions = detail_match_plan(db)
         return render_template('ebay_orders.html', current_category='banknotes', connection=conn,
                                configured=sync.client.configured, worker_enabled=sync.worker_enabled,
-                               interval_minutes=sync.interval // 60, items=items, notes=notes,
+                               items=items, notes=notes,
                                events=events, runs=runs, tracking=tracking, suggestions=suggestions,
                                merchant_notices=notices, purchase_observations=observations,
                                csrf_token=csrf_token(),

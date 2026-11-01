@@ -174,8 +174,15 @@ order identity appear under Other purchase messages as review-only evidence.
 eBay references, estimates and ambiguous notices are excluded. Only sender,
 subject, order ID, status phrase, receipt time and a message hash leave the Mac;
 no raw bodies, addresses, payments or attachments. Missing message bodies retry.
-The two sources run independently every 30 minutes while Today is running, so
-a closed browser does not block other sellers' notices.
+Automatic eBay purchase-history checks run at most once daily at 7:00 a.m.
+`America/New_York` (including daylight saving changes), while Today is running.
+The attempt date is persisted before reading eBay; a failed run or restart does
+not repeat that day's automatic attempt. The host must be awake during
+7:00–7:01; a missed run waits until the next morning, without daytime catch-up.
+Non-eBay merchant messages retain their independent startup and 30-minute
+checks, so a closed browser does not block other sellers' notices. Explicit
+order imports, Check, Buy capture and `/api/stuffapp/sync` remain available
+immediately. The five-second request-queue poll does not read eBay by itself.
 
 Setup uses `STUFFAPP_TODAY_TOKEN` on Railway **web only**, and the same token in
 `~/Library/Application Support/com.boardroom.today/stuffapp-mail.json` (0600):
@@ -195,7 +202,7 @@ boardroom's `apps/today/ebay-mail.test.ts`.
 ## Optional direct eBay API
 
 Banknotes → **eBay Orders** connects one buyer account to this collection.
-The worker checks every 30 minutes (minimum supported interval 15 minutes),
+The optional worker also checks at most once daily at 7:00 a.m. New York time,
 using Trading `GetOrders` with `OrderRole=Buyer`, all statuses and all pages
 of a fixed 89-day creation window. The only supported Trading calls are
 `GetUser` and `GetOrders`; this feature never writes to eBay.
@@ -223,8 +230,10 @@ of a fixed 89-day creation window. The only supported Trading calls are
    public origin if required by eBay). Scope is the traditional API base
    scope `https://api.ebay.com/oauth/api_scope`; this scope is broader than
    this code's read-only allowlist, not an eBay-enforced read-only scope.
-5. Set `EBAY_SYNC_WORKER=1` on web only and deploy. Optional interval:
-   `EBAY_SYNC_INTERVAL_SECONDS=1800`. Without keys and an authorized buyer,
+5. Set `EBAY_SYNC_WORKER=1` on web only and deploy. Automatic checks use the
+   fixed 7:00 a.m. New York schedule; `EBAY_SYNC_INTERVAL_SECONDS` only controls
+   the existing cooldown and cannot enable more frequent automatic checks.
+   Without keys and an authorized buyer,
    the worker does nothing and the UI says setup is incomplete.
 6. Owner opens **Connect eBay**, signs into the actual purchasing account
    and grants consent on eBay. This stores encrypted access/refresh tokens,

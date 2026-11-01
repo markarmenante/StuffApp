@@ -10,6 +10,7 @@
     <h2 id="connectionHeading">{% if mail_configured %}eBay Purchases{% elif connection and connection.connected %}Connected to {{ connection.account_name }}{% else %}Purchase updates{% endif %}</h2>
     {% if mail_configured %}
       <p><strong>{% if mail_connection and not mail_connection.enabled %}Purchase updates paused{% elif purchase_observations %}Connected to Today{% else %}Waiting for Purchases check{% endif %}</strong></p>
+      <p>Automatic checks: daily at 7:00 a.m. New York time, while the Mac is awake. Manual order imports and Check remain available anytime.</p>
       <p>Last Purchases check: {{ mail_connection.last_received if purchase_observations and mail_connection and mail_connection.last_received else 'Not checked yet' }}{% if purchase_observations and mail_connection and mail_connection.last_received %} (UTC){% endif %}</p>
       <form action="{{ url_for('ebay.settings') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="{{ 'resume_mail' if mail_connection and not mail_connection.enabled else 'pause_mail' }}"><button class="toolbar-btn pill" type="submit">{{ 'Resume purchase updates' if mail_connection and not mail_connection.enabled else 'Pause purchase updates' }}</button></form>
     {% elif not configured %}
@@ -27,7 +28,7 @@
       </details>
     {% elif configured %}
       {% if connection and connection.connected %}
-        <p>{% if connection.enabled and worker_enabled %}<strong>Automatic updates are on</strong> · every {{ interval_minutes }} minutes.{% elif not connection.enabled %}<strong>Automatic updates are paused.</strong>{% else %}<strong>Scheduled checks are not enabled on this deployment.</strong> Check now still works.{% endif %}</p>
+        <p>{% if connection.enabled and worker_enabled %}<strong>Automatic updates are on</strong> · daily at 7:00 a.m. New York time.{% elif not connection.enabled %}<strong>Automatic updates are paused.</strong>{% else %}<strong>Scheduled checks are not enabled on this deployment.</strong> Check now still works.{% endif %}</p>
         <p>Last successful check: {{ connection.last_success|default('Not checked yet', true) }}{% if connection.last_success %} (UTC){% endif %}</p>
         {% if connection.error %}<p class="ebay-notice" role="alert">{{ connection.error }}</p>{% endif %}
       {% else %}
