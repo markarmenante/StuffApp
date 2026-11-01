@@ -36,6 +36,7 @@ _MULTIPLE = r'(?:[2-9]\d*|1\d+|two|three|four|five|six|seven|eight|nine|ten|elev
 _BUNDLE = re.compile(r'\b(?:set|bundle)\s*(?:of\s*)?'+_MULTIPLE+r'\b|\blot\s+of\s+'+_MULTIPLE+r'\b|\bpair of\b|\b'+_MULTIPLE+r'\s+(?:consecutive\s+)?(?:serial\s+)?(?:notes|banknotes)\b', re.I)
 _AUTO_AMBIGUOUS = re.compile(r'\b(?:set|bundle|pair|assortment|assorted|coins?|stamps?|medals?|empty|holder only)\b|\blot\s+(?:of\s+)?(?:notes|banknotes)\b|\bcollection\s+of\s+(?:\w+\s+){0,4}(?:notes|banknotes)\b|\b(?:notes|banknotes)\s+collection\b', re.I)
 _NOTE_TITLE = re.compile(r'\b(?:banknotes?|paper money|PMG|Friedberg)\b|\bPick\s*[#-]?\s*\d', re.I)
+_LISTING_PREVIEW_URL = re.compile(r'https://i\.ebayimg\.com/images/g/[\w~-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', re.ASCII)
 
 
 class ImportProblem(ValueError):
@@ -315,6 +316,53 @@ def _existing_record_changes(existing, current):
             if key not in _EXISTING_UNVERSIONED_FIELDS and current.get(key) != value]
 
 
+def _listing_previews(db, row, source):
+    """Expose captured public images for viewing without accepting source status.
+
+    This read-only fallback never downloads, retains, selects or classifies a
+    photograph. Check and release keep their stricter source-status guards.
+    """
+    if row['state'] not in ('draft', 'blocked'):
+        return []
+    try:
+        batch = _batch(db, row['batch_id'])
+        membership = json.loads(batch['snapshot_json'])
+    except (ImportProblem, ValueError, TypeError):
+        return []
+    if (not isinstance(membership, list) or batch['state'] not in ('review', 'complete')
+            or row['account_name'] != batch['account_name']
+            or source.get('item_id') != row['item_id']
+            or _digest(source) != row['source_digest']
+            or [source.get('order_id'), row['item_id']] not in membership):
+        return []
+    stored = db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
+                        (source.get('order_id'), row['item_id'])).fetchall()
+    if len(stored) != 1:
+        return []
+    current = dict(stored[0])
+    if (current['line_key'] != row['line_key'] or _digest(current) != row['source_digest']
+            or current['quantity'] != 1 or current['ignored']
+            or current['attention'].startswith('Multiple purchase rows')):
+        return []
+    now = time.time()
+    capture = db.execute('SELECT images_json FROM ebay_listing_captures WHERE url=? '
+                         'AND captured_at>? AND captured_at<=?',
+                         ('https://www.ebay.com/itm/' + row['item_id'],
+                          now - ebay_listing_captures.MAX_AGE, now + 60)).fetchone()
+    if not capture:
+        return []
+    try:
+        urls = json.loads(capture['images_json'])
+    except (ValueError, TypeError):
+        return []
+    if (not isinstance(urls, list) or len(urls) > 24
+            or any(not isinstance(url, str) or len(url) > 2048
+                   or not _LISTING_PREVIEW_URL.fullmatch(url) for url in urls)):
+        return []
+    return [dict(url=url, source_url=url, position=position, preview=True, selectable=False)
+            for position, url in enumerate(dict.fromkeys(urls))]
+
+
 def _public_item(db, row):
     row = dict(row)
     source = json.loads(row['source_json'])
@@ -345,6 +393,8 @@ def _public_item(db, row):
         saved=[dict(url='/uploads/'+existing[field],filename=existing[field],selectable=False,source_url='',position=index)
                for index,field in enumerate(('image_1','image_2')) if existing.get(field)]
         photos=saved+[photo for photo in photos if photo['url'] not in {p['url'] for p in saved}]
+    if not photos:
+        photos = _listing_previews(db, row, source)
     evidence = [json.loads(proof['proof_json']) | {'field':proof['field'],'value':json.loads(proof['value_json'])}
                 for proof in db.execute('SELECT * FROM banknote_import_evidence WHERE item_id=? ORDER BY field', (row['id'],))]
     paid=ebay_purchase_prices.for_item(db,source)

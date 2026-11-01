@@ -9,22 +9,38 @@ const batch = (extra = {}) => ({id: 'test', order_number: '12-12345-12345', stat
 const draft = (extra = {}) => ({id: 'draft', state: 'draft', check_state: 'done', fields: {},
   order_number: '12-12345-12345', detail_url: '/banknotes/imports/test/items/draft', ...extra});
 
-function page(initial, replies = []) {
-  const element = () => ({dataset: {}, textContent: '', children: [], handlers: {}, hidden: false,
+const descendants = node => (node.children || []).flatMap(child => [child, ...descendants(child)]);
+const content = node => [node.textContent || '', ...node.children.map(content)].join(' ');
+
+function page(initial, replies = [], item) {
+  const element = (tag = 'div') => ({tagName: tag.toUpperCase(), dataset: {}, textContent: '', children: [], handlers: {}, hidden: false,
+    classList: {contains() { return false; }},
     append(...nodes) { this.children.push(...nodes); },
     replaceChildren(...nodes) { this.children = nodes; },
-    querySelectorAll() { return []; },
+    setAttribute(name, value) { this[name] = value; },
+    querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
+    querySelectorAll(selector) {
+      return descendants(this).filter(node => selector === 'ul' ? node.tagName === 'UL'
+        : selector === 'figure[data-photo-filename]' ? node.tagName === 'FIGURE' && 'photoFilename' in node.dataset
+        : selector === '[data-photo-selected]' ? 'photoSelected' in node.dataset
+        : selector === '[data-photo-side]' ? 'photoSide' in node.dataset
+        : selector === '.import-photo-actions' ? node.className === 'import-photo-actions' : false);
+    },
     addEventListener(name, fn) { this.handlers[name] = fn; }});
   const ids = ['banknoteImportStatus', 'banknoteImportIntro', 'banknoteImportCount',
     'banknoteImportList', 'banknoteImportRetry', 'banknoteImportRefresh', 'banknoteImportRefreshOrder'];
+  if (item) ids.push('mainForm', 'banknoteImportSave', 'banknoteImportCheck', 'banknoteImportRelease',
+    'banknoteImportState', 'banknoteImportPhotos', 'banknoteImportPhotosHeading', 'banknoteImportWarnings', 'banknoteImportEvidence', 'banknoteImportImageHelp');
   const elements = Object.fromEntries(ids.map(id => [id, element()]));
-  elements['banknote-import-data'] = {textContent: JSON.stringify({batch: initial})};
+  if (item) elements.banknoteImportEvidence.append(element('ul'));
+  elements['banknote-import-data'] = {textContent: JSON.stringify({batch: initial, item})};
   const requests = [], timers = [], navigations = [];
   vm.runInNewContext(source, {
-    document: {querySelector: () => ({dataset: {importMode: 'review'}}),
-      getElementById: id => elements[id], createElement: element, createDocumentFragment: element},
+    document: {querySelector: () => ({dataset: {importMode: item ? 'detail' : 'review'}, classList: {contains() { return false; }}}),
+      getElementById: id => elements[id], createElement: element, createDocumentFragment: element,
+      querySelectorAll() { return []; }, addEventListener() {}},
     window: {location: {href: 'https://stuff.test/banknotes/imports/test', origin: 'https://stuff.test',
-      assign: url => navigations.push(url)}},
+      assign: url => navigations.push(url)}, addEventListener() {}},
     URL, clearTimeout() {}, setTimeout(fn) { timers.push(fn); return timers.length; },
     fetch: async (url, options) => {
       requests.push({url, method: options.method});
@@ -34,7 +50,7 @@ function page(initial, replies = []) {
   });
   return {intro: elements.banknoteImportIntro, status: elements.banknoteImportStatus,
     retry: elements.banknoteImportRetry, refreshOrder: elements.banknoteImportRefreshOrder,
-    list: elements.banknoteImportList, requests, timers, navigations};
+    list: elements.banknoteImportList, requests, timers, navigations, elements};
 }
 
 (async () => {
@@ -102,5 +118,66 @@ function page(initial, replies = []) {
   assert.match(refreshFailed.intro.textContent, /^Saved for review/);
   assert.match(refreshFailed.status.textContent, /could not be retrieved/);
   assert.equal(refreshFailed.retry.hidden, false);
+
+  const previewUrl = 'https://i.ebayimg.com/images/g/synthetic-front_~-/s-l1600.jpg';
+  const preview = (url = previewUrl, extra = {}) => ({url, preview: true, selectable: false, ...extra});
+  const warning = 'Status needs attention: <img src=x onerror=alert(1)> synthetic warning';
+  const blockedDraft = draft({state: 'blocked', photos: [preview()], warnings: [warning, {message: 'Review this exact purchased item.'}]});
+  const cleanDraft = draft({id: 'clean', fields: {image_1: 'retained.png'},
+    photos: [{url: '/uploads/retained.png', filename: 'retained.png'}, preview()]});
+  const galleryReview = page(batch({state: 'review', items: [blockedDraft, cleanDraft], pending_count: 2}));
+  const cards = galleryReview.list.children[0].children;
+  assert.deepEqual(descendants(cards[0]).filter(node => node.tagName === 'IMG').map(node => node.src), [previewUrl]);
+  assert.equal(descendants(cards[0]).find(node => node.tagName === 'IMG').referrerPolicy, 'no-referrer');
+  assert.match(content(cards[0]), /Listing preview/);
+  assert.ok(descendants(cards[0]).some(node => node.tagName === 'LI' && node.textContent === warning), 'Warnings remain literal text');
+  assert.deepEqual(descendants(cards[1]).filter(node => node.tagName === 'IMG').map(node => node.src), ['/uploads/retained.png', previewUrl]);
+  assert.equal(galleryReview.requests.length, 0, 'Viewing blocked and clean siblings performs no actions');
+
+  const unsafeUrls = ['https://attacker.invalid/photo.jpg', 'http://i.ebayimg.com/images/g/front/s-l1600.jpg',
+    'https://i.ebayimg.com.attacker.invalid/images/g/front/s-l1600.jpg',
+    'https://user:password@i.ebayimg.com/images/g/front/s-l1600.jpg', previewUrl + '?tracking=1', previewUrl + '#fragment',
+    previewUrl + '\n', '//i.ebayimg.com/images/g/front/s-l1600.jpg',
+    'https://i.ebayimg.com:443/images/g/front/s-l1600.jpg',
+    'https://i.ebayimg.com/images/g/../front/s-l1600.jpg', '/uploads/local.png',
+    'https://i.ebayimg.com/images/g/' + 'a'.repeat(2048) + '/s-l1600.jpg'];
+  for (const url of unsafeUrls) {
+    const ui = page(batch({state: 'review', items: [draft({photos: [preview(url)]})]}));
+    assert.equal(descendants(ui.list).filter(node => node.tagName === 'IMG').length, 0, url);
+    assert.equal(ui.requests.length, 0);
+  }
+  const unflagged = page(batch({state: 'review', items: [draft({photos: [{url: previewUrl}]})]}));
+  assert.equal(descendants(unflagged.list).filter(node => node.tagName === 'IMG').length, 0, 'External URLs require the preview flag');
+  assert.throws(() => page(batch({state: 'review', items: [draft({detail_url: 'https://attacker.invalid/check', photos: [preview()]})]})), /invalid link/,
+    'A preview never permits an external application action');
+
+  const detailDraft = {...blockedDraft, photos: [preview(previewUrl, {filename: 'untrusted.png', selectable: true})]};
+  const detail = page(batch({state: 'review', items: [detailDraft]}), [], detailDraft);
+  const gallery = detail.elements.banknoteImportPhotos;
+  assert.equal(descendants(gallery).filter(node => node.tagName === 'IMG').length, 1);
+  assert.match(content(gallery), /listing preview only/);
+  assert.equal(descendants(gallery).filter(node => node.tagName === 'BUTTON').length, 0, 'Preview flags cannot expose side selection');
+  assert.equal(gallery.children[0].dataset.photoFilename, '', 'Preview is never a retained filename');
+  assert.equal(detail.elements.banknoteImportCheck.disabled, true);
+  assert.equal(detail.elements.banknoteImportRelease.disabled, true);
+  assert.match(detail.elements.banknoteImportImageHelp.textContent, /blocked.*inspection only/);
+  assert.doesNotMatch(detail.elements.banknoteImportImageHelp.textContent, /Use Check|Choose front|adjust.*crop/);
+  assert.equal(detail.requests.length, 0);
+  const emptyDraft = {...blockedDraft, photos: []};
+  const emptyDetail = page(batch({state: 'review', items: [emptyDraft]}), [], emptyDraft);
+  assert.doesNotMatch(content(emptyDetail.elements.banknoteImportPhotos), /Use Check/);
+  assert.match(content(emptyDetail.elements.banknoteImportPhotos), /Refresh eBay order/);
+  assert.equal(detail.elements.banknoteImportPhotosHeading.textContent, 'Purchased photos');
+  const checkingPreview = draft({check_state: 'checking', revision: 1, photos: [preview()]});
+  const retainedDraft = draft({check_state: 'done', revision: 2,
+    photos: [{url: '/uploads/retained.png', filename: 'retained.png', selectable: true}]});
+  const transitioning = page(batch({state: 'review', items: [checkingPreview]}),
+    [batch({state: 'review', items: [retainedDraft]})], checkingPreview);
+  assert.equal(transitioning.elements.banknoteImportPhotosHeading.textContent, 'Purchased photos');
+  await transitioning.timers.shift()();
+  assert.equal(transitioning.elements.banknoteImportPhotosHeading.textContent, 'Purchased photos · select front and back');
+  assert.deepEqual(descendants(transitioning.elements.banknoteImportPhotos).filter(node => node.tagName === 'IMG').map(node => node.src), ['/uploads/retained.png']);
+  assert.equal(descendants(transitioning.elements.banknoteImportPhotos).filter(node => node.tagName === 'BUTTON').length, 2);
+  assert.deepEqual(transitioning.requests, [{url: '/banknotes/imports/test/status', method: 'GET'}]);
   console.log('Order review correctly distinguishes empty, queued, blocked, failed, saved and released states.');
 })().catch(error => { console.error(error); process.exit(1); });

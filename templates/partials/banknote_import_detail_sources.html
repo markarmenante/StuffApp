@@ -1,5 +1,5 @@
 <details class="import-purchased-photos"{% if not import_item.fields.get('image_1') or not import_item.fields.get('image_2') %} open{% endif %}>
-  <summary class="section-bar">Purchased photos · select front and back</summary>
+  <summary class="section-bar" id="banknoteImportPhotosHeading">Purchased photos{% if import_item.state == 'draft' and not (import_item.photos|selectattr('preview')|list) %} · select front and back{% endif %}</summary>
   <div class="import-gallery" id="banknoteImportPhotos" aria-label="Purchased item photos"></div>
 </details>
 <div class="import-source">

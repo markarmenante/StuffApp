@@ -171,19 +171,32 @@
     + '?report_back=' + encodeURIComponent(batchUrl);
   const reviewUrl = draft => draft.state === 'released' && draft.released_record_id ? collectionUrl(draft) : draft.detail_url;
   function appendPhoto(parent, photo, index, detailUrl, large = false) {
-    let src; try { src = sameOrigin(photo.url); } catch (_) { return; }
+    const preview = photo.preview === true;
+    // Only cached eBay image URLs get the display-only exception. All retained
+    // photos and every application action still require the same origin.
+    let src;
+    if (preview) {
+      if (typeof photo.url !== 'string' || photo.url.length > 2048 || photo.url.trim() !== photo.url
+          || !/^https:\/\/i\.ebayimg\.com\/images\/g\/[\w~-]+\/s-l\d+\.(?:jpg|jpeg|png|webp)$/.test(photo.url)) return;
+      src = photo.url;
+    } else { try { src = sameOrigin(photo.url); } catch (_) { return; } }
     const anchor = el('a'); anchor.href = large ? src : sameOrigin(detailUrl);
     if (large) { anchor.target = '_blank'; anchor.rel = 'noopener'; }
-    const image = el('img'); image.src = src; image.alt = 'Purchased banknote photo ' + (index + 1);
+    const image = el('img'); image.alt = 'Purchased banknote photo ' + (index + 1);
+    if (preview) {
+      image.referrerPolicy = 'no-referrer'; anchor.referrerPolicy = 'no-referrer';
+      anchor.rel = 'noopener noreferrer'; anchor.dataset.photoPreview = 'true';
+    }
+    image.src = src;
     image.loading = index < 2 ? 'eager' : 'lazy'; anchor.append(image);
     if (large) {
-      const figure = el('figure'); figure.dataset.photoFilename = photo.filename || ''; figure.tabIndex = -1;
-      const caption = el('figcaption', 'Photo ' + (index + 1));
-      for (const [field, label] of [['image_1','Front'], ['image_2','Back']]) {
+      const figure = el('figure'); figure.dataset.photoFilename = preview ? '' : photo.filename || ''; figure.tabIndex = -1;
+      const caption = el('figcaption', 'Photo ' + (index + 1) + (preview ? ' · listing preview only' : ''));
+      for (const [field, label] of preview ? [] : [['image_1','Front'], ['image_2','Back']]) {
         const badge = el('span', label, 'import-badge'); badge.dataset.photoSelected = field; badge.hidden = true; caption.append(badge);
       }
       figure.append(anchor, caption);
-      if (photo.filename && photo.selectable !== false) {
+      if (!preview && photo.filename && photo.selectable !== false) {
         const actions = el('div', undefined, 'import-photo-actions');
         for (const [field, label] of [['image_1','front'], ['image_2','back']]) {
           const button = el('button', 'Use as ' + label, 'toolbar-btn pill');
@@ -195,7 +208,10 @@
       }
       parent.append(figure);
     }
-    else parent.append(anchor);
+    else {
+      if (preview) anchor.append(el('span', 'Listing preview', 'import-photo-preview'));
+      parent.append(anchor);
+    }
   }
   const missing = draft => [['country','country'],['denomination','denomination'],['pick_number','catalogue number']]
     .filter(([name]) => !text(draft.fields?.[name]).trim()).map(([,label]) => label);
@@ -223,6 +239,11 @@
       body.append(el('p', [price ? 'Item price: ' + price : 'Item price not available', draft.fields?.vendor ? 'Seller: ' + draft.fields.vendor : '', 'Order: ' + draft.order_number].filter(Boolean).join(' · ')));
       const absent = missing(draft);
       if (absent.length && draft.state !== 'released') body.append(el('p', 'Missing: ' + absent.join(', ')));
+      const warnings = (draft.warnings || []).map(evidenceText).filter(Boolean);
+      if (warnings.length) {
+        const list = el('ul', undefined, 'import-card-warnings');
+        warnings.forEach(warning => list.append(el('li', warning))); body.append(list);
+      }
       const actions = el('div', undefined, 'import-actions');
       const review = el('a', draft.state === 'released' ? 'Open banknote' : 'Review details', 'toolbar-btn pill active');
       review.href = sameOrigin(reviewUrl(draft)); review.dataset.reviewDraft = draft.id;
@@ -317,11 +338,13 @@
     form?.setAttribute('aria-busy', String(busy || Boolean(saving)));
     document.getElementById('banknoteImportState').textContent = stateLabel(item);
     const gallery = document.getElementById('banknoteImportPhotos');
-    const signature = JSON.stringify(item.photos || []);
+    const signature = JSON.stringify([item.state, item.photos || []]);
     if (gallery.dataset.photos !== signature) {
       gallery.dataset.photos = signature; gallery.replaceChildren();
       (item.photos || []).forEach((photo, index) => appendPhoto(gallery, photo, index, item.detail_url, true));
-      if (!gallery.children.length) gallery.append(el('p', checkRunning(item) ? 'Loading purchased photos…' : 'No purchased photos available yet. Use Check to retry.'));
+      if (!gallery.children.length) gallery.append(el('p', item.state === 'blocked'
+        ? 'Photos are unavailable for this item. Return to Order review and use Refresh eBay order.'
+        : checkRunning(item) ? 'Loading purchased photos…' : 'No purchased photos available yet. Use Check to retry.'));
     }
     const warnings = document.getElementById('banknoteImportWarnings');
     warnings.replaceChildren(); warnings.hidden = !(item.warnings || []).length;
@@ -339,6 +362,9 @@
       entries.append(li);
     });
     const editable = item.state === 'draft';
+    const hasPreviews = (item.photos || []).some(photo => photo.preview === true);
+    const photoHeading = document.getElementById('banknoteImportPhotosHeading');
+    if (photoHeading) photoHeading.textContent = 'Purchased photos' + (editable && !hasPreviews ? ' · select front and back' : '');
     form?.querySelectorAll('.quad-fix-btn').forEach(button => {
       button.hidden = !editable;
       button.disabled = !editable || busy || checkRunning(item) || Boolean(conflict);
@@ -354,6 +380,10 @@
       if (item.state === 'released' && item.released_record_id) {
         const link = el('a', 'Edit photos in collection');
         link.href = sameOrigin(collectionUrl(item)); imageHelp.append(link);
+      } else if (item.state === 'blocked') {
+        imageHelp.textContent = 'This item is blocked. Photos are for inspection only. Review the purchase warning above, then return to Order review and use Refresh eBay order after resolving it.';
+      } else if (hasPreviews) {
+        imageHelp.textContent = 'Listing photos below are previews. Use Check to save photos before selecting front and back.';
       } else {
         imageHelp.textContent = item.fields?.image_1 || item.fields?.image_2
           ? 'Use ✂ on either photo to adjust its crop. Changes stay in this draft until release.'

@@ -63,6 +63,15 @@ owner/account-bound access. They are protected from orphan cleanup. Source text 
 untrusted evidence. A title without the usual banknote discovery words is retained;
 ambiguous quantities and bundles stay visible but blocked from release as one note.
 
+Before original photographs have been retained, review cards and Purchased photos
+can show previews from the fresh, verified exact-listing capture. This includes
+items blocked by a purchase-status warning. These previews are public listing
+images, not saved originals or selected front/back photos; normal Check retains
+the originals when the purchase is eligible. Viewing previews never fetches images
+on the server, runs Check, accepts a price or changes a draft. Expired captures,
+changed source identity, account or membership, excluded purchases and ambiguous
+item identities cannot supply previews. Retained and preserved photos take priority.
+
 After Check reads the original holder photographs, newly selected front/back
 images pass through the same crop pipeline used for uploads. Only previously
 empty photo slots are eligible. Accepted display crops retain their original,

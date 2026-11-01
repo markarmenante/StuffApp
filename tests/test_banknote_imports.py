@@ -363,6 +363,116 @@ class DraftTests(unittest.TestCase):
         latest=self.client.get(b['status_url']).json
         self.assertEqual(latest['pending_count'],1);self.assertFalse(latest['processing_single'])
         self.assertIsNone(latest['completion_url'])
+    def test_blocked_cached_listing_previews_are_read_only_and_never_saved_photo_choices(self):
+        batch=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
+        item=next(i for i in batch['items'] if i['state']=='blocked')
+        expected=['https://i.ebayimg.com/images/g/'+IDS[0]+side+'/s-l1600.jpg' for side in ('front','back')]
+        self.assertEqual(item['photos'],[dict(url=url,source_url=url,position=index,preview=True,selectable=False)
+                                         for index,url in enumerate(expected)])
+        self.assertIsNone(item['purchase']['price']);self.assertFalse(item['fields'].get('image_1'))
+        changes=self.db.total_changes;files={p.name for p in Path(stuff.UPLOAD_FOLDER).iterdir()}
+        with patch.object(imports.listing_images,'download') as download, \
+                patch.object(stuff,'_start_import_checks') as start,patch.object(stuff,'_queue_import_check') as check:
+            for url in (batch['status_url'],batch['url'],item['detail_url']):
+                response=self.client.get(url);self.assertEqual(response.status_code,200)
+                if url==batch['status_url']:
+                    saved=next(i for i in response.json['items'] if i['id']==item['id'])
+                else:
+                    embedded=response.get_data(as_text=True).split('<script id="banknote-import-data" type="application/json">',1)[1].split('</script>',1)[0]
+                    data=json.loads(embedded)
+                    saved=data.get('item') or next(i for i in data['batch']['items'] if i['id']==item['id'])
+                self.assertEqual(saved['photos'],item['photos'])
+            self.assertFalse(download.called);self.assertFalse(start.called);self.assertFalse(check.called)
+        self.assertEqual(self.db.total_changes,changes)
+        self.assertEqual({p.name for p in Path(stuff.UPLOAD_FOLDER).iterdir()},files)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_assets').fetchone()[0],0)
+        for photo in item['photos']:
+            self.assertNotIn('filename',photo)
+            self.assertEqual(self.client.post(item['detail_url']+'/photos',json={
+                'revision':item['revision'],'field':'image_1','filename':photo['url']}).status_code,409)
+        self.assertEqual(self.client.post(item['detail_url']+'/check',json={'revision':item['revision']}).status_code,409)
+        self.assertEqual(self.release(batch,[item]).status_code,409)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+    def test_cached_listing_previews_require_fresh_exact_bounded_valid_image_capture(self):
+        import ebay_listing_captures
+        batch=self.imported();item=batch['items'][0];url=item['listing_url']
+        original=dict(self.db.execute('SELECT * FROM ebay_listing_captures WHERE url=?',(url,)).fetchone())
+        good=json.loads(original['images_json'])[0]
+        invalid_json=['{',json.dumps({}),json.dumps(good),json.dumps([good]*25),json.dumps([None]),
+                      json.dumps([good,'http://i.ebayimg.com/images/g/item/s-l1600.jpg']),
+                      json.dumps(['https://i.ebayimg.com.evil.test/images/g/item/s-l1600.jpg']),
+                      json.dumps(['https://i.ebayimg.com@evil.test/images/g/item/s-l1600.jpg']),
+                      json.dumps(['https://i.ebayimg.com/images/g/item/s-l1600.svg']),
+                      json.dumps(['https://i.ebayimg.com/images/g/item/s-l1600.jpg?tracking=1']),
+                      json.dumps(['https://i.ebayimg.com/images/g/'+'a'*2048+'/s-l1600.jpg']),
+                      json.dumps([good+'\n'])]
+        for raw in invalid_json:
+            with self.subTest(images_json=raw):
+                self.db.execute('UPDATE ebay_listing_captures SET images_json=? WHERE url=?',(raw,url));self.db.commit()
+                self.assertEqual(self.current_item(batch,item)['photos'],[])
+        self.db.execute('UPDATE ebay_listing_captures SET images_json=?,captured_at=? WHERE url=?',
+                        (original['images_json'],time.time()-ebay_listing_captures.MAX_AGE-1,url));self.db.commit()
+        self.assertEqual(self.current_item(batch,item)['photos'],[])
+        self.db.execute('UPDATE ebay_listing_captures SET captured_at=? WHERE url=?',(time.time()+3600,url));self.db.commit()
+        self.assertEqual(self.current_item(batch,item)['photos'],[])
+        self.db.execute('DELETE FROM ebay_listing_captures WHERE url=?',(url,));self.db.commit()
+        self.assertEqual(self.current_item(batch,item)['photos'],[])
+        self.assertTrue(self.current_item(batch,batch['items'][1])['photos'])
+        self.db.execute('INSERT INTO ebay_listing_captures VALUES(?,?,?,?,?)',
+                        ('https://www.ebay.com/itm/999999999999',original['title'],original['text'],original['images_json'],time.time()))
+        self.db.commit();self.assertEqual(self.current_item(batch,item)['photos'],[])
+    def test_cached_listing_previews_recheck_account_membership_and_current_purchase_identity(self):
+        batch=self.imported();item=batch['items'][0]
+        row=dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+        source=dict(self.db.execute('SELECT * FROM ebay_order_items WHERE line_key=?',(row['line_key'],)).fetchone())
+        membership=self.db.execute('SELECT snapshot_json FROM banknote_import_batches WHERE id=?',(batch['id'],)).fetchone()[0]
+        for field,value in (('title','Changed purchase title'),('ignored',1),
+                            ('attention','Multiple purchase rows share this identity; review required')):
+            with self.subTest(field=field):
+                self.db.execute('UPDATE ebay_order_items SET '+field+'=? WHERE line_key=?',(value,row['line_key']));self.db.commit()
+                self.assertEqual(self.current_item(batch,item)['photos'],[])
+                self.db.execute('UPDATE ebay_order_items SET '+field+'=? WHERE line_key=?',(source[field],row['line_key']));self.db.commit()
+        # Even a matching saved source digest cannot turn a multi-unit purchase into one exact photo target.
+        multiple={**source,'quantity':2}
+        self.db.execute('UPDATE ebay_order_items SET quantity=2 WHERE line_key=?',(row['line_key'],))
+        self.db.execute('UPDATE banknote_import_items SET source_json=?,source_digest=? WHERE id=?',
+                        (json.dumps(multiple),imports._digest(multiple),item['id']));self.db.commit()
+        self.assertEqual(self.current_item(batch,item)['photos'],[])
+        self.db.execute('UPDATE ebay_order_items SET quantity=1 WHERE line_key=?',(row['line_key'],))
+        self.db.execute('UPDATE banknote_import_items SET source_json=?,source_digest=? WHERE id=?',
+                        (row['source_json'],row['source_digest'],item['id']))
+        self.db.execute("UPDATE banknote_import_batches SET snapshot_json='[]' WHERE id=?",(batch['id'],));self.db.commit()
+        self.assertEqual(self.current_item(batch,item)['photos'],[])
+        self.db.execute('UPDATE banknote_import_batches SET snapshot_json=? WHERE id=?',(membership,batch['id']))
+        self.db.execute("UPDATE banknote_import_items SET account_name='other-buyer' WHERE id=?",(item['id'],));self.db.commit()
+        self.assertEqual(self.current_item(batch,item)['photos'],[])
+        self.db.execute('UPDATE banknote_import_items SET account_name=? WHERE id=?',(row['account_name'],item['id']))
+        self.db.execute("UPDATE ebay_purchase_account SET account_name='other-buyer'");self.db.commit()
+        self.assertEqual(self.client.get(batch['status_url']).status_code,404)
+        self.assertEqual(self.client.get(item['detail_url']).status_code,409)
+        self.assertEqual(imports._public_item(self.db,row)['photos'],[])
+    def test_retained_original_photos_replace_cached_listing_previews(self):
+        batch=self.imported();item=batch['items'][0]
+        self.assertTrue(all(photo.get('preview') for photo in item['photos']))
+        batch=self.check(batch,item);current=next(i for i in batch['items'] if i['id']==item['id'])
+        self.assertEqual(len(current['photos']),2)
+        for photo in current['photos']:
+            self.assertTrue(photo['url'].startswith('/uploads/'));self.assertTrue(photo['filename'])
+            self.assertTrue(photo['selectable']);self.assertFalse(photo.get('preview'))
+    def test_preserved_existing_photos_take_precedence_over_cached_listing_previews(self):
+        self.partial_record();batch=self.imported()
+        item=next(i for i in batch['items'] if i.get('existing_record_id'))
+        self.assertEqual({photo['url'] for photo in item['photos']},{'/uploads/saved-front.jpg','/uploads/saved-back.jpg'})
+        self.assertTrue(all(photo.get('filename') and not photo['selectable'] and not photo.get('preview') for photo in item['photos']))
+    def test_released_item_never_uses_cached_listing_preview_in_place_of_live_photo(self):
+        batch=self.imported();item=batch['items'][0]
+        self.assertTrue(item['photos']);result=self.release(batch,[item])
+        self.assertEqual(result.status_code,200,result.json);record_id=result.json['released'][0]['record_id']
+        self.db.execute("UPDATE banknotes SET image_1='live-front.jpg' WHERE id=?",(record_id,));self.db.commit()
+        current=self.current_item(batch,item)
+        self.assertEqual(current['fields']['image_1'],'live-front.jpg');self.assertEqual(current['photos'],[])
+        self.db.execute('UPDATE banknotes SET image_1=NULL WHERE id=?',(record_id,));self.db.commit()
+        self.assertEqual(self.current_item(batch,item)['photos'],[])
     def test_single_receipt_attention_cannot_check_release_or_automatically_publish(self):
         b=self.single_imported(lambda p:p['items'][0].update(status_text='Payment pending'))
         item=b['items'][0]
