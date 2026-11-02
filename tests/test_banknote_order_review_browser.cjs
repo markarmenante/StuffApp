@@ -231,6 +231,31 @@ finally:server.server_close();temporary.cleanup()
     await button.click();
   };
   const noOverflow=async page=>assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'horizontal page overflow');
+  async function loadedImages(t,selector){
+    const images=t.page.locator(selector),responses=[];
+    await images.first().waitFor({state:'attached'});
+    const count=await images.count();
+    try{
+      for(const url of await images.evaluateAll(nodes=>nodes.map(image=>image.src))){
+        assert.equal(new URL(url).origin,origin,'expected an isolated fixture image');
+        const response=await t.context.request.get(url);
+        responses.push({url,status:response.status(),type:response.headers()['content-type']});
+        assert.equal(response.status(),200,'image must be served: '+url);
+        assert.match(response.headers()['content-type']||'',/^image\//,'image response type: '+url);
+      }
+      // Purchased galleries lazy-load later photos. Bring each current image
+      // into view, then inspect attached nodes rather than decoding a snapshot
+      // that can precede lazy loading or be replaced by a status refresh.
+      for(let index=0;index<count;index++)await images.nth(index).scrollIntoViewIfNeeded();
+      await t.page.waitForFunction(({selector,count})=>{
+        const current=[...document.querySelectorAll(selector)];
+        return current.length===count&&current.every(image=>image.isConnected&&image.complete&&image.naturalWidth>0&&image.naturalHeight>0);
+      },{selector,count});
+    }catch(error){
+      (evidence.imageFailures??=[]).push({url:t.page.url(),selector,responses,images:await images.evaluateAll(nodes=>nodes.map(image=>({src:image.src,complete:image.complete,width:image.naturalWidth,height:image.naturalHeight,connected:image.isConnected,loading:image.loading})))});
+      throw error;
+    }
+  }
   async function newCheckout(t,number,fromBlank=true,options={}){
     const before=await t.state();
     const diagnostics={requests:[],dialogs:[]};
@@ -437,7 +462,7 @@ finally:server.server_close();temporary.cleanup()
         assert.equal(await t.page.locator('[name="country"]').inputValue(),'Colombia');
         const images=t.page.locator('.banknote-imgs img');
         assert.equal(await images.count(),2,'both selected photos replace empty main-image slots');
-        await images.evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+        await loadedImages(t,'.banknote-imgs img');
         assert(await images.evaluateAll(images=>images.every(image=>image.naturalWidth>0)));
         assert.equal(await t.page.locator('.quad-fix-btn:visible').count(),2,'both selected sides expose their crop controls');
         await t.page.locator('[name="printer"]').fill('Reviewed Colombia fixture printer');
@@ -499,7 +524,7 @@ finally:server.server_close();temporary.cleanup()
             assert.equal(await t.page.locator('#mainForm [name="'+field+'"]').count(),1,'full detail field '+field);
           }
           await t.page.locator('.import-purchased-photos').evaluate(details=>{details.open=true;});
-          await t.page.locator('#banknoteImportPhotos img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+          await loadedImages(t,'#banknoteImportPhotos img');
           assert.equal(await t.page.locator('#banknoteImportPhotos img').count(),2);
           const editablePreview=t.page.locator('[data-md-preview-for="condition"]');
           const history=t.page.locator('[name="condition"]');
@@ -731,7 +756,7 @@ finally:server.server_close();temporary.cleanup()
         assert((await changes.innerText()).includes('Fixture source printer'),'comparison shows actual checked draft value, not original blank');
         assert((await changes.innerText()).includes('Collection printer changed'));
         assert.equal(await changes.locator('img').count(),2,'both previous and current crop shown for review');
-        await changes.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+        await loadedImages(t,'#banknoteImportExistingChanges img');
         assert.equal(await t.page.locator('#banknoteImportExistingLink').getAttribute('href'),'/banknotes/'+recordId);
         assert.equal(await t.page.locator('#banknoteImportExistingLink').getAttribute('target'),'_blank');
         assert.equal(await t.page.locator('#banknoteImportRefresh').isVisible(),false,'collection change is not a draft revision conflict');
@@ -754,7 +779,7 @@ finally:server.server_close();temporary.cleanup()
         assert.equal(await changes.locator('img[src="/uploads/second-reviewed-back-crop.png"]').count(),1,'new crop is shown before retry');
         assert.equal(await t.page.locator('[name="watermark"]').inputValue(),'My pending inspection detail');
         assert.equal(await t.page.locator('#banknoteImportRelease').isDisabled(),true);
-        await changes.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+        await loadedImages(t,'#banknoteImportExistingChanges img');
         await t.page.screenshot({path:path.join(artifacts,'collection-change-review.png'),fullPage:true});
         const updated=t.page.waitForResponse(response=>response.url().endsWith('/refresh-existing')&&response.request().method()==='POST');
         await t.page.locator('#banknoteImportRefreshExisting').click();const updatedResponse=await updated;
@@ -977,7 +1002,7 @@ finally:server.server_close();temporary.cleanup()
         assert(await t.page.locator('[data-photo-side]').evaluateAll(buttons=>buttons.every(button=>button.disabled)),'existing front/back slots cannot be replaced');
         assert.equal(await t.page.locator('figure[data-photo-filename="recover-front.png"] [data-photo-side]').count(),0,'preserved original is view-only');
         await t.page.locator('.import-purchased-photos').evaluate(details=>{details.open=true;});
-          await t.page.locator('#banknoteImportPhotos img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+        await loadedImages(t,'#banknoteImportPhotos img');
         const released=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
         await t.page.locator('#banknoteImportRelease').click();assert.equal((await released).status(),200);
         const result=t.releaseResults.at(-1);assert.equal(result.released[0].record_id,'recover-exact-partial');
