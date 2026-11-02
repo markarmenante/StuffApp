@@ -11421,7 +11421,7 @@ def _trim_small_slab_note(img, expect_aspect=None, meta=None):
     if failed and not _v2_validator_may_waive(failed):
         app.logger.info('trim: small paper quad rejected: %s', '; '.join(failed))
         return None
-    if _vision_crop_verdict(crop) is not True:
+    if _vision_crop_verdict(crop, original=img) is not True:
         return None
     if meta is not None:
         meta['engine'] = 'small-paper-quad'
@@ -11621,7 +11621,7 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
     return None
 
 
-def _vision_crop_verdict(crop):
+def _vision_crop_verdict(crop, original=None):
     """One yes/no question about a finished crop: is this exactly one
     full banknote, paper margins intact on all four sides, with no
     backdrop, holder plastic, or label visible? Returns True (good),
@@ -11651,6 +11651,34 @@ def _vision_crop_verdict(crop):
         "or edited area; never fail the image for one. "
         "Judge only those criteria. Reply ONLY JSON: "
         '{"good": true} or {"good": false, "why": "<a few words>"}.')
+    content = []
+    if original is not None:
+        source = original.convert('RGB').copy()
+        # Keep tiny natural margins readable in an oversized holder photo.
+        source.thumbnail((1600, 1600))
+        source_buf = BytesIO()
+        source.save(source_buf, format='JPEG', quality=85)
+        content.extend([
+            {'type': 'text', 'text': 'Original photograph, including the holder and the actual paper edges:'},
+            {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg',
+                                        'data': base64.b64encode(source_buf.getvalue()).decode()}},
+            {'type': 'text', 'text': 'Proposed crop of that same paper sheet:'},
+        ])
+        prompt = (
+            'Compare the proposed crop with the ORIGINAL photograph. Is the crop '
+            'the same COMPLETE banknote paper sheet visible inside the holder? '
+            'Check that every printed element and the physical paper extent on '
+            'all four sides are preserved, with no holder, label, or backdrop. '
+            'Use the original as the boundary evidence: some notes have naturally '
+            'very narrow margins, so do not require wider blank margins than the '
+            'paper actually has. Reject any cut-off printing, missing paper edge, '
+            'or uncertainty about whether the whole sheet is present. '
+            'Reply ONLY JSON: {"good": true} or '
+            '{"good": false, "why": "<a few words>"}.')
+    content.extend([
+        {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': b64}},
+        {'type': 'text', 'text': prompt},
+    ])
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=30.0, max_retries=0)
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
@@ -11659,12 +11687,7 @@ def _vision_crop_verdict(crop):
             # The current model can spend output tokens before its JSON answer.
             # An 80-token cap returned only thinking and silently vetoed imports.
             max_tokens=4096,
-            messages=[{'role': 'user', 'content': [
-                {'type': 'image', 'source': {
-                    'type': 'base64', 'media_type': 'image/jpeg',
-                    'data': b64}},
-                {'type': 'text', 'text': prompt},
-            ]}],
+            messages=[{'role': 'user', 'content': content}],
         )
         if getattr(resp, 'stop_reason', None) == 'max_tokens':
             app.logger.info('trim: validator response budget exhausted')

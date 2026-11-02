@@ -1,11 +1,13 @@
 """Small full sheets need original paper geometry and affirmative validation."""
+import base64
 import io
 import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image, ImageDraw
 
@@ -33,6 +35,54 @@ def slab(note_size=(450, 300)):
 
 
 class SmallSlabCropTests(unittest.TestCase):
+    def test_small_sheet_validator_receives_the_original_photo(self):
+        image = slab()
+
+        def compare(candidate, *, original):
+            self.assertIs(original, image)
+            self.assertIsNot(candidate, original)
+            self.assertLess(candidate.width * candidate.height,
+                            original.width * original.height * 0.15)
+            return True
+
+        with patch.object(stuff, '_vision_crop_verdict', side_effect=compare) as verdict:
+            self.assertIsNotNone(stuff._trim_small_slab_note(image))
+        verdict.assert_called_once()
+
+    def test_validator_transmits_original_then_candidate_with_comparison_prompt(self):
+        source = slab()
+        candidate = Image.new('RGB', (408, 347), (240, 233, 211))
+        response = SimpleNamespace(stop_reason='end_turn')
+        create = Mock(return_value=response)
+        provider = SimpleNamespace(Anthropic=Mock(return_value=SimpleNamespace(
+            messages=SimpleNamespace(create=create))))
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-no-network'}), \
+                patch.dict(sys.modules, {'anthropic': provider}), \
+                patch.object(stuff, 'anthropic_lookup_model', return_value='test-model'), \
+                patch.object(stuff, '_message_text', return_value='{"good": true}'):
+            self.assertIs(stuff._vision_crop_verdict(candidate, original=source), True)
+            self.assertIs(stuff._vision_crop_verdict(candidate), True)
+
+        compared = create.call_args_list[0].kwargs['messages'][0]['content']
+        images = [part for part in compared if part['type'] == 'image']
+        self.assertEqual(len(images), 2)
+        decoded = [Image.open(io.BytesIO(base64.b64decode(part['source']['data'])))
+                   for part in images]
+        self.assertEqual(decoded[0].size, source.size,
+                         'Keep the 1600px original readable when paper margins are very narrow')
+        self.assertEqual(decoded[1].size, candidate.size)
+        prompt = ' '.join(part['text'] for part in compared if part['type'] == 'text')
+        self.assertIn('Compare', prompt)
+        self.assertIn('ORIGINAL', prompt)
+        self.assertIn('naturally', prompt)
+        self.assertIn('uncertainty', prompt)
+
+        standalone = create.call_args_list[1].kwargs['messages'][0]['content']
+        self.assertEqual(sum(part['type'] == 'image' for part in standalone), 1)
+        standalone_prompt = ' '.join(part['text'] for part in standalone if part['type'] == 'text')
+        self.assertIn('full paper', standalone_prompt)
+        self.assertNotIn('Compare', standalone_prompt)
+
     def test_original_paper_quad_validates_and_records_inset_source_coordinates(self):
         image = slab()
         meta = {}
