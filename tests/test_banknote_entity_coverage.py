@@ -19,6 +19,8 @@ SINGAPORE = 'british-singapore'
 SARAWAK = 'british-sarawak'
 NORTH_BORNEO = 'british-british-north-borneo'
 BRUNEI = 'british-brunei'
+EAST_CARIBBEAN = 'british-east-caribbean-states'
+GRENADA = 'british-grenada'
 
 
 class EntityCoverageTests(unittest.TestCase):
@@ -134,6 +136,72 @@ class EntityCoverageTests(unittest.TestCase):
             db.execute('PRAGMA query_only=ON')
             self.assertIn(NORTH_BORNEO, self.keys(row))
             self.assertEqual(dict(row)['country'], 'Malaya and British Borneo')
+
+    def test_grenada_attributed_ecca_note_covers_grenada_without_changing_regional_filing(self):
+        row = dict(country='East Caribbean States - Grenada', issuer='East Caribbean Currency Authority',
+                   date_1=1965, series='ND (1965)', denomination='5 Dollars', pick_number='P-14k',
+                   status='Ordered', order_number='24-15335-90977', serial_number='A123456')
+        before = copy.deepcopy(row)
+        classification = catalog.row_classification(row)
+        classified_before = copy.deepcopy(classification)
+        roster_before = copy.deepcopy(entities.ENTITY_CATALOG)
+        coverage = entities_for_row(row, classification)
+        self.assertEqual(tuple(entity['key'] for entity in coverage), (EAST_CARIBBEAN, GRENADA))
+        self.assertEqual(coverage[0]['coverage_kind'], 'direct')
+        self.assertEqual(coverage[1]['coverage_kind'], 'regional')
+        self.assertIn('Grenada-attributed ECCA regional note', coverage[1]['coverage_note'])
+        self.assertIn('not a separate Grenadian issue or a colonial-period date', coverage[1]['coverage_note'])
+        self.assertNotIn('1965', coverage[1]['coverage_note'])
+        self.assertEqual(entities.entity_for_row(row)['key'], EAST_CARIBBEAN)
+        coverage[1]['label'] = 'Caller-local label'
+        self.assertEqual(row, before)
+        self.assertEqual(classification, classified_before)
+        self.assertEqual(entities.ENTITY_CATALOG, roster_before)
+
+    def test_explicit_grenada_labels_and_exact_issuer_variants_supply_attribution(self):
+        for country in ('Grenada', 'East Caribbean States - Grenada',
+                        'Eastern Caribbean States (Grenada)', 'East Caribbean States (Grenada)'):
+            for issuer, abbreviation in (
+                    ('East Caribbean Currency Authority', 'ECCA'),
+                    ('Eastern Caribbean Currency Authority', 'ECCA'), ('ECCA', 'ECCA'),
+                    ('Eastern Caribbean Central Bank', 'ECCB'),
+                    ('East Caribbean Central Bank', 'ECCB'), ('ECCB', 'ECCB')):
+                with self.subTest(country=country, issuer=issuer):
+                    row = dict(country=country, issuer=issuer, date_1=None, status='Ordered')
+                    coverage = entities_for_row(row)
+                    self.assertEqual(tuple(entity['key'] for entity in coverage), (EAST_CARIBBEAN, GRENADA))
+                    self.assertIn(abbreviation+' regional note', coverage[1]['coverage_note'])
+                    self.assertEqual(entities.entity_for_row(row)['key'], EAST_CARIBBEAN)
+
+    def test_unattributed_or_conflicting_caribbean_notes_do_not_gain_grenada_coverage(self):
+        for country in ('East Caribbean States', None, 'East Caribbean Currency Authority',
+                        'East Caribbean States - Dominica', 'East Caribbean States - Grenada replica',
+                        'Saint Vincent and the Grenadines'):
+            with self.subTest(country=country):
+                row = dict(country=country, issuer='East Caribbean Currency Authority', date_1=1965,
+                           serial_number='G123456', pick_number='P-14k',
+                           description='Grenada attribution mentioned in unverified text')
+                self.assertNotIn(GRENADA, self.keys(row))
+        for issuer in (None, '', 'Unknown issuer', 'British Caribbean Currency Board',
+                       'Bank of Grenada', 'ECCA replica', 'East Caribbean Currency Authority / Bank of England'):
+            with self.subTest(issuer=issuer):
+                row = dict(country='East Caribbean States - Grenada', issuer=issuer,
+                           date_1=1965, serial_number='G123456', pick_number='P-14k')
+                self.assertNotIn(GRENADA, self.keys(row))
+
+    def test_grenada_attribution_supports_sqlite_rows_without_purchase_or_date_inference(self):
+        with sqlite3.connect(':memory:') as db:
+            db.row_factory = sqlite3.Row
+            for year, status in ((None, 'Ordered'), (1965, 'Own'), (1988, 'Sold')):
+                row = db.execute('SELECT ? AS country, ? AS date_1, ? AS issuer, ? AS status',
+                                 ('East Caribbean States - Grenada', year,
+                                  'Eastern Caribbean Central Bank', status)).fetchone()
+                before = dict(row)
+                db.execute('PRAGMA query_only=ON')
+                self.assertEqual(self.keys(row), (EAST_CARIBBEAN, GRENADA))
+                self.assertEqual(dict(row), before)
+                # Lifecycle filtering remains the caller's responsibility.
+                self.assertEqual(entities.entity_for_row(row)['key'], EAST_CARIBBEAN)
 
 
 if __name__ == '__main__':

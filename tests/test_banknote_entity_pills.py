@@ -341,6 +341,8 @@ class EntityPillTests(unittest.TestCase):
         self.note('regional-board', country='British Caribbean Territories',
                   year=1956, issuer='British Caribbean Currency Board')
         before = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        ordered_before = [row['id'] for row in self.db.execute(
+            'SELECT * FROM banknotes ORDER BY ' + stuff.CATEGORY_ORDER_BY['banknotes'])]
         for history in ('0', '1'):
             page = self.page('/banknotes?history=' + history + '&filter=ordered')
             pill = page.pills['british-east-caribbean-states']
@@ -348,13 +350,50 @@ class EntityPillTests(unittest.TestCase):
             self.assertIn('4 notes', pill['title'])
             self.assertIn(pill['href'], ('#item-regional-grenada', '#item-regional-blank'))
             self.assertIn(pill['href'][1:], page.targets)
-            self.assertEqual(page.pills['british-grenada']['data-coverage'], 'missing')
+            grenada = page.pills['british-grenada']
+            self.assertEqual((grenada['tag'], grenada['data-coverage'], grenada['href']),
+                             ('a', 'held', '#item-regional-grenada'))
+            self.assertEqual(grenada['text'], 'Grenada (1974)')
+            self.assertIn('1 note;', grenada['title'])
+            for attribute in ('title', 'aria-label'):
+                self.assertIn('Grenada-attributed ECCA regional note', grenada[attribute])
+                self.assertIn('not a separate Grenadian issue or a colonial-period date', grenada[attribute])
+            self.assertIn('item-regional-grenada', page.targets)
             self.assertFalse(any('-record-' in key and 'caribbean' in key for key in page.pills))
             board = page.pills['british-british-caribbean-territories']
             self.assertIn('1 note;', board['title'])
             self.assertIn('item-regional-board', self.page(board['href']).targets)
         after = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
         self.assertEqual(before, after)
+        self.assertEqual(ordered_before, [row['id'] for row in self.db.execute(
+            'SELECT * FROM banknotes ORDER BY ' + stuff.CATEGORY_ORDER_BY['banknotes'])])
+        grenada_row = next(row for row in after if row['id'] == 'regional-grenada')
+        self.assertEqual(stuff.banknote_entities.entity_for_row(grenada_row)['key'],
+                         'british-east-caribbean-states')
+
+    def test_grenada_regional_coverage_finds_hidden_ordered_note_and_excludes_disposed_status(self):
+        self.note('grenada-order', country='East Caribbean States - Grenada', year=1965,
+                  status='Ordered', issuer='East Caribbean Currency Authority',
+                  pick_number='P-14k', description='Territorially attributed regional note')
+        self.note('canada-own', country='Canada', year=1954, description='Visible owned note')
+        before = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        for history in ('0', '1'):
+            for query in ('filter=own', 'q_banknotes=Visible'):
+                page = self.page('/banknotes?history=' + history + '&' + query)
+                pill = page.pills['british-grenada']
+                self.assertEqual(pill['data-coverage'], 'held')
+                self.assertNotIn('item-grenada-order', page.targets)
+                link = urlsplit(pill['href'])
+                self.assertEqual(parse_qs(link.query),
+                                 {'filter': ['heritage_british'], 'history': [history]})
+                self.assertEqual(link.fragment, 'item-grenada-order')
+                self.assertIn(link.fragment, self.page(pill['href']).targets)
+        self.assertEqual(before, [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')])
+        self.db.execute("UPDATE banknotes SET status='Sold' WHERE id='grenada-order'")
+        self.db.commit()
+        pill = self.page().pills['british-grenada']
+        self.assertEqual((pill['tag'], pill['data-coverage']), ('span', 'missing'))
+        self.assertNotIn('href', pill)
 
     def test_solomon_1977_owned_or_ordered_note_covers_the_pre_independence_entity(self):
         self.note('solomon-1977', country='Solomon Islands', year=1977, status='Ordered')

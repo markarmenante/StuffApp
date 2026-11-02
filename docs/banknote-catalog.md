@@ -285,9 +285,13 @@ for the reviewed BCCB 1953–1964 Currency Board/Elizabeth II wording variants.
 The original labels stay unchanged. Migration **v30** updates only the
 P display positions to match the list/report order; edits to either catalogue
 reference also resequence positions. The two existing regional entity pills
-remain separate (BCCB and the ECCA/ECCB successor area); a regional Grenada
-attribution does not assert a standalone Grenadian issue or pre-independence
-territorial coverage. Tests: `test_banknote_caribbean.py` and the isolated
+remain separate (BCCB and the ECCA/ECCB successor area). An explicitly
+Grenada-attributed ECCA/ECCB note also counts for the Grenada coverage pill,
+which links to the same regional row and explains the attribution. This does
+not change filing, assert a standalone Grenadian issue or establish a
+pre-independence issue date. Exact regional issuer and explicit Grenada country
+labels are required; generic regional notes and serial prefixes do not qualify.
+Tests: `test_banknote_entity_coverage.py`, `test_banknote_caribbean.py` and the isolated
 `test_banknote_caribbean_browser.cjs` fixture.
 
 ## Spelling and preservation

@@ -105,9 +105,14 @@ Currency Authority / Central Bank records count toward the existing East
 Caribbean States pill, including a blank country with an explicit regional
 issuer, an authority saved as the country, and a recognized member-island suffix.
 The British Caribbean Currency Board retains its separate predecessor pill.
-These are regional holdings: an ECCA note labelled Grenada does not turn the
-separate Grenada territorial pill green. Full Pick varieties and saved country
-labels remain intact. The successor region has no colonial scan period;
+An explicitly Grenada-attributed note with an exact ECCA or ECCB issuer also
+turns the Grenada pill green and links to that same regional note. Its tooltip
+explains the territorial attribution without claiming a separate Grenadian
+issue or a colonial-period date. Generic regional labels, a G serial prefix,
+catalogue suffix alone, and missing or conflicting issuers do not add this
+coverage. Primary identity and list placement remain East Caribbean States;
+full Pick varieties and all saved country and purchase fields remain intact.
+The successor region has no colonial scan period;
 ND (1965) alone cannot establish the actual issue date of a territorial variety
 or eligibility before that territory's independence.
 

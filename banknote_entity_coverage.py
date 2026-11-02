@@ -32,6 +32,10 @@ _MEMBERS = (
     ('british-british-north-borneo', 1963),
     ('british-brunei', 1967),
 )
+_GRENADA_LABELS = frozenset(catalog.fold(label) for label in (
+    'Grenada', 'East Caribbean States - Grenada', 'Eastern Caribbean States - Grenada',
+    'East Caribbean States (Grenada)', 'Eastern Caribbean States (Grenada)',
+))
 
 
 def _issuer_token(value):
@@ -65,19 +69,42 @@ def _regional_year(row, primary):
     return last
 
 
+def _grenada_attribution(row, primary):
+    """Recognize saved island attribution without guessing from serials or dates."""
+    if (not primary or primary['key'] != 'british-east-caribbean-states'
+            or catalog.fold(row.get('country')) not in _GRENADA_LABELS
+            or not str(row.get('issuer') or '').strip()):
+        return None
+    issue = catalog.eastern_caribbean_issue(row.get('country'), row.get('date_1'),
+                                           row.get('issuer'), row.get('series'))
+    return issue if issue and issue['key'] in ('ecca', 'eccb') else None
+
+
 def entities_for_row(row, classification=None):
     """Return copied entity definitions with explicit direct/regional coverage.
 
     ``coverage_kind`` is ``direct`` for the existing primary identity and
     ``regional`` for an additional documented member. ``coverage_note`` explains
-    shared coverage without claiming a separate territorial issue. Unknown,
-    transition-year, conflicting-issuer and successor notes gain no regional
-    coverage. No record, entity definition, or supplied classification changes.
+    shared coverage without claiming a separate territorial issue. Currency-board
+    period coverage requires exact dates; explicit Grenada attribution on an
+    ECCA/ECCB note establishes no colonial-period date. No record, entity
+    definition, or supplied classification changes.
     """
     values = dict(row)
     primary = entities.entity_for_row(row, classification)
     result = ([{**primary, 'coverage_kind': 'direct', 'coverage_note': ''}]
               if primary else [])
+    grenada = _grenada_attribution(values, primary)
+    if grenada:
+        result.append({
+            **entities.ENTITY_BY_KEY['british-grenada'],
+            'coverage_kind': 'regional',
+            'coverage_note': (
+                f"Covered by a Grenada-attributed {grenada['key'].upper()} regional note. "
+                'This records territorial attribution, not a separate Grenadian '
+                'issue or a colonial-period date.'
+            ),
+        })
     year = _regional_year(values, primary)
     if year is None:
         return tuple(result)
