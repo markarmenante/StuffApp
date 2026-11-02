@@ -43406,13 +43406,15 @@ with app.app_context():
         # Railway runs one Gunicorn worker. On replacement, no former worker
         # can complete its saved leases. Fence its tokens before dispatching
         # any new checks, including leases that have not yet timed out.
+        recovered_checks=[]
         try:
-            banknote_imports.recover_interrupted_work(get_db(),abandoned=True)
+            recovered_checks=banknote_imports.recover_interrupted_work(get_db(),abandoned=True)['checks']
         except banknote_imports.ImportProblem:
             pass  # An account has not yet been connected.
-        for batch in get_db().execute("SELECT DISTINCT i.batch_id FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE (i.state='draft' AND (i.check_state IN ('idle','queued') OR (b.auto_single=1 AND i.check_state IN ('done','partial')))) OR (i.state='blocked' AND i.check_state='queued') LIMIT 25").fetchall():
-            _finish_single_import(get_db(),batch[0])
-            _start_import_checks(batch[0])
+        pending_batches=get_db().execute("SELECT DISTINCT i.batch_id FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE (i.state='draft' AND (i.check_state IN ('idle','queued') OR (b.auto_single=1 AND i.check_state IN ('done','partial')))) OR (i.state='blocked' AND i.check_state='queued') LIMIT 25").fetchall()
+        for batch_id in dict.fromkeys(recovered_checks+[batch[0] for batch in pending_batches]):
+            _finish_single_import(get_db(),batch_id)
+            _start_import_checks(batch_id)
         # Preview-only purchases do not appear in the Check queue. Resume their
         # durable queued and recovered jobs after a restart.
         try:
