@@ -27,6 +27,7 @@ import source_documents
 
 MAX_ITEMS = 25
 CHECK_TTL = 300
+CHECK_CROP_MESSAGE = 'Note details saved; preparing display crops.'
 _CHECK_SLOTS = threading.BoundedSemaphore(2)
 PHOTO_SIDE_WARNINGS = (
     'Front and back could not both be confirmed from the listing. Existing photos and all originals were retained; choose the missing or uncertain side manually.',
@@ -596,6 +597,7 @@ def _public_item(db, row):
     check_state, message = row['check_state'],row['check_message']
     if check_state == 'checking' and row['check_expires'] <= time.time():
         check_state,message='failed','Check was interrupted or expired. Your draft was kept; press Check to retry.'
+    check_phase='cropping' if check_state=='checking' and message==CHECK_CROP_MESSAGE else check_state
     warnings = [v for v in (row['warning'],message if check_state in ('failed','partial') else '') if v]
     editable=can_edit(db,row)
     photos = [dict(url='/uploads/'+asset['filename'],filename=asset['filename'],selectable=editable,source_url=asset['source_url'],position=asset['position'])
@@ -640,7 +642,7 @@ def _public_item(db, row):
                 released_record_id=row['released_record_id'],existing_record_id=row.get('existing_record_id'),photos=photos,check_state=check_state,
                 existing_record_changes=existing_changes,existing_record_version=existing_version,
                 existing_record_url='/banknotes/'+row['existing_record_id'] if row.get('existing_record_id') else None,
-                check_message=message,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields,
+                check_message=message,check_phase=check_phase,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields,
                 manual_photos=json.loads(row.get('manual_photos_json') or '{}'),
                 preview_state=preview_state,can_check=can_check(db,row),can_edit=editable,can_release=editable,
                 locked_fields=list(_REVIEW_LOCKED_FIELDS) if row['state']=='blocked' else [],
@@ -1301,6 +1303,66 @@ def queue_inspection_checks(db,batch_id):
         db.rollback();raise
 
 
+def recover_interrupted_work(db, *, abandoned=False):
+    """Resume previously requested work after lease expiry or worker replacement.
+
+    ``abandoned`` is reserved for startup of the app's single import worker,
+    before it launches any jobs. Routine recovery must leave live leases alone.
+    Replacing tokens fences late results; saved drafts and originals stay put.
+    """
+    now=time.time()
+    result={'checks':set(), 'previews':set()}
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        account=_account(db)
+        rows=db.execute('''SELECT i.* FROM banknote_import_items i
+            JOIN banknote_import_batches b ON b.id=i.batch_id
+            WHERE i.account_name=? AND b.account_name=i.account_name
+                AND b.state IN ('review','complete') AND i.state IN ('draft','blocked')
+                AND i.check_state='checking' AND (? OR i.check_expires<=?)''',
+            (account,int(abandoned),now)).fetchall()
+        for record in rows:
+            row=dict(record)
+            try:_check_context(db,_batch(db,row['batch_id']),row)
+            except ImportProblem as error:
+                state,message='failed',str(error)
+            else:
+                state,message='queued','Resuming interrupted Check; saved details and originals were kept.'
+                result['checks'].add(row['batch_id'])
+            db.execute('''UPDATE banknote_import_items SET check_state=?,check_message=?,
+                check_token=NULL,check_expires=0 WHERE id=? AND check_token IS ?''',
+                (state,message,row['id'],row['check_token']))
+
+        previews=db.execute('''SELECT j.*,i.batch_id FROM banknote_import_preview_jobs j
+            JOIN banknote_import_items i ON i.id=j.item_id
+            JOIN banknote_import_batches b ON b.id=i.batch_id
+            WHERE i.account_name=? AND b.account_name=i.account_name
+                AND b.state IN ('review','complete') AND i.state='blocked'
+                AND j.state='checking' AND (? OR j.expires<=?)''',
+            (account,int(abandoned),now)).fetchall()
+        for job in previews:
+            token=None;expires=0
+            try:
+                batch,row=_item(db,job['batch_id'],job['item_id'])
+                _photos,digest=_preview_context(db,batch,row)
+                if (job['source_digest']!=row['source_digest'] or job['revision']!=row['revision']
+                        or job['capture_digest']!=digest):
+                    raise ImportProblem('The listing photos changed while cropping. Use Crop photos to retry.')
+            except ImportProblem as error:
+                state,message='failed',str(error)
+            else:
+                state,message='queued','Resuming interrupted photo cropping.'
+                token=uuid.uuid4().hex;expires=now+1800
+                result['previews'].add(job['batch_id'])
+            db.execute('''UPDATE banknote_import_preview_jobs SET state=?,message=?,token=?,expires=?,updated_at=?
+                WHERE item_id=? AND token IS ?''',
+                (state,message,token,expires,now,job['item_id'],job['token']))
+        db.commit()
+        return {kind:sorted(batches) for kind,batches in result.items()}
+    except Exception:
+        db.rollback();raise
+
+
 def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,prepare_photo=None,*,retry_uncropped=False):
     db=connect()
     created=[]
@@ -1412,7 +1474,7 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
                     ('partial' if warnings else 'done',' '.join(warnings),time.time(),item_id))
             else:
                 db.execute('''UPDATE banknote_import_items SET check_message=?,check_expires=? WHERE id=?''',
-                    ('Note details saved; preparing display crops.',time.time()+CHECK_TTL,item_id))
+                    (CHECK_CROP_MESSAGE,time.time()+CHECK_TTL,item_id))
             db.commit()
             revision+=1
             return current_fields
@@ -1447,6 +1509,8 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
                     display_edits[field]=dict(filename=filename,source=source,
                         quad=_json(crop.get('quad')),sha256=hashlib.sha256(crop['data']).hexdigest())
                     photos[field]=filename
+                except ImportProblem as error:
+                    prepared['warnings'].append(str(error))
                 except Exception:
                     prepared['warnings'].append('An imported photo could not be cropped; its original was retained.')
         publish(photos,display_edits,expected_images,final=True)

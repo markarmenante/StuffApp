@@ -62,11 +62,61 @@ class CoordinatorTests(unittest.TestCase):
         self.assertNotIn(batch['id'], stuff._IMPORT_BATCH_THREADS)
         return checks
 
-    def finish(self, checks, evaluate=None):
+    def finish(self, checks, evaluate=None, prepare_photo=None):
         with patch.object(imports.listing_images, 'download', side_effect=self.download):
             for batch_id, item_id, revision, token in checks:
                 imports.run_check(stuff.open_db_connection, batch_id, item_id, revision, token,
-                    stuff.UPLOAD_FOLDER, self.classify, evaluate or (lambda *_: dict(filled=self.fills)))
+                    stuff.UPLOAD_FOLDER, self.classify, evaluate or (lambda *_: dict(filled=self.fills)),
+                    prepare_photo=prepare_photo)
+
+    def test_restart_recovers_checkpointed_jobs_and_fences_old_workers(self):
+        batch = self.imported()
+        sources = {row['id']: (row['line_key'], row['source_json'], row['source_digest']) for row in
+                   self.db.execute('SELECT * FROM banknote_import_items WHERE batch_id=?', (batch['id'],))}
+        old_checks = self.coordinator(batch)
+        self.assertEqual(len(old_checks), 3)
+        fresh_checks = []
+        checkpoint = {}
+
+        def crop_after_restart(raw, note):
+            # Identification and originals have already been committed. Mimic
+            # a replacement worker taking over while the old crop call returns.
+            current = imports.status(self.db, batch['id'])
+            checkpoint.update({item['id']: item['fields'] for item in current['items']})
+            first = next(item for item in current['items'] if item['id'] == old_checks[0][1])
+            self.assertEqual(first['check_phase'], 'cropping')
+            self.assertEqual(first['fields']['country'], self.fills['country'])
+            recovered = imports.recover_interrupted_work(self.db, abandoned=True)
+            self.assertEqual(recovered, {'checks': [batch['id']], 'previews': []})
+            fresh_checks.extend(self.coordinator(batch))
+            return fixtures.DraftTests.preview_crop(raw, note)
+
+        self.finish(old_checks[:1], prepare_photo=crop_after_restart)
+        self.assertEqual(len(fresh_checks), 3)
+        old_tokens = {item_id: token for _, item_id, _, token in old_checks}
+        fresh_tokens = {item_id: token for _, item_id, _, token in fresh_checks}
+        self.assertEqual(set(fresh_tokens), set(old_tokens))
+        self.assertTrue(all(fresh_tokens[item_id] != old_tokens[item_id] for item_id in old_tokens))
+        # The other abandoned jobs can also return after the new claims. None
+        # may save stale model output or fail the replacement worker's lease.
+        self.finish(old_checks[1:], lambda *_: dict(filled={'country': 'Stale result'}))
+        for item in imports.status(self.db, batch['id'])['items']:
+            self.assertEqual(item['check_state'], 'checking')
+            self.assertEqual(item['fields'], checkpoint[item['id']])
+            token = self.db.execute('SELECT check_token FROM banknote_import_items WHERE id=?',
+                                    (item['id'],)).fetchone()[0]
+            self.assertEqual(token, fresh_tokens[item['id']])
+
+        self.finish(fresh_checks)
+        for item in imports.status(self.db, batch['id'])['items']:
+            self.assertEqual(item['check_state'], 'done', item['check_message'])
+            self.assertEqual(item['fields']['country'], self.fills['country'])
+            for field, value in checkpoint[item['id']].items():
+                self.assertEqual(item['fields'].get(field), value)
+        current_sources = {row['id']: (row['line_key'], row['source_json'], row['source_digest']) for row in
+                           self.db.execute('SELECT * FROM banknote_import_items WHERE batch_id=?', (batch['id'],))}
+        self.assertEqual(current_sources, sources)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0], 0)
 
     def test_refresh_while_third_item_waits_requeues_the_first_two_stale_checks(self):
         batch = self.imported()

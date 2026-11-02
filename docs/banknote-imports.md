@@ -146,6 +146,11 @@ slow, failed or stale crop leaves completed identification and originals saved
 with a partial-result message. Geometry/validator provider calls have explicit
 30-second timeouts without SDK retries. Missing core identification is reported
 as partial rather than successful empty enrichment.
+The optional crop stage has a 60-second deadline per photograph and is displayed
+as "Cropping photos" after details are saved. At most two crop computations can
+remain outstanding; timed-out computations keep their capacity until they exit
+and cannot publish late results. A timeout leaves the originals available for
+manual cropping or an explicit retry.
 Original source photographs are retained before the slower catalogue call, with
 owner/account-bound access. They are protected from orphan cleanup. Source text is
 untrusted evidence. A title without the usual banknote discovery words is retained;
@@ -194,8 +199,13 @@ fields. Save draft, Check, Release to Collection and Order review use draft rout
 collection-only actions are available after release. Saved original photos can be
 selected in Purchased photos. Changes use a draft revision: a stale save or late Check cannot overwrite newer edits. Check
 failures persist with a retry message. Read-only status GETs never start provider
-work. Unstarted checks resume after restart; an interrupted active check is shown
-as retryable after its lease expires, without an automatic paid replay.
+work. At startup the single Gunicorn worker requeues interrupted active checks
+and preview crops, replacing their old tokens before dispatch. Saved details,
+originals, and manual selections are preserved; invalid or changed sources fail
+clearly. Completed, partial, and failed jobs are not automatically retried.
+Outside worker replacement, an expired check is shown as retryable. Review cards
+use selected photos when present, without filling an absent side with an
+unselected gallery image.
 When automatic side identification is uncertain, **Use as front** and **Use as back**
 select from that draft's saved originals. The choice is revision guarded, cannot
 use another draft's asset or the same image for both sides, and cannot replace an

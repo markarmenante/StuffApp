@@ -32,6 +32,7 @@ import banknote_printers
 import ebay_orders
 import purchase_orders
 import banknote_imports
+import banknote_crop_jobs
 import purchase_lifecycle as purchase_states
 import banknote_feedback
 import original_listings
@@ -21653,12 +21654,19 @@ def _evaluate_import_check(note,prepared):
 
 
 def _prepare_import_photo(data,note):
-    """Use the arrival crop pipeline for an untouched draft original."""
-    meta={}
-    image=_trim_slabbed_note_image(data,expect_aspect=_banknote_expect_aspect(note),meta=meta)
-    if image is None and meta.get('crop_status')!='already_cropped':
-        raise banknote_imports.ImportProblem('The full paper edges could not be confirmed. The original photo was kept; use Crop photos or adjust its crop.')
-    return dict(data=image,quad=meta.get('quad')) if image else None
+    """Bound optional cropping without letting late results change the draft."""
+    expect_aspect=_banknote_expect_aspect(note)
+    def crop():
+        with app.app_context():
+            meta={}
+            image=_trim_slabbed_note_image(data,expect_aspect=expect_aspect,meta=meta)
+            if image is None and meta.get('crop_status')!='already_cropped':
+                raise banknote_imports.ImportProblem('The full paper edges could not be confirmed. The original photo was kept; use Crop photos or adjust its crop.')
+            return dict(data=image,quad=meta.get('quad')) if image else None
+    try:
+        return banknote_crop_jobs.run(crop,timeout=60)
+    except (TimeoutError,banknote_crop_jobs.CropBusy):
+        raise banknote_imports.ImportProblem('Photo cropping could not finish in time. Your details and original photo were kept; use Crop photos or adjust its crop.') from None
 
 
 def _run_import_check(batch_id,item_id,revision,token):
@@ -43395,11 +43403,18 @@ with app.app_context():
     market_ebay_feed.init_schema(get_db())
     original_listings.init_schema(get_db())
     if os.environ.get('BANKNOTE_IMPORT_WORKER','1')!='0':
+        # Railway runs one Gunicorn worker. On replacement, no former worker
+        # can complete its saved leases. Fence its tokens before dispatching
+        # any new checks, including leases that have not yet timed out.
+        try:
+            banknote_imports.recover_interrupted_work(get_db(),abandoned=True)
+        except banknote_imports.ImportProblem:
+            pass  # An account has not yet been connected.
         for batch in get_db().execute("SELECT DISTINCT i.batch_id FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE (i.state='draft' AND (i.check_state IN ('idle','queued') OR (b.auto_single=1 AND i.check_state IN ('done','partial')))) OR (i.state='blocked' AND i.check_state='queued') LIMIT 25").fetchall():
             _finish_single_import(get_db(),batch[0])
             _start_import_checks(batch[0])
         # Preview-only purchases do not appear in the Check queue. Resume their
-        # durable queued jobs after a restart, without replaying active crops.
+        # durable queued and recovered jobs after a restart.
         try:
             for batch_id in banknote_imports.pending_preview_batches(get_db()):
                 _start_import_previews(batch_id)

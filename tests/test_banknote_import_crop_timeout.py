@@ -1,5 +1,6 @@
 """Optional display cropping must not discard a successful exact-item Check."""
 import time
+import threading
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -25,6 +26,34 @@ class CropTimeoutTests(unittest.TestCase):
             return None
         with patch.object(stuff,'_trim_slabbed_note_image',side_effect=already_cropped):
             self.assertIsNone(stuff._prepare_import_photo(b'fixture',{}))
+
+    def test_blocked_crop_returns_partial_with_saved_details_and_originals(self):
+        stuff=fixture_module.stuff
+        runner=stuff.banknote_crop_jobs.CropRunner(default_timeout=0.03)
+        unblock=threading.Event()
+        exited=threading.Event()
+        def stalled_crop(*_args,**_kwargs):
+            try:
+                unblock.wait(2)
+                return b'late crop must not publish'
+            finally:
+                exited.set()
+        batch=self.fixture.imported()
+        item=batch['items'][0]
+        try:
+            with patch.object(stuff,'_trim_slabbed_note_image',side_effect=stalled_crop), \
+                    patch.object(stuff.banknote_crop_jobs,'run',side_effect=lambda call,timeout:runner.run(call)):
+                result=self.fixture.check(batch,item,lambda *_:dict(filled=self.fixture.fills),stuff._prepare_import_photo)
+            current=next(row for row in result['items'] if row['id']==item['id'])
+            self.assertEqual(current['check_state'],'partial')
+            self.assertTrue(current['fields']['image_1'])
+            self.assertTrue(current['fields']['image_2'])
+            self.assertIn('could not finish in time',current['check_message'])
+            for field,value in self.fixture.fills.items():
+                self.assertEqual(current['fields'].get(field),value)
+        finally:
+            unblock.set()
+            self.assertTrue(exited.wait(1))
 
     def assert_metadata_survives_slow_crop(self, *, raises):
         fixture = self.fixture

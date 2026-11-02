@@ -190,10 +190,11 @@
   const canEdit = draft => draft.can_edit ?? draft.state === 'draft';
   const canRelease = draft => draft.can_release ?? draft.state === 'draft';
   const checkRunning = draft => ['queued', 'checking'].includes(draft.check_state);
+  const checkCropping = draft => draft.check_state === 'checking' && draft.check_phase === 'cropping';
   const previewRunning = draft => ['queued','checking'].includes(draft.preview_state);
   const batchRunning = () => batch.processing_single === true || ['queued', 'sign_in_required', 'challenge_required'].includes(batch.state)
     || (batch.items || []).some(draft => previewRunning(draft) || checkRunning(draft));
-  const stateLabel = draft => draft.state === 'released' ? 'In collection' : draft.check_state === 'queued' ? 'Waiting to check…' : checkRunning(draft) ? 'Checking…' : previewRunning(draft) ? 'Cropping photos…'
+  const stateLabel = draft => draft.state === 'released' ? 'In collection' : draft.check_state === 'queued' ? 'Waiting to check…' : checkCropping(draft) ? 'Cropping photos…' : checkRunning(draft) ? 'Checking…' : previewRunning(draft) ? 'Cropping photos…'
     : draft.check_state === 'failed' ? 'Check needs retry' : draft.check_state === 'partial' ? 'Review needed'
     : draft.preview_state === 'failed' ? 'Crop needs retry' : draft.preview_state === 'partial' ? 'Review photos'
     : draft.state === 'blocked' ? 'Needs attention' : draft.check_state === 'idle' ? 'Not checked' : 'Saved draft';
@@ -263,10 +264,11 @@
       const card = el('article', undefined, 'import-card'); card.dataset.draftId = draft.id;
       const photos = el('div', undefined, 'import-card-photos');
       const originals = draft.photos || [];
+      const hasSelectedPhoto = Boolean(draft.fields?.image_1 || draft.fields?.image_2);
       const previews = ['image_1','image_2'].map((field, index) => {
         const filename = draft.fields?.[field];
         return filename ? originals.find(photo => photo.filename === filename)
-          || {filename, url:'/uploads/' + encodeURIComponent(filename)} : draft.state === 'released' ? null : originals[index];
+          || {filename, url:'/uploads/' + encodeURIComponent(filename)} : draft.state === 'released' || hasSelectedPhoto ? null : originals[index];
       }).filter(Boolean);
       previews.forEach((photo, index) => appendPhoto(photos, photo, index, reviewUrl(draft)));
       if (!photos.children.length) photos.append(el('span', checkRunning(draft) ? 'Loading purchased photos…' : 'Photos not yet available', 'import-photo-empty'));
@@ -308,9 +310,9 @@
       ? 'Saved for review. Open each item to inspect its photos and details before releasing it to the collection.'
       : 'No items have been saved for review yet.';
     const pending = items.filter(draft => draft.state !== 'released');
-    const checking = pending.filter(draft => draft.check_state === 'checking').length;
+    const checking = pending.filter(draft => draft.check_state === 'checking' && !checkCropping(draft)).length;
     const queued = pending.filter(draft => draft.check_state === 'queued').length;
-    const cropping = pending.filter(previewRunning).length;
+    const cropping = pending.filter(draft => checkCropping(draft) || previewRunning(draft)).length;
     const unchecked = pending.filter(draft => draft.state === 'draft' && draft.check_state === 'idle').length;
     const countText = count => count + (count === 1 ? ' item' : ' items');
     const progress = !['review','complete'].includes(batch.state) ? '' : checking || queued || cropping
@@ -332,7 +334,7 @@
     const crop = document.getElementById('banknoteImportCropPhotos');
     if (crop) {
       crop.disabled = busy || uncertain || batchRunning() || !items.some(draft => draft.state !== 'released');
-      crop.textContent = items.some(previewRunning) ? 'Cropping photos…' : 'Crop photos';
+      crop.textContent = items.some(draft => checkCropping(draft) || previewRunning(draft)) ? 'Cropping photos…' : 'Crop photos';
     }
   }
   function evidenceText(value) {
@@ -489,7 +491,7 @@
     document.getElementById('banknoteImportSave').disabled = !editable || busy || uncertain || checkRunning(item) || Boolean(saving);
     const check = document.getElementById('banknoteImportCheck');
     check.disabled = !canCheck(item) || busy || uncertain || checkRunning(item) || Boolean(conflict);
-    check.textContent = item.check_state === 'queued' ? 'Waiting to check…' : checkRunning(item) ? 'Checking…' : item.check_state === 'failed' ? 'Retry Check' : '✓ Check';
+    check.textContent = item.check_state === 'queued' ? 'Waiting to check…' : checkCropping(item) ? 'Cropping photos…' : checkRunning(item) ? 'Checking…' : item.check_state === 'failed' ? 'Retry Check' : '✓ Check';
     const release = document.getElementById('banknoteImportRelease');
     release.disabled = !canRelease(item) || busy || uncertain || checkRunning(item) || Boolean(conflict) || Boolean(existingChanges().length);
     release.textContent = busyAction === 'release' ? 'Releasing…' : 'Release to Collection';

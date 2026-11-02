@@ -139,7 +139,8 @@ function page(initial, replies = [], item, formFields = []) {
   assert.equal(descendants(cards[0]).find(node => node.tagName === 'IMG').referrerPolicy, 'no-referrer');
   assert.match(content(cards[0]), /Listing preview/);
   assert.ok(descendants(cards[0]).some(node => node.tagName === 'LI' && node.textContent === warning), 'Warnings remain literal text');
-  assert.deepEqual(descendants(cards[1]).filter(node => node.tagName === 'IMG').map(node => node.src), ['/uploads/retained.png', previewUrl]);
+  assert.deepEqual(descendants(cards[1]).filter(node => node.tagName === 'IMG').map(node => node.src), ['/uploads/retained.png'],
+    'Once a side is selected, an unselected listing preview is not presented as its other side');
   assert.equal(galleryReview.requests.length, 0, 'Viewing blocked and clean siblings performs no actions');
 
   const unsafeUrls = ['https://attacker.invalid/photo.jpg', 'http://i.ebayimg.com/images/g/front/s-l1600.jpg',
@@ -265,6 +266,20 @@ function page(initial, replies = [], item, formFields = []) {
   const queueSummary = page(batch({state: 'review', message: 'Review each item before releasing it.',
     items: [queuedNormal, {...runningNormal, id:'other'}]}));
   assert.match(queueSummary.status.textContent, /1 item checking photos and details.*1 item waiting to check/);
+  const croppingDraft = {...runningNormal, check_phase:'cropping'};
+  const croppingUi = page(batch({state:'review',items:[croppingDraft]}),[],croppingDraft);
+  assert.equal(croppingUi.elements.banknoteImportState.textContent,'Cropping photos…');
+  assert.equal(croppingUi.elements.banknoteImportCheck.textContent,'Cropping photos…');
+  const cropSummary = page(batch({state:'review',items:[croppingDraft]}));
+  assert.match(cropSummary.status.textContent,/1 item cropping photos/);
+  assert.doesNotMatch(cropSummary.status.textContent,/checking photos and details/);
+  const oneSide = draft({fields:{image_1:'front.jpg'},photos:[
+    {filename:'front.jpg',url:'/uploads/front.jpg'},
+    {filename:'front-copy.webp',url:'/uploads/front-copy.webp'}]});
+  const oneSideUi = page(batch({state:'review',items:[oneSide]}));
+  const selectedImages = descendants(oneSideUi.list).filter(node => node.tagName === 'IMG');
+  assert.equal(selectedImages.length,1,'A selected single-sided note must not display a gallery duplicate as its back');
+  assert.equal(selectedImages[0].src,'/uploads/front.jpg');
   const failedWarning = {...reviewable, check_state:'failed', warnings:['The provider failed; retry Check.']};
   const partialWarning = {...reviewable, check_state:'partial', warnings:['A photo side needs review.']};
   for (const [pendingItem,label,summary] of [[failedWarning,'Check needs retry',/Some Checks did not finish/],
