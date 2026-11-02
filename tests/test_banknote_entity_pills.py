@@ -510,7 +510,6 @@ class EntityPillTests(unittest.TestCase):
             ('Northern Rhodesia', 'british-northern-rhodesia'),
             ('Montserrat', 'british-montserrat'), ('Gold Coast', 'british-gold-coast'),
             ('Gambia', 'british-gambia'),
-            ('Cocos (Keeling) Islands', 'british-cocos-keeling-islands'),
             ('British Somaliland', 'british-british-somaliland'),
             ('British Cameroons', 'british-british-cameroons'),
             ('Anguilla', 'british-anguilla'), ('Alderney', 'british-alderney'),
@@ -527,7 +526,7 @@ class EntityPillTests(unittest.TestCase):
             page = self.page('/banknotes?history=' + history)
             self.assertFalse({key for _country, key in removed} & page.pills.keys())
             for key in ('british-british-east-africa', 'british-british-west-africa',
-                        'british-rhodesia-and-nyasaland'):
+                        'british-rhodesia-and-nyasaland', 'british-cocos-keeling-islands'):
                 self.assertIn(key, page.pills)
             self.assertEqual(page.targets, {'item-' + row['id'] for row in records_before})
         self.assertEqual(stuff.banknote_entities.ENTITY_CATALOG, roster_before)
@@ -537,8 +536,7 @@ class EntityPillTests(unittest.TestCase):
         self.note('india')
         self.note('kenya-fallback', country=' Kenya ')
         self.note('kenya-modern', country='Kenya', year=2000)
-        aliases = ('Pitcairn', 'Pitcarin Islands', 'Nyassaland', 'Cocos Islands',
-                   'Cocos (Keeling) Islands', 'Keeling-Cocos Islands')
+        aliases = ('Pitcairn', 'Pitcarin Islands', 'Nyassaland')
         matches = {}
         for index, country in enumerate(aliases):
             ident = 'alias-' + str(index)

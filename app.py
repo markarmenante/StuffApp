@@ -5904,7 +5904,6 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
         'Kenya', 'Uganda', 'Malawi', 'Tanganyika', 'Sierra Leone',
         'Pitcairn Islands', 'Pitcairn', 'Pitcarin Islands', 'Nyasaland', 'Nyassaland',
         'Northern Rhodesia', 'Montserrat', 'Gold Coast', 'Gambia',
-        'Cocos (Keeling) Islands', 'Cocos Islands', 'Keeling-Cocos Islands',
         'British Somaliland', 'British Cameroons', 'Anguilla', 'Alderney',
     )}
     for entity in entities.values():
