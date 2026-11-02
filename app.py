@@ -11389,6 +11389,50 @@ def _shave_dark_border(img):
     return img.crop((x0, y0, x1, y1))
 
 
+def _trim_small_slab_note(img, expect_aspect=None, meta=None):
+    """Validate a small complete paper sheet inside a much larger holder.
+
+    Only the original image's measured paper quad may use this exception to
+    the fallback's 15% area floor. Ink-only and refined crops retain that
+    floor, and an affirmative validator never waives hard geometry failures.
+    """
+    import math
+
+    quad = _cv_note_quad(img, expect_aspect=expect_aspect)
+    if quad is None:
+        return None
+    qw = (math.hypot(quad[1][0] - quad[0][0], quad[1][1] - quad[0][1]) +
+          math.hypot(quad[2][0] - quad[3][0], quad[2][1] - quad[3][1])) / 2
+    qh = (math.hypot(quad[3][0] - quad[0][0], quad[3][1] - quad[0][1]) +
+          math.hypot(quad[2][0] - quad[1][0], quad[2][1] - quad[1][1])) / 2
+    # Match the established CV paper-boundary inset. The mask may include
+    # its transition pixels; a second edge cleanup must not redefine it.
+    rect = _rectify_note_quad(img, quad, inset_px=max(2.0, 0.004 * min(qw, qh)),
+                              fill=(0, 0, 0))
+    if rect is None:
+        return None
+    crop, _inner, coeffs = rect
+    area_fraction = crop.width * crop.height / float(img.width * img.height)
+    if not 0.05 <= area_fraction < 0.15:
+        return None
+    if expect_aspect and _aspect_off(crop.size, expect_aspect) > 0.08:
+        return None
+    failed = _note_crop_metrics(crop, expect_aspect)
+    if failed and not _v2_validator_may_waive(failed):
+        app.logger.info('trim: small paper quad rejected: %s', '; '.join(failed))
+        return None
+    if _vision_crop_verdict(crop) is not True:
+        return None
+    if meta is not None:
+        meta['engine'] = 'small-paper-quad'
+        meta['quad'] = [_apply_perspective(coeffs, x, y) for x, y in
+                        ((0, 0), (crop.width, 0),
+                         (crop.width, crop.height), (0, crop.height))]
+    app.logger.info('trim: validated small paper quad %dx%d -> %dx%d',
+                    img.width, img.height, crop.width, crop.height)
+    return _encode_trimmed_note(crop)
+
+
 def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
     """Crop a note photo (PMG/PCGS slab, sleeve, or bare) down to the
     engraved area plus its paper margins, squared up.
@@ -11446,6 +11490,9 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
                 meta['quad'] = [[round(x, 1), round(y, 1)] for x, y in paper_quad]
             app.logger.info('trim: dark-surround paper boundary %dx%d -> %dx%d', w, h, *rect[0].size)
             return _encode_trimmed_note(rect[0])
+    small_sheet = _trim_small_slab_note(img, expect_aspect=expect_aspect, meta=meta)
+    if small_sheet is not None:
+        return small_sheet
     # Seeded geometry pipeline first when enabled: 'ok' ships its crop,
     # 'noop' means the frame already is the note (store nothing), and
     # only a genuine failure falls through to the detector cascade.

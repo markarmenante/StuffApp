@@ -151,6 +151,11 @@ as "Cropping photos" after details are saved. At most two crop computations can
 remain outstanding; timed-out computations keep their capacity until they exit
 and cannot publish late results. A timeout leaves the originals available for
 manual cropping or an explicit retry.
+Small notes in oversized holders can use a candidate measured directly from
+the original photograph's paper quad. Candidates occupying 5–15% of the frame
+still require the catalog ratio, all hard crop metrics, and an affirmative
+vision verdict. Cleanup-derived crops retain the normal 15% minimum; missing
+validation cannot approve a small candidate.
 Original source photographs are retained before the slower catalogue call, with
 owner/account-bound access. They are protected from orphan cleanup. Source text is
 untrusted evidence. A title without the usual banknote discovery words is retained;
