@@ -29,7 +29,7 @@ jobs:
       - run: python scripts/test-regressions.py
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,7 +46,15 @@ jobs:
           cache: pip
       - run: python scripts/install-test-dependencies.py
       - run: npm --prefix browser-tests run browsers:install
+      - run: node tests/test_banknote_import_review.js
+      - run: node tests/test_banknote_single_order.js
+      - run: node tests/test_banknote_order_uncertain.js
       - run: npm --prefix browser-tests run test:e2e
+      - run: node tests/test_banknote_order_review_browser.cjs
+        timeout-minutes: 8
+        env:
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/browser-tests/node_modules/playwright/index.mjs
+          ORDER_REVIEW_ARTIFACTS: browser-artifacts/order-review
       - run: node tests/test_banknote_crop_controls_browser.cjs
         env:
           PLAYWRIGHT_MODULE: ${{ github.workspace }}/browser-tests/node_modules/playwright/index.mjs

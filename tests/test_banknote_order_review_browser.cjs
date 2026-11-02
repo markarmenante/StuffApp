@@ -65,6 +65,10 @@ stuff._classify_banknote_listing_photos=classify
 def specs(note):
  second='Seychelles' in (note.get('description') or '')
  third='Maldives' in (note.get('description') or '')
+ if 'Colombia' in (note.get('description') or ''):
+  return dict(country='Colombia',issuer='Banco de la Republica',denomination='1 Peso Oro',
+   pick_number='P-380g',date_1=1954,grading_authority='PMG',grade_numeric=66,
+   printer='Fixture source printer',serial_number='FIXTURE-COLOMBIA',sources='Synthetic exact-listing source')
  return dict(country='Maldives' if third else 'Seychelles' if second else 'Tonga',issuer='Government of Maldives' if third else 'Government of Seychelles' if second else 'Government of Tonga',
   denomination='10 Rufiyaa' if third else '5 Rupees' if second else '1 Pound',pick_number='P-5b' if third else 'P-14a' if second else 'P-12b',date_1=1960 if third else 1968 if second else 1966,
   grading_authority='PMG',grade_numeric=64,grade_modifier='EPQ',printer='Fixture source printer',
@@ -114,11 +118,14 @@ def fixture_complete():
  checkout_id='98-7654-'+number[-5:]+'0'
  seller_orders=[number] if data.get('single') else [number[:-5]+str(int(number[-5:])+offset).zfill(5) for offset in (-1,0,1)]
  examples=(('Tonga 1 Pound 1966 P-12b PMG 64 EPQ','599.89'),('Seychelles 5 Rupees 1968 P-14a PMG 64 EPQ','125.37'),('Maldives 10 Rufiyaa 1960 P-5b PMG 64 EPQ','38.11'))
+ if data.get('colombia'):
+  examples=(('Colombia One Peso Oro 1-1-1954 P380g Uncirculated Grade 66','137.42'),*examples[1:])
  for index,(title,amount) in enumerate(examples[:1] if data.get('single') else examples):
   actual_order=seller_orders[index]
   ident=str(177000000000+int(number[-5:])*10+index)
   details='https://order.ebay.com/ord/show?orderId='+actual_order+'&purchaseOrderId='+checkout_id
   item=dict(order_id=actual_order,item_id=ident,title=title,seller='fixture-dealer-'+str(index),quantity=1,status_text='Order processing',delivery_text='',ordered_date='Oct 26, 2026',details_url=details)
+  if data.get('colombia') and index==0:item['status_text']='Multiple items'
   items.append(item)
   receipts.append(dict(order_id=actual_order,item_id=ident,quantity=1,url='https://order.ebay.com/ord/show?orderId='+actual_order,
    currency='USD',unit_amount=amount,observed_at=observed,evidence='Order number '+actual_order+'\nItem info\n'+title+'\nUnit price USD '+amount+'\nItem number: '+ident+'\nPayment summary\nTax USD 44.44\nShipping USD 33.33\nOrder total USD 999.99'))
@@ -224,7 +231,7 @@ finally:server.server_close();temporary.cleanup()
     await button.click();
   };
   const noOverflow=async page=>assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'horizontal page overflow');
-  async function newCheckout(t,number,fromBlank=true){
+  async function newCheckout(t,number,fromBlank=true,options={}){
     const before=await t.state();
     const diagnostics={requests:[],dialogs:[]};
     const captureRequest=request=>{if(request.method()==='POST')diagnostics.requests.push(new URL(request.url()).pathname);};
@@ -251,7 +258,7 @@ finally:server.server_close();temporary.cleanup()
     const started=await created;assert.equal(started.status(),200);
     const startedBatch=(await t.state()).batches.find(saved=>saved.order_id===number);
     assert.ok(startedBatch,'entry saved the exact order batch');
-    const response=await t.context.request.post(origin+'/__fixture/complete',{data:{order:number}});
+    const response=await t.context.request.post(origin+'/__fixture/complete',{data:{order:number,...options}});
     assert.equal(response.status(),200,await response.text());
     try{await t.page.waitForURL(/\/banknotes\/imports\/[a-f0-9]{32}$/);}
     catch(error){
@@ -293,6 +300,48 @@ finally:server.server_close();temporary.cleanup()
         assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Existing collection detail still saves');
       }finally{await t.close();}
     });
+    for(const mobile of [false,true]){
+      await run((mobile?'mobile':'desktop')+': uncertain blank-note import opens saved orders without reposting',async()=>{
+        const t=await setup(mobile);try{
+          const number=mobile?'98-76543-43020':'98-76543-43010';
+          const before=await t.state(),alerts=[];let importPosts=0,beforeUnloadPrompts=0,createdBatch;
+          t.page.on('dialog',async dialog=>{alerts.push(dialog.message());if(dialog.type()==='beforeunload')beforeUnloadPrompts++;await dialog.dismiss();});
+          t.page.on('request',request=>{
+            if(request.method()==='POST'&&new URL(request.url()).pathname==='/banknotes/imports')importPosts++;
+          });
+          await t.page.route('**/banknotes/imports',async route=>{
+            assert.equal(route.request().method(),'POST');
+            // The server commits, but the caller receives an uncertain failure.
+            const response=await route.fetch();assert.equal(response.status(),200);
+            createdBatch=await response.json();
+            return route.fulfill({status:503,json:{error:'Synthetic response lost after saving the order'}});
+          });
+          await t.page.goto(origin+'/banknotes/new');
+          await t.page.locator('[name="order_number"]').fill(number);
+          await t.page.locator('[name="property"]').selectOption('');
+          await checkButton(t.page);
+          const check=t.page.locator('.coin-spec-check-btn');
+          await t.page.waitForFunction(()=>document.querySelector('.coin-spec-check-btn')?.textContent==='Open saved orders');
+          assert.equal(await check.isEnabled(),true);
+          assert.equal(await t.page.locator('#mainForm').evaluate(form=>form.inert),false,'failed entry restores the form');
+          assert.equal(await t.page.locator('[name="order_number"]').inputValue(),number);
+          assert(alerts.some(message=>message.includes('could not be confirmed')));
+          assert.equal(importPosts,1);assert(createdBatch?.id,'the first request was durably saved');
+          const recovery=t.page.waitForResponse(response=>new URL(response.url()).pathname==='/banknotes/imports/new'&&response.request().method()==='GET');
+          await checkButton(t.page);assert.equal((await recovery).status(),200);
+          await t.page.waitForURL(origin+'/banknotes/imports/new');
+          assert.equal(beforeUnloadPrompts,0,'recovering an unchanged order with no Location needs no discard prompt');
+          assert.equal(importPosts,1,'recovery reads saved orders without repeating the uncertain POST');
+          assert.equal(await t.page.locator('[data-saved-batch="'+createdBatch.id+'"]').count(),1);
+          assert.deepEqual((await t.state()).rows,before.rows,'recovering an order request creates no collection record');
+          // Finish only the synthetic reader job so it cannot interfere with
+          // later fixture claims; multiple items remain unpublished drafts.
+          const completed=await t.context.request.post(origin+'/__fixture/complete',{data:{order:number}});
+          assert.equal(completed.status(),200,await completed.text());
+          assert.deepEqual((await t.state()).rows,before.rows);
+        }finally{await t.close();}
+      });
+    }
     for (const [name,number,mobile,fromBlank,partial,edit] of [
       ['single desktop blank Check opens exact banknote','98-76543-41010',false,true,false,false],
       ['single mobile order entry opens exact banknote','98-76543-41020',true,false,false,false],
@@ -368,6 +417,50 @@ finally:server.server_close();temporary.cleanup()
         await t.page.waitForURL(url=>/^\/banknotes\/[a-f0-9-]{32,36}$/.test(url.pathname));
         assert.equal((await batchStatus(t,saved.id)).items[0].state,'released');
         assert.equal(await t.page.locator('[data-import-mode]').count(),0);
+      }finally{await t.close();}
+    });
+    await run('abbreviated Pick title in a multiple-item order supports Check, photos and explicit release',async()=>{
+      const t=await setup(false);try{
+        const {before,id,batch}=await newCheckout(t,'98-76543-42010',false,{colombia:true});
+        const draft=batch.items.find(item=>item.title.startsWith('Colombia '));
+        assert(draft,'the exact keywordless purchased title remains in review');
+        assert.equal(draft.state,'blocked','the purchase warning is retained');
+        assert.equal(draft.can_check,true);assert.equal(draft.can_edit,true);assert.equal(draft.can_release,true);
+        assert.equal(draft.check_state,'done',draft.check_message);
+        assert.match(draft.warnings.join(' '),/Multiple items; shipment or delivery not confirmed/);
+        assert.equal(draft.fields.country,'Colombia');assert.equal(draft.fields.pick_number,'P-380g');
+        assert.equal(numberValue(draft.fields.price),137.42,'the exact item amount is separate from order totals');
+        await t.page.locator('article[data-draft-id="'+draft.id+'"] [data-review-draft]').click();
+        assert.equal(await t.page.locator('#banknoteImportCheck').isEnabled(),true);
+        assert.equal(await t.page.locator('#banknoteImportRelease').isEnabled(),true);
+        assert.equal(await t.page.locator('[name="country"]').isEnabled(),true);
+        assert.equal(await t.page.locator('[name="country"]').inputValue(),'Colombia');
+        const images=t.page.locator('.banknote-imgs img');
+        assert.equal(await images.count(),2,'both selected photos replace empty main-image slots');
+        await images.evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+        assert(await images.evaluateAll(images=>images.every(image=>image.naturalWidth>0)));
+        assert.equal(await t.page.locator('.quad-fix-btn:visible').count(),2,'both selected sides expose their crop controls');
+        await t.page.locator('[name="printer"]').fill('Reviewed Colombia fixture printer');
+        const checked=t.page.waitForResponse(response=>response.url()===origin+draft.detail_url+'/check'&&response.request().method()==='POST');
+        await t.page.locator('#banknoteImportCheck').click();assert.equal((await checked).status(),202);
+        await t.page.waitForFunction(()=>!document.getElementById('banknoteImportCheck').disabled);
+        const current=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+        assert.equal(current.fields.printer,'Reviewed Colombia fixture printer','Check flushes and preserves pending edits');
+        assert.equal(current.fields.image_1,draft.fields.image_1);assert.equal(current.fields.image_2,draft.fields.image_2);
+        assert.deepEqual((await t.state()).rows,before.rows,'review and Check do not publish any collection record');
+        const released=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
+        await t.page.locator('#banknoteImportRelease').click();assert.equal((await released).status(),200);
+        await t.page.waitForURL(origin+'/banknotes/imports/'+id);
+        const releasedId=t.releaseResults.at(-1).released[0].record_id;
+        const state=await t.state(),row=state.rows.find(item=>item.id===releasedId);
+        assert.equal(row.country,'Colombia');assert.equal(row.pick_number,'P-380g');
+        assert.equal(row.status,'Ordered');assert.equal(numberValue(row.price),137.42);
+        assert.equal(row.order_number,draft.order_number);assert.equal(row.printer,'Reviewed Colombia fixture printer');
+        assert.equal(state.rows.length,before.rows.length+1,'only the explicitly released item is published');
+        assert.equal(state.links.filter(link=>link.banknote_id===releasedId).length,1,'one exact purchase link is created');
+        const after=await batchStatus(t,id);
+        assert.equal(after.pending_count,2,'sibling notes retain separate review');
+        assert.match(after.items.find(item=>item.id===draft.id).warnings.join(' '),/Multiple items/);
       }finally{await t.close();}
     });
     for(const mobile of [false,true]){
@@ -511,15 +604,17 @@ finally:server.server_close();temporary.cleanup()
           t.page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/release'))releases++;});
           await t.page.locator('[name="printer"]').fill('Never lose this pending edit');
           await t.page.locator('#banknoteImportRelease').click();
-          await t.page.waitForFunction(()=>document.getElementById('banknoteImportStatus')?.textContent.includes('interruption'));
+          await t.page.waitForFunction(()=>document.getElementById('banknoteImportStatus')?.textContent.includes('could not be confirmed'));
           assert(failedSaves>0);assert.equal(releases,0);assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Never lose this pending edit');
+          assert.equal(await t.page.locator('#banknoteImportSave').isDisabled(),true,'an uncertain save cannot be replayed before status reconciliation');
           assert.equal(t.page.url(),origin+draft.detail_url);assert.equal((await t.state()).rows.length,before.rows.length);
           await t.page.unroute('**'+draft.detail_url);
           const remote=await t.context.request.post(origin+draft.detail_url,{data:{revision:draft.revision,updates:{printer:'Saved in another window'}}});assert.equal(remote.status(),200);
-          await t.page.locator('#banknoteImportSave').click();
           await t.page.locator('#banknoteImportRefresh').waitFor({state:'visible'});
           assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Never lose this pending edit');
           assert.equal(await t.page.locator('#banknoteImportRelease').isDisabled(),true);assert.equal(releases,0);
+          await t.page.locator('#banknoteImportRefresh').click();
+          await t.page.waitForFunction(()=>document.getElementById('banknoteImportStatus')?.textContent.includes('changed elsewhere'));
           await t.page.locator('#banknoteImportRefresh').click();
           await t.page.locator('#banknoteImportConflict').waitFor();
           assert((await t.page.locator('#banknoteImportConflict').innerText()).includes('Saved in another window'));
@@ -554,10 +649,14 @@ finally:server.server_close();temporary.cleanup()
             ?route.fulfill({status:503,json:{error:'Synthetic photo-save interruption'}}):route.continue());
           await t.page.locator('[name="printer"]').fill('Reviewed before choosing photos');
           await front.click();
-          await t.page.waitForFunction(()=>document.getElementById('banknoteImportStatus')?.textContent.includes('photo-save interruption'));
+          await t.page.waitForFunction(()=>document.getElementById('banknoteImportStatus')?.textContent.includes('could not be confirmed'));
           assert.equal(photoRequests,0,'a failed field save must block the photo selection');
           assert.equal(await t.page.locator('[name="printer"]').inputValue(),'Reviewed before choosing photos');
           await t.page.unroute('**'+draft.detail_url);
+          assert.equal(await front.isDisabled(),true,'an uncertain field save blocks photo writes until refreshed');
+          await t.page.locator('#banknoteImportRefresh').click();
+          await t.page.waitForFunction(()=>document.getElementById('banknoteImportStatus')?.textContent.includes('Saved status refreshed'));
+          assert.equal(photoRequests,0,'status reconciliation never replays the photo selection');
           let response=t.page.waitForResponse(response=>response.url().endsWith('/photos')&&response.request().method()==='POST');
           await front.click();assert.equal((await response).status(),200);
           let remote=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);

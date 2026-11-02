@@ -1,4 +1,5 @@
 """Short-lived exact-order requests for Today's authenticated Purchases bridge."""
+from datetime import datetime
 import re
 import time
 import uuid
@@ -6,6 +7,7 @@ from urllib.parse import urlsplit, parse_qs
 
 from flask import abort, jsonify, request
 import ebay_mail
+import ebay_orders
 import ebay_listing_captures
 import ebay_purchase_prices
 import market_purchase_capture
@@ -190,6 +192,44 @@ def complete_session(db, row, payload):
     return dict(ok=True)
 
 
+def _validate_exact_observation(db, items, observed, requested_at):
+    """A skipped older observation cannot stand in for this checkout read."""
+    stamp = datetime.fromisoformat(observed.replace('Z', '+00:00')).timestamp()
+    if not requested_at - 5 <= stamp <= time.time() + 60:
+        raise ValueError('Purchase evidence is not from this order check')
+    suppressed = {row[0] for row in db.execute('SELECT identity_hash FROM ebay_deleted_accounts')}
+    for item in items:
+        stored = db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
+                            (item['order_id'], item['item_id'])).fetchall()
+        if len(stored) > 1:
+            raise ValueError('Purchase identity could not be confirmed')
+        old = dict(stored[0]) if stored else None
+        if ({ebay_orders.digest(item['seller'].lower()), old['seller_key'] if old else ''} & suppressed):
+            raise ValueError('Purchase identity could not be confirmed: seller was excluded')
+        if not old:
+            continue
+        seen = db.execute('SELECT * FROM ebay_purchase_observations WHERE line_key=?',
+                          (old['line_key'],)).fetchone()
+        if not seen or seen['observed_at'] < observed:
+            continue
+        # Same-second retries are valid only when their purchase facts agree.
+        # Never replace a newer observation, or materialize its older quantity,
+        # seller, title or status while claiming the new payload was accepted.
+        attention = item['attention']
+        # Purchases can hide a delivery line after a refund. Compare the same
+        # retained-delivery annotation that apply_purchases persists, rather
+        # than rejecting an otherwise identical retry of that observation.
+        if (item['status_text'].lower() in ('refunded', 'partially refunded')
+                and not attention.startswith('Multiple purchase rows')
+                and not item['delivered_at'] and old['delivered_at']
+                and old['attention'] == item['status_text'] + '; previously confirmed delivered'):
+            attention = old['attention']
+        keys = ('title', 'seller', 'quantity', 'ordered_at', 'attention')
+        if (any(old[key] != (attention if key == 'attention' else item[key]) for key in keys)
+                or any(seen[key] != item[key] for key in ('status_text', 'delivery_text'))):
+            raise ValueError('Purchase observation conflicts with newer saved evidence; refresh the order')
+
+
 def complete(db, payload):
     """Only acknowledge validated evidence for the claimed order, never a sibling."""
     if payload.get('kind') == 'market_purchase' or any(k in payload for k in ('search_item_id','search_complete')):
@@ -225,6 +265,7 @@ def complete(db, payload):
         if skipped or not items or len(items)>25:
             db.rollback()
             raise ValueError('Purchase result must contain only the complete requested order')
+        _validate_exact_observation(db, items, observed, row['requested_at'])
         # The owner requested this exact order for a current banknote. Keep all
         # its items even when the seller title lacks discovery words such as
         # banknote or PMG; quantity and sibling checks still apply downstream.

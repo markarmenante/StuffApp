@@ -24,6 +24,7 @@ from PIL import Image
 HEADERS={'Authorization':'Bearer '+'x'*40}
 ORDERS=['24-15335-90977','24-15335-90978','24-15335-90979']
 IDS=['158075629160','336824466148','236156645678']
+CATALOGUE_REVIEW_TITLE='Colombia One Peso Oro 1-1-1954 P380g Uncirculated Grade 66'
 
 class DraftTests(unittest.TestCase):
     def setUp(self):
@@ -281,6 +282,17 @@ class DraftTests(unittest.TestCase):
         b=self.check(b,b['items'][0],failed)
         self.assertEqual(b['items'][0]['check_state'],'failed');self.assertIsNone(self.batch()['completion_url'])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+    def test_catalogue_review_title_does_not_broaden_automatic_single_identity(self):
+        def title_only(payload):
+            payload['items'][0]['title']=CATALOGUE_REVIEW_TITLE
+            payload['listings'][0].update(title=CATALOGUE_REVIEW_TITLE,text=CATALOGUE_REVIEW_TITLE+'; exact listing.')
+        batch=self.single_imported(title_only)
+        batch=self.check(batch,batch['items'][0],lambda *_:dict(filled={}))
+        self.assertEqual(batch['items'][0]['check_state'],'done')
+        self.assertIsNone(stuff._finish_single_import(self.db,batch['id']))
+        self.assertIsNone(self.batch()['completion_url'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
     def test_single_completion_revalidates_source_membership_quantity_and_current_revision(self):
         b=self.single_imported();b=self.check(b,b['items'][0]);item=b['items'][0]
         self.db.execute("UPDATE banknote_import_batches SET snapshot_json='[]' WHERE id=?",(b['id'],));self.db.commit()
@@ -483,13 +495,75 @@ class DraftTests(unittest.TestCase):
                                  prepare or self.preview_crop)
         return self.current_item(batch,item)
 
-    def inspection_item(self):
+    def inspection_item(self,title=None):
         def without_receipt(payload):
             payload['items'][0]['status_text']='Multiple items'
             payload['receipts']=payload['receipts'][1:]
+            if title:
+                payload['items'][0]['title']=title
+                payload['listings'][0].update(title=title,text=title+'; exact purchased listing.')
         batch=self.imported(without_receipt)
         item=next(i for i in batch['items'] if i['state']=='blocked')
         self.assertTrue(item['can_check']);return batch,item
+
+    def test_catalogue_denomination_title_unlocks_review_from_cropped_previews_through_manual_release(self):
+        batch,item=self.inspection_item(CATALOGUE_REVIEW_TITLE)
+        self.assertTrue(item['can_edit']);self.assertTrue(item['can_release'])
+        item=self.prepare_previews(batch,item)
+        self.assertTrue(all(photo.get('local_preview') for photo in item['photos']))
+        self.assertFalse(item['fields'].get('country'));self.assertFalse(item['fields'].get('image_1'))
+        before=dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+        originals={row['source_filename']:(Path(stuff.UPLOAD_FOLDER)/row['source_filename']).read_bytes()
+                   for row in self.db.execute('SELECT * FROM banknote_import_photo_previews WHERE item_id=?',(item['id'],))}
+        def evaluate(note,prepared):
+            for field in ('image_1','image_2'):
+                self.assertIn(note[field],originals)
+                with Image.open(Path(stuff.UPLOAD_FOLDER)/note[field]) as image:self.assertEqual(image.size,(160,80))
+            return dict(filled=dict(country='Colombia',denomination='1 Peso Oro',pick_number='P-380g',
+                                    grade='66',grading_authority='PMG',price='$9999',status='Own'))
+        batch=self.check(batch,item,evaluate,prepare_photo=self.preview_crop)
+        item=self.current_item(batch,item)
+        self.assertEqual(item['state'],'blocked');self.assertEqual(item['check_state'],'partial')
+        self.assertIn('exact paid item amount is unavailable',' '.join(item['warnings']))
+        self.assertEqual(item['fields']['country'],'Colombia');self.assertEqual(item['fields']['pick_number'],'P-380g')
+        self.assertEqual(item['fields']['grade'],'66')
+        for field in ('image_1','image_2'):
+            self.assertIn(stuff._banknote_vision_source(item['fields'][field],self.db),originals)
+            with Image.open(Path(stuff.UPLOAD_FOLDER)/item['fields'][field]) as image:self.assertEqual(image.size,(150,70))
+        self.assertTrue(all(photo['selectable'] for photo in item['photos']))
+        self.assertFalse(item['fields'].get('price'));self.assertEqual(item['fields']['status'],'Ordered')
+        locked=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'price':'$1'}})
+        self.assertEqual(locked.status_code,409)
+        edited=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'notes':'Reviewed exact note'}})
+        self.assertEqual(edited.status_code,200,edited.json);item=edited.json['item']
+        original=item['photos'][0]['filename']
+        selected=self.choose(item,'image_1',original)
+        self.assertEqual(selected.status_code,200,selected.json);item=selected.json['item']
+        cropped=self.crop(item)
+        self.assertEqual(cropped.status_code,200,cropped.json);item=cropped.json['item']
+        self.assertEqual(item['image_sources']['image_1'],original)
+        self.assertEqual(item['manual_photos']['image_1'],item['fields']['image_1'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+        for filename,raw in originals.items():self.assertEqual((Path(stuff.UPLOAD_FOLDER)/filename).read_bytes(),raw)
+        released=self.release(batch,[item]);self.assertEqual(released.status_code,200,released.json)
+        record=self.db.execute('SELECT * FROM banknotes').fetchone()
+        self.assertEqual(record['country'],'Colombia');self.assertEqual(record['pick_number'],'P-380g')
+        self.assertEqual(record['status'],'Ordered');self.assertFalse(record['price'])
+        self.assertEqual(record['notes'],'Reviewed exact note')
+        self.assertEqual(stuff._banknote_vision_source(record['image_1'],self.db),original)
+        after=dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+        for field in ('warning','source_json','source_digest'):self.assertEqual(after[field],before[field])
+
+    def test_catalogue_review_accepts_p_and_pk_titles_with_one_positive_denomination(self):
+        for title in ('Colombia 1 Peso P-380g', 'Colombia One Peso PK380g', 'Colombia 1 Peso P#380g'):
+            with self.subTest(title=title):
+                try:
+                    batch,item=self.inspection_item(title)
+                    self.assertTrue(item['can_edit']);self.assertTrue(item['can_release'])
+                    self.assertEqual(item['state'],'blocked')
+                    self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+                finally:self.tearDown();self.setUp()
 
     def group_receipt_payload(self,payload):
         # Two distinct notes share one seller order, plus another seller order
@@ -779,10 +853,17 @@ class DraftTests(unittest.TestCase):
         cases=[dict(title='PMG banknote and coin'),dict(title='Empty PMG holder only'),
                dict(title='Unidentified collectible'),dict(title='Lot of two banknotes PMG'),dict(quantity=2),
                dict(attention='Needs review'),dict(attention='Multiple purchase rows share this identity; review required'),dict(ignored=1)]
+        cases.extend(dict(title=title) for title in (
+            'Colombia P380g Grade 66', 'Colombia One Peso Oro Grade 66', 'Colombia 0 Pesos P380g',
+            'Colombia One Peso P380g and P381a', 'Colombia One Peso and Five Pesos P380g',
+            'Colombia One Peso P380g coin', 'Colombia One Peso P380g holder only',
+            'Colombia One Peso P380g/P381', 'Colombia One Peso P380g-P381',
+            'Colombia One Peso P380g/381', 'Colombia One Peso P380g P???',
+            'Colombia One Peso P380g P380g', 'Camera P100 $5'))
         for changes in cases:
             with self.subTest(changes=changes):
                 try:
-                    batch,item=self.inspection_item()
+                    batch,item=self.inspection_item(CATALOGUE_REVIEW_TITLE)
                     source=dict(self.db.execute('SELECT * FROM ebay_order_items WHERE item_id=?',(IDS[0],)).fetchone())
                     source.update(changes)
                     for key,value in changes.items():self.db.execute('UPDATE ebay_order_items SET '+key+'=? WHERE item_id=?',(value,IDS[0]))
@@ -811,7 +892,7 @@ class DraftTests(unittest.TestCase):
         for changed in cases:
             with self.subTest(changed=changed):
                 try:
-                    batch,item=self.inspection_item();batch=self.check(batch,item);item=self.current_item(batch,item)
+                    batch,item=self.inspection_item(CATALOGUE_REVIEW_TITLE);batch=self.check(batch,item);item=self.current_item(batch,item)
                     info=self.crop_info(item).json
                     if changed=='account':self.db.execute("UPDATE ebay_purchase_account SET account_name='other'")
                     elif changed=='membership':self.db.execute("UPDATE banknote_import_batches SET snapshot_json='[]' WHERE id=?",(batch['id'],))
@@ -1159,12 +1240,47 @@ class DraftTests(unittest.TestCase):
         self.assertNotIn('identity_ambiguous',payload['items'][0])
         response=self.client.post('/ebay/today/requests',json=payload,headers=HEADERS)
         self.assertEqual(response.status_code,409,response.json)
-        self.assertEqual(response.json['error'],'Receipt purchase requires review')
+        self.assertIn('conflicts with newer saved evidence',response.json['error'])
         self.assertEqual(dict(self.db.execute("SELECT * FROM ebay_order_items WHERE line_key='ambiguous'").fetchone()),before)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0],1)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_purchase_observations').fetchone()[0],1)
         for table in ('ebay_listing_captures','ebay_purchase_prices','banknote_import_items','banknotes'):
             self.assertEqual(self.db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0],0,table)
+    def assert_stale_refresh_cannot_reuse_old_single_quantity(self, single):
+        batch=self.single_imported() if single else self.imported()
+        future=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(time.time()+30))
+        self.db.execute('UPDATE ebay_purchase_observations SET observed_at=?',(future,))
+        self.db.commit()
+        tables=('ebay_order_items','ebay_purchase_observations','ebay_purchase_prices',
+                'ebay_listing_captures','banknote_import_items')
+        before={table:[dict(row) for row in self.db.execute('SELECT * FROM '+table)] for table in tables}
+        self.assertEqual(self.client.post('/banknotes/imports',json={
+            'order_number':ORDERS[1],'refresh':True}).status_code,200)
+        claim=self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request']
+        payload=self.payload(claim)
+        if single:
+            payload['items']=payload['items'][1:2]
+            payload['checkout']['orders']=payload['checkout']['orders'][1:2]
+        payload['receipts']=[];payload['listings']=[]
+        payload['items'][0]['quantity']=2
+        response=self.client.post('/ebay/today/requests',json=payload,headers=HEADERS)
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertIn('conflicts with newer saved evidence',response.json['error'])
+        for table in tables:
+            self.assertEqual([dict(row) for row in self.db.execute('SELECT * FROM '+table)],before[table],table)
+        latest=self.client.get(batch['status_url']).json
+        self.assertEqual(latest['state'],'failed')
+        self.assertIsNone(stuff._finish_single_import(self.db,batch['id']))
+        self.assertEqual(self.release(latest).status_code,409)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+
+    def test_single_refresh_rejects_stale_changed_quantity_without_receipt_or_listing(self):
+        self.assert_stale_refresh_cannot_reuse_old_single_quantity(True)
+
+    def test_multi_refresh_rejects_stale_changed_quantity_without_receipt_or_listing(self):
+        self.assert_stale_refresh_cannot_reuse_old_single_quantity(False)
+
     def test_explicit_fresh_order_read_can_resolve_blocked_receipt_attention(self):
         b=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
         blocked=next(i for i in b['items'] if i['state']=='blocked')

@@ -9,13 +9,14 @@
     const process = document.getElementById('banknoteOrderProcess');
     const cancel = document.getElementById('banknoteOrderCancel');
     const status = document.getElementById('banknoteOrderStatus');
-    let processing = false;
+    let processing = false, orderUncertain = false;
     const say = (message, error = false) => {
       status.textContent = message;
       status.dataset.error = String(error);
     };
     orderAdd.addEventListener('click', () => {
-      say(''); orderDialog.showModal(); input.focus();
+      say(orderUncertain ? 'The order request could not be confirmed. Open saved orders to continue.' : '', orderUncertain);
+      orderDialog.showModal(); input.focus();
     });
     cancel.addEventListener('click', () => orderDialog.close());
     orderDialog.addEventListener('cancel', event => {
@@ -25,6 +26,7 @@
     form.addEventListener('submit', async event => {
       event.preventDefault();
       if (processing) return;
+      if (orderUncertain) { window.location.assign('/banknotes/imports/new'); return; }
       if (!input.value.trim()) {
         say('Enter the eBay order number first.', true); input.focus(); return;
       }
@@ -37,6 +39,7 @@
         window.location.assign(batch.url);
       } catch (error) {
         say(error.message, true);
+        if (error.uncertain) { orderUncertain = true; input.required = false; process.textContent = 'Open saved orders'; }
         processing = false; process.disabled = false; cancel.disabled = false;
         input.readOnly = false; form.removeAttribute('aria-busy'); input.focus();
       }

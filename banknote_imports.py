@@ -19,6 +19,7 @@ import banknote_catalog_proposals
 import banknote_photo_sides
 import ebay_listing_captures
 import ebay_mail
+import ebay_matching
 import ebay_purchase_prices
 import listing_images
 import original_listings
@@ -34,6 +35,8 @@ PHOTO_SIDE_WARNINGS = (
 _ORDER = re.compile(r'\d{2}-\d{5}-\d{5}')
 _MULTIPLE = r'(?:[2-9]\d*|1\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|hundred)'
 _BUNDLE = re.compile(r'\b(?:set|bundle)\s*(?:of\s*)?'+_MULTIPLE+r'\b|\blot\s+of\s+'+_MULTIPLE+r'\b|\bpair of\b|\b'+_MULTIPLE+r'\s+(?:consecutive\s+)?(?:serial\s+)?(?:notes|banknotes)\b', re.I)
+_DIMENSIONS = re.compile(r'(?<![\w.])\d+(?:[.,]\d+)?\s*(?:(?:mm|cm|inches|inch|in)\s*)?[x×]\s*\d+(?:[.,]\d+)?\s*(?:mm|cm|inches|inch|in)\b', re.I)
+_MULTIPACK = re.compile(r'(?<![\w./-])'+_MULTIPLE+r'\s*[x×](?=\s|\d|$)|(?<!\w)[x×]\s*'+_MULTIPLE+r'\b', re.I)
 _AUTO_AMBIGUOUS = re.compile(r'\b(?:set|bundle|pair|assortment|assorted|coins?|stamps?|medals?|empty|holder only)\b|\blot\s+(?:of\s+)?(?:notes|banknotes)\b|\bcollection\s+of\s+(?:\w+\s+){0,4}(?:notes|banknotes)\b|\b(?:notes|banknotes)\s+collection\b', re.I)
 _NOTE_TITLE = re.compile(r'\b(?:banknotes?|paper money|PMG|Friedberg)\b|\bPick\s*[#-]?\s*\d', re.I)
 _LISTING_PREVIEW_URL = re.compile(r'https://i\.ebayimg\.com/images/g/[\w~-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', re.ASCII)
@@ -155,10 +158,16 @@ def _digest(item):
     return hashlib.sha256(_json(source_identity(item)).encode()).hexdigest()
 
 
+def _bundle_title(title):
+    # A checkout quantity of one can still buy several physical notes. Remove
+    # explicitly labelled measurements before interpreting "3 x" or "x 3".
+    return bool(_BUNDLE.search(title) or _MULTIPACK.search(_DIMENSIONS.sub(' ',title)))
+
+
 def _reason(item):
     if item.get('ignored'):
         return 'This purchase was excluded from eBay order matching. Review it before importing.'
-    if item.get('quantity') != 1 or _BUNDLE.search(item.get('title') or ''):
+    if item.get('quantity') != 1 or _bundle_title(item.get('title') or ''):
         return 'This purchase contains multiple notes or units. Separate exact item identification is needed before release.'
     if item.get('attention'):
         return 'This purchase needs review: ' + str(item['attention'])[:300]
@@ -394,7 +403,7 @@ def _preview_context(db,batch,row):
     source=json.loads(row['source_json'])
     photos=_listing_preview_sources(db,row,source)
     existing=json.loads(row['existing_snapshot_json'] or '{}')
-    if (row['state']!='blocked' or not photos or _BUNDLE.search(source.get('title') or '')
+    if (row['state']!='blocked' or not photos or _bundle_title(source.get('title') or '')
             or any(existing.get(field) for field in ('image_1','image_2'))
             or db.execute('SELECT 1 FROM banknote_import_assets WHERE item_id=?',(row['id'],)).fetchone()):
         raise ImportProblem('No exact listing previews are available to crop for this item.')
@@ -711,13 +720,49 @@ def _validate_source(db,batch,row):
         raise ImportProblem('This item is absent from the verified order snapshot.')
     if row['account_name'] != _account(db):
         raise ImportProblem('The connected eBay account changed; the draft was kept.')
-    source=db.execute('SELECT * FROM ebay_order_items WHERE line_key=?',(row['line_key'],)).fetchone()
-    if not source or _digest(dict(source)) != row['source_digest']:
+    saved=json.loads(row['source_json'])
+    matches=db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
+                       (saved['order_id'],row['item_id'])).fetchall()
+    if len(matches)!=1:
+        raise ImportProblem('This purchase identity is ambiguous or unavailable. Refresh the order review.')
+    source=matches[0]
+    if (source['line_key']!=row['line_key'] or _digest(dict(source)) != row['source_digest']
+            or source['ordered_at'] != saved.get('ordered_at')):
         raise ImportProblem('The purchased item details changed. Review the order again before releasing it.')
     reason=_reason(dict(source))
     if reason:
         raise ImportProblem(reason)
     return dict(source)
+
+
+def _review_note_title(title):
+    """Recognize a note's Pick shorthand without broadening automatic imports."""
+    if _NOTE_TITLE.search(title):return True
+    if re.search(r'\b(?:books?|cameras?|lenses|lens|albums?|posters?|postcards?)\b',title,re.I):return False
+    profile=ebay_matching.profile(title)
+    picks=profile['catalogs'].get('p',set())
+    denominations=profile['denominations']
+    if len(picks)!=1 or len(denominations)!=1 or next(iter(denominations))[0]<=0:
+        return False
+    # A bare asking price beside a product/SKU token is not a face value.
+    without_catalog=ebay_matching.CATALOG_RE.sub(' ',title)
+    # The shared matching parser intentionally discards punctuation. A signed
+    # negative face value must not become positive proof of a banknote here.
+    if re.search(r'(?<!\w)[-−]'+ebay_matching.NUMBER+r'\s*(?:'+ebay_matching.UNIT_RE+r')\b',without_catalog,re.I):return False
+    if not re.search(r'\b(?:'+ebay_matching.UNIT_RE+r')\b',without_catalog,re.I):return False
+    without_prices=re.sub(r'[$£]\s*'+ebay_matching.NUMBER,' ',without_catalog)
+    if ebay_matching.denominations(without_prices)!=denominations:return False
+    # The shared parser intentionally ignores malformed references and collapses
+    # repeated values. Review eligibility must not turn those into one note.
+    starts=list(re.finditer(r'\b(?:pk|p)(?=\d|[\s.#?/_-]|$)',title,re.I))
+    matches=[match for match in ebay_matching.CATALOG_RE.finditer(title)
+             if match[1].lower() in ('p','pk')]
+    if len(starts)!=1 or len(matches)!=1 or starts[0].start()!=matches[0].start():return False
+    match=matches[0];tail=title[match.end():]
+    if (tail and not re.match(r'[\s.,;:)\]]',tail)
+            or re.match(r'\s*(?:[/~]|[-–—]\s*\w|(?:and|or|to)\s+[a-z]?\d)',tail,re.I)):
+        return False
+    return True
 
 
 def _review_source(db,batch,row):
@@ -734,8 +779,8 @@ def _review_source(db,batch,row):
             or source.get('item_id')!=row['item_id'] or _digest(source)!=row['source_digest']
             or [source.get('order_id'),row['item_id']] not in membership
             or source.get('attention','').lower() not in _INSPECTION_ATTENTION
-            or row['warning']!=_reason(source) or not _NOTE_TITLE.search(source.get('title') or '')
-            or _AUTO_AMBIGUOUS.search(source.get('title') or '') or _BUNDLE.search(source.get('title') or '')):
+            or row['warning']!=_reason(source) or not _review_note_title(source.get('title') or '')
+            or _AUTO_AMBIGUOUS.search(source.get('title') or '') or _bundle_title(source.get('title') or '')):
         raise ImportProblem('This purchase needs its exact item identity reviewed before editing or release.')
     matches=db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
                        (source.get('order_id'),row['item_id'])).fetchall()
@@ -743,6 +788,7 @@ def _review_source(db,batch,row):
         raise ImportProblem('This purchase identity is ambiguous. Refresh the order review.')
     current=dict(matches[0])
     if (current['line_key']!=row['line_key'] or _digest(current)!=row['source_digest']
+            or current['ordered_at']!=source.get('ordered_at')
             or current['attention'].lower() not in _INSPECTION_ATTENTION
             or _reason(current)!=row['warning'] or current['quantity']!=1 or current['ignored']
             or _existing_matches(db,source)
@@ -788,10 +834,19 @@ def can_check(db,row):
 
 
 def _check_context(db,batch,row):
-    if row['state']=='blocked':return _inspection_context(db,batch,row)
-    if row['state']!='draft':raise ImportProblem('This item is no longer an editable draft.')
-    _validate_source(db,batch,row)
-    return None
+    if row['state']=='blocked':
+        capture_digest=_inspection_context(db,batch,row)
+        source=_review_source(db,batch,row)
+    else:
+        if row['state']!='draft':raise ImportProblem('This item is no longer an editable draft.')
+        source=_validate_source(db,batch,row)
+        capture=db.execute('SELECT * FROM ebay_listing_captures WHERE url=?',
+                           ('https://www.ebay.com/itm/'+row['item_id'],)).fetchone()
+        capture_digest=hashlib.sha256(_json(dict(capture) if capture else None).encode()).hexdigest()
+    # Normal Check needs the same evidence binding as warning-only inspection.
+    # Receipt corrections can arrive while the provider is running without
+    # changing a draft revision or the purchased listing's identity.
+    return (row['state'],capture_digest,_json(ebay_purchase_prices.for_item(db,source)))
 
 
 def save(db,batch_id,item_id,revision,updates,normalize):
@@ -1130,11 +1185,11 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
     try:
         batch,row=_item(db,batch_id,item_id)
         context=_check_context(db,batch,row)
-        inspection=context is not None
+        inspection=row['state']=='blocked'
         fields=json.loads(row['fields_json'])
         prepared,assets,photos=_source_inputs(db,row,fields,folder,classify)
+        _verify_original_assets(assets,folder)
         if inspection:
-            _verify_original_assets(assets,folder)
             prepared.update(purchase={},purchase_price_blocked=True,
                 evidence=[entry for entry in prepared['evidence'] if entry['kind']=='listing'])
         retries=_uncropped_draft_photos(db,row,fields,assets) if retry_uncropped else {}
@@ -1162,8 +1217,8 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
                     if candidate:
                         note[field]=candidate;used.add(candidate);note['_inspection_unassigned_photos']=True
         result=evaluate(note,prepared)
+        _verify_original_assets(assets,folder)
         if inspection:
-            _verify_original_assets(assets,folder)
             result=dict(result,filled={field:value for field,value in result.get('filled',{}).items()
                                       if field in _INSPECTION_FIELDS})
         # Vision reads the full saved originals first. Display preparation is
@@ -1194,7 +1249,7 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         current_context=_check_context(db,batch,current)
         if (current_context!=context or current['revision']!=revision or current['check_token']!=token or current['check_expires']<=time.time()):
             raise ImportProblem('The draft changed while Check was running. Your edits were kept; press Check again.')
-        if inspection:_verify_original_assets(assets,folder)
+        _verify_original_assets(assets,folder)
         current_fields=json.loads(current['fields_json'])
         applied=set()
         for field,value in {**photos,**result.get('filled',{})}.items():
@@ -1284,6 +1339,8 @@ def release(db,batch_id,selected,folder,create,*,automatic_single=False):
             if row['state'] not in ('draft','blocked') or row['revision']!=entry['revision']:raise ImportProblem('A selected draft changed. Review the latest version before release.',code='draft_changed')
             if row['check_state']=='checking' and row['check_expires']>time.time():raise ImportProblem('Wait for Check to finish before releasing this draft.')
             source=_editable_source(db,batch,row)
+            _verify_original_assets([dict(asset) for asset in db.execute(
+                'SELECT * FROM banknote_import_assets WHERE item_id=?',(row['id'],))],folder)
             linked=db.execute('SELECT banknote_id FROM banknote_ebay_links WHERE line_key=?',(row['line_key'],)).fetchone()
             if linked:raise ImportProblem('This purchased item was already added to the collection. Refresh the review list.')
             fields=json.loads(row['fields_json'])

@@ -70,6 +70,12 @@ types retain their existing restrictions.
 An exact single-note item held only by that group-status warning remains editable
 in review. **Save draft**, retained-photo selection and **Adjust crop** work even
 after the listing capture expires; a new **Check** still needs fresh evidence.
+Review also recognizes a title with one unambiguous P/PK catalogue reference and
+one positive written currency denomination, such as a Peso face value, even when
+the seller omitted “banknote”, “PMG” or the full word “Pick”. A bare asking price,
+malformed/ranged references, multiple denominations and existing mixed-item or
+bundle blockers do not qualify. This title fallback does not change automatic
+single-note completion rules.
 Price, seller, purchase date and status stay source-controlled while the warning
 persists. Refreshing the complete order fills a blank draft price from the newly
 authenticated exact-item receipt while preserving occupied draft or recovery
@@ -86,7 +92,11 @@ remain read-only.
 Eligible detail checks queue durably on explicit import/resume, or start through
 the item's Check control. Reading a saved order never schedules work. Every write
 rechecks the draft revision/token, exact source, full listing-capture fingerprint
-and original-photo hashes. If side identification is uncertain, unassigned full
+and original-photo hashes. Check also binds the exact receipt evidence, so a
+corrected amount during provider work cannot publish an older result. A changed
+purchase date or newly ambiguous source identity requires a fresh order review;
+release rechecks retained original hashes, including originals behind accepted
+crops. If side identification is uncertain, unassigned full
 listing photos still supply metadata evidence but do not become selected image
 slots. Accepted crops continue resolving to their full originals on later Check.
 Selecting clear front/back display photos does not discard other useful holder

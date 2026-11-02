@@ -13,6 +13,16 @@ Failure traces, screenshots and HTML reports are retained for seven days in the
 workflow's artifacts; they contain only synthetic test data. Generated output is
 ignored by Git. The fixtures never add an authentication bypass to app code.
 
+The browser job also runs `tests/test_banknote_order_review_browser.cjs` against
+its own temporary Flask/SQLite application. It covers single-note completion,
+multiple seller orders, exact prices, saved review edits, refresh, provider and
+save failures, photo selection/cropping, existing-record recovery and explicit
+release on desktop and mobile. Abbreviated catalogue titles such as `P380g`
+exercise the same routes with a retained group-delivery warning. Its diagnostics
+are stored under `browser-artifacts/order-review/`. The order-entry and draft
+review JavaScript suites run in the same job, including stalled-request recovery;
+they do not access a browser account or replay real writes.
+
 The final main-push job polls the existing production health/version endpoints
 and requires the exact tested commit SHA. A healthy older deployment cannot pass.
 It is read-only, does not deploy twice, and never resubmits writes. Existing Vercel

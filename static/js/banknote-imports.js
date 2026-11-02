@@ -12,27 +12,52 @@
     try { const url = new URL(value, window.location.href); return ['https:', 'http:'].includes(url.protocol) ? url.href : ''; }
     catch (_) { return ''; }
   };
-  async function request(url, method = 'GET', body, signal) {
-    const response = await fetch(sameOrigin(url), {
-      method, credentials: 'same-origin', cache: 'no-store',
-      headers: {Accept: 'application/json', ...(body ? {'Content-Type': 'application/json'} : {})},
-      ...(body ? {body: JSON.stringify(body)} : {}),
-      ...(signal ? {signal} : {}),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.error) {
-      const error = new Error(data.error || (response.status === 401 || response.status === 403
-        ? 'Sign in again to continue. Your saved drafts are kept.' : 'Could not save this change. Please try again.'));
-      error.status = response.status; error.data = data; throw error;
-    }
-    return data;
+  const REQUEST_TIMEOUT = 30000;
+  async function request(url, method = 'GET', body, timeoutMs = REQUEST_TIMEOUT) {
+    const controller = new AbortController();
+    let timer;
+    try {
+      const operation = (async () => {
+        const response = await fetch(sameOrigin(url), {
+          method, credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+          headers: {Accept: 'application/json', ...(body ? {'Content-Type': 'application/json'} : {})},
+          ...(body ? {body: JSON.stringify(body)} : {}),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.error) {
+          const error = new Error(data.error || (response.status === 401 || response.status === 403
+            ? 'Sign in again to continue. Your saved drafts are kept.' : 'Could not save this change. Please try again.'));
+          error.status = response.status; error.data = data;
+          error.uncertain = method !== 'GET' && response.status >= 500;
+          throw error;
+        }
+        return data;
+      })();
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          const error = new Error('The request timed out.');
+          error.timeout = true; reject(error);
+        }, Math.max(1, timeoutMs));
+      });
+      return await Promise.race([operation, timeout]);
+    } catch (error) {
+      if (method !== 'GET' && (error.timeout || !error.status)) error.uncertain = true;
+      throw error;
+    } finally { clearTimeout(timer); }
   }
+  function unconfirmed(message) { const error = new Error(message); error.uncertain = true; return error; }
   window.startBanknoteOrderReview = async function (orderNumber, options = {}) {
     const value = String(orderNumber || '').trim();
     if (!value) throw new Error('Enter the eBay order number first.');
-    const data = await request('/banknotes/imports', 'POST', {order_number: value, ...(options.refresh === true ? {refresh:true} : {})});
+    let data;
+    try { data = await request('/banknotes/imports', 'POST', {order_number: value, ...(options.refresh === true ? {refresh:true} : {})}); }
+    catch (error) {
+      if (error.uncertain) error.message = 'The order request could not be confirmed. Refresh saved orders before trying again.';
+      throw error;
+    }
     let current = data.batch || data;
-    if (!current.url) throw new Error('The order was saved but its review link was missing. Open Order review to resume.');
+    if (!current.url) throw unconfirmed('The order could not be confirmed. Refresh saved orders before trying again.');
     const reviewUrl = sameOrigin(current.url);
     const statusUrl = sameOrigin(current.status_url || reviewUrl + '/status');
     const deadline = Date.now() + 10 * 60 * 1000;
@@ -51,16 +76,14 @@
       if (Date.now() >= deadline) return saved();
       await new Promise(resolve => setTimeout(resolve, Math.min(2500, deadline - Date.now())));
       if (Date.now() >= deadline) return saved();
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), deadline - Date.now());
       try {
         // The entry POST authorizes processing. Polls only read saved status;
         // the browser never posts an automatic collection release.
-        const next = await request(statusUrl, 'GET', undefined, controller.signal);
+        const next = await request(statusUrl, 'GET', undefined, Math.min(REQUEST_TIMEOUT, deadline - Date.now()));
         current = next.batch || next;
       } catch (_) {
         return saved();
-      } finally { clearTimeout(timeout); }
+      }
     }
   };
   const root = document.querySelector('[data-import-mode]');
@@ -80,9 +103,10 @@
   if (mode === 'new') {
     const button = document.getElementById('banknoteImportStart');
     const orderInput = document.getElementById('banknoteImportOrderNumber');
-    let starting = false;
+    let starting = false, refreshOrders = false;
     const openOrder = async orderNumber => {
       if (starting) return;
+      if (refreshOrders) { window.location.reload(); return; }
       starting = true; button.disabled = true; orderInput.readOnly = true; say('Retrieving order…');
       try {
         const batch = await window.startBanknoteOrderReview(orderNumber,
@@ -90,6 +114,7 @@
         window.location.assign(batch.url);
       } catch (error) {
         say(error.message, true); starting = false; button.disabled = false; orderInput.readOnly = false;
+        if (error.uncertain) { refreshOrders = true; button.textContent = 'Refresh saved orders'; }
       }
     };
     document.getElementById('banknoteImportOrderForm').addEventListener('submit', event => {
@@ -109,7 +134,7 @@
   const refresh = document.getElementById('banknoteImportRefresh');
   let pollTimer, pollFailures = 0, polling = false;
   let form, fields = [], baseline = {}, saving = null, saveTimer, busy = false, busyAction = '', conflict = null;
-  let leftPage = false;
+  let leftPage = false, uncertain = false;
   const dirty = () => fields.some(field => field.value !== (baseline[field.name] || ''));
   // The shared detail form displays units/currency, while saved draft fields
   // retain their canonical values. Compare display to display for CAS merges.
@@ -281,7 +306,7 @@
     document.getElementById('banknoteImportIntro').textContent = items.length
       ? 'Saved for review. Open each item to inspect its photos and details before releasing it to the collection.'
       : 'No items have been saved for review yet.';
-    say(batch.message || (batch.state === 'queued' ? 'Retrieving the purchased items…'
+    say(uncertain ? 'The last action could not be confirmed. Refresh saved status before trying again.' : batch.message || (batch.state === 'queued' ? 'Retrieving the purchased items…'
       : batch.state === 'sign_in_required' ? 'Sign in to eBay in the opened browser to continue retrieving this order.'
       : batch.state === 'challenge_required' ? 'Complete the eBay verification in the opened browser to continue retrieving this order.'
       : batch.state === 'failed' ? 'The order could not be retrieved. Use Retry order to try again.'
@@ -289,10 +314,11 @@
       : items.length ? 'Drafts saved. Review each item before releasing it.'
       : 'No purchased items are available to review. Refresh the eBay order to try again.'), batch.state === 'failed');
     document.getElementById('banknoteImportRetry').hidden = batch.state !== 'failed';
-    document.getElementById('banknoteImportRefreshOrder').disabled = ['queued','sign_in_required','challenge_required'].includes(batch.state);
+    document.getElementById('banknoteImportRefreshOrder').disabled = uncertain || ['queued','sign_in_required','challenge_required'].includes(batch.state);
+    document.getElementById('banknoteImportRetry').disabled = uncertain;
     const crop = document.getElementById('banknoteImportCropPhotos');
     if (crop) {
-      crop.disabled = busy || batchRunning() || !items.some(draft => draft.state !== 'released');
+      crop.disabled = busy || uncertain || batchRunning() || !items.some(draft => draft.state !== 'released');
       crop.textContent = items.some(previewRunning) ? 'Cropping photos…' : 'Crop photos';
     }
   }
@@ -304,6 +330,11 @@
   const draftConflict = error => error.status === 409 && (error.data?.code === 'draft_changed'
     || (!error.data?.code && /(?:draft.*changed|newer draft revision|draft revision.*changed)/i.test(error.message)));
   function actionError(error, suffix = '') {
+    if (error.uncertain) {
+      uncertain = true; refresh.hidden = false; refresh.textContent = 'Refresh saved status';
+      say('The action could not be confirmed. Refresh saved status before trying again.' + suffix, true);
+      renderDetail(); return;
+    }
     if (error.data?.code === 'existing_record_changed' && error.data.item) setRemote(error.data.item);
     else if (draftConflict(error)) {
       conflict = {pending:true}; refresh.hidden = false; refresh.textContent = 'Review latest saved values';
@@ -346,7 +377,7 @@
     const update = document.getElementById('banknoteImportRefreshExisting');
     // A blur-triggered autosave must not disable the button between pointerdown
     // and click. Its handler awaits any in-flight save before refreshing.
-    update.disabled = busy || checkRunning(item) || Boolean(conflict);
+    update.disabled = busy || uncertain || checkRunning(item) || Boolean(conflict);
     update.textContent = busyAction === 'refresh-existing' ? 'Updating draft…' : 'Update draft from collection';
     const link = document.getElementById('banknoteImportExistingLink');
     link.href = sameOrigin(item.existing_record_url || '/banknotes/' + encodeURIComponent(item.existing_record_id));
@@ -386,7 +417,7 @@
     if (photoHeading) photoHeading.textContent = 'Purchased photos' + (editable && !hasPreviews ? ' · select front and back' : '');
     form?.querySelectorAll('.quad-fix-btn').forEach(button => {
       button.hidden = !editable;
-      button.disabled = !editable || busy || checkRunning(item) || Boolean(conflict);
+      button.disabled = !editable || busy || uncertain || checkRunning(item) || Boolean(conflict);
     });
     const openCollection = document.getElementById('banknoteImportOpenCollection');
     if (openCollection) {
@@ -428,7 +459,7 @@
         const oppositeField = field === 'image_1' ? 'image_2' : 'image_1';
         const selected = item.fields?.[field] === filename || item.image_sources?.[field] === filename;
         const opposite = item.fields?.[oppositeField] === filename || item.image_sources?.[oppositeField] === filename;
-        button.disabled = !editable || busy || checkRunning(item) || Boolean(conflict) || preserved.has(field) || selected || opposite;
+        button.disabled = !editable || busy || uncertain || checkRunning(item) || Boolean(conflict) || preserved.has(field) || selected || opposite;
         button.setAttribute('aria-pressed', String(selected));
         button.title = preserved.has(field) ? 'The existing record’s photo is preserved.' : selected
           ? 'Selected for this side.' : opposite ? 'This photo is already selected for the other side.' : '';
@@ -436,14 +467,14 @@
     });
     fields.forEach(field => {
       field.readOnly = preserved.has(field.name) || locked.has(field.name);
-      field.disabled = !editable || busy || locked.has(field.name) || (field.tagName === 'SELECT' && preserved.has(field.name));
+      field.disabled = !editable || busy || uncertain || checkRunning(item) || locked.has(field.name) || (field.tagName === 'SELECT' && preserved.has(field.name));
     });
-    document.getElementById('banknoteImportSave').disabled = !editable || busy || Boolean(saving);
+    document.getElementById('banknoteImportSave').disabled = !editable || busy || uncertain || checkRunning(item) || Boolean(saving);
     const check = document.getElementById('banknoteImportCheck');
-    check.disabled = !canCheck(item) || busy || checkRunning(item) || Boolean(conflict);
+    check.disabled = !canCheck(item) || busy || uncertain || checkRunning(item) || Boolean(conflict);
     check.textContent = item.check_state === 'queued' ? 'Waiting to check…' : checkRunning(item) ? 'Checking…' : item.check_state === 'failed' ? 'Retry Check' : '✓ Check';
     const release = document.getElementById('banknoteImportRelease');
-    release.disabled = !canRelease(item) || busy || checkRunning(item) || Boolean(conflict) || Boolean(existingChanges().length);
+    release.disabled = !canRelease(item) || busy || uncertain || checkRunning(item) || Boolean(conflict) || Boolean(existingChanges().length);
     release.textContent = busyAction === 'release' ? 'Releasing…' : 'Release to Collection';
     release.title = existingChanges().length ? 'Review the collection changes and update this draft first.'
       : !canRelease(item) ? 'Resolve the purchase warning before releasing this item.'
@@ -470,6 +501,8 @@
   }
   async function saveDraft() {
     clearTimeout(saveTimer);
+    if (uncertain) throw new Error('Refresh saved status before trying again. Your edits are kept here.');
+    if (checkRunning(item) && dirty()) throw new Error('Check is running. Your edits are kept here until it finishes.');
     if (conflict) throw new Error('This draft changed elsewhere. Review the latest saved values first. Your edits are still here.');
     if (saving) { await saving; if (dirty()) return saveDraft(); return; }
     if (!dirty()) return;
@@ -481,7 +514,7 @@
       try {
         const result = await request(item.detail_url, 'POST', {revision:item.revision, updates});
         const remote = result.item;
-        if (!remote) throw new Error('The draft save could not be confirmed. Your edits are kept here.');
+        if (!remote) throw unconfirmed('The draft save could not be confirmed. Your edits are kept here.');
         fields.forEach(field => {
           const oldValue = baseline[field.name];
           if (Object.hasOwn(updates, field.name)) {
@@ -501,14 +534,14 @@
     if (dirty()) await saveDraft();
   }
   async function selectPhoto(photo, field) {
-    if (busy || conflict || checkRunning(item) || !canEdit(item) || photo.selectable === false
+    if (busy || uncertain || conflict || checkRunning(item) || !canEdit(item) || photo.selectable === false
         || (item.preserved_fields || []).includes(field)) return;
     busy = true; renderDetail();
     try {
       await saveDraft();
       say('Saving the ' + (field === 'image_1' ? 'front' : 'back') + ' photo…');
       const result = await request(item.detail_url + '/photos', 'POST', {revision:item.revision, field, filename:photo.filename});
-      if (!result.item) throw new Error('The photo choice could not be confirmed. Refresh the saved status before trying again.');
+      if (!result.item) throw unconfirmed('The photo choice could not be confirmed. Refresh the saved status before trying again.');
       if (setRemote(result.item)) say('Photo choice saved · not yet in collection');
     } catch (error) {
       actionError(error);
@@ -519,7 +552,7 @@
   // that supplied the visible corners, never a later background response.
   window.banknoteImportCrop = {
     async load(field) {
-      if (busy || conflict || checkRunning(item) || !canEdit(item)) {
+      if (busy || uncertain || conflict || checkRunning(item) || !canEdit(item)) {
         throw new Error('Finish the current draft action before editing this photo.');
       }
       busy = true; busyAction = 'crop'; renderDetail();
@@ -533,7 +566,7 @@
         const result = await request(item.detail_url + '/trim-quad/' + encodeURIComponent(field), 'POST', {
           revision:info.revision, trimmed:info.trimmed, quad,
         });
-        if (!result.item) throw new Error('The crop save could not be confirmed. Refresh the saved status before trying again.');
+        if (!result.item) throw unconfirmed('The crop save could not be confirmed. Refresh the saved status before trying again.');
         if (setRemote(result.item)) say('Crop saved · not yet in collection');
         return result;
       } catch (error) { actionError(error); throw error; }
@@ -576,20 +609,23 @@
         const destination = sameOrigin(batch.completion_url);
         leftPage = true; window.location.assign(destination); return;
       }
-      if (mode === 'review') renderList();
+      if (mode === 'review') { if (manual) uncertain = false; renderList(); }
       else {
         const remote = (batch.items || []).find(draft => String(draft.id) === String(item.id));
         if (remote) {
-          if (manual && conflict) showConflict(remote);
-          else if (!conflict && !busy && setRemote(remote) && !dirty() && !saving) {
+          if (manual && uncertain && !saving && !busy) {
+            uncertain = false;
+            if (setRemote(remote)) say('Saved status refreshed. Review your edits before trying again.');
+          } else if (manual && conflict) showConflict(remote);
+          else if (!uncertain && !conflict && !busy && setRemote(remote) && !dirty() && !saving) {
             say(item.state === 'released' ? 'Released to collection.' : existingChanges().length
               ? 'The collection record changed. Review the updates below before releasing this draft.' : checkRunning(item)
-              ? 'Draft saved. Checking photos and missing details…' : item.check_state === 'failed'
+              ? 'Checking photos and missing details. Editing resumes when Check finishes.' : item.check_state === 'failed'
               ? 'Draft saved. Check did not finish; you can retry it.' : 'Draft saved · not yet in collection');
           }
         }
       }
-      if (!conflict) { refresh.hidden = true; refresh.textContent = 'Refresh saved status'; }
+      if (!conflict && !uncertain) { refresh.hidden = true; refresh.textContent = 'Refresh saved status'; }
     } catch (error) {
       pollFailures += 1;
       if (!dirty() && !saving) say('Could not refresh the saved order. ' + error.message, true);
@@ -604,24 +640,31 @@
   if (mode === 'review') {
     renderList();
     document.getElementById('banknoteImportCropPhotos')?.addEventListener('click', async () => {
-      if (busy || batchRunning()) return;
+      if (busy || uncertain || batchRunning()) return;
       busy = true; renderList();
       try {
         batch = await request(batchUrl + '/crop-photos', 'POST', {});
         say('Cropping the order photos. Saved crops are kept.');
         clearTimeout(pollTimer); pollTimer = setTimeout(() => pollStatus(), 1000);
-      } catch (error) { say(error.message, true); }
+      } catch (error) {
+        if (error.uncertain) { uncertain = true; refresh.hidden = false; }
+        say(error.uncertain ? 'The crop request could not be confirmed. Refresh saved status before trying again.' : error.message, true);
+      }
       finally { busy = false; renderList(); }
     });
     const readOrder = async (event, forceRefresh) => {
+      if (uncertain) return;
       const button = event.currentTarget; button.disabled = true;
       try {
         say('Refreshing the exact purchased items. Saved draft edits are kept…');
         const saved = await window.startBanknoteOrderReview(batch.order_number,
           {refresh:forceRefresh, onProgress: message => say(message)});
         if (saved.url !== batchUrl) window.location.assign(saved.url); else await pollStatus(true);
-      } catch (error) { say(error.message,true); }
-      finally { button.disabled = button.id === 'banknoteImportRefreshOrder' && ['queued','sign_in_required','challenge_required'].includes(batch.state); }
+      } catch (error) {
+        if (error.uncertain) { uncertain = true; refresh.hidden = false; }
+        say(error.message,true);
+      }
+      finally { button.disabled = uncertain || button.id === 'banknoteImportRefreshOrder' && ['queued','sign_in_required','challenge_required'].includes(batch.state); }
     };
     document.getElementById('banknoteImportRetry').addEventListener('click', event => readOrder(event, false));
     document.getElementById('banknoteImportRefreshOrder').addEventListener('click', event => readOrder(event, true));
@@ -689,19 +732,20 @@
     });
     document.getElementById('banknoteImportSave').addEventListener('click', () => saveDraft().catch(error => say(error.message,true)));
     document.getElementById('banknoteImportCheck').addEventListener('click', async () => {
-      if (!canCheck(item) || busy || checkRunning(item)) return;
+      if (!canCheck(item) || busy || uncertain || checkRunning(item)) return;
       busy = true; renderDetail();
       try {
         await saveDraft();
         const result = await request(item.detail_url + '/check', 'POST', {revision:item.revision});
-        if (result.item) item = result.item;
-        say('Draft saved. Checking photos and missing details…');
+        if (!result.item) throw unconfirmed('Check could not be confirmed. Refresh saved status before trying again.');
+        item = result.item;
+        say('Checking photos and missing details. Editing resumes when Check finishes.');
         clearTimeout(pollTimer); pollTimer = setTimeout(() => pollStatus(), 1000);
       } catch (error) { actionError(error); }
       finally { busy = false; renderDetail(); }
     });
     document.getElementById('banknoteImportRefreshExisting')?.addEventListener('click', async () => {
-      if (busy || checkRunning(item) || conflict || !existingChanges().length) return;
+      if (busy || uncertain || checkRunning(item) || conflict || !existingChanges().length) return;
       // Bind the acknowledgement to the values the user actually reviewed, even
       // if saving local edits reveals a newer change in the collection.
       const reviewedVersion = item.existing_record_version;
@@ -709,18 +753,18 @@
       try {
         await saveDraft(); say('Updating the draft from the collection record…');
         const result = await request(item.detail_url + '/refresh-existing', 'POST', {revision:item.revision, existing_record_version:reviewedVersion});
-        if (!result.item) throw new Error('The draft update could not be confirmed. Refresh the saved status before trying again.');
+        if (!result.item) throw unconfirmed('The draft update could not be confirmed. Refresh the saved status before trying again.');
         if (setRemote(result.item)) say('Draft updated. Review the note, then click Release to Collection when ready.');
       } catch (error) { actionError(error); }
       finally { busy = false; busyAction = ''; renderDetail(); }
     });
     document.getElementById('banknoteImportRelease').addEventListener('click', async () => {
-      if (!canRelease(item) || busy || checkRunning(item) || conflict) return;
+      if (!canRelease(item) || busy || uncertain || checkRunning(item) || conflict) return;
       busy = true; busyAction = 'release'; renderDetail();
       try {
         await saveDraft(); say('Releasing to collection…');
         const result = await request(batchUrl + '/release', 'POST', {items:[{id:item.id,revision:item.revision}]});
-        if (!result.next_url) throw new Error('The release could not be confirmed. Refresh the saved status before trying again.');
+        if (!result.next_url) throw unconfirmed('The release could not be confirmed. Refresh the saved status before trying again.');
         leftPage = true; window.location.assign(sameOrigin(result.next_url));
       } catch (error) {
         actionError(error);

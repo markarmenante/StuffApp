@@ -12,7 +12,7 @@ const draft = (extra = {}) => ({id: 'draft', state: 'draft', check_state: 'done'
 const descendants = node => (node.children || []).flatMap(child => [child, ...descendants(child)]);
 const content = node => [node.textContent || '', ...node.children.map(content)].join(' ');
 
-function page(initial, replies = [], item) {
+function page(initial, replies = [], item, formFields = []) {
   const element = (tag = 'div') => ({tagName: tag.toUpperCase(), dataset: {}, textContent: '', children: [], handlers: {}, hidden: false,
     classList: {contains() { return false; }},
     append(...nodes) { this.children.push(...nodes); },
@@ -32,8 +32,11 @@ function page(initial, replies = [], item) {
   if (item) ids.push('mainForm', 'banknoteImportSave', 'banknoteImportCheck', 'banknoteImportRelease',
     'banknoteImportState', 'banknoteImportPhotos', 'banknoteImportPhotosHeading', 'banknoteImportWarnings', 'banknoteImportEvidence', 'banknoteImportImageHelp');
   const elements = Object.fromEntries(ids.map(id => [id, element()]));
-  if (item) elements.banknoteImportEvidence.append(element('ul'));
-  elements['banknote-import-data'] = {textContent: JSON.stringify({batch: initial, item})};
+  if (item) {
+    elements.banknoteImportEvidence.append(element('ul'));
+    elements.mainForm.querySelectorAll = selector => selector.startsWith('input[name]') ? formFields : [];
+  }
+  elements['banknote-import-data'] = {textContent: JSON.stringify({batch: initial, item, allowed_fields: formFields.map(field => field.name)})};
   const requests = [], payloads = [], timers = [], navigations = [];
   vm.runInNewContext(source, {
     document: {querySelector: () => ({dataset: {importMode: item ? 'detail' : 'review'}, classList: {contains() { return false; }}}),
@@ -41,12 +44,16 @@ function page(initial, replies = [], item) {
       querySelectorAll() { return []; }, addEventListener() {}},
     window: {location: {href: 'https://stuff.test/banknotes/imports/test', origin: 'https://stuff.test',
       assign: url => navigations.push(url)}, addEventListener() {}},
-    URL, clearTimeout() {}, setTimeout(fn) { timers.push(fn); return timers.length; },
+    URL, AbortController, clearTimeout(id) { const index = timers.indexOf(id); if (index >= 0) timers.splice(index, 1); },
+    setTimeout(fn, delay) { fn.delay = delay; timers.push(fn); return fn; },
     fetch: async (url, options) => {
       requests.push({url, method: options.method});
       payloads.push(options.body ? JSON.parse(options.body) : undefined);
       assert.ok(replies.length, 'Unexpected request');
-      return {ok: true, status: 200, json: async () => replies.shift()};
+      const reply = replies.shift();
+      if (reply?.hang) return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('Aborted'))));
+      if (reply instanceof Error) throw reply;
+      return {ok: true, status: 200, json: async () => reply};
     },
   });
   return {intro: elements.banknoteImportIntro, status: elements.banknoteImportStatus,
@@ -206,6 +213,8 @@ function page(initial, replies = [], item) {
   assert.match(usable.elements.banknoteImportImageHelp.textContent, /edit the note and its photos.*Ordered/);
   await usable.elements.banknoteImportCheck.handlers.click();
   assert.equal(usable.elements.banknoteImportRelease.disabled, true, 'Wait for active Check before explicit release');
+  assert.equal(usable.elements.banknoteImportSave.disabled, true, 'Editing waits for the active Check');
+  assert.match(usable.status.textContent, /Editing resumes when Check finishes/);
   await usable.timers.shift()();
   assert.equal(usable.elements.banknoteImportSave.disabled, false);
   assert.equal(usable.elements.banknoteImportRelease.disabled, false);
@@ -246,5 +255,49 @@ function page(initial, replies = [], item) {
   assert.deepEqual(descendants(transitioning.elements.banknoteImportPhotos).filter(node => node.tagName === 'IMG').map(node => node.src), ['/uploads/retained.png']);
   assert.equal(descendants(transitioning.elements.banknoteImportPhotos).filter(node => node.tagName === 'BUTTON').length, 2);
   assert.deepEqual(transitioning.requests, [{url: '/banknotes/imports/test/status', method: 'GET'}]);
+  // An unanswered save may have committed: no automatic replay, and the
+  // current fields remain visible until a successful read reconciles them.
+  const input = {name: 'country', value: '', tagName: 'INPUT', handlers: {},
+    addEventListener(name, fn) { this.handlers[name] = fn; }};
+  const original = draft({revision: 1, fields: {country: ''}});
+  const savedAfterTimeout = draft({revision: 2, fields: {country: 'Peru'}});
+  const uncertainSave = page(batch({state: 'review', items: [original]}),
+    [{hang: true}, batch({state: 'review', items: [savedAfterTimeout]})], original, [input]);
+  input.value = 'Peru';
+  const pendingSave = uncertainSave.elements.banknoteImportCheck.handlers.click();
+  await Promise.resolve();
+  const saveTimeout = uncertainSave.timers.find(timer => timer.delay === 30000);
+  assert.ok(saveTimeout); saveTimeout();
+  await pendingSave;
+  assert.equal(input.value, 'Peru');
+  assert.match(uncertainSave.status.textContent, /could not be confirmed.*Refresh saved status/);
+  assert.equal(uncertainSave.elements.banknoteImportCheck.disabled, true);
+  assert.equal(uncertainSave.requests.length, 1, 'A timed-out save is not replayed or followed by Check');
+  await uncertainSave.elements.banknoteImportRefresh.handlers.click();
+  assert.equal(input.value, 'Peru', 'The saved response retains the user’s edit');
+  assert.equal(uncertainSave.elements.banknoteImportCheck.disabled, false);
+  assert.deepEqual(uncertainSave.requests.map(request => request.method), ['POST', 'GET']);
+
+  const uncertainRelease = page(batch({state: 'review', items: [original]}),
+    [{hang: true}, batch({state: 'complete', items: [draft({state: 'released', revision: 2,
+      released_record_id: 'note'})]})], original);
+  const pendingRelease = uncertainRelease.elements.banknoteImportRelease.handlers.click();
+  await Promise.resolve();
+  uncertainRelease.timers.find(timer => timer.delay === 30000)();
+  await pendingRelease;
+  assert.equal(uncertainRelease.elements.banknoteImportRelease.disabled, true);
+  assert.equal(uncertainRelease.requests.length, 1, 'A timed-out release is not automatically repeated');
+  await uncertainRelease.elements.banknoteImportRefresh.handlers.click();
+  assert.equal(uncertainRelease.elements.banknoteImportRelease.disabled, true, 'Already released is not released twice');
+  assert.deepEqual(uncertainRelease.requests.map(request => request.method), ['POST', 'GET']);
+
+  const stalledStatus = page(batch(), [{hang: true}]);
+  const pendingStatus = stalledStatus.timers.shift()();
+  await Promise.resolve();
+  stalledStatus.timers.find(timer => timer.delay === 30000)();
+  await pendingStatus;
+  assert.match(stalledStatus.status.textContent, /Could not refresh/);
+  assert.equal(stalledStatus.elements.banknoteImportRefresh.hidden, false);
+
   console.log('Order review correctly distinguishes empty, queued, blocked, failed, saved and released states.');
 })().catch(error => { console.error(error); process.exit(1); });

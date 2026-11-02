@@ -8241,8 +8241,19 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   }
 
   // ── Coin Check pill: complete missing identifying fields.
+  let banknoteOrderUncertain = false, banknoteOrderAttemptValues = null;
+  const banknoteOrderFormValues = form => JSON.stringify([...new FormData(form)].map(([name, value]) =>
+    [name, typeof value === 'string' ? value : value.name ? [value.name, value.size, value.lastModified] : null]));
   document.querySelectorAll('.coin-spec-check-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
+      if (banknoteOrderUncertain) {
+        // An unchanged order-only form has nothing to save or locate here.
+        // Keep the normal leave guard if the user has since changed the form.
+        if (banknoteOrderFormValues(document.getElementById('mainForm')) === banknoteOrderAttemptValues) {
+          window.__stuffAllowUnload = true;
+        }
+        window.location.assign('/banknotes/imports/new'); return;
+      }
       const originalText = btn.textContent;
       btn.classList.add('loading');
       btn.disabled = true;
@@ -8252,9 +8263,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
           btn.textContent = 'Retrieving order…';
           const orderForm = document.getElementById('mainForm');
           const orderNumber = orderForm.querySelector('[name="order_number"]').value;
-          const formValues = () => JSON.stringify([...new FormData(orderForm)].map(([name, value]) =>
-            [name, typeof value === 'string' ? value : value.name ? [value.name, value.size, value.lastModified] : null]));
-          const startedValues = formValues();
+          const startedValues = banknoteOrderFormValues(orderForm);
+          banknoteOrderAttemptValues = startedValues;
           const wasInert = orderForm.inert;
           // Editing identification while the order is importing could trigger
           // ordinary new-record autosave and duplicate the purchased note.
@@ -8262,7 +8272,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
           try {
             const saved = await window.startBanknoteOrderReview(orderNumber,
               {onProgress: message => { btn.textContent = message; }});
-            if (formValues() !== startedValues) {
+            if (banknoteOrderFormValues(orderForm) !== startedValues) {
               throw new Error('The order is saved. Your newer edits are kept here. Open Order review to continue.');
             }
             window.__stuffAllowUnload = true;
@@ -8282,12 +8292,13 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
           ignoreApplyFailure: true,
         });
       } catch (err) {
+        if (err?.uncertain) banknoteOrderUncertain = true;
         if (err?.name !== 'CheckCancelled') alert('Check failed: ' + coinLookupFailureMessage(err));
       } finally {
         btn.classList.remove('loading');
         btn.disabled = false;
         btn.removeAttribute('aria-busy');
-        btn.textContent = originalText;
+        btn.textContent = banknoteOrderUncertain ? 'Open saved orders' : originalText;
       }
     });
   });

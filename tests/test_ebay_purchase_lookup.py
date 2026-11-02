@@ -443,6 +443,73 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0], 0)
         self.assertEqual(self.client.get('/banknotes/note/purchase-refresh/' + job['id']).json['status'], 'failed')
 
+    def test_exact_read_rejects_conflicts_with_newer_or_same_second_purchase_facts(self):
+        observed = ebay_orders.now_iso()
+        item = lookup.ebay_mail.validate_purchase(self.item())
+        lookup.ebay_mail.apply_purchases(self.db, [item], observed, auto_match=False,
+                                        requested_order=self.note['order_number'])
+        self.db.commit()
+        before = dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone())
+        job = lookup.ensure(self.db, self.note)
+        self.post(action='claim')
+        for changes in ({'quantity': 2}, {'title': 'Different 10 Francs banknote'},
+                        {'seller': 'different-dealer'}, {'status_text': 'Refunded'},
+                        {'identity_ambiguous': True}):
+            with self.subTest(changes=changes):
+                response = self.complete(job, observed_at=observed, items=[self.item(**changes)])
+                self.assertEqual(response.status_code, 409, response.json)
+                self.assertIn('conflicts with newer saved evidence', response.json['error'])
+                self.assertEqual(dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone()), before)
+                self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_purchase_prices').fetchone()[0], 0)
+                job = self.retry_request()
+        self.assertEqual(self.complete(job, observed_at=observed).status_code, 200,
+                         'Identical same-second observations remain idempotent')
+
+    def test_same_second_refund_retry_preserves_confirmed_delivery(self):
+        earlier = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time()-2))
+        delivered = self.item(status_text='Delivered', delivery_text='Delivered on Tue, Oct 20')
+        lookup.ebay_mail.apply_purchases(self.db, [lookup.ebay_mail.validate_purchase(delivered)],
+                                        earlier, auto_match=False, requested_order=self.note['order_number'])
+        observed = ebay_orders.now_iso()
+        refund = self.item(status_text='Partially refunded')
+        lookup.ebay_mail.apply_purchases(self.db, [lookup.ebay_mail.validate_purchase(refund)],
+                                        observed, auto_match=False, requested_order=self.note['order_number'])
+        self.db.commit()
+        before = dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone())
+        self.assertEqual(before['attention'], 'Partially refunded; previously confirmed delivered')
+        job = lookup.ensure(self.db, self.note)
+        self.post(action='claim')
+        response = self.complete(job, observed_at=observed, items=[dict(refund, identity_ambiguous=True)])
+        self.assertEqual(response.status_code, 409, response.json)
+        self.assertIn('conflicts with newer saved evidence', response.json['error'])
+        job = self.retry_request()
+        response = self.complete(job, observed_at=observed, items=[refund])
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone()), before)
+
+    def test_exact_read_requires_current_request_observation_without_a_receipt(self):
+        job = lookup.ensure(self.db, self.note)
+        self.post(action='claim')
+        old = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time()-60))
+        response = self.complete(job, observed_at=old)
+        self.assertEqual(response.status_code, 409, response.json)
+        self.assertIn('not from this order check', response.json['error'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0], 0)
+
+    def test_cached_purchase_cannot_bypass_new_seller_suppression(self):
+        observed = ebay_orders.now_iso()
+        lookup.ebay_mail.apply_purchases(self.db, [lookup.ebay_mail.validate_purchase(self.item())],
+                                        observed, auto_match=False, requested_order=self.note['order_number'])
+        self.db.execute('INSERT INTO ebay_deleted_accounts VALUES (?)', (ebay_orders.digest('dealer'),))
+        self.db.commit()
+        before = dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone())
+        job = lookup.ensure(self.db, self.note)
+        self.post(action='claim')
+        response = self.complete(job, observed_at=observed)
+        self.assertEqual(response.status_code, 409, response.json)
+        self.assertIn('seller was excluded', response.json['error'])
+        self.assertEqual(dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone()), before)
+
     def test_changed_order_cannot_import_old_request_or_expose_old_status(self):
         job = lookup.ensure(self.db, self.note)
         self.post(action='claim')

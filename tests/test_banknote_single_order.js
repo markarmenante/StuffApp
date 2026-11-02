@@ -98,7 +98,11 @@ function entry(replies) {
   assert.equal(expired.elapsed(), 600000, 'Waiting stops after ten minutes');
   const hanging = entry([batch(), {hang: true}]);
   assert.equal((await hanging.finish(hanging.start('12-12345-12345'))).url, reviewUrl);
-  assert.equal(hanging.elapsed(), 600000, 'A stalled status response cannot extend the deadline');
+  assert.equal(hanging.elapsed(), 32500, 'A stalled status response returns to saved review after its bounded timeout');
+  const hangingStart = entry([{hang: true}]);
+  await assert.rejects(hangingStart.finish(hangingStart.start('12-12345-12345')), /could not be confirmed.*Refresh saved orders/);
+  assert.equal(hangingStart.elapsed(), 30000);
+  assert.equal(hangingStart.requests.length, 1, 'A timed-out order POST is never automatically replayed');
 
   for (const bad of [
     batch({url: 'https://other.test/review'}),
