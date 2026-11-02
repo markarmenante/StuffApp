@@ -471,7 +471,13 @@ finally:server.server_close();temporary.cleanup()
           assert.equal(await t.page.locator('.banknote-imgs img').count(),0);
           const checked=t.page.waitForResponse(response=>response.url()===origin+draft.detail_url+'/check'&&response.request().method()==='POST');
           await t.page.locator('#banknoteImportCheck').click();assert.equal((await checked).status(),202);
-          await t.page.waitForFunction(()=>!document.getElementById('banknoteImportCheck').disabled);
+          // The fixture finishes Check inside POST. Its completed response can
+          // enable controls before the scheduled status poll applies form values.
+          // Require the visible result; do not reload or manually refresh it.
+          await t.page.waitForFunction(expectedCountry=>
+            document.querySelector('[name="country"]')?.value===expectedCountry
+            && document.querySelectorAll('.banknote-imgs img').length===2
+            && !document.getElementById('banknoteImportCheck').disabled,country);
           draft=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
         }
         assert.equal(draft.can_check,true);assert.equal(draft.can_edit,true);assert.equal(draft.can_release,true);

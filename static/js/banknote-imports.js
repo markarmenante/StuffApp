@@ -738,8 +738,9 @@
         await saveDraft();
         const result = await request(item.detail_url + '/check', 'POST', {revision:item.revision});
         if (!result.item) throw unconfirmed('Check could not be confirmed. Refresh saved status before trying again.');
-        item = result.item;
-        say('Checking photos and missing details. Editing resumes when Check finishes.');
+        if (setRemote(result.item)) say(checkRunning(item)
+          ? 'Checking photos and missing details. Editing resumes when Check finishes.'
+          : 'Draft saved · not yet in collection');
         clearTimeout(pollTimer); pollTimer = setTimeout(() => pollStatus(), 1000);
       } catch (error) { actionError(error); }
       finally { busy = false; renderDetail(); }
