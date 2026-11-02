@@ -1,6 +1,7 @@
 """Check publication and release must retain the evidence they actually read."""
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import test_banknote_imports as fixtures
 
@@ -20,6 +21,7 @@ class ImportConsistencyTests(unittest.TestCase):
     download = fixtures.DraftTests.download
     classify = fixtures.DraftTests.classify
     release = fixtures.DraftTests.release
+    partial_record = fixtures.DraftTests.partial_record
 
     def assert_changed_evidence_rejected(self, changed):
         batch = self.single_imported()
@@ -143,6 +145,51 @@ class ImportConsistencyTests(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertFalse(imports._review_note_title(title))
         self.assertTrue(imports._review_note_title('Colombia 1 Peso catalogue P380g Grade66'))
+
+    def recovery_with_changed_photo(self):
+        self.partial_record()
+        batch = self.imported()
+        item = next(item for item in batch['items'] if item.get('existing_record_id'))
+        fixtures.Image.new('RGB', (160, 80), 'purple').save(Path(stuff.UPLOAD_FOLDER) / 'newer-back.jpg')
+        self.db.execute("UPDATE banknotes SET image_2='newer-back.jpg' WHERE id='failed-form'")
+        self.db.commit()
+        return batch, item
+
+    def test_recovery_before_photo_remains_visible_until_review_accepts_new_photo(self):
+        batch, item = self.recovery_with_changed_photo()
+        response = self.client.get('/uploads/saved-back.jpg')
+        self.assertEqual(response.status_code, 200)
+        response.close()
+        latest = next(value for value in self.client.get(batch['status_url']).json['items']
+                      if value['id'] == item['id'])
+        response = self.client.post(item['detail_url'] + '/refresh-existing', json={
+            'revision': latest['revision'], 'existing_record_version': latest['existing_record_version']})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get('/uploads/saved-back.jpg').status_code, 404)
+
+    def test_recovery_snapshot_uploads_keep_owner_account_and_tenant_boundaries(self):
+        self.recovery_with_changed_photo()
+        self.db.execute("INSERT OR REPLACE INTO users(id,email,display_name,role,categories) "
+                        "VALUES('recovery-viewer','recovery-viewer@example.test','Viewer','viewer','banknotes')")
+        self.db.commit()
+        with patch.object(stuff, '_resolve_user_email', return_value='recovery-viewer@example.test'):
+            self.assertEqual(self.client.get('/uploads/saved-back.jpg').status_code, 404)
+        with patch.object(stuff, 'TENANT_CATEGORIES', {'coins'}):
+            self.assertEqual(self.client.get('/uploads/saved-back.jpg').status_code, 404)
+        self.db.execute("UPDATE ebay_purchase_account SET account_name='another-buyer'")
+        self.db.commit()
+        self.assertEqual(self.client.get('/uploads/saved-back.jpg').status_code, 404)
+
+    def test_recovery_snapshot_and_crop_original_remain_protected_from_cleanup(self):
+        self.recovery_with_changed_photo()
+        original = 'saved-back-full-original.jpg'
+        fixtures.Image.new('RGB', (180, 100), 'yellow').save(Path(stuff.UPLOAD_FOLDER) / original)
+        self.db.execute('INSERT INTO trimmed_image_sources(trimmed,source,quad) VALUES(?,?,?)',
+                        ('saved-back.jpg', original, 'null'))
+        self.db.commit()
+        referenced = stuff._collect_referenced_uploads(self.db)
+        self.assertIn('saved-back.jpg', referenced)
+        self.assertIn(original, referenced)
 
 
 if __name__ == '__main__':

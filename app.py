@@ -31071,6 +31071,17 @@ def _upload_visible_to_current_user(filename):
                 JOIN banknote_import_items i ON i.id=e.item_id
                 JOIN ebay_purchase_account p ON p.id=1 AND lower(p.account_name)=i.account_name
                 WHERE e.filename=? LIMIT 1''',(name,)).fetchone()
+        if not draft:
+            # Recovery review must still show its saved "before" photograph
+            # after the live collection record adopts a newer crop or image.
+            draft=db.execute('''SELECT 1 FROM banknote_import_items i
+                JOIN banknote_import_batches b ON b.id=i.batch_id AND b.account_name=i.account_name
+                JOIN ebay_purchase_account p ON p.id=1 AND lower(p.account_name)=i.account_name
+                WHERE i.existing_record_id IS NOT NULL AND (
+                    json_extract(i.existing_snapshot_json,'$.image_1')=? OR
+                    json_extract(i.existing_snapshot_json,'$.image_2')=? OR
+                    json_extract(i.fields_json,'$.image_1')=? OR
+                    json_extract(i.fields_json,'$.image_2')=?) LIMIT 1''',(name,)*4).fetchone()
         if draft:
             return True
 
@@ -34278,6 +34289,13 @@ def _collect_referenced_uploads(db):
         referenced.update(row)
     for row in db.execute('SELECT filename,source_filename FROM banknote_import_photo_previews'):
         referenced.update(row)
+    # Recovery snapshots can be the only remaining reference to a previous
+    # collection photograph while its replacement awaits owner review.
+    for row in db.execute('''SELECT json_extract(existing_snapshot_json,'$.image_1'),
+            json_extract(existing_snapshot_json,'$.image_2'),
+            json_extract(fields_json,'$.image_1'),json_extract(fields_json,'$.image_2')
+            FROM banknote_import_items WHERE existing_record_id IS NOT NULL'''):
+        referenced.update(name for name in row if isinstance(name,str) and name)
     for cat, fields in FIELDS.items():
         table = CATEGORIES[cat]['table']
         file_cols = [f['name'] for f in fields if f.get('type') == 'file']

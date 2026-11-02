@@ -318,7 +318,7 @@ finally:server.server_close();temporary.cleanup()
           });
           await t.page.goto(origin+'/banknotes/new');
           await t.page.locator('[name="order_number"]').fill(number);
-          await t.page.locator('[name="property"]').selectOption('');
+          await t.page.locator('[name="property_name"]').selectOption('');
           await checkButton(t.page);
           const check=t.page.locator('.coin-spec-check-btn');
           await t.page.waitForFunction(()=>document.querySelector('.coin-spec-check-btn')?.textContent==='Open saved orders');
