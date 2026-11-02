@@ -65,12 +65,23 @@ ambiguous quantities and bundles stay visible but blocked from release as one no
 
 Before original photographs have been retained, review cards and Purchased photos
 can show previews from the fresh, verified exact-listing capture. This includes
-items blocked by a purchase-status warning. These previews are public listing
-images, not saved originals or selected front/back photos; normal Check retains
-the originals when the purchase is eligible. Viewing previews never fetches images
+items blocked by a purchase-status warning. Import/resume and explicit refresh
+prepare cropped previews of the first two listing photos for these blocked items,
+using the normal arrival crop pipeline. The **Crop photos** button on Order review
+retries these previews and untouched original photos on editable siblings without
+rereading the eBay order. Accepted crops and manual photo choices stay unchanged.
+Blocked previews retain their full originals separately; opening a preview shows
+that original and its grading label. They remain inspection-only, never selected
+front/back photos, and cannot supply a purchase price or enable Check or Release.
+Viewing previews never fetches images
 on the server, runs Check, accepts a price or changes a draft. Expired captures,
 changed source identity, account or membership, excluded purchases and ambiguous
 item identities cannot supply previews. Retained and preserved photos take priority.
+Preview jobs share the two provider slots with Check, retain originals before model
+work, and verify the source, capture and draft revision again before publishing a
+crop. Failed or uncertain attempts retain originals and require an explicit retry;
+GETs never queue work. Preview files are served only by their owner/account-bound
+route, kept out of editable assets, and protected from orphan cleanup.
 
 After Check reads the original holder photographs, newly selected front/back
 images pass through the same crop pipeline used for uploads. An explicit Check
@@ -145,7 +156,8 @@ or ambiguous existing match stays blocked for review.
 
 Storage is separate from `banknotes`: `banknote_import_batches`,
 `banknote_import_items`, `banknote_import_assets`, `banknote_import_image_edits`,
-and `banknote_import_evidence`.
+`banknote_import_evidence`, `banknote_import_preview_jobs`, and
+`banknote_import_photo_previews`.
 Batch/account/order and account/item-line uniqueness prevent duplicate drafts.
 Collection lists, reports, totals and Market Scan coverage see no staged drafts.
 No existing collection record or photo is removed by this workflow.
@@ -159,6 +171,10 @@ No existing collection record or photo is removed by this workflow.
   only read progress. The entry page waits for a single note and opens its normal
   detail URL; multiple items open the saved review.
 - `GET /banknotes/imports/<batch>` and `/status`: review HTML and read-only state.
+- `POST /banknotes/imports/<batch>/crop-photos`: retry pending photo crops across
+  the order, retaining all purchase and release restrictions.
+- `GET /banknotes/imports/<batch>/items/<item>/preview/<position>`: guarded saved
+  listing preview; `?original=1` shows its retained full original.
 - `GET /banknotes/imports/<batch>/items/<item>`: saved draft detail.
   Once released, GET redirects to the real banknote detail page with a return
   link to this order review; draft writes remain rejected after release.

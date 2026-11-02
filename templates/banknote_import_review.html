@@ -6,6 +6,7 @@
   <header class="import-toolbar">
     <h1>Order {{ batch.order_number }}</h1>
     <span class="import-count" id="banknoteImportCount">{{ batch.pending_count }} pending</span>
+    <button class="toolbar-btn pill" id="banknoteImportCropPhotos" type="button">Crop photos</button>
     <button class="toolbar-btn pill" id="banknoteImportRefreshOrder" type="button">Refresh eBay order</button>
     <a class="toolbar-btn pill" href="/banknotes/imports/new">Saved orders</a>
     <a class="toolbar-btn pill" href="/banknotes">Collection</a>

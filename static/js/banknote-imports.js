@@ -162,9 +162,10 @@
     });
   }
   const checkRunning = draft => draft.check_state === 'checking';
+  const previewRunning = draft => ['queued','checking'].includes(draft.preview_state);
   const batchRunning = () => batch.processing_single === true || ['queued', 'sign_in_required', 'challenge_required'].includes(batch.state)
-    || (batch.items || []).some(draft => draft.state === 'draft' && ['idle', 'checking'].includes(draft.check_state));
-  const stateLabel = draft => draft.state === 'released' ? 'In collection' : draft.state === 'blocked'
+    || (batch.items || []).some(draft => previewRunning(draft) || (draft.state === 'draft' && ['idle', 'checking'].includes(draft.check_state)));
+  const stateLabel = draft => draft.state === 'released' ? 'In collection' : previewRunning(draft) ? 'Cropping photos…' : draft.state === 'blocked'
     ? 'Needs attention' : checkRunning(draft) ? 'Checking…' : draft.check_state === 'failed'
     ? 'Check needs retry' : draft.check_state === 'partial' ? 'Review needed' : 'Saved draft';
   const collectionUrl = draft => draft.collection_url || '/banknotes/' + encodeURIComponent(draft.released_record_id)
@@ -172,15 +173,25 @@
   const reviewUrl = draft => draft.state === 'released' && draft.released_record_id ? collectionUrl(draft) : draft.detail_url;
   function appendPhoto(parent, photo, index, detailUrl, large = false) {
     const preview = photo.preview === true;
-    // Only cached eBay image URLs get the display-only exception. All retained
-    // photos and every application action still require the same origin.
+    // Cropped listing previews have their own guarded same-origin route. Raw
+    // previews retain the exact eBay-only exception and cannot become actions.
     let src;
-    if (preview) {
+    const localPreview = preview && photo.local_preview === true;
+    if (localPreview) {
+      const prefix = sameOrigin(detailUrl).split('?')[0] + '/preview/';
+      if (typeof photo.url !== 'string' || !photo.url.startsWith(prefix)
+          || !/^\d+\?v=[a-f0-9]{64}$/.test(photo.url.slice(prefix.length))) return;
+      try { src = sameOrigin(photo.url); } catch (_) { return; }
+    } else if (preview) {
       if (typeof photo.url !== 'string' || photo.url.length > 2048 || photo.url.trim() !== photo.url
           || !/^https:\/\/i\.ebayimg\.com\/images\/g\/[\w~-]+\/s-l\d+\.(?:jpg|jpeg|png|webp)$/.test(photo.url)) return;
       src = photo.url;
     } else { try { src = sameOrigin(photo.url); } catch (_) { return; } }
     const anchor = el('a'); anchor.href = large ? src : sameOrigin(detailUrl);
+    if (large && localPreview) {
+      // The full original, including its grading label, remains one click away.
+      anchor.href = src.split('?')[0] + '?original=1';
+    }
     if (large) { anchor.target = '_blank'; anchor.rel = 'noopener'; }
     const image = el('img'); image.alt = 'Purchased banknote photo ' + (index + 1);
     if (preview) {
@@ -276,6 +287,11 @@
       : 'No purchased items are available to review. Refresh the eBay order to try again.'), batch.state === 'failed');
     document.getElementById('banknoteImportRetry').hidden = batch.state !== 'failed';
     document.getElementById('banknoteImportRefreshOrder').disabled = ['queued','sign_in_required','challenge_required'].includes(batch.state);
+    const crop = document.getElementById('banknoteImportCropPhotos');
+    if (crop) {
+      crop.disabled = busy || batchRunning() || !items.some(draft => draft.state !== 'released');
+      crop.textContent = items.some(previewRunning) ? 'Cropping photos…' : 'Crop photos';
+    }
   }
   function evidenceText(value) {
     if (typeof value === 'string') return value;
@@ -381,7 +397,7 @@
         const link = el('a', 'Edit photos in collection');
         link.href = sameOrigin(collectionUrl(item)); imageHelp.append(link);
       } else if (item.state === 'blocked') {
-        imageHelp.textContent = 'This item is blocked. Photos are for inspection only. Review the purchase warning above, then return to Order review and use Refresh eBay order after resolving it.';
+        imageHelp.textContent = 'This item is blocked. Photos are for inspection only. Use Crop photos on Order review to retry their crops. Review the purchase warning above and use Refresh eBay order after resolving it.';
       } else if (hasPreviews) {
         imageHelp.textContent = 'Listing photos below are previews. Use Check to save photos before selecting front and back.';
       } else {
@@ -577,6 +593,16 @@
   refresh.addEventListener('click', () => pollStatus(true));
   if (mode === 'review') {
     renderList();
+    document.getElementById('banknoteImportCropPhotos')?.addEventListener('click', async () => {
+      if (busy || batchRunning()) return;
+      busy = true; renderList();
+      try {
+        batch = await request(batchUrl + '/crop-photos', 'POST', {});
+        say('Cropping the order photos. Saved crops are kept.');
+        clearTimeout(pollTimer); pollTimer = setTimeout(() => pollStatus(), 1000);
+      } catch (error) { say(error.message, true); }
+      finally { busy = false; renderList(); }
+    });
     const readOrder = async (event, forceRefresh) => {
       const button = event.currentTarget; button.disabled = true;
       try {

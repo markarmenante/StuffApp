@@ -90,6 +90,17 @@ def init_schema(db):
         quad_json TEXT NOT NULL, sha256 TEXT NOT NULL, created_at REAL NOT NULL);
     CREATE INDEX IF NOT EXISTS banknote_import_image_edits_item
         ON banknote_import_image_edits(item_id,field);
+    CREATE TABLE IF NOT EXISTS banknote_import_preview_jobs (
+        item_id TEXT PRIMARY KEY REFERENCES banknote_import_items(id),
+        source_digest TEXT NOT NULL, capture_digest TEXT NOT NULL, revision INTEGER NOT NULL,
+        state TEXT NOT NULL, token TEXT, expires REAL NOT NULL DEFAULT 0,
+        message TEXT NOT NULL DEFAULT '', updated_at REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS banknote_import_photo_previews (
+        item_id TEXT NOT NULL REFERENCES banknote_import_items(id), source_url TEXT NOT NULL,
+        source_digest TEXT NOT NULL, capture_digest TEXT NOT NULL,
+        source_filename TEXT NOT NULL, source_sha256 TEXT NOT NULL,
+        filename TEXT NOT NULL, sha256 TEXT NOT NULL, quad_json TEXT NOT NULL,
+        position INTEGER NOT NULL, PRIMARY KEY(item_id,source_url,source_digest,capture_digest));
     CREATE TABLE IF NOT EXISTS banknote_import_evidence (
         item_id TEXT NOT NULL REFERENCES banknote_import_items(id), field TEXT NOT NULL,
         value_json TEXT NOT NULL, proof_json TEXT NOT NULL, accepted_at REAL NOT NULL,
@@ -316,7 +327,7 @@ def _existing_record_changes(existing, current):
             if key not in _EXISTING_UNVERSIONED_FIELDS and current.get(key) != value]
 
 
-def _listing_previews(db, row, source):
+def _listing_preview_sources(db, row, source):
     """Expose captured public images for viewing without accepting source status.
 
     This read-only fallback never downloads, retains, selects or classifies a
@@ -363,6 +374,160 @@ def _listing_previews(db, row, source):
             for position, url in enumerate(dict.fromkeys(urls))]
 
 
+def _preview_digest(photos):
+    return hashlib.sha256(_json([photo['source_url'] for photo in photos]).encode()).hexdigest()
+
+
+def _preview_context(db,batch,row):
+    """Exact photo identity is independent of permission to accept the purchase."""
+    source=json.loads(row['source_json'])
+    photos=_listing_preview_sources(db,row,source)
+    existing=json.loads(row['existing_snapshot_json'] or '{}')
+    if (row['state']!='blocked' or not photos or _BUNDLE.search(source.get('title') or '')
+            or any(existing.get(field) for field in ('image_1','image_2'))
+            or db.execute('SELECT 1 FROM banknote_import_assets WHERE item_id=?',(row['id'],)).fetchone()):
+        raise ImportProblem('No exact listing previews are available to crop for this item.')
+    return photos,_preview_digest(photos)
+
+
+def _listing_previews(db,row,source):
+    photos=_listing_preview_sources(db,row,source)
+    capture_digest=_preview_digest(photos)
+    cached={entry['source_url']:dict(entry) for entry in db.execute(
+        'SELECT * FROM banknote_import_photo_previews WHERE item_id=? AND source_digest=? AND capture_digest=?',
+        (row['id'],row['source_digest'],capture_digest))}
+    for photo in photos:
+        saved=cached.get(photo['source_url'])
+        if saved:
+            route=f"/banknotes/imports/{row['batch_id']}/items/{row['id']}/preview/{photo['position']}"
+            photo.update(url=route+'?v='+saved['sha256'],original_url=route+'?original=1',local_preview=True)
+    return photos
+
+
+def claim_previews(db,batch_id,item_id,*,retry=False):
+    """Claim only the two review-card previews; never select photos or accept a purchase."""
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        batch,row=_item(db,batch_id,item_id)
+        photos,capture_digest=_preview_context(db,batch,row)
+        job=db.execute('SELECT * FROM banknote_import_preview_jobs WHERE item_id=?',(item_id,)).fetchone()
+        matching=bool(job and job['source_digest']==row['source_digest'] and job['capture_digest']==capture_digest
+                      and job['revision']==row['revision'])
+        if matching and ((job['state'] in ('queued','checking') and job['expires']>time.time()) or not retry):
+            db.commit();return None
+        cached={entry['source_url']:entry for entry in db.execute(
+            'SELECT * FROM banknote_import_photo_previews WHERE item_id=? AND source_digest=? AND capture_digest=?',
+            (item_id,row['source_digest'],capture_digest))}
+        if all(photo['source_url'] in cached and cached[photo['source_url']]['filename']!=cached[photo['source_url']]['source_filename']
+               for photo in photos[:2]):
+            db.commit();return None
+        token=uuid.uuid4().hex
+        db.execute('''INSERT INTO banknote_import_preview_jobs
+            (item_id,source_digest,capture_digest,revision,state,token,expires,updated_at)
+            VALUES(?,?,?,?,'queued',?,?,?) ON CONFLICT(item_id) DO UPDATE SET
+            source_digest=excluded.source_digest,capture_digest=excluded.capture_digest,revision=excluded.revision,
+            state='queued',token=excluded.token,expires=excluded.expires,message='',updated_at=excluded.updated_at''',
+            (item_id,row['source_digest'],capture_digest,row['revision'],token,time.time()+1800,time.time()))
+        db.commit();return token
+    except Exception:
+        db.rollback();raise
+
+
+def _validate_preview_job(db,batch_id,item_id,token):
+    batch,row=_item(db,batch_id,item_id)
+    photos,capture_digest=_preview_context(db,batch,row)
+    job=db.execute('SELECT * FROM banknote_import_preview_jobs WHERE item_id=?',(item_id,)).fetchone()
+    if (not job or job['token']!=token or job['expires']<=time.time() or job['revision']!=row['revision']
+            or job['source_digest']!=row['source_digest'] or job['capture_digest']!=capture_digest):
+        raise ImportProblem('The listing photos changed while cropping. Use Crop photos to retry.')
+    return row,photos,capture_digest
+
+
+def run_previews(connect,batch_id,item_id,token,folder,prepare_photo):
+    db=connect();created=[]
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        row,photos,capture_digest=_validate_preview_job(db,batch_id,item_id,token)
+        db.execute("UPDATE banknote_import_preview_jobs SET state='checking',expires=? WHERE item_id=? AND token=?",
+                   (time.time()+CHECK_TTL,item_id,token));db.commit()
+        unchanged=False
+        for photo in photos[:2]:
+            cached=db.execute('''SELECT * FROM banknote_import_photo_previews
+                WHERE item_id=? AND source_url=? AND source_digest=? AND capture_digest=?''',
+                (item_id,photo['source_url'],row['source_digest'],capture_digest)).fetchone()
+            if cached and cached['filename']!=cached['source_filename']:
+                continue
+            if cached:
+                source=cached['source_filename'];source_hash=cached['source_sha256']
+            else:
+                asset=listing_images.download(photo['source_url'],folder)
+                # The downloader may return a content-addressed original already
+                # used by a sibling or collection record. Only our UUID crop
+                # outputs belong to this worker's cleanup list.
+                source=asset['filename'];source_hash=asset['sha256']
+            source_path=Path(folder)/source
+            if source_path.name!=source or source_path.resolve().parent!=Path(folder).resolve():
+                raise ImportProblem('The listing original is unavailable. Use Crop photos to retry.')
+            raw=source_path.read_bytes()
+            if hashlib.sha256(raw).hexdigest()!=source_hash:
+                raise ImportProblem('The listing original changed. Refresh the eBay order before retrying.')
+            # Retain the original before model work, without making it a selectable
+            # draft asset or changing any purchase/draft fields.
+            db.execute('BEGIN IMMEDIATE')
+            _validate_preview_job(db,batch_id,item_id,token)
+            db.execute('''INSERT OR IGNORE INTO banknote_import_photo_previews
+                (item_id,source_url,source_digest,capture_digest,source_filename,source_sha256,filename,sha256,quad_json,position)
+                VALUES(?,?,?,?,?,?,?,?,?,?)''',(item_id,photo['source_url'],row['source_digest'],capture_digest,
+                source,source_hash,source,source_hash,'null',photo['position']))
+            db.commit()
+            crop=prepare_photo(raw,json.loads(row['fields_json']))
+            if not crop:
+                unchanged=True;continue
+            filename=uuid.uuid4().hex+'.jpg';path=Path(folder)/filename
+            created.append(path);path.write_bytes(crop['data'])
+            db.execute('BEGIN IMMEDIATE')
+            _validate_preview_job(db,batch_id,item_id,token)
+            if hashlib.sha256(source_path.read_bytes()).hexdigest()!=source_hash:
+                raise ImportProblem('The listing original changed while cropping. Use Crop photos to retry.')
+            db.execute('''UPDATE banknote_import_photo_previews SET filename=?,sha256=?,quad_json=?
+                WHERE item_id=? AND source_url=? AND source_filename=? AND source_digest=? AND capture_digest=?''',
+                (filename,hashlib.sha256(crop['data']).hexdigest(),_json(crop.get('quad')),item_id,photo['source_url'],
+                 source,row['source_digest'],capture_digest))
+            db.commit()
+        db.execute('BEGIN IMMEDIATE')
+        _validate_preview_job(db,batch_id,item_id,token)
+        message='Some listing photos were kept unchanged because their note edges could not be confirmed. Use Crop photos to retry.' if unchanged else ''
+        db.execute('''UPDATE banknote_import_preview_jobs SET state=?,message=?,token=NULL,expires=0,updated_at=?
+            WHERE item_id=? AND token=?''',('partial' if unchanged else 'done',message,time.time(),item_id,token));db.commit()
+    except Exception as error:
+        db.rollback()
+        message=str(error) if isinstance(error,ImportProblem) else 'Listing photos could not finish cropping. Their originals were kept; use Crop photos to retry.'
+        db.execute('''UPDATE banknote_import_preview_jobs SET state='failed',message=?,token=NULL,expires=0,updated_at=?
+            WHERE item_id=? AND token=?''',(message,time.time(),item_id,token));db.commit()
+    finally:
+        for path in created:
+            retained=db.execute('SELECT 1 FROM banknote_import_photo_previews WHERE filename=? OR source_filename=?',
+                                (path.name,path.name)).fetchone()
+            if not retained:path.unlink(missing_ok=True)
+        db.close()
+
+
+def preview_file(db,batch_id,item_id,position,folder,*,original=False):
+    batch,row=_item(db,batch_id,item_id)
+    photos=_listing_preview_sources(db,row,json.loads(row['source_json']))
+    photo=next((photo for photo in photos if photo['position']==position),None)
+    if not photo:raise ImportProblem('This listing preview is unavailable.')
+    saved=db.execute('''SELECT * FROM banknote_import_photo_previews WHERE item_id=? AND source_url=?
+        AND source_digest=? AND capture_digest=?''',(item_id,photo['source_url'],row['source_digest'],_preview_digest(photos))).fetchone()
+    if not saved:raise ImportProblem('This listing preview is unavailable.')
+    filename=saved['source_filename'] if original else saved['filename'];path=Path(folder)/filename
+    expected=saved['source_sha256'] if original else saved['sha256']
+    if (path.name!=filename or path.resolve().parent!=Path(folder).resolve() or not path.is_file()
+            or hashlib.sha256(path.read_bytes()).hexdigest()!=expected):
+        raise ImportProblem('This listing preview is unavailable.')
+    return filename
+
+
 def _public_item(db, row):
     row = dict(row)
     source = json.loads(row['source_json'])
@@ -395,6 +560,16 @@ def _public_item(db, row):
         photos=saved+[photo for photo in photos if photo['url'] not in {p['url'] for p in saved}]
     if not photos:
         photos = _listing_previews(db, row, source)
+    preview_job=db.execute('SELECT * FROM banknote_import_preview_jobs WHERE item_id=?',(row['id'],)).fetchone()
+    if preview_job and (row['state']!='blocked' or preview_job['source_digest']!=row['source_digest']
+            or preview_job['revision']!=row['revision'] or not photos or any(not photo.get('preview') for photo in photos)
+            or preview_job['capture_digest']!=_preview_digest(photos)):
+        preview_job=None
+    preview_state=preview_job['state'] if preview_job else 'idle'
+    preview_message=preview_job['message'] if preview_job else ''
+    if preview_job and preview_state in ('queued','checking') and preview_job['expires']<=time.time():
+        preview_state,preview_message='failed','Photo cropping was interrupted. Use Crop photos to retry.'
+    if preview_state in ('failed','partial') and preview_message:warnings.append(preview_message)
     evidence = [json.loads(proof['proof_json']) | {'field':proof['field'],'value':json.loads(proof['value_json'])}
                 for proof in db.execute('SELECT * FROM banknote_import_evidence WHERE item_id=? ORDER BY field', (row['id'],))]
     paid=ebay_purchase_prices.for_item(db,source)
@@ -414,6 +589,7 @@ def _public_item(db, row):
                 existing_record_url='/banknotes/'+row['existing_record_id'] if row.get('existing_record_id') else None,
                 check_message=message,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields,
                 manual_photos=json.loads(row.get('manual_photos_json') or '{}'),
+                preview_state=preview_state,
                 image_sources={field:edit['source_filename'] for field,edit in _image_edits(db,row,fields).items()})
 
 
@@ -789,6 +965,25 @@ def _uncropped_draft_photos(db,row,fields,assets):
             continue
         result[field]=filename
     return result
+
+
+def queue_photo_retries(db,batch_id):
+    """Make an order-level retry durable before its provider slot becomes free."""
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        batch=_batch(db,batch_id)
+        rows=db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND state='draft' LIMIT 25",(batch_id,)).fetchall()
+        for row in rows:
+            if row['check_state']=='checking' and row['check_expires']>time.time():continue
+            try:_validate_source(db,batch,row)
+            except ImportProblem:continue
+            fields=json.loads(row['fields_json'])
+            assets=[dict(asset) for asset in db.execute('SELECT * FROM banknote_import_assets WHERE item_id=?',(row['id'],))]
+            if all(fields.get(field) for field in ('image_1','image_2')) and not _uncropped_draft_photos(db,row,fields,assets):continue
+            db.execute("UPDATE banknote_import_items SET check_state='idle',check_token=NULL,check_expires=0 WHERE id=?",(row['id'],))
+        db.commit()
+    except Exception:
+        db.rollback();raise
 
 
 def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,prepare_photo=None,*,retry_uncropped=False):

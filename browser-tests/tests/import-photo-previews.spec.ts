@@ -116,3 +116,44 @@ test('hostile preview URLs never become image requests or action targets', async
   expect(observed.externalImages).toEqual([]);
   expect(observed.actions).toEqual([]);
 });
+
+test('Crop photos prepares blocked previews without accepting purchases or replacing manual sibling photos', async ({ page, request }) => {
+  const batch = await (await request.post('/__fixture/import-photos')).json();
+  const blocked = batch.items.find((item: { state: string }) => item.state === 'blocked');
+  const clean = batch.items.find((item: { state: string }) => item.state === 'draft');
+  const before = await (await request.get('/__fixture/import-photo-state')).json();
+  const observed = await watchRequests(page);
+  await page.goto(batch.url);
+  const button = page.getByRole('button', { name: 'Crop photos', exact: true });
+  await expect(button).toBeEnabled();
+  await button.click();
+  const blockedCard = page.locator(`[data-draft-id="${blocked.id}"]`);
+  await expect.poll(() => blockedCard.locator('img').evaluateAll(images => images.length === 2 && images.every(image =>
+    image.getAttribute('src')?.startsWith('/banknotes/imports/') && (image as HTMLImageElement).naturalWidth === 150))
+  ).toBe(true);
+  await expect(blockedCard.locator('.import-card-warnings')).toContainText(blocked.warnings[0]);
+  await expect(blockedCard.getByText('Needs attention', { exact: true })).toBeVisible();
+  const cleanCard = page.locator(`[data-draft-id="${clean.id}"]`);
+  expect(await cleanCard.locator('img').evaluateAll(images => images.map(image => image.getAttribute('src'))))
+    .toEqual(['/uploads/fixture-retained-front.png', '/uploads/fixture-retained-back.png']);
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expect(button).toBeEnabled();
+  const after = await (await request.get('/__fixture/import-photo-state')).json();
+  expect(after.items).toEqual(before.items);
+  expect(after.collection_count).toBe(before.collection_count);
+  expect(after.link_count).toBe(before.link_count);
+  expect(after.preview_crop_calls - before.preview_crop_calls).toBe(2);
+  await blockedCard.getByRole('link', { name: 'Review details' }).click();
+  await loadedPhotos(page.locator('#banknoteImportPhotos img'), 2);
+  await expect(page.locator('#banknoteImportPhotos [data-photo-side]')).toHaveCount(0);
+  await expect(page.locator('#banknoteImportCheck')).toBeDisabled();
+  await expect(page.locator('#banknoteImportRelease')).toBeDisabled();
+  const original = page.locator('#banknoteImportPhotos a').first();
+  await expect(original).toHaveAttribute('href', /\/preview\/0\?original=1$/);
+  const originalResponse = await request.get((await original.getAttribute('href'))!);
+  expect(originalResponse.ok()).toBe(true);
+  expect(observed.actions).toEqual(['POST ' + new URL(batch.url + '/crop-photos', page.url()).href,
+                                  'POST ' + new URL(batch.url + '/crop-photos', page.url()).href]);
+  expect(observed.rejectedImages).toEqual([]);
+});

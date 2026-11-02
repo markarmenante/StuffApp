@@ -72,3 +72,19 @@ The crop validator and geometry scan reserve 4096 output tokens, including any
 model thinking. The former 80-token verdict budget could finish without a text
 answer and reject otherwise usable imported-note crops. Truncated answers remain
 inconclusive; neither partial JSON nor an unavailable verdict authorizes a crop.
+
+## Peru order photos: shadows and reflective seams
+
+The Peru P-67A front has a thin warm shadow just outside its cream paper. The
+paper-colour mask now requires pale pixels, keeping that shadow out of the
+measured outline. All four paper margins, exterior contrast, aspect and separate
+holder-label checks still apply.
+
+The P-66A front has a thin reflective seam next to its top paper edge. A small
+opening removes disconnected reflection lines from the dark-holder refinement
+mask before closing gaps. The measured paper edge then stays on the sheet;
+the paper-rim and dark-surround acceptance thresholds remain unchanged.
+
+Synthetic shadow/seam regressions live in `tests/test_banknote_image_quality.py`.
+The original order photos were also used to check full margins and native crop
+resolution without adding those photos to the public repository.

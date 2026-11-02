@@ -11648,6 +11648,14 @@ def _paper_on_dark_backdrop_quad(img, expect_aspect=None):
     def pale_mask(arr):
         return (cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY) > 140).astype(np.uint8) * 255
 
+    def refinement_mask(arr):
+        # Remove detached hairline holder reflections before the refiner's
+        # closing step can join them to the paper and flatten a sloped edge.
+        # This changes the contour fit only; all paper and backdrop probes
+        # still read the original pixels with the same acceptance gates.
+        return cv2.morphologyEx(pale_mask(arr), cv2.MORPH_OPEN,
+                                np.ones((3, 3), np.uint8))
+
     mask = pale_mask(small)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:3]:
@@ -11663,7 +11671,7 @@ def _paper_on_dark_backdrop_quad(img, expect_aspect=None):
         sums, diffs = pts.sum(axis=1), pts[:, 0] - pts[:, 1]
         quad = tuple(tuple(point) for point in (pts[sums.argmin()], pts[diffs.argmax()],
                                                pts[sums.argmax()], pts[diffs.argmin()]))
-        quad = _cv_refine_quad(rgb, quad, pale_mask) or quad
+        quad = _cv_refine_quad(rgb, quad, refinement_mask) or quad
         pts = np.asarray(quad)
         lengths = [np.linalg.norm(pts[(i + 1) % 4] - pts[i]) for i in range(4)]
         if min(lengths) < 80 or not (0.95 < lengths[0] / lengths[2] < 1.05
@@ -11781,7 +11789,11 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
 
     def paper_mask(a, warmth=12):
         r, g, b = (a[:, :, i].astype(np.int16) for i in range(3))
-        return ((r - b > warmth) & (g - b > 5)).astype(np.uint8) * 255
+        # A thin warm shadow outside the sheet can join its colour mask.
+        # Trace the pale paper itself so edge refinement does not land on
+        # that shadow and then reject the real margin as dark holder plastic.
+        return ((r - b > warmth) & (g - b > 5) &
+                (a.mean(axis=2) > 140)).astype(np.uint8) * 255
 
     scale = min(1.0, 1600.0 / max(w, h))
     small = (cv2.resize(rgb, (round(w * scale), round(h * scale)),
@@ -21666,8 +21678,32 @@ def _finish_single_import(db,batch_id):
         return None
 
 
-def _start_import_checks(batch_id):
-    if os.environ.get('BANKNOTE_IMPORT_WORKER','1')=='0':return
+def _start_import_previews(batch_id,*,retry=False):
+    # Claim before returning the POST, so the review page sees durable queued
+    # work even when both shared provider slots are occupied by normal Check.
+    db=get_db();jobs=[]
+    banknote_imports._batch(db,batch_id)
+    for row in db.execute("SELECT id FROM banknote_import_items WHERE batch_id=? AND state='blocked' ORDER BY created_at,item_id LIMIT 25",(batch_id,)).fetchall():
+        try:token=banknote_imports.claim_previews(db,batch_id,row['id'],retry=retry)
+        except banknote_imports.ImportProblem:continue
+        if token:jobs.append((row['id'],token))
+    if not jobs:return
+    def worker(item_id,token):
+        try:
+            with app.app_context():
+                banknote_imports.run_previews(open_db_connection,batch_id,item_id,token,UPLOAD_FOLDER,_prepare_import_photo)
+        finally:banknote_imports._CHECK_SLOTS.release()
+    def run():
+        for item_id,token in jobs:
+            banknote_imports._CHECK_SLOTS.acquire()
+            threading.Thread(target=worker,args=(item_id,token),daemon=True,name='banknote-preview-crop').start()
+    threading.Thread(target=run,daemon=True,name='banknote-preview-batch').start()
+
+
+def _start_import_checks(batch_id,*,retry_photos=False):
+    if os.environ.get('BANKNOTE_IMPORT_WORKER','1')=='0' and not retry_photos:return
+    if retry_photos:banknote_imports.queue_photo_retries(get_db(),batch_id)
+    _start_import_previews(batch_id,retry=retry_photos)
     with _IMPORT_BATCH_LOCK:
         if batch_id in _IMPORT_BATCH_THREADS:return
         _IMPORT_BATCH_THREADS.add(batch_id)
@@ -21772,6 +21808,26 @@ def banknote_import_status(batch_id):
     try:result=banknote_imports.status(get_db(),batch_id)
     except banknote_imports.ImportProblem as exc:return jsonify(error=str(exc)),404
     response=jsonify(result);response.headers['Cache-Control']='no-store';return response
+
+
+@app.post('/banknotes/imports/<batch_id>/crop-photos')
+def banknote_import_crop_photos(batch_id):
+    require_owner()
+    try:
+        banknote_imports._batch(get_db(),batch_id)
+        _start_import_checks(batch_id,retry_photos=True)
+        return jsonify(banknote_imports.status(get_db(),batch_id)),202
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
+
+
+@app.get('/banknotes/imports/<batch_id>/items/<item_id>/preview/<int:position>')
+def banknote_import_preview(batch_id,item_id,position):
+    require_owner()
+    try:
+        filename=banknote_imports.preview_file(get_db(),batch_id,item_id,position,UPLOAD_FOLDER,
+                                             original=request.args.get('original')=='1')
+        response=send_from_directory(UPLOAD_FOLDER,filename);response.headers['Cache-Control']='no-store';return response
+    except banknote_imports.ImportProblem:abort(404)
 
 
 @app.route('/banknotes/imports/<batch_id>/items/<item_id>',methods=['GET','POST','PATCH'])
@@ -34177,6 +34233,8 @@ def _collect_referenced_uploads(db):
     # Staged photos are durable user work even before collection release.
     referenced.update(row[0] for row in db.execute('SELECT filename FROM banknote_import_assets'))
     for row in db.execute('SELECT filename,source_filename,base_filename FROM banknote_import_image_edits'):
+        referenced.update(row)
+    for row in db.execute('SELECT filename,source_filename FROM banknote_import_photo_previews'):
         referenced.update(row)
     for cat, fields in FIELDS.items():
         table = CATEGORIES[cat]['table']

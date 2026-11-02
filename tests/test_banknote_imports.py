@@ -30,7 +30,7 @@ class DraftTests(unittest.TestCase):
         self.ctx=stuff.app.app_context();self.ctx.push()
         self.db=stuff.get_db();self.client=stuff.app.test_client()
         self.db.execute('PRAGMA foreign_keys=OFF')
-        for table in ('banknote_import_image_edits','trimmed_image_sources','banknote_import_evidence','banknote_import_assets','banknote_import_items','banknote_import_batches',
+        for table in ('banknote_import_preview_jobs','banknote_import_photo_previews','banknote_import_image_edits','trimmed_image_sources','banknote_import_evidence','banknote_import_assets','banknote_import_items','banknote_import_batches',
                       'banknote_ebay_links','ebay_purchase_prices','ebay_order_items','ebay_purchase_request_sessions',
                       'ebay_purchase_requests','ebay_purchase_observations','ebay_listing_captures','banknotes','record_documents',
                       'original_listing_sources','banknote_original_listings','original_listing_image_sources','original_image_assets','record_source_documents'):
@@ -468,6 +468,167 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(self.client.post(item['detail_url']+'/check',json={'revision':item['revision']}).status_code,409)
         self.assertEqual(self.release(batch,[item]).status_code,409)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+    @staticmethod
+    def preview_crop(raw,note):
+        import io
+        output=io.BytesIO()
+        Image.open(io.BytesIO(raw)).crop((5,5,155,75)).save(output,format='JPEG')
+        return dict(data=output.getvalue(),quad=[[5,5],[155,5],[155,75],[5,75]])
+
+    def prepare_previews(self,batch,item,prepare=None):
+        token=imports.claim_previews(self.db,batch['id'],item['id'],retry=True)
+        self.assertTrue(token)
+        with patch.object(imports.listing_images,'download',side_effect=self.download):
+            imports.run_previews(stuff.open_db_connection,batch['id'],item['id'],token,stuff.UPLOAD_FOLDER,
+                                 prepare or self.preview_crop)
+        return self.current_item(batch,item)
+
+    def test_blocked_preview_crops_preserve_originals_purchase_guards_and_read_only_views(self):
+        import io
+        batch=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
+        item=next(i for i in batch['items'] if i['state']=='blocked')
+        before={row['id']:tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items')}
+        item=self.prepare_previews(batch,item)
+        self.assertEqual(item['preview_state'],'done')
+        self.assertEqual(item['state'],'blocked');self.assertFalse(item['fields'].get('price'))
+        self.assertTrue(all(p['preview'] and p['local_preview'] and not p['selectable'] for p in item['photos']))
+        cached=list(self.db.execute('SELECT * FROM banknote_import_photo_previews WHERE item_id=?',(item['id'],)))
+        self.assertEqual(len(cached),2)
+        for photo in item['photos']:
+            response=self.client.get(photo['url']);self.assertEqual(response.status_code,200)
+            self.assertEqual(Image.open(io.BytesIO(response.data)).size,(150,70));response.close()
+            response=self.client.get(photo['original_url']);self.assertEqual(response.status_code,200)
+            self.assertEqual(Image.open(io.BytesIO(response.data)).size,(160,80));response.close()
+        for saved in cached:
+            raw=(Path(stuff.UPLOAD_FOLDER)/saved['source_filename']).read_bytes()
+            self.assertEqual(hashlib.sha256(raw).hexdigest(),saved['source_sha256'])
+            self.assertIn(saved['source_filename'],stuff._collect_referenced_uploads(self.db))
+            self.assertIn(saved['filename'],stuff._collect_referenced_uploads(self.db))
+            self.assertEqual(self.client.get('/uploads/'+saved['filename']).status_code,404)
+        changes=self.db.total_changes
+        with patch.object(imports.listing_images,'download') as download,patch.object(stuff,'_start_import_checks') as start:
+            for url in (batch['status_url'],batch['url'],item['detail_url']):self.assertEqual(self.client.get(url).status_code,200)
+            download.assert_not_called();start.assert_not_called()
+        self.assertEqual(self.db.total_changes,changes)
+        self.assertIsNone(imports.claim_previews(self.db,batch['id'],item['id'],retry=True))
+        self.assertEqual(before,{row['id']:tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items')})
+        self.assertEqual(self.client.post(item['detail_url']+'/check',json={'revision':item['revision']}).status_code,409)
+        self.assertEqual(self.release(batch,[item]).status_code,409)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_assets WHERE item_id=?',(item['id'],)).fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+
+    def test_preview_worker_discards_crop_if_identity_changes_and_original_stays_retained(self):
+        batch=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
+        item=next(i for i in batch['items'] if i['state']=='blocked')
+        files={p.name for p in Path(stuff.UPLOAD_FOLDER).iterdir()}
+        def changed(raw,note):
+            self.db.execute('UPDATE banknote_import_items SET revision=revision+1 WHERE id=?',(item['id'],));self.db.commit()
+            return self.preview_crop(raw,note)
+        updated=self.prepare_previews(batch,item,changed)
+        # A stale job must not leave its warning/status attached to a newer draft.
+        self.assertEqual(updated['preview_state'],'idle')
+        self.assertEqual(updated['state'],'blocked');self.assertFalse(updated['fields'].get('image_1'))
+        cached=list(self.db.execute('SELECT * FROM banknote_import_photo_previews WHERE item_id=?',(item['id'],)))
+        self.assertEqual(len(cached),1);self.assertEqual(cached[0]['filename'],cached[0]['source_filename'])
+        added={p.name for p in Path(stuff.UPLOAD_FOLDER).iterdir()}-files
+        self.assertLessEqual(added,{cached[0]['source_filename']})
+        repaired=self.prepare_previews(batch,updated)
+        self.assertEqual(repaired['preview_state'],'done')
+
+    def test_preview_cancelled_after_download_does_not_delete_shared_original(self):
+        batch=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
+        blocked=next(i for i in batch['items'] if i['state']=='blocked')
+        clean=next(i for i in batch['items'] if i['state']=='draft')
+        batch=self.check(batch,clean);clean=self.current_item(batch,clean)
+        source=self.db.execute('SELECT * FROM banknote_import_assets WHERE item_id=? ORDER BY position',(clean['id'],)).fetchone()
+        path=Path(stuff.UPLOAD_FOLDER)/source['filename'];raw=path.read_bytes()
+        token=imports.claim_previews(self.db,batch['id'],blocked['id'])
+        def changed(url,folder):
+            self.db.execute('UPDATE banknote_import_items SET revision=revision+1 WHERE id=?',(blocked['id'],));self.db.commit()
+            return dict(source)
+        with patch.object(imports.listing_images,'download',side_effect=changed),patch.object(stuff,'_prepare_import_photo') as crop:
+            imports.run_previews(stuff.open_db_connection,batch['id'],blocked['id'],token,stuff.UPLOAD_FOLDER,crop)
+            crop.assert_not_called()
+        self.assertEqual(path.read_bytes(),raw)
+        self.assertEqual(self.current_item(batch,clean)['fields'],clean['fields'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_photo_previews').fetchone()[0],0)
+
+    def test_preview_warning_is_hidden_after_purchase_becomes_editable(self):
+        batch=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
+        item=next(i for i in batch['items'] if i['state']=='blocked')
+        item=self.prepare_previews(batch,item,lambda *_:None)
+        self.assertEqual(item['preview_state'],'partial')
+        self.assertIn('edges could not be confirmed',' '.join(item['warnings']))
+        self.db.execute("UPDATE banknote_import_items SET state='draft',warning='',revision=revision+1 WHERE id=?",(item['id'],))
+        self.db.execute("UPDATE ebay_order_items SET attention='' WHERE item_id=?",(IDS[0],));self.db.commit()
+        updated=self.current_item(batch,item)
+        self.assertEqual(updated['preview_state'],'idle')
+        self.assertNotIn('edges could not be confirmed',' '.join(updated['warnings']))
+
+    def test_saved_preview_rechecks_capture_membership_account_and_image_hash(self):
+        batch=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
+        item=self.prepare_previews(batch,next(i for i in batch['items'] if i['state']=='blocked'))
+        url=item['photos'][0]['url']
+        cached=self.db.execute('SELECT * FROM banknote_import_photo_previews WHERE item_id=? ORDER BY position',(item['id'],)).fetchone()
+        path=Path(stuff.UPLOAD_FOLDER)/cached['filename'];original=path.read_bytes();path.write_bytes(b'changed')
+        self.assertEqual(self.client.get(url).status_code,404);path.write_bytes(original)
+        capture=self.db.execute('SELECT images_json FROM ebay_listing_captures WHERE url=?',(item['listing_url'],)).fetchone()[0]
+        self.db.execute("UPDATE ebay_listing_captures SET images_json='[]' WHERE url=?",(item['listing_url'],));self.db.commit()
+        self.assertEqual(self.client.get(url).status_code,404)
+        self.db.execute('UPDATE ebay_listing_captures SET images_json=? WHERE url=?',(capture,item['listing_url']))
+        self.db.execute("UPDATE banknote_import_batches SET snapshot_json='[]' WHERE id=?",(batch['id'],));self.db.commit()
+        self.assertEqual(self.client.get(url).status_code,404)
+        self.db.execute("UPDATE ebay_purchase_account SET account_name='another-buyer'");self.db.commit()
+        self.assertEqual(self.client.get(url).status_code,404)
+
+    def test_order_crop_action_handles_blocked_previews_and_original_drafts_preserving_saved_crops(self):
+        batch=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
+        blocked=next(i for i in batch['items'] if i['state']=='blocked')
+        clean=[i for i in batch['items'] if i['state']=='draft']
+        batch=self.check(batch,clean[0]);uncropped=self.current_item(batch,clean[0])
+        self.db.execute("UPDATE banknote_import_items SET check_state='checking',check_expires=0 WHERE id=?",(uncropped['id'],));self.db.commit()
+        batch=self.check(batch,clean[1],prepare_photo=self.preview_crop);preserved=self.current_item(batch,clean[1])
+        before=dict(preserved['fields']);calls=[]
+        class Inline:
+            def __init__(self,target,args=(),**kwargs):self.target,self.args=target,args
+            def start(self):self.target(*self.args)
+        def crop(raw,note):calls.append(raw);return self.preview_crop(raw,note)
+        with patch.object(stuff.threading,'Thread',Inline), \
+                patch.object(imports.listing_images,'download',side_effect=self.download), \
+                patch.object(stuff,'_classify_banknote_listing_photos',side_effect=self.classify), \
+                patch.object(stuff,'_evaluate_import_check',return_value=dict(filled={})), \
+                patch.object(stuff,'_prepare_import_photo',side_effect=crop):
+            response=self.client.post(batch['url']+'/crop-photos',json={})
+        self.assertEqual(response.status_code,202,response.json)
+        self.assertEqual(len(calls),4)
+        self.assertEqual(self.current_item(batch,blocked)['state'],'blocked')
+        self.assertEqual(self.current_item(batch,blocked)['preview_state'],'done')
+        self.assertEqual(self.current_item(batch,preserved)['fields'],before)
+        updated=self.current_item(batch,uncropped)
+        for field in ('image_1','image_2'):self.assertNotEqual(updated['fields'][field],uncropped['fields'][field])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+
+    def test_order_crop_action_publishes_queued_retry_before_a_worker_slot_is_available(self):
+        batch=self.imported();item=batch['items'][0]
+        batch=self.check(batch,item);item=self.current_item(batch,item)
+        for sibling in batch['items'][1:]:batch=self.check(batch,sibling,prepare_photo=self.preview_crop)
+        self.assertEqual(item['check_state'],'done')
+        acquired=0
+        try:
+            for _ in range(2):
+                self.assertTrue(imports._CHECK_SLOTS.acquire(blocking=False));acquired+=1
+            with patch.object(stuff.threading.Thread,'start'):
+                response=self.client.post(batch['url']+'/crop-photos',json={})
+            self.assertEqual(response.status_code,202,response.json)
+            queued=next(row for row in response.json['items'] if row['id']==item['id'])
+            self.assertEqual(queued['check_state'],'idle')
+            self.assertEqual(queued['revision'],item['revision'])
+            self.assertEqual(queued['fields'],item['fields'])
+            self.assertEqual(self.current_item(batch,item)['check_state'],'idle')
+        finally:
+            for _ in range(acquired):imports._CHECK_SLOTS.release()
+            stuff._IMPORT_BATCH_THREADS.discard(batch['id'])
+
     def test_cached_listing_previews_require_fresh_exact_bounded_valid_image_capture(self):
         import ebay_listing_captures
         batch=self.imported();item=batch['items'][0];url=item['listing_url']

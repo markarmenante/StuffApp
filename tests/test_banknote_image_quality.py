@@ -141,6 +141,41 @@ solid_bar = neutral_holder()
 ImageDraw.Draw(solid_bar).rectangle((85, 55, 1540, 250), fill=(50, 75, 60))
 assert stuffapp._warm_paper_on_light_holder_quad(solid_bar) is None
 
+# Peru P-67A: a thin warm shadow outside a cream sheet joined the colour
+# mask, shifting the measured edge onto the shadow. The actual paper rim
+# then failed the light-margin test and left the whole holder uncropped.
+# Use synthetic pixels rather than publishing the seller's photograph.
+def shadowed_neutral_holder(width=4, label=True):
+    img = neutral_holder(label=label)
+    ImageDraw.Draw(img).polygon(
+        [(1400, 315), (1400 + width, 315),
+         (1395 + width, 855), (1395, 855)], fill=(125, 123, 103))
+    return img
+
+
+for shadow_width in (3, 4):
+    for angle in (0, 2, -2):
+        img = shadowed_neutral_holder(shadow_width).rotate(
+            angle, resample=Image.Resampling.BICUBIC,
+            fillcolor=(238, 237, 234))
+        meta = {}
+        with patch.object(stuffapp, '_trim_note_v2', side_effect=AssertionError('model fallback')), \
+                patch.object(stuffapp, '_trim_note_cv_cascade', side_effect=AssertionError('ink fallback')):
+            output = stuffapp._trim_slabbed_note_image(encoded(img), meta=meta)
+        assert output and meta['engine'] == 'paper-boundary', (shadow_width, angle, meta)
+        result = Image.open(io.BytesIO(output))
+        assert abs(result.width - 1180) <= 8 and abs(result.height - 540) <= 8, result.size
+        if angle == 0:
+            expected = [(220, 300), (1400, 315), (1395, 855), (215, 840)]
+            assert all(math.dist(a, b) < 3 for a, b in zip(meta['quad'], expected)), meta
+        # Keep the paper margin beside the dark print; do not crop to ink.
+        assert min(result.getpixel((result.width - 8, result.height // 2))) > 170
+        assert stuffapp._warm_paper_on_light_holder_quad(result) is None
+        assert JpegImagePlugin.get_sampling(result) == 0
+assert stuffapp._warm_paper_on_light_holder_quad(shadowed_neutral_holder(label=False)) is None
+assert stuffapp._warm_paper_on_light_holder_quad(shadowed_neutral_holder(width=18)) is None, \
+    'A broad dark surround still lacks the required light exterior on every side'
+
 # A pale green PMG panel can carry text without any dark rectangular
 # frame. Virginia 1862: the reverse is unprinted, and the front's paper
 # rim is much narrower than the detector's old deep margin sample.
@@ -322,6 +357,36 @@ assert stuffapp._paper_on_dark_backdrop_quad(second_probe_gray) is None
 # must reject it when either farther probe would leave the actual photograph.
 assert stuffapp._paper_on_dark_backdrop_quad(clipped_dark_holder()[0].crop((0, 0, 1280, 933))) is not None
 assert stuffapp._paper_on_dark_backdrop_quad(seam_holder.crop((0, 0, 1280, 933))) is None
+
+# Peru P-66A: a detached hairline above the sheet was joined to the
+# paper by contour refinement, flattening its sloped top edge into the
+# holder seam. Remove the hairline from the refinement mask, never from
+# the photograph or the original-pixel paper/backdrop acceptance probes.
+for fmt in ('PNG', 'WEBP', 'JPEG'):
+    parallel_seam, parallel_quad = clipped_dark_holder()
+    ImageDraw.Draw(parallel_seam).line((0, 305, 1279, 305),
+                                       fill=(235, 235, 235), width=2)
+    meta = {}
+    with patch.object(stuffapp, '_trim_note_v2', side_effect=AssertionError('model fallback')), \
+            patch.object(stuffapp, '_trim_note_cv_cascade', side_effect=AssertionError('design fallback')):
+        output = stuffapp._trim_slabbed_note_image(encoded(parallel_seam, fmt), meta=meta)
+    assert output and meta['engine'] == 'paper-on-dark-backdrop', (fmt, meta)
+    assert all(math.dist(a, b) < 3 for a, b in zip(meta['quad'], parallel_quad)), meta
+    result = Image.open(io.BytesIO(output))
+    assert abs(result.width - 1122) <= 3 and abs(result.height - 614) <= 3, result.size
+    for point in ((result.width // 2, 5), (result.width // 2, result.height - 6),
+                  (5, result.height // 2), (result.width - 6, result.height // 2)):
+        assert min(result.getpixel(point)) > 180, (fmt, point, result.getpixel(point))
+    assert stuffapp._paper_on_dark_backdrop_quad(result) is None
+parallel_unlabelled, _ = clipped_dark_holder(label=False)
+ImageDraw.Draw(parallel_unlabelled).line((0, 305, 1279, 305),
+                                       fill=(235, 235, 235), width=2)
+assert stuffapp._paper_on_dark_backdrop_quad(parallel_unlabelled) is None
+blocked_probe, _ = clipped_dark_holder()
+ImageDraw.Draw(blocked_probe).line((0, 303, 1279, 303),
+                                  fill=(235, 235, 235), width=2)
+assert stuffapp._paper_on_dark_backdrop_quad(blocked_probe) is None, \
+    'Mask cleanup must not erase a seam from the original backdrop probe'
 
 broad, _ = clipped_dark_holder()
 assert stuffapp._paper_on_dark_backdrop_quad(broad, expect_aspect=3.4) is None

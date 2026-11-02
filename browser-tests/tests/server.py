@@ -2,6 +2,7 @@
 import atexit
 import base64
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import time
 import types
+import uuid
 from unittest.mock import patch
 
 root = Path(__file__).resolve().parents[2]
@@ -28,6 +30,26 @@ with patch('threading.Thread.start'):
 stuff.ensure_country_history = lambda *args, **kwargs: None
 from flask import jsonify
 import banknote_imports
+from PIL import Image
+
+preview_crop_calls = 0
+
+def fixture_listing_image(url,folder):
+    if not url.startswith('https://i.ebayimg.com/images/g/fixture-'):
+        raise RuntimeError('Fixture does not permit provider access')
+    filename=uuid.uuid4().hex+'.jpg';path=Path(folder)/filename
+    Image.new('RGB',(160,80),'green' if 'front' in url else 'red').save(path)
+    return dict(filename=filename,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),width=160,height=80)
+
+def fixture_preview_crop(raw,note):
+    global preview_crop_calls
+    preview_crop_calls += 1
+    output=io.BytesIO()
+    Image.open(io.BytesIO(raw)).crop((5,5,155,75)).save(output,format='JPEG')
+    return dict(data=output.getvalue(),quad=[[5,5],[155,5],[155,75],[5,75]])
+
+banknote_imports.listing_images.download = fixture_listing_image
+stuff._prepare_import_photo = fixture_preview_crop
 
 # Only this temporary fixture has a verified synthetic purchase-account binding.
 with stuff.app.app_context():
@@ -48,6 +70,8 @@ def fixture_import_photos():
     """Saved synthetic siblings; no purchase reader, Check or network activity."""
     db = stuff.get_db()
     batch_id = 'fixture-photo-review'
+    db.execute('DELETE FROM banknote_import_preview_jobs')
+    db.execute('DELETE FROM banknote_import_photo_previews')
     if not db.execute('SELECT 1 FROM banknote_import_batches WHERE id=?', (batch_id,)).fetchone():
         now = time.time()
         order = '90-00000-00001'
@@ -81,8 +105,10 @@ def fixture_import_photos():
             db.execute('INSERT INTO banknote_import_assets VALUES(?,?,?,?,?,?,?)',
                 (clean['id'], 'https://i.ebayimg.com/images/g/fixture-199999999992-' + side + '/s-l1600.png',
                  filename, hashlib.sha256(png).hexdigest(), 1, 1, position))
-        db.execute('UPDATE banknote_import_items SET fields_json=? WHERE id=?', (json.dumps(fields), clean['id']))
+        db.execute('UPDATE banknote_import_items SET fields_json=?,manual_photos_json=? WHERE id=?',
+                   (json.dumps(fields),json.dumps({key:fields[key] for key in ('image_1','image_2')}),clean['id']))
         db.commit()
+    db.commit()
     return jsonify(banknote_imports.status(db, batch_id))
 
 
@@ -92,6 +118,7 @@ def fixture_import_photo_state():
     return jsonify(
         collection_count=db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],
         link_count=db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],
+        preview_crop_calls=preview_crop_calls,
         items=[dict(row) for row in db.execute('''SELECT id,state,check_state,revision,fields_json
             FROM banknote_import_items WHERE batch_id='fixture-photo-review' ORDER BY id''')])
 
