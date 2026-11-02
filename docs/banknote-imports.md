@@ -123,13 +123,29 @@ partial, conflicting or malformed classifications supply no extra references.
 These references can expose certification details missing from bare-note views
 without replacing the selected display photos or existing metadata.
 
+Both ordinary and purchase-warning drafts persist `queued` before waiting for a
+provider slot. The coordinator rescans that queue after each pass: a refresh
+that invalidates an in-flight result cannot strand earlier siblings. Its final
+queue check and coordinator handoff share the resume lock. Queued/running work
+is shown as waiting/checking and blocks edits or release; an untouched idle item
+is labelled **Not checked**. Failed or partial results remain visible even when
+a purchase warning also exists. Explicit order retry expires abandoned reader
+sessions using their existing lease rules, without replacing a live session.
+
 All source drafts are committed before automatic Check begins. Single-note drafts
 are the durable processing record; successful or partially enriched known notes
 finish automatically under the rules above. Multiple-item drafts remain isolated
 until explicit Release. At most two checks run
-concurrently; each batch contains at most 25 items and each Check has a five-minute
+concurrently; each batch contains at most 25 items. Identification has a five-minute
 publication lease. Check uses the existing photo-side classifier and catalogue
 validator, fills blank draft fields only, and saves accepted catalogue proof.
+Verified metadata and selected originals are checkpointed before optional display
+cropping. The checkpoint advances the draft revision and renews the active crop
+lease; crop publication repeats the source, token, revision and hash checks. A
+slow, failed or stale crop leaves completed identification and originals saved
+with a partial-result message. Geometry/validator provider calls have explicit
+30-second timeouts without SDK retries. Missing core identification is reported
+as partial rather than successful empty enrichment.
 Original source photographs are retained before the slower catalogue call, with
 owner/account-bound access. They are protected from orphan cleanup. Source text is
 untrusted evidence. A title without the usual banknote discovery words is retained;
@@ -141,8 +157,10 @@ items blocked by a purchase-status warning. Eligible single-note detail checks
 prepare their normal display photographs. For other blocked items, import/resume
 and explicit refresh prepare cropped previews of the first two listing photos,
 using the normal arrival crop pipeline. The **Crop photos** button on Order review
-retries these previews and untouched original photos on editable siblings without
-rereading the eBay order. Accepted crops and manual photo choices stay unchanged.
+retries these previews and automatic crops on editable siblings from their
+retained originals without rereading the eBay order. Manual crops, manual photo
+choices and occupied collection photos stay unchanged. The retry request is
+durable; ordinary Check continues preserving previously accepted automatic crops.
 Blocked previews retain their full originals separately; opening a preview shows
 that original and its grading label. Preview files remain inspection-only, never
 selected front/back photos, and cannot supply a purchase price. The separate

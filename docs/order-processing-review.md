@@ -39,6 +39,35 @@ retry, duplicate prevention, and collection release.
 
 ## Verification
 
+### Spain checkout follow-up: coordination and recovery
+
+The Spain checkout exposed a failure that successful individual-note tests did
+not cover: an explicit order refresh overlapped two active Checks while a third
+item waited for a slot. Provider logs confirmed successful identification. The
+refresh invalidated the first two work tokens, but the batch coordinator had
+already visited those rows and never returned to them. Their completed fields
+and crops were discarded, leaving raw gallery thumbnails and blank drafts.
+The third item started after the refresh and completed normally. Running the
+actual first original through the crop pipeline produced a correct full-paper
+crop; changing its detector would not have fixed the lost publication.
+
+| Failure point | Repair and regression |
+| --- | --- |
+| Refresh invalidates work after a coordinator has passed that item. | Rescan durable queued work and synchronize the final handoff with explicit resume. Deterministic three-item regression refreshes while the third job waits and confirms all refreshed siblings complete. |
+| Waiting ordinary drafts appear saved and allow conflicting writes. | Persist queued intent before acquiring a provider slot; show waiting/checking status and reject queued edits, photo changes and release. |
+| Optional crop latency discards completed identification. | Checkpoint metadata, catalogue evidence and selected originals before cropping; late/failed crops become partial results without losing those fields. Stale crops still cannot overwrite newer source facts or edits. |
+| A cached automatic crop cannot be retried. | Explicit Crop photos retries automatic outputs from original files while preserving manual choices/crops and collection photographs. |
+| Restart leaves preview work queued but without a worker. | Reattach durable queued preview tokens and claim queued-to-checking atomically, preventing duplicate provider work. |
+| An expired local-reader session blocks a new explicit order retry. | Apply existing expiry rules before deciding whether the old reader is still active. Live sessions and successor request identity remain protected. |
+| Removed gallery photos remain candidates after a listing refresh. | Classify/select only the current captured gallery; retain old originals for inspection and intentional saved-reference use. |
+| Empty identification or rejected crop looks successful. | Report missing core fields and unconfirmed paper boundaries as partial results with an actionable retry message. |
+
+The focused coordinator, lifecycle, crop-timeout and crop-retry suites exercise
+these failure sequences with isolated databases and controlled provider results.
+The real Spain checkout is also verified through normal review controls after
+deployment. This is a set of specific recovery guarantees, not a claim that
+external providers can never fail.
+
 Run `python3 scripts/test-regressions.py`,
 `node tests/test_banknote_import_review.js`, and
 `node tests/test_banknote_single_order.js`, and

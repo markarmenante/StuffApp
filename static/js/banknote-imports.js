@@ -192,10 +192,11 @@
   const checkRunning = draft => ['queued', 'checking'].includes(draft.check_state);
   const previewRunning = draft => ['queued','checking'].includes(draft.preview_state);
   const batchRunning = () => batch.processing_single === true || ['queued', 'sign_in_required', 'challenge_required'].includes(batch.state)
-    || (batch.items || []).some(draft => previewRunning(draft) || checkRunning(draft) || (draft.state === 'draft' && draft.check_state === 'idle'));
-  const stateLabel = draft => draft.state === 'released' ? 'In collection' : draft.check_state === 'queued' ? 'Waiting to check…' : checkRunning(draft) ? 'Checking…' : previewRunning(draft) ? 'Cropping photos…' : draft.state === 'blocked'
-    ? 'Needs attention' : draft.check_state === 'failed'
-    ? 'Check needs retry' : draft.check_state === 'partial' ? 'Review needed' : 'Saved draft';
+    || (batch.items || []).some(draft => previewRunning(draft) || checkRunning(draft));
+  const stateLabel = draft => draft.state === 'released' ? 'In collection' : draft.check_state === 'queued' ? 'Waiting to check…' : checkRunning(draft) ? 'Checking…' : previewRunning(draft) ? 'Cropping photos…'
+    : draft.check_state === 'failed' ? 'Check needs retry' : draft.check_state === 'partial' ? 'Review needed'
+    : draft.preview_state === 'failed' ? 'Crop needs retry' : draft.preview_state === 'partial' ? 'Review photos'
+    : draft.state === 'blocked' ? 'Needs attention' : draft.check_state === 'idle' ? 'Not checked' : 'Saved draft';
   const collectionUrl = draft => draft.collection_url || '/banknotes/' + encodeURIComponent(draft.released_record_id)
     + '?report_back=' + encodeURIComponent(batchUrl);
   const reviewUrl = draft => draft.state === 'released' && draft.released_record_id ? collectionUrl(draft) : draft.detail_url;
@@ -306,7 +307,19 @@
     document.getElementById('banknoteImportIntro').textContent = items.length
       ? 'Saved for review. Open each item to inspect its photos and details before releasing it to the collection.'
       : 'No items have been saved for review yet.';
-    say(uncertain ? 'The last action could not be confirmed. Refresh saved status before trying again.' : batch.message || (batch.state === 'queued' ? 'Retrieving the purchased items…'
+    const pending = items.filter(draft => draft.state !== 'released');
+    const checking = pending.filter(draft => draft.check_state === 'checking').length;
+    const queued = pending.filter(draft => draft.check_state === 'queued').length;
+    const cropping = pending.filter(previewRunning).length;
+    const unchecked = pending.filter(draft => draft.state === 'draft' && draft.check_state === 'idle').length;
+    const countText = count => count + (count === 1 ? ' item' : ' items');
+    const progress = !['review','complete'].includes(batch.state) ? '' : checking || queued || cropping
+      ? [checking ? countText(checking) + ' checking photos and details' : '', queued ? countText(queued) + ' waiting to check' : '', cropping ? countText(cropping) + ' cropping photos' : ''].filter(Boolean).join(' · ') + '. Your drafts are saved.'
+      : pending.some(draft => draft.check_state === 'failed') ? 'Some Checks did not finish. Open the affected items and use Retry Check.'
+      : pending.some(draft => draft.check_state === 'partial') ? 'Some items need review. Open their details to see what could not be completed.'
+      : pending.some(draft => ['failed','partial'].includes(draft.preview_state)) ? 'Some photo crops need review. Use Crop photos to retry them.'
+      : unchecked ? countText(unchecked) + (unchecked === 1 ? ' has' : ' have') + ' not been checked. Open the details and use Check.' : '';
+    say(uncertain ? 'The last action could not be confirmed. Refresh saved status before trying again.' : progress || batch.message || (batch.state === 'queued' ? 'Retrieving the purchased items…'
       : batch.state === 'sign_in_required' ? 'Sign in to eBay in the opened browser to continue retrieving this order.'
       : batch.state === 'challenge_required' ? 'Complete the eBay verification in the opened browser to continue retrieving this order.'
       : batch.state === 'failed' ? 'The order could not be retrieved. Use Retry order to try again.'
@@ -385,7 +398,7 @@
   function renderDetail() {
     syncDetailDisplay();
     renderExistingChanges();
-    form?.setAttribute('aria-busy', String(busy || Boolean(saving)));
+    form?.setAttribute('aria-busy', String(busy || Boolean(saving) || checkRunning(item)));
     document.getElementById('banknoteImportState').textContent = stateLabel(item);
     const gallery = document.getElementById('banknoteImportPhotos');
     const signature = JSON.stringify([item.state, item.photos || []]);
@@ -430,6 +443,10 @@
       if (item.state === 'released' && item.released_record_id) {
         const link = el('a', 'Edit photos in collection');
         link.href = sameOrigin(collectionUrl(item)); imageHelp.append(link);
+      } else if (checkRunning(item)) {
+        imageHelp.textContent = item.check_state === 'queued'
+          ? 'Waiting to check photos and details. Editing resumes when Check finishes.'
+          : 'Checking the original photos and preparing the note images. Editing resumes when Check finishes.';
       } else if (item.state === 'blocked' && editable) {
         imageHelp.textContent = 'You can edit the note and its photos. Release to Collection adds it as Ordered; the purchase warning remains for review.';
       } else if (item.state === 'blocked') {

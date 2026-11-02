@@ -191,7 +191,7 @@ class DraftTests(unittest.TestCase):
         batch=self.check(batch,item,prepare_photo=crop,retry_uncropped=True)
         updated=self.current_item(batch,item)
         self.assertEqual(updated['fields']['issuer'],'Newer edit')
-        self.assertEqual(updated['check_state'],'failed')
+        self.assertEqual(updated['check_state'],'partial')
         for field in ('image_1','image_2'):self.assertEqual(updated['fields'][field],before[field])
         self.assertEqual(set(Path(stuff.UPLOAD_FOLDER).iterdir()),created_before)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_image_edits').fetchone()[0],0)
@@ -210,7 +210,11 @@ class DraftTests(unittest.TestCase):
             return dict(data=raw,quad=None)
         b=self.check(b,item,prepare_photo=crop);item=b['items'][0]
         self.assertEqual(item['fields']['issuer'],'Newer edit')
-        self.assertFalse(item['fields'].get('image_1'));self.assertEqual(item['check_state'],'failed')
+        self.assertEqual(item['check_state'],'partial')
+        originals={row['filename'] for row in self.db.execute('SELECT filename FROM banknote_import_assets')}
+        self.assertIn(item['fields'].get('image_1'),originals)
+        self.assertIn(item['fields'].get('image_2'),originals)
+        self.assertEqual(item['fields']['country'],self.fills['country'])
         assets={Path(stuff.UPLOAD_FOLDER)/row['filename'] for row in self.db.execute('SELECT filename FROM banknote_import_assets')}
         self.assertTrue(set(Path(stuff.UPLOAD_FOLDER).iterdir())-before<=assets)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_image_edits').fetchone()[0],0)
@@ -272,7 +276,8 @@ class DraftTests(unittest.TestCase):
     def test_single_unknown_partial_failed_or_quantity_ambiguous_purchase_never_auto_adds(self):
         b=self.single_imported(lambda p:p['items'][0].update(title='Unknown collectible'))
         b=self.check(b,b['items'][0],lambda *_:dict(filled={}))
-        self.assertEqual(b['items'][0]['check_state'],'done')
+        self.assertEqual(b['items'][0]['check_state'],'partial')
+        self.assertIn('could not confirm',b['items'][0]['check_message'])
         self.assertIsNone(self.batch()['completion_url'])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
         item=b['items'][0]
@@ -288,7 +293,7 @@ class DraftTests(unittest.TestCase):
             payload['listings'][0].update(title=CATALOGUE_REVIEW_TITLE,text=CATALOGUE_REVIEW_TITLE+'; exact listing.')
         batch=self.single_imported(title_only)
         batch=self.check(batch,batch['items'][0],lambda *_:dict(filled={}))
-        self.assertEqual(batch['items'][0]['check_state'],'done')
+        self.assertEqual(batch['items'][0]['check_state'],'partial')
         self.assertIsNone(stuff._finish_single_import(self.db,batch['id']))
         self.assertIsNone(self.batch()['completion_url'])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
@@ -930,6 +935,54 @@ class DraftTests(unittest.TestCase):
             self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_preview_jobs WHERE item_id=?',(item['id'],)).fetchone()[0],0)
         finally:stuff._IMPORT_BATCH_THREADS.discard(batch['id'])
 
+    def test_normal_drafts_publish_durable_queue_before_worker_capacity_is_available(self):
+        batch=self.imported()
+        self.assertTrue(all(item['check_state']=='idle' for item in batch['items']))
+        acquired=0
+        try:
+            for _ in range(2):
+                self.assertTrue(imports._CHECK_SLOTS.acquire(blocking=False));acquired+=1
+            with patch.dict(os.environ,{'BANKNOTE_IMPORT_WORKER':'1'}),patch.object(stuff.threading.Thread,'start'):
+                response=self.client.post('/banknotes/imports',json={'order_number':batch['order_number']})
+            self.assertEqual(response.status_code,200,response.json)
+            self.assertTrue(all(item['check_state']=='queued' for item in response.json['items']))
+            self.assertEqual([item['revision'] for item in response.json['items']],
+                             [item['revision'] for item in batch['items']])
+            changes=self.db.total_changes
+            for url in (batch['url'],batch['status_url'],batch['items'][0]['detail_url']):
+                self.assertEqual(self.client.get(url).status_code,200)
+            self.assertEqual(self.db.total_changes,changes,'Viewing queued work never starts or alters it')
+            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        finally:
+            for _ in range(acquired):imports._CHECK_SLOTS.release()
+            stuff._IMPORT_BATCH_THREADS.discard(batch['id'])
+
+    def test_queued_single_note_remains_processing_until_check_finishes(self):
+        batch=self.single_imported()
+        imports.queue_inspection_checks(self.db,batch['id'])
+        queued=self.client.get(batch['status_url']).json
+        self.assertEqual(queued['items'][0]['check_state'],'queued')
+        self.assertTrue(queued['processing_single'])
+        self.assertIsNone(queued['completion_url'])
+
+    def test_queued_and_active_checks_block_draft_mutations_until_completion(self):
+        batch,item=self.checked_item();info=self.crop_info(item).json
+        for state in ('queued','checking'):
+            with self.subTest(state=state):
+                self.db.execute('UPDATE banknote_import_items SET check_state=?,check_expires=? WHERE id=?',
+                                (state,time.time()+60 if state=='checking' else 0,item['id']));self.db.commit()
+                before=tuple(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+                saved=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'notes':'Must wait'}})
+                self.assertEqual(saved.status_code,409);self.assertIn('Check',saved.json['error'])
+                self.assertEqual(self.choose(item,'image_1',item['photos'][0]['filename']).status_code,409)
+                self.assertEqual(self.crop(item,info=info).status_code,409)
+                self.assertEqual(self.release(batch,[item]).status_code,409)
+                self.assertEqual(tuple(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()),before)
+                self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.db.execute("UPDATE banknote_import_items SET check_state='partial',check_expires=0 WHERE id=?",(item['id'],));self.db.commit()
+        saved=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'notes':'Reviewed after Check'}})
+        self.assertEqual(saved.status_code,200,saved.json)
+
     def test_blocked_preview_crops_preserve_originals_purchase_guards_and_read_only_views(self):
         import io
         batch=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))
@@ -957,7 +1010,7 @@ class DraftTests(unittest.TestCase):
             for url in (batch['status_url'],batch['url'],item['detail_url']):self.assertEqual(self.client.get(url).status_code,200)
             download.assert_not_called();start.assert_not_called()
         self.assertEqual(self.db.total_changes,changes)
-        self.assertIsNone(imports.claim_previews(self.db,batch['id'],item['id'],retry=True))
+        self.assertIsNone(imports.claim_previews(self.db,batch['id'],item['id']))
         self.assertEqual(before,{row['id']:tuple(row) for row in self.db.execute('SELECT * FROM banknote_import_items')})
         self.assertEqual(self.client.post(item['detail_url']+'/check',json={'revision':item['revision']}).status_code,409)
         self.assertEqual(self.release(batch,[item]).status_code,409)
@@ -1035,6 +1088,8 @@ class DraftTests(unittest.TestCase):
         batch=self.check(batch,clean[0]);uncropped=self.current_item(batch,clean[0])
         self.db.execute("UPDATE banknote_import_items SET check_state='checking',check_expires=0 WHERE id=?",(uncropped['id'],));self.db.commit()
         batch=self.check(batch,clean[1],prepare_photo=self.preview_crop);preserved=self.current_item(batch,clean[1])
+        preserved=self.crop(preserved,'image_1').json['item']
+        preserved=self.crop(preserved,'image_2').json['item']
         before=dict(preserved['fields']);calls=[]
         class Inline:
             def __init__(self,target,args=(),**kwargs):self.target,self.args=target,args
@@ -1068,10 +1123,10 @@ class DraftTests(unittest.TestCase):
                 response=self.client.post(batch['url']+'/crop-photos',json={})
             self.assertEqual(response.status_code,202,response.json)
             queued=next(row for row in response.json['items'] if row['id']==item['id'])
-            self.assertEqual(queued['check_state'],'idle')
+            self.assertEqual(queued['check_state'],'queued')
             self.assertEqual(queued['revision'],item['revision'])
             self.assertEqual(queued['fields'],item['fields'])
-            self.assertEqual(self.current_item(batch,item)['check_state'],'idle')
+            self.assertEqual(self.current_item(batch,item)['check_state'],'queued')
         finally:
             for _ in range(acquired):imports._CHECK_SLOTS.release()
             stuff._IMPORT_BATCH_THREADS.discard(batch['id'])
@@ -1333,7 +1388,12 @@ class DraftTests(unittest.TestCase):
         b=self.imported();item=b['items'][0]
         def during(*_):
             db=stuff.open_db_connection()
-            imports.save(db,b['id'],item['id'],item['revision'],{'country':'User choice'},lambda x:x);db.close()
+            # Simulate a separate writer after Check took its snapshot. Normal
+            # draft API edits now wait for queued/active Check to finish.
+            fields=json.loads(db.execute('SELECT fields_json FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0])
+            fields['country']='User choice'
+            db.execute('UPDATE banknote_import_items SET fields_json=?,revision=revision+1 WHERE id=?',(json.dumps(fields),item['id']))
+            db.commit();db.close()
             return dict(filled={'country':'Model country','pick_number':'P99'})
         b=self.check(b,item,during);item=next(i for i in b['items'] if i['id']==item['id'])
         self.assertEqual(item['fields']['country'],'User choice');self.assertNotIn('pick_number',item['fields']);self.assertEqual(item['check_state'],'failed')

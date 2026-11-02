@@ -11399,6 +11399,8 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
     result did not validate — well-trimmed notes pass through
     untouched.
     """
+    if meta is not None:
+        meta['crop_status'] = 'unconfirmed'
     img = _flatten_image_for_jpeg(_open_upload_image(data))
     w, h = img.size
     if w < 200 or h < 100:
@@ -11438,6 +11440,8 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
         if v2_status == 'ok':
             return v2_out
         if v2_status == 'noop':
+            if meta is not None:
+                meta['crop_status'] = 'already_cropped'
             return None
         v2_failed = True
         app.logger.info('trim: v2 found no accepted crop — running the cascade')
@@ -11586,7 +11590,7 @@ def _vision_crop_verdict(crop):
         "Judge only those criteria. Reply ONLY JSON: "
         '{"good": true} or {"good": false, "why": "<a few words>"}.')
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=30.0, max_retries=0)
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
         resp = client.messages.create(
             model=model,
@@ -12008,7 +12012,7 @@ def _note_geometry_scan(img):
         'holder or sleeve is visible. label = a grading-service label '
         'is visible.')
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=30.0, max_retries=0)
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
         resp = client.messages.create(
             model=model,
@@ -21638,6 +21642,8 @@ def _prepare_import_photo(data,note):
     """Use the arrival crop pipeline for an untouched draft original."""
     meta={}
     image=_trim_slabbed_note_image(data,expect_aspect=_banknote_expect_aspect(note),meta=meta)
+    if image is None and meta.get('crop_status')!='already_cropped':
+        raise banknote_imports.ImportProblem('The full paper edges could not be confirmed. The original photo was kept; use Crop photos or adjust its crop.')
     return dict(data=image,quad=meta.get('quad')) if image else None
 
 
@@ -21712,30 +21718,48 @@ def _start_import_checks(batch_id,*,retry_photos=False):
         if batch_id in _IMPORT_BATCH_THREADS:return
         _IMPORT_BATCH_THREADS.add(batch_id)
     def run():
+        registered=True
+        def pending(db):
+            return db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND ((state='draft' AND check_state IN ('idle','queued')) OR (state='blocked' AND check_state='queued')) ORDER BY created_at,item_id LIMIT 25",(batch_id,)).fetchall()
         try:
             with app.app_context():
                 db=get_db()
-                rows=db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND ((state='draft' AND check_state='idle') OR (state='blocked' AND check_state='queued')) ORDER BY created_at,item_id LIMIT 25",(batch_id,)).fetchall()
-                for row in rows:
-                    # At most two provider jobs across all imports. Unclaimed
-                    # rows stay idle/durable if this coordinator is interrupted.
-                    banknote_imports._CHECK_SLOTS.acquire()
-                    current=db.execute('SELECT revision,check_state FROM banknote_import_items WHERE id=?',(row['id'],)).fetchone()
-                    if not current or current['check_state'] not in ('idle','queued'):
-                        banknote_imports._CHECK_SLOTS.release();continue
-                    revision=current['revision']
-                    try:token=banknote_imports.claim_check(db,batch_id,row['id'],revision)
-                    except Exception:
-                        db.execute("UPDATE banknote_import_items SET check_state='failed',check_message=? WHERE id=? AND check_state IN ('idle','queued')",
-                                   ('The draft changed before automatic Check started. Your edits were kept; press Check to retry.',row['id']))
-                        db.commit()
-                        banknote_imports._CHECK_SLOTS.release();continue
-                    if not token:
-                        banknote_imports._CHECK_SLOTS.release();continue
-                    threading.Thread(target=_run_import_check,args=(batch_id,row['id'],revision,token),
-                                     daemon=True,name='banknote-import-check').start()
+                while True:
+                    rows=pending(db)
+                    if not rows:
+                        # An explicit refresh may replace revisions while this
+                        # coordinator is waiting for another item's work slot.
+                        # Hand off under the same lock used by resume callers,
+                        # so none can queue work after our last read and then
+                        # return because they still see this coordinator alive.
+                        with _IMPORT_BATCH_LOCK:
+                            rows=pending(db)
+                            if not rows:
+                                _IMPORT_BATCH_THREADS.discard(batch_id)
+                                registered=False
+                                return
+                    for row in rows:
+                        # At most two provider jobs across all imports. Re-scan
+                        # durable pending rows after this pass; an old snapshot
+                        # cannot cover work invalidated by an explicit refresh.
+                        banknote_imports._CHECK_SLOTS.acquire()
+                        current=db.execute('SELECT revision,check_state FROM banknote_import_items WHERE id=?',(row['id'],)).fetchone()
+                        if not current or current['check_state'] not in ('idle','queued'):
+                            banknote_imports._CHECK_SLOTS.release();continue
+                        revision=current['revision']
+                        try:token=banknote_imports.claim_check(db,batch_id,row['id'],revision)
+                        except Exception:
+                            db.execute("UPDATE banknote_import_items SET check_state='failed',check_message=? WHERE id=? AND check_state IN ('idle','queued')",
+                                       ('The draft changed before automatic Check started. Your edits were kept; press Check to retry.',row['id']))
+                            db.commit()
+                            banknote_imports._CHECK_SLOTS.release();continue
+                        if not token:
+                            banknote_imports._CHECK_SLOTS.release();continue
+                        threading.Thread(target=_run_import_check,args=(batch_id,row['id'],revision,token),
+                                         daemon=True,name='banknote-import-check').start()
         finally:
-            with _IMPORT_BATCH_LOCK:_IMPORT_BATCH_THREADS.discard(batch_id)
+            if registered:
+                with _IMPORT_BATCH_LOCK:_IMPORT_BATCH_THREADS.discard(batch_id)
     threading.Thread(target=run,daemon=True,name='banknote-import-batch').start()
 
 
@@ -43357,9 +43381,16 @@ with app.app_context():
     market_ebay_feed.init_schema(get_db())
     original_listings.init_schema(get_db())
     if os.environ.get('BANKNOTE_IMPORT_WORKER','1')!='0':
-        for batch in get_db().execute("SELECT DISTINCT i.batch_id FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE (i.state='draft' AND (i.check_state='idle' OR (b.auto_single=1 AND i.check_state IN ('done','partial')))) OR (i.state='blocked' AND i.check_state='queued') LIMIT 25").fetchall():
+        for batch in get_db().execute("SELECT DISTINCT i.batch_id FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE (i.state='draft' AND (i.check_state IN ('idle','queued') OR (b.auto_single=1 AND i.check_state IN ('done','partial')))) OR (i.state='blocked' AND i.check_state='queued') LIMIT 25").fetchall():
             _finish_single_import(get_db(),batch[0])
             _start_import_checks(batch[0])
+        # Preview-only purchases do not appear in the Check queue. Resume their
+        # durable queued jobs after a restart, without replaying active crops.
+        try:
+            for batch_id in banknote_imports.pending_preview_batches(get_db()):
+                _start_import_previews(batch_id)
+        except banknote_imports.ImportProblem:
+            pass  # An account has not yet been connected.
 
 _ebay_order_sync.start()
 _original_listing_service.start()

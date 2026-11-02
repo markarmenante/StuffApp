@@ -85,6 +85,7 @@ def init_schema(db):
         released_record_id TEXT, existing_record_id TEXT, existing_snapshot_json TEXT,
         manual_photos_json TEXT NOT NULL DEFAULT '{}',
         note_identity_json TEXT NOT NULL DEFAULT '{}',
+        retry_photos INTEGER NOT NULL DEFAULT 0,
         warning TEXT NOT NULL DEFAULT '',
         check_state TEXT NOT NULL DEFAULT 'idle', check_token TEXT, check_expires REAL NOT NULL DEFAULT 0,
         check_message TEXT NOT NULL DEFAULT '', checked_at REAL,
@@ -130,6 +131,8 @@ def init_schema(db):
         db.execute("ALTER TABLE banknote_import_items ADD COLUMN manual_photos_json TEXT NOT NULL DEFAULT '{}'")
     if 'note_identity_json' not in columns:
         db.execute("ALTER TABLE banknote_import_items ADD COLUMN note_identity_json TEXT NOT NULL DEFAULT '{}'")
+    if 'retry_photos' not in columns:
+        db.execute('ALTER TABLE banknote_import_items ADD COLUMN retry_photos INTEGER NOT NULL DEFAULT 0')
 
 
 def _account(db):
@@ -206,6 +209,10 @@ def begin(db, order_number, refresh=False):
             db.execute('UPDATE banknote_import_batches SET auto_single=1 WHERE id=?',(existing['id'],))
             db.commit()
             return existing['id']
+        # Retry must recover even when the Mac stopped polling after claiming
+        # the order. Use the reader's session-aware expiry before its busy guard.
+        import ebay_purchase_lookup
+        ebay_purchase_lookup.expire(db)
         if existing and existing['request_id']:
             request = db.execute("SELECT q.*,s.expires_at FROM ebay_purchase_requests q LEFT JOIN ebay_purchase_request_sessions s ON s.request_id=q.id WHERE q.id=?", (existing['request_id'],)).fetchone()
             if request and request['status'] in ('queued','reading') and (request['expires_at'] or request['requested_at']+120) > now:
@@ -437,12 +444,18 @@ def claim_previews(db,batch_id,item_id,*,retry=False):
         job=db.execute('SELECT * FROM banknote_import_preview_jobs WHERE item_id=?',(item_id,)).fetchone()
         matching=bool(job and job['source_digest']==row['source_digest'] and job['capture_digest']==capture_digest
                       and job['revision']==row['revision'])
-        if matching and ((job['state'] in ('queued','checking') and job['expires']>time.time()) or not retry):
+        if matching and job['state']=='queued' and job['expires']>time.time():
+            # A queued token is durable work, not proof a process still owns it.
+            # Resume/startup can reattach it; run_previews claims it atomically.
+            db.commit();return job['token']
+        # An expired queued lease still represents requested work. Issue a new
+        # token below after the same source checks, even if old crops are cached.
+        if matching and job['state']!='queued' and ((job['state']=='checking' and job['expires']>time.time()) or not retry):
             db.commit();return None
         cached={entry['source_url']:entry for entry in db.execute(
             'SELECT * FROM banknote_import_photo_previews WHERE item_id=? AND source_digest=? AND capture_digest=?',
             (item_id,row['source_digest'],capture_digest))}
-        if all(photo['source_url'] in cached and cached[photo['source_url']]['filename']!=cached[photo['source_url']]['source_filename']
+        if not retry and not (matching and job['state']=='queued') and all(photo['source_url'] in cached and cached[photo['source_url']]['filename']!=cached[photo['source_url']]['source_filename']
                for photo in photos[:2]):
             db.commit();return None
         token=uuid.uuid4().hex
@@ -455,6 +468,17 @@ def claim_previews(db,batch_id,item_id,*,retry=False):
         db.commit();return token
     except Exception:
         db.rollback();raise
+
+
+def pending_preview_batches(db):
+    """Restart only explicitly queued previews, never replay an active crop."""
+    return [row[0] for row in db.execute('''SELECT DISTINCT i.batch_id
+        FROM banknote_import_preview_jobs j JOIN banknote_import_items i ON i.id=j.item_id
+        JOIN banknote_import_batches b ON b.id=i.batch_id
+        WHERE j.state='queued' AND i.state='blocked'
+            AND i.account_name=? AND b.account_name=i.account_name
+            AND j.source_digest=i.source_digest AND j.revision=i.revision
+            AND b.state IN ('review','complete') LIMIT 25''',(_account(db),))]
 
 
 def _validate_preview_job(db,batch_id,item_id,token):
@@ -471,6 +495,9 @@ def run_previews(connect,batch_id,item_id,token,folder,prepare_photo):
     db=connect();created=[]
     try:
         db.execute('BEGIN IMMEDIATE')
+        job=db.execute('SELECT state,token FROM banknote_import_preview_jobs WHERE item_id=?',(item_id,)).fetchone()
+        if not job or job['token']!=token or job['state']!='queued':
+            db.rollback();return
         row,photos,capture_digest=_validate_preview_job(db,batch_id,item_id,token)
         db.execute("UPDATE banknote_import_preview_jobs SET state='checking',expires=? WHERE item_id=? AND token=?",
                    (time.time()+CHECK_TTL,item_id,token));db.commit()
@@ -479,8 +506,6 @@ def run_previews(connect,batch_id,item_id,token,folder,prepare_photo):
             cached=db.execute('''SELECT * FROM banknote_import_photo_previews
                 WHERE item_id=? AND source_url=? AND source_digest=? AND capture_digest=?''',
                 (item_id,photo['source_url'],row['source_digest'],capture_digest)).fetchone()
-            if cached and cached['filename']!=cached['source_filename']:
-                continue
             if cached:
                 source=cached['source_filename'];source_hash=cached['source_sha256']
             else:
@@ -504,7 +529,10 @@ def run_previews(connect,batch_id,item_id,token,folder,prepare_photo):
                 VALUES(?,?,?,?,?,?,?,?,?,?)''',(item_id,photo['source_url'],row['source_digest'],capture_digest,
                 source,source_hash,source,source_hash,'null',photo['position']))
             db.commit()
-            crop=prepare_photo(raw,json.loads(row['fields_json']))
+            try:
+                crop=prepare_photo(raw,json.loads(row['fields_json']))
+            except Exception:
+                unchanged=True;continue
             if not crop:
                 unchanged=True;continue
             filename=uuid.uuid4().hex+'.jpg';path=Path(folder)/filename
@@ -705,7 +733,7 @@ def status(db,batch_id):
                     completion_url='/banknotes/'+quote(single['released_record_id'],safe='')
             except ImportProblem:pass
         elif single['state']=='draft' and not single['warning']:
-            processing_single=single['check_state'] in ('idle','checking')
+            processing_single=single['check_state'] in ('idle','queued','checking')
             if single['check_state'] in ('done','partial'):
                 try:processing_single=_single_ready(db,batch,single)
                 except ImportProblem:processing_single=False
@@ -920,6 +948,10 @@ def _check_context(db,batch,row):
     return (row['state'],capture_digest,_json(ebay_purchase_prices.for_item(db,source)))
 
 
+def _check_active(row):
+    return row['check_state']=='queued' or (row['check_state']=='checking' and row['check_expires']>time.time())
+
+
 def save(db,batch_id,item_id,revision,updates,normalize):
     if type(revision) is not int or not isinstance(updates,dict) or not updates:
         raise ImportProblem('Save requires the current draft revision and edited fields.')
@@ -929,6 +961,8 @@ def save(db,batch_id,item_id,revision,updates,normalize):
         batch,row=_item(db,batch_id,item_id)
         if row['state'] not in ('draft','blocked') or row['revision']!=revision:
             raise ImportProblem('This draft changed or was released. Reload it before saving.', code='draft_changed')
+        if _check_active(row):
+            raise ImportProblem('Wait for Check to finish before editing this draft. Your saved values were kept.')
         if row['state']=='blocked':
             _review_source(db,batch,row)
             if any(field in normalized for field in _REVIEW_LOCKED_FIELDS):
@@ -959,7 +993,7 @@ def refresh_existing(db,batch_id,item_id,revision,existing_record_version):
         source=_validate_source(db,batch,row)
         if row['state']!='draft' or row['revision']!=revision:
             raise ImportProblem('This draft changed or was released. Review its latest saved values.',code='draft_changed')
-        if row['check_state']=='checking' and row['check_expires']>time.time():
+        if _check_active(row):
             raise ImportProblem('Wait for Check to finish before refreshing the existing record.')
         if not row['existing_record_id']:
             raise ImportProblem('This draft does not complete an existing collection record.')
@@ -1016,7 +1050,7 @@ def _draft_image(db,batch_id,item_id,field,folder,revision=None,trimmed=None):
     _editable_source(db,batch,row)
     if revision is not None and row['revision']!=revision:
         raise ImportProblem('This draft changed or was released. Reopen the photo editor.',code='draft_changed')
-    if row['check_state']=='checking' and row['check_expires']>time.time():
+    if _check_active(row):
         raise ImportProblem('Wait for Check to finish before editing draft photos.')
     fields=json.loads(row['fields_json']);filename=fields.get(field)
     if not filename or (trimmed is not None and filename!=trimmed):
@@ -1098,7 +1132,7 @@ def select_photo(db,batch_id,item_id,revision,field,filename,folder):
         _editable_source(db,batch,row)
         if row['revision']!=revision:
             raise ImportProblem('This draft changed or was released. Reload it before choosing a photo.',code='draft_changed')
-        if row['check_state']=='checking' and row['check_expires']>time.time():
+        if _check_active(row):
             raise ImportProblem('Wait for Check to finish before choosing draft photos.')
         existing=json.loads(row['existing_snapshot_json'] or '{}')
         if not banknote_catalog_lookup.is_blank(existing.get(field)):
@@ -1163,7 +1197,10 @@ def _source_inputs(db,row,fields,folder,classify):
         return saved['source'] if saved else filename
     current_urls=set(json.loads(capture['images_json'])) if capture else set()
     needs_identity=row['state']=='blocked' and not _review_note_title(source.get('title') or '')
-    inspected=[asset for asset in assets if asset['source_url'] in current_urls] if needs_identity else assets
+    # Retained originals remain available for review, but a refreshed listing
+    # must not promote a removed photo into an empty side. Existing selected
+    # images still enter the classifier separately as saved references.
+    inspected=[asset for asset in assets if asset['source_url'] in current_urls]
     chosen=banknote_photo_sides.select(inspected,folder,classify,existing=fields,resolve_original=original)
     warnings.extend(chosen['warnings'])
     photos={field:asset['filename'] for field,asset in chosen['images'].items() if not fields.get(field)}
@@ -1182,7 +1219,7 @@ def _source_inputs(db,row,fields,folder,classify):
     return dict(evidence=evidence,reports=['Exact order item isolated from sibling purchases.'],warnings=warnings,
                 documents=[],images={},vision_images=vision_images,purchase=purchase,
                 purchase_price_fill_only=True,purchase_price_blocked=not bool(paid),
-                _note_identity=identity),assets,photos
+                _note_identity=identity,_current_gallery=inspected),assets,photos
 
 
 def _verify_original_assets(assets,folder):
@@ -1194,7 +1231,8 @@ def _verify_original_assets(assets,folder):
             raise ImportProblem('An original listing photo changed while checking. Your draft was kept; retry Check.')
 
 
-def _saved_preview_crop(db,row,asset,folder):
+def _saved_preview_crop(db,row,asset,folder,*,retry=False):
+    if retry:return None
     photos=_listing_preview_sources(db,row,json.loads(row['source_json']))
     cached=db.execute('''SELECT * FROM banknote_import_photo_previews WHERE item_id=? AND source_url=?
         AND source_digest=? AND capture_digest=? AND source_sha256=? AND filename!=source_filename''',
@@ -1207,23 +1245,25 @@ def _saved_preview_crop(db,row,asset,folder):
     return dict(data=raw,quad=json.loads(cached['quad_json']))
 
 
-def _uncropped_draft_photos(db,row,fields,assets):
-    """Retry only untouched originals retained after an inconclusive arrival crop."""
+def _uncropped_draft_photos(db,row,fields,assets,*,retry_automatic=False):
+    """Check retries originals; explicit Crop photos may replace automatic crops."""
     selected=json.loads(row['manual_photos_json'] or '{}')
     existing=json.loads(row['existing_snapshot_json'] or '{}')
     originals={asset['filename'] for asset in assets}
     result={}
     for field in ('image_1','image_2'):
         filename=fields.get(field)
-        if (not filename or filename not in originals or selected.get(field)
+        if (not filename or selected.get(field)
                 or not banknote_catalog_lookup.is_blank(existing.get(field))):
             continue
-        if db.execute('SELECT 1 FROM trimmed_image_sources WHERE trimmed=?',(filename,)).fetchone():
-            continue
-        if db.execute('SELECT 1 FROM banknote_import_image_edits WHERE item_id=? AND field=?',
-                      (row['id'],field)).fetchone():
-            continue
-        result[field]=filename
+        edit=db.execute('''SELECT source_filename FROM banknote_import_image_edits
+            WHERE item_id=? AND field=? AND filename=?''',(row['id'],field,filename)).fetchone()
+        trimmed=db.execute('SELECT source FROM trimmed_image_sources WHERE trimmed=?',(filename,)).fetchone()
+        if retry_automatic:
+            original=edit['source_filename'] if edit else trimmed['source'] if trimmed else filename
+            if original in originals:result[field]=original
+        elif filename in originals and not trimmed and not edit:
+            result[field]=filename
     return result
 
 
@@ -1239,22 +1279,23 @@ def queue_photo_retries(db,batch_id):
             except ImportProblem:continue
             fields=json.loads(row['fields_json'])
             assets=[dict(asset) for asset in db.execute('SELECT * FROM banknote_import_assets WHERE item_id=?',(row['id'],))]
-            if all(fields.get(field) for field in ('image_1','image_2')) and not _uncropped_draft_photos(db,row,fields,assets):continue
-            db.execute("UPDATE banknote_import_items SET check_state=?,check_token=NULL,check_expires=0 WHERE id=?",
-                       ('queued' if row['state']=='blocked' else 'idle',row['id']))
+            if all(fields.get(field) for field in ('image_1','image_2')) and not _uncropped_draft_photos(db,row,fields,assets,retry_automatic=True):continue
+            db.execute("UPDATE banknote_import_items SET check_state='queued',retry_photos=1,check_token=NULL,check_expires=0 WHERE id=?",
+                       (row['id'],))
         db.commit()
     except Exception:
         db.rollback();raise
 
 
 def queue_inspection_checks(db,batch_id):
-    """An explicit import/resume authorizes these details checks, never a GET."""
+    """Persist every eligible Check requested by import/resume before dispatch."""
     db.execute('BEGIN IMMEDIATE')
     try:
-        _batch(db,batch_id)
-        for row in db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND state='blocked' AND check_state='idle' LIMIT 25",(batch_id,)).fetchall():
-            if can_check(db,row):
-                db.execute("UPDATE banknote_import_items SET check_state='queued' WHERE id=?",(row['id'],))
+        batch=_batch(db,batch_id)
+        for row in db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND state IN ('draft','blocked') AND check_state='idle' LIMIT 25",(batch_id,)).fetchall():
+            try:_check_context(db,batch,row)
+            except ImportProblem:continue
+            db.execute("UPDATE banknote_import_items SET check_state='queued' WHERE id=?",(row['id'],))
         db.commit()
     except Exception:
         db.rollback();raise
@@ -1265,6 +1306,7 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
     created=[]
     retained=set()
     committed=False
+    checkpointed=False
     try:
         batch,row=_item(db,batch_id,item_id)
         context=_check_context(db,batch,row)
@@ -1276,7 +1318,8 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         if inspection:
             prepared.update(purchase={},purchase_price_blocked=True,
                 evidence=[entry for entry in prepared['evidence'] if entry['kind']=='listing'])
-        retries=_uncropped_draft_photos(db,row,fields,assets) if retry_uncropped else {}
+        retry_automatic=bool(row['retry_photos'])
+        retries=_uncropped_draft_photos(db,row,fields,assets,retry_automatic=retry_automatic) if retry_uncropped or retry_automatic else {}
         photos.update(retries)
         # Save source photographs before the slower catalogue call. A provider
         # failure or restart must not discard the already captured originals.
@@ -1289,6 +1332,7 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
             db.execute('''INSERT OR IGNORE INTO banknote_import_assets(item_id,source_url,filename,sha256,width,height,position)
                 VALUES(?,?,?,?,?,?,?)''',(item_id,asset['source_url'],asset['filename'],asset['sha256'],asset.get('width'),asset.get('height'),asset['position']))
         db.commit()
+        current_gallery=prepared.pop('_current_gallery',[])
         identity=prepared.pop('_note_identity',{})
         if needs_identity and not _valid_note_identity(db,row,identity):
             raise ImportProblem('The original photos could not verify one banknote with a clear front and back. No draft fields or selected photos were changed; refresh the listing evidence and retry Check.')
@@ -1300,7 +1344,8 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
             used={note.get(field) for field in ('image_1','image_2') if note.get(field)}
             for field in ('image_1','image_2'):
                 if not note.get(field):
-                    candidate=next((asset['filename'] for asset in assets if asset['filename'] not in used),None)
+                    current_urls={entry['source_url'] for entry in current_gallery}
+                    candidate=next((asset['filename'] for asset in assets if asset['source_url'] in current_urls and asset['filename'] not in used),None)
                     if candidate:
                         note[field]=candidate;used.add(candidate);note['_inspection_unassigned_photos']=True
         result=evaluate(note,prepared)
@@ -1308,6 +1353,75 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         if inspection:
             result=dict(result,filled={field:value for field,value in result.get('filled',{}).items()
                                       if field in _INSPECTION_FIELDS})
+        def publish(outgoing_photos,display_edits,expected_images,*,final):
+            nonlocal revision
+            db.execute('BEGIN IMMEDIATE')
+            batch,current=_item(db,batch_id,item_id)
+            current_context=_check_context(db,batch,current)
+            if (current_context!=context or current['revision']!=revision or current['check_token']!=token or current['check_expires']<=time.time()):
+                raise ImportProblem('The draft changed while Check was running. Your edits were kept; press Check again.')
+            _verify_original_assets(assets,folder)
+            if needs_identity and not _valid_note_identity(db,current,identity):
+                raise ImportProblem('The verified note photos or listing changed while Check was running. Your draft was kept; retry Check.')
+            current_fields=json.loads(current['fields_json'])
+            filled={} if checkpointed else result.get('filled',{})
+            applied=set()
+            for field,value in {**outgoing_photos,**filled}.items():
+                retry_crop=(field in display_edits and field in expected_images
+                            and current_fields.get(field)==expected_images[field])
+                if field in note and (banknote_catalog_lookup.is_blank(current_fields.get(field)) or retry_crop):
+                    current_fields[field]=value
+                    applied.add(field)
+            for field,edit in display_edits.items():
+                if current_fields.get(field)!=edit['filename']:
+                    continue
+                db.execute('''INSERT INTO banknote_import_image_edits
+                    (filename,item_id,field,base_filename,source_filename,quad_json,sha256,created_at)
+                    VALUES(?,?,?,?,?,?,?,?)''',(edit['filename'],item_id,field,edit['source'],edit['source'],
+                    edit['quad'],edit['sha256'],time.time()))
+                db.execute('INSERT INTO trimmed_image_sources(trimmed,source,quad) VALUES(?,?,?)',
+                    (edit['filename'],edit['source'],edit['quad']))
+                retained.add(edit['filename'])
+            proofs={field:proof for field,proof in result.get('catalogue',{}).get('fields',{}).items()
+                    if field in filled and current_fields.get(field)==proof.get('value')
+                    and (not inspection or field in applied)}
+            if proofs:
+                current_fields['note_references_research']=banknote_catalog_proposals.append_reference_notes(
+                    current_fields.get('note_references_research'),proofs,banknote_catalog_lookup.identity_snapshot(current_fields),time.strftime('%Y-%m-%d',time.gmtime()))
+                for field,proof in proofs.items():
+                    db.execute('''INSERT OR REPLACE INTO banknote_import_evidence
+                        (item_id,field,value_json,proof_json,accepted_at,identity_json) VALUES(?,?,?,?,?,?)''',
+                        (item_id,field,_json(proof['value']),_json(proof),time.time(),_json(banknote_catalog_lookup.identity_snapshot(current_fields))))
+            for asset in assets:
+                db.execute('''INSERT OR IGNORE INTO banknote_import_assets(item_id,source_url,filename,sha256,width,height,position)
+                    VALUES(?,?,?,?,?,?,?)''',(item_id,asset['source_url'],asset['filename'],asset['sha256'],asset.get('width'),asset.get('height'),asset['position']))
+            warnings=list(dict.fromkeys(prepared['warnings']+[result['lookup_error']] if result.get('lookup_error') else prepared['warnings']))
+            missing=[label for field,label in (('country','country'),('denomination','denomination'))
+                     if banknote_catalog_lookup.is_blank(current_fields.get(field))]
+            if all(banknote_catalog_lookup.is_blank(current_fields.get(field)) for field in ('pick_number','other_catalog')):
+                missing.append('catalogue number')
+            if missing:
+                warnings.append('Check could not confirm '+', '.join(missing)+'. Review the listing and original photos or retry Check.')
+            if _manually_selected_pair(current_fields,json.loads(current['manual_photos_json'] or '{}')):
+                warnings=[warning for warning in warnings if warning not in PHOTO_SIDE_WARNINGS]
+            db.execute('''UPDATE banknote_import_items SET fields_json=?,note_identity_json=?,revision=revision+1,updated_at=? WHERE id=?''',
+                (_json(current_fields),_json(identity) if needs_identity else current['note_identity_json'],time.time(),item_id))
+            if final:
+                db.execute('''UPDATE banknote_import_items SET check_state=?,check_message=?,retry_photos=0,
+                    check_token=NULL,check_expires=0,checked_at=? WHERE id=?''',
+                    ('partial' if warnings else 'done',' '.join(warnings),time.time(),item_id))
+            else:
+                db.execute('''UPDATE banknote_import_items SET check_message=?,check_expires=? WHERE id=?''',
+                    ('Note details saved; preparing display crops.',time.time()+CHECK_TTL,item_id))
+            db.commit()
+            revision+=1
+            return current_fields
+
+        # Optional crop latency must not erase completed identification. The
+        # checkpoint retains the active token and advances its revision, so a
+        # refresh/new writer still invalidates only the remaining crop work.
+        expected_images=publish(photos,{}, {},final=False)
+        checkpointed=True
         # Vision reads the full saved originals first. Display preparation is
         # for newly selected empty slots or an explicit retry of an untouched
         # original. Accepted crops, manual choices and collection photos stay put.
@@ -1317,12 +1431,16 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         if prepare_photo:
             crop_note={**note,**result.get('filled',{})}
             for field,source in list(photos.items()):
+                active=db.execute('SELECT revision,check_token,check_expires FROM banknote_import_items WHERE id=?',(item_id,)).fetchone()
+                if (not active or active['revision']!=revision or active['check_token']!=token
+                        or active['check_expires']<=time.time()):
+                    raise ImportProblem('Automatic cropping was interrupted; the saved note details and originals were kept. Retry Crop photos.')
                 try:
                     raw=(Path(folder)/source).read_bytes()
                     asset=next(asset for asset in assets if asset['filename']==source)
                     if hashlib.sha256(raw).hexdigest()!=asset['sha256']:
                         raise ValueError('Source image changed')
-                    crop=_saved_preview_crop(db,row,asset,folder) or prepare_photo(raw,crop_note)
+                    crop=_saved_preview_crop(db,row,asset,folder,retry=retry_automatic) or prepare_photo(raw,crop_note)
                     if not crop:continue
                     filename=uuid.uuid4().hex+'.jpg';path=Path(folder)/filename
                     created.append(path);path.write_bytes(crop['data'])
@@ -1331,59 +1449,17 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
                     photos[field]=filename
                 except Exception:
                     prepared['warnings'].append('An imported photo could not be cropped; its original was retained.')
-        db.execute('BEGIN IMMEDIATE')
-        batch,current=_item(db,batch_id,item_id)
-        current_context=_check_context(db,batch,current)
-        if (current_context!=context or current['revision']!=revision or current['check_token']!=token or current['check_expires']<=time.time()):
-            raise ImportProblem('The draft changed while Check was running. Your edits were kept; press Check again.')
-        _verify_original_assets(assets,folder)
-        if needs_identity and not _valid_note_identity(db,current,identity):
-            raise ImportProblem('The verified note photos or listing changed while Check was running. Your draft was kept; retry Check.')
-        current_fields=json.loads(current['fields_json'])
-        applied=set()
-        for field,value in {**photos,**result.get('filled',{})}.items():
-            retry_crop=(field in retries and field in display_edits
-                        and current_fields.get(field)==retries[field])
-            if field in note and (banknote_catalog_lookup.is_blank(current_fields.get(field)) or retry_crop):
-                current_fields[field]=value
-                applied.add(field)
-        for field,edit in display_edits.items():
-            if current_fields.get(field)!=edit['filename']:
-                continue
-            db.execute('''INSERT INTO banknote_import_image_edits
-                (filename,item_id,field,base_filename,source_filename,quad_json,sha256,created_at)
-                VALUES(?,?,?,?,?,?,?,?)''',(edit['filename'],item_id,field,edit['source'],edit['source'],
-                edit['quad'],edit['sha256'],time.time()))
-            db.execute('INSERT INTO trimmed_image_sources(trimmed,source,quad) VALUES(?,?,?)',
-                (edit['filename'],edit['source'],edit['quad']))
-            retained.add(edit['filename'])
-        proofs={field:proof for field,proof in result.get('catalogue',{}).get('fields',{}).items()
-                if field in result.get('filled',{}) and current_fields.get(field)==proof.get('value')
-                and (not inspection or field in applied)}
-        if proofs:
-            current_fields['note_references_research']=banknote_catalog_proposals.append_reference_notes(
-                current_fields.get('note_references_research'),proofs,banknote_catalog_lookup.identity_snapshot(current_fields),time.strftime('%Y-%m-%d',time.gmtime()))
-            for field,proof in proofs.items():
-                db.execute('''INSERT OR REPLACE INTO banknote_import_evidence
-                    (item_id,field,value_json,proof_json,accepted_at,identity_json) VALUES(?,?,?,?,?,?)''',
-                    (item_id,field,_json(proof['value']),_json(proof),time.time(),_json(banknote_catalog_lookup.identity_snapshot(current_fields))))
-        for asset in assets:
-            db.execute('''INSERT OR IGNORE INTO banknote_import_assets(item_id,source_url,filename,sha256,width,height,position)
-                VALUES(?,?,?,?,?,?,?)''',(item_id,asset['source_url'],asset['filename'],asset['sha256'],asset.get('width'),asset.get('height'),asset['position']))
-        warnings=list(dict.fromkeys(prepared['warnings']+[result['lookup_error']] if result.get('lookup_error') else prepared['warnings']))
-        if _manually_selected_pair(current_fields,json.loads(current['manual_photos_json'] or '{}')):
-            warnings=[warning for warning in warnings if warning not in PHOTO_SIDE_WARNINGS]
-        db.execute('''UPDATE banknote_import_items SET fields_json=?,note_identity_json=?,revision=revision+1,check_state=?,check_message=?,
-            check_token=NULL,check_expires=0,checked_at=?,updated_at=? WHERE id=?''',
-            (_json(current_fields),_json(identity) if needs_identity else current['note_identity_json'],
-             'partial' if warnings else 'done',' '.join(warnings),time.time(),time.time(),item_id))
-        db.commit()
+        publish(photos,display_edits,expected_images,final=True)
         committed=True
     except Exception as error:
         db.rollback()
         message=str(error) if isinstance(error,ImportProblem) else 'Check could not finish. Your saved draft was kept; retry Check.'
-        db.execute("UPDATE banknote_import_items SET check_state='failed',check_message=?,check_token=NULL,check_expires=0 WHERE id=? AND check_token=?",
-                   (message,item_id,token));db.commit()
+        state='failed'
+        if checkpointed:
+            state='partial'
+            message='The note details and original photos were saved, but automatic cropping did not finish. Use Crop photos to retry.'
+        db.execute("UPDATE banknote_import_items SET check_state=?,check_message=?,check_token=NULL,check_expires=0 WHERE id=? AND check_token=?",
+                   (state,message,item_id,token));db.commit()
     finally:
         db.close()
         for path in created:
@@ -1427,7 +1503,7 @@ def release(db,batch_id,selected,folder,create,*,automatic_single=False):
             if row['state']=='released':
                 released.append(dict(id=row['id'],record_id=row['released_record_id']));continue
             if row['state'] not in ('draft','blocked') or row['revision']!=entry['revision']:raise ImportProblem('A selected draft changed. Review the latest version before release.',code='draft_changed')
-            if row['check_state']=='checking' and row['check_expires']>time.time():raise ImportProblem('Wait for Check to finish before releasing this draft.')
+            if _check_active(row):raise ImportProblem('Wait for Check to finish before releasing this draft.')
             source=_editable_source(db,batch,row)
             _verify_original_assets([dict(asset) for asset in db.execute(
                 'SELECT * FROM banknote_import_assets WHERE item_id=?',(row['id'],))],folder)

@@ -235,6 +235,55 @@ function page(initial, replies = [], item, formFields = []) {
   assert.equal(waitingInspection.timers.length, 1, 'Explicitly queued metadata work keeps polling while waiting for a worker');
   assert.equal(waitingInspection.elements.banknoteImportState.textContent, 'Waiting to check…');
   assert.equal(waitingInspection.elements.banknoteImportCheck.disabled, true);
+  const unchecked = draft({check_state: 'idle'});
+  const idleNormal = page(batch({state: 'review', items: [unchecked]}));
+  assert.match(content(idleNormal.list), /Not checked/);
+  assert.match(idleNormal.status.textContent, /1 item has not been checked/);
+  assert.equal(idleNormal.timers.length, 0, 'Idle alone does not claim queued work or poll forever');
+  const queueField = {name: 'country', value: '', tagName: 'INPUT', handlers: {},
+    addEventListener(name, fn) { this.handlers[name] = fn; }};
+  const queuedNormal = draft({revision: 1, check_state: 'queued'});
+  const runningNormal = {...queuedNormal, check_state: 'checking'};
+  const completedNormal = {...queuedNormal, revision: 2, check_state: 'done', fields: {country: 'Spain'}};
+  const queuedUi = page(batch({state: 'review', message: 'Review each item before releasing it.', items: [queuedNormal]}),
+    [batch({state: 'review', items: [runningNormal]}), batch({state: 'review', items: [completedNormal]})], queuedNormal, [queueField]);
+  assert.equal(queuedUi.elements.banknoteImportState.textContent, 'Waiting to check…');
+  assert.equal(queuedUi.elements.banknoteImportSave.disabled, true);
+  assert.equal(queuedUi.elements.banknoteImportCheck.disabled, true);
+  assert.equal(queuedUi.elements.banknoteImportRelease.disabled, true);
+  assert.equal(queueField.disabled, true);
+  assert.match(queuedUi.elements.banknoteImportImageHelp.textContent, /Waiting to check/);
+  await queuedUi.timers.shift()();
+  assert.equal(queuedUi.elements.banknoteImportState.textContent, 'Checking…');
+  await queuedUi.timers.shift()();
+  assert.equal(queuedUi.elements.banknoteImportState.textContent, 'Saved draft');
+  assert.equal(queueField.value, 'Spain');
+  assert.equal(queueField.disabled, false);
+  assert.equal(queuedUi.elements.banknoteImportRelease.disabled, false);
+  assert.equal(queuedUi.timers.length, 0);
+  assert.deepEqual(queuedUi.requests.map(request => request.method), ['GET','GET'], 'Queue progress never replays work or releases items');
+  const queueSummary = page(batch({state: 'review', message: 'Review each item before releasing it.',
+    items: [queuedNormal, {...runningNormal, id:'other'}]}));
+  assert.match(queueSummary.status.textContent, /1 item checking photos and details.*1 item waiting to check/);
+  const failedWarning = {...reviewable, check_state:'failed', warnings:['The provider failed; retry Check.']};
+  const partialWarning = {...reviewable, check_state:'partial', warnings:['A photo side needs review.']};
+  for (const [pendingItem,label,summary] of [[failedWarning,'Check needs retry',/Some Checks did not finish/],
+      [partialWarning,'Review needed',/Some items need review/]]) {
+    const detailUi = page(batch({state:'review',items:[pendingItem]}),[],pendingItem);
+    assert.equal(detailUi.elements.banknoteImportState.textContent,label,'A purchase warning must not hide the Check result');
+    assert.equal(detailUi.elements.banknoteImportCheck.disabled,false);
+    assert.match(content(detailUi.elements.banknoteImportWarnings),/provider failed|photo side/);
+    const listUi=page(batch({state:'review',message:'Review each item before releasing it.',items:[pendingItem]}));
+    assert.match(listUi.status.textContent,summary);
+    assert.equal(listUi.timers.length,0,'Terminal results do not poll or rerun the provider');
+  }
+  for (const [previewState,label] of [['failed','Crop needs retry'],['partial','Review photos']]) {
+    const cropFailure={...blockedDraft,check_state:'idle',preview_state:previewState};
+    const cropUi=page(batch({state:'review',items:[cropFailure]}));
+    assert.match(content(cropUi.list),new RegExp(label));
+    assert.match(cropUi.status.textContent,/photo crops need review.*Crop photos/);
+    assert.equal(cropUi.timers.length,0);
+  }
   const prohibitedInspection = page(batch({state: 'review', items: [blockedDraft]}), [], blockedDraft);
   await prohibitedInspection.elements.banknoteImportCheck.handlers.click();
   await prohibitedInspection.elements.banknoteImportRelease.handlers.click();
