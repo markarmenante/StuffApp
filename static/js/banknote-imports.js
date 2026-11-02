@@ -161,12 +161,13 @@
       window.ensureBanknoteCropControl?.(panel);
     });
   }
-  const checkRunning = draft => draft.check_state === 'checking';
+  const canCheck = draft => draft.can_check ?? draft.state === 'draft';
+  const checkRunning = draft => ['queued', 'checking'].includes(draft.check_state);
   const previewRunning = draft => ['queued','checking'].includes(draft.preview_state);
   const batchRunning = () => batch.processing_single === true || ['queued', 'sign_in_required', 'challenge_required'].includes(batch.state)
-    || (batch.items || []).some(draft => previewRunning(draft) || (draft.state === 'draft' && ['idle', 'checking'].includes(draft.check_state)));
-  const stateLabel = draft => draft.state === 'released' ? 'In collection' : previewRunning(draft) ? 'Cropping photos…' : draft.state === 'blocked'
-    ? 'Needs attention' : checkRunning(draft) ? 'Checking…' : draft.check_state === 'failed'
+    || (batch.items || []).some(draft => previewRunning(draft) || checkRunning(draft) || (draft.state === 'draft' && draft.check_state === 'idle'));
+  const stateLabel = draft => draft.state === 'released' ? 'In collection' : draft.check_state === 'queued' ? 'Waiting to check…' : checkRunning(draft) ? 'Checking…' : previewRunning(draft) ? 'Cropping photos…' : draft.state === 'blocked'
+    ? 'Needs attention' : draft.check_state === 'failed'
     ? 'Check needs retry' : draft.check_state === 'partial' ? 'Review needed' : 'Saved draft';
   const collectionUrl = draft => draft.collection_url || '/banknotes/' + encodeURIComponent(draft.released_record_id)
     + '?report_back=' + encodeURIComponent(batchUrl);
@@ -397,7 +398,9 @@
         const link = el('a', 'Edit photos in collection');
         link.href = sameOrigin(collectionUrl(item)); imageHelp.append(link);
       } else if (item.state === 'blocked') {
-        imageHelp.textContent = 'This item is blocked. Photos are for inspection only. Use Crop photos on Order review to retry their crops. Review the purchase warning above and use Refresh eBay order after resolving it.';
+        imageHelp.textContent = canCheck(item)
+          ? 'Use Check to fill missing banknote details from the listing and original photos. The purchase still needs review before release. Use Refresh eBay order on Order review after resolving the warning.'
+          : 'This item is blocked. Photos are for inspection only. Use Crop photos on Order review to retry their crops. Review the purchase warning above and use Refresh eBay order after resolving it.';
       } else if (hasPreviews) {
         imageHelp.textContent = 'Listing photos below are previews. Use Check to save photos before selecting front and back.';
       } else {
@@ -432,8 +435,8 @@
     });
     document.getElementById('banknoteImportSave').disabled = !editable || busy || Boolean(saving);
     const check = document.getElementById('banknoteImportCheck');
-    check.disabled = !editable || busy || checkRunning(item) || Boolean(conflict);
-    check.textContent = checkRunning(item) ? 'Checking…' : item.check_state === 'failed' ? 'Retry Check' : '✓ Check';
+    check.disabled = !canCheck(item) || busy || checkRunning(item) || Boolean(conflict);
+    check.textContent = item.check_state === 'queued' ? 'Waiting to check…' : checkRunning(item) ? 'Checking…' : item.check_state === 'failed' ? 'Retry Check' : '✓ Check';
     const release = document.getElementById('banknoteImportRelease');
     release.disabled = !editable || busy || checkRunning(item) || Boolean(conflict) || Boolean(existingChanges().length);
     release.textContent = busyAction === 'release' ? 'Releasing…' : 'Release to Collection';
@@ -679,7 +682,7 @@
     });
     document.getElementById('banknoteImportSave').addEventListener('click', () => saveDraft().catch(error => say(error.message,true)));
     document.getElementById('banknoteImportCheck').addEventListener('click', async () => {
-      if (busy || checkRunning(item)) return;
+      if (!canCheck(item) || busy || checkRunning(item)) return;
       busy = true; renderDetail();
       try {
         await saveDraft();

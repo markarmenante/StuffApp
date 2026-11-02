@@ -51,6 +51,25 @@ excluded purchases remain protected. A normal collection Check retains its stric
 rejection; this handling applies only to a verified checkout import.
 A partial or old-reader response without checkout membership is rejected atomically.
 
+eBay's **Multiple items; shipment or delivery not confirmed** group-status warning
+does not prevent identifying a positively recognized single banknote. With fresh
+exact listing evidence, verified account/membership and no quantity, bundle,
+duplicate or collection-link conflict, **Check** may read the full original photos
+and fill blank note-identification, grading and supported catalogue fields. It may
+also prepare classified front/back display images, reusing an accepted preview
+crop when the original hash and current capture agree. The item remains blocked:
+its warning, purchase facts and missing paid amount stay unchanged, and Save,
+manual photo selection and Release remain unavailable. Model output cannot supply
+image paths or modify purchase/status/owner fields. Other purchase warnings and
+ambiguous item types retain their existing restrictions.
+
+Eligible detail checks queue durably on explicit import/resume, or start through
+the item's Check control. Reading a saved order never schedules work. Every write
+rechecks the draft revision/token, exact source, full listing-capture fingerprint
+and original-photo hashes. If side identification is uncertain, unassigned full
+listing photos still supply metadata evidence but do not become selected image
+slots. Accepted crops continue resolving to their full originals on later Check.
+
 All source drafts are committed before automatic Check begins. Single-note drafts
 are the durable processing record; successful or partially enriched known notes
 finish automatically under the rules above. Multiple-item drafts remain isolated
@@ -65,14 +84,16 @@ ambiguous quantities and bundles stay visible but blocked from release as one no
 
 Before original photographs have been retained, review cards and Purchased photos
 can show previews from the fresh, verified exact-listing capture. This includes
-items blocked by a purchase-status warning. Import/resume and explicit refresh
-prepare cropped previews of the first two listing photos for these blocked items,
+items blocked by a purchase-status warning. Eligible single-note detail checks
+prepare their normal display photographs. For other blocked items, import/resume
+and explicit refresh prepare cropped previews of the first two listing photos,
 using the normal arrival crop pipeline. The **Crop photos** button on Order review
 retries these previews and untouched original photos on editable siblings without
 rereading the eBay order. Accepted crops and manual photo choices stay unchanged.
 Blocked previews retain their full originals separately; opening a preview shows
 that original and its grading label. They remain inspection-only, never selected
-front/back photos, and cannot supply a purchase price or enable Check or Release.
+front/back photos, and cannot supply a purchase price or enable Release. The
+separate exact-item eligibility rule above determines whether Check is available.
 Viewing previews never fetches images
 on the server, runs Check, accepts a price or changes a draft. Expired captures,
 changed source identity, account or membership, excluded purchases and ambiguous

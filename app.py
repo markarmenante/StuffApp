@@ -21683,7 +21683,10 @@ def _start_import_previews(batch_id,*,retry=False):
     # work even when both shared provider slots are occupied by normal Check.
     db=get_db();jobs=[]
     banknote_imports._batch(db,batch_id)
-    for row in db.execute("SELECT id FROM banknote_import_items WHERE batch_id=? AND state='blocked' ORDER BY created_at,item_id LIMIT 25",(batch_id,)).fetchall():
+    for row in db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND state='blocked' ORDER BY created_at,item_id LIMIT 25",(batch_id,)).fetchall():
+        # Exact single-banknote status warnings now use original-first Check,
+        # which also prepares their display photos. Do not race its revision.
+        if banknote_imports.can_check(db,row):continue
         try:token=banknote_imports.claim_previews(db,batch_id,row['id'],retry=retry)
         except banknote_imports.ImportProblem:continue
         if token:jobs.append((row['id'],token))
@@ -21703,6 +21706,7 @@ def _start_import_previews(batch_id,*,retry=False):
 def _start_import_checks(batch_id,*,retry_photos=False):
     if os.environ.get('BANKNOTE_IMPORT_WORKER','1')=='0' and not retry_photos:return
     if retry_photos:banknote_imports.queue_photo_retries(get_db(),batch_id)
+    banknote_imports.queue_inspection_checks(get_db(),batch_id)
     _start_import_previews(batch_id,retry=retry_photos)
     with _IMPORT_BATCH_LOCK:
         if batch_id in _IMPORT_BATCH_THREADS:return
@@ -21711,18 +21715,18 @@ def _start_import_checks(batch_id,*,retry_photos=False):
         try:
             with app.app_context():
                 db=get_db()
-                rows=db.execute("SELECT id,revision FROM banknote_import_items WHERE batch_id=? AND state='draft' AND check_state='idle' ORDER BY created_at,item_id LIMIT 25",(batch_id,)).fetchall()
+                rows=db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND ((state='draft' AND check_state='idle') OR (state='blocked' AND check_state='queued')) ORDER BY created_at,item_id LIMIT 25",(batch_id,)).fetchall()
                 for row in rows:
                     # At most two provider jobs across all imports. Unclaimed
                     # rows stay idle/durable if this coordinator is interrupted.
                     banknote_imports._CHECK_SLOTS.acquire()
                     current=db.execute('SELECT revision,check_state FROM banknote_import_items WHERE id=?',(row['id'],)).fetchone()
-                    if not current or current['check_state']!='idle':
+                    if not current or current['check_state'] not in ('idle','queued'):
                         banknote_imports._CHECK_SLOTS.release();continue
                     revision=current['revision']
                     try:token=banknote_imports.claim_check(db,batch_id,row['id'],revision)
                     except Exception:
-                        db.execute("UPDATE banknote_import_items SET check_state='failed',check_message=? WHERE id=? AND check_state='idle'",
+                        db.execute("UPDATE banknote_import_items SET check_state='failed',check_message=? WHERE id=? AND check_state IN ('idle','queued')",
                                    ('The draft changed before automatic Check started. Your edits were kept; press Check to retry.',row['id']))
                         db.commit()
                         banknote_imports._CHECK_SLOTS.release();continue
@@ -27903,9 +27907,11 @@ def fetch_banknote_specs(note):
     # The UNTRIMMED uploads are what the model sees — the stored files
     # are trimmed to the bare note on upload, and the holder label the
     # grading fields come from lives only on the original.
+    image_labels = ('listing photo 1 (side unconfirmed)', 'listing photo 2 (side unconfirmed)') \
+        if dict(note).get('_inspection_unassigned_photos') else ('front', 'back')
     images = _load_vision_images((
-        (_banknote_vision_source(_coin_row_value(note, 'image_1')), 'front'),
-        (_banknote_vision_source(_coin_row_value(note, 'image_2')), 'back'),
+        (_banknote_vision_source(_coin_row_value(note, 'image_1')), image_labels[0]),
+        (_banknote_vision_source(_coin_row_value(note, 'image_2')), image_labels[1]),
     ))
 
     # Images or a pasted dealer description are enough to identify a
@@ -43297,7 +43303,7 @@ with app.app_context():
     market_ebay_feed.init_schema(get_db())
     original_listings.init_schema(get_db())
     if os.environ.get('BANKNOTE_IMPORT_WORKER','1')!='0':
-        for batch in get_db().execute("SELECT DISTINCT i.batch_id FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE i.state='draft' AND (i.check_state='idle' OR (b.auto_single=1 AND i.check_state IN ('done','partial'))) LIMIT 25").fetchall():
+        for batch in get_db().execute("SELECT DISTINCT i.batch_id FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE (i.state='draft' AND (i.check_state='idle' OR (b.auto_single=1 AND i.check_state IN ('done','partial')))) OR (i.state='blocked' AND i.check_state='queued') LIMIT 25").fetchall():
             _finish_single_import(get_db(),batch[0])
             _start_import_checks(batch[0])
 

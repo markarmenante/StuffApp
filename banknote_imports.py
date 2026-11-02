@@ -37,6 +37,12 @@ _BUNDLE = re.compile(r'\b(?:set|bundle)\s*(?:of\s*)?'+_MULTIPLE+r'\b|\blot\s+of\
 _AUTO_AMBIGUOUS = re.compile(r'\b(?:set|bundle|pair|assortment|assorted|coins?|stamps?|medals?|empty|holder only)\b|\blot\s+(?:of\s+)?(?:notes|banknotes)\b|\bcollection\s+of\s+(?:\w+\s+){0,4}(?:notes|banknotes)\b|\b(?:notes|banknotes)\s+collection\b', re.I)
 _NOTE_TITLE = re.compile(r'\b(?:banknotes?|paper money|PMG|Friedberg)\b|\bPick\s*[#-]?\s*\d', re.I)
 _LISTING_PREVIEW_URL = re.compile(r'https://i\.ebayimg\.com/images/g/[\w~-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', re.ASCII)
+_INSPECTION_ATTENTION = frozenset(('multiple items; shipment or delivery not confirmed',))
+_INSPECTION_FIELDS = frozenset(('country','municipality','issue_type','issuer','official',
+    'denomination','series','pick_number','other_catalog','printer','signatures','serial_number',
+    'watermark','material','date_1','date_2','date_1_text','date_2_text','size_width','size_height',
+    'grade','grade_numeric','grading_authority','slab_number','grade_condition','grade_modifier',
+    'lettering','lettering_translation','obv_rev','condition','notes'))
 
 
 class ImportProblem(ValueError):
@@ -545,7 +551,7 @@ def _public_item(db, row):
     if check_state == 'checking' and row['check_expires'] <= time.time():
         check_state,message='failed','Check was interrupted or expired. Your draft was kept; press Check to retry.'
     warnings = [v for v in (row['warning'],message if check_state in ('failed','partial') else '') if v]
-    photos = [dict(url='/uploads/'+asset['filename'],filename=asset['filename'],selectable=True,source_url=asset['source_url'],position=asset['position'])
+    photos = [dict(url='/uploads/'+asset['filename'],filename=asset['filename'],selectable=row['state']!='blocked',source_url=asset['source_url'],position=asset['position'])
               for asset in db.execute('SELECT * FROM banknote_import_assets WHERE item_id=? ORDER BY position', (row['id'],))]
     existing_changes = []
     existing_version = None
@@ -589,7 +595,7 @@ def _public_item(db, row):
                 existing_record_url='/banknotes/'+row['existing_record_id'] if row.get('existing_record_id') else None,
                 check_message=message,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields,
                 manual_photos=json.loads(row.get('manual_photos_json') or '{}'),
-                preview_state=preview_state,
+                preview_state=preview_state,can_check=can_check(db,row),
                 image_sources={field:edit['source_filename'] for field,edit in _image_edits(db,row,fields).items()})
 
 
@@ -705,6 +711,44 @@ def _validate_source(db,batch,row):
     if reason:
         raise ImportProblem(reason)
     return dict(source)
+
+
+def _inspection_context(db,batch,row):
+    """Identify a known note behind eBay's group-status warning; never accept it."""
+    source=json.loads(row['source_json'])
+    photos=_listing_preview_sources(db,row,source)
+    if (row['state']!='blocked' or not photos or row['existing_record_id']
+            or source.get('attention','').lower() not in _INSPECTION_ATTENTION
+            or row['warning']!=_reason(source) or not _NOTE_TITLE.search(source.get('title') or '')
+            or _AUTO_AMBIGUOUS.search(source.get('title') or '') or _BUNDLE.search(source.get('title') or '')):
+        raise ImportProblem('This purchase needs review before its note details can be checked.')
+    current=db.execute('SELECT * FROM ebay_order_items WHERE line_key=?',(row['line_key'],)).fetchone()
+    if (not current or current['attention'].lower() not in _INSPECTION_ATTENTION
+            or _reason(dict(current))!=row['warning'] or current['quantity']!=1 or current['ignored']
+            or _existing_matches(db,source)
+            or db.execute('SELECT 1 FROM banknote_ebay_links WHERE line_key=?',(row['line_key'],)).fetchone()):
+        raise ImportProblem('This purchase identity needs review before its note details can be checked.')
+    capture=db.execute('SELECT * FROM ebay_listing_captures WHERE url=?',
+                       ('https://www.ebay.com/itm/'+row['item_id'],)).fetchone()
+    # Bind all evidence read by Check, not just gallery URLs. A newer capture
+    # must never lend its identity to an older in-flight model response.
+    return hashlib.sha256(_json(dict(capture)).encode()).hexdigest()
+
+
+def can_check(db,row):
+    if row['state']=='draft':return True
+    if row['state']!='blocked':return False
+    try:
+        _inspection_context(db,_batch(db,row['batch_id']),row)
+        return True
+    except ImportProblem:return False
+
+
+def _check_context(db,batch,row):
+    if row['state']=='blocked':return _inspection_context(db,batch,row)
+    if row['state']!='draft':raise ImportProblem('This item is no longer an editable draft.')
+    _validate_source(db,batch,row)
+    return None
 
 
 def save(db,batch_id,item_id,revision,updates,normalize):
@@ -940,11 +984,36 @@ def _source_inputs(db,row,fields,folder,classify):
                 assets.append(dict(asset,source_url=image_url,position=position))
             except Exception:warnings.append('An exact listing photograph could not be downloaded. Retry Check when the source is available.')
     else:warnings.append('The exact listing photos and description are unavailable. Retry the order read; your draft details were kept.')
-    chosen=banknote_photo_sides.select(assets,folder,classify,existing=fields)
+    def original(filename):
+        saved=db.execute('SELECT source FROM trimmed_image_sources WHERE trimmed=?',(filename,)).fetchone()
+        return saved['source'] if saved else filename
+    chosen=banknote_photo_sides.select(assets,folder,classify,existing=fields,resolve_original=original)
     warnings.extend(chosen['warnings'])
     photos={field:asset['filename'] for field,asset in chosen['images'].items() if not fields.get(field)}
     return dict(evidence=evidence,reports=['Exact order item isolated from sibling purchases.'],warnings=warnings,
                 documents=[],images={},purchase=purchase,purchase_price_fill_only=True,purchase_price_blocked=not bool(paid)),assets,photos
+
+
+def _verify_original_assets(assets,folder):
+    root=Path(folder).resolve()
+    for asset in assets:
+        path=root/asset['filename']
+        if (path.name!=asset['filename'] or path.resolve().parent!=root or not path.is_file()
+                or hashlib.sha256(path.read_bytes()).hexdigest()!=asset['sha256']):
+            raise ImportProblem('An original listing photo changed while checking. Your draft was kept; retry Check.')
+
+
+def _saved_preview_crop(db,row,asset,folder):
+    photos=_listing_preview_sources(db,row,json.loads(row['source_json']))
+    cached=db.execute('''SELECT * FROM banknote_import_photo_previews WHERE item_id=? AND source_url=?
+        AND source_digest=? AND capture_digest=? AND source_sha256=? AND filename!=source_filename''',
+        (row['id'],asset['source_url'],row['source_digest'],_preview_digest(photos),asset['sha256'])).fetchone()
+    if not cached:return None
+    path=Path(folder)/cached['filename']
+    if path.name!=cached['filename'] or path.resolve().parent!=Path(folder).resolve() or not path.is_file():return None
+    raw=path.read_bytes()
+    if hashlib.sha256(raw).hexdigest()!=cached['sha256']:return None
+    return dict(data=raw,quad=json.loads(cached['quad_json']))
 
 
 def _uncropped_draft_photos(db,row,fields,assets):
@@ -972,15 +1041,29 @@ def queue_photo_retries(db,batch_id):
     db.execute('BEGIN IMMEDIATE')
     try:
         batch=_batch(db,batch_id)
-        rows=db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND state='draft' LIMIT 25",(batch_id,)).fetchall()
+        rows=db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND state IN ('draft','blocked') LIMIT 25",(batch_id,)).fetchall()
         for row in rows:
             if row['check_state']=='checking' and row['check_expires']>time.time():continue
-            try:_validate_source(db,batch,row)
+            try:_check_context(db,batch,row)
             except ImportProblem:continue
             fields=json.loads(row['fields_json'])
             assets=[dict(asset) for asset in db.execute('SELECT * FROM banknote_import_assets WHERE item_id=?',(row['id'],))]
             if all(fields.get(field) for field in ('image_1','image_2')) and not _uncropped_draft_photos(db,row,fields,assets):continue
-            db.execute("UPDATE banknote_import_items SET check_state='idle',check_token=NULL,check_expires=0 WHERE id=?",(row['id'],))
+            db.execute("UPDATE banknote_import_items SET check_state=?,check_token=NULL,check_expires=0 WHERE id=?",
+                       ('queued' if row['state']=='blocked' else 'idle',row['id']))
+        db.commit()
+    except Exception:
+        db.rollback();raise
+
+
+def queue_inspection_checks(db,batch_id):
+    """An explicit import/resume authorizes these details checks, never a GET."""
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        _batch(db,batch_id)
+        for row in db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND state='blocked' AND check_state='idle' LIMIT 25",(batch_id,)).fetchall():
+            if can_check(db,row):
+                db.execute("UPDATE banknote_import_items SET check_state='queued' WHERE id=?",(row['id'],))
         db.commit()
     except Exception:
         db.rollback();raise
@@ -993,17 +1076,22 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
     committed=False
     try:
         batch,row=_item(db,batch_id,item_id)
-        _validate_source(db,batch,row)
+        context=_check_context(db,batch,row)
+        inspection=context is not None
         fields=json.loads(row['fields_json'])
         prepared,assets,photos=_source_inputs(db,row,fields,folder,classify)
+        if inspection:
+            _verify_original_assets(assets,folder)
+            prepared.update(purchase={},purchase_price_blocked=True,
+                evidence=[entry for entry in prepared['evidence'] if entry['kind']=='listing'])
         retries=_uncropped_draft_photos(db,row,fields,assets) if retry_uncropped else {}
         photos.update(retries)
         # Save source photographs before the slower catalogue call. A provider
         # failure or restart must not discard the already captured originals.
         db.execute('BEGIN IMMEDIATE')
         batch,current=_item(db,batch_id,item_id)
-        _validate_source(db,batch,current)
-        if current['state']!='draft' or current['check_token']!=token or current['check_expires']<=time.time():
+        current_context=_check_context(db,batch,current)
+        if current_context!=context or current['revision']!=revision or current['check_token']!=token or current['check_expires']<=time.time():
             raise ImportProblem('This draft Check expired. The draft was kept; press Check again.')
         for asset in assets:
             db.execute('''INSERT OR IGNORE INTO banknote_import_assets(item_id,source_url,filename,sha256,width,height,position)
@@ -1011,7 +1099,20 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         db.commit()
         note={column[1]:None for column in db.execute('PRAGMA table_info(banknotes)')}
         note.update(fields);note.update(photos);note.update(id=item_id,_check_sources=prepared)
+        if inspection:
+            # Uncertain sides must not suppress the original holder evidence.
+            # These temporary inputs never become selected display photographs.
+            used={note.get(field) for field in ('image_1','image_2') if note.get(field)}
+            for field in ('image_1','image_2'):
+                if not note.get(field):
+                    candidate=next((asset['filename'] for asset in assets if asset['filename'] not in used),None)
+                    if candidate:
+                        note[field]=candidate;used.add(candidate);note['_inspection_unassigned_photos']=True
         result=evaluate(note,prepared)
+        if inspection:
+            _verify_original_assets(assets,folder)
+            result=dict(result,filled={field:value for field,value in result.get('filled',{}).items()
+                                      if field in _INSPECTION_FIELDS})
         # Vision reads the full saved originals first. Display preparation is
         # for newly selected empty slots or an explicit retry of an untouched
         # original. Accepted crops, manual choices and collection photos stay put.
@@ -1026,7 +1127,7 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
                     asset=next(asset for asset in assets if asset['filename']==source)
                     if hashlib.sha256(raw).hexdigest()!=asset['sha256']:
                         raise ValueError('Source image changed')
-                    crop=prepare_photo(raw,crop_note)
+                    crop=_saved_preview_crop(db,row,asset,folder) or prepare_photo(raw,crop_note)
                     if not crop:continue
                     filename=uuid.uuid4().hex+'.jpg';path=Path(folder)/filename
                     created.append(path);path.write_bytes(crop['data'])
@@ -1037,15 +1138,18 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
                     prepared['warnings'].append('An imported photo could not be cropped; its original was retained.')
         db.execute('BEGIN IMMEDIATE')
         batch,current=_item(db,batch_id,item_id)
-        _validate_source(db,batch,current)
-        if (current['state']!='draft' or current['revision']!=revision or current['check_token']!=token or current['check_expires']<=time.time()):
+        current_context=_check_context(db,batch,current)
+        if (current_context!=context or current['revision']!=revision or current['check_token']!=token or current['check_expires']<=time.time()):
             raise ImportProblem('The draft changed while Check was running. Your edits were kept; press Check again.')
+        if inspection:_verify_original_assets(assets,folder)
         current_fields=json.loads(current['fields_json'])
+        applied=set()
         for field,value in {**photos,**result.get('filled',{})}.items():
             retry_crop=(field in retries and field in display_edits
                         and current_fields.get(field)==retries[field])
             if field in note and (banknote_catalog_lookup.is_blank(current_fields.get(field)) or retry_crop):
                 current_fields[field]=value
+                applied.add(field)
         for field,edit in display_edits.items():
             if current_fields.get(field)!=edit['filename']:
                 continue
@@ -1057,7 +1161,8 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
                 (edit['filename'],edit['source'],edit['quad']))
             retained.add(edit['filename'])
         proofs={field:proof for field,proof in result.get('catalogue',{}).get('fields',{}).items()
-                if field in result.get('filled',{}) and current_fields.get(field)==proof.get('value')}
+                if field in result.get('filled',{}) and current_fields.get(field)==proof.get('value')
+                and (not inspection or field in applied)}
         if proofs:
             current_fields['note_references_research']=banknote_catalog_proposals.append_reference_notes(
                 current_fields.get('note_references_research'),proofs,banknote_catalog_lookup.identity_snapshot(current_fields),time.strftime('%Y-%m-%d',time.gmtime()))
@@ -1092,8 +1197,8 @@ def claim_check(db,batch_id,item_id,revision):
     db.execute('BEGIN IMMEDIATE')
     try:
         batch,row=_item(db,batch_id,item_id)
-        _validate_source(db,batch,row)
-        if row['state']!='draft' or row['revision']!=revision:raise ImportProblem('The draft changed. Reload it before checking.',code='draft_changed')
+        _check_context(db,batch,row)
+        if row['revision']!=revision:raise ImportProblem('The draft changed. Reload it before checking.',code='draft_changed')
         if row['check_state']=='checking' and row['check_expires']>time.time():
             db.commit();return None
         token=uuid.uuid4().hex

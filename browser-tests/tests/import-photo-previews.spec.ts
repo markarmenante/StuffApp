@@ -1,7 +1,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
-const approvedImage = /^https:\/\/i\.ebayimg\.com\/images\/g\/fixture-199999999991-(?:front|back)\/s-l1600\.png$/;
+const approvedImage = /^https:\/\/i\.ebayimg\.com\/images\/g\/fixture-19999999999[13]-(?:front|back)\/s-l1600\.png$/;
 
 async function watchRequests(page: Page) {
   const actions: string[] = [], externalImages: string[] = [], rejectedImages: string[] = [], referrers: string[] = [];
@@ -156,4 +156,70 @@ test('Crop photos prepares blocked previews without accepting purchases or repla
   expect(observed.actions).toEqual(['POST ' + new URL(batch.url + '/crop-photos', page.url()).href,
                                   'POST ' + new URL(batch.url + '/crop-photos', page.url()).href]);
   expect(observed.rejectedImages).toEqual([]);
+});
+
+test('Check fills an exact-item inspection draft while its purchase and editing restrictions remain', async ({ page, request }) => {
+  const batch = await (await request.post('/__fixture/import-checkable-photos')).json();
+  const blocked = batch.items.find((item: { state: string }) => item.state === 'blocked');
+  const clean = batch.items.find((item: { state: string }) => item.state === 'draft');
+  expect(blocked.can_check).toBe(true);
+  const stateUrl = '/__fixture/import-photo-state?batch=' + encodeURIComponent(batch.id);
+  const before = await (await request.get(stateUrl)).json();
+  const beforeBlocked = before.items.find((item: { id: string }) => item.id === blocked.id);
+  const beforeFields = JSON.parse(beforeBlocked.fields_json);
+  const observed = await watchRequests(page);
+  await page.goto(blocked.detail_url);
+  await expect(page.locator('#banknoteImportCheck')).toBeEnabled();
+  await expect(page.locator('#banknoteImportSave')).toBeDisabled();
+  await expect(page.locator('#banknoteImportRelease')).toBeDisabled();
+  await expect(page.locator('#banknoteImportWarnings')).toContainText(blocked.warnings[0]);
+  await expect(page.locator('#banknoteImportImageHelp')).toContainText('Use Check');
+
+  await page.locator('#banknoteImportCheck').click();
+  for (const [name, value] of Object.entries({ country: 'Peru', denomination: '5 Soles de Oro',
+    pick_number: 'P-66A', grading_authority: 'PMG', grade: '67', grade_modifier: 'EPQ' })) {
+    const field = page.locator(`[name="${name}"]`);
+    await expect(field).toHaveValue(value);
+    await expect(field).toBeDisabled();
+  }
+  await loadedPhotos(page.locator('.banknote-imgs .coin-img-panel img'), 2);
+  await expect.poll(() => page.locator('.banknote-imgs .coin-img-panel img').evaluateAll(images =>
+    images.every(image => (image as HTMLImageElement).naturalWidth === 150))).toBe(true);
+  await loadedPhotos(page.locator('#banknoteImportPhotos img'), 2);
+  await expect.poll(() => page.locator('#banknoteImportPhotos img').evaluateAll(images =>
+    images.every(image => (image as HTMLImageElement).naturalWidth === 160))).toBe(true);
+  await expect(page.locator('#banknoteImportState')).toHaveText('Needs attention');
+  await expect(page.locator('#banknoteImportWarnings')).toContainText(blocked.warnings[0]);
+  await expect(page.locator('#banknoteImportSave')).toBeDisabled();
+  await expect(page.locator('#banknoteImportRelease')).toBeDisabled();
+  await expect(page.locator('.quad-fix-btn:visible')).toHaveCount(0);
+  await expect(page.locator('#banknoteImportPhotos .import-photo-actions:visible')).toHaveCount(0);
+  for (const choice of await page.locator('#banknoteImportPhotos [data-photo-side]').all())
+    await expect(choice).toBeDisabled();
+
+  const originalHref = await page.locator('#banknoteImportPhotos a').first().getAttribute('href');
+  expect(originalHref).toMatch(/^\/uploads\//);
+  expect((await request.get(originalHref!)).ok()).toBe(true);
+  const after = await (await request.get(stateUrl)).json();
+  const afterBlocked = after.items.find((item: { id: string }) => item.id === blocked.id);
+  const afterFields = JSON.parse(afterBlocked.fields_json);
+  expect(afterBlocked.state).toBe('blocked');
+  expect(afterBlocked.released_record_id).toBeNull();
+  for (const field of ['warning', 'source_json', 'source_digest', 'manual_photos_json'])
+    expect(afterBlocked[field]).toBe(beforeBlocked[field]);
+  for (const field of ['price', 'vendor', 'status', 'purchase_date', 'order_number', 'marketplace'])
+    expect(afterFields[field]).toEqual(beforeFields[field]);
+  expect(after.items.find((item: { id: string }) => item.id === clean.id))
+    .toEqual(before.items.find((item: { id: string }) => item.id === clean.id));
+  expect(after.collection_count).toBe(before.collection_count);
+  expect(after.link_count).toBe(before.link_count);
+  expect(after.metadata_check_calls).toBe(before.metadata_check_calls + 1);
+  expect(observed.actions).toEqual(['POST ' + new URL(blocked.detail_url + '/check', page.url()).href]);
+  expect(observed.rejectedImages).toEqual([]);
+
+  await page.reload();
+  await expect(page.locator('[name="pick_number"]')).toHaveValue('P-66A');
+  await loadedPhotos(page.locator('.banknote-imgs .coin-img-panel img'), 2);
+  await expect(page.locator('#banknoteImportWarnings')).toContainText(blocked.warnings[0]);
+  await expect(page.locator('#banknoteImportRelease')).toBeDisabled();
 });

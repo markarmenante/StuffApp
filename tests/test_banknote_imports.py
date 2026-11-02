@@ -483,6 +483,140 @@ class DraftTests(unittest.TestCase):
                                  prepare or self.preview_crop)
         return self.current_item(batch,item)
 
+    def inspection_item(self):
+        batch=self.imported(lambda p:p['items'][0].update(status_text='Multiple items'))
+        item=next(i for i in batch['items'] if i['state']=='blocked')
+        self.assertTrue(item['can_check']);return batch,item
+
+    def test_status_warning_check_fills_only_supported_metadata_and_internal_display_photos(self):
+        batch,item=self.inspection_item();before=dict(item['fields']);sources=[]
+        def evaluate(note,prepared):
+            self.assertEqual(prepared['purchase'],{});self.assertTrue(prepared['purchase_price_blocked'])
+            self.assertTrue(all(entry['kind']=='listing' for entry in prepared['evidence']))
+            for field in ('image_1','image_2'):
+                sources.append(note[field])
+                with Image.open(Path(stuff.UPLOAD_FOLDER)/note[field]) as image:self.assertEqual(image.size,(160,80))
+            return dict(filled=dict(country='Peru',denomination='10 Soles de Oro',pick_number='P-84a',
+                grade_numeric=66,grading_authority='PMG',grade_modifier='EPQ',serial_number='I158504160',
+                notes='Plate position A.',price='$9999',vendor='Wrong vendor',status='Own',owner='Other',
+                property_name='Other',purchase_date='2000-01-01',order_number='99-99999-99999',marketplace='Other',
+                image_1='provider-photo.jpg',image_3='provider-extra.jpg',banknote_id='B999',note_references_research='Untrusted'))
+        batch=self.check(batch,item,evaluate,prepare_photo=self.preview_crop)
+        updated=self.current_item(batch,item)
+        self.assertEqual(updated['state'],'blocked');self.assertTrue(updated['can_check'])
+        self.assertEqual(updated['fields']['country'],'Peru');self.assertEqual(updated['fields']['notes'],'Plate position A.')
+        self.assertEqual(updated['fields']['grade_numeric'],66)
+        for field in ('price','vendor','status','owner','property_name','purchase_date','order_number','marketplace',
+                      'image_3','banknote_id','note_references_research'):
+            self.assertEqual(updated['fields'].get(field),before.get(field),field)
+        self.assertEqual(updated['warnings'][0],item['warnings'][0]);self.assertIsNone(updated['purchase']['price'])
+        self.assertEqual(updated['manual_photos'],{})
+        for field,source in zip(('image_1','image_2'),sources):
+            display=updated['fields'][field];self.assertNotEqual(display,source)
+            self.assertEqual(stuff._banknote_vision_source(display,self.db),source)
+            with Image.open(Path(stuff.UPLOAD_FOLDER)/display) as image:self.assertEqual(image.size,(150,70))
+        self.assertTrue(all(not photo['selectable'] for photo in updated['photos']))
+        self.assertEqual(self.release(batch,[updated]).status_code,409)
+        self.assertEqual(self.client.post(updated['detail_url'],json={'revision':updated['revision'],'updates':{'country':'Other'}}).status_code,409)
+        self.assertEqual(self.choose(updated,'image_1',sources[0]).status_code,409)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+
+    def test_inspection_reuses_preview_crops_and_repeat_reads_full_originals(self):
+        batch,item=self.inspection_item();item=self.prepare_previews(batch,item)
+        cache=list(self.db.execute('SELECT * FROM banknote_import_photo_previews WHERE item_id=? ORDER BY position',(item['id'],)))
+        with patch.object(stuff,'_prepare_import_photo') as crop:
+            batch=self.check(batch,item,prepare_photo=crop)
+            crop.assert_not_called()
+        updated=self.current_item(batch,item)
+        before=dict(updated['fields'])
+        for field,saved in zip(('image_1','image_2'),cache):
+            self.assertEqual((Path(stuff.UPLOAD_FOLDER)/updated['fields'][field]).read_bytes(),
+                             (Path(stuff.UPLOAD_FOLDER)/saved['filename']).read_bytes())
+        def evaluate(note,prepared):
+            for field in ('image_1','image_2'):
+                original=stuff._banknote_vision_source(note[field],self.db)
+                with Image.open(Path(stuff.UPLOAD_FOLDER)/original) as image:self.assertEqual(image.size,(160,80))
+            return dict(filled={'country':'Overwrite forbidden','printer':'Thomas De La Rue'})
+        batch=self.check(batch,updated,evaluate,prepare_photo=self.preview_crop,retry_uncropped=True)
+        final=self.current_item(batch,updated)
+        self.assertEqual(final['fields']['country'],before['country'])
+        self.assertEqual(final['fields']['printer'],'Thomas De La Rue')
+        for field in ('image_1','image_2'):self.assertEqual(final['fields'][field],before[field])
+
+    def test_inspection_reads_originals_when_sides_are_uncertain_without_selecting_them(self):
+        batch,item=self.inspection_item();seen=[]
+        def evaluate(note,prepared):
+            self.assertTrue(note['_inspection_unassigned_photos'])
+            for field in ('image_1','image_2'):
+                with Image.open(Path(stuff.UPLOAD_FOLDER)/note[field]) as image:self.assertEqual(image.size,(160,80))
+                seen.append(note[field])
+            return dict(filled={'country':'Peru','grading_authority':'PMG'})
+        with patch.object(self,'classify',return_value={'photos':[]}):
+            batch=self.check(batch,item,evaluate,prepare_photo=self.preview_crop)
+        updated=self.current_item(batch,item)
+        self.assertEqual(len(seen),2);self.assertEqual(updated['fields']['country'],'Peru')
+        self.assertFalse(updated['fields'].get('image_1'));self.assertFalse(updated['fields'].get('image_2'))
+        self.assertEqual(updated['state'],'blocked');self.assertEqual(updated['check_state'],'partial')
+
+    def test_inspection_rejects_changed_capture_or_original_during_provider_work(self):
+        for changed in ('capture','original'):
+            with self.subTest(changed=changed):
+                batch,item=self.inspection_item()
+                def evaluate(note,prepared):
+                    if changed=='capture':
+                        self.db.execute('UPDATE ebay_listing_captures SET text=text || ? WHERE url=?',(' Changed evidence.',item['listing_url']));self.db.commit()
+                    else:(Path(stuff.UPLOAD_FOLDER)/note['image_1']).write_bytes(b'changed')
+                    return dict(filled={'country':'Must not publish'})
+                batch=self.check(batch,item,evaluate,prepare_photo=self.preview_crop)
+                updated=self.current_item(batch,item)
+                self.assertEqual(updated['check_state'],'failed');self.assertEqual(updated['state'],'blocked')
+                self.assertFalse(updated['fields'].get('country'));self.assertFalse(updated['fields'].get('image_1'))
+                self.assertEqual(len(updated['photos']),2)
+                self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_image_edits').fetchone()[0],0)
+                # Preserve the actual mutation for this scenario, then reset the
+                # isolated purchase/draft tables before the independent case.
+                self.tearDown();self.setUp()
+
+    def test_inspection_eligibility_rejects_ambiguous_types_quantities_and_generic_attention(self):
+        cases=[dict(title='PMG banknote and coin'),dict(title='Empty PMG holder only'),
+               dict(title='Unidentified collectible'),dict(title='Lot of two banknotes PMG'),dict(quantity=2),
+               dict(attention='Needs review'),dict(attention='Multiple purchase rows share this identity; review required'),dict(ignored=1)]
+        for changes in cases:
+            with self.subTest(changes=changes):
+                try:
+                    batch,item=self.inspection_item()
+                    source=dict(self.db.execute('SELECT * FROM ebay_order_items WHERE item_id=?',(IDS[0],)).fetchone())
+                    source.update(changes)
+                    for key,value in changes.items():self.db.execute('UPDATE ebay_order_items SET '+key+'=? WHERE item_id=?',(value,IDS[0]))
+                    self.db.execute('UPDATE banknote_import_items SET source_json=?,source_digest=?,warning=? WHERE id=?',
+                                    (json.dumps(source),imports._digest(source),imports._reason(source),item['id']));self.db.commit()
+                    self.assertFalse(self.current_item(batch,item)['can_check'])
+                    with self.assertRaises(imports.ImportProblem):imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
+                finally:self.tearDown();self.setUp()
+
+    def test_inspection_existing_collection_or_purchase_link_conflict_remains_blocked(self):
+        batch,item=self.inspection_item()
+        self.db.execute("INSERT INTO banknotes(id,order_number,marketplace) VALUES('conflict',?,'eBay')",(ORDERS[0],))
+        self.db.execute("INSERT INTO banknote_original_listings(banknote_id,url) VALUES('conflict',?)",(item['listing_url'],));self.db.commit()
+        self.assertFalse(self.current_item(batch,item)['can_check'])
+        with self.assertRaises(imports.ImportProblem):imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+
+    def test_inspection_checks_are_queued_only_by_explicit_resume_and_gets_remain_read_only(self):
+        batch,item=self.inspection_item();self.assertEqual(item['check_state'],'idle')
+        changes=self.db.total_changes
+        for url in (batch['url'],batch['status_url'],item['detail_url']):self.assertEqual(self.client.get(url).status_code,200)
+        self.assertEqual(self.db.total_changes,changes)
+        try:
+            with patch.dict(os.environ,{'BANKNOTE_IMPORT_WORKER':'1'}),patch.object(stuff.threading.Thread,'start'):
+                response=self.client.post('/banknotes/imports',json={'order_number':batch['order_number']})
+            updated=next(row for row in response.json['items'] if row['id']==item['id'])
+            self.assertEqual(updated['check_state'],'queued');self.assertTrue(updated['can_check'])
+            self.assertEqual(updated['state'],'blocked');self.assertEqual(updated['revision'],item['revision'])
+            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_preview_jobs WHERE item_id=?',(item['id'],)).fetchone()[0],0)
+        finally:stuff._IMPORT_BATCH_THREADS.discard(batch['id'])
+
     def test_blocked_preview_crops_preserve_originals_purchase_guards_and_read_only_views(self):
         import io
         batch=self.imported(lambda p:p['items'][0].update(status_text='Payment pending'))

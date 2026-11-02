@@ -28,11 +28,12 @@ sys.modules['dotenv'] = types.SimpleNamespace(load_dotenv=lambda **kwargs: None)
 with patch('threading.Thread.start'):
     import app as stuff
 stuff.ensure_country_history = lambda *args, **kwargs: None
-from flask import jsonify
+from flask import jsonify, request
 import banknote_imports
 from PIL import Image
 
 preview_crop_calls = 0
+metadata_check_calls = 0
 
 def fixture_listing_image(url,folder):
     if not url.startswith('https://i.ebayimg.com/images/g/fixture-'):
@@ -51,6 +52,33 @@ def fixture_preview_crop(raw,note):
 banknote_imports.listing_images.download = fixture_listing_image
 stuff._prepare_import_photo = fixture_preview_crop
 
+def fixture_photo_sides(photos):
+    """Synthetic colour encodes the side; no model or provider is contacted."""
+    readings=[]; selected={}
+    for photo in photos:
+        with Image.open(Path(stuff.UPLOAD_FOLDER)/photo['filename']) as image:
+            red,green,_=image.convert('RGB').getpixel((10,10))
+        side='front' if green>red else 'back'
+        readings.append(dict(id=photo['id'],side=side,confidence='high',complete_note=True,same_note=True,
+                             reason='Synthetic '+side+' colour fixture.'))
+        if photo['gallery']:selected[side]=photo['id']
+    return dict(photos=readings,front=selected.get('front'),back=selected.get('back'),
+                pair_verified=True,pair_reason='Different synthetic front/back colour fixtures.')
+
+def fixture_metadata_check(note,prepared):
+    global metadata_check_calls
+    row=stuff.get_db().execute('SELECT batch_id FROM banknote_import_items WHERE id=?',(note['id'],)).fetchone()
+    if not row or row['batch_id']!='fixture-checkable-photo-review':
+        raise RuntimeError('Fixture Check is restricted to the synthetic inspection draft')
+    metadata_check_calls+=1
+    return dict(filled=dict(country='Peru',denomination='5 Soles de Oro',pick_number='P-66A',
+                           grading_authority='PMG',grade='67',grade_modifier='EPQ',
+                           price='9999.99',vendor='Unverified provider seller',status='Own'),
+                catalogue=dict(fields={}))
+
+stuff._classify_banknote_listing_photos=fixture_photo_sides
+stuff._evaluate_import_check=fixture_metadata_check
+
 # Only this temporary fixture has a verified synthetic purchase-account binding.
 with stuff.app.app_context():
     db = stuff.get_db()
@@ -68,20 +96,30 @@ def fixture_batches():
 @stuff.app.post('/__fixture/import-photos')
 def fixture_import_photos():
     """Saved synthetic siblings; no purchase reader, Check or network activity."""
+    return make_import_photo_fixture('fixture-photo-review','90-00000-00001',
+        ('199999999991','199999999992'),
+        'Synthetic purchase status needs review <strong>before release</strong>.')
+
+
+@stuff.app.post('/__fixture/import-checkable-photos')
+def fixture_import_checkable_photos():
+    return make_import_photo_fixture('fixture-checkable-photo-review','90-00000-00002',
+        ('199999999993','199999999994'),'Multiple items; shipment or delivery not confirmed')
+
+
+def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention):
     db = stuff.get_db()
-    batch_id = 'fixture-photo-review'
-    db.execute('DELETE FROM banknote_import_preview_jobs')
-    db.execute('DELETE FROM banknote_import_photo_previews')
+    for table in ('banknote_import_preview_jobs','banknote_import_photo_previews'):
+        db.execute('DELETE FROM '+table+' WHERE item_id IN (SELECT id FROM banknote_import_items WHERE batch_id=?)',(batch_id,))
     if not db.execute('SELECT 1 FROM banknote_import_batches WHERE id=?', (batch_id,)).fetchone():
         now = time.time()
-        order = '90-00000-00001'
         db.execute('''INSERT INTO banknote_import_batches
             (id,account_name,order_id,request_id,created_at,updated_at)
             VALUES(?,?,?,?,?,?)''', (batch_id, 'fixture-buyer', order, 'fixture-photo-request', now, now))
         items = []
-        for index, ident in enumerate(('199999999991', '199999999992')):
+        for index, ident in enumerate(identifiers):
             title = 'Synthetic banknote ' + ('blocked' if index == 0 else 'clean')
-            attention = 'Synthetic purchase status needs review <strong>before release</strong>.' if index == 0 else ''
+            attention = blocked_attention if index == 0 else ''
             db.execute('''INSERT INTO ebay_order_items
                 (line_key,order_id,item_id,title,seller,quantity,delivery_status,attention,last_seen)
                 VALUES(?,?,?,?,?,1,'Ordered',?,?)''',
@@ -103,7 +141,7 @@ def fixture_import_photos():
             (Path(stuff.UPLOAD_FOLDER) / filename).write_bytes(png)
             fields['image_' + str(position + 1)] = filename
             db.execute('INSERT INTO banknote_import_assets VALUES(?,?,?,?,?,?,?)',
-                (clean['id'], 'https://i.ebayimg.com/images/g/fixture-199999999992-' + side + '/s-l1600.png',
+                (clean['id'], 'https://i.ebayimg.com/images/g/fixture-' + identifiers[1] + '-' + side + '/s-l1600.png',
                  filename, hashlib.sha256(png).hexdigest(), 1, 1, position))
         db.execute('UPDATE banknote_import_items SET fields_json=?,manual_photos_json=? WHERE id=?',
                    (json.dumps(fields),json.dumps({key:fields[key] for key in ('image_1','image_2')}),clean['id']))
@@ -115,12 +153,15 @@ def fixture_import_photos():
 @stuff.app.get('/__fixture/import-photo-state')
 def fixture_import_photo_state():
     db = stuff.get_db()
+    batch_id=request.args.get('batch','fixture-photo-review')
     return jsonify(
         collection_count=db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],
         link_count=db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],
         preview_crop_calls=preview_crop_calls,
-        items=[dict(row) for row in db.execute('''SELECT id,state,check_state,revision,fields_json
-            FROM banknote_import_items WHERE batch_id='fixture-photo-review' ORDER BY id''')])
+        metadata_check_calls=metadata_check_calls,
+        items=[dict(row) for row in db.execute('''SELECT id,state,check_state,revision,fields_json,
+            warning,source_json,source_digest,manual_photos_json,released_record_id
+            FROM banknote_import_items WHERE batch_id=? ORDER BY id''',(batch_id,))])
 
 if __name__ == '__main__':
     with make_server('127.0.0.1', 4182, stuff.app, threaded=True) as server:

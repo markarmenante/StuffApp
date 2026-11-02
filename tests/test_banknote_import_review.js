@@ -163,6 +163,45 @@ function page(initial, replies = [], item) {
   assert.match(detail.elements.banknoteImportImageHelp.textContent, /blocked.*inspection only/);
   assert.doesNotMatch(detail.elements.banknoteImportImageHelp.textContent, /Use Check|Choose front|adjust.*crop/);
   assert.equal(detail.requests.length, 0);
+  // Purchase review does not prevent an independently authorized metadata Check.
+  const inspectable = {...blockedDraft, can_check: true, revision: 1};
+  const runningInspection = {...inspectable, check_state: 'checking'};
+  const filledInspection = {...inspectable, revision: 2, check_state: 'done',
+    fields: {country: 'Peru', denomination: '10 Soles de Oro', pick_number: 'P-84a'}};
+  const inspection = page(batch({state: 'review', items: [inspectable]}),
+    [{item: runningInspection}, batch({state: 'review', items: [runningInspection]}),
+      batch({state: 'review', items: [filledInspection]})], inspectable);
+  assert.equal(inspection.elements.banknoteImportCheck.disabled, false);
+  assert.equal(inspection.elements.banknoteImportSave.disabled, true);
+  assert.equal(inspection.elements.banknoteImportRelease.disabled, true);
+  assert.match(inspection.elements.banknoteImportImageHelp.textContent, /Use Check.*missing banknote details/);
+  await inspection.elements.banknoteImportCheck.handlers.click();
+  assert.equal(inspection.elements.banknoteImportCheck.disabled, true);
+  assert.equal(inspection.elements.banknoteImportState.textContent, 'Checking…');
+  await inspection.timers.shift()();
+  assert.equal(inspection.timers.length, 1, 'Blocked metadata checks continue polling until completed');
+  await inspection.timers.shift()();
+  assert.equal(inspection.timers.length, 0);
+  assert.equal(inspection.elements.banknoteImportCheck.disabled, false);
+  assert.equal(inspection.elements.banknoteImportRelease.disabled, true);
+  assert.equal(inspection.elements.banknoteImportSave.disabled, true);
+  assert.equal(inspection.elements.banknoteImportState.textContent, 'Needs attention');
+  assert.match(content(inspection.elements.banknoteImportWarnings), /Review this exact purchased item/);
+  assert.deepEqual(inspection.requests, [
+    {url: '/banknotes/imports/test/items/draft/check', method: 'POST'},
+    {url: '/banknotes/imports/test/status', method: 'GET'},
+    {url: '/banknotes/imports/test/status', method: 'GET'},
+  ], 'Metadata Check never saves, selects photos, or releases the purchase');
+  const awaitingInspection = page(batch({state: 'review', items: [{...inspectable, check_state: 'idle'}]}));
+  assert.equal(awaitingInspection.timers.length, 0, 'Previously blocked idle rows do not poll forever before Check is requested');
+  const queuedInspection = {...inspectable, check_state: 'queued'};
+  const waitingInspection = page(batch({state: 'review', items: [queuedInspection]}), [], queuedInspection);
+  assert.equal(waitingInspection.timers.length, 1, 'Explicitly queued metadata work keeps polling while waiting for a worker');
+  assert.equal(waitingInspection.elements.banknoteImportState.textContent, 'Waiting to check…');
+  assert.equal(waitingInspection.elements.banknoteImportCheck.disabled, true);
+  const prohibitedInspection = page(batch({state: 'review', items: [blockedDraft]}), [], blockedDraft);
+  await prohibitedInspection.elements.banknoteImportCheck.handlers.click();
+  assert.equal(prohibitedInspection.requests.length, 0, 'Ineligible items cannot start metadata checks');
   const emptyDraft = {...blockedDraft, photos: []};
   const emptyDetail = page(batch({state: 'review', items: [emptyDraft]}), [], emptyDraft);
   assert.doesNotMatch(content(emptyDetail.elements.banknoteImportPhotos), /Use Check/);
