@@ -52,7 +52,7 @@ def select(assets, folder, classify, existing=None, resolve_original=None):
     The caller owns any eventual transaction and must compare both saved slots.
     """
     existing = dict(existing or {})
-    result = dict(images={}, warnings=[])
+    result = dict(images={}, evidence_images=[], warnings=[])
     if not assets:
         return result
     photos, by_hash, gallery, saved = [], {}, {}, {}
@@ -130,9 +130,16 @@ def select(assets, folder, classify, existing=None, resolve_original=None):
         missing = [field for field in ('image_1', 'image_2') if not existing.get(field) and field not in result['images']]
         wrong_saved = any(existing.get(field) and not confident(saved.get(field), side)
                           for field, side in (('image_1', 'front'), ('image_2', 'back')))
+        if not wrong_saved:
+            by_id={photo['id']:photo for photo in photos}
+            result['evidence_images']=[dict(asset,sha256=by_id[ident]['sha256'])
+                for ident,asset in gallery.items()
+                if readings[ident]['side'] in ('front','back') and readings[ident]['confidence']=='high'
+                and readings[ident]['same_note'] is True and readings[ident]['complete_note'] is True]
         if missing or wrong_saved:
             result['warnings'].append('Front and back could not both be confirmed from the listing. Existing photos and all originals were retained; choose the missing or uncertain side manually.')
     except Exception:
         result['images'] = {}
+        result['evidence_images'] = []
         result['warnings'].append('Listing-photo sides could not be verified. Existing photos and all originals were retained; run Check again or choose the photos manually.')
     return result

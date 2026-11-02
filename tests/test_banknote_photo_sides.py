@@ -45,6 +45,29 @@ class PhotoSidesTests(unittest.TestCase):
         self.assertEqual(len(classify.call_args.args[0]), 4)
         self.assertEqual(result['images']['image_1']['position'], 0)
         self.assertEqual(result['images']['image_2']['position'], 2)
+        self.assertEqual([asset['position'] for asset in result['evidence_images']],[0,1,2,3])
+
+    def test_reference_holder_photos_are_separate_from_selected_views_and_reject_ambiguity(self):
+        def classify(photos):
+            result=self.decision(photos)
+            # Keep photo0/2 as clearest complete note sides. Photo1 is another
+            # complete same-note holder view useful for its grading label.
+            result['photos'][3].update(same_note=False)
+            return result
+        result=self.select(classify=classify)
+        self.assertEqual([result['images'][field]['position'] for field in ('image_1','image_2')],[0,2])
+        self.assertEqual([asset['position'] for asset in result['evidence_images']],[0,1,2])
+        for change in ({'confidence':'medium'},{'complete_note':False},{'side':'unknown'},{'same_note':False}):
+            def uncertain(photos):
+                result=self.decision(photos);result['photos'][1].update(change);return result
+            result=self.select(classify=uncertain)
+            self.assertNotIn(1,[asset['position'] for asset in result['evidence_images']])
+
+    def test_conflicting_saved_note_and_invalid_classifier_never_supply_extra_references(self):
+        result=self.select(existing={'image_1':'gallery-2.png'})
+        self.assertEqual(result['evidence_images'],[])
+        for classify in (lambda _:{'photos':[]},lambda _:None):
+            self.assertEqual(self.select(classify=classify)['evidence_images'],[])
 
     def test_later_reverse_after_first_four_is_considered(self):
         for asset in self.assets:

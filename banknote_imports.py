@@ -990,8 +990,13 @@ def _source_inputs(db,row,fields,folder,classify):
     chosen=banknote_photo_sides.select(assets,folder,classify,existing=fields,resolve_original=original)
     warnings.extend(chosen['warnings'])
     photos={field:asset['filename'] for field,asset in chosen['images'].items() if not fields.get(field)}
+    current_urls=set(json.loads(capture['images_json'])) if capture else set()
+    vision_images=[dict(filename=asset['filename'],sha256=asset['sha256'],
+                        label='Additional verified photograph of the same note (holder/label evidence)')
+                   for asset in chosen['evidence_images'] if asset['source_url'] in current_urls]
     return dict(evidence=evidence,reports=['Exact order item isolated from sibling purchases.'],warnings=warnings,
-                documents=[],images={},purchase=purchase,purchase_price_fill_only=True,purchase_price_blocked=not bool(paid)),assets,photos
+                documents=[],images={},vision_images=vision_images,purchase=purchase,
+                purchase_price_fill_only=True,purchase_price_blocked=not bool(paid)),assets,photos
 
 
 def _verify_original_assets(assets,folder):

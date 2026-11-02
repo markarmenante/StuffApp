@@ -27879,6 +27879,47 @@ def _banknote_description_fields(note):
     return out
 
 
+def _banknote_check_vision_images(note):
+    """Keep verified holder evidence even when display choices are bare notes."""
+    import hashlib
+    from pathlib import Path
+    labels = ('listing photo 1 (side unconfirmed)', 'listing photo 2 (side unconfirmed)') \
+        if dict(note).get('_inspection_unassigned_photos') else ('front', 'back')
+    candidates = [(_banknote_vision_source(_coin_row_value(note, field)), label, None)
+                  for field, label in zip(('image_1', 'image_2'), labels)]
+    for index, photo in enumerate(dict(note).get('_check_sources', {}).get('vision_images', [])[:24]):
+        if isinstance(photo, dict) and isinstance(photo.get('sha256'), str):
+            candidates.append((photo.get('filename'),
+                f'Additional verified same-note listing photo {index + 1} (including holder evidence)', photo['sha256']))
+    root = Path(UPLOAD_FOLDER).resolve()
+    images, seen, total_size = [], set(), 0
+    for filename, label, expected_hash in candidates:
+        if len(images) >= 8:
+            break
+        if not isinstance(filename, str) or Path(filename).name != filename:
+            continue
+        path = (root / filename).resolve()
+        try:
+            if path.parent != root or (expected_hash is not None and path.stat().st_size > 12_000_000):
+                continue
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest in seen or (expected_hash is not None and digest != expected_hash):
+            continue
+        media_type = _sniff_image_media_type(raw)
+        if media_type not in set(_VISION_EXT_MEDIA.values()):
+            continue
+        data, media_type = _fit_vision_image(raw, media_type)
+        if len(data) > _VISION_IMAGE_B64_CAP or total_size + len(data) > 20_000_000:
+            continue
+        images.append(dict(label=label, data=data, media_type=media_type))
+        seen.add(digest)
+        total_size += len(data)
+    return images
+
+
 def fetch_banknote_specs(note):
     """Fill missing identifying fields on a banknote via Claude vision +
     web search. Same contract as fetch_coin_specs: returns {field: value}
@@ -27907,12 +27948,7 @@ def fetch_banknote_specs(note):
     # The UNTRIMMED uploads are what the model sees — the stored files
     # are trimmed to the bare note on upload, and the holder label the
     # grading fields come from lives only on the original.
-    image_labels = ('listing photo 1 (side unconfirmed)', 'listing photo 2 (side unconfirmed)') \
-        if dict(note).get('_inspection_unassigned_photos') else ('front', 'back')
-    images = _load_vision_images((
-        (_banknote_vision_source(_coin_row_value(note, 'image_1')), image_labels[0]),
-        (_banknote_vision_source(_coin_row_value(note, 'image_2')), image_labels[1]),
-    ))
+    images = _banknote_check_vision_images(note)
 
     # Images or a pasted dealer description are enough to identify a
     # note — the images-first flow (drop photos, hit Check) must work

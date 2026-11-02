@@ -559,6 +559,57 @@ class DraftTests(unittest.TestCase):
         self.assertFalse(updated['fields'].get('image_1'));self.assertFalse(updated['fields'].get('image_2'))
         self.assertEqual(updated['state'],'blocked');self.assertEqual(updated['check_state'],'partial')
 
+    def test_metadata_reads_unselected_same_note_holder_but_not_unrelated_or_stale_gallery_photos(self):
+        batch,item=self.inspection_item();kinds={}
+        capture=self.db.execute('SELECT images_json FROM ebay_listing_captures WHERE url=?',(item['listing_url'],)).fetchone()[0]
+        urls=json.loads(capture)+['https://i.ebayimg.com/images/g/'+IDS[0]+kind+'/s-l1600.jpg' for kind in ('holder','unrelated')]
+        self.db.execute('UPDATE ebay_listing_captures SET images_json=? WHERE url=?',(json.dumps(urls),item['listing_url']));self.db.commit()
+        def download(url,folder):
+            kind=next(name for name in ('front','back','holder','unrelated') if name in url)
+            filename=hashlib.sha256(url.encode()).hexdigest()+'.jpg';path=Path(folder)/filename
+            Image.new('RGB',(160,80),{'front':'red','back':'blue','holder':'purple','unrelated':'black'}[kind]).save(path)
+            kinds[filename]=kind
+            return dict(filename=filename,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),width=160,height=80)
+        def classify(photos):
+            by_kind={kinds[photo['filename']]:photo['id'] for photo in photos}
+            return dict(photos=[dict(id=photo['id'],side='front' if kinds[photo['filename']]=='front' else 'back',
+                confidence='high',complete_note=True,same_note=kinds[photo['filename']]!='unrelated',
+                reason='Complete design and matching specimen details') for photo in photos],
+                front=by_kind['front'],back=by_kind['back'],pair_verified=True,pair_reason='Opposite designs of one note')
+        def evaluate(note,prepared):
+            self.assertEqual({kinds[source['filename']] for source in prepared['vision_images']},{'front','back','holder'})
+            images=stuff._banknote_check_vision_images(note)
+            self.assertEqual(len(images),3,'both chosen sides plus the unselected holder evidence')
+            self.assertEqual([image['label'] for image in images[:2]],['front','back'])
+            return dict(filled={'slab_number':'1234567-001'})
+        token=imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
+        with patch.object(imports.listing_images,'download',side_effect=download):
+            imports.run_check(stuff.open_db_connection,batch['id'],item['id'],item['revision'],token,
+                stuff.UPLOAD_FOLDER,classify,evaluate,prepare_photo=self.preview_crop)
+        updated=self.current_item(batch,item)
+        self.assertEqual(updated['fields']['slab_number'],'1234567-001')
+        for field,kind in (('image_1','front'),('image_2','back')):
+            self.assertEqual(kinds[stuff._banknote_vision_source(updated['fields'][field],self.db)],kind)
+        self.db.execute('UPDATE ebay_listing_captures SET images_json=? WHERE url=?',(capture,item['listing_url']));self.db.commit()
+        row=dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+        prepared,assets,photos=imports._source_inputs(self.db,row,updated['fields'],stuff.UPLOAD_FOLDER,classify)
+        self.assertEqual(len(assets),4,'retained originals remain available without becoming current evidence')
+        self.assertEqual({kinds[source['filename']] for source in prepared['vision_images']},{'front','back'})
+        self.assertEqual(photos,{})
+
+    def test_metadata_vision_references_deduplicate_originals_and_reject_invalid_paths_or_hashes(self):
+        assets=[self.download('https://i.ebayimg.com/images/g/'+kind+'/s-l1600.jpg',stuff.UPLOAD_FOLDER) for kind in ('front','back')]
+        path=Path(stuff.UPLOAD_FOLDER)/'verified-holder.jpg';Image.new('RGB',(160,80),'purple').save(path)
+        holder=dict(filename=path.name,sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+        note=dict(image_1=assets[0]['filename'],image_2=assets[1]['filename'],_check_sources={'vision_images':[
+            assets[0],holder,holder,dict(holder,sha256='0'*64),dict(holder,filename='../verified-holder.jpg'),
+            dict(holder,filename='/tmp/private.jpg'),dict(holder,filename='missing-original.jpg')]})
+        images=stuff._banknote_check_vision_images(note)
+        self.assertEqual(len(images),3)
+        self.assertEqual([image['label'] for image in images[:2]],['front','back'])
+        self.assertIn('same-note',images[2]['label'])
+        self.assertEqual((Path(stuff.UPLOAD_FOLDER)/holder['filename']).read_bytes(),path.read_bytes())
+
     def test_inspection_rejects_changed_capture_or_original_during_provider_work(self):
         for changed in ('capture','original'):
             with self.subTest(changed=changed):

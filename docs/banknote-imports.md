@@ -69,6 +69,13 @@ rechecks the draft revision/token, exact source, full listing-capture fingerprin
 and original-photo hashes. If side identification is uncertain, unassigned full
 listing photos still supply metadata evidence but do not become selected image
 slots. Accepted crops continue resolving to their full originals on later Check.
+Selecting clear front/back display photos does not discard other useful holder
+evidence. Check also receives bounded, hash-verified original gallery photos that
+the existing classifier positively identifies as complete views of the same note.
+Only photos in the current exact listing capture qualify; unrelated, uncertain,
+partial, conflicting or malformed classifications supply no extra references.
+These references can expose certification details missing from bare-note views
+without replacing the selected display photos or existing metadata.
 
 All source drafts are committed before automatic Check begins. Single-note drafts
 are the durable processing record; successful or partially enriched known notes
