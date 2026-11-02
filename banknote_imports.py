@@ -304,6 +304,10 @@ def materialize(db, account, order_id, items, request_id):
                 refreshed_fields.update({key:value for key,value in recovery.items() if key not in
                     ('id','cat_id','banknote_id','created_at','updated_at','specs_searched_at') and not banknote_catalog_lookup.is_blank(value)})
                 refreshed_fields.update(crops)
+            # A newly captured exact receipt fills the saved draft immediately;
+            # ordinary edits and occupied recovery values remain authoritative.
+            if paid and banknote_catalog_lookup.is_blank(refreshed_fields.get('price')):
+                refreshed_fields['price']=paid['price']
             db.execute('''UPDATE banknote_import_items SET source_json=?,source_digest=?,warning=?,
                 fields_json=?,state=?,released_record_id=?,revision=revision+1,check_state='idle',check_token=NULL,check_expires=0,updated_at=?
                 WHERE account_name=? AND line_key=? AND state!='released' ''',

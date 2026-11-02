@@ -30,6 +30,8 @@ with patch('threading.Thread.start'):
 stuff.ensure_country_history = lambda *args, **kwargs: None
 from flask import jsonify, request
 import banknote_imports
+import ebay_orders
+import ebay_purchase_prices
 from PIL import Image
 
 preview_crop_calls = 0
@@ -105,15 +107,24 @@ def fixture_import_photos():
 
 @stuff.app.post('/__fixture/import-checkable-photos')
 def fixture_import_checkable_photos():
+    return make_checkable_photo_fixture()
+
+
+@stuff.app.post('/__fixture/import-priced-photos')
+def fixture_import_priced_photos():
+    return make_checkable_photo_fixture(receipt_amount='72.63')
+
+
+def make_checkable_photo_fixture(receipt_amount=None):
     global checkable_fixture_sequence
     checkable_fixture_sequence+=1
     number=checkable_fixture_sequence
     return make_import_photo_fixture('fixture-checkable-photo-review-'+str(number),f'90-00001-{number:05d}',
         (str(199999990000+2*number),str(199999990001+2*number)),
-        'Multiple items; shipment or delivery not confirmed',extra_front=True)
+        'Multiple items; shipment or delivery not confirmed',extra_front=True,receipt_amount=receipt_amount)
 
 
-def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention,extra_front=False):
+def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention,extra_front=False,receipt_amount=None):
     db = stuff.get_db()
     for table in ('banknote_import_preview_jobs','banknote_import_photo_previews'):
         db.execute('DELETE FROM '+table+' WHERE item_id IN (SELECT id FROM banknote_import_items WHERE batch_id=?)',(batch_id,))
@@ -137,6 +148,17 @@ def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention,extra
                 urls.append('https://i.ebayimg.com/images/g/fixture-'+ident+'-alternate-front/s-l1600.png')
             db.execute('INSERT INTO ebay_listing_captures VALUES(?,?,?,?,?)',
                 ('https://www.ebay.com/itm/' + ident, title, 'Synthetic exact listing evidence for browser verification.', json.dumps(urls), now))
+        if receipt_amount is not None:
+            source=dict(db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
+                                   (order,identifiers[0])).fetchone())
+            # Exercise the real exact-item receipt parser and stored authority,
+            # including cents and distracting shipping/order totals.
+            receipt=dict(order_id=order,item_id=identifiers[0],quantity=1,
+                url='https://order.ebay.com/ord/show?orderId='+order,currency='USD',
+                unit_amount=receipt_amount,observed_at=ebay_orders.now_iso(),
+                evidence=f'Order number: {order}\nItem info\nUnit price USD {receipt_amount}\n'
+                         f'Item number: {identifiers[0]}\nShipping USD 9.00\nOrder total USD 999.99')
+            ebay_purchase_prices.save(db,receipt,[source],now-10)
         banknote_imports.materialize(db, 'fixture-buyer', order, items, 'fixture-photo-request')
         db.execute("UPDATE banknote_import_items SET check_state='done' WHERE batch_id=?", (batch_id,))
         clean = db.execute("SELECT * FROM banknote_import_items WHERE batch_id=? AND state='draft'", (batch_id,)).fetchone()

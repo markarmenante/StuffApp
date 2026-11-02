@@ -273,6 +273,45 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(tuple(self.db.execute('SELECT currency,unit_amount_minor FROM ebay_purchase_prices').fetchone()),
                          ('EUR', 47950))
 
+    def test_group_warning_receipts_keep_each_same_order_item_amount_and_cents(self):
+        import ebay_purchase_prices as prices
+        job=lookup.ensure(self.db,self.note);self.post(action='claim')
+        ids=('178536931638','178536931639');amounts=('71.29','392.17')
+        items=[self.item(item_id=ident,status_text='Multiple items') for ident in ids]
+        evidence='Order number: '+self.note['order_number']+'\n'+''.join(
+            'Item info\nUnit price USD '+amount+'\nItem number: '+ident+'\n'
+            for ident,amount in zip(ids,amounts))+'Shipping USD 9.00\nTax USD 23.45\nOrder total USD 495.91'
+        receipts=[self.receipt(item_id=ident,unit_amount=amount,evidence=evidence) for ident,amount in zip(ids,amounts)]
+        response=self.complete(job,items=items,receipts=receipts)
+        self.assertEqual(response.status_code,200,response.json)
+        for row,amount in zip(self.db.execute('SELECT * FROM ebay_order_items ORDER BY item_id'),amounts):
+            self.assertEqual(prices.for_item(self.db,row)['price'],'$'+amount)
+            self.assertEqual(row['attention'],'Multiple items; shipment or delivery not confirmed')
+            self.assertEqual(row['delivery_status'],'Ordered')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+
+    def test_saved_price_rechecks_current_source_instead_of_stale_draft_snapshot(self):
+        import ebay_purchase_prices as prices
+        job=lookup.ensure(self.db,self.note);self.post(action='claim')
+        self.assertEqual(self.complete(job,items=[self.item(status_text='Multiple items')],receipt=self.receipt()).status_code,200)
+        snapshot=dict(self.db.execute('SELECT * FROM ebay_order_items').fetchone())
+        cases=[dict(attention='Partially refunded'),dict(attention='Payment pending'),
+               dict(attention='Multiple purchase rows share this identity; review required'),
+               dict(quantity=2),dict(ignored=1),dict(seller='Other dealer'),dict(title='Other note'),dict(line_key='other-line')]
+        for changes in cases:
+            with self.subTest(changes=changes):
+                self.db.execute('UPDATE ebay_order_items SET '+','.join(key+'=?' for key in changes),tuple(changes.values()))
+                self.assertIsNone(prices.for_item(self.db,snapshot))
+                self.db.rollback()
+        columns=list(snapshot)
+        duplicate=dict(snapshot,line_key='duplicate',ignored=1)
+        self.db.execute('INSERT INTO ebay_order_items('+','.join(columns)+') VALUES('+','.join('?' for _ in columns)+')',
+                        tuple(duplicate[column] for column in columns))
+        self.assertIsNone(prices.for_item(self.db,snapshot))
+        with self.assertRaises(ValueError):prices.save(self.db,self.receipt(),[snapshot],time.time()-10)
+        self.db.rollback()
+        self.assertEqual(prices.for_item(self.db,snapshot)['price'],'$599.89')
+
     def test_receipt_rejects_multi_quantity_siblings_and_attention(self):
         job = lookup.ensure(self.db, self.note)
         self.post(action='claim')

@@ -484,9 +484,72 @@ class DraftTests(unittest.TestCase):
         return self.current_item(batch,item)
 
     def inspection_item(self):
-        batch=self.imported(lambda p:p['items'][0].update(status_text='Multiple items'))
+        def without_receipt(payload):
+            payload['items'][0]['status_text']='Multiple items'
+            payload['receipts']=payload['receipts'][1:]
+        batch=self.imported(without_receipt)
         item=next(i for i in batch['items'] if i['state']=='blocked')
         self.assertTrue(item['can_check']);return batch,item
+
+    def group_receipt_payload(self,payload):
+        # Two distinct notes share one seller order, plus another seller order
+        # in the same complete checkout. Each receipt has its own item amount.
+        shared=ORDERS[0]
+        for index in (0,2):
+            payload['items'][index].update(order_id=shared,status_text='Multiple items',seller='group-dealer')
+            amount=('71.29','392.17')[index//2]
+            payload['receipts'][index].update(order_id=shared,
+                url='https://order.ebay.com/ord/show?orderId='+shared,unit_amount=amount,
+                evidence=f'Order number: {shared}\nItem info\nUnit price USD {amount}\nItem number: {IDS[index]}\nShipping USD 9.00\nTax USD 23.45\nOrder total USD 495.91')
+        payload['checkout']['orders']=[dict(order_id=shared,
+            details_url=f'https://order.ebay.com/ord/show?orderId={shared}&purchaseOrderId=24-1533-590976',item_ids=[IDS[0],IDS[2]]),
+            payload['checkout']['orders'][1]]
+
+    def test_group_warning_exact_receipts_fill_each_draft_and_explicit_release(self):
+        batch=self.imported(self.group_receipt_payload)
+        held=[item for item in batch['items'] if item['state']=='blocked']
+        self.assertEqual(len(held),2)
+        expected={IDS[0]:'$71.29',IDS[2]:'$392.17'}
+        for item in held:
+            price=expected[item['listing_url'].rsplit('/',1)[-1]]
+            self.assertEqual(item['fields']['price'],price);self.assertEqual(item['purchase']['price'],price)
+            self.assertIn('price',item['locked_fields']);self.assertTrue(item['can_release'])
+            self.assertEqual(item['fields']['status'],'Ordered')
+            self.assertIn('Multiple items',' '.join(item['warnings']))
+        item=held[0];batch=self.check(batch,item,lambda *_:dict(filled={'price':'$9999.99','country':'Peru'}))
+        self.assertEqual(self.current_item(batch,item)['fields']['price'],item['fields']['price'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        held=[self.current_item(batch,item) for item in held]
+        response=self.release(batch,held);self.assertEqual(response.status_code,200,response.json)
+        records=list(self.db.execute('SELECT price,status,order_number FROM banknotes'))
+        self.assertEqual({row['price'] for row in records},set(expected.values()))
+        self.assertTrue(all(row['status']=='Ordered' and row['order_number']==ORDERS[0] for row in records))
+
+    def test_refresh_fills_only_blank_draft_receipt_price(self):
+        def missing(payload):
+            self.group_receipt_payload(payload);payload['receipts']=payload['receipts'][1:2]
+        batch=self.imported(missing)
+        held=[item for item in batch['items'] if item['state']=='blocked'];blank,preserved=held
+        batch=self.check(batch,blank,prepare_photo=self.preview_crop);blank=self.current_item(batch,blank)
+        saved_fields={key:blank['fields'][key] for key in ('country','denomination','pick_number','image_1','image_2')}
+        self.assertIn('exact paid item amount is unavailable',' '.join(blank['warnings']))
+        fields=dict(preserved['fields'],price='$44.12',notes='Keep reviewed amount')
+        self.db.execute('UPDATE banknote_import_items SET fields_json=? WHERE id=?',(json.dumps(fields),preserved['id']))
+        self.db.execute("UPDATE ebay_purchase_observations SET observed_at='2026-01-01T00:00:00Z'");self.db.commit()
+        response=self.client.post('/banknotes/imports',json={'order_number':batch['order_number'],'refresh':True})
+        self.assertEqual(response.status_code,200,response.json)
+        request=self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request']
+        payload=self.payload(request);self.group_receipt_payload(payload)
+        response=self.client.post('/ebay/today/requests',json=payload,headers=HEADERS)
+        self.assertEqual(response.status_code,200,response.json)
+        updated=self.current_item(batch,blank);kept=self.current_item(batch,preserved)
+        self.assertEqual(updated['fields']['price'],updated['purchase']['price'])
+        self.assertEqual(updated['fields']['price'],{'/itm/'+IDS[0]:'$71.29','/itm/'+IDS[2]:'$392.17'}[urlsplit(updated['listing_url']).path])
+        self.assertEqual(kept['fields']['price'],'$44.12');self.assertEqual(kept['fields']['notes'],'Keep reviewed amount')
+        self.assertNotEqual(kept['purchase']['price'],kept['fields']['price'])
+        self.assertEqual(updated['state'],'blocked');self.assertEqual(updated['warnings'][0],blank['warnings'][0])
+        self.assertNotIn('exact paid item amount is unavailable',' '.join(updated['warnings']))
+        self.assertEqual({key:updated['fields'][key] for key in saved_fields},saved_fields)
 
     def test_status_warning_check_fills_only_supported_metadata_and_internal_display_photos(self):
         batch,item=self.inspection_item();before=dict(item['fields']);sources=[]
@@ -1047,7 +1110,7 @@ class DraftTests(unittest.TestCase):
             with self.subTest(reason=name):
                 b=self.batch()
                 q=self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request']
-                payload=self.payload(q);payload['items'][0]['status_text']='Payment pending';mutate(payload)
+                payload=self.payload(q);payload['items'][0]['status_text']='Multiple items';mutate(payload)
                 response=self.client.post('/ebay/today/requests',json=payload,headers=HEADERS)
                 self.assertEqual(response.status_code,409,response.json)
                 self.assertEqual(self.client.get(b['status_url']).json['state'],'failed')
@@ -1112,6 +1175,7 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(item['state'],'draft');self.assertFalse(item['warnings'])
         self.assertGreater(item['revision'],blocked['revision'])
         self.assertEqual(item['purchase']['price'],'$599.89')
+        self.assertEqual(item['fields']['price'],'$599.89')
         self.assertEqual(self.db.execute('SELECT attention FROM ebay_order_items WHERE item_id=?',(IDS[0],)).fetchone()[0],'')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
     def test_old_reader_without_membership_proof_cannot_import_partial_checkout(self):

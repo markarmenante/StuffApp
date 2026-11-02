@@ -42,13 +42,18 @@ orders: the reader verifies each seller order's details link has the same observ
 exactly. Every draft retains its own actual seller order, exact item ID, seller,
 paid unit amount and original listing. Shipping, tax, order totals and listing
 asking prices cannot supply an item price. A missing receipt leaves the price blank.
-A receipt with valid exact-item evidence cannot supply a price while that purchase
-has a status review warning. The complete checkout is still saved, with the flagged
-item blocked for review and its receipt amount withheld; valid sibling items retain
-their own accepted amounts. Wrong receipt identity, quantity, currency, freshness
-or unit-price evidence still rejects the response atomically. Ambiguous or previously
-excluded purchases remain protected. A normal collection Check retains its strict receipt
-rejection; this handling applies only to a verified checkout import.
+A receipt with valid exact-item evidence can supply its amount despite eBay's
+**Multiple items; shipment or delivery not confirmed** group-status warning.
+Each receipt is matched to its exact item, including distinct items sharing one
+seller order; cents are preserved and no group total is divided between items.
+Every other status review warning still withholds the amount. The complete
+checkout is saved for review without accepting delivery or ownership. Wrong
+receipt identity, quantity, currency, freshness or unit-price evidence still
+rejects the response atomically. Ambiguous or previously excluded purchases remain
+protected. Saved receipt lookup rechecks the current purchase and refuses an
+older amount after a refund, exclusion, changed source identity or ambiguous
+purchase, even when given an earlier source snapshot. Existing draft values
+remain retained for review.
 A partial or old-reader response without checkout membership is rejected atomically.
 
 eBay's **Multiple items; shipment or delivery not confirmed** group-status warning
@@ -66,7 +71,10 @@ An exact single-note item held only by that group-status warning remains editabl
 in review. **Save draft**, retained-photo selection and **Adjust crop** work even
 after the listing capture expires; a new **Check** still needs fresh evidence.
 Price, seller, purchase date and status stay source-controlled while the warning
-persists. **Release to Collection** is an explicit owner action and creates an
+persists. Refreshing the complete order fills a blank draft price from the newly
+authenticated exact-item receipt while preserving occupied draft or recovery
+values, saved metadata and photos. Metadata-only Check cannot invent a price.
+**Release to Collection** is an explicit owner action and creates an
 **Ordered** record, never an automatic ownership confirmation. It preserves the
 source warning in the review history and uses only the existing exact paid-amount
 authority, leaving an unavailable price blank. These items never complete through

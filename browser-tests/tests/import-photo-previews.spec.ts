@@ -278,3 +278,55 @@ test('an exact-item group warning allows review edits, photo tools, and explicit
     .toEqual(before.items.find((item: { id: string }) => item.id === clean.id));
   await expect(page.locator(`[data-draft-id="${blocked.id}"] .import-card-warnings`)).toContainText(blocked.warnings[0]);
 });
+
+test('an exact item receipt keeps its paid cents visible and locked through Check and explicit Ordered release', async ({ page, request }) => {
+  const fixture = await request.post('/__fixture/import-priced-photos');
+  expect(fixture.ok()).toBe(true);
+  const batch = await fixture.json();
+  const blocked = batch.items.find((item: { state: string }) => item.state === 'blocked');
+  expect(blocked.fields.price).toBe('$72.63');
+  const stateUrl = '/__fixture/import-photo-state?batch=' + encodeURIComponent(batch.id);
+  const before = await (await request.get(stateUrl)).json();
+  const beforeItem = before.items.find((item: { id: string }) => item.id === blocked.id);
+  const observed = await watchRequests(page);
+
+  await page.goto(batch.url);
+  const card = page.locator(`[data-draft-id="${blocked.id}"]`);
+  await expect(card).toContainText('Item price: $72.63');
+  await expect(card.locator('.import-card-warnings')).toContainText(blocked.warnings[0]);
+  await card.getByRole('link', { name: 'Review details' }).click();
+  await expect(page.locator('#banknoteImportSourcePrice')).toHaveText('$72.63');
+  const price = page.locator('[name="price"]');
+  await expect(price).toHaveValue('$72.63');
+  await expect(price).not.toBeEditable();
+  await page.locator('#banknoteImportCheck').click();
+  await expect(page.locator('[name="pick_number"]')).toHaveValue('P-66A');
+  await expect(page.locator('#banknoteImportRelease')).toBeEnabled();
+  await expect(price).toHaveValue('$72.63');
+  await expect(price).not.toBeEditable();
+  await expect(page.locator('#banknoteImportSourcePrice')).toHaveText('$72.63');
+  await expect(page.locator('#banknoteImportWarnings')).toContainText(blocked.warnings[0]);
+
+  const checked = await (await request.get(stateUrl)).json();
+  const checkedItem = checked.items.find((item: { id: string }) => item.id === blocked.id);
+  expect(checkedItem.state).toBe('blocked');
+  expect(checkedItem.released_record_id).toBeNull();
+  expect(JSON.parse(checkedItem.fields_json).price).toBe('$72.63');
+  expect(checked.collection_count).toBe(before.collection_count);
+  expect(checked.link_count).toBe(before.link_count);
+
+  await page.locator('#banknoteImportRelease').click();
+  await expect(page).toHaveURL(batch.url);
+  const after = await (await request.get(stateUrl)).json();
+  const released = after.items.find((item: { id: string }) => item.id === blocked.id);
+  expect(released.state).toBe('released');
+  expect(after.collection_count).toBe(before.collection_count + 1);
+  expect(after.link_count).toBe(before.link_count + 1);
+  expect(after.records).toHaveLength(1);
+  expect(after.records[0]).toMatchObject({ id: released.released_record_id, price: '$72.63',
+    status: 'Ordered', order_number: batch.order_number });
+  expect(released.warning).toBe(beforeItem.warning);
+  expect(released.source_json).toBe(beforeItem.source_json);
+  expect(after.source_items).toEqual(before.source_items);
+  expect(observed.rejectedImages).toEqual([]);
+});

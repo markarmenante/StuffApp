@@ -6,6 +6,13 @@ import time
 
 # '$' preserves an observed display symbol without asserting USD.
 SYMBOLS = {'$': '$', 'USD': '$', 'EUR': '€', 'GBP': '£'}
+_GROUP_STATUS_WARNING = 'multiple items; shipment or delivery not confirmed'
+
+
+def _price_status_allowed(item):
+    # Group delivery status does not invalidate an exact item receipt. Other
+    # warnings can reflect cancellation, payment or identity problems.
+    return (item.get('attention') or '').strip().lower() in ('', _GROUP_STATUS_WARNING)
 
 
 class ReceiptPurchaseNeedsReview(ValueError):
@@ -39,11 +46,11 @@ def save(db, capture, items, requested_at):
         raise ValueError('Receipt observation time is invalid') from None
     if not requested_at - 5 <= stamp <= time.time() + 60:
         raise ValueError('Receipt evidence is not from this purchase check')
-    stored = db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=? AND ignored=0',
+    stored = db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
                         (item['order_id'], item['item_id'])).fetchall()
     # Purchases normalizes its ambiguous-row flag into this attention reason.
     # An identity conflict is never a recoverable status warning.
-    if (len(stored) != 1 or stored[0]['quantity'] != 1
+    if (len(stored) != 1 or stored[0]['quantity'] != 1 or stored[0]['ignored']
             or stored[0]['attention'].startswith('Multiple purchase rows')):
         raise ValueError('Receipt purchase requires review')
     currency_tokens = {'$': r'\$', 'USD': r'US\s*\$|USD', 'EUR': r'EUR|€', 'GBP': r'GBP|£'}
@@ -53,15 +60,15 @@ def save(db, capture, items, requested_at):
     # sibling items, coupons/refunds, missing currency and ambiguous amounts.
     from banknote_check_sources import ebay_receipt_unit_price
     # Validate the receipt's exact identity and amount even when its purchase
-    # needs review. This copy is only a parser input: the original review flag
-    # still prevents the amount from being saved or used below.
+    # needs review. This copy is only a parser input; source status remains
+    # unchanged and only the known group-delivery warning is accepted below.
     price = ebay_receipt_unit_price(evidence, dict(stored[0], attention=''))
     expected = SYMBOLS[currency] + format(Decimal(amount), ',.2f')
     if expected.endswith('.00'):
         expected = expected[:-3]
     if price != expected:
         raise ValueError('Receipt unit amount disagrees with its source evidence')
-    if stored[0]['attention']:
+    if not _price_status_allowed(dict(stored[0])):
         raise ReceiptPurchaseNeedsReview('Receipt purchase requires review')
     db.execute('INSERT INTO ebay_purchase_prices(line_key,currency,unit_amount_minor,source_url,observed_at,evidence) '
                'VALUES(?,?,?,?,?,?) ON CONFLICT(line_key) DO UPDATE SET currency=excluded.currency,'
@@ -71,7 +78,20 @@ def save(db, capture, items, requested_at):
 
 
 def for_item(db, item):
-    if not item or item['quantity'] != 1 or item['attention']:
+    if not item:
+        return None
+    item = dict(item)
+    if item['quantity'] != 1 or not _price_status_allowed(item):
+        return None
+    # Draft source snapshots can outlive a refund, exclusion or identity change.
+    # The current unique source controls whether a saved amount is usable.
+    stored = db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
+                        (item['order_id'], item['item_id'])).fetchall()
+    if len(stored) != 1:
+        return None
+    current = dict(stored[0])
+    if (current['quantity'] != 1 or current['ignored'] or not _price_status_allowed(current)
+            or any(current[key] != item.get(key) for key in ('line_key','order_id','item_id','title','seller'))):
         return None
     row = db.execute('SELECT * FROM ebay_purchase_prices WHERE line_key=?', (item['line_key'],)).fetchone()
     if not row:
