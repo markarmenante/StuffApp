@@ -500,12 +500,73 @@ class EntityPillTests(unittest.TestCase):
         self.assertIn('Independence: 1963.', pill['aria-label'])
         self.assertNotIn('href', pill)
 
-    def test_pitcairn_is_a_documented_nonissuer_without_a_collection_link(self):
+    def test_requested_british_territories_stay_out_of_pills_without_removing_notes(self):
+        removed = (
+            ('Kenya', 'british-kenya'), ('Uganda', 'british-uganda'),
+            ('Malawi', 'british-malawi'), ('Tanganyika', 'british-tanganyika'),
+            ('Sierra Leone', 'british-sierra-leone'),
+            ('Pitcairn Islands', 'british-pitcairn-islands'),
+            ('Nyasaland', 'british-nyasaland'),
+            ('Northern Rhodesia', 'british-northern-rhodesia'),
+            ('Montserrat', 'british-montserrat'), ('Gold Coast', 'british-gold-coast'),
+            ('Gambia', 'british-gambia'),
+            ('Cocos (Keeling) Islands', 'british-cocos-keeling-islands'),
+            ('British Somaliland', 'british-british-somaliland'),
+            ('British Cameroons', 'british-british-cameroons'),
+            ('Anguilla', 'british-anguilla'), ('Alderney', 'british-alderney'),
+        )
         self.note('india')
-        pill = self.page().pills['british-pitcairn-islands']
-        self.assertEqual((pill['tag'], pill['data-coverage']), ('span', 'nonissuer'))
-        self.assertIn('Did not issue its own banknotes', pill['title'])
-        self.assertNotIn('href', pill)
+        roster_before = deepcopy(stuff.banknote_entities.ENTITY_CATALOG)
+        for history in ('0', '1'):
+            page = self.page('/banknotes?history=' + history)
+            self.assertFalse({key for _country, key in removed} & page.pills.keys())
+        for index, (country, _key) in enumerate(removed):
+            self.note('removed-' + str(index), country=country)
+        records_before = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        for history in ('0', '1'):
+            page = self.page('/banknotes?history=' + history)
+            self.assertFalse({key for _country, key in removed} & page.pills.keys())
+            for key in ('british-british-east-africa', 'british-british-west-africa',
+                        'british-rhodesia-and-nyasaland'):
+                self.assertIn(key, page.pills)
+            self.assertEqual(page.targets, {'item-' + row['id'] for row in records_before})
+        self.assertEqual(stuff.banknote_entities.ENTITY_CATALOG, roster_before)
+        self.assertEqual(records_before, [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')])
+
+    def test_removed_aliases_and_fallback_holdings_cannot_recreate_british_pills(self):
+        self.note('india')
+        self.note('kenya-fallback', country=' Kenya ')
+        self.note('kenya-modern', country='Kenya', year=2000)
+        aliases = ('Pitcairn', 'Pitcarin Islands', 'Nyassaland', 'Cocos Islands',
+                   'Cocos (Keeling) Islands', 'Keeling-Cocos Islands')
+        matches = {}
+        for index, country in enumerate(aliases):
+            ident = 'alias-' + str(index)
+            self.note(ident, country=country)
+            # Exercise both a label-only custom entity and a country alias
+            # discovered from a holding, after the initial roster is built.
+            matches[ident] = dict(key='fixture-' + ident, group='british',
+                                 label=country if index % 2 == 0 else 'Legacy territory',
+                                 countries=() if index % 2 == 0 else (country,),
+                                 issued=None, note='Custom alias fixture.')
+        original = stuff.banknote_entity_coverage.entities_for_row
+
+        def coverage(row, classification=None):
+            if row['id'] == 'kenya-fallback':
+                return ()
+            if row['id'] in matches:
+                return (matches[row['id']],)
+            return original(row, classification)
+
+        records_before = [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')]
+        with patch.object(stuff.banknote_entity_coverage, 'entities_for_row', side_effect=coverage):
+            for history in ('0', '1'):
+                page = self.page('/banknotes?history=' + history)
+                self.assertNotIn('british-record-kenya', page.pills)
+                self.assertFalse({entity['key'] for entity in matches.values()} & page.pills.keys())
+                self.assertEqual(page.pills['other-record-kenya']['href'], '#item-kenya-modern')
+                self.assertEqual(page.targets, {'item-' + row['id'] for row in records_before})
+        self.assertEqual(records_before, [dict(row) for row in self.db.execute('SELECT * FROM banknotes ORDER BY id')])
 
     def test_row_access_restrictions_apply_to_coverage_and_navigation(self):
         self.note('restricted-india')

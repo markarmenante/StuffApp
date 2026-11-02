@@ -5898,7 +5898,22 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
                     regional_notes.setdefault(entity['key'], set()).add(entity['coverage_note'])
 
     groups = {}
+    # Mark's British pill display exclusions. Keep the historical catalogue and
+    # saved notes intact; exact names avoid hiding regional currency issuers.
+    excluded_british_pills = {banknote_catalog.fold(name) for name in (
+        'Kenya', 'Uganda', 'Malawi', 'Tanganyika', 'Sierra Leone',
+        'Pitcairn Islands', 'Pitcairn', 'Pitcarin Islands', 'Nyasaland', 'Nyassaland',
+        'Northern Rhodesia', 'Montserrat', 'Gold Coast', 'Gambia',
+        'Cocos (Keeling) Islands', 'Cocos Islands', 'Keeling-Cocos Islands',
+        'British Somaliland', 'British Cameroons', 'Anguilla', 'Alderney',
+    )}
     for entity in entities.values():
+        # Apply after matching holdings and adding fallback entities, so saved
+        # notes cannot reintroduce an excluded British pill.
+        if entity['group'] == 'british' and any(
+                banknote_catalog.fold(name) in excluded_british_pills
+                for name in (entity['label'], *entity.get('countries', ()))):
+            continue
         held = holdings.get(entity['key'], [])
         href = None
         if held:
