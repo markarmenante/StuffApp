@@ -11,6 +11,7 @@ retry, duplicate prevention, and collection release.
 | Defect | Correction and regression coverage |
 | --- | --- |
 | A warning-only purchase titled `Colombia One Peso Oro 1-1-1954 P380g Uncirculated Grade 66` stayed blocked because it lacked a discovery keyword. | Review recognizes one valid Pick shorthand and one positive currency denomination. Original-photo Check, metadata, crops, editing, exact price, and explicit release are covered. Automatic single-note eligibility is unchanged. |
+| The first correction still depended on a finite currency vocabulary and left `Brazil 100 Cruzeiros ND(1964) P170b Uncirculated Grade 68 Top Pop (1)` blocked. | Explicit Check can inspect exact quantity-one purchases independently of the currency vocabulary. Unknown titles require a verified complete front/back pair from the current original gallery before editing or release. Server-owned identity evidence is bound to purchase, capture and original hashes. Brazil and several historical currencies have focused regressions; the full browser flow also covers Brazil's initially locked draft, Check, photos, exact price and explicit release. |
 | Stalled HTTP requests could leave controls disabled indefinitely. | Requests have a 30-second deadline. An uncertain write requires reading saved status before retrying; local edits remain available and writes are never replayed automatically. |
 | Editing during Check could invalidate its result without explaining the interruption. | Editing pauses while Check runs, with an explicit message; revision checks still protect concurrent clients. |
 | Normal Check did not bind its result to the listing capture or receipt it read. | Publication rechecks the capture, receipt, purchase date, draft revision and work token. Changed evidence rejects the result without publishing a collection record. |
@@ -51,3 +52,10 @@ draft through its normal Check action. That draft remains available for the
 owner's explicit release. External eBay authentication, changed page markup,
 provider outages and missing source facts remain runtime dependencies; the
 review does not claim exhaustive coverage of all possible provider responses.
+
+The Brazil follow-up also identified a pre-existing recovery limitation: if a
+retained original file is missing or corrupt, Check and release reject it, but
+Check currently skips downloading a URL already present in the asset table.
+Repeated Check cannot repair that file. This does not explain the reported
+Brazil draft, whose originals load correctly, and is not resolved by the
+currency-independent review correction.

@@ -5,7 +5,7 @@ import subprocess
 import sys
 suites = [
     'test_monitoring.py', 'test_ebay_orders.py', 'test_ebay_mail.py', 'test_ebay_purchase_lookup.py',
-    'test_ebay_matching.py', 'test_banknote_imports.py', 'test_banknote_import_consistency.py', 'test_banknote_photo_sides.py',
+    'test_ebay_matching.py', 'test_banknote_imports.py', 'test_banknote_import_consistency.py', 'test_banknote_review_currency.py', 'test_banknote_photo_sides.py',
     'test_purchase_lifecycle.py', 'test_banknote_check_sources.py',
     'test_banknote_price_currency.py', 'test_banknote_catalog_recovery.py',
     'test_market_purchase_capture.py', 'test_banknote_crop_responses.py',

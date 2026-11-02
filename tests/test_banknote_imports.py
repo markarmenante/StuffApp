@@ -851,10 +851,10 @@ class DraftTests(unittest.TestCase):
 
     def test_inspection_eligibility_rejects_ambiguous_types_quantities_and_generic_attention(self):
         cases=[dict(title='PMG banknote and coin'),dict(title='Empty PMG holder only'),
-               dict(title='Unidentified collectible'),dict(title='Lot of two banknotes PMG'),dict(quantity=2),
+               dict(title='Lot of two banknotes PMG'),dict(quantity=2),
                dict(attention='Needs review'),dict(attention='Multiple purchase rows share this identity; review required'),dict(ignored=1)]
         cases.extend(dict(title=title) for title in (
-            'Colombia P380g Grade 66', 'Colombia One Peso Oro Grade 66', 'Colombia 0 Pesos P380g',
+            'Colombia 0 Pesos P380g',
             'Colombia One Peso P380g and P381a', 'Colombia One Peso and Five Pesos P380g',
             'Colombia One Peso P380g coin', 'Colombia One Peso P380g holder only',
             'Colombia One Peso P380g/P381', 'Colombia One Peso P380g-P381',

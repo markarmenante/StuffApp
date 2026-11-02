@@ -16,7 +16,7 @@ const {createHash} = require('node:crypto');
   const repo = path.resolve(__dirname, '..');
   const artifacts = process.env.ORDER_REVIEW_ARTIFACTS || fs.mkdtempSync(path.join(os.tmpdir(), 'banknote-order-review-'));
   fs.mkdirSync(artifacts, {recursive:true});
-  const sourceFiles = ['app.py','banknote_imports.py','ebay_purchase_lookup.py','purchase_orders.py',
+  const sourceFiles = ['app.py','banknote_imports.py','banknote_photo_sides.py','ebay_purchase_lookup.py','purchase_orders.py',
     'static/js/banknote-imports.js','templates/banknote_import_new.html','templates/banknote_import_review.html','templates/partials/banknote_import_detail_header.html','templates/partials/banknote_import_detail_sources.html','templates/partials/banknote_import_styles.html','templates/partials/collection_toolbar.html','templates/detail.html'].filter(file=>fs.existsSync(path.join(repo,file)));
   const hashes=()=>Object.fromEntries(sourceFiles.map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(repo,file))).digest('hex')]));
   const evidence={passed:[],failures:[],errors:[],externalRequests:[],filter:process.env.ORDER_REVIEW_TEST_FILTER||null,sourceBefore:hashes()};
@@ -69,6 +69,10 @@ def specs(note):
   return dict(country='Colombia',issuer='Banco de la Republica',denomination='1 Peso Oro',
    pick_number='P-380g',date_1=1954,grading_authority='PMG',grade_numeric=66,
    printer='Fixture source printer',serial_number='FIXTURE-COLOMBIA',sources='Synthetic exact-listing source')
+ if 'Brazil' in (note.get('description') or ''):
+  return dict(country='Brazil',issuer='Tesouro Nacional',denomination='100 Cruzeiros',
+   pick_number='P-170b',date_1=1964,grading_authority='PMG',grade_numeric=68,
+   printer='Fixture source printer',serial_number='FIXTURE-BRAZIL',sources='Synthetic exact-listing source')
  return dict(country='Maldives' if third else 'Seychelles' if second else 'Tonga',issuer='Government of Maldives' if third else 'Government of Seychelles' if second else 'Government of Tonga',
   denomination='10 Rufiyaa' if third else '5 Rupees' if second else '1 Pound',pick_number='P-5b' if third else 'P-14a' if second else 'P-12b',date_1=1960 if third else 1968 if second else 1966,
   grading_authority='PMG',grade_numeric=64,grade_modifier='EPQ',printer='Fixture source printer',
@@ -120,12 +124,14 @@ def fixture_complete():
  examples=(('Tonga 1 Pound 1966 P-12b PMG 64 EPQ','599.89'),('Seychelles 5 Rupees 1968 P-14a PMG 64 EPQ','125.37'),('Maldives 10 Rufiyaa 1960 P-5b PMG 64 EPQ','38.11'))
  if data.get('colombia'):
   examples=(('Colombia One Peso Oro 1-1-1954 P380g Uncirculated Grade 66','137.42'),*examples[1:])
+ if data.get('brazil'):
+  examples=(('Brazil 100 Cruzeiros ND(1964) P170b Uncirculated Grade 68 Top Pop (1)','299.99'),*examples[1:])
  for index,(title,amount) in enumerate(examples[:1] if data.get('single') else examples):
   actual_order=seller_orders[index]
   ident=str(177000000000+int(number[-5:])*10+index)
   details='https://order.ebay.com/ord/show?orderId='+actual_order+'&purchaseOrderId='+checkout_id
   item=dict(order_id=actual_order,item_id=ident,title=title,seller='fixture-dealer-'+str(index),quantity=1,status_text='Order processing',delivery_text='',ordered_date='Oct 26, 2026',details_url=details)
-  if data.get('colombia') and index==0:item['status_text']='Multiple items'
+  if (data.get('colombia') or data.get('brazil')) and index==0:item['status_text']='Multiple items'
   items.append(item)
   receipts.append(dict(order_id=actual_order,item_id=ident,quantity=1,url='https://order.ebay.com/ord/show?orderId='+actual_order,
    currency='USD',unit_amount=amount,observed_at=observed,evidence='Order number '+actual_order+'\nItem info\n'+title+'\nUnit price USD '+amount+'\nItem number: '+ident+'\nPayment summary\nTax USD 44.44\nShipping USD 33.33\nOrder total USD 999.99'))
@@ -140,6 +146,7 @@ def fixture_complete():
    drafts=[dict(row) for row in fresh.execute('SELECT i.* FROM banknote_import_items i JOIN banknote_import_batches b ON b.id=i.batch_id WHERE b.order_id=?',(number,))];fresh.close()
    with patch.object(stuff,'fetch_banknote_specs',side_effect=RuntimeError('Synthetic provider interruption')) if data.get('partial') else contextlib.nullcontext():
     for draft in drafts:
+     if data.get('defer_review_check') and draft['item_id']==items[0]['item_id']:continue
      check=client.post('/banknotes/imports/'+draft['batch_id']+'/items/'+draft['id']+'/check',json={'revision':draft['revision']})
      assert check.status_code==202,(check.status_code,check.get_json())
   return jsonify(status=response.status_code,body=response.get_json(),items=items),response.status_code
@@ -444,33 +451,50 @@ finally:server.server_close();temporary.cleanup()
         assert.equal(await t.page.locator('[data-import-mode]').count(),0);
       }finally{await t.close();}
     });
-    await run('abbreviated Pick title in a multiple-item order supports Check, photos and explicit release',async()=>{
+    for(const reviewCase of [
+      {country:'Colombia',pick:'P-380g',price:137.42,number:'98-76543-42010',options:{colombia:true}},
+      {country:'Brazil',pick:'P-170b',price:299.99,number:'98-76543-42020',options:{brazil:true,defer_review_check:true}}
+    ])await run(reviewCase.country+': abbreviated Pick title in a multiple-item order supports Check, photos and explicit release',async()=>{
       const t=await setup(false);try{
-        const {before,id,batch}=await newCheckout(t,'98-76543-42010',false,{colombia:true});
-        const draft=batch.items.find(item=>item.title.startsWith('Colombia '));
+        const {country,pick,price,number,options}=reviewCase;
+        const {before,id,batch}=await newCheckout(t,number,false,options);
+        let draft=batch.items.find(item=>item.title.startsWith(country+' '));
         assert(draft,'the exact keywordless purchased title remains in review');
         assert.equal(draft.state,'blocked','the purchase warning is retained');
+        assert.equal(draft.can_check,true,'the original photos can establish banknote identity');
+        await t.page.locator('article[data-draft-id="'+draft.id+'"] [data-review-draft]').click();
+        assert.equal(await t.page.locator('#banknoteImportCheck').isEnabled(),true);
+        if(options.defer_review_check){
+          assert.equal(draft.can_edit,false);assert.equal(draft.can_release,false);
+          assert.equal(await t.page.locator('#banknoteImportRelease').isEnabled(),false);
+          assert.equal(await t.page.locator('[name="country"]').isEnabled(),false);
+          assert.equal(await t.page.locator('.banknote-imgs img').count(),0);
+          const checked=t.page.waitForResponse(response=>response.url()===origin+draft.detail_url+'/check'&&response.request().method()==='POST');
+          await t.page.locator('#banknoteImportCheck').click();assert.equal((await checked).status(),202);
+          await t.page.waitForFunction(()=>!document.getElementById('banknoteImportCheck').disabled);
+          draft=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
+        }
         assert.equal(draft.can_check,true);assert.equal(draft.can_edit,true);assert.equal(draft.can_release,true);
         assert.equal(draft.check_state,'done',draft.check_message);
         assert.match(draft.warnings.join(' '),/Multiple items; shipment or delivery not confirmed/);
-        assert.equal(draft.fields.country,'Colombia');assert.equal(draft.fields.pick_number,'P-380g');
-        assert.equal(numberValue(draft.fields.price),137.42,'the exact item amount is separate from order totals');
-        await t.page.locator('article[data-draft-id="'+draft.id+'"] [data-review-draft]').click();
+        assert.equal(draft.fields.country,country);assert.equal(draft.fields.pick_number,pick);
+        assert.equal(numberValue(draft.fields.price),price,'the exact item amount is separate from order totals');
         assert.equal(await t.page.locator('#banknoteImportCheck').isEnabled(),true);
         assert.equal(await t.page.locator('#banknoteImportRelease').isEnabled(),true);
         assert.equal(await t.page.locator('[name="country"]').isEnabled(),true);
-        assert.equal(await t.page.locator('[name="country"]').inputValue(),'Colombia');
+        assert.equal(await t.page.locator('[name="country"]').inputValue(),country);
         const images=t.page.locator('.banknote-imgs img');
         assert.equal(await images.count(),2,'both selected photos replace empty main-image slots');
         await loadedImages(t,'.banknote-imgs img');
         assert(await images.evaluateAll(images=>images.every(image=>image.naturalWidth>0)));
         assert.equal(await t.page.locator('.quad-fix-btn:visible').count(),2,'both selected sides expose their crop controls');
-        await t.page.locator('[name="printer"]').fill('Reviewed Colombia fixture printer');
+        const reviewedPrinter='Reviewed '+country+' fixture printer';
+        await t.page.locator('[name="printer"]').fill(reviewedPrinter);
         const checked=t.page.waitForResponse(response=>response.url()===origin+draft.detail_url+'/check'&&response.request().method()==='POST');
         await t.page.locator('#banknoteImportCheck').click();assert.equal((await checked).status(),202);
         await t.page.waitForFunction(()=>!document.getElementById('banknoteImportCheck').disabled);
         const current=(await batchStatus(t,id)).items.find(item=>item.id===draft.id);
-        assert.equal(current.fields.printer,'Reviewed Colombia fixture printer','Check flushes and preserves pending edits');
+        assert.equal(current.fields.printer,reviewedPrinter,'Check flushes and preserves pending edits');
         assert.equal(current.fields.image_1,draft.fields.image_1);assert.equal(current.fields.image_2,draft.fields.image_2);
         assert.deepEqual((await t.state()).rows,before.rows,'review and Check do not publish any collection record');
         const released=t.page.waitForResponse(response=>response.url().endsWith('/release')&&response.request().method()==='POST');
@@ -478,9 +502,9 @@ finally:server.server_close();temporary.cleanup()
         await t.page.waitForURL(origin+'/banknotes/imports/'+id);
         const releasedId=t.releaseResults.at(-1).released[0].record_id;
         const state=await t.state(),row=state.rows.find(item=>item.id===releasedId);
-        assert.equal(row.country,'Colombia');assert.equal(row.pick_number,'P-380g');
-        assert.equal(row.status,'Ordered');assert.equal(numberValue(row.price),137.42);
-        assert.equal(row.order_number,draft.order_number);assert.equal(row.printer,'Reviewed Colombia fixture printer');
+        assert.equal(row.country,country);assert.equal(row.pick_number,pick);
+        assert.equal(row.status,'Ordered');assert.equal(numberValue(row.price),price);
+        assert.equal(row.order_number,draft.order_number);assert.equal(row.printer,reviewedPrinter);
         assert.equal(state.rows.length,before.rows.length+1,'only the explicitly released item is published');
         assert.equal(state.links.filter(link=>link.banknote_id===releasedId).length,1,'one exact purchase link is created');
         const after=await batchStatus(t,id);

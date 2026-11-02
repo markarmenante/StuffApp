@@ -57,25 +57,41 @@ remain retained for review.
 A partial or old-reader response without checkout membership is rejected atomically.
 
 eBay's **Multiple items; shipment or delivery not confirmed** group-status warning
-does not prevent identifying a positively recognized single banknote. With fresh
+does not prevent inspecting an exact single-item purchase. With fresh
 exact listing evidence, verified account/membership and no quantity, bundle,
 duplicate or collection-link conflict, **Check** may read the full original photos
 and fill blank note-identification, grading and supported catalogue fields. It may
 also prepare classified front/back display images, reusing an accepted preview
 crop when the original hash and current capture agree. Check retains the purchase
 warning and does not release the item. Model output cannot supply image paths or
-modify purchase/status/owner fields. Other purchase warnings and ambiguous item
-types retain their existing restrictions.
+modify purchase/status/owner fields. Other purchase warnings, known non-note
+objects, explicit conflicting catalogue/denomination identities and bundles
+retain their existing restrictions.
 
 An exact single-note item held only by that group-status warning remains editable
 in review. **Save draft**, retained-photo selection and **Adjust crop** work even
 after the listing capture expires; a new **Check** still needs fresh evidence.
 Review also recognizes a title with one unambiguous P/PK catalogue reference and
 one positive written currency denomination, such as a Peso face value, even when
-the seller omitted “banknote”, “PMG” or the full word “Pick”. A bare asking price,
-malformed/ranged references, multiple denominations and existing mixed-item or
-bundle blockers do not qualify. This title fallback does not change automatic
-single-note completion rules.
+the seller omitted “banknote”, “PMG” or the full word “Pick”. An unrecognized
+currency word or incomplete title does not disable **Check**. Such items remain
+locked for editing and release until Check verifies two distinct, complete,
+high-confidence opposite sides of the same banknote from the current listing.
+Another complete unrelated or uncertain note view invalidates this proof;
+holder-only label photos do not. Missing, mixed or uncertain photos retain their
+originals and a retryable explanation without publishing fields or selected
+images. Known non-note objects, malformed/ranged or repeated references,
+nonpositive face values, multiple known denominations and bundle blockers remain
+excluded from inspection. Neither this inspection path nor the title fallback
+changes automatic single-note completion rules.
+
+Photo identity is server-owned evidence stored separately from editable fields.
+It binds the exact source digest, listing content and every inspected original's
+URL, filename and hash, including the verified front/back pair. Editing and
+release require that evidence still match the source, capture and saved assets;
+publication and release additionally verify the original file bytes. Listing
+age alone, or a timestamp-only refresh, does not revoke accepted identity. A
+changed capture or source does, and a new Check still requires fresh evidence.
 Price, seller, purchase date and status stay source-controlled while the warning
 persists. Refreshing the complete order fills a blank draft price from the newly
 authenticated exact-item receipt while preserving occupied draft or recovery

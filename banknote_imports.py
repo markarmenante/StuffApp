@@ -39,6 +39,7 @@ _DIMENSIONS = re.compile(r'(?<![\w.])\d+(?:[.,]\d+)?\s*(?:(?:mm|cm|inches|inch|i
 _MULTIPACK = re.compile(r'(?<![\w./-])'+_MULTIPLE+r'\s*[x×](?=\s|\d|$)|(?<!\w)[x×]\s*'+_MULTIPLE+r'\b', re.I)
 _AUTO_AMBIGUOUS = re.compile(r'\b(?:set|bundle|pair|assortment|assorted|coins?|stamps?|medals?|empty|holder only)\b|\blot\s+(?:of\s+)?(?:notes|banknotes)\b|\bcollection\s+of\s+(?:\w+\s+){0,4}(?:notes|banknotes)\b|\b(?:notes|banknotes)\s+collection\b', re.I)
 _NOTE_TITLE = re.compile(r'\b(?:banknotes?|paper money|PMG|Friedberg)\b|\bPick\s*[#-]?\s*\d', re.I)
+_NON_NOTE_TITLE = re.compile(r'\b(?:books?|cameras?|lenses|lens|albums?|posters?|postcards?)\b', re.I)
 _LISTING_PREVIEW_URL = re.compile(r'https://i\.ebayimg\.com/images/g/[\w~-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', re.ASCII)
 _INSPECTION_ATTENTION = frozenset(('multiple items; shipment or delivery not confirmed',))
 _REVIEW_LOCKED_FIELDS = ('price','vendor','purchase_date','status')
@@ -83,6 +84,7 @@ def init_schema(db):
         state TEXT NOT NULL DEFAULT 'draft', revision INTEGER NOT NULL DEFAULT 1,
         released_record_id TEXT, existing_record_id TEXT, existing_snapshot_json TEXT,
         manual_photos_json TEXT NOT NULL DEFAULT '{}',
+        note_identity_json TEXT NOT NULL DEFAULT '{}',
         warning TEXT NOT NULL DEFAULT '',
         check_state TEXT NOT NULL DEFAULT 'idle', check_token TEXT, check_expires REAL NOT NULL DEFAULT 0,
         check_message TEXT NOT NULL DEFAULT '', checked_at REAL,
@@ -126,6 +128,8 @@ def init_schema(db):
         if name not in columns:db.execute('ALTER TABLE banknote_import_items ADD COLUMN '+name+' TEXT')
     if 'manual_photos_json' not in columns:
         db.execute("ALTER TABLE banknote_import_items ADD COLUMN manual_photos_json TEXT NOT NULL DEFAULT '{}'")
+    if 'note_identity_json' not in columns:
+        db.execute("ALTER TABLE banknote_import_items ADD COLUMN note_identity_json TEXT NOT NULL DEFAULT '{}'")
 
 
 def _account(db):
@@ -738,7 +742,7 @@ def _validate_source(db,batch,row):
 def _review_note_title(title):
     """Recognize a note's Pick shorthand without broadening automatic imports."""
     if _NOTE_TITLE.search(title):return True
-    if re.search(r'\b(?:books?|cameras?|lenses|lens|albums?|posters?|postcards?)\b',title,re.I):return False
+    if _NON_NOTE_TITLE.search(title):return False
     profile=ebay_matching.profile(title)
     picks=profile['catalogs'].get('p',set())
     denominations=profile['denominations']
@@ -765,11 +769,33 @@ def _review_note_title(title):
     return True
 
 
-def _review_source(db,batch,row):
-    """Allow exact single-note review despite an unconfirmed group delivery status.
+def _review_title_ambiguous(title):
+    """Reject explicit contradictory identities without requiring known units."""
+    # Repeated written units joined as separate values are explicit ambiguity,
+    # even when the matching vocabulary does not know that currency yet.
+    if re.search(r'\b'+ebay_matching.NUMBER+r'\s+([^\W\d_]+(?:\s+[^\W\d_]+){0,3}?)\s*(?:and|or|to|[&/,;–—])\s*'
+                 +ebay_matching.NUMBER+r'\s+\1\b',title,re.I):return True
+    denominations=ebay_matching.denominations(title)
+    if len(denominations)>1 or any(amount<=0 for amount,_ in denominations):return True
+    if re.search(r'(?<!\w)[-−]'+ebay_matching.NUMBER+r'\s*(?:'+ebay_matching.UNIT_RE+r')\b',
+                 ebay_matching.CATALOG_RE.sub(' ',title),re.I):return True
+    starts=list(re.finditer(r'\b(?:pk|p)(?=\d|[\s.#?/_-]|$)',title,re.I))
+    matches=[match for match in ebay_matching.CATALOG_RE.finditer(title) if match[1].lower() in ('p','pk')]
+    if len(starts)>1 or len(starts)!=len(matches):return True
+    if matches:
+        if starts[0].start()!=matches[0].start():return True
+        tail=title[matches[0].end():]
+        if (tail and not re.match(r'[\s.,;:)\]]',tail)
+                or re.match(r'\s*(?:[/~]|[-–—]\s*\w|(?:and|or|to)\s+[a-z]?\d)',tail,re.I)):
+            return True
+    return False
 
-    Retained draft edits and explicit release depend on purchase identity, not
-    the age of a listing capture. This exception never admits other blockers.
+
+def _review_purchase_source(db,batch,row):
+    """Validate an exact quantity-one purchase before explicit inspection.
+
+    A title vocabulary match is not required to inspect its originals. Known
+    non-note objects, bundles and every other purchase blocker remain excluded.
     """
     source=json.loads(row['source_json'])
     membership=json.loads(batch['snapshot_json'])
@@ -779,7 +805,8 @@ def _review_source(db,batch,row):
             or source.get('item_id')!=row['item_id'] or _digest(source)!=row['source_digest']
             or [source.get('order_id'),row['item_id']] not in membership
             or source.get('attention','').lower() not in _INSPECTION_ATTENTION
-            or row['warning']!=_reason(source) or not _review_note_title(source.get('title') or '')
+            or row['warning']!=_reason(source) or _NON_NOTE_TITLE.search(source.get('title') or '')
+            or _review_title_ambiguous(source.get('title') or '')
             or _AUTO_AMBIGUOUS.search(source.get('title') or '') or _bundle_title(source.get('title') or '')):
         raise ImportProblem('This purchase needs its exact item identity reviewed before editing or release.')
     matches=db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
@@ -795,6 +822,50 @@ def _review_source(db,batch,row):
             or db.execute('SELECT 1 FROM banknote_ebay_links WHERE line_key=?',(row['line_key'],)).fetchone()):
         raise ImportProblem('This purchase identity changed or already has a collection record. Refresh the order review.')
     return current
+
+
+def _identity_capture_digest(capture):
+    # Retained identity survives time passing and a timestamp-only refresh, but
+    # never a change to the listing evidence on which the classifier relied.
+    return hashlib.sha256(_json({key:capture[key] for key in ('url','title','text','images_json')}).encode()).hexdigest()
+
+
+def _identity_asset(asset):
+    return {key:asset[key] for key in ('source_url','filename','sha256')}
+
+
+def _valid_note_identity(db,row,proof=None):
+    """Validate server-owned proof against current source, capture and assets."""
+    try:
+        proof=json.loads(row['note_identity_json']) if proof is None else proof
+        if (not isinstance(proof,dict) or proof.get('version')!=1
+                or proof.get('source_digest')!=row['source_digest']):return False
+        capture=db.execute('SELECT * FROM ebay_listing_captures WHERE url=?',
+            ('https://www.ebay.com/itm/'+row['item_id'],)).fetchone()
+        if not capture or proof.get('capture_digest')!=_identity_capture_digest(capture):return False
+        urls=json.loads(capture['images_json'])
+        originals=proof.get('originals')
+        pair=proof.get('pair')
+        if (not isinstance(originals,list) or not isinstance(pair,dict)
+                or set(pair)!=set(('image_1','image_2')) or len(originals)!=len(urls)
+                or {asset['source_url'] for asset in originals}!=set(urls)):
+            return False
+        current={asset['source_url']:_identity_asset(asset) for asset in db.execute(
+            'SELECT * FROM banknote_import_assets WHERE item_id=?',(row['id'],))}
+        if any(current.get(asset['source_url'])!=asset for asset in originals):return False
+        if any(asset not in originals for asset in pair.values()):return False
+        return (pair['image_1']['filename']!=pair['image_2']['filename']
+                and pair['image_1']['sha256']!=pair['image_2']['sha256'])
+    except (KeyError,TypeError,ValueError):
+        return False
+
+
+def _review_source(db,batch,row):
+    """Editing/release requires a recognized title or retained photo identity."""
+    source=_review_purchase_source(db,batch,row)
+    if not _review_note_title(source.get('title') or '') and not _valid_note_identity(db,row):
+        raise ImportProblem('Use Check to verify that the original photos show one banknote before editing or release.')
+    return source
 
 
 def can_edit(db,row):
@@ -813,8 +884,8 @@ def _editable_source(db,batch,row):
 
 
 def _inspection_context(db,batch,row):
-    """Bind a metadata-only Check to fresh evidence for an exact reviewable note."""
-    _review_source(db,batch,row)
+    """Bind explicit inspection to fresh evidence for an exact purchase."""
+    _review_purchase_source(db,batch,row)
     if not _listing_preview_sources(db,row,json.loads(row['source_json'])):
         raise ImportProblem('Refresh the exact listing evidence before checking this note.')
     capture=db.execute('SELECT * FROM ebay_listing_captures WHERE url=?',
@@ -836,7 +907,7 @@ def can_check(db,row):
 def _check_context(db,batch,row):
     if row['state']=='blocked':
         capture_digest=_inspection_context(db,batch,row)
-        source=_review_source(db,batch,row)
+        source=_review_purchase_source(db,batch,row)
     else:
         if row['state']!='draft':raise ImportProblem('This item is no longer an editable draft.')
         source=_validate_source(db,batch,row)
@@ -1090,16 +1161,28 @@ def _source_inputs(db,row,fields,folder,classify):
     def original(filename):
         saved=db.execute('SELECT source FROM trimmed_image_sources WHERE trimmed=?',(filename,)).fetchone()
         return saved['source'] if saved else filename
-    chosen=banknote_photo_sides.select(assets,folder,classify,existing=fields,resolve_original=original)
+    current_urls=set(json.loads(capture['images_json'])) if capture else set()
+    needs_identity=row['state']=='blocked' and not _review_note_title(source.get('title') or '')
+    inspected=[asset for asset in assets if asset['source_url'] in current_urls] if needs_identity else assets
+    chosen=banknote_photo_sides.select(inspected,folder,classify,existing=fields,resolve_original=original)
     warnings.extend(chosen['warnings'])
     photos={field:asset['filename'] for field,asset in chosen['images'].items() if not fields.get(field)}
-    current_urls=set(json.loads(capture['images_json'])) if capture else set()
+    identity={}
+    pair=chosen.get('verified_pair',{})
+    if (needs_identity and capture and set(pair)=={'image_1','image_2'}
+            and {asset['source_url'] for asset in inspected}==current_urls
+            and len(inspected)==len(current_urls)):
+        identity=dict(version=1,source_digest=row['source_digest'],
+            capture_digest=_identity_capture_digest(capture),
+            originals=[_identity_asset(asset) for asset in inspected],
+            pair={field:_identity_asset(asset) for field,asset in pair.items()})
     vision_images=[dict(filename=asset['filename'],sha256=asset['sha256'],
                         label='Additional verified photograph of the same note (holder/label evidence)')
                    for asset in chosen['evidence_images'] if asset['source_url'] in current_urls]
     return dict(evidence=evidence,reports=['Exact order item isolated from sibling purchases.'],warnings=warnings,
                 documents=[],images={},vision_images=vision_images,purchase=purchase,
-                purchase_price_fill_only=True,purchase_price_blocked=not bool(paid)),assets,photos
+                purchase_price_fill_only=True,purchase_price_blocked=not bool(paid),
+                _note_identity=identity),assets,photos
 
 
 def _verify_original_assets(assets,folder):
@@ -1186,6 +1269,7 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         batch,row=_item(db,batch_id,item_id)
         context=_check_context(db,batch,row)
         inspection=row['state']=='blocked'
+        needs_identity=inspection and not _review_note_title(json.loads(row['source_json']).get('title') or '')
         fields=json.loads(row['fields_json'])
         prepared,assets,photos=_source_inputs(db,row,fields,folder,classify)
         _verify_original_assets(assets,folder)
@@ -1205,6 +1289,9 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
             db.execute('''INSERT OR IGNORE INTO banknote_import_assets(item_id,source_url,filename,sha256,width,height,position)
                 VALUES(?,?,?,?,?,?,?)''',(item_id,asset['source_url'],asset['filename'],asset['sha256'],asset.get('width'),asset.get('height'),asset['position']))
         db.commit()
+        identity=prepared.pop('_note_identity',{})
+        if needs_identity and not _valid_note_identity(db,row,identity):
+            raise ImportProblem('The original photos could not verify one banknote with a clear front and back. No draft fields or selected photos were changed; refresh the listing evidence and retry Check.')
         note={column[1]:None for column in db.execute('PRAGMA table_info(banknotes)')}
         note.update(fields);note.update(photos);note.update(id=item_id,_check_sources=prepared)
         if inspection:
@@ -1250,6 +1337,8 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         if (current_context!=context or current['revision']!=revision or current['check_token']!=token or current['check_expires']<=time.time()):
             raise ImportProblem('The draft changed while Check was running. Your edits were kept; press Check again.')
         _verify_original_assets(assets,folder)
+        if needs_identity and not _valid_note_identity(db,current,identity):
+            raise ImportProblem('The verified note photos or listing changed while Check was running. Your draft was kept; retry Check.')
         current_fields=json.loads(current['fields_json'])
         applied=set()
         for field,value in {**photos,**result.get('filled',{})}.items():
@@ -1284,9 +1373,10 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         warnings=list(dict.fromkeys(prepared['warnings']+[result['lookup_error']] if result.get('lookup_error') else prepared['warnings']))
         if _manually_selected_pair(current_fields,json.loads(current['manual_photos_json'] or '{}')):
             warnings=[warning for warning in warnings if warning not in PHOTO_SIDE_WARNINGS]
-        db.execute('''UPDATE banknote_import_items SET fields_json=?,revision=revision+1,check_state=?,check_message=?,
+        db.execute('''UPDATE banknote_import_items SET fields_json=?,note_identity_json=?,revision=revision+1,check_state=?,check_message=?,
             check_token=NULL,check_expires=0,checked_at=?,updated_at=? WHERE id=?''',
-            (_json(current_fields),'partial' if warnings else 'done',' '.join(warnings),time.time(),time.time(),item_id))
+            (_json(current_fields),_json(identity) if needs_identity else current['note_identity_json'],
+             'partial' if warnings else 'done',' '.join(warnings),time.time(),time.time(),item_id))
         db.commit()
         committed=True
     except Exception as error:
