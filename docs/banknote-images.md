@@ -57,3 +57,18 @@ already been JPEG-compressed before trimming. Tests in
 `tests/test_banknote_image_quality.py` cover full paper margins, colour sampling,
 native resolution, exact source preservation, and rejection of an inner coloured
 design / already cropped note / uncertain surround.
+
+## Retrying uncropped order-draft originals
+
+For an editable order draft, an explicit Check retries arrival cropping when a
+side still points to its retained original asset. It never retries an accepted
+crop, a manually selected photo, a manually adjusted crop, or a photo preserved
+from an existing collection record. Source hashes, draft revision/token checks
+and the existing release transaction still protect publication. A failed retry
+keeps the original and an accepted retry records its original and source quad.
+Ordinary collection Check remains a metadata operation and never recrops photos.
+
+The crop validator and geometry scan reserve 4096 output tokens, including any
+model thinking. The former 80-token verdict budget could finish without a text
+answer and reject otherwise usable imported-note crops. Truncated answers remain
+inconclusive; neither partial JSON nor an unavailable verdict authorizes a crop.

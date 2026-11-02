@@ -771,7 +771,27 @@ def _source_inputs(db,row,fields,folder,classify):
                 documents=[],images={},purchase=purchase,purchase_price_fill_only=True,purchase_price_blocked=not bool(paid)),assets,photos
 
 
-def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,prepare_photo=None):
+def _uncropped_draft_photos(db,row,fields,assets):
+    """Retry only untouched originals retained after an inconclusive arrival crop."""
+    selected=json.loads(row['manual_photos_json'] or '{}')
+    existing=json.loads(row['existing_snapshot_json'] or '{}')
+    originals={asset['filename'] for asset in assets}
+    result={}
+    for field in ('image_1','image_2'):
+        filename=fields.get(field)
+        if (not filename or filename not in originals or selected.get(field)
+                or not banknote_catalog_lookup.is_blank(existing.get(field))):
+            continue
+        if db.execute('SELECT 1 FROM trimmed_image_sources WHERE trimmed=?',(filename,)).fetchone():
+            continue
+        if db.execute('SELECT 1 FROM banknote_import_image_edits WHERE item_id=? AND field=?',
+                      (row['id'],field)).fetchone():
+            continue
+        result[field]=filename
+    return result
+
+
+def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,prepare_photo=None,*,retry_uncropped=False):
     db=connect()
     created=[]
     retained=set()
@@ -781,6 +801,8 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         _validate_source(db,batch,row)
         fields=json.loads(row['fields_json'])
         prepared,assets,photos=_source_inputs(db,row,fields,folder,classify)
+        retries=_uncropped_draft_photos(db,row,fields,assets) if retry_uncropped else {}
+        photos.update(retries)
         # Save source photographs before the slower catalogue call. A provider
         # failure or restart must not discard the already captured originals.
         db.execute('BEGIN IMMEDIATE')
@@ -796,7 +818,8 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         note.update(fields);note.update(photos);note.update(id=item_id,_check_sources=prepared)
         result=evaluate(note,prepared)
         # Vision reads the full saved originals first. Display preparation is
-        # only for newly selected empty slots, never an existing/manual crop.
+        # for newly selected empty slots or an explicit retry of an untouched
+        # original. Accepted crops, manual choices and collection photos stay put.
         # Detection runs outside the write lock; publication below still checks
         # the draft revision/token. A stale result cannot replace newer edits.
         display_edits={}
@@ -824,7 +847,9 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
             raise ImportProblem('The draft changed while Check was running. Your edits were kept; press Check again.')
         current_fields=json.loads(current['fields_json'])
         for field,value in {**photos,**result.get('filled',{})}.items():
-            if field in note and banknote_catalog_lookup.is_blank(current_fields.get(field)):
+            retry_crop=(field in retries and field in display_edits
+                        and current_fields.get(field)==retries[field])
+            if field in note and (banknote_catalog_lookup.is_blank(current_fields.get(field)) or retry_crop):
                 current_fields[field]=value
         for field,edit in display_edits.items():
             if current_fields.get(field)!=edit['filename']:

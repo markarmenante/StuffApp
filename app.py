@@ -11590,7 +11590,9 @@ def _vision_crop_verdict(crop):
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
         resp = client.messages.create(
             model=model,
-            max_tokens=80,
+            # The current model can spend output tokens before its JSON answer.
+            # An 80-token cap returned only thinking and silently vetoed imports.
+            max_tokens=4096,
             messages=[{'role': 'user', 'content': [
                 {'type': 'image', 'source': {
                     'type': 'base64', 'media_type': 'image/jpeg',
@@ -11598,6 +11600,9 @@ def _vision_crop_verdict(crop):
                 {'type': 'text', 'text': prompt},
             ]}],
         )
+        if getattr(resp, 'stop_reason', None) == 'max_tokens':
+            app.logger.info('trim: validator response budget exhausted')
+            return None
         data = parse_model_json_object(_message_text(resp))
     except Exception as e:
         app.logger.info('trim: vision validator unavailable: %s', e)
@@ -11995,7 +12000,7 @@ def _note_geometry_scan(img):
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
         resp = client.messages.create(
             model=model,
-            max_tokens=300,
+            max_tokens=4096,
             messages=[{'role': 'user', 'content': [
                 {'type': 'image', 'source': {
                     'type': 'base64', 'media_type': 'image/jpeg',
@@ -12003,6 +12008,9 @@ def _note_geometry_scan(img):
                 {'type': 'text', 'text': prompt},
             ]}],
         )
+        if getattr(resp, 'stop_reason', None) == 'max_tokens':
+            app.logger.info('trim-v2: geometry response budget exhausted')
+            return None
         data = parse_model_json_object(_message_text(resp))
     except Exception as e:
         app.logger.info('trim-v2: geometry scan unavailable: %s', e)
@@ -21615,7 +21623,7 @@ def _evaluate_import_check(note,prepared):
 
 
 def _prepare_import_photo(data,note):
-    """Use the arrival crop pipeline for a newly selected draft photo only."""
+    """Use the arrival crop pipeline for an untouched draft original."""
     meta={}
     image=_trim_slabbed_note_image(data,expect_aspect=_banknote_expect_aspect(note),meta=meta)
     return dict(data=image,quad=meta.get('quad')) if image else None
@@ -21626,7 +21634,7 @@ def _run_import_check(batch_id,item_id,revision,token):
         with app.app_context():
             banknote_imports.run_check(open_db_connection,batch_id,item_id,revision,token,
                                       UPLOAD_FOLDER,_classify_banknote_listing_photos,_evaluate_import_check,
-                                      prepare_photo=_prepare_import_photo)
+                                      prepare_photo=_prepare_import_photo,retry_uncropped=True)
             _finish_single_import(get_db(),batch_id)
     finally:banknote_imports._CHECK_SLOTS.release()
 

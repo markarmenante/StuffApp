@@ -8,7 +8,8 @@ suites = [
     'test_ebay_matching.py', 'test_banknote_imports.py', 'test_banknote_photo_sides.py',
     'test_purchase_lifecycle.py', 'test_banknote_check_sources.py',
     'test_banknote_price_currency.py', 'test_banknote_catalog_recovery.py',
-    'test_market_purchase_capture.py',
+    'test_market_purchase_capture.py', 'test_banknote_crop_responses.py',
+    'test_banknote_image_quality.py', 'test_banknote_check_preserves_images.py',
 ]
 env = dict(os.environ, EBAY_SYNC_WORKER='0', BANKNOTE_IMPORT_WORKER='0', ORIGINAL_LISTING_WORKER='0')
 for key in ('ANTHROPIC_API_KEY', 'PERPLEXITY_API_KEY', 'OPENAI_API_KEY'):

@@ -73,11 +73,12 @@ changed source identity, account or membership, excluded purchases and ambiguous
 item identities cannot supply previews. Retained and preserved photos take priority.
 
 After Check reads the original holder photographs, newly selected front/back
-images pass through the same crop pipeline used for uploads. Only previously
-empty photo slots are eligible. Accepted display crops retain their original,
-corner transform and file hash in the draft; release copies the display crop
-and preserves the source for future Check and Adjust crop. Existing photographs
-and manual crops are never recropped by Check. Detection runs outside the draft
+images pass through the same crop pipeline used for uploads. An explicit Check
+also retries a draft side still using an untouched original after an inconclusive
+arrival crop. Accepted crops, manually selected photos and collection photographs
+are preserved. Accepted display crops retain their original, corner transform and
+file hash in the draft; release copies the display crop and preserves the source
+for future Check and Adjust crop. Detection runs outside the draft
 write lock, and a changed revision discards its output without replacing edits.
 An engraving-only cleanup after a measured paper crop cannot remove a large
 side or substantially change that sheet's proportions, even without catalogue

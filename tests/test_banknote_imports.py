@@ -66,10 +66,10 @@ class DraftTests(unittest.TestCase):
         return dict(url=url,filename=filename,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),width=160,height=80)
     def classify(self,photos):
         return dict(photos=[dict(id=p['id'],side='front' if n==0 else 'back',confidence='high',complete_note=True,same_note=True,reason='different complete designs') for n,p in enumerate(photos)],front=photos[0]['id'],back=photos[1]['id'],pair_verified=True,pair_reason='Opposite sides of same note')
-    def check(self,batch,item,evaluate=None,prepare_photo=None):
+    def check(self,batch,item,evaluate=None,prepare_photo=None,*,retry_uncropped=False):
         token=imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
         with patch.object(imports.listing_images,'download',side_effect=self.download):
-            imports.run_check(stuff.open_db_connection,batch['id'],item['id'],item['revision'],token,stuff.UPLOAD_FOLDER,self.classify,evaluate or (lambda *_:dict(filled=self.fills)),prepare_photo=prepare_photo)
+            imports.run_check(stuff.open_db_connection,batch['id'],item['id'],item['revision'],token,stuff.UPLOAD_FOLDER,self.classify,evaluate or (lambda *_:dict(filled=self.fills)),prepare_photo=prepare_photo,retry_uncropped=retry_uncropped)
         return self.client.get(batch['status_url']).json
     def test_import_arrival_crop_keeps_originals_for_vision_and_copies_crop_on_release(self):
         b=self.imported();item=b['items'][0];seen=[];quad=[[5,5],[154,5],[154,74],[5,74]]
@@ -120,6 +120,81 @@ class DraftTests(unittest.TestCase):
         with patch.object(stuff,'_prepare_import_photo') as again:
             b=self.check(b,item,prepare_photo=again)
         again.assert_not_called()
+    def test_check_retry_crops_only_untouched_draft_originals(self):
+        import io
+        batch,item=self.checked_item()
+        originals={field:item['fields'][field] for field in ('image_1','image_2')}
+        raw={name:(Path(stuff.UPLOAD_FOLDER)/name).read_bytes() for name in originals.values()}
+        siblings={row['id']:row['fields'] for row in batch['items'] if row['id']!=item['id']}
+        calls=[]
+        def crop(data,note):
+            calls.append(data)
+            output=io.BytesIO()
+            Image.open(io.BytesIO(data)).crop((5,5,155,75)).save(output,format='JPEG')
+            return dict(data=output.getvalue(),quad=[[5,5],[155,5],[155,75],[5,75]])
+        batch=self.check(batch,item,prepare_photo=crop,retry_uncropped=True)
+        updated=self.current_item(batch,item)
+        self.assertEqual(len(calls),2)
+        for field,source in originals.items():
+            name=updated['fields'][field]
+            self.assertNotEqual(name,source)
+            with Image.open(Path(stuff.UPLOAD_FOLDER)/name) as image:self.assertEqual(image.size,(150,70))
+            self.assertEqual((Path(stuff.UPLOAD_FOLDER)/source).read_bytes(),raw[source])
+            self.assertEqual(stuff._banknote_vision_source(name,self.db),source)
+        self.assertEqual(siblings,{row['id']:row['fields'] for row in batch['items'] if row['id']!=item['id']})
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(updated['manual_photos'],{})
+        with patch.object(stuff,'_prepare_import_photo') as again:
+            self.check(batch,updated,prepare_photo=again,retry_uncropped=True)
+        again.assert_not_called()
+
+    def test_check_retry_preserves_manual_crop_and_manually_selected_original(self):
+        batch,item=self.checked_item()
+        item=self.crop(item,'image_1').json['item']
+        item=self.choose(item,'image_2',item['fields']['image_2']).json['item']
+        before={field:item['fields'][field] for field in ('image_1','image_2')}
+        with patch.object(stuff,'_prepare_import_photo') as crop:
+            batch=self.check(batch,item,prepare_photo=crop,retry_uncropped=True)
+        crop.assert_not_called()
+        self.assertEqual(before,{field:self.current_item(batch,item)['fields'][field] for field in before})
+
+    def test_check_retry_keeps_accepted_crop_while_recovering_uncropped_side(self):
+        batch,item=self.checked_item();calls=[]
+        front=item['fields']['image_1'];back=item['fields']['image_2']
+        # One side already has an accepted automatic crop, not a manual choice.
+        self.db.execute('INSERT INTO trimmed_image_sources(trimmed,source,quad) VALUES(?,?,?)',
+                        (front,front,json.dumps([[0,0],[159,0],[159,79],[0,79]])))
+        self.db.commit()
+        def crop(data,note):
+            calls.append(data)
+            return dict(data=data,quad=[[0,0],[159,0],[159,79],[0,79]])
+        batch=self.check(batch,item,prepare_photo=crop,retry_uncropped=True)
+        updated=self.current_item(batch,item)
+        self.assertEqual(calls,[(Path(stuff.UPLOAD_FOLDER)/back).read_bytes()])
+        self.assertEqual(updated['fields']['image_1'],front)
+        self.assertNotEqual(updated['fields']['image_2'],back)
+
+    def test_check_retry_discards_crop_when_draft_changes_during_detection(self):
+        batch,item=self.checked_item()
+        before=dict(item['fields']);created_before=set(Path(stuff.UPLOAD_FOLDER).iterdir());changed=False
+        def crop(data,note):
+            nonlocal changed
+            if not changed:
+                changed=True
+                other=stuff.open_db_connection()
+                fields=json.loads(other.execute('SELECT fields_json FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0])
+                fields['issuer']='Newer edit'
+                other.execute('UPDATE banknote_import_items SET fields_json=?,revision=revision+1 WHERE id=?',(json.dumps(fields),item['id']))
+                other.commit();other.close()
+            return dict(data=data,quad=[[0,0],[159,0],[159,79],[0,79]])
+        batch=self.check(batch,item,prepare_photo=crop,retry_uncropped=True)
+        updated=self.current_item(batch,item)
+        self.assertEqual(updated['fields']['issuer'],'Newer edit')
+        self.assertEqual(updated['check_state'],'failed')
+        for field in ('image_1','image_2'):self.assertEqual(updated['fields'][field],before[field])
+        self.assertEqual(set(Path(stuff.UPLOAD_FOLDER).iterdir()),created_before)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_image_edits').fetchone()[0],0)
+
     def test_stale_import_crop_is_discarded_without_changing_newer_draft(self):
         b=self.imported();item=b['items'][0];before=set(Path(stuff.UPLOAD_FOLDER).iterdir());changed=False
         def crop(raw,note):
