@@ -57,11 +57,23 @@ exact listing evidence, verified account/membership and no quantity, bundle,
 duplicate or collection-link conflict, **Check** may read the full original photos
 and fill blank note-identification, grading and supported catalogue fields. It may
 also prepare classified front/back display images, reusing an accepted preview
-crop when the original hash and current capture agree. The item remains blocked:
-its warning, purchase facts and missing paid amount stay unchanged, and Save,
-manual photo selection and Release remain unavailable. Model output cannot supply
-image paths or modify purchase/status/owner fields. Other purchase warnings and
-ambiguous item types retain their existing restrictions.
+crop when the original hash and current capture agree. Check retains the purchase
+warning and does not release the item. Model output cannot supply image paths or
+modify purchase/status/owner fields. Other purchase warnings and ambiguous item
+types retain their existing restrictions.
+
+An exact single-note item held only by that group-status warning remains editable
+in review. **Save draft**, retained-photo selection and **Adjust crop** work even
+after the listing capture expires; a new **Check** still needs fresh evidence.
+Price, seller, purchase date and status stay source-controlled while the warning
+persists. **Release to Collection** is an explicit owner action and creates an
+**Ordered** record, never an automatic ownership confirmation. It preserves the
+source warning in the review history and uses only the existing exact paid-amount
+authority, leaving an unavailable price blank. These items never complete through
+the automatic single-note path. Every manual write repeats the account, complete
+checkout membership, exact source, quantity, exclusion, bundle, duplicate and
+collection-link checks under the normal revision guard. Other blocked items
+remain read-only.
 
 Eligible detail checks queue durably on explicit import/resume, or start through
 the item's Check control. Reading a saved order never schedules work. Every write
@@ -98,9 +110,10 @@ using the normal arrival crop pipeline. The **Crop photos** button on Order revi
 retries these previews and untouched original photos on editable siblings without
 rereading the eBay order. Accepted crops and manual photo choices stay unchanged.
 Blocked previews retain their full originals separately; opening a preview shows
-that original and its grading label. They remain inspection-only, never selected
-front/back photos, and cannot supply a purchase price or enable Release. The
-separate exact-item eligibility rule above determines whether Check is available.
+that original and its grading label. Preview files remain inspection-only, never
+selected front/back photos, and cannot supply a purchase price. The separate
+exact-item eligibility rule above determines whether Check, editing and explicit
+Release are available.
 Viewing previews never fetches images
 on the server, runs Check, accepts a price or changes a draft. Expired captures,
 changed source identity, account or membership, excluded purchases and ambiguous
@@ -199,6 +212,8 @@ No existing collection record or photo is removed by this workflow.
   only read progress. The entry page waits for a single note and opens its normal
   detail URL; multiple items open the saved review.
 - `GET /banknotes/imports/<batch>` and `/status`: review HTML and read-only state.
+  Item capabilities expose `can_check`, `can_edit`, `can_release` and
+  `locked_fields`; a purchase warning alone does not imply a disabled editor.
 - `POST /banknotes/imports/<batch>/crop-photos`: retry pending photo crops across
   the order, retaining all purchase and release restrictions.
 - `GET /banknotes/imports/<batch>/items/<item>/preview/<position>`: guarded saved

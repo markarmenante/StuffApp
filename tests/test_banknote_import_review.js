@@ -34,7 +34,7 @@ function page(initial, replies = [], item) {
   const elements = Object.fromEntries(ids.map(id => [id, element()]));
   if (item) elements.banknoteImportEvidence.append(element('ul'));
   elements['banknote-import-data'] = {textContent: JSON.stringify({batch: initial, item})};
-  const requests = [], timers = [], navigations = [];
+  const requests = [], payloads = [], timers = [], navigations = [];
   vm.runInNewContext(source, {
     document: {querySelector: () => ({dataset: {importMode: item ? 'detail' : 'review'}, classList: {contains() { return false; }}}),
       getElementById: id => elements[id], createElement: element, createDocumentFragment: element,
@@ -44,13 +44,14 @@ function page(initial, replies = [], item) {
     URL, clearTimeout() {}, setTimeout(fn) { timers.push(fn); return timers.length; },
     fetch: async (url, options) => {
       requests.push({url, method: options.method});
+      payloads.push(options.body ? JSON.parse(options.body) : undefined);
       assert.ok(replies.length, 'Unexpected request');
       return {ok: true, status: 200, json: async () => replies.shift()};
     },
   });
   return {intro: elements.banknoteImportIntro, status: elements.banknoteImportStatus,
     retry: elements.banknoteImportRetry, refreshOrder: elements.banknoteImportRefreshOrder,
-    list: elements.banknoteImportList, requests, timers, navigations, elements};
+    list: elements.banknoteImportList, requests, payloads, timers, navigations, elements};
 }
 
 (async () => {
@@ -192,6 +193,32 @@ function page(initial, replies = [], item) {
     {url: '/banknotes/imports/test/status', method: 'GET'},
     {url: '/banknotes/imports/test/status', method: 'GET'},
   ], 'Metadata Check never saves, selects photos, or releases the purchase');
+  // An exact note with only the known group-status warning remains usable.
+  const reviewable = {...inspectable, can_edit: true, can_release: true,
+    locked_fields: ['price', 'vendor', 'purchase_date', 'status']};
+  const reviewed = {...filledInspection, can_edit: true, can_release: true,
+    locked_fields: reviewable.locked_fields};
+  const usable = page(batch({state: 'review', items: [reviewable]}),
+    [{item: {...reviewable, check_state: 'checking'}},
+      batch({state: 'review', items: [reviewed]}), {next_url: '/banknotes/reviewed-note'}], reviewable);
+  assert.equal(usable.elements.banknoteImportSave.disabled, false, 'The purchase warning must not freeze editing');
+  assert.equal(usable.elements.banknoteImportRelease.disabled, false);
+  assert.match(usable.elements.banknoteImportImageHelp.textContent, /edit the note and its photos.*Ordered/);
+  await usable.elements.banknoteImportCheck.handlers.click();
+  assert.equal(usable.elements.banknoteImportRelease.disabled, true, 'Wait for active Check before explicit release');
+  await usable.timers.shift()();
+  assert.equal(usable.elements.banknoteImportSave.disabled, false);
+  assert.equal(usable.elements.banknoteImportRelease.disabled, false);
+  assert.equal(usable.elements.banknoteImportState.textContent, 'Needs attention');
+  assert.deepEqual(usable.navigations, [], 'Check never releases a warning-bearing note');
+  assert.deepEqual(usable.requests, [
+    {url: '/banknotes/imports/test/items/draft/check', method: 'POST'},
+    {url: '/banknotes/imports/test/status', method: 'GET'},
+  ]);
+  await usable.elements.banknoteImportRelease.handlers.click();
+  assert.deepEqual(usable.requests.at(-1), {url: '/banknotes/imports/test/release', method: 'POST'});
+  assert.deepEqual(usable.payloads.at(-1), {items: [{id: 'draft', revision: 2}]}, 'Release only the explicitly selected revision');
+  assert.deepEqual(usable.navigations, ['/banknotes/reviewed-note']);
   const awaitingInspection = page(batch({state: 'review', items: [{...inspectable, check_state: 'idle'}]}));
   assert.equal(awaitingInspection.timers.length, 0, 'Previously blocked idle rows do not poll forever before Check is requested');
   const queuedInspection = {...inspectable, check_state: 'queued'};
@@ -201,6 +228,7 @@ function page(initial, replies = [], item) {
   assert.equal(waitingInspection.elements.banknoteImportCheck.disabled, true);
   const prohibitedInspection = page(batch({state: 'review', items: [blockedDraft]}), [], blockedDraft);
   await prohibitedInspection.elements.banknoteImportCheck.handlers.click();
+  await prohibitedInspection.elements.banknoteImportRelease.handlers.click();
   assert.equal(prohibitedInspection.requests.length, 0, 'Ineligible items cannot start metadata checks');
   const emptyDraft = {...blockedDraft, photos: []};
   const emptyDetail = page(batch({state: 'review', items: [emptyDraft]}), [], emptyDraft);

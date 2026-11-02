@@ -162,6 +162,8 @@
     });
   }
   const canCheck = draft => draft.can_check ?? draft.state === 'draft';
+  const canEdit = draft => draft.can_edit ?? draft.state === 'draft';
+  const canRelease = draft => draft.can_release ?? draft.state === 'draft';
   const checkRunning = draft => ['queued', 'checking'].includes(draft.check_state);
   const previewRunning = draft => ['queued','checking'].includes(draft.preview_state);
   const batchRunning = () => batch.processing_single === true || ['queued', 'sign_in_required', 'challenge_required'].includes(batch.state)
@@ -378,7 +380,7 @@
       } else li.textContent = evidenceText(source);
       entries.append(li);
     });
-    const editable = item.state === 'draft';
+    const editable = canEdit(item);
     const hasPreviews = (item.photos || []).some(photo => photo.preview === true);
     const photoHeading = document.getElementById('banknoteImportPhotosHeading');
     if (photoHeading) photoHeading.textContent = 'Purchased photos' + (editable && !hasPreviews ? ' · select front and back' : '');
@@ -397,6 +399,8 @@
       if (item.state === 'released' && item.released_record_id) {
         const link = el('a', 'Edit photos in collection');
         link.href = sameOrigin(collectionUrl(item)); imageHelp.append(link);
+      } else if (item.state === 'blocked' && editable) {
+        imageHelp.textContent = 'You can edit the note and its photos. Release to Collection adds it as Ordered; the purchase warning remains for review.';
       } else if (item.state === 'blocked') {
         imageHelp.textContent = canCheck(item)
           ? 'Use Check to fill missing banknote details from the listing and original photos. The purchase still needs review before release. Use Refresh eBay order on Order review after resolving the warning.'
@@ -410,6 +414,7 @@
       }
     }
     const preserved = new Set(item.preserved_fields || []);
+    const locked = new Set(item.locked_fields || []);
     gallery.querySelectorAll('figure[data-photo-filename]').forEach(figure => {
       const filename = figure.dataset.photoFilename;
       figure.querySelectorAll('[data-photo-selected]').forEach(badge => {
@@ -430,17 +435,19 @@
       });
     });
     fields.forEach(field => {
-      field.readOnly = preserved.has(field.name);
-      field.disabled = !editable || busy || (field.tagName === 'SELECT' && preserved.has(field.name));
+      field.readOnly = preserved.has(field.name) || locked.has(field.name);
+      field.disabled = !editable || busy || locked.has(field.name) || (field.tagName === 'SELECT' && preserved.has(field.name));
     });
     document.getElementById('banknoteImportSave').disabled = !editable || busy || Boolean(saving);
     const check = document.getElementById('banknoteImportCheck');
     check.disabled = !canCheck(item) || busy || checkRunning(item) || Boolean(conflict);
     check.textContent = item.check_state === 'queued' ? 'Waiting to check…' : checkRunning(item) ? 'Checking…' : item.check_state === 'failed' ? 'Retry Check' : '✓ Check';
     const release = document.getElementById('banknoteImportRelease');
-    release.disabled = !editable || busy || checkRunning(item) || Boolean(conflict) || Boolean(existingChanges().length);
+    release.disabled = !canRelease(item) || busy || checkRunning(item) || Boolean(conflict) || Boolean(existingChanges().length);
     release.textContent = busyAction === 'release' ? 'Releasing…' : 'Release to Collection';
-    release.title = existingChanges().length ? 'Review the collection changes and update this draft first.' : '';
+    release.title = existingChanges().length ? 'Review the collection changes and update this draft first.'
+      : !canRelease(item) ? 'Resolve the purchase warning before releasing this item.'
+      : item.state === 'blocked' ? 'Add this reviewed note as Ordered. The purchase warning will remain visible.' : '';
   }
   function setRemote(remote) {
     if (saving) return false;
@@ -466,7 +473,7 @@
     if (conflict) throw new Error('This draft changed elsewhere. Review the latest saved values first. Your edits are still here.');
     if (saving) { await saving; if (dirty()) return saveDraft(); return; }
     if (!dirty()) return;
-    if (item.state !== 'draft') throw new Error('This item is no longer an editable draft. Your edits have not been released.');
+    if (!canEdit(item)) throw new Error('This item is no longer an editable draft. Your edits have not been released.');
     const updates = {};
     fields.forEach(field => { if (field.value !== baseline[field.name]) updates[field.name] = field.value; });
     say('Saving draft…');
@@ -494,7 +501,7 @@
     if (dirty()) await saveDraft();
   }
   async function selectPhoto(photo, field) {
-    if (busy || conflict || checkRunning(item) || item.state !== 'draft' || photo.selectable === false
+    if (busy || conflict || checkRunning(item) || !canEdit(item) || photo.selectable === false
         || (item.preserved_fields || []).includes(field)) return;
     busy = true; renderDetail();
     try {
@@ -512,7 +519,7 @@
   // that supplied the visible corners, never a later background response.
   window.banknoteImportCrop = {
     async load(field) {
-      if (busy || conflict || checkRunning(item) || item.state !== 'draft') {
+      if (busy || conflict || checkRunning(item) || !canEdit(item)) {
         throw new Error('Finish the current draft action before editing this photo.');
       }
       busy = true; busyAction = 'crop'; renderDetail();
@@ -708,7 +715,7 @@
       finally { busy = false; busyAction = ''; renderDetail(); }
     });
     document.getElementById('banknoteImportRelease').addEventListener('click', async () => {
-      if (busy || checkRunning(item)) return;
+      if (!canRelease(item) || busy || checkRunning(item) || conflict) return;
       busy = true; busyAction = 'release'; renderDetail();
       try {
         await saveDraft(); say('Releasing to collection…');

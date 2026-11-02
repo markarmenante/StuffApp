@@ -34,12 +34,14 @@ from PIL import Image
 
 preview_crop_calls = 0
 metadata_check_calls = 0
+checkable_fixture_sequence = 0
 
 def fixture_listing_image(url,folder):
     if not url.startswith('https://i.ebayimg.com/images/g/fixture-'):
         raise RuntimeError('Fixture does not permit provider access')
     filename=uuid.uuid4().hex+'.jpg';path=Path(folder)/filename
-    Image.new('RGB',(160,80),'green' if 'front' in url else 'red').save(path)
+    colour=(0,160,0) if 'alternate-front' in url else 'green' if 'front' in url else 'red'
+    Image.new('RGB',(160,80),colour).save(path)
     return dict(filename=filename,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),width=160,height=80)
 
 def fixture_preview_crop(raw,note):
@@ -68,7 +70,7 @@ def fixture_photo_sides(photos):
 def fixture_metadata_check(note,prepared):
     global metadata_check_calls
     row=stuff.get_db().execute('SELECT batch_id FROM banknote_import_items WHERE id=?',(note['id'],)).fetchone()
-    if not row or row['batch_id']!='fixture-checkable-photo-review':
+    if not row or not row['batch_id'].startswith('fixture-checkable-photo-review-'):
         raise RuntimeError('Fixture Check is restricted to the synthetic inspection draft')
     metadata_check_calls+=1
     return dict(filled=dict(country='Peru',denomination='5 Soles de Oro',pick_number='P-66A',
@@ -103,11 +105,15 @@ def fixture_import_photos():
 
 @stuff.app.post('/__fixture/import-checkable-photos')
 def fixture_import_checkable_photos():
-    return make_import_photo_fixture('fixture-checkable-photo-review','90-00000-00002',
-        ('199999999993','199999999994'),'Multiple items; shipment or delivery not confirmed')
+    global checkable_fixture_sequence
+    checkable_fixture_sequence+=1
+    number=checkable_fixture_sequence
+    return make_import_photo_fixture('fixture-checkable-photo-review-'+str(number),f'90-00001-{number:05d}',
+        (str(199999990000+2*number),str(199999990001+2*number)),
+        'Multiple items; shipment or delivery not confirmed',extra_front=True)
 
 
-def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention):
+def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention,extra_front=False):
     db = stuff.get_db()
     for table in ('banknote_import_preview_jobs','banknote_import_photo_previews'):
         db.execute('DELETE FROM '+table+' WHERE item_id IN (SELECT id FROM banknote_import_items WHERE batch_id=?)',(batch_id,))
@@ -127,6 +133,8 @@ def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention):
             items.append(dict(order_id=order, item_id=ident))
             urls = ['https://i.ebayimg.com/images/g/fixture-' + ident + '-' + side + '/s-l1600.png'
                     for side in ('front', 'back')]
+            if extra_front and index==0:
+                urls.append('https://i.ebayimg.com/images/g/fixture-'+ident+'-alternate-front/s-l1600.png')
             db.execute('INSERT INTO ebay_listing_captures VALUES(?,?,?,?,?)',
                 ('https://www.ebay.com/itm/' + ident, title, 'Synthetic exact listing evidence for browser verification.', json.dumps(urls), now))
         banknote_imports.materialize(db, 'fixture-buyer', order, items, 'fixture-photo-request')
@@ -150,6 +158,20 @@ def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention):
     return jsonify(banknote_imports.status(db, batch_id))
 
 
+@stuff.app.post('/__fixture/expire-import-capture')
+def fixture_expire_import_capture():
+    batch_id=(request.get_json(silent=True) or {}).get('batch_id','')
+    if not batch_id.startswith('fixture-checkable-photo-review-'):
+        return jsonify(error='Not a synthetic editable review fixture'),400
+    db=stuff.get_db()
+    for row in db.execute('SELECT item_id FROM banknote_import_items WHERE batch_id=?',(batch_id,)).fetchall():
+        db.execute('UPDATE ebay_listing_captures SET captured_at=? WHERE url=?',
+                   (time.time()-banknote_imports.ebay_listing_captures.MAX_AGE-1,
+                    'https://www.ebay.com/itm/'+row['item_id']))
+    db.commit()
+    return jsonify(banknote_imports.status(db,batch_id))
+
+
 @stuff.app.get('/__fixture/import-photo-state')
 def fixture_import_photo_state():
     db = stuff.get_db()
@@ -159,6 +181,11 @@ def fixture_import_photo_state():
         link_count=db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],
         preview_crop_calls=preview_crop_calls,
         metadata_check_calls=metadata_check_calls,
+        records=[dict(row) for row in db.execute('''SELECT id,country,denomination,pick_number,
+            price,vendor,status,order_number,image_1,image_2 FROM banknotes WHERE id IN
+            (SELECT released_record_id FROM banknote_import_items WHERE batch_id=?)''',(batch_id,))],
+        source_items=[dict(row) for row in db.execute('''SELECT line_key,item_id,attention FROM ebay_order_items
+            WHERE line_key IN (SELECT line_key FROM banknote_import_items WHERE batch_id=?) ORDER BY item_id''',(batch_id,))],
         items=[dict(row) for row in db.execute('''SELECT id,state,check_state,revision,fields_json,
             warning,source_json,source_digest,manual_photos_json,released_record_id
             FROM banknote_import_items WHERE batch_id=? ORDER BY id''',(batch_id,))])

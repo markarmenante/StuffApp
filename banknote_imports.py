@@ -38,6 +38,7 @@ _AUTO_AMBIGUOUS = re.compile(r'\b(?:set|bundle|pair|assortment|assorted|coins?|s
 _NOTE_TITLE = re.compile(r'\b(?:banknotes?|paper money|PMG|Friedberg)\b|\bPick\s*[#-]?\s*\d', re.I)
 _LISTING_PREVIEW_URL = re.compile(r'https://i\.ebayimg\.com/images/g/[\w~-]+/s-l\d+\.(?:jpg|jpeg|png|webp)', re.ASCII)
 _INSPECTION_ATTENTION = frozenset(('multiple items; shipment or delivery not confirmed',))
+_REVIEW_LOCKED_FIELDS = ('price','vendor','purchase_date','status')
 _INSPECTION_FIELDS = frozenset(('country','municipality','issue_type','issuer','official',
     'denomination','series','pick_number','other_catalog','printer','signatures','serial_number',
     'watermark','material','date_1','date_2','date_1_text','date_2_text','size_width','size_height',
@@ -551,7 +552,8 @@ def _public_item(db, row):
     if check_state == 'checking' and row['check_expires'] <= time.time():
         check_state,message='failed','Check was interrupted or expired. Your draft was kept; press Check to retry.'
     warnings = [v for v in (row['warning'],message if check_state in ('failed','partial') else '') if v]
-    photos = [dict(url='/uploads/'+asset['filename'],filename=asset['filename'],selectable=row['state']!='blocked',source_url=asset['source_url'],position=asset['position'])
+    editable=can_edit(db,row)
+    photos = [dict(url='/uploads/'+asset['filename'],filename=asset['filename'],selectable=editable,source_url=asset['source_url'],position=asset['position'])
               for asset in db.execute('SELECT * FROM banknote_import_assets WHERE item_id=? ORDER BY position', (row['id'],))]
     existing_changes = []
     existing_version = None
@@ -595,7 +597,8 @@ def _public_item(db, row):
                 existing_record_url='/banknotes/'+row['existing_record_id'] if row.get('existing_record_id') else None,
                 check_message=message,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields,
                 manual_photos=json.loads(row.get('manual_photos_json') or '{}'),
-                preview_state=preview_state,can_check=can_check(db,row),
+                preview_state=preview_state,can_check=can_check(db,row),can_edit=editable,can_release=editable,
+                locked_fields=list(_REVIEW_LOCKED_FIELDS) if row['state']=='blocked' else [],
                 image_sources={field:edit['source_filename'] for field,edit in _image_edits(db,row,fields).items()})
 
 
@@ -713,21 +716,57 @@ def _validate_source(db,batch,row):
     return dict(source)
 
 
-def _inspection_context(db,batch,row):
-    """Identify a known note behind eBay's group-status warning; never accept it."""
+def _review_source(db,batch,row):
+    """Allow exact single-note review despite an unconfirmed group delivery status.
+
+    Retained draft edits and explicit release depend on purchase identity, not
+    the age of a listing capture. This exception never admits other blockers.
+    """
     source=json.loads(row['source_json'])
-    photos=_listing_preview_sources(db,row,source)
-    if (row['state']!='blocked' or not photos or row['existing_record_id']
+    membership=json.loads(batch['snapshot_json'])
+    if (row['state']!='blocked' or row['existing_record_id']
+            or batch['state'] not in ('review','complete') or not isinstance(membership,list)
+            or row['account_name']!=batch['account_name'] or row['account_name']!=_account(db)
+            or source.get('item_id')!=row['item_id'] or _digest(source)!=row['source_digest']
+            or [source.get('order_id'),row['item_id']] not in membership
             or source.get('attention','').lower() not in _INSPECTION_ATTENTION
             or row['warning']!=_reason(source) or not _NOTE_TITLE.search(source.get('title') or '')
             or _AUTO_AMBIGUOUS.search(source.get('title') or '') or _BUNDLE.search(source.get('title') or '')):
-        raise ImportProblem('This purchase needs review before its note details can be checked.')
-    current=db.execute('SELECT * FROM ebay_order_items WHERE line_key=?',(row['line_key'],)).fetchone()
-    if (not current or current['attention'].lower() not in _INSPECTION_ATTENTION
-            or _reason(dict(current))!=row['warning'] or current['quantity']!=1 or current['ignored']
+        raise ImportProblem('This purchase needs its exact item identity reviewed before editing or release.')
+    matches=db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
+                       (source.get('order_id'),row['item_id'])).fetchall()
+    if len(matches)!=1:
+        raise ImportProblem('This purchase identity is ambiguous. Refresh the order review.')
+    current=dict(matches[0])
+    if (current['line_key']!=row['line_key'] or _digest(current)!=row['source_digest']
+            or current['attention'].lower() not in _INSPECTION_ATTENTION
+            or _reason(current)!=row['warning'] or current['quantity']!=1 or current['ignored']
             or _existing_matches(db,source)
             or db.execute('SELECT 1 FROM banknote_ebay_links WHERE line_key=?',(row['line_key'],)).fetchone()):
-        raise ImportProblem('This purchase identity needs review before its note details can be checked.')
+        raise ImportProblem('This purchase identity changed or already has a collection record. Refresh the order review.')
+    return current
+
+
+def can_edit(db,row):
+    if row['state']=='draft':return True
+    if row['state']!='blocked':return False
+    try:
+        _review_source(db,_batch(db,row['batch_id']),row)
+        return True
+    except ImportProblem:return False
+
+
+def _editable_source(db,batch,row):
+    if row['state']=='blocked':return _review_source(db,batch,row)
+    if row['state']!='draft':raise ImportProblem('This item is no longer an editable draft.',code='draft_changed')
+    return _validate_source(db,batch,row)
+
+
+def _inspection_context(db,batch,row):
+    """Bind a metadata-only Check to fresh evidence for an exact reviewable note."""
+    _review_source(db,batch,row)
+    if not _listing_preview_sources(db,row,json.loads(row['source_json'])):
+        raise ImportProblem('Refresh the exact listing evidence before checking this note.')
     capture=db.execute('SELECT * FROM ebay_listing_captures WHERE url=?',
                        ('https://www.ebay.com/itm/'+row['item_id'],)).fetchone()
     # Bind all evidence read by Check, not just gallery URLs. A newer capture
@@ -758,8 +797,12 @@ def save(db,batch_id,item_id,revision,updates,normalize):
     db.execute('BEGIN IMMEDIATE')
     try:
         batch,row=_item(db,batch_id,item_id)
-        if row['state']!='draft' or row['revision']!=revision:
+        if row['state'] not in ('draft','blocked') or row['revision']!=revision:
             raise ImportProblem('This draft changed or was released. Reload it before saving.', code='draft_changed')
+        if row['state']=='blocked':
+            _review_source(db,batch,row)
+            if any(field in normalized for field in _REVIEW_LOCKED_FIELDS):
+                raise ImportProblem('Price, seller, purchase date and status remain tied to the verified purchase while this item needs review.')
         existing=json.loads(row['existing_snapshot_json'] or '{}')
         if any(not banknote_catalog_lookup.is_blank(existing.get(key)) and
                str(value or '').strip()!=str(existing[key] or '').strip() for key,value in normalized.items()):
@@ -840,8 +883,8 @@ def _draft_image(db,batch_id,item_id,field,folder,revision=None,trimmed=None):
     if field not in ('image_1','image_2'):
         raise ImportProblem('Unknown image field.')
     batch,row=_item(db,batch_id,item_id)
-    _validate_source(db,batch,row)
-    if row['state']!='draft' or (revision is not None and row['revision']!=revision):
+    _editable_source(db,batch,row)
+    if revision is not None and row['revision']!=revision:
         raise ImportProblem('This draft changed or was released. Reopen the photo editor.',code='draft_changed')
     if row['check_state']=='checking' and row['check_expires']>time.time():
         raise ImportProblem('Wait for Check to finish before editing draft photos.')
@@ -922,8 +965,8 @@ def select_photo(db,batch_id,item_id,revision,field,filename,folder):
     db.execute('BEGIN IMMEDIATE')
     try:
         batch,row=_item(db,batch_id,item_id)
-        _validate_source(db,batch,row)
-        if row['state']!='draft' or row['revision']!=revision:
+        _editable_source(db,batch,row)
+        if row['revision']!=revision:
             raise ImportProblem('This draft changed or was released. Reload it before choosing a photo.',code='draft_changed')
         if row['check_state']=='checking' and row['check_expires']>time.time():
             raise ImportProblem('Wait for Check to finish before choosing draft photos.')
@@ -932,7 +975,8 @@ def select_photo(db,batch_id,item_id,revision,field,filename,folder):
             raise ImportProblem('This photo already belongs to the existing record and is preserved. Open that record to change it.')
         asset=db.execute('SELECT * FROM banknote_import_assets WHERE item_id=? AND filename=?',(item_id,filename)).fetchone()
         root=Path(folder).resolve();path=root/filename
-        if not asset or path.resolve().parent!=root or not path.is_file():
+        if (not asset or path.resolve().parent!=root or not path.is_file()
+                or hashlib.sha256(path.read_bytes()).hexdigest()!=asset['sha256']):
             raise ImportProblem('That photograph is not an available original for this draft.')
         fields=json.loads(row['fields_json']);other='image_2' if field=='image_1' else 'image_1'
         if fields.get(other):
@@ -1233,13 +1277,20 @@ def release(db,batch_id,selected,folder,create,*,automatic_single=False):
             _,row=_item(db,batch_id,entry['id'])
             if row['state']=='released':
                 released.append(dict(id=row['id'],record_id=row['released_record_id']));continue
-            if row['state']!='draft' or row['revision']!=entry['revision']:raise ImportProblem('A selected draft changed. Review the latest version before release.',code='draft_changed')
+            if row['state'] not in ('draft','blocked') or row['revision']!=entry['revision']:raise ImportProblem('A selected draft changed. Review the latest version before release.',code='draft_changed')
             if row['check_state']=='checking' and row['check_expires']>time.time():raise ImportProblem('Wait for Check to finish before releasing this draft.')
-            source=_validate_source(db,batch,row)
+            source=_editable_source(db,batch,row)
             linked=db.execute('SELECT banknote_id FROM banknote_ebay_links WHERE line_key=?',(row['line_key'],)).fetchone()
             if linked:raise ImportProblem('This purchased item was already added to the collection. Refresh the review list.')
             fields=json.loads(row['fields_json'])
             fields['order_number']=source['order_id'];fields['marketplace']='eBay'
+            if row['state']=='blocked':
+                # Explicit review accepts this exact note into the collection,
+                # never delivery or ownership. Preserve the warning and retain
+                # the existing authenticated item-price authority.
+                paid=ebay_purchase_prices.for_item(db,source)
+                fields.update(status='Ordered',price=paid['price'] if paid else '',
+                              vendor=source['seller'],purchase_date=(source.get('ordered_at') or '')[:10])
             image_edits=_image_edits(db,row,fields)
             existing=None
             if not row['existing_record_id'] and _existing_matches(db,source):

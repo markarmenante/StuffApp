@@ -515,12 +515,95 @@ class DraftTests(unittest.TestCase):
             display=updated['fields'][field];self.assertNotEqual(display,source)
             self.assertEqual(stuff._banknote_vision_source(display,self.db),source)
             with Image.open(Path(stuff.UPLOAD_FOLDER)/display) as image:self.assertEqual(image.size,(150,70))
-        self.assertTrue(all(not photo['selectable'] for photo in updated['photos']))
-        self.assertEqual(self.release(batch,[updated]).status_code,409)
-        self.assertEqual(self.client.post(updated['detail_url'],json={'revision':updated['revision'],'updates':{'country':'Other'}}).status_code,409)
-        self.assertEqual(self.choose(updated,'image_1',sources[0]).status_code,409)
+        self.assertTrue(updated['can_edit']);self.assertTrue(updated['can_release'])
+        self.assertTrue(all(photo['selectable'] for photo in updated['photos']))
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+
+    def test_group_warning_draft_edits_and_photos_remain_usable_after_capture_expiry(self):
+        batch,item=self.inspection_item();batch=self.check(batch,item,prepare_photo=self.preview_crop)
+        item=self.current_item(batch,item);before=dict(item['fields'])
+        self.db.execute('DELETE FROM ebay_listing_captures WHERE url=?',(item['listing_url'],));self.db.commit()
+        item=self.current_item(batch,item)
+        self.assertTrue(item['can_edit']);self.assertTrue(item['can_release']);self.assertFalse(item['can_check'])
+        self.assertEqual(item['locked_fields'],['price','vendor','purchase_date','status'])
+        changes=self.db.total_changes
+        for url in (batch['status_url'],item['detail_url']):self.assertEqual(self.client.get(url).status_code,200)
+        self.assertEqual(self.db.total_changes,changes)
+        response=self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'denomination':'10 Soles de Oro','notes':'Reviewed by owner'}})
+        self.assertEqual(response.status_code,200,response.json);edited=response.json['item']
+        self.assertEqual(edited['revision'],item['revision']+1);self.assertEqual(edited['state'],'blocked')
+        self.assertEqual(edited['warnings'],item['warnings'])
+        for field in edited['locked_fields']:self.assertEqual(edited['fields'].get(field),before.get(field))
+        original=edited['photos'][0]['filename'];raw=(Path(stuff.UPLOAD_FOLDER)/original).read_bytes()
+        response=self.choose(edited,'image_1',original);self.assertEqual(response.status_code,200,response.json)
+        chosen=response.json['item']
+        response=self.crop(chosen);self.assertEqual(response.status_code,200,response.json);cropped=response.json['item']
+        self.assertEqual(cropped['image_sources']['image_1'],original)
+        self.assertEqual(cropped['manual_photos']['image_1'],cropped['fields']['image_1'])
+        self.assertEqual((Path(stuff.UPLOAD_FOLDER)/original).read_bytes(),raw)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.choose(edited,'image_1',original).status_code,409)
+        response=self.release(batch,[cropped]);self.assertEqual(response.status_code,200,response.json)
+        record=self.db.execute('SELECT * FROM banknotes').fetchone()
+        self.assertEqual(record['denomination'],'10 Soles de Oro');self.assertEqual(record['status'],'Ordered')
+        self.assertFalse(record['price']);self.assertEqual(record['notes'],'Reviewed by owner')
+        self.assertEqual(stuff._banknote_vision_source(record['image_1'],self.db),original)
+        released=self.current_item(batch,item)
+        self.assertFalse(released['can_edit']);self.assertFalse(released['can_release'])
+        self.assertEqual(released['warnings'],item['warnings'])
+        self.assertEqual(self.release(batch,[cropped]).status_code,200)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+
+    def test_group_warning_locks_purchase_fields_and_manual_release_rechecks_authority(self):
+        batch,item=self.inspection_item();before=dict(item['fields'])
+        for field,value in dict(price='$999',vendor='Other seller',purchase_date='2000-01-01',status='Own').items():
+            with self.subTest(field=field):
+                response=self.client.post(item['detail_url'],json={'revision':item['revision'],
+                    'updates':{field:value,'country':'Must not save'}})
+                self.assertEqual(response.status_code,409,response.json)
+                self.assertEqual(self.current_item(batch,item)['fields'],before)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        # Even an old or otherwise inconsistent draft cannot publish fabricated
+        # purchase fields through the newly allowed explicit review action.
+        forged=dict(before,price='$999',vendor='Other seller',purchase_date='2000-01-01',status='Own')
+        self.db.execute('UPDATE banknote_import_items SET fields_json=? WHERE id=?',(json.dumps(forged),item['id']));self.db.commit()
+        response=self.release(batch,[item]);self.assertEqual(response.status_code,200,response.json)
+        record=self.db.execute('SELECT * FROM banknotes').fetchone()
+        self.assertEqual(record['status'],'Ordered');self.assertFalse(record['price'])
+        self.assertEqual(record['vendor'],before['vendor']);self.assertEqual(record['purchase_date'],before['purchase_date'])
+        self.assertEqual(record['order_number'],item['order_number'])
+        source=self.db.execute('SELECT attention FROM ebay_order_items WHERE item_id=?',(IDS[0],)).fetchone()[0]
+        self.assertEqual(source,'Multiple items; shipment or delivery not confirmed')
+
+    def test_group_warning_never_automatically_releases_even_when_only_item_and_check_done(self):
+        batch,item=self.inspection_item();batch=self.check(batch,item);item=self.current_item(batch,item)
+        self.db.execute('DELETE FROM banknote_import_items WHERE batch_id=? AND id!=?',(batch['id'],item['id']))
+        self.db.execute('UPDATE banknote_import_batches SET auto_single=1,snapshot_json=? WHERE id=?',
+                        (json.dumps([[item['order_number'],IDS[0]]]),batch['id']));self.db.commit()
+        create=lambda *_args,**_kwargs:self.fail('Automatic release must not create a record')
+        self.assertIsNone(imports.finish_single(self.db,batch['id'],stuff.UPLOAD_FOLDER,create))
+        with self.assertRaises(imports.ImportProblem):
+            imports.release(self.db,batch['id'],[dict(id=item['id'],revision=item['revision'])],
+                            stuff.UPLOAD_FOLDER,create,automatic_single=True)
+        self.assertEqual(self.current_item(batch,item)['state'],'blocked')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+
+    def test_group_warning_retained_photo_actions_reject_foreign_assets_and_active_check(self):
+        batch,item=self.inspection_item();batch=self.check(batch,item);item=self.current_item(batch,item)
+        sibling=next(other for other in batch['items'] if other['state']=='draft')
+        batch=self.check(batch,sibling);sibling=self.current_item(batch,sibling)
+        self.assertEqual(self.choose(item,'image_1',sibling['photos'][0]['filename']).status_code,409)
+        path=Path(stuff.UPLOAD_FOLDER)/item['photos'][0]['filename'];original=path.read_bytes()
+        try:
+            path.write_bytes(b'changed original')
+            self.assertEqual(self.choose(item,'image_1',path.name).status_code,409)
+        finally:path.write_bytes(original)
+        info=self.crop_info(item);self.assertEqual(info.status_code,200,info.json)
+        imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
+        self.assertEqual(self.crop(item,info=info.json).status_code,409)
+        self.assertEqual(self.choose(item,'image_1',item['photos'][0]['filename']).status_code,409)
+        self.assertEqual(self.release(batch,[item]).status_code,409)
 
     def test_inspection_reuses_preview_crops_and_repeat_reads_full_originals(self):
         batch,item=self.inspection_item();item=self.prepare_previews(batch,item)
@@ -643,7 +726,11 @@ class DraftTests(unittest.TestCase):
                     self.db.execute('UPDATE banknote_import_items SET source_json=?,source_digest=?,warning=? WHERE id=?',
                                     (json.dumps(source),imports._digest(source),imports._reason(source),item['id']));self.db.commit()
                     self.assertFalse(self.current_item(batch,item)['can_check'])
+                    self.assertFalse(self.current_item(batch,item)['can_edit'])
+                    self.assertFalse(self.current_item(batch,item)['can_release'])
                     with self.assertRaises(imports.ImportProblem):imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
+                    self.assertEqual(self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'country':'Other'}}).status_code,409)
+                    self.assertEqual(self.release(batch,[item]).status_code,409)
                 finally:self.tearDown();self.setUp()
 
     def test_inspection_existing_collection_or_purchase_link_conflict_remains_blocked(self):
@@ -651,8 +738,39 @@ class DraftTests(unittest.TestCase):
         self.db.execute("INSERT INTO banknotes(id,order_number,marketplace) VALUES('conflict',?,'eBay')",(ORDERS[0],))
         self.db.execute("INSERT INTO banknote_original_listings(banknote_id,url) VALUES('conflict',?)",(item['listing_url'],));self.db.commit()
         self.assertFalse(self.current_item(batch,item)['can_check'])
+        self.assertFalse(self.current_item(batch,item)['can_edit']);self.assertFalse(self.current_item(batch,item)['can_release'])
         with self.assertRaises(imports.ImportProblem):imports.claim_check(self.db,batch['id'],item['id'],item['revision'])
+        self.assertEqual(self.release(batch,[item]).status_code,409)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+
+    def test_group_warning_manual_actions_revalidate_account_membership_source_and_links(self):
+        cases=('account','membership','source','saved_source','link','recovery')
+        for changed in cases:
+            with self.subTest(changed=changed):
+                try:
+                    batch,item=self.inspection_item();batch=self.check(batch,item);item=self.current_item(batch,item)
+                    info=self.crop_info(item).json
+                    if changed=='account':self.db.execute("UPDATE ebay_purchase_account SET account_name='other'")
+                    elif changed=='membership':self.db.execute("UPDATE banknote_import_batches SET snapshot_json='[]' WHERE id=?",(batch['id'],))
+                    elif changed=='source':self.db.execute("UPDATE ebay_order_items SET seller='Other' WHERE item_id=?",(IDS[0],))
+                    elif changed=='saved_source':
+                        source=json.loads(self.db.execute('SELECT source_json FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0])
+                        source['item_id']=IDS[1]
+                        self.db.execute('UPDATE banknote_import_items SET source_json=? WHERE id=?',(json.dumps(source),item['id']))
+                    elif changed=='link':
+                        source=self.db.execute('SELECT line_key FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0]
+                        self.db.execute("INSERT INTO banknotes(id) VALUES('linked')")
+                        self.db.execute("INSERT INTO banknote_ebay_links(banknote_id,line_key,matched_by,matched_at) VALUES('linked',?,'manual','now')",(source,))
+                    else:self.db.execute("UPDATE banknote_import_items SET existing_record_id='existing' WHERE id=?",(item['id'],))
+                    self.db.commit()
+                    row=dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+                    self.assertFalse(imports.can_edit(self.db,row))
+                    self.assertEqual(self.client.post(item['detail_url'],json={'revision':item['revision'],'updates':{'country':'Other'}}).status_code,409)
+                    self.assertEqual(self.choose(item,'image_1',item['photos'][0]['filename']).status_code,409)
+                    self.assertEqual(self.crop(item,info=info).status_code,409)
+                    self.assertEqual(self.release(batch,[item]).status_code,409)
+                    self.assertEqual(self.db.execute('SELECT state FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone()[0],'blocked')
+                finally:self.tearDown();self.setUp()
 
     def test_inspection_checks_are_queued_only_by_explicit_resume_and_gets_remain_read_only(self):
         batch,item=self.inspection_item();self.assertEqual(item['check_state'],'idle')
