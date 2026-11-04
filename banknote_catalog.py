@@ -325,11 +325,25 @@ def country_spellings(value):
     return (canonical,) + ALIASES.get(canonical, ())
 
 
-def country_search(value):
+def collection_country(country, date=None, issuer=None, series=None):
+    """Contextual display name, never a rewrite of the saved country."""
+    country = (country or '').strip()
+    year = exact_year(date)
+    authority = fold(issuer or '')
+    if (fold(country) == 'timor' and year is not None and 0 < year < 1975
+            and authority in {'banconacionalultramarino', 'bnu',
+                              'banconacionalultramarinobnu', 'banconacionalultramarinotimor'}):
+        return 'Portuguese Timor'
+    return country
+
+
+def country_search(value, date=None, issuer=None, series=None):
     # Collection discovery only. These lineage terms must not enter the
     # canonical-country normalizer used by saved facts and catalogue matching.
     if fold(value) in {fold(name) for name in ('Tahiti', 'French Oceania', 'French Polynesia', 'Tahiti / French Oceania')}:
         return ' '.join((str(value), 'Tahiti French Oceania French Polynesia'))
+    if collection_country(value, date, issuer, series) == 'Portuguese Timor':
+        return 'Portuguese Timor'
     return ' '.join(country_spellings(value))
 
 
@@ -725,7 +739,7 @@ def american_colonial_country(country, date=None, issuer=None, series=None):
 
 @lru_cache(maxsize=8192)
 def classify(country, date=None, issuer=None, series=None):
-    country = canonical_country(country) or ''
+    country = canonical_country(collection_country(country, date, issuer, series)) or ''
     colonial_country = american_colonial_country(country, date, issuer, series)
     country = colonial_country or country
     y = _year(date)
@@ -858,8 +872,6 @@ def classify(country, date=None, issuer=None, series=None):
         return result('british', 'British North America — colonial issue')
     if country in _AMERICAN_COUNTRIES or country.startswith('United States ('):
         return result('us', 'American colonial / state issue — see issuer and date')
-    if country == 'Timor' and 'banconacionalultramarino' in evidence and y and y < 1975:
-        return result('portuguese', 'Portuguese Timor — overseas provincial issue')
     if country in HISTORIC:
         key, label = HISTORIC[country]
         return result(key, label)
@@ -886,7 +898,7 @@ def row_classification(row):
 
 def sort_country(country, date=None, issuer=None, series=None):
     # Domestic US issues lead their requested Philippine collection family.
-    canonical = canonical_country(country) or 'zzz'
+    canonical = canonical_country(collection_country(country, date, issuer, series)) or 'zzz'
     family = collection_family_issue(country, date, issuer, series)
     if family:
         return family['family']

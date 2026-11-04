@@ -408,7 +408,7 @@
            the country-alphabetical list. Municipality follows on the
            detail line. #}
         <div class="item-line1">
-          <span class="item-brand">{{ row['country'] or row['municipality'] or row['issuer'] or '—' }}</span>
+          <span class="item-brand">{{ (_bn_group.display_country if _bn_group else row['country']) or row['municipality'] or row['issuer'] or '—' }}</span>
           {% set _delivery = banknote_delivery(row['id']) %}
           {% set _listing_review = listing_review_reason(category, row['id']) or (_row_lifecycle.review_reason if _row_lifecycle and _row_lifecycle.attention else none) %}
           {% if _listing_review %}<span class="purchase-review-pill" title="{{ _listing_review }}">Please Review</span>{% endif %}

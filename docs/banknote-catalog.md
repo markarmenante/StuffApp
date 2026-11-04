@@ -304,8 +304,15 @@ Nyasaland, and historical versus successor currency areas are not merged.
 Other explicit spelling aliases include Rhodesia & Nyasaland → Rhodesia and
 Nyasaland; Saint Pierre & Miquelon → Saint Pierre and Miquelon; Sao Tome and
 Principe → São Tomé and Príncipe; Sarawak (Malaysia) → Sarawak; and
-Viet Nam - South (South Vietnam) → South Vietnam. Timor stays Timor: a dated BNU
-issue can be classified as Portuguese Timor without rewriting an ambiguous name.
+Viet Nam - South (South Vietnam) → South Vietnam. Saved Timor names remain intact,
+but an exact pre-1975 year and Banco Nacional Ultramarino issuer resolve the display
+name to **Portuguese Timor**. Both labels share list titles, history panels, ordering,
+search and report sections. The existing Portuguese Timor coverage pill links into
+that same group. Undated, transition-year, modern, and other-issuer Timor records
+are not inferred to be Portuguese issues; Timor-Leste, East Timor and West Timor
+remain distinct saved names. Migration v36 updates only derived P positions.
+The [Fitzwilliam Museum's 1967 20 escudos record](https://data.fitzmuseum.cam.ac.uk/id/object/165650)
+documents the BNU issuer and printed TIMOR legend for this issue family.
 
 French Afars & Issas and French Afars and Issas resolve to French Territory of
 the Afars and Issas, as do the equivalent longer English and French names. The

@@ -100,6 +100,33 @@ def fixture_batches():
     return jsonify(batches=[dict(row) for row in rows])
 
 
+@stuff.app.route('/__fixture/timor',methods=['GET','POST'])
+def fixture_timor():
+    db=stuff.get_db()
+    if request.method=='POST':
+        db.execute('''INSERT OR REPLACE INTO country_eras(country_key,title,eras,spellings)
+            VALUES(?,?,?,?)''',('timor','Portuguese Timor',
+            json.dumps([[1959,1975,'Portuguese Timorese escudo','Synthetic history fixture.']]),
+            json.dumps(['timor','portuguese timor'])))
+        for ident,country,year,denomination,status in (
+                ('fixture-timor-500','Portuguese Timor',1963,'500 Escudos','Delivered'),
+                ('fixture-timor-20','Timor',1967,'20 Escudos','Own'),
+                ('fixture-timor-50','Portuguese Timor',1967,'50 Escudos','Shipped'),
+                ('fixture-timor-modern','Timor-Leste',2002,'1 Dollar','Own')):
+            filename=ident+'.jpg'
+            Image.new('RGB',(160,80),'green').save(Path(stuff.UPLOAD_FOLDER)/filename)
+            db.execute('''INSERT OR REPLACE INTO banknotes
+                (id,country,date_1,denomination,status,issuer,series,image_1,image_2,price)
+                VALUES(?,?,?,?,?,?,?,?,?,?)''',(ident,country,year,denomination,status,
+                'Banco Nacional Ultramarino' if year<1975 else 'Banco Central de Timor-Leste',
+                '1963-68 Issue' if year<1975 else '',filename,filename,'$82.13'))
+        db.commit();stuff._generated_country_eras(force=True)
+        stuff._renumber_banknotes(db);db.commit()
+    return jsonify(rows=[dict(row) for row in db.execute("SELECT * FROM banknotes WHERE id LIKE 'fixture-timor-%' ORDER BY id")],
+        sections=[dict(title=title,ids=[row['id'] for row in rows]) for title,key,rows in
+            stuff._banknote_report_sections(db,{'q':'Portuguese Timor','filter':'heritage_portuguese'})])
+
+
 @stuff.app.post('/__fixture/import-photos')
 def fixture_import_photos():
     """Saved synthetic siblings; no purchase reader, Check or network activity."""

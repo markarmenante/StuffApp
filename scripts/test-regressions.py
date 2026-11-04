@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 suites = [
+    'test_banknote_catalog.py',
     'test_monitoring.py', 'test_ebay_orders.py', 'test_ebay_mail.py', 'test_ebay_purchase_lookup.py',
     'test_ebay_browser_requests.py', 'test_ebay_browser_setup.py',
     'test_ebay_matching.py', 'test_banknote_imports.py', 'test_banknote_import_consistency.py', 'test_banknote_review_currency.py', 'test_banknote_photo_sides.py',

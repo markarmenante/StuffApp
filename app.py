@@ -5607,7 +5607,7 @@ def _series_panel_for_row(row):
     note's times, with monetary policy in the foreground only where it was
     the event (Weimar, the pengő, the 1944 drachma, Zimbabwe). Returns None
     when there is nothing useful to say."""
-    country = _row_get(row, 'country') or ''
+    country = banknote_catalog.collection_country(*(_row_get(row, key) for key in ('country', 'date_1', 'issuer', 'series')))
     country_key = _country_key(country)
     year = _note_year(row)
     issuer = (_row_get(row, 'issuer') or '').strip()
@@ -5706,7 +5706,7 @@ def _series_panel_for_row(row):
     # shown after it as 'now Zimbabwe' (Mark, 2026-09-15). Because the
     # title is part of the panel signature, a run of notes under one
     # era splits where the issuing name changes.
-    country_raw = (_row_get(row, 'country') or '').strip()
+    country_raw = country.strip()
     return {
         'country_key': country_key,
         'title': country_raw or _country_eras_for(country_key)[0],
@@ -5775,7 +5775,7 @@ def series_panels(rows):
             # its run, so the gap is visible instead of silent — a new
             # country's history takes a minute or two to generate after
             # its first note is saved (Réunion, 2026-09-10).
-            country_name = (_row_get(row, 'country') or '').strip()
+            country_name = banknote_catalog.collection_country(*(_row_get(row, key) for key in ('country', 'date_1', 'issuer', 'series')))
             state = _country_history_state(country_name)
             if state in ('pending', 'missing'):
                 if country_name.lower() != prev_pending_country:
@@ -5844,6 +5844,7 @@ def banknote_grouping(rows):
     placements = {}
     for row in rows:
         info = dict(banknote_catalog.row_classification(row))
+        info['display_country'] = banknote_catalog.collection_country(*(_row_get(row, key) for key in ('country', 'date_1', 'issuer', 'series')))
         info['heading'] = info['key'] != previous
         regional = banknote_catalog.collection_family_for_row(row)
         if regional:
@@ -5980,6 +5981,7 @@ def _configure_db_connection(db):
     db.create_function('BANKNOTE_GROUP', 4,
                        lambda *v: banknote_catalog.classify(*v)['rank'], deterministic=True)
     db.create_function('BANKNOTE_COUNTRY', 4, banknote_catalog.sort_country, deterministic=True)
+    db.create_function('BANKNOTE_DISPLAY_COUNTRY', 4, banknote_catalog.collection_country, deterministic=True)
     db.create_function('COLLECTION_FAMILY_RANK', 4,
                        lambda *v: (banknote_catalog.collection_family_issue(*v) or {}).get('rank', -1), deterministic=True)
     db.create_function('COLLECTION_FAMILY_SECTION', 4,
@@ -5988,6 +5990,7 @@ def _configure_db_connection(db):
     db.create_function('CATALOGUE_REFERENCE_SORT', 1, banknote_catalog.catalogue_reference_sort, deterministic=True)
     db.create_function('CARIBBEAN_DENOMINATION', 1, banknote_catalog.eastern_caribbean_denomination, deterministic=True)
     db.create_function('BANKNOTE_COUNTRY_SEARCH', 1, banknote_catalog.country_search, deterministic=True)
+    db.create_function('BANKNOTE_COUNTRY_SEARCH', 4, banknote_catalog.country_search, deterministic=True)
     db.execute("PRAGMA foreign_keys = ON")
     # Wait up to 5s for a competing writer (gunicorn runs 4 threads)
     # instead of failing immediately with "database is locked".
@@ -6958,9 +6961,10 @@ def init_db():
     # Hong Kong's issuer-aware occupation era retains matching P positions.
     # v34: Oceania with a Japanese occupation issuer joins the Japanese group.
     # v35: The Eastern Caribbean Territories Currency Board alias joins BCCB.
+    # v36: Dated BNU Timor issues share Portuguese Timor display filing.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v35',),
+        ('banknote_display_number_v36',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6968,7 +6972,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v35', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v36', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -13104,7 +13108,7 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
                 wheres.append('(' + ' OR '.join(conds) + ')')
                 continue
             for col in text_fields:
-                search_col = "BANKNOTE_COUNTRY_SEARCH(country)" if category == "banknotes" and col == "country" else col
+                search_col = "BANKNOTE_COUNTRY_SEARCH(country,date_1,issuer,series)" if category == "banknotes" and col == "country" else col
                 conds.append(f"NODIA({search_col}) LIKE ?")
                 params.append(f'%{folded_term}%')
             if category in SELL_PANEL_CATEGORIES:
@@ -13245,7 +13249,7 @@ CATEGORY_ORDER_BY = {
                   "COALESCE(NOTE_YEAR(series, country, date_1), 99999) END ASC, "
                   f"{_US_EMERGENCY_SQL_CALL} ASC, "
                   "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN '' ELSE "
-                  "COALESCE(NULLIF(country, ''), 'zzz') END COLLATE NODIACRITIC, "
+                  "COALESCE(NULLIF(BANKNOTE_DISPLAY_COUNTRY(country, date_1, issuer, series), ''), 'zzz') END COLLATE NODIACRITIC, "
                   "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN 'zzz' "
                   f"WHEN {_US_EMERGENCY_SQL_CALL} THEN 'zzz' ELSE "
                   "COALESCE(NULLIF(municipality, ''), 'zzz') END COLLATE NODIACRITIC, "
@@ -32000,7 +32004,7 @@ def _banknote_modern_name(country):
 
 def _banknote_report_sections(db, query=None):
     """The report's sections in the list's order: [(country, key, [rows])],
-    one per country / colony as stored. `query` is the Banknotes list's
+    one per displayed country / colony. `query` is the Banknotes list's
     own state — {'q', 'dot', 'filter', 'at'} — so the report covers
     exactly the notes the list shows (a search for "United States"
     reports those notes); with no status filter, owned notes and all
@@ -32016,7 +32020,7 @@ def _banknote_report_sections(db, query=None):
         rows = [r for r in rows if purchase_states.held(r['status'])]
     sections = []
     for r in rows:
-        country = (r['country'] or '').strip() or 'Unattributed'
+        country = banknote_catalog.collection_country(*(r[key] for key in ('country', 'date_1', 'issuer', 'series'))) or 'Unattributed'
         regional = banknote_catalog.collection_family_for_row(r)
         key = banknote_catalog.collection_family_section_key(regional) if regional else _country_key(country)
         if regional:
