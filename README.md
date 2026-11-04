@@ -198,6 +198,12 @@ Tests: `test_banknote_photo_sides.py`, `test_banknote_check_sources.py`, and
 
 ### Market Scan buying
 
+Explicit eBay order imports and banknote Check can use the computer running
+StuffApp through the desktop Chrome/Edge browser connection. Open
+`/ebay/browser/setup` for its one-time installation. Those browser reads do not
+depend on the Today Mac. See [eBay browser connection](docs/ebay-browser.md) for
+setup, supported browsers and the existing account/order safeguards.
+
 Watched and sponsored eBay cards share View listing, Buy, Bought and Delete with
 Market Scan candidates. Buy asks for Location, saves an Ordered record and opens
 eBay's ordering page for a verified Buy It Now listing. Other sellers open their

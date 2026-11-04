@@ -9,10 +9,10 @@ const batch = extra => ({id: 'order', state: 'queued', items: [], url: reviewUrl
   status_url: reviewUrl + '/status', ...extra});
 const note = extra => ({id: 'note', state: 'draft', check_state: 'checking', ...extra});
 
-function entry(replies) {
+function entry(replies, browser) {
   let now = 0, timerId = 0;
   const timers = new Map(), requests = [];
-  const window = {location: {href: 'https://stuff.test/banknotes/imports/new', origin: 'https://stuff.test'}};
+  const window = {stuffappEbayBrowser: browser, location: {href: 'https://stuff.test/banknotes/imports/new', origin: 'https://stuff.test'}};
   vm.runInNewContext(source, {
     window, document: {querySelector: () => null}, URL, AbortController,
     Date: {now: () => now},
@@ -122,5 +122,26 @@ function entry(replies) {
   const empty = entry([]);
   await assert.rejects(empty.finish(empty.start('  ')), /Enter the eBay order number/);
   assert.equal(empty.requests.length, 0);
+  const reads = [];
+  const browser = {available:async()=>true, run:async request=>{reads.push(request)}};
+  const refresh = {id:'browser-request',order_id:'12-12345-12345',reader:'browser',status:'queued',expires_at:600};
+  const portable = entry([batch({purchase_refresh:refresh}),batch({state:'complete',completion_url:'/banknotes/exact-note'})],browser);
+  assert.equal((await portable.finish(portable.start('12-12345-12345'))).url,'/banknotes/exact-note');
+  assert.equal(portable.requests[0].body.reader,'browser');
+  assert.equal(reads.length,1);
+  assert.equal(reads[0].id,refresh.id);
+  const refreshedMulti = entry([
+    batch({items:[note(),note({id:'second'})],purchase_refresh:refresh}),
+    batch({state:'review',items:[note(),note({id:'second'})],purchase_refresh:{...refresh,status:'done'}}),
+  ],browser);
+  assert.equal((await refreshedMulti.finish(refreshedMulti.start('12-12345-12345',{refresh:true}))).url,reviewUrl);
+  assert.equal(refreshedMulti.requests.length,2,'A multi-note browser refresh keeps its initiating document until the read finishes');
+  const native = entry([batch({state:'failed'})],{available:async()=>false,run:()=>{throw Error('Must not dispatch')}});
+  await native.finish(native.start('12-12345-12345'));
+  assert.equal(native.requests[0].body.reader,undefined,'Missing extension preserves the native pathway');
+  const explicitRetry = entry([batch({state:'failed'})],browser);
+  await explicitRetry.finish(explicitRetry.start('12-12345-12345',{refresh:true}));
+  assert.equal(explicitRetry.requests[0].body.reader,'browser');
+  assert.equal(explicitRetry.requests[0].body.refresh,true);
   console.log('Single-order entry waits for processing, preserves review fallbacks, and only follows same-origin completion.');
 })().catch(error => { console.error(error); process.exit(1); });

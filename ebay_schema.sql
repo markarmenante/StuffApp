@@ -139,7 +139,8 @@ CREATE TABLE IF NOT EXISTS ebay_purchase_requests (
     order_id TEXT NOT NULL UNIQUE,
     requested_at REAL NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('queued','reading','done','failed')),
-    message TEXT NOT NULL
+    message TEXT NOT NULL,
+    reader TEXT NOT NULL DEFAULT 'today' CHECK (reader IN ('today','browser'))
 );
 CREATE INDEX IF NOT EXISTS ebay_purchase_requests_pending ON ebay_purchase_requests(status, requested_at);
 -- One bounded browser-access attempt per explicit Check; legacy requests need no migration.
@@ -150,6 +151,14 @@ CREATE TABLE IF NOT EXISTS ebay_purchase_request_sessions (
     next_attempt_at REAL NOT NULL DEFAULT 0,
     state TEXT NOT NULL DEFAULT 'ready' CHECK (state IN ('ready','sign_in_required','challenge_required','unavailable','cancelled')),
     reason TEXT
+);
+-- An owner browser gets one bounded claim, never the reusable Today credential.
+CREATE TABLE IF NOT EXISTS ebay_purchase_browser_claims (
+    request_id TEXT PRIMARY KEY REFERENCES ebay_purchase_requests(id) ON DELETE CASCADE,
+    token_hash TEXT,
+    expected_account TEXT NOT NULL,
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('note','import')),
+    target_id TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS ebay_listing_captures (

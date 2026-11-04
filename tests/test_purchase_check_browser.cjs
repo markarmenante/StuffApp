@@ -15,7 +15,7 @@ const path = require('node:path');
   };
   const lookup = source('  async function runCoinSpecLookup(', '  function delay(ms)');
   const checkGuards = source('  function banknoteCheckSnapshot()', '  // Push the form\'s current non-empty values');
-  const handler = source("  document.querySelectorAll('.coin-spec-check-btn').forEach", '  // ── Coin ✓ Check:');
+  const handler = source('  let banknoteOrderUncertain = false', '  // ── Coin ✓ Check:');
   const pageHtml = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
     <form id="mainForm" data-category="banknotes"><input name="order_number" value="12-34567-89012"><input name="marketplace" value="eBay"><textarea name="description">Keep my entered details</textarea></form>
     <button class="coin-spec-check-btn" data-spec-url="/banknotes/fixture/lookup-specs">Check</button><button id="banknoteCheckCancel" hidden style="display:none">Cancel check</button>
@@ -33,17 +33,29 @@ const path = require('node:path');
   const statusPath = `/banknotes/fixture/purchase-refresh/${id}`;
   const snapshot = (status, message = status, extra = {}) => ({ id, order_id: '12-34567-89012', status, message, expires_at: now / 1000 + 600, ...extra });
   const tick = async (page, ms = 2050) => { await page.clock.runFor(ms); await page.waitForTimeout(25); };
-  async function setup({ states = [], initial, resumed, poll, cancel } = {}) {
+  async function setup({ states = [], initial, resumed, poll, cancel, portable } = {}) {
     const context = await browser.newContext({ serviceWorkers: 'block' });
     const page = await context.newPage(), requests = [], errors = [];
     let lookupCount = 0, stateIndex = 0;
+    if (portable) await page.addInitScript(config => {
+      window.browserReads = []; window.browserCancels = [];
+      window.stuffappEbayBrowser = {
+        available: async () => true,
+        run: async request => {
+          window.browserReads.push(request);
+          if (config.fail) throw Object.assign(new Error('This browser read was interrupted. Press Check again.'),{code:'retry_required'});
+          return {status:'complete'};
+        },
+        cancel: async id => { window.browserCancels.push(id); },
+      };
+    }, portable);
     page.on('pageerror', error => errors.push(error.message));
     await page.clock.install({ time: new Date(now) });
     await context.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
       assert.equal(url.origin, 'http://check-fixture.test');
       if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: pageHtml });
-      requests.push({ method: request.method(), path: url.pathname, body: request.postData() });
+      requests.push({ method: request.method(), path: url.pathname, body: request.postData(), reader: request.headers()['x-stuffapp-purchase-reader'] });
       if (url.pathname === '/banknotes/fixture/lookup-specs') {
         lookupCount++;
         if (lookupCount > 1) return typeof resumed === 'function' ? resumed(route) : route.fulfill(resumed || { json: { filled: { denomination: '1 Dollar' }, overwritten: {} } });
@@ -65,6 +77,27 @@ const path = require('node:path');
   }
   async function run(name, fn) { try { await fn(); results.push(name); } catch (error) { failures.push({ name, error: error.stack }); } }
   try {
+    await run('this-computer Check dispatches one exact browser request and resumes normally', async () => {
+      const t = await setup({portable:{}, initial:{status:202,json:{purchase_refresh:{...snapshot('queued','Reading locally',{reader:'browser'}),url:statusPath}}},states:[snapshot('done','Verified',{reader:'browser'})]});
+      try {
+        await tick(t.page); await t.finish();
+        assert.equal(t.lookupCount(),2);
+        assert.ok(t.requests.filter(r=>r.path.endsWith('/lookup-specs')).every(r=>r.reader==='browser'));
+        assert.equal(await t.page.evaluate(()=>browserReads.length),1);
+        assert.equal(await t.page.evaluate(()=>browserReads[0].order_id),'12-34567-89012');
+        assert.equal(await t.page.evaluate(()=>alerts.length),0);
+      } finally { await t.close(); }
+    });
+    await run('lost browser capability ends the explicit Check so the next click can retry', async () => {
+      const t = await setup({portable:{fail:true}, initial:{status:202,json:{purchase_refresh:{...snapshot('reading','Reading locally',{reader:'browser'}),url:statusPath}}},states:[snapshot('reading','Reading locally',{reader:'browser'})]});
+      try {
+        await tick(t.page); await t.finish();
+        assert.equal(t.lookupCount(),1);
+        assert.equal(t.requests.filter(r=>r.path.endsWith('/cancel')).length,1);
+        assert.match((await t.page.evaluate(()=>alerts))[0],/interrupted/);
+        assert.equal(await t.page.evaluate(()=>applies.length),0);
+      } finally { await t.close(); }
+    });
     await run('sign-in and challenge progress resumes the same exact Check once, preserving form', async () => {
       const t = await setup({ states: [snapshot('sign_in_required', 'Finish signing in to eBay in the opened browser.'), snapshot('challenge_required', 'Complete the eBay security check in the opened browser.'), snapshot('reading', 'Signed in. Reading the exact order…'), snapshot('done', 'Order found. Checking the purchased item…')] });
       try {

@@ -315,6 +315,8 @@ def init_schema(db):
     db.executescript(Path(__file__).with_name('ebay_schema.sql').read_text())
     with db:
         db.execute('BEGIN IMMEDIATE')
+        if 'reader' not in {row[1] for row in db.execute('PRAGMA table_info(ebay_purchase_requests)')}:
+            db.execute("ALTER TABLE ebay_purchase_requests ADD COLUMN reader TEXT NOT NULL DEFAULT 'today' CHECK (reader IN ('today','browser'))")
         sql = db.execute("SELECT sql FROM sqlite_master WHERE name='banknote_ebay_links'").fetchone()[0]
         if "'details'" not in sql:
             # Rebuild only the link table to widen its CHECK, preserving every link/override.

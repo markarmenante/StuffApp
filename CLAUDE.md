@@ -24,7 +24,9 @@ fold new standing instructions in here — nowhere else.)
   When an explicit Check needs the local reader or browser, start/reuse the
   authorized process and existing sign-in, show any required provider sign-in or
   verification, and resume after confirmed readiness. Do not require the Today
-  browser window to stay open. The designated Mac must still be awake; never
+  browser window to stay open. Explicit Check/import can instead use the
+  installed desktop Chrome/Edge connection on the viewing computer; see
+  `docs/ebay-browser.md`. Today-backed reads still need the designated Mac awake; never
   automate passwords, verification codes, CAPTCHA or provider consent.
 - **Market Scan recommendation deletion** (2026-10-25): keep a visible Delete
   control on current coin/banknote recommendations and watched/sponsored cards. Deleting a

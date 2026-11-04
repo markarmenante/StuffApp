@@ -12,7 +12,7 @@ const draft = (extra = {}) => ({id: 'draft', state: 'draft', check_state: 'done'
 const descendants = node => (node.children || []).flatMap(child => [child, ...descendants(child)]);
 const content = node => [node.textContent || '', ...node.children.map(content)].join(' ');
 
-function page(initial, replies = [], item, formFields = []) {
+function page(initial, replies = [], item, formFields = [], browser) {
   const element = (tag = 'div') => ({tagName: tag.toUpperCase(), dataset: {}, textContent: '', children: [], handlers: {}, hidden: false,
     classList: {contains() { return false; }},
     append(...nodes) { this.children.push(...nodes); },
@@ -42,7 +42,7 @@ function page(initial, replies = [], item, formFields = []) {
     document: {querySelector: () => ({dataset: {importMode: item ? 'detail' : 'review'}, classList: {contains() { return false; }}}),
       getElementById: id => elements[id], createElement: element, createDocumentFragment: element,
       querySelectorAll() { return []; }, addEventListener() {}},
-    window: {location: {href: 'https://stuff.test/banknotes/imports/test', origin: 'https://stuff.test',
+    window: {stuffappEbayBrowser: browser, location: {href: 'https://stuff.test/banknotes/imports/test', origin: 'https://stuff.test',
       assign: url => navigations.push(url)}, addEventListener() {}},
     URL, AbortController, clearTimeout(id) { const index = timers.indexOf(id); if (index >= 0) timers.splice(index, 1); },
     setTimeout(fn, delay) { fn.delay = delay; timers.push(fn); return fn; },
@@ -80,6 +80,19 @@ function page(initial, replies = [], item, formFields = []) {
     assert.equal(ui.requests.length, 0, 'Rendering never starts a source read or release');
   }
 
+  const browserRefresh = {id:'browser-request',order_id:'12-12345-12345',reader:'browser',status:'queued',expires_at:600};
+  const reads=[];
+  const local=page(batch({purchase_refresh:browserRefresh}),[batch({purchase_refresh:{...browserRefresh,status:'reading'}})],undefined,[],
+    {run:async request=>{reads.push(request)}});
+  assert.equal(reads.length,1,'A queued browser request resumes from its saved review');
+  await local.timers.shift()();
+  assert.equal(reads.length,1,'Repeated status polls do not start another browser job');
+  assert.equal(local.requests.every(request=>request.method==='GET'),true,'Browser review never releases to collection');
+  const interruptedBrowser=page(batch({purchase_refresh:{...browserRefresh,status:'reading'}}),[],undefined,[],
+    {run:async()=>{throw new Error('This browser read was interrupted. Use Retry order.')}});
+  for(let i=0;i<5;i++) await Promise.resolve();
+  assert.equal(interruptedBrowser.retry.hidden,false);
+  assert.match(interruptedBrowser.status.textContent,/interrupted.*Retry order/);
   const failed = page(batch({state: 'failed', message: 'Chrome access failed.'}));
   assert.equal(failed.status.textContent, 'Chrome access failed.', 'Keep the actual reader error');
   assert.equal(failed.status.dataset.error, 'true');

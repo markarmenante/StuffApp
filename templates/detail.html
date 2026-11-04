@@ -1695,6 +1695,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   <!-- Grade, Conditions -->
   <p id="banknoteCheckSources" role="status"{% if not banknote_import_check_warning|default('', true) %} hidden{% endif %} style="padding:8px 12px;white-space:pre-line;overflow-wrap:anywhere">{{ banknote_import_check_warning|default('', true) }}</p>
+  {% if _is_owner and not import_draft %}<p id="banknoteBrowserSetup" hidden style="padding:0 12px 8px"><a href="/ebay/browser/setup" target="_blank" rel="noopener">Use this computer for eBay orders</a></p>{% endif %}
   <details id="banknoteCatalogueSources" hidden style="padding:8px 12px;overflow-wrap:anywhere">
     <summary>Catalogue reference</summary>
     <div></div>
@@ -7952,6 +7953,9 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     let statusUrl = null;
     let cancelled = false;
     let cancellation = null;
+    const browser = checkpoint ? window.stuffappEbayBrowser : null;
+    let browserReady = false, browserRequestId = '', browserError = null;
+    const browserSetup = document.getElementById('banknoteBrowserSetup');
     const cancelBtn = document.getElementById('banknoteCheckCancel');
     const summary = document.getElementById('banknoteCheckSources');
     const orderInputs = () => ['order_number', 'marketplace'].map(name =>
@@ -7959,6 +7963,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const enteredOrder = orderInputs();
     const sourceStatus = message => {
       if (summary) { summary.textContent = message; summary.hidden = !message; }
+      if (browserSetup) browserSetup.hidden = !message || (browserReady && browserError?.code !== 'setup_required');
     };
     const checkOrder = () => {
       if (orderInputs() !== enteredOrder) throw new Error('Order details changed. Press Check again for the new order.');
@@ -7966,6 +7971,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const cancel = () => {
       if (cancelled || !statusUrl) return;
       cancelled = true;
+      if (browserRequestId) void browser?.cancel(browserRequestId);
       if (cancelBtn) { cancelBtn.disabled = true; cancelBtn.textContent = 'Cancelling…'; }
       ctl.abort();
       const cancelCtl = new AbortController();
@@ -7993,11 +7999,13 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     const readSpecs = async () => {
       checkOrder();
       if (cancelled) throw new DOMException('Check cancelled.', 'CheckCancelled');
-      resp = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' }, signal: ctl.signal });
+      resp = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json',
+        ...(browserReady ? {'X-StuffApp-Purchase-Reader': 'browser'} : {}) }, signal: ctl.signal });
       data = await resp.json().catch(() => ({}));
       checkOrder();
     };
     try {
+      browserReady = Boolean(browser && await browser.available());
       await readSpecs();
       if (resp.status === 202 && data.purchase_refresh) {
         const refresh = data.purchase_refresh;
@@ -8022,6 +8030,11 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
           }
         };
         progress(refresh);
+        if (refresh.reader === 'browser') {
+          browserRequestId = refresh.id;
+          const operation = browser?.run(refresh, {onProgress: sourceStatus});
+          (operation || Promise.reject(new Error('Connect this computer to read eBay orders.'))).catch(error => { browserError = error; });
+        }
         if (cancelBtn) {
           cancelBtn.hidden = false; cancelBtn.style.display = ''; cancelBtn.disabled = false;
           cancelBtn.textContent = 'Cancel check'; cancelBtn.addEventListener('click', cancel);
@@ -8038,10 +8051,21 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
           if (status.status === 'failed') throw new Error(status.message || 'This purchase check could not finish.');
           if (status.status === 'cancelled') { cancelled = true; break; }
           if (status.status === 'done') { finished = true; break; }
+          if (browserError) {
+            // A lost document capability cannot resume the previous read. End
+            // this explicit Check before offering a fresh request.
+            try {
+              await fetch(statusUrl.href + '/cancel', {method:'POST',
+                headers:{'Accept':'application/json','Content-Type':'application/json'}, body:'{}', signal:ctl.signal});
+            } catch (_) {}
+            throw browserError;
+          }
           if (!['queued', 'reading', 'sign_in_required', 'challenge_required'].includes(status.status)) throw new Error('The purchase reader returned an unknown state.');
         }
         if (cancelled) throw new DOMException('Check cancelled.', 'CheckCancelled');
-        if (!finished) throw new Error('This purchase check expired. Make sure the Today Mac is awake and connected, then press Check again.');
+        if (!finished) throw new Error(refresh.reader === 'browser'
+          ? 'This browser read expired. Keep the eBay tab open, then press Check again.'
+          : 'This purchase check expired. Connect this computer for eBay orders, or make sure the Today Mac is awake, then press Check again.');
         if (cancelBtn) { cancelBtn.hidden = true; cancelBtn.style.display = 'none'; }
         // Resume the original exact-order Check once, with its normal AI budget.
         setBudget(280000);
@@ -8057,6 +8081,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       throw error;
     } finally {
       clearTimeout(timeoutId);
+      if (browserRequestId) void browser?.cancel(browserRequestId);
       if (cancelBtn) {
         cancelBtn.removeEventListener('click', cancel);
         cancelBtn.hidden = true; cancelBtn.style.display = 'none'; cancelBtn.disabled = false;

@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "StuffApp eBay Reader",
+  "version": "1.0.0",
+  "description": "Read your exact eBay order in this browser when you request Check or import in StuffApp.",
+  "minimum_chrome_version": "110",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiMNfGcZeoWmRQO6+jdFuXVOtiHXQKu8AP8R7VDPayOFCowKOFW4kgxu91aElOWuXrZ6kbuFAE2/sl1HpSFOiLaYJ+lyqsMn5VnzGqJjJhqYoGEi3ZDZpqkp6k5UL2yxIOBaM9yiUiAOBOLAoyMjQl/ROQczXvLzHlkaEGB83o/tPnj9Rp7bsHFNf9BwFFiN4BFspw2IdS9dzl4md0iXkO5JEFO/ELldaMXAKc0c4Qn5i9TLKHvlC/wtnMKPOVTTOiIjO5RwtPWAn4TgHF79JM/rV0Aqh7BItuVIrdM1JlIfL2M6+M+/khp8zWrAdWrFgPJhwSYuL4v/spatf3Db62QIDAQAB",
+  "permissions": [
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.ebay.com/*",
+    "https://order.ebay.com/*",
+    "https://signin.ebay.com/*"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://stuff.armenante.com/*"
+    ]
+  },
+  "background": {
+    "service_worker": "background.mjs",
+    "type": "module"
+  }
+}

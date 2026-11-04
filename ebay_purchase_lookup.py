@@ -1,6 +1,8 @@
-"""Short-lived exact-order requests for Today's authenticated Purchases bridge."""
+"""Bounded exact-order requests for Today or the owner's current browser."""
 from datetime import datetime
+import hashlib
 import re
+import secrets
 import time
 import uuid
 from urllib.parse import urlsplit, parse_qs
@@ -23,6 +25,7 @@ def session_for(db, request_id):
 
 def snapshot(row, session=None):
     result = {key: row[key] for key in ('id', 'order_id', 'status', 'message')}
+    result['reader'] = row['reader']
     result['expires_at'] = session['expires_at'] if session else row['requested_at'] + TIMEOUT
     if session:
         if row['status'] in ('queued', 'reading') and session['state'] in ('sign_in_required', 'challenge_required'):
@@ -30,6 +33,84 @@ def snapshot(row, session=None):
         elif row['status'] == 'failed' and session['state'] == 'cancelled':
             result['status'] = 'cancelled'
     return result
+
+
+def reader_mode(value):
+    if value not in ('today', 'browser'):
+        raise ValueError('Choose this browser or the Today reader for this purchase check.')
+    return value
+
+
+def expected_account(db):
+    row = db.execute('SELECT account_name FROM ebay_purchase_account WHERE id=1').fetchone()
+    if not row:
+        row = db.execute('SELECT account_name FROM ebay_connection WHERE id=1').fetchone()
+    return str(row[0] or '').strip().lower() if row else None
+
+
+def bind_browser(db, request_id, target_kind, target_id):
+    account = expected_account(db)
+    if not account:
+        raise ValueError('Connect and verify eBay Purchases before checking in this browser.')
+    db.execute('INSERT INTO ebay_purchase_browser_claims(request_id,expected_account,target_kind,target_id) VALUES (?,?,?,?)',
+               (request_id, account, target_kind, target_id))
+
+
+def forget_request(db, request_id):
+    # Requests replace their primary key on retry, so remove children first even
+    # on older SQLite connections that do not enable foreign-key enforcement.
+    db.execute('DELETE FROM ebay_purchase_browser_claims WHERE request_id=?', (request_id,))
+    db.execute('DELETE FROM ebay_purchase_request_sessions WHERE request_id=?', (request_id,))
+
+
+def _browser_binding(db, row, token=None, require_token=False):
+    binding = db.execute('SELECT * FROM ebay_purchase_browser_claims WHERE request_id=?', (row['id'],)).fetchone()
+    if row['reader'] != 'browser' or not binding:
+        raise ValueError('This request is not assigned to this browser.')
+    if require_token and (not isinstance(token, str) or len(token) != 43 or not binding['token_hash']
+            or not secrets.compare_digest(binding['token_hash'], hashlib.sha256(token.encode()).hexdigest())):
+        raise ValueError('This purchase check belongs to another browser session.')
+    if expected_account(db) != binding['expected_account']:
+        raise ValueError('The connected eBay account changed. Start a new purchase check.')
+    paused = db.execute('SELECT enabled FROM ebay_mail_connection WHERE id=1').fetchone()
+    if paused and not paused[0]:
+        raise ValueError('Purchase updates are paused. Resume them in eBay Orders before checking.')
+    if binding['target_kind'] == 'note':
+        current = db.execute("SELECT 1 FROM banknotes WHERE id=? AND order_number=? AND COALESCE(marketplace,'') IN ('','eBay')",
+                             (binding['target_id'], row['order_id'])).fetchone()
+    else:
+        batch = import_batch(db, row['order_id'], row['id'])
+        current = batch and batch['id'] == binding['target_id'] and batch['account_name'] == binding['expected_account']
+    if not current:
+        raise ValueError('This purchase request no longer matches its banknote or import.')
+    return binding
+
+
+def browser_claim(db, request_id, token=None):
+    if not isinstance(request_id, str) or not re.fullmatch(r'[a-f0-9]{32}', request_id):
+        raise ValueError('Invalid purchase request')
+    db.execute('BEGIN IMMEDIATE')
+    expire(db)
+    row = db.execute('SELECT * FROM ebay_purchase_requests WHERE id=?', (request_id,)).fetchone()
+    if not row or row['status'] not in ('queued', 'reading'):
+        raise ValueError('Purchase request expired or is no longer active')
+    binding = _browser_binding(db, row)
+    if binding['token_hash']:
+        _browser_binding(db, row, token, require_token=True)
+    else:
+        if row['status'] != 'queued':
+            raise ValueError('This purchase request is already being read.')
+        token = secrets.token_urlsafe(32)
+        db.execute('UPDATE ebay_purchase_browser_claims SET token_hash=? WHERE request_id=?',
+                   (hashlib.sha256(token.encode()).hexdigest(), request_id))
+        db.execute("UPDATE ebay_purchase_requests SET status='reading',message=? WHERE id=?",
+                   ('Reading the exact eBay order in this browser…', request_id))
+    session = session_for(db, request_id)
+    job = dict(id=request_id, order_id=row['order_id'], expected_account=binding['expected_account'],
+               expires_at=session['expires_at'] if session else row['requested_at'] + TIMEOUT,
+               import_checkout=binding['target_kind'] == 'import')
+    db.commit()
+    return dict(ok=True, request=job, token=token)
 
 
 def current_order(db, order_id):
@@ -53,7 +134,7 @@ def checkout_orders(payload, requested, items, importing):
     checkout = payload.get('checkout')
     if not checkout:
         if importing:
-            raise ValueError('The purchase reader did not verify complete checkout membership; update Today and retry the import')
+            raise ValueError('The purchase reader did not verify complete checkout membership; update the reader and retry the import')
         if any(item['order_id'] != requested for item in items):
             raise ValueError('Purchase result contains an unrelated order')
         return {requested}
@@ -91,14 +172,17 @@ def expire(db):
                ('The purchase check expired before it could finish. Press Check to try again.', TIMEOUT, time.time()))
 
 
-def ensure(db, note):
+def ensure(db, note, reader='today'):
     """Refresh missing orders and public listings through the signed-in browser."""
+    reader_mode(reader)
     note = dict(note)
     number = (note.get('order_number') or '').strip()
     if note.get('marketplace') not in (None, '', 'eBay') or not re.fullmatch(r'\d{2}-\d{5}-\d{5}', number):
         return None
-    if not ebay_mail.configured():
+    if reader == 'today' and not ebay_mail.configured():
         return None
+    if reader == 'browser' and not expected_account(db):
+        return dict(status='failed', message='Connect and verify eBay Purchases before checking in this browser.')
     cached = db.execute('SELECT i.item_id,i.quantity,i.attention,o.status_text FROM ebay_order_items i JOIN ebay_purchase_observations o '
                         'ON o.line_key=i.line_key WHERE i.order_id=?', (number,)).fetchall()
     # Older readers misclassified this normal new-order state. Refresh the
@@ -120,18 +204,32 @@ def ensure(db, note):
     enabled = db.execute('SELECT enabled FROM ebay_mail_connection WHERE id=1').fetchone()
     if enabled and not enabled[0]:
         return dict(status='failed', message='Purchase updates are paused. Resume them in eBay Orders before checking this order.')
+    db.execute('BEGIN IMMEDIATE')
     expire(db)
     row = db.execute('SELECT * FROM ebay_purchase_requests WHERE order_id=?', (number,)).fetchone()
-    if not row or (row['status'] not in ('queued', 'reading') and row['requested_at'] < time.time() - 15):
+    if row and row['reader'] == 'browser' and row['status'] in ('queued', 'reading'):
+        binding = db.execute('SELECT target_kind,target_id FROM ebay_purchase_browser_claims WHERE request_id=?', (row['id'],)).fetchone()
+        if not binding or binding['target_kind'] != 'note' or binding['target_id'] != note['id']:
+            db.commit()
+            return dict(status='failed', message='Another banknote or import is checking this order. Let it finish, then retry.')
+    if row and row['reader'] != reader and row['status'] == 'reading':
+        db.commit()
+        return dict(status='failed', message='A previous Check is reading this order. Cancel it or let it finish, then retry.')
+    if (not row or row['reader'] != reader or (reader == 'browser' and row['status'] == 'failed')
+            or (row['status'] not in ('queued', 'reading') and row['requested_at'] < time.time() - 15)):
         if row:
-            db.execute('DELETE FROM ebay_purchase_request_sessions WHERE request_id=?', (row['id'],))
-        db.execute('INSERT INTO ebay_purchase_requests (id,order_id,requested_at,status,message) VALUES (?,?,?,?,?) '
+            forget_request(db, row['id'])
+        db.execute('INSERT INTO ebay_purchase_requests (id,order_id,requested_at,status,message,reader) VALUES (?,?,?,?,?,?) '
                    'ON CONFLICT(order_id) DO UPDATE SET id=excluded.id,requested_at=excluded.requested_at, '
-                   'status=excluded.status,message=excluded.message',
-                   (uuid.uuid4().hex, number, time.time(), 'queued', 'Waiting for the Mac to read this order from eBay Purchases...'))
+                   'status=excluded.status,message=excluded.message,reader=excluded.reader',
+                   (uuid.uuid4().hex, number, time.time(), 'queued',
+                    'Waiting for this browser to read the exact eBay order…' if reader == 'browser'
+                    else 'Waiting for the Mac to read this order from eBay Purchases...', reader))
         row = db.execute('SELECT * FROM ebay_purchase_requests WHERE order_id=?', (number,)).fetchone()
         db.execute('INSERT INTO ebay_purchase_request_sessions(request_id,expires_at) VALUES (?,?)',
                    (row['id'], row['requested_at'] + SESSION_TIMEOUT))
+        if reader == 'browser':
+            bind_browser(db, row['id'], 'note', note['id'])
     db.commit()
     return snapshot(row, session_for(db, row['id']))
 
@@ -142,7 +240,7 @@ def claim(db):
     enabled = db.execute('SELECT enabled FROM ebay_mail_connection WHERE id=1').fetchone()
     row = None if enabled and not enabled[0] else db.execute(
         "SELECT q.* FROM ebay_purchase_requests q LEFT JOIN ebay_purchase_request_sessions s ON s.request_id=q.id "
-        "WHERE q.status='queued' AND COALESCE(s.next_attempt_at,0)<=? ORDER BY q.requested_at LIMIT 1",
+        "WHERE q.status='queued' AND q.reader='today' AND COALESCE(s.next_attempt_at,0)<=? ORDER BY q.requested_at LIMIT 1",
         (time.time(),)).fetchone()
     result = None
     if row:
@@ -183,11 +281,17 @@ def complete_session(db, row, payload):
         'expired': 'The purchase check expired before it could finish. Press Check to try again.',
         'unavailable': 'Check could not open eBay on the designated Mac. Open Chrome and try Check again.',
     }
+    if row['reader'] == 'browser':
+        messages.update(
+            unsupported_browser='Use Chrome or Edge with the StuffApp eBay reader installed on this computer.',
+            browser_access='This browser could not read eBay. Reconnect the StuffApp reader and retry Check.',
+            wrong_account='This browser is signed in to a different eBay account. Sign in to the connected account, then retry Check.',
+            unavailable='This browser could not open eBay. Retry Check with the StuffApp reader connected.')
     message = messages[reason or state]
     db.execute('UPDATE ebay_purchase_request_sessions SET state=?,reason=?,next_attempt_at=? WHERE request_id=?',
                (state, reason, time.time() + SESSION_RETRY, row['id']))
     db.execute('UPDATE ebay_purchase_requests SET status=?,message=? WHERE id=?',
-               ('failed' if state == 'unavailable' else 'queued', message, row['id']))
+               ('failed' if state == 'unavailable' else 'reading' if row['reader'] == 'browser' else 'queued', message, row['id']))
     db.commit()
     return dict(ok=True)
 
@@ -230,7 +334,7 @@ def _validate_exact_observation(db, items, observed, requested_at):
             raise ValueError('Purchase observation conflicts with newer saved evidence; refresh the order')
 
 
-def complete(db, payload):
+def complete(db, payload, *, browser_token=None, reader='today'):
     """Only acknowledge validated evidence for the claimed order, never a sibling."""
     if payload.get('kind') == 'market_purchase' or any(k in payload for k in ('search_item_id','search_complete')):
         raise ValueError('A targeted purchase search cannot complete an exact-order request')
@@ -242,6 +346,10 @@ def complete(db, payload):
     if not row or row['status'] != 'reading':
         db.rollback()
         raise ValueError('Purchase request expired or is no longer active')
+    if row['reader'] != reader:
+        raise ValueError('This purchase request is assigned to a different reader.')
+    if row['reader'] == 'browser':
+        binding = _browser_binding(db, row, browser_token, require_token=True)
     if not current_order(db, row['order_id']):
         raise ValueError('This purchase request no longer matches a banknote order')
     if 'session' in payload:
@@ -251,6 +359,8 @@ def complete(db, payload):
         'unreadable': 'eBay did not provide readable details for this order. No item was selected; try Check again later.',
         'browser': 'The Mac could not read eBay Purchases. Keep Chrome signed in and try Check again.',
     }
+    if row['reader'] == 'browser':
+        messages['browser'] = 'This browser could not read eBay Purchases. Keep eBay signed in and retry Check.'
     error = payload.get('error')
     if error:
         if error not in messages:
@@ -259,6 +369,8 @@ def complete(db, payload):
         status, message = 'failed', messages[error]
     else:
         account, observed, items, skipped = ebay_mail.purchase_snapshot(payload)
+        if row['reader'] == 'browser' and account.lower() != binding['expected_account']:
+            raise ValueError('The browser is signed in to a different eBay account.')
         ebay_mail.check_account(db, account)
         importing=import_batch(db,row['order_id'],row['id'])
         orders=checkout_orders(payload,row['order_id'],items,bool(importing))
@@ -314,6 +426,61 @@ def complete(db, payload):
 
 
 def register(app, get_db, require_owner, after_import=None):
+    def finish_import(db, request_id):
+        if after_import:
+            batch=db.execute("SELECT id FROM banknote_import_batches WHERE request_id=? AND state='review'", (request_id,)).fetchone()
+            if batch:
+                after_import(batch[0])
+
+    @app.post('/ebay/browser/requests')
+    def ebay_browser_requests():
+        require_owner()
+        # Only an owner page on this exact tenant can obtain a bounded claim.
+        # Extension origins and a reusable Today bearer credential do not qualify.
+        # Railway terminates HTTPS before Flask. Public origins are HTTPS even
+        # if the internal WSGI connection is HTTP; do not trust forwarded input.
+        local = urlsplit(request.host_url).hostname in ('localhost', '127.0.0.1', '::1')
+        origin = request.host_url.rstrip('/') if local else 'https://' + request.host
+        if (request.headers.get('Origin') != origin
+                or request.headers.get('Sec-Fetch-Site') not in (None, 'same-origin')
+                or request.mimetype != 'application/json'):
+            abort(403)
+        if request.content_length is None or request.content_length > 2000000:
+            abort(413)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or payload.get('action') not in ('claim', 'complete'):
+            abort(400)
+        db = get_db()
+        try:
+            if payload['action'] == 'claim':
+                result = browser_claim(db, payload.get('id'), payload.get('token'))
+            else:
+                result = complete(db, payload, browser_token=payload.get('token'), reader='browser')
+                finish_import(db, payload.get('id'))
+            response = jsonify(result)
+            response.headers['Cache-Control'] = 'no-store'
+            return response
+        except ValueError as exc:
+            db.rollback()
+            # A wrong claim token, changed account, paused collection or stale
+            # target cannot fail another active browser's work. Valid claims
+            # with invalid evidence do become terminal for an explicit retry.
+            if (payload['action'] == 'complete' and isinstance(payload.get('id'), str)
+                    and re.fullmatch(r'[a-f0-9]{32}', payload['id'])):
+                row = db.execute('SELECT * FROM ebay_purchase_requests WHERE id=?', (payload.get('id'),)).fetchone()
+                try:
+                    if row and row['status'] == 'reading':
+                        _browser_binding(db, row, payload.get('token'), require_token=True)
+                        db.execute("UPDATE ebay_purchase_requests SET status='failed',message=? WHERE id=?",
+                                   ('The purchase evidence was rejected: ' + str(exc)[:200].rstrip('.') + '. Nothing was changed.', row['id']))
+                        db.commit()
+                except ValueError:
+                    db.rollback()
+            return jsonify(error=str(exc)), 409
+        except Exception:
+            db.rollback()
+            raise
+
     @app.get('/banknotes/<record_id>/purchase-refresh/<request_id>')
     def banknote_purchase_refresh(record_id, request_id):
         require_owner()
@@ -340,6 +507,11 @@ def register(app, get_db, require_owner, after_import=None):
         if not row:
             db.rollback()
             abort(404)
+        if row['reader'] == 'browser':
+            binding = db.execute('SELECT target_kind,target_id FROM ebay_purchase_browser_claims WHERE request_id=?', (row['id'],)).fetchone()
+            if not binding or binding['target_kind'] != 'note' or binding['target_id'] != record_id:
+                db.rollback()
+                abort(404)
         if row['status'] in ('queued', 'reading'):
             db.execute("INSERT INTO ebay_purchase_request_sessions(request_id,expires_at,state) VALUES (?,?,'cancelled') "
                        "ON CONFLICT(request_id) DO UPDATE SET state='cancelled'",
@@ -371,9 +543,8 @@ def register(app, get_db, require_owner, after_import=None):
             if payload.get('action') == 'complete':
                 handler = market_purchase_capture.complete if payload.get('kind') == 'market_purchase' else complete
                 result=handler(db,payload)
-                if after_import and handler is complete:
-                    batch=db.execute("SELECT id FROM banknote_import_batches WHERE request_id=? AND state='review'",(payload.get('id'),)).fetchone()
-                    if batch:after_import(batch[0])
+                if handler is complete:
+                    finish_import(db, payload.get('id'))
                 return jsonify(result)
         except ValueError as exc:
             db.rollback()
@@ -390,7 +561,7 @@ def register(app, get_db, require_owner, after_import=None):
                 message = ('The purchase evidence was rejected: ' + str(exc)[:200].rstrip('.')
                            + '. Nothing was changed.')
                 db.execute("UPDATE ebay_purchase_requests SET status='failed',message=? "
-                           "WHERE id=? AND status='reading' AND COALESCE("
+                           "WHERE id=? AND reader='today' AND status='reading' AND COALESCE("
                            "(SELECT expires_at FROM ebay_purchase_request_sessions s WHERE s.request_id=ebay_purchase_requests.id),"
                            "requested_at+?)>=?",
                            (message, request_id, TIMEOUT, time.time()))

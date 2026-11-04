@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Use this computer for eBay orders — StuffApp{% endblock %}
+{% block content %}
+{% include 'partials/banknote_import_styles.html' %}
+<div class="banknote-import" style="max-width:780px;margin:24px auto">
+  <header class="import-toolbar">
+    <h1>Use this computer for eBay orders</h1>
+    <a class="toolbar-btn pill" href="/banknotes/imports/new">Saved orders</a>
+  </header>
+  <div style="padding:0 20px 20px;line-height:1.6">
+    <p>Connect Chrome or Microsoft Edge on this computer to read an exact eBay order when you choose Import order or Check. It uses your eBay sign-in in this browser.</p>
+    <ol>
+      <li><a href="/ebay/browser/download">Download the StuffApp eBay reader</a> and unzip it into a folder you will keep on this computer.</li>
+      <li>Open <strong>chrome://extensions</strong> in Chrome, or <strong>edge://extensions</strong> in Edge.</li>
+      <li>Turn on <strong>Developer mode</strong>, choose <strong>Load unpacked</strong>, and select the unzipped <strong>browser-extension</strong> folder containing <strong>manifest.json</strong>.</li>
+      <li>Return to StuffApp in the same browser, sign in if needed, and refresh this page.</li>
+    </ol>
+    <button type="button" class="toolbar-btn pill active" id="ebayBrowserCheckConnection">Check connection</button>
+    <p id="ebayBrowserConnectionStatus" role="status" aria-live="polite">Install once on each computer you use.</p>
+    <p>Then open a saved order or enter your eBay order number and choose Import order. Keep the StuffApp page open while it reads. If eBay asks you to sign in or complete verification, do that in the eBay tab; the read resumes here.</p>
+    <p>The reader handles the order you requested. eBay passwords and verification codes stay in eBay. Background Today scans still use their existing connection.</p>
+  </div>
+</div>
+<script>
+(() => {
+  const button = document.getElementById('ebayBrowserCheckConnection');
+  const status = document.getElementById('ebayBrowserConnectionStatus');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    status.textContent = 'Checking this browser…';
+    try {
+      const ready = await window.stuffappEbayBrowser?.available();
+      status.textContent = ready ? 'Connected. This computer is ready to read your eBay orders.'
+        : 'Reader not connected. Complete the steps above in Chrome or Edge, then refresh this page and check again.';
+    } finally { button.disabled = false; }
+  });
+})();
+</script>
+{% endblock %}

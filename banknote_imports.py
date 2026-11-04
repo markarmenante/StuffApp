@@ -188,11 +188,16 @@ def _existing_matches(db,source):
         (source['order_id'],'https://www.ebay.com/itm/'+source['item_id'])).fetchall()
 
 
-def begin(db, order_number, refresh=False):
+def begin(db, order_number, refresh=False, reader='today'):
+    import ebay_purchase_lookup
+    try:
+        ebay_purchase_lookup.reader_mode(reader)
+    except ValueError as exc:
+        raise ImportProblem(str(exc)) from exc
     number = str(order_number or '').strip()
     if not _ORDER.fullmatch(number):
         raise ImportProblem('Enter the eBay order number, for example 12-12345-12345.')
-    if not ebay_mail.configured():
+    if reader == 'today' and not ebay_mail.configured():
         raise ImportProblem('The eBay purchase reader is not configured for this collection.')
     account = _account(db)
     now = time.time()
@@ -212,11 +217,10 @@ def begin(db, order_number, refresh=False):
             return existing['id']
         # Retry must recover even when the Mac stopped polling after claiming
         # the order. Use the reader's session-aware expiry before its busy guard.
-        import ebay_purchase_lookup
         ebay_purchase_lookup.expire(db)
         if existing and existing['request_id']:
             request = db.execute("SELECT q.*,s.expires_at FROM ebay_purchase_requests q LEFT JOIN ebay_purchase_request_sessions s ON s.request_id=q.id WHERE q.id=?", (existing['request_id'],)).fetchone()
-            if request and request['status'] in ('queued','reading') and (request['expires_at'] or request['requested_at']+120) > now:
+            if request and request['reader'] == reader and request['status'] in ('queued','reading') and (request['expires_at'] or request['requested_at']+120) > now and not (refresh and reader == 'browser'):
                 db.execute('UPDATE banknote_import_batches SET auto_single=1 WHERE id=?',(existing['id'],))
                 db.commit()
                 return existing['id']
@@ -229,19 +233,25 @@ def begin(db, order_number, refresh=False):
         request_id = uuid.uuid4().hex
         # A fresh import MUST read the complete exact order; a cached single
         # Purchases card may omit collapsed siblings and is not membership proof.
-        old = db.execute('SELECT id,status FROM ebay_purchase_requests WHERE order_id=?', (number,)).fetchone()
-        if old and old['status']=='reading':
+        old = db.execute('SELECT id,status,reader FROM ebay_purchase_requests WHERE order_id=?', (number,)).fetchone()
+        if old and old['reader'] == 'browser' and old['status'] in ('queued','reading'):
+            binding=db.execute('SELECT target_kind,target_id FROM ebay_purchase_browser_claims WHERE request_id=?',(old['id'],)).fetchone()
+            if not binding or binding['target_kind'] != 'import' or binding['target_id'] != batch_id:
+                raise ImportProblem('Another banknote or import is checking this order. Let it finish, then retry Import order.')
+        if old and old['status']=='reading' and not (refresh and old['reader'] == reader == 'browser'):
             raise ImportProblem('A previous Check is reading this order. Let it finish, then retry Import order.')
-        if old and old['status'] in ('queued','reading'):
+        if old and old['status'] == 'queued' and old['reader'] == reader == 'today':
             request_id = old['id']
         else:
             if old:
-                db.execute('DELETE FROM ebay_purchase_request_sessions WHERE request_id=?', (old['id'],))
-            db.execute('''INSERT INTO ebay_purchase_requests(id,order_id,requested_at,status,message)
-                VALUES(?,?,?,'queued',?) ON CONFLICT(order_id) DO UPDATE SET id=excluded.id,
-                requested_at=excluded.requested_at,status=excluded.status,message=excluded.message''',
-                (request_id,number,now,'Reading all purchased items from this exact eBay order…'))
+                ebay_purchase_lookup.forget_request(db, old['id'])
+            db.execute('''INSERT INTO ebay_purchase_requests(id,order_id,requested_at,status,message,reader)
+                VALUES(?,?,?,'queued',?,?) ON CONFLICT(order_id) DO UPDATE SET id=excluded.id,
+                requested_at=excluded.requested_at,status=excluded.status,message=excluded.message,reader=excluded.reader''',
+                (request_id,number,now,'Reading all purchased items from this exact eBay order…',reader))
             db.execute('INSERT INTO ebay_purchase_request_sessions(request_id,expires_at) VALUES(?,?)', (request_id,now+600))
+            if reader == 'browser':
+                ebay_purchase_lookup.bind_browser(db, request_id, 'import', batch_id)
         db.execute('''INSERT INTO banknote_import_batches(id,account_name,order_id,request_id,created_at,updated_at,auto_single)
             VALUES(?,?,?,?,?,?,1) ON CONFLICT(account_name,order_id) DO UPDATE SET request_id=excluded.request_id,
             state='queued',message='',auto_single=1,updated_at=excluded.updated_at''', (batch_id,account,number,request_id,now,now))
@@ -714,6 +724,7 @@ def collection_check_warning(db,record):
 def status(db,batch_id):
     batch = _batch(db,batch_id)
     state,message=batch['state'],batch['message']
+    progress=None
     if state == 'queued':
         request = db.execute('SELECT * FROM ebay_purchase_requests WHERE id=?',(batch['request_id'],)).fetchone()
         if request:
@@ -722,7 +733,8 @@ def status(db,batch_id):
             state=progress['status'] if progress['status'] in ('failed','sign_in_required','challenge_required') else 'queued'
             message=progress['message']
             if progress.get('expires_at',0) < time.time():
-                state,message='failed','This order read expired. Keep the Today Mac awake, then retry the import.'
+                state,message='failed',('This order read expired. Retry the import in this browser.' if request['reader']=='browser'
+                                        else 'This order read expired. Keep the Today Mac awake, then retry the import.')
     items=[_public_item(db,row) for row in db.execute('SELECT * FROM banknote_import_items WHERE batch_id=? ORDER BY created_at,item_id',(batch_id,))]
     single=_single_item(db,batch)
     processing_single=False
@@ -741,7 +753,7 @@ def status(db,batch_id):
                 except ImportProblem:processing_single=False
             if single['check_state']=='checking' and single['check_expires']<=time.time():
                 processing_single=False
-    return dict(id=batch_id,order_number=batch['order_id'],state=state,message=message,items=items,
+    return dict(id=batch_id,order_number=batch['order_id'],state=state,message=message,items=items,purchase_refresh=progress,
                 processing_single=processing_single,completion_url=completion_url,
                 pending_count=sum(item['state']!='released' for item in items),
                 url=f'/banknotes/imports/{batch_id}',status_url=f'/banknotes/imports/{batch_id}/status')

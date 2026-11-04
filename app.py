@@ -21905,7 +21905,8 @@ def banknote_import_new():
 def banknote_import_create():
     require_owner();data=request.get_json(silent=True) or request.form
     try:
-        ident=banknote_imports.begin(get_db(),data.get('order_number'),refresh=data.get('refresh') is True)
+        ident=banknote_imports.begin(get_db(),data.get('order_number'),refresh=data.get('refresh') is True,
+                                   reader=data.get('reader','today'))
         _finish_single_import(get_db(),ident)
         _start_import_checks(ident)
         return jsonify(banknote_imports.status(get_db(),ident))
@@ -28386,7 +28387,11 @@ def banknote_lookup_specs(record_id):
     if not note:
         return jsonify({'error': 'Banknote not found'}), 404
 
-    refresh = ebay_purchase_lookup.ensure(db, note)
+    try:
+        refresh = ebay_purchase_lookup.ensure(db, note, reader=request.headers.get('X-StuffApp-Purchase-Reader','today'))
+    except ValueError as exc:
+        db.rollback()
+        return jsonify(error=str(exc)), 409
     if refresh:
         if refresh['status'] in ('queued', 'reading', 'sign_in_required', 'challenge_required'):
             refresh['url'] = url_for('banknote_purchase_refresh', record_id=record_id, request_id=refresh['id'])
@@ -43424,6 +43429,8 @@ _ebay_order_sync = ebay_orders.register(
     app, get_db, open_db_connection, require_owner, DATA_DIR)
 import ebay_purchase_lookup
 ebay_purchase_lookup.register(app, get_db, require_owner, after_import=_start_import_checks)
+import ebay_browser_setup
+ebay_browser_setup.register(app, require_owner, _import_context)
 market_purchase_capture.register(app, get_db, require_owner)
 market_ebay_feed.register(app, get_db, on_complete=_market_capture_bridge_estimate_basis,
                           after_complete=_market_wake_label_worker)

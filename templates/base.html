@@ -713,6 +713,8 @@ async function startSyncUp(ev, link) {
   {% endwith %}
 </div>
 
+<script src="{{ url_for('static', filename='js/stuffapp-ebay-browser.js') }}?v={{ asset_v('js/stuffapp-ebay-browser.js') }}"></script>
+
 <main class="main-content">
   {% block content %}{% endblock %}
 </main>

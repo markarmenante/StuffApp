@@ -50,8 +50,11 @@
   window.startBanknoteOrderReview = async function (orderNumber, options = {}) {
     const value = String(orderNumber || '').trim();
     if (!value) throw new Error('Enter the eBay order number first.');
+    const browser = window.stuffappEbayBrowser;
+    const browserReady = browser && await browser.available();
     let data;
-    try { data = await request('/banknotes/imports', 'POST', {order_number: value, ...(options.refresh === true ? {refresh:true} : {})}); }
+    try { data = await request('/banknotes/imports', 'POST', {order_number: value,
+      ...(browserReady ? {reader:'browser'} : {}), ...(options.refresh === true ? {refresh:true} : {})}); }
     catch (error) {
       if (error.uncertain) error.message = 'The order request could not be confirmed. Refresh saved orders before trying again.';
       throw error;
@@ -62,13 +65,30 @@
     const statusUrl = sameOrigin(current.status_url || reviewUrl + '/status');
     const deadline = Date.now() + 10 * 60 * 1000;
     const saved = () => ({...data, ...current, url: reviewUrl});
+    let browserRequest = '', browserError = null;
+    const browserProgress = message => options.onProgress?.(message, current);
     while (true) {
+      const refresh = current.purchase_refresh;
+      if (browser && refresh?.reader === 'browser' && refresh.id !== browserRequest
+          && ['queued','reading','sign_in_required','challenge_required'].includes(refresh.status)) {
+        if (browserRequest) void browser.cancel?.(browserRequest);
+        browserRequest = refresh.id; browserError = null;
+        browser.run(refresh, {onProgress: browserProgress}).catch(error => {
+          if (browserRequest === refresh.id) browserError = error;
+        });
+      }
       if (current.completion_url) return {...saved(), url: sameOrigin(current.completion_url)};
       const items = current.items || [];
       const needsReview = current.state === 'failed' || items.length > 1
         || items.some(item => item.state === 'blocked');
-      const readingOrder = !items.length && ['queued', 'sign_in_required', 'challenge_required'].includes(current.state);
-      if (needsReview || (!readingOrder && current.processing_single !== true)) return saved();
+      // An explicit refresh may keep older saved drafts while its browser read
+      // runs. Keep this document (and its capability) alive until that read
+      // finishes, then open the saved review normally.
+      const readingBrowser = refresh?.reader === 'browser'
+        && ['queued','reading','sign_in_required','challenge_required'].includes(refresh.status)
+        && ['queued','sign_in_required','challenge_required'].includes(current.state);
+      const readingOrder = readingBrowser || (!items.length && ['queued', 'sign_in_required', 'challenge_required'].includes(current.state));
+      if ((needsReview && !readingBrowser) || browserError || (!readingOrder && current.processing_single !== true)) return saved();
       const message = current.state === 'sign_in_required' ? 'Sign in to eBay to continue…'
         : current.state === 'challenge_required' ? 'Complete eBay verification to continue…'
         : current.processing_single ? 'Checking banknote…' : 'Retrieving order…';
@@ -135,6 +155,22 @@
   let pollTimer, pollFailures = 0, polling = false;
   let form, fields = [], baseline = {}, saving = null, saveTimer, busy = false, busyAction = '', conflict = null;
   let leftPage = false, uncertain = false;
+  let browserRequest = '', browserFailure = null;
+  const resumeBrowserRead = () => {
+    const refresh = batch.purchase_refresh;
+    if (refresh?.reader !== 'browser' || !['queued','reading','sign_in_required','challenge_required'].includes(refresh.status)) {
+      browserFailure = null; return;
+    }
+    if (browserRequest === refresh.id) return;
+    if (browserRequest) void window.stuffappEbayBrowser?.cancel(browserRequest);
+    browserRequest = refresh.id; browserFailure = null;
+    const operation = window.stuffappEbayBrowser?.run(refresh, {onProgress: message => { if (!leftPage && batch.purchase_refresh?.id === refresh.id) say(message); }});
+    (operation || Promise.reject(new Error('Connect this computer to read eBay orders.'))).catch(error => {
+      if (browserRequest !== refresh.id || leftPage || !['queued','reading','sign_in_required','challenge_required'].includes(batch.purchase_refresh?.status)) return;
+      browserFailure = error;
+      if (mode === 'review') renderList();
+    });
+  };
   const dirty = () => fields.some(field => field.value !== (baseline[field.name] || ''));
   // The shared detail form displays units/currency, while saved draft fields
   // retain their canonical values. Compare display to display for CAS merges.
@@ -328,7 +364,8 @@
       : items.length && items.every(draft => draft.state === 'released') ? 'All reviewed items are in the collection.'
       : items.length ? 'Drafts saved. Review each item before releasing it.'
       : 'No purchased items are available to review. Refresh the eBay order to try again.'), batch.state === 'failed');
-    document.getElementById('banknoteImportRetry').hidden = batch.state !== 'failed';
+    if (browserFailure) say(browserFailure.message, true);
+    document.getElementById('banknoteImportRetry').hidden = batch.state !== 'failed' && !browserFailure;
     document.getElementById('banknoteImportRefreshOrder').disabled = uncertain || ['queued','sign_in_required','challenge_required'].includes(batch.state);
     document.getElementById('banknoteImportRetry').disabled = uncertain;
     const crop = document.getElementById('banknoteImportCropPhotos');
@@ -624,6 +661,7 @@
     polling = true;
     try {
       const next = await request(statusUrl); batch = next.batch || next; pollFailures = 0;
+      resumeBrowserRead();
       if (batch.completion_url && !dirty() && !saving && !busy && !conflict) {
         const destination = sameOrigin(batch.completion_url);
         leftPage = true; window.location.assign(destination); return;
@@ -675,6 +713,11 @@
       if (uncertain) return;
       const button = event.currentTarget; button.disabled = true;
       try {
+        if (browserFailure) {
+          await window.stuffappEbayBrowser?.cancel(browserRequest);
+          forceRefresh = true;
+          browserRequest = ''; browserFailure = null;
+        }
         say('Refreshing the exact purchased items. Saved draft edits are kept…');
         const saved = await window.startBanknoteOrderReview(batch.order_number,
           {refresh:forceRefresh, onProgress: message => say(message)});
@@ -802,5 +845,6 @@
     renderDetail();
     if (item.state === 'released') say('Released to collection. Open in Collection to edit this note or its photos.');
   }
+  resumeBrowserRead();
   if (batchRunning()) pollTimer = setTimeout(() => pollStatus(), 1200);
 })();

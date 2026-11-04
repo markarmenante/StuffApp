@@ -33,7 +33,7 @@ class DraftTests(unittest.TestCase):
         self.db.execute('PRAGMA foreign_keys=OFF')
         for table in ('banknote_import_preview_jobs','banknote_import_photo_previews','banknote_import_image_edits','trimmed_image_sources','banknote_import_evidence','banknote_import_assets','banknote_import_items','banknote_import_batches',
                       'banknote_ebay_links','ebay_purchase_prices','ebay_order_items','ebay_purchase_request_sessions',
-                      'ebay_purchase_requests','ebay_purchase_observations','ebay_listing_captures','banknotes','record_documents',
+                      'ebay_purchase_requests','ebay_purchase_browser_claims','ebay_purchase_observations','ebay_listing_captures','banknotes','record_documents',
                       'original_listing_sources','banknote_original_listings','original_listing_image_sources','original_image_assets','record_source_documents'):
             if self.db.execute("SELECT 1 FROM sqlite_master WHERE name=?",(table,)).fetchone():self.db.execute('DELETE FROM '+table)
         self.db.execute("INSERT OR REPLACE INTO ebay_purchase_account VALUES(1,'buyer')")
@@ -72,6 +72,71 @@ class DraftTests(unittest.TestCase):
         with patch.object(imports.listing_images,'download',side_effect=self.download):
             imports.run_check(stuff.open_db_connection,batch['id'],item['id'],item['revision'],token,stuff.UPLOAD_FOLDER,self.classify,evaluate or (lambda *_:dict(filled=self.fills)),prepare_photo=prepare_photo,retry_uncropped=retry_uncropped)
         return self.client.get(batch['status_url']).json
+
+    def browser_import(self):
+        response=self.client.post('/banknotes/imports',json={'order_number':ORDERS[1],'reader':'browser'},headers={'Origin':'http://localhost'})
+        self.assertEqual(response.status_code,200,response.json)
+        batch=response.json
+        self.assertEqual(batch['purchase_refresh']['reader'],'browser')
+        response=self.client.post('/ebay/browser/requests',json={'action':'claim','id':batch['purchase_refresh']['id']},headers={'Origin':'http://localhost'})
+        self.assertEqual(response.status_code,200,response.json)
+        return batch,response.json
+
+    def test_browser_import_without_today_token_verifies_complete_checkout_and_snapshot(self):
+        with patch.dict(os.environ,{'STUFFAPP_TODAY_TOKEN':''}):
+            batch,claim=self.browser_import()
+            self.assertTrue(claim['request']['import_checkout'])
+            self.assertEqual(claim['request']['expected_account'],'buyer')
+            payload=dict(self.payload(claim['request']),token=claim['token'])
+            response=self.client.post('/ebay/browser/requests',json=payload,headers={'Origin':'http://localhost'})
+            self.assertEqual(response.status_code,200,response.json)
+        status=self.client.get(batch['status_url']).json
+        self.assertEqual(status['state'],'review')
+        self.assertEqual(len(status['items']),3)
+        self.assertIsNone(status['purchase_refresh'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_purchase_prices').fetchone()[0],3)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+
+    def test_explicit_browser_import_retry_replaces_lost_claim_and_rejects_late_completion(self):
+        batch,old=self.browser_import()
+        response=self.client.post('/banknotes/imports',json={'order_number':ORDERS[1],'reader':'browser','refresh':True})
+        self.assertEqual(response.status_code,200,response.json)
+        fresh=response.json
+        self.assertEqual(fresh['id'],batch['id'])
+        self.assertNotEqual(fresh['purchase_refresh']['id'],old['request']['id'])
+        self.assertIsNone(self.client.post('/ebay/today/requests',json={'action':'claim'},headers=HEADERS).json['request'])
+        response=self.client.post('/ebay/browser/requests',json=dict(self.payload(old['request']),token=old['token']),headers={'Origin':'http://localhost'})
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_items').fetchone()[0],0)
+        self.assertEqual(self.client.get(batch['status_url']).json['purchase_refresh']['status'],'queued')
+
+    def test_browser_import_rejects_missing_checkout_and_changed_batch(self):
+        batch,claim=self.browser_import()
+        payload=dict(self.payload(claim['request']),token=claim['token']);payload.pop('checkout')
+        response=self.client.post('/ebay/browser/requests',json=payload,headers={'Origin':'http://localhost'})
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_items').fetchone()[0],0)
+        self.client.post('/banknotes/imports',json={'order_number':ORDERS[1],'reader':'browser','refresh':True})
+        batch,claim=self.browser_import()
+        self.db.execute("UPDATE banknote_import_batches SET request_id='replacement' WHERE id=?",(batch['id'],));self.db.commit()
+        response=self.client.post('/ebay/browser/requests',json=dict(self.payload(claim['request']),token=claim['token']),headers={'Origin':'http://localhost'})
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0],0)
+
+    def test_unknown_purchase_reader_is_rejected_before_import(self):
+        response=self.client.post('/banknotes/imports',json={'order_number':ORDERS[1],'reader':'remote-anything'})
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_import_batches').fetchone()[0],0)
+
+    def test_import_retry_cannot_cancel_browser_check_for_existing_note(self):
+        self.db.execute("INSERT INTO banknotes(id,order_number,marketplace) VALUES('existing',?,'eBay')",(ORDERS[1],));self.db.commit()
+        note=self.db.execute("SELECT * FROM banknotes WHERE id='existing'").fetchone()
+        job=stuff.ebay_purchase_lookup.ensure(self.db,note,reader='browser')
+        claim=self.client.post('/ebay/browser/requests',json={'action':'claim','id':job['id']},headers={'Origin':'http://localhost'})
+        self.assertEqual(claim.status_code,200,claim.json)
+        response=self.client.post('/banknotes/imports',json={'order_number':ORDERS[1],'reader':'browser','refresh':True})
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(self.db.execute('SELECT status FROM ebay_purchase_requests WHERE id=?',(job['id'],)).fetchone()[0],'reading')
     def test_import_arrival_crop_keeps_originals_for_vision_and_copies_crop_on_release(self):
         b=self.imported();item=b['items'][0];seen=[];quad=[[5,5],[154,5],[154,74],[5,74]]
         def size(filename):

@@ -49,6 +49,12 @@ jobs:
       - run: node tests/test_banknote_import_review.js
       - run: node tests/test_banknote_single_order.js
       - run: node tests/test_banknote_order_uncertain.js
+      - run: node tests/test_ebay_browser_bridge.js
+      - run: node --test browser-extension/tests/reader.test.mjs
+      - run: node tests/test_ebay_browser_extension.cjs
+      - run: node tests/test_purchase_check_browser.cjs
+        env:
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/browser-tests/node_modules/playwright/index.mjs
       - run: npm --prefix browser-tests run test:e2e
       - run: node tests/test_banknote_order_review_browser.cjs
         timeout-minutes: 8
