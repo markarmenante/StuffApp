@@ -435,7 +435,7 @@
 <div class="detail-page detail-page-{{ category }}{% if import_draft %} banknote-import banknote-import-detail{% endif %}"{% if import_draft %} data-import-mode="detail" data-draft-id="{{ import_item.id }}" data-uploaded-file-template="{{ url_for('uploaded_file', filename='__draft_image__') }}"{% endif %}>
 <form method="post"
       action="{% if import_draft %}{{ import_item.detail_url }}{% elif is_new %}{{ url_for('new_record', category=category) }}{% else %}{{ url_for('detail_view', category=category, record_id=r['id']) }}{% endif %}"
-      enctype="multipart/form-data" id="mainForm" autocomplete="off"
+      enctype="multipart/form-data" id="mainForm" autocomplete="off"{% if import_draft %} inert{% endif %}
       data-category="{{ category }}"
       data-is-new="{{ 'true' if is_new else 'false' }}">
   {% if not import_draft and not is_new and detail_report_back|default(none) %}

@@ -843,6 +843,9 @@
       if (!leftPage && (dirty() || saving)) { event.preventDefault(); event.returnValue = ''; }
     });
     renderDetail();
+    // Server-rendered drafts stay inert until every listener and permission
+    // guard is ready. A delayed or failed script cannot expose live controls.
+    form.inert = false;
     if (item.state === 'released') say('Released to collection. Open in Collection to edit this note or its photos.');
   }
   resumeBrowserRead();

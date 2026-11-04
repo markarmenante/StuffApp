@@ -463,8 +463,25 @@ finally:server.server_close();temporary.cleanup()
         assert.equal(draft.state,'blocked','the purchase warning is retained');
         assert.equal(draft.can_check,true,'the original photos can establish banknote identity');
         await t.page.locator('article[data-draft-id="'+draft.id+'"] [data-review-draft]').click();
-        assert.equal(await t.page.locator('#banknoteImportCheck').isEnabled(),true);
+        await t.page.waitForFunction(()=>!document.getElementById('mainForm').inert
+          && !document.getElementById('banknoteImportCheck').disabled);
         if(options.defer_review_check){
+          const scriptless=await browser.newContext({javaScriptEnabled:false,serviceWorkers:'block'});
+          try{
+            const initial=await scriptless.newPage();
+            const mutations=[];
+            initial.on('request',request=>{if(!['GET','HEAD'].includes(request.method()))mutations.push(request.method()+' '+request.url());});
+            await initial.route('**/*',route=>new URL(route.request().url()).origin===origin
+              ?route.continue():route.fulfill({body:''}));
+            const beforeInitial=await t.state();
+            await initial.goto(origin+draft.detail_url);
+            assert.equal(await initial.locator('#mainForm').getAttribute('inert'),'','A draft is inert before its script initializes');
+            for(const action of ['Save','Check','Release']){
+              assert.equal(await initial.locator('#banknoteImport'+action).isEnabled(),false,'Initial '+action+' stays disabled without JavaScript');
+            }
+            assert.deepEqual(mutations,[],'Viewing a scriptless draft performs no mutations');
+            assert.deepEqual(await t.state(),beforeInitial,'A scriptless view does not change the saved order or collection');
+          }finally{await scriptless.close();}
           assert.equal(draft.can_edit,false);assert.equal(draft.can_release,false);
           assert.equal(await t.page.locator('#banknoteImportRelease').isEnabled(),false);
           assert.equal(await t.page.locator('[name="country"]').isEnabled(),false);

@@ -3,9 +3,9 @@
   <span class="import-badge" id="banknoteImportState">Saved draft</span>
   <span id="banknoteImportTitle">{{ import_item.title }}</span>
   <nav class="import-actions">
-    <button class="toolbar-btn pill" type="button" id="banknoteImportSave">Save draft</button>
-    <button class="toolbar-btn pill" type="button" id="banknoteImportCheck">✓ Check</button>
-    <button class="toolbar-btn pill active" type="button" id="banknoteImportRelease">Release to Collection</button>
+    <button class="toolbar-btn pill" type="button" id="banknoteImportSave" disabled>Save draft</button>
+    <button class="toolbar-btn pill" type="button" id="banknoteImportCheck" disabled>✓ Check</button>
+    <button class="toolbar-btn pill active" type="button" id="banknoteImportRelease" disabled>Release to Collection</button>
     <a class="toolbar-btn pill active" id="banknoteImportOpenCollection" hidden>Open in Collection</a>
     <a class="toolbar-btn pill" href="{{ back_href }}" data-import-back>← Order review</a>
   </nav>
