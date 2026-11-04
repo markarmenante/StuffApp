@@ -111,7 +111,7 @@
 {% set _sell_keep = val('sell_keep') if val('sell_keep') in ['Sell','Keep'] else 'Keep' %}
 {% set _sell_tax_state = val('sell_tax_state') if val('sell_tax_state') in ['NY','CA'] else 'NY' %}
 {% set _sell_rate_checked = val('sell_tax_rates_checked_at') if val('sell_tax_rates_checked_at') else '2026-05-23' %}
-<details class="sell-panel {{ 'is-keep-state' if _sell_keep == 'Keep' else '' }}" {% if _has_sell and _sell_keep == 'Sell' %}open{% endif %}>
+<details class="sell-panel {{ 'is-keep-state' if _sell_keep == 'Keep' else '' }}" {% if (val('status')|lower == 'sold') or (_has_sell and _sell_keep == 'Sell') %}open{% endif %}>
   <summary class="section-bar sell-panel-summary">
     <span>Sales</span>
     <button type="button" class="sell-keep-pill {{ 'is-sell' if _sell_keep == 'Sell' else 'is-keep' }}"
@@ -130,7 +130,8 @@
   <input type="hidden" name="sell_ny_tax_rate" value="{{ val('sell_ny_tax_rate') if val('sell_ny_tax_rate') else '0.109' }}">
   <input type="hidden" name="sell_ca_tax_rate" value="{{ val('sell_ca_tax_rate') if val('sell_ca_tax_rate') else '0.133' }}">
   <input type="hidden" name="sell_tax_rates_checked_at" value="{{ _sell_rate_checked }}">
-  <div class="dgrid dg5 sell-panel-grid">
+  <div class="dgrid dg6 sell-panel-grid">
+    {{ datecell('sale_date', 'Sales Date', seed_today=false) }}
     <div class="dcell">
       <input type="text" name="sell_purchase_price" value="{{ _sell_purchase }}"
              class="price-input sell-money" inputmode="numeric">
@@ -4633,16 +4634,30 @@ window.banknoteDeferOrderDraft = function () {
     const sellStatus = sellPanel.querySelector('[data-sell-status-select]');
     const canonicalStatus = form.querySelector('select[name="status"]');
     if (sellStatus && canonicalStatus) {
-      sellStatus.addEventListener('change', () => {
-        canonicalStatus.value = sellStatus.value;
-        if (document.querySelector('[data-purchase-status-control]')) canonicalStatus.dispatchEvent(new Event('change', {bubbles: true}));
-        else saveField('status', sellStatus.value);
-      });
-      canonicalStatus.addEventListener('change', () => {
+      const saleDate = sellPanel.querySelector('input[name="sale_date"]');
+      function syncSellStatus() {
         if (canonicalStatus.value === 'Own' || canonicalStatus.value === 'Sold') {
           sellStatus.value = canonicalStatus.value;
         }
+        if (canonicalStatus.value !== 'Sold') return;
+        sellPanel.open = true;
+        // Record the local date once; keep an entered or previously saved date.
+        if (saleDate && !saleDate.value) {
+          saleDate.value = sellTodayIso();
+          saleDate.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+      }
+      sellStatus.addEventListener('change', () => {
+        canonicalStatus.value = sellStatus.value;
+        if (document.querySelector('[data-purchase-status-control]')) canonicalStatus.dispatchEvent(new Event('change', {bubbles: true}));
+        else saveField('status', sellStatus.value).then(result => {
+          if (result?.ok) syncSellStatus();
+        });
       });
+      canonicalStatus.addEventListener('change', syncSellStatus);
+      canonicalStatus.addEventListener('purchase-status-saved', syncSellStatus);
+      // Wait for the date overlay and autosave listeners below to be installed.
+      document.addEventListener('DOMContentLoaded', syncSellStatus);
     }
     updateSellMath();
   }

@@ -1102,6 +1102,9 @@ input[type="number"]::-webkit-outer-spin-button {
 .sell-panel-grid.dg5 {
   grid-template-columns: repeat(5, 1fr);
 }
+.sell-panel-grid.dg6 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
 .sell-panel-grid .dcell input[readonly] {
   color: var(--text-secondary, #555);
   background: #f8f8f8;
@@ -3129,7 +3132,8 @@ input[type="date"] { -webkit-appearance: none; }
     min-width: 0;
   }
 
-  .sell-panel-grid.dg5 {
+  .sell-panel-grid.dg5,
+  .sell-panel-grid.dg6 {
     grid-template-columns: 1fr;
   }
 
