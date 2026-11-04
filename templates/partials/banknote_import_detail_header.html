@@ -22,4 +22,15 @@
   </div>
 </section>
 <div class="import-evidence" id="banknoteImportWarnings" hidden></div>
+<section class="import-evidence import-identity-review" id="banknoteImportIdentityReview" hidden aria-labelledby="banknoteImportIdentityTitle">
+  <strong id="banknoteImportIdentityTitle">Correct note details</strong>
+  <p id="banknoteImportIdentitySource"></p>
+  <div class="import-identity-fields">
+    <label>Country / territory<input data-identity-field="country" maxlength="300" autocomplete="off"></label>
+    <label>Denomination<input data-identity-field="denomination" maxlength="300" autocomplete="off"></label>
+    <label>Catalog #s<input data-identity-field="pick_number" maxlength="300" autocomplete="off"></label>
+  </div>
+  <label class="import-identity-confirm"><input type="checkbox" id="banknoteImportIdentityConfirm"> I have reviewed the photos: this purchased item is one banknote.</label>
+  <button type="button" class="toolbar-btn pill active" id="banknoteImportIdentitySave" disabled>Save correction</button>
+</section>
 {% if import_item.preserved_fields|default([]) %}<p class="import-intro" id="banknoteImportPreserved">Existing record values are preserved. Missing details and photo crops can be reviewed here before release.</p>{% endif %}

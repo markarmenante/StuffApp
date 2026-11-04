@@ -14,6 +14,20 @@ or uncertain photo sides remain blank with current warnings in that editor;
 provider failures remain retryable through its normal Check control.
 
 Multiple-item orders keep the saved draft review and explicit Release workflow.
+Catalogue references are excluded from face-value ambiguity checks: a suffix
+such as `Pick #46c` identifies a variety, not a second denomination of 46 cents.
+Actual mixed face values and multi-note bundles retain their review safeguards.
+When a quantity-one exact purchase is held only by conflicting or unrecognized
+note identity, its detail page names the questionable field and shows the original
+listing title alongside **Correct note details**. The owner can confirm one banknote
+from its photographs and save its country, denomination and optional catalogue
+references. This explicit correction is separate from the immutable purchase source;
+it restores normal draft editing and Check, never automatic release or Owned status.
+The saved acknowledgement is bound to the exact source, listing evidence and corrected
+fields; a changed account, purchase, evidence or identity requires review again.
+Bundles, quantities other than one, non-note items, refunds, duplicate links,
+missing checkout membership and other purchase conflicts cannot be overridden by
+this correction. Existing collection recovery still uses its own comparison workflow.
 Unknown item types, possible bundles, ambiguous quantities, account/membership
 failures, changed source facts and conflicting existing records also stay saved
 for review. One pending item from a multi-item checkout is still a multi-item
@@ -290,6 +304,10 @@ No existing collection record or photo is removed by this workflow.
   Once released, GET redirects to the real banknote detail page with a return
   link to this order review; draft writes remain rejected after release.
 - `POST` or `PATCH` the item URL: `{revision, updates}`.
+- `POST` the item URL plus `/correct-identity`: `{revision, updates,
+  confirmed_single_note:true}`; only country, denomination and `pick_number`
+  (the shared Catalog #s field) are accepted. The status response exposes
+  `identity_review.issues`, `can_correct` and `manually_reviewed`.
 - `POST` the item URL plus `/check`: `{revision}`, asynchronous status 202.
 - `POST` the item URL plus `/photos`: `{revision, field, filename}` selects
   `image_1` (front) or `image_2` (back) from a retained same-draft original.

@@ -6,6 +6,12 @@
 session's opening context. Keep it the first section of this file, and
 fold new standing instructions in here — nowhere else.)
 
+- **Questionable banknote details** (2026-11-04): identify the specific disputed
+  data and provide an explicit manual correction path instead of only disabling
+  the draft. Keep exact purchase evidence, original photos and existing collection
+  records protected. Correcting note identity does not release a multi-note draft
+  or mark it Owned; unresolved purchase/account/quantity conflicts still require
+  verified source evidence. See `docs/banknote-imports.md`.
 - **Single-banknote orders** (2026-10-27): when the verified complete eBay
   checkout contains exactly one banknote, process it through Check and open its
   normal collection detail page directly, without a separate review/Release step.

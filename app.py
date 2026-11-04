@@ -21974,6 +21974,16 @@ def banknote_import_detail(batch_id,item_id):
     except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 
 
+@app.post('/banknotes/imports/<batch_id>/items/<item_id>/correct-identity')
+def banknote_import_correct_identity(batch_id,item_id):
+    require_owner();data=request.get_json(silent=True) or {}
+    try:
+        item=banknote_imports.correct_identity(get_db(),batch_id,item_id,data.get('revision'),
+            data.get('updates'),data.get('confirmed_single_note'),_normalize_import_updates)
+        return jsonify(ok=True,item=item)
+    except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
+
+
 @app.post('/banknotes/imports/<batch_id>/items/<item_id>/photos')
 def banknote_import_photo(batch_id,item_id):
     require_owner();data=request.get_json(silent=True) or {}

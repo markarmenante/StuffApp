@@ -75,6 +75,9 @@ def fixture_metadata_check(note,prepared):
     if not row or not row['batch_id'].startswith('fixture-checkable-photo-review-'):
         raise RuntimeError('Fixture Check is restricted to the synthetic inspection draft')
     metadata_check_calls+=1
+    if 'Pick # 46c' in (note.get('description') or ''):
+        return dict(filled=dict(country='Belize',denomination='1 Dollar',pick_number='P-46c',series='1987',
+                               grading_authority='PMG',grade='67',grade_modifier='EPQ'),catalogue=dict(fields={}))
     return dict(filled=dict(country='Peru',denomination='5 Soles de Oro',pick_number='P-66A',
                            grading_authority='PMG',grade='67',grade_modifier='EPQ',
                            price='9999.99',vendor='Unverified provider seller',status='Own'),
@@ -115,16 +118,28 @@ def fixture_import_priced_photos():
     return make_checkable_photo_fixture(receipt_amount='72.63')
 
 
-def make_checkable_photo_fixture(receipt_amount=None):
+@stuff.app.post('/__fixture/import-catalogue-suffix')
+def fixture_import_catalogue_suffix():
+    return make_checkable_photo_fixture(receipt_amount='82.00',
+        title='Belize 1 Dollar 1987 PMG 67 EPQ UNC Pick # 46c Queen Elizabeth II, Series A/15')
+
+
+@stuff.app.post('/__fixture/import-ambiguous-identity')
+def fixture_import_ambiguous_identity():
+    return make_checkable_photo_fixture(receipt_amount='82.00',
+        title='Belize 1 Dollar / 5 Dollars PMG 67 EPQ Pick # 46c')
+
+
+def make_checkable_photo_fixture(receipt_amount=None,title=None):
     global checkable_fixture_sequence
     checkable_fixture_sequence+=1
     number=checkable_fixture_sequence
     return make_import_photo_fixture('fixture-checkable-photo-review-'+str(number),f'90-00001-{number:05d}',
         (str(199999990000+2*number),str(199999990001+2*number)),
-        'Multiple items; shipment or delivery not confirmed',extra_front=True,receipt_amount=receipt_amount)
+        'Multiple items; shipment or delivery not confirmed',extra_front=True,receipt_amount=receipt_amount,blocked_title=title)
 
 
-def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention,extra_front=False,receipt_amount=None):
+def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention,extra_front=False,receipt_amount=None,blocked_title=None):
     db = stuff.get_db()
     for table in ('banknote_import_preview_jobs','banknote_import_photo_previews'):
         db.execute('DELETE FROM '+table+' WHERE item_id IN (SELECT id FROM banknote_import_items WHERE batch_id=?)',(batch_id,))
@@ -136,6 +151,7 @@ def make_import_photo_fixture(batch_id,order,identifiers,blocked_attention,extra
         items = []
         for index, ident in enumerate(identifiers):
             title = 'Synthetic banknote ' + ('blocked' if index == 0 else 'clean')
+            if index==0 and blocked_title:title=blocked_title
             attention = blocked_attention if index == 0 else ''
             db.execute('''INSERT INTO ebay_order_items
                 (line_key,order_id,item_id,title,seller,quantity,delivery_status,attention,last_seen)

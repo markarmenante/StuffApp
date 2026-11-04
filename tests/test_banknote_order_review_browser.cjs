@@ -463,6 +463,7 @@ finally:server.server_close();temporary.cleanup()
         assert.equal(draft.state,'blocked','the purchase warning is retained');
         assert.equal(draft.can_check,true,'the original photos can establish banknote identity');
         await t.page.locator('article[data-draft-id="'+draft.id+'"] [data-review-draft]').click();
+        await t.page.locator('#mainForm').waitFor();
         await t.page.waitForFunction(()=>!document.getElementById('mainForm').inert
           && !document.getElementById('banknoteImportCheck').disabled);
         if(options.defer_review_check){

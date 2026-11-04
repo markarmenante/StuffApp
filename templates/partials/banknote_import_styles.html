@@ -59,6 +59,12 @@
 .banknote-import-detail .banknote-imgs img { cursor: zoom-in; }
 .banknote-import .import-existing-changes { border-left: 4px solid #c49520; background: #fffaf0; }
 .banknote-import .import-existing-change { margin-top: 10px; }
+.banknote-import .import-identity-review { border-left: 4px solid #c49520; }
+.banknote-import .import-identity-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; max-width: 720px; }
+.banknote-import .import-identity-fields label { display: grid; gap: 4px; min-width: 0; font-size: 14px; }
+.banknote-import .import-identity-fields input { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px; font: inherit; }
+.banknote-import .import-identity-confirm { display: flex; align-items: start; gap: 8px; margin: 12px 0; }
+@media (max-width: 600px) { .banknote-import .import-identity-fields { grid-template-columns: minmax(0,1fr); } }
 .banknote-import .import-existing-values { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; max-width: 720px; }
 .banknote-import .import-existing-values figure { min-width: 0; margin: 4px 0; }
 .banknote-import .import-existing-values figcaption { font-size: 13px; color: var(--text-secondary); }

@@ -284,6 +284,84 @@ test('an exact-item group warning allows review edits, photo tools, and explicit
   await expect(page.locator(`[data-draft-id="${blocked.id}"] .import-card-warnings`)).toContainText(blocked.warnings[0]);
 });
 
+test('a catalogue c suffix leaves exact-order draft controls usable through Check without automatic release', async ({ page, request }) => {
+  const response = await request.post('/__fixture/import-catalogue-suffix');
+  expect(response.ok()).toBe(true);
+  const batch = await response.json();
+  const item = batch.items.find((entry: { state: string }) => entry.state === 'blocked');
+  const stateUrl = '/__fixture/import-photo-state?batch=' + encodeURIComponent(batch.id);
+  const before = await (await request.get(stateUrl)).json();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(item.detail_url);
+    await expect(page.locator('#banknoteImportCheck')).toBeEnabled();
+    await expect(page.locator('#banknoteImportRelease')).toBeEnabled();
+    await expect(page.locator('[name="country"]')).toBeEditable();
+    await expect(page.locator('[name="price"]')).toHaveValue('$82');
+    await expect(page.locator('[name="price"]')).not.toBeEditable();
+  }
+  await page.locator('#banknoteImportCheck').click();
+  await expect(page.locator('[name="pick_number"]')).toHaveValue('P-46c');
+  await expect(page.locator('[name="country"]')).toHaveValue('Belize');
+  await expect(page.locator('#banknoteImportCheck')).toBeEnabled();
+  await expect(page.locator('#banknoteImportRelease')).toBeEnabled();
+  await expect(page.locator('[name="price"]')).toHaveValue('$82');
+  const after = await (await request.get(stateUrl)).json();
+  expect(after.collection_count).toBe(before.collection_count);
+  expect(after.link_count).toBe(before.link_count);
+  const checked = after.items.find((entry: { id: string }) => entry.id === item.id);
+  expect(checked.released_record_id).toBeNull();
+  expect(checked.source_json).toBe(before.items.find((entry: { id: string }) => entry.id === item.id).source_json);
+  expect(JSON.parse(checked.fields_json).status).toBe('Ordered');
+});
+
+for (const width of [1440, 390]) {
+  test(`questionable note identity is explained and manually corrected without release at ${width}px`, async ({ page, request }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const response = await request.post('/__fixture/import-ambiguous-identity');
+    expect(response.ok()).toBe(true);
+    const batch = await response.json();
+    const item = batch.items.find((entry: { state: string }) => entry.state === 'blocked');
+    const stateUrl = '/__fixture/import-photo-state?batch=' + encodeURIComponent(batch.id);
+    const before = await (await request.get(stateUrl)).json();
+    await page.goto(item.detail_url);
+    await expect(page.locator('#banknoteImportCheck')).toBeDisabled();
+    await expect(page.locator('#banknoteImportRelease')).toBeDisabled();
+    await expect(page.locator('#banknoteImportWarnings')).toContainText('Conflicting face values in the listing: 1 dollar, 5 dollar.');
+    const correction = page.locator('#banknoteImportIdentityReview');
+    await expect(correction).toBeVisible();
+    await expect(correction).toContainText(item.title);
+    await correction.getByLabel('Country / territory', { exact: true }).fill('Belize');
+    await correction.getByLabel('Denomination', { exact: true }).fill('1 Dollar');
+    await correction.getByLabel('Catalog #s', { exact: true }).fill('P-46c');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`identity-correction-${width}.png`), fullPage: true });
+    await expect(correction.getByRole('button', { name: 'Save correction' })).toBeDisabled();
+    await correction.getByRole('checkbox').check();
+    await correction.getByRole('button', { name: 'Save correction' }).click();
+    await expect(correction).toBeHidden();
+    await expect(page.locator('#banknoteImportCheck')).toBeEnabled();
+    await expect(page.locator('#banknoteImportRelease')).toBeEnabled();
+    await expect(page.locator('[name="denomination"]')).toHaveValue('1 Dollar');
+    await expect(page.locator('[name="price"]')).toHaveValue('$82');
+    await expect(page.locator('[name="price"]')).not.toBeEditable();
+    await page.reload();
+    await expect(page.locator('#banknoteImportCheck')).toBeEnabled();
+    await page.locator('#banknoteImportCheck').click();
+    await expect(page.locator('[name="grade"]')).toHaveValue('67');
+    await expect(page.locator('#banknoteImportCheck')).toBeEnabled();
+    await expect(page.locator('[name="pick_number"]')).toHaveValue('P-46c');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const after = await (await request.get(stateUrl)).json();
+    expect(after.collection_count).toBe(before.collection_count);
+    expect(after.link_count).toBe(before.link_count);
+    const saved = after.items.find((entry: { id: string }) => entry.id === item.id);
+    expect(saved.released_record_id).toBeNull();
+    expect(saved.source_json).toBe(before.items.find((entry: { id: string }) => entry.id === item.id).source_json);
+    expect(JSON.parse(saved.fields_json).status).toBe('Ordered');
+  });
+}
+
 test('an exact item receipt keeps its paid cents visible and locked through Check and explicit Ordered release', async ({ page, request }) => {
   const fixture = await request.post('/__fixture/import-priced-photos');
   expect(fixture.ok()).toBe(true);

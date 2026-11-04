@@ -655,6 +655,7 @@ def _public_item(db, row):
                 check_message=message,check_phase=check_phase,warnings=warnings,evidence=evidence,purchase=purchase,preserved_fields=preserved_fields,
                 manual_photos=json.loads(row.get('manual_photos_json') or '{}'),
                 preview_state=preview_state,can_check=can_check(db,row),can_edit=editable,can_release=editable,
+                identity_review=identity_review(db,row),
                 locked_fields=list(_REVIEW_LOCKED_FIELDS) if row['state']=='blocked' else [],
                 image_sources={field:edit['source_filename'] for field,edit in _image_edits(db,row,fields).items()})
 
@@ -817,12 +818,14 @@ def _review_title_ambiguous(title):
     # even when the matching vocabulary does not know that currency yet.
     if re.search(r'\b'+ebay_matching.NUMBER+r'\s+([^\W\d_]+(?:\s+[^\W\d_]+){0,3}?)\s*(?:and|or|to|[&/,;–—])\s*'
                  +ebay_matching.NUMBER+r'\s+\1\b',title,re.I):return True
-    denominations=ebay_matching.denominations(title)
+    # Catalogue suffixes such as Pick 46c are varieties, not 46-cent notes.
+    without_catalog=ebay_matching.CATALOG_RE.sub(' ',title)
+    denominations=ebay_matching.denominations(without_catalog)
     if len(denominations)>1 or any(amount<=0 for amount,_ in denominations):return True
     if re.search(r'(?<!\w)[-−]'+ebay_matching.NUMBER+r'\s*(?:'+ebay_matching.UNIT_RE+r')\b',
-                 ebay_matching.CATALOG_RE.sub(' ',title),re.I):return True
-    starts=list(re.finditer(r'\b(?:pk|p)(?=\d|[\s.#?/_-]|$)',title,re.I))
-    matches=[match for match in ebay_matching.CATALOG_RE.finditer(title) if match[1].lower() in ('p','pk')]
+                 without_catalog,re.I):return True
+    starts=list(re.finditer(r'\b(?:pick|pk|p)(?=\d|[\s.#?/_-]|$)',title,re.I))
+    matches=[match for match in ebay_matching.CATALOG_RE.finditer(title) if match[1].lower() in ('pick','p','pk')]
     if len(starts)>1 or len(starts)!=len(matches):return True
     if matches:
         if starts[0].start()!=matches[0].start():return True
@@ -833,7 +836,7 @@ def _review_title_ambiguous(title):
     return False
 
 
-def _review_purchase_source(db,batch,row):
+def _review_purchase_source(db,batch,row,*,allow_title_review=False):
     """Validate an exact quantity-one purchase before explicit inspection.
 
     A title vocabulary match is not required to inspect its originals. Known
@@ -848,7 +851,8 @@ def _review_purchase_source(db,batch,row):
             or [source.get('order_id'),row['item_id']] not in membership
             or source.get('attention','').lower() not in _INSPECTION_ATTENTION
             or row['warning']!=_reason(source) or _NON_NOTE_TITLE.search(source.get('title') or '')
-            or _review_title_ambiguous(source.get('title') or '')
+            or (_review_title_ambiguous(source.get('title') or '')
+                and not allow_title_review and not _valid_manual_identity(db,row))
             or _AUTO_AMBIGUOUS.search(source.get('title') or '') or _bundle_title(source.get('title') or '')):
         raise ImportProblem('This purchase needs its exact item identity reviewed before editing or release.')
     matches=db.execute('SELECT * FROM ebay_order_items WHERE order_id=? AND item_id=?',
@@ -876,8 +880,92 @@ def _identity_asset(asset):
     return {key:asset[key] for key in ('source_url','filename','sha256')}
 
 
+_IDENTITY_FIELDS = frozenset(('country','denomination','pick_number'))
+
+
+def _valid_manual_identity(db,row):
+    try:
+        proof=json.loads(row['note_identity_json'])
+        fields=json.loads(row['fields_json'])
+        if not isinstance(proof,dict) or not isinstance(fields,dict):return False
+        reviewed=proof.get('fields',{})
+        capture=db.execute('SELECT * FROM ebay_listing_captures WHERE url=?',
+            ('https://www.ebay.com/itm/'+row['item_id'],)).fetchone()
+        return (proof.get('version')==2 and proof.get('kind')=='owner_review'
+            and proof.get('source_digest')==row['source_digest'] and capture is not None
+            and proof.get('capture_digest')==_identity_capture_digest(capture)
+            and isinstance(reviewed,dict) and {'country','denomination'}<=reviewed.keys()<=_IDENTITY_FIELDS
+            and all(value and fields.get(key)==value for key,value in reviewed.items()))
+    except (KeyError,TypeError,ValueError):
+        return False
+
+
+def identity_review(db,row):
+    """Explain source ambiguity without treating a manual edit as purchase proof."""
+    if row['state']!='blocked':return dict(issues=[],can_correct=False)
+    source=json.loads(row['source_json']);title=source.get('title') or ''
+    issues=[]
+    if source.get('quantity')!=1:
+        issues.append(dict(field='quantity',message='Purchased quantity: '+str(source.get('quantity'))+'. Exact individual note identification is required.'))
+    if _bundle_title(title) or _AUTO_AMBIGUOUS.search(title) or _NON_NOTE_TITLE.search(title):
+        issues.append(dict(field='listing',message='The listing may contain multiple notes or a non-banknote item. The exact purchased item must be resolved first.'))
+    if not _valid_manual_identity(db,row):
+        values=ebay_matching.denominations(ebay_matching.CATALOG_RE.sub(' ',title))
+        if len(values)>1 or any(amount<=0 for amount,_ in values):
+            labels=', '.join(str(amount)+' '+unit for amount,unit in sorted(values))
+            issues.append(dict(field='denomination',message='Conflicting face values in the listing: '+labels+'.'))
+        elif _review_title_ambiguous(title):
+            issues.append(dict(field='pick_number',message='The listing has incomplete or conflicting catalogue references.'))
+        elif not _review_note_title(title) and not _valid_note_identity(db,row):
+            issues.append(dict(field='country',message='The listing title does not establish the banknote identity.'))
+    can_correct=False
+    if issues:
+        try:
+            _review_purchase_source(db,_batch(db,row['batch_id']),row,allow_title_review=True)
+            can_correct=bool(_listing_preview_sources(db,row,source))
+        except ImportProblem:pass
+    return dict(issues=issues,can_correct=can_correct,
+                manually_reviewed=_valid_manual_identity(db,row),source_title=title)
+
+
+def correct_identity(db,batch_id,item_id,revision,updates,confirmed,normalize):
+    if (type(revision) is not int or confirmed is not True or not isinstance(updates,dict)
+            or not updates or set(updates)-_IDENTITY_FIELDS):
+        raise ImportProblem('Confirm one banknote and enter only its corrected identification fields.')
+    if any(not isinstance(value,str) or len(value)>300 for value in updates.values()):
+        raise ImportProblem('Identification fields must be plain text of at most 300 characters.')
+    normalized=normalize(updates)
+    if not normalized.get('country') or not normalized.get('denomination'):
+        raise ImportProblem('Enter the country and one denomination shown on the note. Catalogue references may remain blank.')
+    if _review_title_ambiguous(normalized['denomination']):
+        raise ImportProblem('Enter one positive denomination shown on the note.')
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        batch,row=_item(db,batch_id,item_id)
+        if row['revision']!=revision:
+            raise ImportProblem('This draft changed. Review the latest saved values.',code='draft_changed')
+        if _check_active(row):raise ImportProblem('Wait for Check to finish before correcting this draft.')
+        _review_purchase_source(db,batch,row,allow_title_review=True)
+        if not identity_review(db,row)['can_correct']:
+            raise ImportProblem('This purchase requires refreshed exact-item evidence, not a note-detail correction.')
+        capture=db.execute('SELECT * FROM ebay_listing_captures WHERE url=?',
+            ('https://www.ebay.com/itm/'+row['item_id'],)).fetchone()
+        fields=json.loads(row['fields_json']);fields.update(normalized)
+        proof=dict(version=2,kind='owner_review',source_digest=row['source_digest'],
+            capture_digest=_identity_capture_digest(capture),reviewed_at=time.time(),
+            fields={key:value for key,value in normalized.items() if value})
+        db.execute('''UPDATE banknote_import_items SET fields_json=?,note_identity_json=?,
+            revision=revision+1,check_state='idle',check_message='',check_token=NULL,check_expires=0,updated_at=? WHERE id=?''',
+            (_json(fields),_json(proof),time.time(),item_id))
+        db.commit()
+    except Exception:
+        db.rollback();raise
+    return _public_item(db,db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item_id,)).fetchone())
+
+
 def _valid_note_identity(db,row,proof=None):
     """Validate server-owned proof against current source, capture and assets."""
+    if proof is None and _valid_manual_identity(db,row):return True
     try:
         proof=json.loads(row['note_identity_json']) if proof is None else proof
         if (not isinstance(proof,dict) or proof.get('version')!=1
@@ -1210,7 +1298,7 @@ def _source_inputs(db,row,fields,folder,classify):
         saved=db.execute('SELECT source FROM trimmed_image_sources WHERE trimmed=?',(filename,)).fetchone()
         return saved['source'] if saved else filename
     current_urls=set(json.loads(capture['images_json'])) if capture else set()
-    needs_identity=row['state']=='blocked' and not _review_note_title(source.get('title') or '')
+    needs_identity=row['state']=='blocked' and not _review_note_title(source.get('title') or '') and not _valid_manual_identity(db,row)
     # Retained originals remain available for review, but a refreshed listing
     # must not promote a removed photo into an empty side. Existing selected
     # images still enter the classifier separately as saved references.
@@ -1385,7 +1473,7 @@ def run_check(connect,batch_id,item_id,revision,token,folder,classify,evaluate,p
         batch,row=_item(db,batch_id,item_id)
         context=_check_context(db,batch,row)
         inspection=row['state']=='blocked'
-        needs_identity=inspection and not _review_note_title(json.loads(row['source_json']).get('title') or '')
+        needs_identity=inspection and not _review_note_title(json.loads(row['source_json']).get('title') or '') and not _valid_manual_identity(db,row)
         fields=json.loads(row['fields_json'])
         prepared,assets,photos=_source_inputs(db,row,fields,folder,classify)
         _verify_original_assets(assets,folder)

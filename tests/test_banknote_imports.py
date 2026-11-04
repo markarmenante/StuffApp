@@ -649,6 +649,152 @@ class DraftTests(unittest.TestCase):
             details_url=f'https://order.ebay.com/ord/show?orderId={shared}&purchaseOrderId=24-1533-590976',item_ids=[IDS[0],IDS[2]]),
             payload['checkout']['orders'][1]]
 
+    def test_pick_c_suffix_is_not_a_second_face_value_in_group_order_review(self):
+        title='Belize 1 Dollar 1987 PMG 67 EPQ UNC Pick # 46c Queen Elizabeth II, Series A/15'
+        def payload(data):
+            self.group_receipt_payload(data)
+            data['items'][0]['title']=title
+            data['listings'][0].update(title=title,text=title+'; exact purchased listing.')
+        batch=self.imported(payload)
+        item=next(i for i in batch['items'] if i['listing_url'].endswith(IDS[0]))
+        self.assertTrue(item['can_check']);self.assertTrue(item['can_edit']);self.assertTrue(item['can_release'])
+        before=dict(item['fields']);warning=list(item['warnings'])
+        self.fills=dict(country='Belize',denomination='1 Dollar',pick_number='P-46c',series='1987')
+        checked=self.check(batch,item,prepare_photo=self.preview_crop)
+        item=self.current_item(checked,item)
+        self.assertEqual(item['check_state'],'done')
+        self.assertEqual(item['fields']['pick_number'],'P-46c')
+        for field in ('price','vendor','purchase_date','order_number','status'):
+            self.assertEqual(item['fields'][field],before[field])
+        self.assertEqual(item['warnings'],warning)
+        self.assertTrue(item['fields']['image_1']);self.assertTrue(item['fields']['image_2'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+
+    def test_review_denominations_exclude_catalogues_but_not_actual_cents(self):
+        for reference in ('Pick # 46c','Pick 46c','P-46c','P46c','PK46c','Fr. 46c'):
+            with self.subTest(reference=reference):
+                self.assertFalse(imports._review_title_ambiguous('Belize 1 Dollar PMG 67 '+reference))
+                self.assertTrue(imports._review_title_ambiguous('Belize 1 Dollar and 46c PMG 67 '+reference))
+                self.assertTrue(imports._review_title_ambiguous('Belize 1 Dollar and 5 Dollars PMG 67 '+reference))
+        self.assertFalse(imports._review_title_ambiguous('Belize 50c PMG 67 Pick # 46c'))
+
+    def ambiguous_identity_item(self):
+        def payload(data):
+            self.group_receipt_payload(data)
+            title='Belize 1 Dollar / 5 Dollars PMG 67 Pick #46c'
+            data['items'][0]['title']=title
+            data['listings'][0].update(title=title,text=title)
+        batch=self.imported(payload)
+        return batch,next(i for i in batch['items'] if i['listing_url'].endswith(IDS[0]))
+
+    def correct_identity(self,item,**changes):
+        payload=dict(revision=item['revision'],confirmed_single_note=True,
+                     updates=dict(country='Belize',denomination='1 Dollar',pick_number='P-46c'))
+        payload.update(changes)
+        return self.client.post(item['detail_url']+'/correct-identity',json=payload)
+
+    def test_owner_correction_explains_conflict_preserves_purchase_and_unlocks_only_draft(self):
+        batch,item=self.ambiguous_identity_item()
+        self.assertFalse(item['can_edit']);self.assertFalse(item['can_check'])
+        review=item['identity_review'];self.assertTrue(review['can_correct'])
+        self.assertEqual(review['issues'][0]['field'],'denomination')
+        self.assertIn('1 dollar',review['issues'][0]['message']);self.assertIn('5 dollar',review['issues'][0]['message'])
+        before=dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+        changes=self.db.total_changes
+        self.client.get(item['detail_url']);self.client.get(batch['status_url'])
+        self.assertEqual(self.db.total_changes,changes)
+        for invalid in (dict(confirmed_single_note=False),dict(revision=item['revision']-1),
+                        dict(updates=dict(country='Belize',denomination='')),
+                        dict(updates=dict(country='Belize',denomination='1 Dollar and 5 Dollars')),
+                        dict(updates=dict(country='Belize',denomination='1 Dollar',status='Own'))):
+            self.assertEqual(self.correct_identity(item,**invalid).status_code,409)
+        result=self.correct_identity(item);self.assertEqual(result.status_code,200,result.json)
+        corrected=result.json['item']
+        self.assertTrue(corrected['can_edit']);self.assertTrue(corrected['can_check']);self.assertTrue(corrected['can_release'])
+        self.assertTrue(corrected['identity_review']['manually_reviewed'])
+        self.assertEqual(corrected['identity_review']['issues'],[])
+        saved=dict(self.db.execute('SELECT * FROM banknote_import_items WHERE id=?',(item['id'],)).fetchone())
+        for key in ('source_json','source_digest','warning','released_record_id'):
+            self.assertEqual(saved[key],before[key])
+        for key in ('price','vendor','purchase_date','order_number','status'):
+            self.assertEqual(corrected['fields'][key],item['fields'][key])
+        checked=self.check(batch,corrected);corrected=self.current_item(checked,item)
+        self.assertEqual(corrected['fields']['country'],'Belize')
+        self.assertEqual(corrected['fields']['denomination'],'1 Dollar')
+        self.assertEqual(corrected['fields']['pick_number'],'P-46c')
+        self.assertTrue(corrected['can_edit']);self.assertTrue(corrected['can_check'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknote_ebay_links').fetchone()[0],0)
+        self.assertIsNone(imports.finish_single(self.db,batch['id'],stuff.UPLOAD_FOLDER,lambda *_:self.fail('No auto release')))
+        released=self.release(batch,[corrected]);self.assertEqual(released.status_code,200,released.json)
+        self.assertEqual(self.db.execute('SELECT status FROM banknotes').fetchone()[0],'Ordered')
+        self.assertEqual(self.correct_identity(corrected).status_code,409)
+
+    def test_manual_correction_does_not_override_real_purchase_blockers(self):
+        for change in (dict(quantity=2),dict(ignored=1),dict(title='Lot of two banknotes PMG'),
+                       dict(title='PMG banknote and coin'),dict(attention='Refunded'),
+                       dict(attention='Multiple purchase rows share this identity; review required')):
+            with self.subTest(change=change):
+                try:
+                    batch,item=self.ambiguous_identity_item()
+                    source=dict(self.db.execute('SELECT * FROM ebay_order_items WHERE item_id=?',(IDS[0],)).fetchone())
+                    source.update(change)
+                    for key,value in change.items():self.db.execute('UPDATE ebay_order_items SET '+key+'=? WHERE item_id=?',(value,IDS[0]))
+                    self.db.execute('UPDATE banknote_import_items SET source_json=?,source_digest=?,warning=? WHERE id=?',
+                        (json.dumps(source),imports._digest(source),imports._reason(source),item['id']));self.db.commit()
+                    self.assertFalse(self.current_item(batch,item)['identity_review']['can_correct'])
+                    self.assertEqual(self.correct_identity(item).status_code,409)
+                    self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],0)
+                finally:self.tearDown();self.setUp()
+
+    def test_manual_correction_requires_owner_and_available_listing_photos(self):
+        batch,item=self.ambiguous_identity_item()
+        self.db.execute("INSERT OR REPLACE INTO users(id,email,display_name,role,categories) VALUES('review-member','review-member@example.test','Review member','member','banknotes')")
+        self.db.commit()
+        response=self.client.post(item['detail_url']+'/correct-identity',
+            json=dict(revision=item['revision'],confirmed_single_note=True,
+                      updates=dict(country='Belize',denomination='1 Dollar')),
+            headers={'Cf-Access-Authenticated-User-Email':'review-member@example.test'})
+        self.assertEqual(response.status_code,403)
+        self.db.execute('DELETE FROM ebay_listing_captures');self.db.commit()
+        self.assertFalse(self.current_item(batch,item)['identity_review']['can_correct'])
+        self.assertEqual(self.correct_identity(item).status_code,409)
+
+    def test_incomplete_and_conflicting_pick_references_are_reviewable(self):
+        for title in ('Belize 1 Dollar Pick #46c / Pick #46d', 'Belize 1 Dollar Pick #?'):
+            with self.subTest(title=title):
+                try:
+                    def mutate(payload):
+                        self.group_receipt_payload(payload)
+                        payload['items'][0]['title']=title
+                        payload['listings'][0]['title']=title
+                    batch=self.imported(mutate);item=batch['items'][0]
+                    self.assertEqual(item['identity_review']['issues'][0]['field'],'pick_number')
+                    self.assertTrue(item['identity_review']['can_correct'])
+                    response=self.correct_identity(item)
+                    self.assertEqual(response.status_code,200,response.json)
+                    self.assertTrue(response.json['item']['can_check'])
+                finally:self.tearDown();self.setUp()
+
+    def test_manual_identity_is_bound_to_source_capture_account_and_corrected_fields(self):
+        for mutation in ('capture','source','account','membership','fields'):
+            with self.subTest(mutation=mutation):
+                try:
+                    batch,item=self.ambiguous_identity_item();result=self.correct_identity(item)
+                    self.assertEqual(result.status_code,200,result.json);item=result.json['item']
+                    if mutation=='capture':self.db.execute("UPDATE ebay_listing_captures SET text='Different evidence'")
+                    elif mutation=='source':self.db.execute("UPDATE ebay_order_items SET seller='DifferentSeller'")
+                    elif mutation=='account':self.db.execute("UPDATE ebay_purchase_account SET account_name='other'")
+                    elif mutation=='membership':self.db.execute("UPDATE banknote_import_batches SET snapshot_json='[]'")
+                    else:
+                        fields=dict(item['fields'],denomination='5 Dollars')
+                        self.db.execute('UPDATE banknote_import_items SET fields_json=? WHERE id=?',(json.dumps(fields),item['id']))
+                    self.db.commit()
+                    self.assertEqual(self.client.post(item['detail_url']+'/check',json={'revision':item['revision']}).status_code,409)
+                    self.assertEqual(self.release(batch,[item]).status_code,409)
+                finally:self.tearDown();self.setUp()
+
     def test_group_warning_exact_receipts_fill_each_draft_and_explicit_release(self):
         batch=self.imported(self.group_receipt_payload)
         held=[item for item in batch['items'] if item['state']=='blocked']

@@ -449,10 +449,27 @@
         : checkRunning(item) ? 'Loading purchased photos…' : 'No purchased photos available yet. Use Check to retry.'));
     }
     const warnings = document.getElementById('banknoteImportWarnings');
-    warnings.replaceChildren(); warnings.hidden = !(item.warnings || []).length;
+    const identityReview = item.identity_review || {};
+    const reviewWarnings = [...(item.warnings || []), ...(identityReview.issues || []).map(issue => issue.message)];
+    warnings.replaceChildren(); warnings.hidden = !reviewWarnings.length;
     if (!warnings.hidden) {
       warnings.append(el('strong', 'Needs review')); const list = el('ul');
-      item.warnings.forEach(warning => list.append(el('li', evidenceText(warning)))); warnings.append(list);
+      reviewWarnings.forEach(warning => list.append(el('li', evidenceText(warning)))); warnings.append(list);
+    }
+    const correction = document.getElementById('banknoteImportIdentityReview');
+    if (correction) {
+      const wasHidden = correction.hidden;
+      correction.hidden = !identityReview.can_correct;
+      document.getElementById('banknoteImportIdentitySource').textContent = 'Original listing: ' + (identityReview.source_title || item.title || '');
+      if (correction.dataset.item !== item.id || (wasHidden && !correction.hidden)) {
+        correction.dataset.item = item.id;
+        document.getElementById('banknoteImportIdentityConfirm').checked = false;
+        correction.querySelectorAll('[data-identity-field]').forEach(field => { field.value = text(item.fields?.[field.dataset.identityField]); });
+      }
+      const locked = busy || uncertain || checkRunning(item) || Boolean(conflict);
+      correction.querySelectorAll('input').forEach(field => { field.disabled = locked; });
+      document.getElementById('banknoteImportIdentitySave').disabled = locked || !identityReview.can_correct
+        || !document.getElementById('banknoteImportIdentityConfirm').checked;
     }
     const evidence = document.getElementById('banknoteImportEvidence');
     evidence.hidden = !(item.evidence || []).length; const entries = evidence.querySelector('ul'); entries.replaceChildren();
@@ -488,6 +505,8 @@
           : 'Checking the original photos and preparing the note images. Editing resumes when Check finishes.';
       } else if (item.state === 'blocked' && editable) {
         imageHelp.textContent = 'You can edit the note and its photos. Release to Collection adds it as Ordered; the purchase warning remains for review.';
+      } else if (item.state === 'blocked' && identityReview.can_correct) {
+        imageHelp.textContent = 'Note identity needs correction. Original purchase photos are retained below.';
       } else if (item.state === 'blocked') {
         imageHelp.textContent = canCheck(item)
           ? 'Use Check to fill missing banknote details from the listing and original photos. The purchase still needs review before release. Use Refresh eBay order on Order review after resolving the warning.'
@@ -793,6 +812,24 @@
       }
     });
     document.getElementById('banknoteImportSave').addEventListener('click', () => saveDraft().catch(error => say(error.message,true)));
+    document.getElementById('banknoteImportIdentityConfirm')?.addEventListener('change', () => renderDetail());
+    document.getElementById('banknoteImportIdentitySave')?.addEventListener('click', async () => {
+      if (busy || uncertain || conflict || checkRunning(item) || !item.identity_review?.can_correct) return;
+      const panel = document.getElementById('banknoteImportIdentityReview');
+      const confirmed = document.getElementById('banknoteImportIdentityConfirm').checked;
+      if (!confirmed) return;
+      const updates = Object.fromEntries([...panel.querySelectorAll('[data-identity-field]')]
+        .map(field => [field.dataset.identityField, field.value.trim()]));
+      busy = true; busyAction = 'correct-identity'; renderDetail();
+      try {
+        const result = await request(item.detail_url + '/correct-identity', 'POST', {
+          revision:item.revision, updates, confirmed_single_note:confirmed,
+        });
+        if (!result.item) throw unconfirmed('The correction could not be confirmed. Refresh saved status before trying again.');
+        if (setRemote(result.item)) say('Correction saved. Check is available; this remains a draft.');
+      } catch (error) { actionError(error); }
+      finally { busy = false; busyAction = ''; renderDetail(); }
+    });
     document.getElementById('banknoteImportCheck').addEventListener('click', async () => {
       if (!canCheck(item) || busy || uncertain || checkRunning(item)) return;
       busy = true; renderDetail();
