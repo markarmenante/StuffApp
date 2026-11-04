@@ -117,7 +117,7 @@ test('hostile preview URLs never become image requests or action targets', async
   expect(observed.actions).toEqual([]);
 });
 
-test('Crop photos prepares blocked previews without accepting purchases or replacing manual sibling photos', async ({ page, request }) => {
+test('Crop photos retries blocked previews from originals without accepting purchases or replacing manual sibling photos', async ({ page, request }) => {
   const batch = await (await request.post('/__fixture/import-photos')).json();
   const blocked = batch.items.find((item: { state: string }) => item.state === 'blocked');
   const clean = batch.items.find((item: { state: string }) => item.state === 'draft');
@@ -137,13 +137,18 @@ test('Crop photos prepares blocked previews without accepting purchases or repla
   expect(await cleanCard.locator('img').evaluateAll(images => images.map(image => image.getAttribute('src'))))
     .toEqual(['/uploads/fixture-retained-front.png', '/uploads/fixture-retained-back.png']);
   await expect(button).toBeEnabled();
+  const firstCrop = await (await request.get('/__fixture/import-photo-state')).json();
+  expect(firstCrop.preview_crop_calls - before.preview_crop_calls,
+    'The first explicit request crops exactly the two blocked previews').toBe(2);
   await button.click();
   await expect(button).toBeEnabled();
   const after = await (await request.get('/__fixture/import-photo-state')).json();
   expect(after.items).toEqual(before.items);
   expect(after.collection_count).toBe(before.collection_count);
   expect(after.link_count).toBe(before.link_count);
-  expect(after.preview_crop_calls - before.preview_crop_calls).toBe(2);
+  expect(after.preview_crop_calls - firstCrop.preview_crop_calls,
+    'An explicit retry crops both previews again from their retained originals').toBe(2);
+  expect(after.preview_crop_calls - before.preview_crop_calls).toBe(4);
   await blockedCard.getByRole('link', { name: 'Review details' }).click();
   await loadedPhotos(page.locator('#banknoteImportPhotos img'), 2);
   await expect(page.locator('#banknoteImportPhotos [data-photo-side]')).toHaveCount(0);
