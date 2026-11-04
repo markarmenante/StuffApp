@@ -282,7 +282,10 @@ facts must still cite every exact saved reference. PCGS NoteFacts joins the
 public catalogue allowlist alongside PMG as a primary type-reference source.
 The vision/search call and its bounded fetch-only follow-up share one 75-second
 budget, at most four searches, one search pause continuation, and no automatic
-whole-call retries. The follow-up selects actual observed public source URLs;
+whole-Check retries. A temporary identification transport failure can retry once
+within that same deadline; the photo-side classifier has the same bounded recovery
+inside its 35-second budget. Invalid responses and authentication failures are not
+retried. See `docs/banknote-imports.md`. The follow-up selects actual observed public source URLs;
 up to four provider-hosted fetches (12k tokens each, failed calls count) read catalogue or auction
 pages from an explicit domain allowlist when search snippets truncate.
 If the instance already has `PERPLEXITY_API_KEY`, `banknote_catalog_search.py`

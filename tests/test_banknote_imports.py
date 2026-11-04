@@ -319,6 +319,50 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(self.client.get(done['completion_url']).status_code,200)
         again=self.batch();self.assertEqual(again['completion_url'],done['completion_url'])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+    def test_single_worker_recovers_temporary_provider_failures_without_second_check(self):
+        import anthropic
+        from types import SimpleNamespace
+        try:import httpx2 as httpx
+        except ImportError:import httpx
+        b=self.single_imported();item=b['items'][0]
+        token=imports.claim_check(self.db,b['id'],item['id'],item['revision'])
+        attempts={'sides':0,'specs':0}
+        def create(**kwargs):
+            stage='sides' if kwargs['max_tokens']==5000 else 'specs'
+            attempts[stage]+=1
+            if attempts[stage]==1:
+                response=httpx.Response(529,request=httpx.Request('POST','https://api.anthropic.com/v1/messages'))
+                raise anthropic.APIStatusError('temporary failure',response=response,body={})
+            if stage=='sides':
+                data=self.classify([{'id':'photo-0'},{'id':'photo-1'}])
+            else:
+                data=dict(self.fills,direct_evidence={field:{'source':'image','quote':value} for field,value in self.fills.items()})
+            return SimpleNamespace(stop_reason='end_turn',content=[SimpleNamespace(type='text',text=json.dumps(data))],
+                model_dump=lambda:{'content':[{'type':'text','text':json.dumps(data)}]})
+        imports._CHECK_SLOTS.acquire()
+        with patch.object(imports.listing_images,'download',side_effect=self.download), \
+                patch('anthropic.Anthropic') as factory, \
+                patch.object(stuff,'_require_anthropic_key',return_value='test-key'), \
+                patch.object(stuff,'anthropic_lookup_model',return_value='configured-model'), \
+                patch.object(stuff.time,'sleep'), \
+                patch.dict(os.environ,{'PERPLEXITY_API_KEY':''}), \
+                patch.object(stuff.banknote_catalog_lookup,'fetch_candidates',return_value=[]), \
+                patch.object(stuff,'_prepare_import_photo',return_value=None):
+            factory.return_value.messages.create.side_effect=create
+            stuff._run_import_check(b['id'],item['id'],item['revision'],token)
+        self.assertEqual(attempts,{'sides':2,'specs':2})
+        done=self.client.get(b['status_url']).json
+        self.assertTrue(done['completion_url']);self.assertEqual(done['pending_count'],0)
+        record=self.db.execute('SELECT * FROM banknotes').fetchone()
+        self.assertEqual(record['price'],'$125.37');self.assertEqual(record['status'],'Ordered')
+        self.assertEqual(record['order_number'],ORDERS[1]);self.assertEqual(record['pick_number'],'P14a')
+        self.assertTrue(record['image_1']);self.assertTrue(record['image_2'])
+        self.assertEqual(record['country'],self.fills['country'])
+        self.assertNotIn('provider could not finish Check',done['items'][0]['check_message'])
+        self.assertNotIn('Listing-photo sides could not be verified',done['items'][0]['check_message'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM banknotes').fetchone()[0],1)
+        for asset in self.db.execute('SELECT * FROM banknote_import_assets'):
+            self.assertEqual(hashlib.sha256((Path(stuff.UPLOAD_FOLDER)/asset['filename']).read_bytes()).hexdigest(),asset['sha256'])
     def test_historical_single_draft_requires_explicit_resume_and_status_get_is_read_only(self):
         b=self.single_imported();b=self.check(b,b['items'][0])
         self.db.execute('UPDATE banknote_import_batches SET auto_single=0 WHERE id=?',(b['id'],));self.db.commit()

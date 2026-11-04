@@ -17093,14 +17093,68 @@ def _market_page_image_urls(listing_url, html=None):
     return keep[:banknote_photo_sides.MAX_GALLERY]
 
 
+def _log_banknote_check_error(stage, error, *, retry=False):
+    """Keep the failure diagnosable without recording provider bodies or facts."""
+    for _ in range(5):
+        if error.__cause__ is None:
+            break
+        error = error.__cause__
+    status = getattr(error, 'status_code', None)
+    status = status if type(status) is int else None
+    trace = error.__traceback__
+    while trace and trace.tb_next:
+        trace = trace.tb_next
+    origin = (f'{os.path.basename(trace.tb_frame.f_code.co_filename)}:{trace.tb_lineno}'
+              if trace else 'unknown')
+    app.logger.warning('Banknote Check failure: stage=%s error=%s status=%s origin=%s retry=%s',
+        stage, type(error).__name__, status, origin, retry)
+
+
+def _banknote_provider_create(client, *, stage, deadline, **kwargs):
+    """One transport retry inside the caller's existing budget, never a new Check."""
+    import anthropic
+    import math
+    for attempt in range(2):
+        remaining = deadline - time.monotonic()
+        if remaining < 1:
+            raise TimeoutError('Banknote Check provider budget exhausted')
+        try:
+            return client.messages.create(timeout=remaining, **kwargs)
+        except Exception as error:
+            status = getattr(error, 'status_code', None)
+            transient = (isinstance(error, anthropic.APIConnectionError) or
+                (isinstance(error, anthropic.APIStatusError) and type(status) is int
+                 and (status in (408, 409, 429) or 500 <= status < 600)))
+            response = getattr(error, 'response', None)
+            headers = response.headers if response is not None else {}
+            delay = 1.0
+            try:
+                if 'retry-after-ms' in headers:
+                    delay = float(headers['retry-after-ms']) / 1000
+                elif 'retry-after' in headers:
+                    delay = float(headers['retry-after'])
+                if not math.isfinite(delay) or delay < 0:
+                    delay = float('inf')
+            except (TypeError, ValueError):
+                # An unreadable server delay is not permission to retry early.
+                delay = float('inf')
+            retry = (attempt == 0 and transient and headers.get('x-should-retry') != 'false'
+                     and deadline - time.monotonic() - delay >= 5)
+            _log_banknote_check_error(stage, error, retry=retry)
+            if not retry:
+                raise
+            time.sleep(delay)
+
+
 def _classify_banknote_listing_photos(photos):
-    """One bounded, image-only side check; no web tools or purchase/private facts."""
+    """Bounded image-only side check; no web tools or purchase/private facts."""
     import anthropic
     content = banknote_photo_sides.vision_content(photos, UPLOAD_FOLDER)
     api_key = _require_anthropic_key()
     client = anthropic.Anthropic(api_key=api_key, timeout=35.0, max_retries=0)
-    response = client.messages.create(
-        model=anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL'),
+    model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
+    response = _banknote_provider_create(client, stage='photo-sides', deadline=time.monotonic() + 35,
+        model=model,
         max_tokens=5000, messages=[{'role': 'user', 'content': content}])
     if response.stop_reason != 'end_turn':
         raise ValueError('Photograph classification did not complete')
@@ -21715,7 +21769,8 @@ def _normalize_import_updates(updates):
 def _evaluate_import_check(note,prepared):
     error=None
     try:suggestions=fetch_banknote_specs(note)
-    except Exception:
+    except Exception as exc:
+        _log_banknote_check_error('import-identification', exc)
         suggestions={}
         error='The image/catalogue provider could not finish Check. Your draft and photographs were kept; retry Check.'
     response=_banknote_check_result(note,prepared,suggestions,error)
@@ -28207,8 +28262,8 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
         search_left = max(0, 4 - banknote_catalog_lookup.tool_uses(responses, 'web_search'))
         search_tools = ([dict(web_search, max_uses=search_left)] if search_left else [])
         try:
-            resp = client.messages.create(model=lookup_model, max_tokens=8192,
-                tools=search_tools, messages=messages, timeout=remaining)
+            resp = _banknote_provider_create(client, stage='identification', deadline=deadline,
+                model=lookup_model, max_tokens=8192, tools=search_tools, messages=messages)
         except Exception as e:
             raise RuntimeError(_friendly_lookup_error('Banknote spec lookup', e)) from e
         responses.append(resp.model_dump())

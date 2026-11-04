@@ -160,6 +160,14 @@ slow, failed or stale crop leaves completed identification and originals saved
 with a partial-result message. Geometry/validator provider calls have explicit
 30-second timeouts without SDK retries. Missing core identification is reported
 as partial rather than successful empty enrichment.
+Photo-side classification and identification retry a temporary provider transport
+failure once, inside their original 35-second and shared 75-second budgets. Server
+retry delays are honored only when enough time remains; authentication, invalid
+requests, malformed answers and uncertain photo pairs do not trigger retries.
+No whole Check is restarted and SDK retries remain disabled. Diagnostics record
+the failed stage, exception type, HTTP status and code location, never provider
+bodies, prompts, images, purchase facts or credentials. Originals, occupied fields,
+manual crops and the revision/source checks remain protected on either attempt.
 The optional crop stage has a 60-second deadline per photograph and is displayed
 as "Cropping photos" after details are saved. At most two crop computations can
 remain outstanding; timed-out computations keep their capacity until they exit

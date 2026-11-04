@@ -1,6 +1,7 @@
 """Choose banknote sides from the exact listing gallery; never infer by position."""
 import base64
 import hashlib
+import logging
 from io import BytesIO
 from pathlib import Path
 
@@ -83,10 +84,12 @@ def select(assets, folder, classify, existing=None, resolve_original=None):
                 pass
     if not gallery:
         return result
+    stage = 'classification'
     try:
         if not callable(classify):
             raise ValueError('Side classifier unavailable')
         decision = classify(photos)
+        stage = 'validation'
         if not isinstance(decision, dict) or not isinstance(decision.get('photos'), list):
             raise ValueError('Incomplete photograph classification')
         readings = {}
@@ -149,7 +152,9 @@ def select(assets, folder, classify, existing=None, resolve_original=None):
                                          for field,ident in chosen.items()}
         if missing or wrong_saved:
             result['warnings'].append('Front and back could not both be confirmed from the listing. Existing photos and all originals were retained; choose the missing or uncertain side manually.')
-    except Exception:
+    except Exception as error:
+        logging.getLogger(__name__).warning('Banknote photo-side %s failed: error=%s',
+            stage, type(error).__name__)
         result['images'] = {}
         result['evidence_images'] = []
         result['verified_pair'] = {}
