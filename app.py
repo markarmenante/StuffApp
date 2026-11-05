@@ -6963,9 +6963,10 @@ def init_db():
     # v35: The Eastern Caribbean Territories Currency Board alias joins BCCB.
     # v36: Dated BNU Timor issues share Portuguese Timor display filing.
     # v37: Same-year denominations precede optional branch municipalities.
+    # v38: Municipality groups Notgeld only; other issues ignore branch towns.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v37',),
+        ('banknote_display_number_v38',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6973,7 +6974,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v37', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v38', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -13189,7 +13190,7 @@ def build_search_query(category, q, dot=False, coin_filter=None, at_property=Non
 _MAKE_MODEL_ORDER = ("COALESCE(NULLIF(make, ''), 'zzz') COLLATE NODIACRITIC, "
                      "COALESCE(NULLIF(model, ''), 'zzz') COLLATE NODIACRITIC")
 
-# The US_EMERGENCY call as it appears (three times) in the banknotes
+# The US_EMERGENCY call as it appears in the banknotes
 # ORDER BY — spelled once so the argument list can't drift between uses.
 _US_EMERGENCY_SQL_CALL = ("US_EMERGENCY(country, series, issuer, official, "
                           "lettering, lettering_translation, other_catalog, "
@@ -13199,7 +13200,7 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
-    # Nation, issue-year, denomination, then town/date. NATION_NAME
+    # Nation, issue-year, Notgeld town, denomination, then date. NATION_NAME
     # folds historical territories onto the modern nation the panels
     # present them as ('British Honduras' files under Belize, 'British
     # East Africa' under Kenya), so a nation's eras run adjacent and in
@@ -13209,13 +13210,12 @@ CATEGORY_ORDER_BY = {
     # then the federal run, with state and obsolete issues as their own
     # block after (US_NOTE_GROUP), keeping the fractional issues
     # contiguous.
-    # Notgeld files
-    # inside its country's chronological run like any national note —
-    # municipality only breaks denomination ties within a year, so a missing
-    # branch town cannot put five yuan after ten. The year (NOTE_YEAR) is the
-    # note's own date_1 for every country but the US, so a run reads
-    # chronologically — George
-    # VI before Elizabeth II — with the series label's year only as a
+    # Notgeld files inside its country's chronological run, grouped by town
+    # within each year and then by denomination within that town. Municipality
+    # has no sorting role for other issue types, even as a tiebreaker.
+    # The year (NOTE_YEAR) is the note's own date_1 for every country but the
+    # US, so a run reads chronologically — George VI before Elizabeth II —
+    # with the series label's year only as a
     # fallback; US notes keep the series-label year first ('Series of
     # 1896 (Educational Series)' -> 1896) because their panels are
     # series-based (see _note_primary_year). Denominations sort by
@@ -13231,10 +13231,8 @@ CATEGORY_ORDER_BY = {
     # only the year key would leave the block split by the era key.
     # The bare US_EMERGENCY key after them keeps the block contiguous
     # against any real-1942 note AND orders the two theater sets
-    # (Hawaii = 1, then North Africa = 2). The municipality key is
-    # neutralized inside the block: some Hawaii notes carry
-    # municipality 'Hawaii' and some don't, and letting it lead would
-    # scramble the denomination order within a set.
+    # (Hawaii = 1, then North Africa = 2). These are not Notgeld, so optional
+    # municipalities cannot scramble denomination order within a set.
     'banknotes': ("BANKNOTE_GROUP(country, date_1, issuer, series), "
                   "BANKNOTE_COUNTRY(country, date_1, issuer, series) COLLATE NODIACRITIC, "
                   "COLLECTION_FAMILY_RANK(country, date_1, issuer, series), "
@@ -13251,6 +13249,8 @@ CATEGORY_ORDER_BY = {
                   f"{_US_EMERGENCY_SQL_CALL} ASC, "
                   "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN '' ELSE "
                   "COALESCE(NULLIF(BANKNOTE_DISPLAY_COUNTRY(country, date_1, issuer, series), ''), 'zzz') END COLLATE NODIACRITIC, "
+                  "CASE WHEN LOWER(TRIM(COALESCE(issue_type, ''))) = 'notgeld' THEN "
+                  "COALESCE(NULLIF(TRIM(municipality), ''), 'zzz') ELSE '' END COLLATE NODIACRITIC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
                   "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN "
                   "DENOM_AMOUNT(CARIBBEAN_DENOMINATION(denomination)) ELSE DENOM_AMOUNT(denomination) END ASC, "
@@ -13259,9 +13259,6 @@ CATEGORY_ORDER_BY = {
                   "CATALOGUE_REFERENCE_SORT(pick_number) ELSE '' END, "
                   "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN "
                   "CATALOGUE_REFERENCE_SORT(other_catalog) ELSE '' END, "
-                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN 'zzz' "
-                  f"WHEN {_US_EMERGENCY_SQL_CALL} THEN 'zzz' ELSE "
-                  "COALESCE(NULLIF(municipality, ''), 'zzz') END COLLATE NODIACRITIC, "
                   "COALESCE(date_1, 99999) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
                 "COALESCE(NULLIF(description, ''), 'zzz') COLLATE NODIACRITIC"),

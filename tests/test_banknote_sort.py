@@ -15,7 +15,7 @@ import app as stuffapp
 db = sqlite3.connect(':memory:')
 stuffapp._configure_db_connection(db)
 db.execute("""CREATE TABLE banknotes (
-    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, issue_type TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
     pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
@@ -113,7 +113,7 @@ print('PHILIPPINES ERA ASSERTIONS PASSED')
 db2 = sqlite3.connect(':memory:')
 stuffapp._configure_db_connection(db2)
 db2.execute("""CREATE TABLE banknotes (
-    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, issue_type TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
     pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
@@ -155,7 +155,7 @@ print('PHILIPPINES ERA ORDER ASSERTIONS PASSED')
 db2 = sqlite3.connect(':memory:')
 stuffapp._configure_db_connection(db2)
 db2.execute("""CREATE TABLE banknotes (
-    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, issue_type TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
     pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
@@ -257,7 +257,7 @@ for y, label in ((1900, 'The gulden'), (1948, 'Succession to Indonesia')):
 db3 = sqlite3.connect(':memory:')
 stuffapp._configure_db_connection(db3)
 db3.execute("""CREATE TABLE banknotes (
-    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, issue_type TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
     pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
@@ -329,7 +329,7 @@ assert nc and nc['name'] == 'National Bank Note', nc
 db4 = sqlite3.connect(':memory:')
 stuffapp._configure_db_connection(db4)
 db4.execute("""CREATE TABLE banknotes (
-    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, issue_type TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
     pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
@@ -410,7 +410,7 @@ assert p['era']['label'] == 'War inflation and the gold yuan', p
 db3 = sqlite3.connect(':memory:')
 stuffapp._configure_db_connection(db3)
 db3.execute("""CREATE TABLE banknotes (
-    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, series TEXT,
+    id INTEGER PRIMARY KEY, country TEXT, municipality TEXT, issue_type TEXT, series TEXT,
     issuer TEXT, official TEXT, lettering TEXT, lettering_translation TEXT,
     pick_number TEXT, other_catalog TEXT, description TEXT, condition TEXT, denomination TEXT,
     date_1 INTEGER)""")
@@ -583,7 +583,7 @@ with stuffapp.app.app_context():
     # migration. Existing startup canonicalization has nothing to change here.
     full_db.execute("INSERT OR IGNORE INTO migration_state (key, applied_at) "
                     "VALUES ('banknote_display_number_v26', '2026-10-15')")
-    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v37'")
+    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v38'")
     full_db.commit()
     before = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
     with patch.object(stuffapp, 'ensure_country_history'):
@@ -597,7 +597,7 @@ with stuffapp.app.app_context():
         for field, value in before[row['id']].items():
             if field != 'banknote_id':
                 assert row[field] == value, (row['id'], field, value, row[field])
-    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v37'").fetchone()
+    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v38'").fetchone()
     migrated = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
     with patch.object(stuffapp, '_renumber_banknotes') as renumber:
         stuffapp.init_db()
@@ -647,11 +647,11 @@ with stuffapp.app.app_context():
         'SELECT id FROM banknotes ORDER BY ' + stuffapp.CATEGORY_ORDER_BY['banknotes'])]
     assert ordered_ids() == expected, ordered_ids()
     before = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
-    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v37'")
+    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v38'")
     full_db.commit()
     with patch.object(stuffapp, 'ensure_country_history'):
         stuffapp.init_db()
-    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v37'").fetchone()
+    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v38'").fetchone()
     ordered = full_db.execute('SELECT * FROM banknotes ORDER BY '
                               + stuffapp.CATEGORY_ORDER_BY['banknotes']).fetchall()
     assert [r['banknote_id'] for r in ordered] == [f'P {i:03d}' for i in range(1, 6)]
@@ -669,3 +669,63 @@ with stuffapp.app.app_context():
     assert [row['id'] for _, _, rows in stuffapp._banknote_report_sections(full_db)
             for row in rows] == expected
 print('ISSUER DENOMINATION BEFORE MUNICIPALITY ASSERTIONS PASSED')
+
+# Only explicit Notgeld uses locality for filing; national branch towns and
+# unknown issue types must not override denomination or break equal-value ties.
+with stuffapp.app.app_context():
+    full_db = stuffapp.get_db()
+    full_db.execute('DELETE FROM banknotes')
+    fixtures = [
+        ('a100', 'Notgeld', 'Aachen', '100 Pfennig', 1921),
+        ('b25', ' notgeld ', 'Berlin', '25 Pfennig', 1921),
+        ('a50', 'NOTGELD', ' Aachen ', '50 Pfennig', 1921),
+        ('b100', 'Notgeld', 'Berlin', '100 Pfennig', 1921),
+        ('unknown', 'Notgeld', ' ', '1 Pfennig', 1921),
+        ('n10', 'National', 'Aachen', '10 Mark', 1921),
+        ('n5a', 'National', 'Aachen', '5 Mark', 1921),
+        ('n5b', 'National', 'Zurich', '5 Mark', 1921),
+        ('blank', '', 'Berlin', '50 Mark', 1921),
+        ('null', None, None, '100 Mark', 1921),
+        ('old', 'Notgeld', 'Zurich', '500 Mark', 1919),
+        ('new', 'Notgeld', 'Aachen', '1 Mark', 1922),
+    ]
+    for i, (ident, issue_type, town, denomination, year) in enumerate(fixtures):
+        full_db.execute(
+            'INSERT INTO banknotes (id, country, issuer, municipality, issue_type, '
+            'date_1, denomination, cat_id, banknote_id, status, price, image_1, image_2) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (ident, 'Germany', 'Issuing authority', town, issue_type, year,
+             denomination, f'B{i + 500}', 'P 999', 'Own', '$89.25',
+             ident + '-front.jpg', ident + '-back.jpg'))
+    full_db.commit()
+    order = stuffapp.CATEGORY_ORDER_BY['banknotes']
+    expected = ['old', 'n5b', 'n5a', 'n10', 'blank', 'null',
+                'a50', 'a100', 'b25', 'b100', 'unknown', 'new']
+    actual = [r['id'] for r in full_db.execute(
+        'SELECT id FROM banknotes ORDER BY ' + order + ', id DESC')]
+    assert actual == expected, actual
+    # Remove the deliberate equal-key pair before checking generated P order.
+    full_db.execute("DELETE FROM banknotes WHERE id='n5a'")
+    expected.remove('n5a')
+    before = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
+    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v38'")
+    full_db.commit()
+    with patch.object(stuffapp, 'ensure_country_history'):
+        stuffapp.init_db()
+    ordered = full_db.execute('SELECT * FROM banknotes ORDER BY ' + order).fetchall()
+    assert [r['id'] for r in ordered] == expected
+    assert [r['banknote_id'] for r in ordered] == [f'P {i:03d}' for i in range(1, 12)]
+    for row in ordered:
+        assert {k: v for k, v in dict(row).items() if k != 'banknote_id'} == {
+            k: v for k, v in before[row['id']].items() if k != 'banknote_id'}
+    with patch.object(stuffapp, 'ensure_country_history'):
+        client = stuffapp.app.test_client()
+        for history in ('0', '1'):
+            response = client.get('/banknotes', query_string={'history': history})
+            assert response.status_code == 200
+            html = response.get_data(as_text=True)
+            offsets = [html.index('id="item-' + ident + '"') for ident in expected]
+            assert offsets == sorted(offsets), (history, offsets)
+    assert [row['id'] for _, _, rows in stuffapp._banknote_report_sections(full_db)
+            for row in rows] == expected
+print('NOTGELD-ONLY MUNICIPALITY ORDER, PRESERVATION AND REPORT ASSERTIONS PASSED')

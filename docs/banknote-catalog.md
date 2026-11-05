@@ -206,14 +206,17 @@ separate, and the existing historical groups and chronology take priority.
 Migration v27 refreshes display positions (P numbers) without rewriting saved
 denominations or permanent B numbers.
 
-Migration v37 compares denominations before optional branch municipalities
-within the existing filing and year keys. The 1914 Bank of
-Communications run therefore reads 1, 5, 10 Yuan even when the 5 Yuan has no
-saved municipality and the other two say Shanghai. Municipality remains an
-equal-denomination tiebreaker. Existing historical/series chronology,
-issuer-aware regional-family filing and WWII emergency sets retain their stronger keys.
-Only derived P positions are reseeded; saved municipalities, permanent B IDs,
-photos, purchase facts and ownership statuses are unchanged.
+Migration v37 put denominations before optional branch municipalities.
+Migration v38 applies Mark's 5 November clarification: only notes explicitly
+classified as Notgeld use municipality for sorting. Within the existing country
+and year keys, Notgeld groups by town, then numeric denomination; missing towns
+sort last. Other issue types ignore municipality entirely, including equal-value
+ties. The 1914 Bank of Communications run therefore reads 1, 5, 10 Yuan even when
+the 5 Yuan has no saved municipality and the other two say Shanghai. Existing
+historical/series chronology, issuer-aware regional-family filing and WWII
+emergency sets retain their stronger keys. Only derived P positions are reseeded;
+saved municipalities, permanent B IDs, photos, purchase facts and ownership
+statuses are unchanged. No issue types or locality fields are inferred or rewritten.
 
 ## Eastern Caribbean regional family
 

@@ -282,7 +282,7 @@ class CaribbeanTests(unittest.TestCase):
         self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
         self.db.execute("INSERT OR IGNORE INTO migration_state (key, applied_at) "
                         "VALUES ('banknote_display_number_v34', '2026-10-28')")
-        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v37'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v38'")
         self.db.commit()
         before = {r['id']: dict(r) for r in self.rows()}
         stuff.init_db()
@@ -291,7 +291,7 @@ class CaribbeanTests(unittest.TestCase):
                          ['kgvi1', 'kgvi20', 'qeii1', 'qeii5', 'authority1', 'central5'])
         self.assertEqual([r['banknote_id'] for r in rows], [f'P {i:03}' for i in range(1, 7)])
         self.assertIsNotNone(self.db.execute(
-            "SELECT 1 FROM migration_state WHERE key='banknote_display_number_v37'").fetchone())
+            "SELECT 1 FROM migration_state WHERE key='banknote_display_number_v38'").fetchone())
         for row in rows:
             self.assertEqual({k: v for k, v in dict(row).items() if k != 'banknote_id'},
                              {k: v for k, v in before[row['id']].items() if k != 'banknote_id'})
