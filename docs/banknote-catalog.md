@@ -206,6 +206,15 @@ separate, and the existing historical groups and chronology take priority.
 Migration v27 refreshes display positions (P numbers) without rewriting saved
 denominations or permanent B numbers.
 
+Migration v37 compares denominations before optional branch municipalities
+within the existing filing and year keys. The 1914 Bank of
+Communications run therefore reads 1, 5, 10 Yuan even when the 5 Yuan has no
+saved municipality and the other two say Shanghai. Municipality remains an
+equal-denomination tiebreaker. Existing historical/series chronology,
+issuer-aware regional-family filing and WWII emergency sets retain their stronger keys.
+Only derived P positions are reseeded; saved municipalities, permanent B IDs,
+photos, purchase facts and ownership statuses are unchanged.
+
 ## Eastern Caribbean regional family
 
 The collection list and PDF report gather this regional currency lineage under

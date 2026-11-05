@@ -6962,9 +6962,10 @@ def init_db():
     # v34: Oceania with a Japanese occupation issuer joins the Japanese group.
     # v35: The Eastern Caribbean Territories Currency Board alias joins BCCB.
     # v36: Dated BNU Timor issues share Portuguese Timor display filing.
+    # v37: Same-year denominations precede optional branch municipalities.
     if not db.execute(
         "SELECT 1 FROM migration_state WHERE key = ?",
-        ('banknote_display_number_v36',),
+        ('banknote_display_number_v37',),
     ).fetchone():
         try:
             _renumber_banknotes(db)
@@ -6972,7 +6973,7 @@ def init_db():
             pass
         db.execute(
             "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
-            ('banknote_display_number_v36', datetime.utcnow().isoformat()),
+            ('banknote_display_number_v37', datetime.utcnow().isoformat()),
         )
         db.commit()
 
@@ -13198,7 +13199,7 @@ CATEGORY_ORDER_BY = {
     'coins': ("COALESCE(NULLIF(region, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(NULLIF(authority, ''), 'zzz') COLLATE NODIACRITIC, "
               "COALESCE(date_1, 99999) ASC"),
-    # Nation, issue-year, town, denomination, then date. NATION_NAME
+    # Nation, issue-year, denomination, then town/date. NATION_NAME
     # folds historical territories onto the modern nation the panels
     # present them as ('British Honduras' files under Belize, 'British
     # East Africa' under Kenya), so a nation's eras run adjacent and in
@@ -13210,10 +13211,10 @@ CATEGORY_ORDER_BY = {
     # contiguous.
     # Notgeld files
     # inside its country's chronological run like any national note —
-    # municipality is only a tiebreak within a year, keeping a town's
-    # same-year set together without splitting Germany or Austria into
-    # per-town blocks. The year (NOTE_YEAR) is the note's own date_1 for
-    # every country but the US, so a run reads chronologically — George
+    # municipality only breaks denomination ties within a year, so a missing
+    # branch town cannot put five yuan after ten. The year (NOTE_YEAR) is the
+    # note's own date_1 for every country but the US, so a run reads
+    # chronologically — George
     # VI before Elizabeth II — with the series label's year only as a
     # fallback; US notes keep the series-label year first ('Series of
     # 1896 (Educational Series)' -> 1896) because their panels are
@@ -13250,9 +13251,6 @@ CATEGORY_ORDER_BY = {
                   f"{_US_EMERGENCY_SQL_CALL} ASC, "
                   "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN '' ELSE "
                   "COALESCE(NULLIF(BANKNOTE_DISPLAY_COUNTRY(country, date_1, issuer, series), ''), 'zzz') END COLLATE NODIACRITIC, "
-                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN 'zzz' "
-                  f"WHEN {_US_EMERGENCY_SQL_CALL} THEN 'zzz' ELSE "
-                  "COALESCE(NULLIF(municipality, ''), 'zzz') END COLLATE NODIACRITIC, "
                   "DENOM_CURRENCY(denomination) COLLATE NODIACRITIC, "
                   "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN "
                   "DENOM_AMOUNT(CARIBBEAN_DENOMINATION(denomination)) ELSE DENOM_AMOUNT(denomination) END ASC, "
@@ -13261,6 +13259,9 @@ CATEGORY_ORDER_BY = {
                   "CATALOGUE_REFERENCE_SORT(pick_number) ELSE '' END, "
                   "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN "
                   "CATALOGUE_REFERENCE_SORT(other_catalog) ELSE '' END, "
+                  "CASE WHEN COLLECTION_FAMILY_RANK(country, date_1, issuer, series) >= 0 THEN 'zzz' "
+                  f"WHEN {_US_EMERGENCY_SQL_CALL} THEN 'zzz' ELSE "
+                  "COALESCE(NULLIF(municipality, ''), 'zzz') END COLLATE NODIACRITIC, "
                   "COALESCE(date_1, 99999) ASC"),
     'watches': ("COALESCE(NULLIF(brand, ''), 'zzz') COLLATE NODIACRITIC, "
                 "COALESCE(NULLIF(description, ''), 'zzz') COLLATE NODIACRITIC"),

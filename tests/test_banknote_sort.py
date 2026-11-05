@@ -583,7 +583,7 @@ with stuffapp.app.app_context():
     # migration. Existing startup canonicalization has nothing to change here.
     full_db.execute("INSERT OR IGNORE INTO migration_state (key, applied_at) "
                     "VALUES ('banknote_display_number_v26', '2026-10-15')")
-    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v36'")
+    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v37'")
     full_db.commit()
     before = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
     with patch.object(stuffapp, 'ensure_country_history'):
@@ -597,7 +597,7 @@ with stuffapp.app.app_context():
         for field, value in before[row['id']].items():
             if field != 'banknote_id':
                 assert row[field] == value, (row['id'], field, value, row[field])
-    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v36'").fetchone()
+    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v37'").fetchone()
     migrated = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
     with patch.object(stuffapp, '_renumber_banknotes') as renumber:
         stuffapp.init_db()
@@ -621,3 +621,51 @@ with stuffapp.app.app_context():
     report_ids = [row['id'] for _, _, rows in sections for row in rows]
     assert report_ids == expected, report_ids
 print('VIRGINIA DENOMINATION LIST, REPORT AND MIGRATION ASSERTIONS PASSED')
+
+# B466 has no municipality; B188/B277 have Shanghai. Branch metadata must
+# not put the 1914 Communications ten yuan ahead of its five yuan.
+with stuffapp.app.app_context():
+    full_db = stuffapp.get_db()
+    full_db.execute('DELETE FROM banknotes')
+    fixtures = [
+        ('c10', 'Bank of Communications', 'Shanghai', '10 Yuan', 1914, 'B277', 'Delivered'),
+        ('c5', 'Bank of Communications', '', '5 Yuan', 1914, 'B466', 'Ordered'),
+        ('c1', 'Bank of Communications', 'Shanghai', '1 Yuan', 1914, 'B188', 'Own'),
+        ('old', 'Bank of Communications', None, '100 Yuan', 1913, 'B501', 'Own'),
+        ('new', 'Bank of Communications', 'Chungking', '1 Yuan', 1915, 'B502', 'Own'),
+    ]
+    for ident, issuer, town, denomination, year, cat_id, status in fixtures:
+        full_db.execute(
+            'INSERT INTO banknotes (id, country, issuer, municipality, series, date_1, '
+            'denomination, cat_id, banknote_id, status, price, image_1, image_2) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (ident, 'China', issuer, town, '', year, denomination, cat_id,
+             'P 999', status, '$89', ident + '-front.jpg', ident + '-back.jpg'))
+    full_db.commit()
+    expected = ['old', 'c1', 'c5', 'c10', 'new']
+    ordered_ids = lambda: [r['id'] for r in full_db.execute(
+        'SELECT id FROM banknotes ORDER BY ' + stuffapp.CATEGORY_ORDER_BY['banknotes'])]
+    assert ordered_ids() == expected, ordered_ids()
+    before = {r['id']: dict(r) for r in full_db.execute('SELECT * FROM banknotes')}
+    full_db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v37'")
+    full_db.commit()
+    with patch.object(stuffapp, 'ensure_country_history'):
+        stuffapp.init_db()
+    assert full_db.execute("SELECT 1 FROM migration_state WHERE key='banknote_display_number_v37'").fetchone()
+    ordered = full_db.execute('SELECT * FROM banknotes ORDER BY '
+                              + stuffapp.CATEGORY_ORDER_BY['banknotes']).fetchall()
+    assert [r['banknote_id'] for r in ordered] == [f'P {i:03d}' for i in range(1, 6)]
+    for row in ordered:
+        assert {k: v for k, v in dict(row).items() if k != 'banknote_id'} == {
+            k: v for k, v in before[row['id']].items() if k != 'banknote_id'}
+    with patch.object(stuffapp, 'ensure_country_history'):
+        client = stuffapp.app.test_client()
+        for history in ('0', '1'):
+            response = client.get('/banknotes', query_string={'history': history})
+            assert response.status_code == 200
+            html = response.get_data(as_text=True)
+            offsets = [html.index('id="item-' + ident + '"') for ident in expected]
+            assert offsets == sorted(offsets), (history, offsets)
+    assert [row['id'] for _, _, rows in stuffapp._banknote_report_sections(full_db)
+            for row in rows] == expected
+print('ISSUER DENOMINATION BEFORE MUNICIPALITY ASSERTIONS PASSED')
