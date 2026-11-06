@@ -446,6 +446,27 @@ class DraftTests(unittest.TestCase):
         html=self.client.get(done['completion_url']).data.decode()
         self.assertIn('provider could not finish Check',html)
         self.assertFalse(self.db.execute('SELECT specs_searched_at FROM banknotes').fetchone()[0])
+    def test_collection_manual_crops_resolve_only_crop_warnings(self):
+        warning=imports.PHOTO_CROP_WARNINGS[0]
+        remaining='Catalogue lookup is incomplete. '+imports.PHOTO_SIDE_WARNINGS[0]
+        b=self.single_imported()
+        b=self.check(b,b['items'][0],lambda *_:dict(filled=self.fills,lookup_error=warning+' '+remaining))
+        done=self.batch();record=self.db.execute('SELECT * FROM banknotes').fetchone()
+        self.assertIn(warning,imports.collection_check_warning(self.db,record))
+        original=self.db.execute('SELECT check_message FROM banknote_import_items WHERE id=?',(b['items'][0]['id'],)).fetchone()[0]
+        quad=[[2,2],[155,2],[155,77],[2,77]]
+        for field in ('image_1','image_2'):
+            result=self.client.post(done['completion_url']+'/trim-quad/'+field,json={'quad':quad})
+            self.assertEqual(result.status_code,200,result.json)
+            record=self.db.execute('SELECT * FROM banknotes').fetchone()
+            message=imports.collection_check_warning(self.db,record)
+            self.assertEqual(warning in message,field=='image_1')
+            self.assertIn(remaining,message)
+        self.assertEqual(self.db.execute('SELECT check_message FROM banknote_import_items WHERE id=?',(b['items'][0]['id'],)).fetchone()[0],original)
+        self.assertNotIn(warning,self.client.get(done['completion_url']).data.decode())
+        for quad_value in ('null','[]','[[1,2]]','not json'):
+            self.db.execute('UPDATE trimmed_image_sources SET quad=? WHERE trimmed=?',(quad_value,record['image_2']));self.db.commit()
+            self.assertIn(warning,imports.collection_check_warning(self.db,record))
     def test_known_single_without_photo_pair_opens_normal_detail_preserving_originals(self):
         b=self.single_imported();item=b['items'][0]
         token=imports.claim_check(self.db,b['id'],item['id'],item['revision'])

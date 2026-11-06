@@ -103,3 +103,20 @@ candidate unused. The original image and exact crop corners remain linked.
 
 Covered by `tests/test_banknote_image_quality.py`, including rejection when
 validation fails or is unavailable, wrong aspect ratios, and missing labels.
+
+## Faint paper against pale holders: New Caledonia P-54
+
+A cream sheet can have four measurable edges but insufficient colour contrast
+for automatic acceptance. A separate low-contrast candidate retains the same
+geometry, catalog-ratio, pale-paper-rim and grading-label requirements. It only
+ships after affirmative comparison with the original photo; a failed or
+unavailable validator leaves it unused. Rendering remains a single transform
+from the original at native crop resolution, with source corners recorded.
+
+Synthetic tests cover rotated pale sheets, intact margins, missing labels,
+absent edges, printed interiors, wrong ratios and unavailable/rejecting
+validators. Both original P-54 photos were checked without publishing seller
+photos in the repository. New detector paths do not replace saved manual crops.
+Once both collection photos have recorded crop transforms, resolved import
+crop warnings disappear on the next page load; unrelated warnings and the
+original import audit remain intact.

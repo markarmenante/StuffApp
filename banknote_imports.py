@@ -33,6 +33,11 @@ PHOTO_SIDE_WARNINGS = (
     'Front and back could not both be confirmed from the listing. Existing photos and all originals were retained; choose the missing or uncertain side manually.',
     'Listing-photo sides could not be verified. Existing photos and all originals were retained; run Check again or choose the photos manually.',
 )
+PHOTO_CROP_WARNINGS = (
+    'The full paper edges could not be confirmed. The original photo was kept; use Crop photos or adjust its crop.',
+    'Photo cropping could not finish in time. Your details and original photo were kept; use Crop photos or adjust its crop.',
+    'An imported photo could not be cropped; its original was retained.',
+)
 _ORDER = re.compile(r'\d{2}-\d{5}-\d{5}')
 _MULTIPLE = r'(?:[2-9]\d*|1\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|hundred)'
 _BUNDLE = re.compile(r'\b(?:set|bundle)\s*(?:of\s*)?'+_MULTIPLE+r'\b|\blot\s+of\s+'+_MULTIPLE+r'\b|\bpair of\b|\b'+_MULTIPLE+r'\s+(?:consecutive\s+)?(?:serial\s+)?(?:notes|banknotes)\b', re.I)
@@ -719,7 +724,22 @@ def collection_check_warning(db,record):
             if datetime.fromisoformat(completed.replace('Z','+00:00')).replace(tzinfo=timezone.utc).timestamp() >= (row['checked_at'] or 0):
                 return ''
         except (TypeError,ValueError):pass
-    return row['check_message']
+    message=row['check_message']
+    # A later manual correction resolves crop-only warnings without erasing
+    # the import audit or unrelated catalogue, price or side-selection warnings.
+    crops=[]
+    for field in ('image_1','image_2'):
+        crop=db.execute('SELECT source,quad FROM trimmed_image_sources WHERE trimmed=?',
+                        (record[field],)).fetchone()
+        try:quad=json.loads(crop['quad']) if crop and crop['quad'] else None
+        except (TypeError,ValueError):quad=None
+        crops.append(bool(crop and crop['source']!=record[field] and
+                          isinstance(quad,list) and len(quad)==4 and
+                          all(isinstance(point,list) and len(point)==2 and
+                              all(isinstance(v,(int,float)) for v in point) for point in quad)))
+    if all(crops):
+        for warning in PHOTO_CROP_WARNINGS:message=message.replace(warning,'')
+    return message.strip()
 
 
 def status(db,batch_id):

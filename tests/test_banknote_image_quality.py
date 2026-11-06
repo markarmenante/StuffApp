@@ -141,6 +141,53 @@ solid_bar = neutral_holder()
 ImageDraw.Draw(solid_bar).rectangle((85, 55, 1540, 250), fill=(50, 75, 60))
 assert stuffapp._warm_paper_on_light_holder_quad(solid_bar) is None
 
+# New Caledonia P-54: a pale cream sheet in a nearly white holder has a
+# measurable outline but less contrast than the automatic acceptance gate.
+def faint_holder(label=True, paper=(248, 244, 228)):
+    img = neutral_holder(paper=paper, label=label)
+    # The holder is slightly warm too; retain the separate framed label.
+    pixels = img.load()
+    for y in range(img.height):
+        for x in range(img.width):
+            if pixels[x, y] == (238, 237, 234):
+                pixels[x, y] = (248, 246, 240)
+    return img
+
+
+for angle in (0, 2, -2):
+    faint = faint_holder().rotate(angle, resample=Image.Resampling.BICUBIC,
+                                  fillcolor=(248, 246, 240))
+    assert stuffapp._warm_paper_on_light_holder_quad(faint) is None
+    quad = stuffapp._warm_paper_on_light_holder_quad(faint, low_contrast=True)
+    assert quad is not None
+    if angle == 0:
+        expected = [(220, 300), (1400, 315), (1395, 855), (215, 840)]
+        assert all(math.dist(a, b) < 4 for a, b in zip(quad, expected)), quad
+assert stuffapp._warm_paper_on_light_holder_quad(faint_holder(label=False), low_contrast=True) is None
+assert stuffapp._warm_paper_on_light_holder_quad(faint_holder(), 3.4, low_contrast=True) is None
+assert stuffapp._warm_paper_on_light_holder_quad(faint_holder(paper=(248, 246, 240)), low_contrast=True) is None
+assert stuffapp._warm_paper_on_light_holder_quad(neutral_holder(paper=(190, 65, 40)), low_contrast=True) is None
+for verdict_value in (True, False, None):
+    faint = faint_holder()
+    meta = {}
+    with patch.object(stuffapp, '_vision_crop_verdict', return_value=verdict_value) as verdict, \
+            patch.object(stuffapp, '_paper_on_dark_backdrop_quad', return_value=None), \
+            patch.object(stuffapp, '_trim_small_slab_note', return_value=None), \
+            patch.object(stuffapp, '_trim_v2_enabled', return_value=False), \
+            patch.object(stuffapp, '_trim_note_cv_cascade', return_value=None):
+        output = stuffapp._trim_slabbed_note_image(encoded(faint), meta=meta)
+    verdict.assert_called_once()
+    assert verdict.call_args.kwargs['original'].tobytes() == faint.tobytes()
+    if verdict_value is True:
+        crop = Image.open(io.BytesIO(output))
+        assert meta['engine'] == 'faint-paper-boundary'
+        assert abs(crop.width - 1180) <= 4 and abs(crop.height - 540) <= 4
+        assert min(crop.getpixel((crop.width // 2, crop.height - 8))) > 200
+        assert JpegImagePlugin.get_sampling(crop) == 0
+        assert stuffapp._warm_paper_on_light_holder_quad(crop, low_contrast=True) is None
+    else:
+        assert output is None and 'quad' not in meta, 'A faint edge needs affirmative validation'
+
 # Hong Kong P-55c: the pattern reaches the paper edge, and warm holder
 # reflections must not be accepted as part of it. These candidates need
 # affirmative comparison with the original; no blank-rim assumption.

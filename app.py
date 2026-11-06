@@ -11505,18 +11505,20 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
             app.logger.info('trim: full paper boundary %dx%d -> %dx%d',
                             w, h, *rect[0].size)
             return _encode_trimmed_note(rect[0])
-    # Printing can run to the physical sheet edge (Hong Kong P-55c).
-    # The stronger colour outline is only a candidate: unlike the pale-rim
-    # path above, it requires affirmative validation against the original.
-    paper_quad = _warm_paper_on_light_holder_quad(img, expect_aspect, printed_edges=True)
-    if paper_quad is not None:
+    # Faint paper/holder contrast and printing to the sheet edge need an
+    # affirmative comparison with the original, not relaxed auto-acceptance.
+    for mode, engine in (({'low_contrast': True}, 'faint-paper-boundary'),
+                         ({'printed_edges': True}, 'printed-paper-boundary')):
+        paper_quad = _warm_paper_on_light_holder_quad(img, expect_aspect, **mode)
+        if paper_quad is None:
+            continue
         rect = _rectify_note_quad(img, paper_quad)
         if rect is not None and _vision_crop_verdict(rect[0], original=img) is True:
             if meta is not None:
-                meta['engine'] = 'printed-paper-boundary'
+                meta['engine'] = engine
                 meta['quad'] = [[round(x, 1), round(y, 1)] for x, y in paper_quad]
-            app.logger.info('trim: validated printed paper boundary %dx%d -> %dx%d',
-                            w, h, *rect[0].size)
+            app.logger.info('trim: validated %s %dx%d -> %dx%d',
+                            engine, w, h, *rect[0].size)
             return _encode_trimmed_note(rect[0])
     # Four visible paper edges also identify the note inside a dark holder,
     # even when the photo clips the holder/label. The same boundary handles
@@ -11899,7 +11901,8 @@ def _dark_holder_has_label(rgb, quad):
     return False
 
 
-def _warm_paper_on_light_holder_quad(img, expect_aspect=None, *, printed_edges=False):
+def _warm_paper_on_light_holder_quad(img, expect_aspect=None, *, printed_edges=False,
+                                   low_contrast=False):
     """High-confidence full-sheet outline, not the printed design.
 
     Cream paper is warmer than the pale neutral/blue plastic surrounding
@@ -11908,8 +11911,9 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None, *, printed_edges=F
     also need a separate label and quiet cream margins: white paper alone
     must not authorize cropping to a coloured design. Ambiguous photos
     defer to the existing pipeline. No sharpening or recolouring.
-    printed_edges returns a candidate only: a separate label is required,
-    and the caller MUST validate it against the original before use.
+    printed_edges and low_contrast return candidates only: a separate label
+    is required, and the caller MUST validate against the original before use.
+    Low-contrast candidates also require quiet cream paper margins.
     """
     try:
         import cv2
@@ -12005,14 +12009,17 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None, *, printed_edges=F
                 (np.abs(rim[:, 0] - rim[:, 1]) < 30) &
                 (rim.mean(axis=1) > 130)) >= 0.85)
             if (np.mean(warm_in > (20 if printed_edges else 12)) < 0.75 or
-                    np.mean(warm_out < (32 if printed_edges else 10)) < 0.85 or
-                    np.median(warm_out) > (24 if printed_edges else 6) or
-                    np.median(warm_in - warm_out) < (25 if printed_edges else 15) or
+                    np.mean(warm_out < (32 if printed_edges else 14 if low_contrast else 10)) < 0.85 or
+                    np.median(warm_out) > (24 if printed_edges else 10 if low_contrast else 6) or
+                    np.median(warm_in - warm_out) < (25 if printed_edges else 8 if low_contrast else 15) or
                     np.median(pout.mean(axis=1)) < (130 if printed_edges else 160)):
                 supported = False
                 break
         if supported:
-            if printed_edges:
+            if low_contrast:
+                if cream_margins and _neutral_holder_has_label(rgb, quad):
+                    return quad
+            elif printed_edges:
                 if _neutral_holder_has_label(rgb, quad):
                     return quad
             elif cool_surround or (cream_margins and _neutral_holder_has_label(rgb, quad)):
