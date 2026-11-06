@@ -208,7 +208,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_search_plan_is_generic_exact_and_does_not_restrict_old_url_layout(self):
         prompt = lookup.prompt(NOTE)
-        self.assertIn('site:numista.com Maldives 10 1960 banknote', prompt)
+        self.assertIn('site:numista.com Maldives 10 1960 P-5b banknote', prompt)
         self.assertIn('Maldives Pick 5b banknote', prompt)
         self.assertIn('site:banknoteindex.com Maldives P5b', prompt)
         self.assertNotIn('site:numista.com/catalogue', prompt)

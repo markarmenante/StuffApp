@@ -92,6 +92,22 @@ def canonical_source_url(url):
     return url
 
 
+def _numista_entry_url(url):
+    try:
+        parsed = urlsplit(canonical_source_url(url))
+        return (parsed.scheme == 'https' and parsed.hostname == 'en.numista.com'
+                and not parsed.username and not parsed.password
+                and parsed.port in (None, 443) and bool(re.fullmatch(r'/\d+', parsed.path)))
+    except (ValueError, TypeError):
+        return False
+
+
+def _pick_type(key):
+    """Parent Pick type is a discovery clue, never exact-variety evidence."""
+    match = re.fullmatch(r'(pick:[a-z]*\d+)[a-z]+', key)
+    return match[1] if match else None
+
+
 def fetch_candidates(note, result, sources):
     """Choose observed pages plus eligible configured navigation; no invented IDs."""
     country = text(note.get('country'))
@@ -132,6 +148,7 @@ def fetch_candidates(note, result, sources):
         if not country or not contains(context, country):
             continue
         exact = any(reference_in(context, key) for key in keys)
+        numista_entry = _numista_entry_url(url)
         index = bool(re.search(r'/catalogue/[a-z-]+-\d+\.html|/catalog/banknotes/[a-z-]+\.html', parsed.path)
                      or ('realbanknotes.com' in parsed.hostname and re.match(r'/country/\d+-', parsed.path))
                      or (parsed.hostname == 'banknoteindex.com' and re.search(r'\bbrowseBy=(?:Country|Authority)\b', parsed.query)))
@@ -141,7 +158,8 @@ def fetch_candidates(note, result, sources):
             for namespace in {key.split(':',1)[0] for key in keys}:
                 found = {reference(m.group()) for m in re.finditer(
                     r'(?<!\w)' + _PREFIXES[namespace] + r'[\s.#:-]*' + _NUMBER + r'(?![\w*(])', context, re.I)}
-                if found and not (found & keys):
+                parents = {_pick_type(key) for key in keys} - {None}
+                if found and not (found & keys) and not (numista_entry and found <= parents):
                     break
             else:
                 found = None
@@ -159,6 +177,7 @@ def fetch_candidates(note, result, sources):
         canonical = canonical_source_url(url)
         score = (20 if exact else 0) + (10 if canonical in wanted else 0) + (8 if index else 0)
         score += 4 if number and contains(context, float(number.group())) else 0
+        score += 6 if score and numista_entry else 0
         if score:
             scored.append((-score, canonical))
     return list(dict.fromkeys(url for _,url in sorted(scored)))[:2]
@@ -178,7 +197,7 @@ Observed URLs: %s
 Known identity (preserve each nonempty value): %s
 Return one JSON object containing catalogue_research with identity {match:"exact|unresolved",country,reference,denomination,issuer,series,date_1,date_1_text,date_2,date_2_text,state,variety_dates:[]} (variety_dates contains Gregorian integer years, e.g. [1960], never date strings) and fields {field:{value,scope:"type|variety",source_url,quote}}.
 Research only these missing type fields: %s. Use actual fetched text or supplied native excerpts for every short literal field quote. The full catalogue namespace/reference including suffix and country must match. Do not use another variety. Include the actual full fetched URL as source_url.
-For stable printer/material/dimensions a matching type-wide page is sufficient. Known issuer must not conflict; a country-only catalogue issuer heading is acceptable for Pick/TBB. Signatures, watermark/date/series require a uniquely dated variety and exact full names must be literally stated. If uncertain leave absent. Never return grade, serial, certificate, purchase or photo fields. Do not change occupied fields. Return exact numeric millimetres for dimensions and literal sourced text for other fields. Format obv_rev as "Obv: literal front description / Rev: literal back description", scope=type for a shared design. Do not translate a catalogue issue category into a guessed app category.
+For stable printer/material/dimensions a matching type-wide page is sufficient. Numista can list a parent Pick type in Features (P-55) and the complete reference (P-55c) in its issue table: read that table to confirm the saved reference and date, then use the shared Features dimensions. A parent number alone or sale offer is insufficient. Known issuer must not conflict; a country-only catalogue issuer heading is acceptable for Pick/TBB. Signatures, watermark/date/series require a uniquely dated variety and exact full names must be literally stated. If uncertain leave absent. Never return grade, serial, certificate, purchase or photo fields. Do not change occupied fields. Return exact numeric millimetres for dimensions and literal sourced text for other fields. Format obv_rev as "Obv: literal front description / Rev: literal back description", scope=type for a shared design. Do not translate a catalogue issue category into a guessed app category.
 ''' % (json.dumps(native_sources or {}), json.dumps(configured), json.dumps(observed), json.dumps(identity), ', '.join(sorted(field for field in FIELDS if is_blank(note.get('condition' if field == 'history_context' else field)))))
 
 
@@ -302,10 +321,18 @@ def issuer_in(quote, value):
 
 
 def issuer_compatible(quote, issuer, country, key, scope):
-    named = re.findall(r'\b(?:Issuer|Issuing bank|Issuing authority|Issuing institution)\s*[:|]\s*([^\n.;|]+)', quote, re.I)
+    headings = re.findall(r'\b(Issuer|Issuing bank|Issuing authority|Issuing institution)\s*[:|]\s*([^\n.;|]+)', quote, re.I)
     aliases = {folded(name) for name in catalog.country_spellings(country)}
     country_headings = aliases | {name + ' ' + name for name in aliases}
-    if any(not issuer_in(name, issuer) and folded(name) not in country_headings for name in named):
+    bank_matches = any(label.lower() != 'issuer' and issuer_in(name, issuer) for label, name in headings)
+    # Numista uses "Issuer | Hong Kong (China)" for geography and a separate
+    # "Issuing bank" for the institution. That geographic parent must not
+    # contradict an explicitly matching bank; a different named bank still does.
+    def geographic_heading(label, name):
+        return (bank_matches and label.lower() == 'issuer' and
+                folded(re.sub(r'\([^()]*\)', '', name)) in country_headings)
+    if any(not issuer_in(name, issuer) and folded(name) not in country_headings
+           and not geographic_heading(label, name) for label, name in headings):
         return False
     if issuer_in(quote, issuer):
         return True
@@ -341,6 +368,37 @@ def guard_matches(row, guard):
             and all(row.get(field) == guard['identity'][field] for field in IDENTITY_FIELDS))
 
 
+def _numista_type_features(note, url, source):
+    """Shared entry facts, bound to exact references in Features or issue rows."""
+    if not _numista_entry_url(url):
+        return None
+    document = source.get('document_text')
+    if not isinstance(document, str):
+        return None
+    heading = r'^\s*(?:#{1,6}\s*)?%s\s*\n'
+    features = re.search((heading % 'Features') + r'([\s\S]*?)(?=' +
+                         heading % 'Obverse' + r')', document, re.M)
+    if not features or not re.search(r'\bStandard circulation banknotes\b', features[1], re.I):
+        return None
+    table = re.search((heading % 'Manage my collection') + r'([\s\S]*?)(?=' +
+                     heading % r'(?:Get this banknote|See also|Comments|Contribute to the catalog)' +
+                     r'|\Z)', document, re.M)
+    for key in references(note):
+        if reference_in(features[1], key):
+            continue
+        parent = _pick_type(key)
+        if not parent or not reference_in(features[1], parent) or not table:
+            return None
+        # Only the actual issue table can connect a suffix to shared facts.
+        # A neighboring variety, specimen or sale recommendation cannot do so.
+        rows = [row for row in table[1].splitlines() if '|' in row and reference_in(row, key)
+                and not re.search(r'\b(?:specimen|proof|remainder|unissued)\b', row, re.I)]
+        dates = [note.get(field) for field in ('date_1', 'date_2') if not is_blank(note.get(field))]
+        if not any(all(contains(row, date) for date in dates) for row in rows):
+            return None
+    return features[1]
+
+
 def structured_research(note, sources):
     """Recover explicit type facts from actual single-entry Numista text.
 
@@ -356,27 +414,13 @@ def structured_research(note, sources):
                 for part in re.split(r'[,;]', text(note.get(field)))
                 if reference(part)), None)
     for url, source in sources.items():
-        try:
-            parsed = urlsplit(canonical_source_url(url))
-            port = parsed.port
-        except (ValueError, TypeError):
+        feature_text = _numista_type_features(note, url, source)
+        if feature_text is None:
             continue
-        if (parsed.scheme != 'https' or parsed.hostname != 'en.numista.com'
-                or parsed.username or parsed.password or port not in (None, 443)
-                or not re.fullmatch(r'/\d+', parsed.path)):
-            continue
-        document = source.get('document_text')
-        if not isinstance(document, str):
-            continue
+        document = source['document_text']
         # Retain literal text in the proofs; heading markers are optional in
         # provider text. Stop before collections, prices and unrelated sales.
         heading = r'^\s*(?:#{1,6}\s*)?%s\s*\n'
-        features = re.search((heading % 'Features') + r'([\s\S]*?)(?=' +
-                             heading % 'Obverse' + r')', document, re.M)
-        if not features:
-            continue
-        feature_text = features[1]
-
         def feature(label):
             rows = re.findall(r'^\s*\|?\s*' + label +
                               r'\s*(?:\|\s*|:\s*|\n\s*)([^\n|]+)', feature_text, re.M)
@@ -387,9 +431,7 @@ def structured_research(note, sources):
         # parentheses. The separate issuing institution may name other
         # territories too (AEF and Cameroon), so it is not country evidence.
         location = re.sub(r'\([^()]*\)', '', location).strip()
-        if (not re.search(r'\bStandard circulation banknotes\b', feature_text, re.I)
-                or not all(reference_in(feature_text, key) for key in keys)
-                or not country_in(location, catalog.canonical_country(note['country']))
+        if (not country_in(location, catalog.canonical_country(note['country']))
                 or not denomination_in(feature_text, note['denomination'], note['country'])):
             continue
         fields = {}
@@ -398,7 +440,7 @@ def structured_research(note, sources):
             if value not in (None, '') and len(text(quote)) <= 1500:
                 fields[field] = dict(value=value, scope='type', source_url=url, quote=text(quote))
 
-        for field, label in (('issuer', 'Issuing institution'), ('material', 'Composition')):
+        for field, label in (('issuer', '(?:Issuing institution|Issuing bank)'), ('material', 'Composition')):
             value = feature(label)
             if value:
                 add(field, value, feature_text)
@@ -538,6 +580,13 @@ def validate(note, recovered, research, sources):
                 or not any(text(q).find(quote) >= 0 for q in quotes)):
             continue
         source_text = '\n'.join(str(q) for q in quotes)
+        # A short model quote must obey the same entry/issue-table binding as
+        # the parser. References mentioned only in sale offers are not identity.
+        document = source.get('document_text')
+        if (_numista_entry_url(url) and isinstance(document, str)
+                and re.search(r'^\s*(?:#{1,6}\s*)?Features\s*\n', document, re.M)
+                and _numista_type_features(target, url, source) is None):
+            continue
         country_context = source.get('title', '')
         if not country_in(country_context, country):
             country_context = source_text[:1500] if source.get('document_text') else source_text
@@ -558,7 +607,10 @@ def validate(note, recovered, research, sources):
         explicit_refs = {reference(m.group()) for m in re.finditer(
             r'(?<!\w)' + _PREFIXES[namespace] + r'[\s.#:-]*' + _NUMBER + r'(?![\w*(])', quote, re.I)}
         if explicit_refs and explicit_refs != {key}:
-            continue
+            features = _numista_type_features(target, url, source)
+            if (scope != 'type' or field in VARIETY_FIELDS or explicit_refs != {_pick_type(key)}
+                    or not features or quote not in text(features)):
+                continue
         if field in VARIETY_FIELDS:
             if scope != 'variety':
                 continue
@@ -605,7 +657,7 @@ def prompt(note):
     if country and denomination:
         query_plan = '\nEXECUTE THESE SEARCH QUERIES IN ORDER; do not replace them with overloaded queries:\n'
         denomination_number = re.search(r'\d+(?:\.\d+)?', denomination)
-        query_plan += '1. ' + ' '.join(part for part in ('site:numista.com', country, denomination_number.group() if denomination_number else denomination, year, 'banknote') if part) + '\n'
+        query_plan += '1. ' + ' '.join(part for part in ('site:numista.com', country, denomination_number.group() if denomination_number else denomination, year, refs[0] if refs else '', 'banknote') if part) + '\n'
         if refs:
             namespace, ref_number = reference(refs[0]).split(':', 1)
             semantic_ref = {'pick':'Pick', 'friedberg':'Friedberg', 'tbb':'TBB', 'criswell':'Criswell',

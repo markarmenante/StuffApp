@@ -54,6 +54,84 @@ def claim(field='material', value='Paper', quote='Composition | Paper', **identi
                 fields={field:dict(value=value, scope='type', source_url=URL, quote=quote)})
 
 
+class NumistaIssueTableTests(unittest.TestCase):
+    # Selected public facts from https://en.numista.com/455466 (2026-11-05).
+    url = 'https://en.numista.com/455466'
+    note = dict(country='Hong Kong', denomination='10 Dollars', date_1=1941,
+                pick_number='P-55c, KNB35a-e',
+                issuer='The Chartered Bank of India, Australia & China')
+    page = '''10 Dollars - Hong Kong
+### Features
+Issuer | Hong Kong (China)
+Issuing bank | The Chartered Bank of India, Australia & China
+Type | Standard circulation banknotes
+Years | 1931-1956
+Value | 10 Dollars
+Composition | Paper
+Size | 165 × 95 mm
+References | P# 55
+### Obverse
+Helmeted Warrior at Left
+### Reverse
+Planting Rice
+### Printer
+Waterlow & Sons Limited
+### Manage my collection
+Date | References
+1931-Jul-01 | P# 55a
+1941-Nov-18 | P# 55c
+1948-Feb-12 | P# 55c
+### Get this banknote
+'''
+
+    def evidence(self, page=None):
+        page = self.page if page is None else page
+        return {self.url:dict(title='10 Dollars - Hong Kong', document_text=page, quotes=[page])}
+
+    def test_missing_check_fields_from_parent_page_and_exact_dated_issue(self):
+        before = copy.deepcopy(self.note)
+        fields = lookup.validate_all(self.note, {}, None, self.evidence())['fields']
+        for field, value in [('size_width',165.),('size_height',95.),('material','Paper'),
+                             ('printer','Waterlow & Sons Limited')]:
+            self.assertEqual(fields[field]['value'], value)
+            self.assertEqual(fields[field]['source_url'], self.url)
+            self.assertIn(fields[field]['quote'], lookup.text(self.page))
+        self.assertEqual(before, self.note)
+        self.assertNotIn('date_1', fields)
+        self.assertNotIn('issuer', fields)
+
+    def test_missing_wrong_or_sales_only_variety_never_authorizes_parent_facts(self):
+        for page in (self.page.replace('P# 55c', 'P# 55b'),
+                     self.page.replace('1941-Nov-18', '1940-Nov-18'),
+                     self.page.replace('### Manage my collection', '### Get this banknote'),
+                     self.page.replace('1941-Nov-18 | P# 55c', '1941-Nov-18 | P# 55c | Specimen'),
+                     self.page.replace('References | P# 55', 'References | P# 54'),
+                     self.page.replace('Size | 165 × 95 mm', 'Size | unavailable')):
+            with self.subTest(page=page):
+                fields = lookup.validate_all(self.note, {}, None, self.evidence(page))['fields']
+                self.assertNotIn('size_width', fields)
+                self.assertNotIn('size_height', fields)
+
+    def test_saved_size_and_cross_reference_conflicts_stay_protected(self):
+        note = dict(self.note, size_width=166, size_height=96, image_1='manual-crop.jpg')
+        fields = lookup.validate_all(note, {}, None, self.evidence())['fields']
+        self.assertNotIn('size_width', fields)
+        self.assertNotIn('size_height', fields)
+        self.assertNotIn('image_1', fields)
+        note = dict(self.note, other_catalog='TBB B334g')
+        self.assertEqual(lookup.validate_all(note, {}, None, self.evidence())['fields'], {})
+        wrong_bank = self.page.replace('Issuing bank | The Chartered Bank of India, Australia & China',
+                                       'Issuing bank | Hongkong and Shanghai Banking Corporation')
+        self.assertEqual(lookup.validate_all(self.note, {}, None, self.evidence(wrong_bank))['fields'], {})
+
+    def test_model_short_quote_cannot_bypass_exact_issue_table(self):
+        proof = dict(identity=dict(self.note, reference='P-55c', match='exact'), fields={
+            'size_width':dict(value=165, scope='type', source_url=self.url, quote='Size | 165 × 95 mm')})
+        self.assertIn('size_width', lookup.validate(self.note, {}, proof, self.evidence())['fields'])
+        sales = self.page.replace('### Manage my collection', '### Get this banknote')
+        self.assertEqual(lookup.validate(self.note, {}, proof, self.evidence(sales))['fields'], {})
+
+
 class RecoveryTests(unittest.TestCase):
     def test_empty_model_result_recovers_six_sourced_cameroon_type_fields(self):
         result = lookup.validate_all(NOTE, {}, {'identity':{'match':'unresolved'},'fields':{}}, sources())
@@ -74,7 +152,7 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(lookup.validate_all(NOTE, {}, None, evidence)['fields'], {})
 
     def test_exact_type_header_required_not_variety_or_sales_table(self):
-        for change in ({'pick_number':'P-31a'}, {'pick_number':'P-31s'}, {'pick_number':'P-32'},
+        for change in ({'pick_number':'P-31s'}, {'pick_number':'P-32'},
                        {'country':'Cameroon'}, {'denomination':'100 Francs'},
                        {'issuer':'Bank of Central African States'}):
             with self.subTest(change=change):
@@ -82,6 +160,12 @@ class RecoveryTests(unittest.TestCase):
         for page in (PAGE.replace('P# 31\n', 'P# 30\n'),
                      PAGE.replace('banknotes', 'coins'), PAGE.replace('Features', 'Recommendations')):
             self.assertEqual(lookup.validate_all(NOTE, {}, None, sources(page))['fields'], {})
+
+    def test_issued_variety_can_use_shared_type_facts_but_not_signatures(self):
+        result = lookup.validate_all(dict(NOTE, pick_number='P-31a'), {}, None, sources())
+        self.assertEqual(result['fields']['size_width']['value'], 115.)
+        self.assertNotIn('signatures', result['fields'])
+        self.assertNotIn('date_1', result['fields'])
 
     def test_no_guessed_page_or_lookalike_host(self):
         for url in ('https://numista.com.evil.test/208240', 'https://en.numista.com/catalogue/aef-2.html',

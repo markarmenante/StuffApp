@@ -93,6 +93,17 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(lookup.fetch_candidates(NOTE, {}, {
             old:dict(title='Maldives 10 Rufiyaa P-5b', quotes=[])}), [URL, lookup.BNI_COUNTRY_DIRECTORY])
 
+    def test_numista_parent_type_is_read_before_requiring_exact_issue_evidence(self):
+        note = dict(country='Hong Kong', denomination='10 Dollars', pick_number='P-55c, KNB35a-e')
+        url = 'https://en.numista.com/455466'
+        source = dict(title='10 Dollars - Hong Kong', quotes=['References | P# 55'])
+        self.assertEqual(lookup.fetch_candidates(note, {}, {url:source}), [url])
+        for wrong in ('P# 54', 'P# 55b', 'P# 55cs'):
+            self.assertEqual(lookup.fetch_candidates(note, {}, {
+                url:dict(source, quotes=['References | ' + wrong])}), [])
+        # A parent number in a search snippet is never itself field evidence.
+        self.assertEqual(lookup.validate_all(note, {}, None, {url:source})['fields'], {})
+
     def test_configured_directory_requires_explicit_unambiguous_country_and_reference(self):
         for change in ({'country':''}, {'pick_number':''}, {'pick_number':'64'},
                        {'pick_number':'P-5b, possibly P-5c'}, {'pick_number':'P-5b, P-5a'},
@@ -152,7 +163,8 @@ class CandidateTests(unittest.TestCase):
 
 
 class ProviderBudgetTests(unittest.TestCase):
-    def call(self, replies, ticks=(100, 101, 110), note=None, native=None,
+    # Both the caller and transport helper check the identification deadline.
+    def call(self, replies, ticks=(100, 101, 101, 110), note=None, native=None,
              search_key='', native_calls=None, native_error=None):
         with patch('anthropic.Anthropic') as factory, \
                 patch.dict(os.environ, {'PERPLEXITY_API_KEY':search_key}), \
@@ -190,7 +202,7 @@ class ProviderBudgetTests(unittest.TestCase):
     def test_empty_cameroon_extraction_recovers_native_page_without_extra_provider_calls(self):
         from test_banknote_catalog_recovery import NOTE as cameroon, sources as cameroon_sources
         result, calls = self.call([response(), response({'catalogue_research':{'fields':{}}})],
-            note=cameroon, native=cameroon_sources(), search_key='synthetic-key', ticks=(100,101,110,112))
+            note=cameroon, native=cameroon_sources(), search_key='synthetic-key', ticks=(100,101,101,110,112))
         valid = lookup.validate_all(cameroon, {}, result['catalogue_research'], result['_catalogue_sources'])
         self.assertEqual(set(valid['fields']), {'issuer','printer','material','size_width','size_height','obv_rev'})
         self.assertEqual(len(calls), 2)
@@ -248,7 +260,7 @@ class ProviderBudgetTests(unittest.TestCase):
             dict(type='server_tool_use',name='web_fetch',id='f2',input={'url':URL}),
             dict(type='web_fetch_tool_result',content=dict(type='web_fetch_tool_result_error'))])
         result, calls = self.call([first, second, response(dict(catalogue_research=research()), fetch_blocks())],
-                                 ticks=(100,101,120,140))
+                                 ticks=(100,101,101,120,120,140))
         self.assertEqual(len(calls), 3)
         limits = {t['name']:t['max_uses'] for t in calls[1]['tools']}
         self.assertEqual(limits, {'web_search':2})
@@ -257,9 +269,9 @@ class ProviderBudgetTests(unittest.TestCase):
         self.assertIn('document_text', result['_catalogue_sources'][URL])
 
     def test_no_followup_when_deadline_near_or_fetch_budget_exhausted(self):
-        for blocks, ticks in [(search_blocks(), (100,101,168)),
+        for blocks, ticks in [(search_blocks(), (100,101,101,168)),
                 (search_blocks()+[dict(type='server_tool_use',name='web_fetch',id=str(i),input={})
-                                  for i in range(lookup.MAX_FETCHES)], (100,101,110))]:
+                                  for i in range(lookup.MAX_FETCHES)], (100,101,101,110))]:
             with self.subTest(ticks=ticks):
                 result, calls = self.call([response(dict(catalogue_research=research()), blocks)], ticks=ticks)
                 self.assertEqual(len(calls), 1)
@@ -293,7 +305,7 @@ class ProviderBudgetTests(unittest.TestCase):
                       _catalogue_sources={'https://invented.example':dict(document_text='Invented')},
                       _catalogue_direct_fields=['printer'])
         native_calls = []
-        result, calls = self.call([response(first), response(second)], ticks=(100,101,110,112),
+        result, calls = self.call([response(first), response(second)], ticks=(100,101,101,110,112),
             native=native, search_key='synthetic-existing-key', native_calls=native_calls)
         self.assertEqual(len(calls), 2)
         self.assertEqual(len(native_calls), 1)
@@ -316,7 +328,7 @@ class ProviderBudgetTests(unittest.TestCase):
         wrong['fields']['printer']['quote'] = 'Printer: Invented Printer.'
         result, _ = self.call([response(), response(dict(catalogue_research=wrong,
             _catalogue_sources={URL:dict(document_text='Printer: Invented Printer.')}))],
-            ticks=(100,101,110,112), native=native, search_key='synthetic-key')
+            ticks=(100,101,101,110,112), native=native, search_key='synthetic-key')
         self.assertEqual(lookup.validate(NOTE, {}, result['catalogue_research'],
             result['_catalogue_sources'])['fields'], {})
         self.assertEqual(result['_catalogue_sources'][URL]['document_text'], FULL)
@@ -325,7 +337,7 @@ class ProviderBudgetTests(unittest.TestCase):
         native = {URL:dict(title='Maldives 10 Rufiyaa P-5b', quotes=[FULL], document_text=FULL)}
         extra = 'Maldives P-5b. Material: Paper.'
         result, _ = self.call([response({}, search_blocks()), response(dict(catalogue_research=research()),
-            fetch_blocks(data=extra))], ticks=(100,101,110,112), native=native, search_key='synthetic-key')
+            fetch_blocks(data=extra))], ticks=(100,101,101,110,112), native=native, search_key='synthetic-key')
         self.assertIn(FULL, result['_catalogue_sources'][URL]['quotes'])
         self.assertIn(extra, result['_catalogue_sources'][URL]['quotes'])
         self.assertIn('printer', lookup.validate(NOTE, {}, result['catalogue_research'],
@@ -335,7 +347,7 @@ class ProviderBudgetTests(unittest.TestCase):
         native = {URL:dict(title='Maldives 10 Rufiyaa P-5b', quotes=[FULL], document_text=FULL)}
         native_calls = []
         result, calls = self.call([response(), response(dict(catalogue_research=research()))],
-            ticks=(100,101,160,165), native=native, search_key='synthetic-key', native_calls=native_calls)
+            ticks=(100,101,101,160,165), native=native, search_key='synthetic-key', native_calls=native_calls)
         self.assertEqual(native_calls[0].kwargs['timeout'], 5)
         self.assertEqual(calls[1]['timeout'], 10)
         self.assertEqual(len(native_calls), 1)
@@ -344,7 +356,7 @@ class ProviderBudgetTests(unittest.TestCase):
     def test_native_search_near_deadline_cannot_trigger_extra_provider_call(self):
         native_calls = []
         result, calls = self.call([response(dict(serial_number='C136027'))],
-            ticks=(100,101,172,174), search_key='synthetic-key', native_calls=native_calls)
+            ticks=(100,101,101,172,174), search_key='synthetic-key', native_calls=native_calls)
         self.assertEqual(native_calls[0].kwargs['timeout'], 0)
         self.assertEqual(len(calls), 1)
         self.assertEqual(result['serial_number'], 'C136027')
@@ -360,21 +372,21 @@ class ProviderBudgetTests(unittest.TestCase):
     def test_native_unavailable_or_failed_extraction_does_not_retry_or_lose_direct_facts(self):
         native_calls = []
         result, calls = self.call([response(dict(serial_number='C136027'))],
-            ticks=(100,101,110,112), search_key='synthetic-key', native_calls=native_calls,
+            ticks=(100,101,101,110,112), search_key='synthetic-key', native_calls=native_calls,
             note=dict(NOTE,size_width=156,size_height=103))
         self.assertEqual(len(native_calls), 1)
         self.assertEqual(len(calls), 1)
         self.assertEqual(result['serial_number'], 'C136027')
         native = {URL:dict(title='Maldives 10 Rufiyaa P-5b', quotes=[FULL], document_text=FULL)}
         result, calls = self.call([response(dict(serial_number='C136027')), RuntimeError('extract unavailable')],
-            ticks=(100,101,110,112), native=native, search_key='synthetic-key')
+            ticks=(100,101,101,110,112), native=native, search_key='synthetic-key')
         self.assertEqual(len(calls), 2)
         self.assertEqual(result['serial_number'], 'C136027')
         self.assertEqual(result['_catalogue_sources'][URL]['document_text'], FULL)
 
     def test_unexpected_native_search_failure_preserves_first_direct_result(self):
         result, calls = self.call([response(dict(serial_number='C136027'))],
-            ticks=(100,101,110,112), search_key='synthetic-key',
+            ticks=(100,101,101,110,112), search_key='synthetic-key',
             native_error=RuntimeError('unexpected adapter failure'), note=dict(NOTE,size_width=156,size_height=103))
         self.assertEqual(len(calls), 1)
         self.assertEqual(result['serial_number'], 'C136027')
@@ -383,7 +395,7 @@ class ProviderBudgetTests(unittest.TestCase):
         document = FULL.replace('Printer: Bradbury Wilkinson.', '**Printer:** Bradbury Wilkinson.')
         native = {URL:dict(title='Maldives 10 Rufiyaa P-5b', quotes=[document], document_text=document)}
         result, _ = self.call([response(), response(dict(catalogue_research=research()))],
-            ticks=(100,101,110,112), native=native, search_key='synthetic-key')
+            ticks=(100,101,101,110,112), native=native, search_key='synthetic-key')
         self.assertIn('printer', lookup.validate(NOTE, {}, result['catalogue_research'],
             result['_catalogue_sources'])['fields'])
 

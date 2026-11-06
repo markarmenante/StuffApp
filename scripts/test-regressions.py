@@ -13,6 +13,7 @@ suites = [
     'test_banknote_import_crop_timeout.py', 'test_banknote_import_crop_retry.py',
     'test_purchase_lifecycle.py', 'test_banknote_check_sources.py',
     'test_banknote_price_currency.py', 'test_banknote_catalog_recovery.py',
+    'test_banknote_catalog_fetch.py', 'test_banknote_catalog_search.py',
     'test_banknote_provider_recovery.py', 'test_banknote_catalog_lookup.py',
     'test_market_purchase_capture.py', 'test_market_colonial.py', 'test_banknote_crop_responses.py',
     'test_banknote_image_quality.py', 'test_banknote_vision_source.py', 'test_banknote_check_preserves_images.py',

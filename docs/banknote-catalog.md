@@ -57,8 +57,15 @@ Printer and design sections of actual retrieved single-entry Numista text. This
 bounded parser can recover issuer, paper/material, dimensions, printer and design;
 the same exact country, full reference, denomination, issuer, blank-field and
 literal-source checks still apply. Location and issuing institution are separate:
-the French Equatorial Africa issuer also names Cameroon. Collection/variety/sale
-tables cannot establish the type header. The 1957 50 Francs P-31 regression
+the French Equatorial Africa issuer also names Cameroon. An exact issued variety
+in Numista's own issue table can connect a saved Pick suffix to the Features
+parent type. For example, [Hong Kong P-55c](https://en.numista.com/455466) has P-55
+in Features and the 18 November 1941 P-55c issue in the table; its shared size is
+165 × 95 mm. The known year must match that row. Specimens, neighboring suffixes
+and sale offers cannot establish this link, and variety-sensitive fields still
+need their own exact proof. The geographic `Issuer | Hong Kong (China)` heading
+does not conflict with a separately verified matching `Issuing bank`.
+The 1957 50 Francs P-31 regression
 recovers six type fields without inventing a P-31a attribution or signatures.
 This adds no network request, remembered per-note values or automatic backfill.
 
@@ -97,8 +104,11 @@ evidence. A repeated apply cannot append the same evidence again. The UI flushes
 Reference Notes before Check and protects edits made while acceptance is pending.
 These are catalogue type sources, separate from the specimen's provenance.
 
-Search uses a generated country/numeric-denomination/year query for Numista's
+Search uses a generated country/numeric-denomination/year/full-reference query for Numista's
 whole domain, then semantic catalogue-reference and specialist/archive queries.
+Matching Numista entries receive extra discovery priority. A parent Pick number
+in a search excerpt is eligible for reading the full entry, but cannot by itself
+authorize a missing-field fill.
 Observed legacy Numista note URLs retain their exact numeric record identity
 when normalized to the current URL form. Country indexes can be useful discovery
 sources; for missing dimensions with explicit unambiguous Pick/TBB identity,
