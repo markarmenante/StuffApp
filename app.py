@@ -11505,6 +11505,19 @@ def _trim_slabbed_note_image(data, expect_aspect=None, meta=None):
             app.logger.info('trim: full paper boundary %dx%d -> %dx%d',
                             w, h, *rect[0].size)
             return _encode_trimmed_note(rect[0])
+    # Printing can run to the physical sheet edge (Hong Kong P-55c).
+    # The stronger colour outline is only a candidate: unlike the pale-rim
+    # path above, it requires affirmative validation against the original.
+    paper_quad = _warm_paper_on_light_holder_quad(img, expect_aspect, printed_edges=True)
+    if paper_quad is not None:
+        rect = _rectify_note_quad(img, paper_quad)
+        if rect is not None and _vision_crop_verdict(rect[0], original=img) is True:
+            if meta is not None:
+                meta['engine'] = 'printed-paper-boundary'
+                meta['quad'] = [[round(x, 1), round(y, 1)] for x, y in paper_quad]
+            app.logger.info('trim: validated printed paper boundary %dx%d -> %dx%d',
+                            w, h, *rect[0].size)
+            return _encode_trimmed_note(rect[0])
     # Four visible paper edges also identify the note inside a dark holder,
     # even when the photo clips the holder/label. The same boundary handles
     # tight seller scans before the near-full-frame no-op gates.
@@ -11697,8 +11710,9 @@ def _vision_crop_verdict(crop, original=None):
             'Check that every printed element and the physical paper extent on '
             'all four sides are preserved, with no holder, label, or backdrop. '
             'Use the original as the boundary evidence: some notes have naturally '
-            'very narrow margins, so do not require wider blank margins than the '
-            'paper actually has. Reject any cut-off printing, missing paper edge, '
+            'very narrow margins or printing right to the paper edge. Do not require '
+            'blank margins when none exist in the original. Preserve the complete '
+            'outer printed pattern on such notes. Reject any cut-off printing, missing paper edge, '
             'or uncertainty about whether the whole sheet is present. '
             'Reply ONLY JSON: {"good": true} or '
             '{"good": false, "why": "<a few words>"}.')
@@ -11885,7 +11899,7 @@ def _dark_holder_has_label(rgb, quad):
     return False
 
 
-def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
+def _warm_paper_on_light_holder_quad(img, expect_aspect=None, *, printed_edges=False):
     """High-confidence full-sheet outline, not the printed design.
 
     Cream paper is warmer than the pale neutral/blue plastic surrounding
@@ -11894,6 +11908,8 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
     also need a separate label and quiet cream margins: white paper alone
     must not authorize cropping to a coloured design. Ambiguous photos
     defer to the existing pipeline. No sharpening or recolouring.
+    printed_edges returns a candidate only: a separate label is required,
+    and the caller MUST validate it against the original before use.
     """
     try:
         import cv2
@@ -11917,9 +11933,13 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
     # JPEG colour bleed can join the paper to a faint holder reflection.
     # Retry its contour more strictly; every edge still has to validate.
     candidates = []
-    for warmth in (12, 16):
+    for warmth in ((24, 32) if printed_edges else (12, 16)):
         mask = cv2.morphologyEx(paper_mask(small, warmth), cv2.MORPH_CLOSE,
                                 np.ones((7, 7), np.uint8))
+        if printed_edges:
+            # Remove thin holder reflections after joining the printed texture.
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
+                                    np.ones((5, 5), np.uint8))
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
                                        cv2.CHAIN_APPROX_SIMPLE)
         candidates.extend((c, warmth) for c in
@@ -11984,16 +12004,19 @@ def _warm_paper_on_light_holder_quad(img, expect_aspect=None):
             cream_margins &= bool(np.mean(
                 (np.abs(rim[:, 0] - rim[:, 1]) < 30) &
                 (rim.mean(axis=1) > 130)) >= 0.85)
-            if (np.mean(warm_in > 12) < 0.75 or
-                    np.mean(warm_out < 10) < 0.85 or
-                    np.median(warm_out) > 6 or
-                    np.median(warm_in - warm_out) < 15 or
-                    np.median(pout.mean(axis=1)) < 160):
+            if (np.mean(warm_in > (20 if printed_edges else 12)) < 0.75 or
+                    np.mean(warm_out < (32 if printed_edges else 10)) < 0.85 or
+                    np.median(warm_out) > (24 if printed_edges else 6) or
+                    np.median(warm_in - warm_out) < (25 if printed_edges else 15) or
+                    np.median(pout.mean(axis=1)) < (130 if printed_edges else 160)):
                 supported = False
                 break
-        if supported and (cool_surround or (cream_margins and
-                _neutral_holder_has_label(rgb, quad))):
-            return quad
+        if supported:
+            if printed_edges:
+                if _neutral_holder_has_label(rgb, quad):
+                    return quad
+            elif cool_surround or (cream_margins and _neutral_holder_has_label(rgb, quad)):
+                return quad
     return None
 
 

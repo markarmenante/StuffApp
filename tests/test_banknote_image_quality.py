@@ -141,6 +141,42 @@ solid_bar = neutral_holder()
 ImageDraw.Draw(solid_bar).rectangle((85, 55, 1540, 250), fill=(50, 75, 60))
 assert stuffapp._warm_paper_on_light_holder_quad(solid_bar) is None
 
+# Hong Kong P-55c: the pattern reaches the paper edge, and warm holder
+# reflections must not be accepted as part of it. These candidates need
+# affirmative comparison with the original; no blank-rim assumption.
+printed = neutral_holder()
+draw = ImageDraw.Draw(printed)
+draw.polygon([(220, 300), (1400, 315), (1395, 855), (215, 840)],
+             fill=(225, 155, 100))
+for y in range(330, 820, 12):
+    draw.line((240, y, 1370, y), fill=(165, 75, 40), width=2)
+assert stuffapp._warm_paper_on_light_holder_quad(printed) is None
+printed_quad = stuffapp._warm_paper_on_light_holder_quad(printed, printed_edges=True)
+assert printed_quad is not None
+assert stuffapp._warm_paper_on_light_holder_quad(printed, 3.4, printed_edges=True) is None
+without_label = printed.copy()
+ImageDraw.Draw(without_label).rectangle((0, 0, 1599, 280), fill=(238, 237, 234))
+assert stuffapp._warm_paper_on_light_holder_quad(without_label, printed_edges=True) is None
+for verdict_value in (True, False, None):
+    meta = {}
+    with patch.object(stuffapp, '_vision_crop_verdict', return_value=verdict_value) as verdict, \
+            patch.object(stuffapp, '_paper_on_dark_backdrop_quad', return_value=None), \
+            patch.object(stuffapp, '_trim_small_slab_note', return_value=None), \
+            patch.object(stuffapp, '_trim_v2_enabled', return_value=False), \
+            patch.object(stuffapp, '_trim_note_cv_cascade', return_value=None):
+        output = stuffapp._trim_slabbed_note_image(encoded(printed), meta=meta)
+    verdict.assert_called_once()
+    assert verdict.call_args.kwargs['original'].size == printed.size
+    assert verdict.call_args.kwargs['original'].tobytes() == printed.tobytes()
+    if verdict_value is True:
+        crop = Image.open(io.BytesIO(output))
+        assert meta['engine'] == 'printed-paper-boundary'
+        assert abs(crop.width - 1180) <= 8 and abs(crop.height - 540) <= 8
+        assert len(meta['quad']) == 4
+    else:
+        assert output is None and 'quad' not in meta, 'Never accept an unvalidated printed edge'
+
+
 # Peru P-67A: a thin warm shadow outside a cream sheet joined the colour
 # mask, shifting the measured edge onto the shadow. The actual paper rim
 # then failed the light-margin test and left the whole holder uncropped.

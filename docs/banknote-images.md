@@ -88,3 +88,18 @@ the paper-rim and dark-surround acceptance thresholds remain unchanged.
 Synthetic shadow/seam regressions live in `tests/test_banknote_image_quality.py`.
 The original order photos were also used to check full margins and native crop
 resolution without adding those photos to the public repository.
+
+
+## Printing to the paper edge: Hong Kong P-55c
+
+Some notes have a printed pattern right to the physical paper edge. On a pale
+holder, a stricter warm-colour mask can separate that sheet from thin holder
+reflections. This produces a candidate only: all four colour transitions,
+rectangular geometry, any known aspect ratio, and a separate holder label must
+agree. The validator then compares the proposed crop with the original photo;
+only an affirmative verdict permits it. Blank margins are not required when
+the original has none. A rejection or unavailable validator leaves this
+candidate unused. The original image and exact crop corners remain linked.
+
+Covered by `tests/test_banknote_image_quality.py`, including rejection when
+validation fails or is unavailable, wrong aspect ratios, and missing labels.
