@@ -173,6 +173,10 @@ for _entry in _entries:
     _entry['countries'] += _ALIASES.get(_entry['key'], ())
 
 _DIRECT_SOURCES = {
+    'british-bahrain': (
+        'https://history.state.gov/countries/bahrain',
+        'https://www.pmgnotes.com/priceguide/world-note-prices.aspx?deid=1775714&subcat=authorization-6-1964',
+        'https://en.numista.com/217019'),
     'british-gilbert-and-ellice-islands': ('https://www.greysheet.com/prices/nc/gilbert-and-ellice-islands-world-paper-money/8491',),
     'french-french-india': ('https://www.greysheet.com/prices/nc/french-india-world-paper-money/8484',),
     'french-french-cochin-china': ('https://www.greysheet.com/prices/nc/french-cochinchina-world-paper-money/8482',),
@@ -186,6 +190,10 @@ _DIRECT_SOURCES = {
 for _entry in _entries:
     if _entry['key'] in _DIRECT_SOURCES:
         _entry['sources'] = _DIRECT_SOURCES[_entry['key']]
+    if _entry['key'] == 'british-bahrain':
+        _entry['note'] = ('Currency Board notes under British administrative control / protection, including the '
+                          '1964-authorization first issue of 1965–1967. Independence was 15 August 1971; '
+                          'undated, transition-year and conflicting-issuer notes require review.')
 
 # Gap-search scope is distinct from broad collection-family membership. These
 # conservative YEAR bounds reuse the reviewed filing/market policy; the end is
@@ -464,7 +472,6 @@ _DATED_COUNTRIES = {
     'Singapore': ('british-singapore', 1840, 1965),
     'Palestine': ('british-palestine', 1927, 1948),
     'Newfoundland': ('british-newfoundland', 1850, 1949),
-    'Bahrain': ('british-bahrain', 1965, 1971),
     'Brunei': ('british-brunei', 1967, 1984),
     'Grenada': ('british-grenada', 1837, 1974),
     'Kuwait': ('british-kuwait', 1961, 1962),
@@ -521,6 +528,12 @@ def entity_for_row(row, classification=None):
         entity_country = family.get('entity_country')
         return _BY_GROUP_COUNTRY.get((family['group'], catalog.fold(entity_country))) if entity_country else None
     country = catalog.canonical_country(info.get('country') or values.get('country') or '')
+    if catalog.fold(country) == 'bahrain':
+        # Coverage must use the same issuer-aware rule as filing. A date-only
+        # fallback credited later/contradictory issuers to the protected state.
+        period = catalog.bahrain_issue(values.get('country'), values.get('date_1'),
+                                       values.get('issuer'), values.get('series'))
+        return ENTITY_BY_KEY['british-bahrain'] if period and period['group'] == 'british' else None
     if country == 'Solomon Islands':
         # This shared name spans independence: only the reviewed dated filing
         # can credit the predecessor. Never reach the broad historical-name

@@ -110,10 +110,17 @@ def _administration_problem(item, years):
 
 
 def administration_label(item):
+    country = catalog.canonical_country(str(item.get('country') or ''))
+    if catalog.fold(country) == 'bahrain':
+        year = item.get('issue_year_start')
+        evidence = ' '.join(str(item.get(key) or '') for key in ('title', 'series'))
+        issue = catalog.bahrain_issue(country, year if year is not None else item.get('date_1'),
+                                     item.get('issuer'), evidence)
+        # Use the reviewed relationship, never a model's "colony" description.
+        return issue['period'] if issue['group'] == 'british' and not problem(item) else ''
     admin = normalize_administration(item.get('administration'))
     if admin.get('kind') in ADMINISTRATION_KINDS and admin.get('name'):
         return f"{admin['name']} · {admin['kind']}"
-    country = catalog.canonical_country(str(item.get('country') or ''))
     if country in DEPENDENCIES:
         return f'{country} · dependency'
     return ''
@@ -231,6 +238,8 @@ def problem(item):
     if gap_problem:
         return gap_problem
     country = catalog.canonical_country(str(item.get('country') or ''))
+    if catalog.fold(country) == 'bahrain':
+        country = 'Bahrain'
     theme = str(item.get('theme') or '')
     if country == 'United States of America' and not item.get('administration'):
         return 'Domestic US issue is not colonial' if theme.startswith(('colonial-', 'wantlist-british', 'wantlist-french', 'wantlist-other', 'entity-gap-')) else ''
@@ -262,6 +271,24 @@ def problem(item):
         if year is None:
             return 'Colonial issue date is not established'
         years = [year]
+    if country == 'Bahrain':
+        # The 1964 authorization belongs to the first Currency Board issue,
+        # not the whole 1861–1971 protected-state period. An old printed date
+        # or model-supplied administration cannot admit an independent issue.
+        supplied_range = any(item.get(key) is not None
+                             for key in ('issue_year_start', 'issue_year_end'))
+        if supplied_range and len(years) != 2:
+            return 'Bahrain offer needs a complete actual issue-year range'
+        # Title text can contradict the supplied identity, never establish it.
+        issue_evidence = ' '.join(str(item.get(key) or '') for key in ('title', 'series'))
+        if not item.get('issuer') or not all(
+                catalog.bahrain_issue(country, year, item.get('issuer'),
+                                      issue_evidence)['group'] == 'british'
+                for year in years):
+            return 'Bahrain protected-state issue date / Currency Board issuer not established'
+        admin_end = _year(normalize_administration(item.get('administration')).get('year_end'))
+        if admin_end is not None and admin_end > 1971:
+            return 'Bahrain administration exceeds independence on 15 August 1971'
     # SIMA's first dollar notes were actually issued in October 1977, before
     # independence on 7 July 1978. The generic lower bound excludes an
     # administration's transition year; this reviewed start is an issue year,

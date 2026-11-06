@@ -6978,6 +6978,27 @@ def init_db():
         )
         db.commit()
 
+    # v39: Bahrain's 1964 authorization / 1965–67 Currency Board issues share
+    # the British administration group. Refresh display positions once without
+    # changing saved catalogue facts, purchase data or photo references.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('banknote_display_number_v39',),
+    ).fetchone():
+        db.execute('SAVEPOINT banknote_display_number_v39')
+        try:
+            _renumber_banknotes(db)
+            db.execute(
+                "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+                ('banknote_display_number_v39', datetime.utcnow().isoformat()),
+            )
+        except Exception:
+            db.execute('ROLLBACK TO SAVEPOINT banknote_display_number_v39')
+            db.execute('RELEASE SAVEPOINT banknote_display_number_v39')
+            raise
+        db.execute('RELEASE SAVEPOINT banknote_display_number_v39')
+        db.commit()
+
     market_estimates.init_schema(db)
     market_slab_labels.init_schema(db)
     banknote_catalog_proposals.init_schema(db)
@@ -15960,7 +15981,7 @@ BANKNOTE_COLONIAL_WANTLIST = [
     ('Seychelles', 'british', 'Government of Seychelles', '1919–1968', ('seychelles',), 1976),
     ('Western Samoa', 'british', 'Territory of Western Samoa (New Zealand administration)', '1920–1961', ('samoa',), 1962),
     ('Zanzibar', 'british', 'Zanzibar Government', '1908–1928', ('zanzibar',), None),
-    ('Bahrain', 'british', 'Bahrain Currency Board', '1964–1965', ('bahrain',), 1971),
+    ('Bahrain', 'british', 'Bahrain Currency Board', '1965–1967 (1964 authorization)', ('bahrain',), 1971),
     ('Qatar and Dubai', 'british', 'Qatar & Dubai Currency Board', '1966', ('qatar',), 1973),
     ('Jersey', 'british', 'States of Jersey', '1963 onward', ('states of jersey', 'jersey (channel', 'jersey, channel', 'bailiwick of jersey'), None),
     ('Tunisia', 'french', "Banque de l'Algérie et de la Tunisie", '1918–1958', ('tunisia',), 1958),
@@ -20163,7 +20184,7 @@ ANALYSIS_CATEGORIES = ('watches', 'coins', 'banknotes')
 ANALYSIS_FOCUS = {
     'watches': 'the independent watchmakers',
     'coins': 'the ancient Greek coinage',
-    'banknotes': 'colonial, United States, military & occupation, and world notes',
+    'banknotes': 'colonial / administrative control, United States, military & occupation, and world notes',
 }
 _ANALYSIS_LOCK = threading.Lock()
 _ANALYSIS_INFLIGHT = set()
@@ -20847,8 +20868,11 @@ def _banknote_military(r):
     return 'Occupation-era issue' if flagged else None
 
 
-def _banknote_colony(country):
+def _banknote_colony(country, year=None, issuer=None, series=None):
     """(empire, colony-name-as-matched) from the colony table, or None."""
+    bahrain = banknote_catalog.bahrain_issue(country, year, issuer, series)
+    if bahrain:
+        return ('British', 'bahrain') if bahrain['group'] == 'british' else None
     low = _bn_country_label(country).lower()
     if not low:
         return None
@@ -20874,8 +20898,14 @@ def _banknote_empire(country, year=None, issuer=None, series=None):
 def _banknote_is_colonial(r):
     """Colonial when the Issue Type says so, or when the country is a
     known colony and the note is dated on or before the end of colonial
-    rule (an undated note of a colony counts). Post-independence issues
-    of a former colony are national notes, not colonial."""
+    rule (an undated note of a colony counts). Bahrain's protected-state
+    issues use the reviewed date/issuer rule before legacy flags. This is a
+    filing bucket, not a claim that Bahrain was a British colony."""
+    bahrain = banknote_catalog.bahrain_issue(
+        _row_get(r, 'country'), _row_get(r, 'date_1'),
+        _row_get(r, 'issuer'), _row_get(r, 'series'))
+    if bahrain:
+        return bahrain['group'] == 'british'
     if (_row_get(r, 'issue_type') or '').strip().lower() == 'colonial':
         return True
     country = _bn_country_label(_row_get(r, 'country'))
@@ -20883,7 +20913,8 @@ def _banknote_is_colonial(r):
     year = _safe_int(_row_get(r, 'date_1'))
     if low.startswith('philippine'):
         return year is None or year <= 1946
-    hit = _banknote_colony(country)
+    hit = _banknote_colony(country, _row_get(r, 'date_1'),
+                           _row_get(r, 'issuer'), _row_get(r, 'series'))
     if not hit:
         return False
     # "British East Africa", "Belgian Congo", "Italian Somaliland": the
@@ -20997,6 +21028,9 @@ def _analysis_banknotes_profile(db):
         """Where a military note would otherwise file — the essay reads a
         Philippine JIM note beside the American-colonial run."""
         country = _bn_country_label(r['country'])
+        bahrain = banknote_catalog.bahrain_issue(country, r['date_1'], r['issuer'], r['series'])
+        if bahrain:
+            return bahrain['period']
         low = country.lower()
         if low.startswith('united states') or low.startswith('confederate'):
             return 'United States'
@@ -21009,6 +21043,7 @@ def _analysis_banknotes_profile(db):
             {'country': _bn_country_label(r['country']), 'denomination': r['denomination'], 'issuer': r['issuer'],
              'issue_type': r['issue_type'], 'series': r['series'], 'pick': r['pick_number'],
              'year': r['date_1_text'] or r['date_1'], 'printer': r['printer'],
+             'period': banknote_catalog.row_classification(r)['period'],
              'printer_group': banknote_printers.canonical_printer(r['printer']),
              'grade': _grade_label(r),
              'empire': _banknote_empire(r['country'], r['date_1'], r['issuer'], r['series']) if bucket == 'colonial' else None,
@@ -21019,7 +21054,7 @@ def _analysis_banknotes_profile(db):
     price_all, _ = _analysis_money(rows, 'price')
     decade_keys = sorted({_decade(r['date_1']) for r in rows if _decade(r['date_1'])})
     decade_series = [
-        {'name': 'Colonial', 'values': [sum(1 for r in colonial if _decade(r['date_1']) == d) for d in decade_keys]},
+        {'name': 'Colonial / administrative control', 'values': [sum(1 for r in colonial if _decade(r['date_1']) == d) for d in decade_keys]},
         {'name': 'United States', 'values': [sum(1 for r in us if _decade(r['date_1']) == d) for d in decade_keys]},
         {'name': 'Military & occupation', 'values': [sum(1 for r in military if _decade(r['date_1']) == d) for d in decade_keys]},
         {'name': 'Other', 'values': [sum(1 for r in other if _decade(r['date_1']) == d) for d in decade_keys]},
@@ -21044,8 +21079,10 @@ def _analysis_banknotes_profile(db):
         'military_groups': military_list,
         'military_territories': _analysis_tally([_bn_country_label(r['country']) for r in military], 20),
         'military_decades': _decades(military),
-        'colonial_rule': ('A note files as colonial when its country was a colony at the date of '
-                          'issue (Issue Type = Colonial always counts); the Philippines under US '
+        'colonial_rule': ('This section includes colonial and administrative-control issues. A note files here when its country was a colony at the date of '
+                          'issue or Issue Type = Colonial. Bahrain instead uses its reviewed date/issuer rule: '
+                          'British administrative control — protected state; independent and unresolved issues '
+                          'stay outside this bucket, even with an old Colonial flag. The Philippines under US '
                           'rule, 1899–1946, are treated as an American colony. Military and '
                           'occupation money is its own movement, whatever the territory.'),
         'colonial_decades': _decades(colonial),
@@ -21127,14 +21164,17 @@ _ANALYSIS_BRIEFS = {
     'banknotes': (
         "You are a senior paper-money specialist writing a scholarly essay on a private "
         "collection (the register of a Spink or Heritage world-paper catalogue essay). Write "
-        "an in-depth analysis of the collection in four movements — colonial notes, United "
+        "an in-depth analysis of the collection in four movements — colonial and administrative-control notes, United "
         "States notes, military and occupation money, and the other world notes. For the "
-        "colonial material: the empires represented and what each empire's issuing model "
+        "colonial and administrative-control material: the empires represented and what each empire's issuing model "
         "looked like (currency boards, chartered and private banks, the Banque de l'Indochine "
         "and Banque de l'Algérie, the Banco Nacional Ultramarino, the Banque du Congo Belge, "
         "the colonial governments), the printers (De La Rue, Bradbury Wilkinson, Waterlow, "
         "American Bank Note, the Banque de France works), design vocabulary, security "
-        "features, and how the notes track the transitions to independence. Treat the "
+        "features, and how the notes track the transitions to independence. Use each note's period "
+        "to distinguish colonies from protected states. Bahrain's early Currency Board notes "
+        "belong under British administrative control — protected state, not a British colony; "
+        "1964 is the authorization year for the first 1965–67 issue and must remain as recorded. Treat the "
         "Philippines under United States rule (1899–1946: Treasury Certificates, the "
         "Philippine National Bank, the Bank of the Philippine Islands, Commonwealth issues) "
         "as an American colonial series in the colonial movement — not strictly a colony, "

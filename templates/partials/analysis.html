@@ -18,7 +18,7 @@
       {%- elif category == 'coins' -%}
         {{ profile.total }} coins held · {{ profile.greek_count }} ancient Greek across {{ profile.regions|length }} regions · {{ profile.ancient_other_count }} other ancient · {{ profile.modern_count }} modern
       {%- else -%}
-        {{ profile.total }} notes held · {{ profile.colonial_count }} colonial across {{ profile.empires|length }} empires · {{ profile.us_count }} United States · {{ profile.military_count }} military &amp; occupation · {{ profile.other_count }} other world
+        {{ profile.total }} notes held · {{ profile.colonial_count }} colonial / administrative control across {{ profile.empires|length }} empires · {{ profile.us_count }} United States · {{ profile.military_count }} military &amp; occupation · {{ profile.other_count }} other world
       {%- endif -%}
     </div>
   </div>
@@ -149,20 +149,20 @@
 
   {% else %}
   <section class="an-section an-figures">
-    <div class="an-figure"><div class="an-figure-n">{{ profile.colonial_count }}</div><div class="an-figure-l">colonial notes · {{ profile.empires|length }} empires</div></div>
+    <div class="an-figure"><div class="an-figure-n">{{ profile.colonial_count }}</div><div class="an-figure-l">colonial / administrative control · {{ profile.empires|length }} empires</div></div>
     <div class="an-figure"><div class="an-figure-n">{{ profile.us_count }}</div><div class="an-figure-l">United States notes</div></div>
     <div class="an-figure"><div class="an-figure-n">{{ profile.military_count }}</div><div class="an-figure-l">military &amp; occupation · {{ profile.military_groups|length }} authorities</div></div>
     <div class="an-figure"><div class="an-figure-n">{{ profile.other_count }}</div><div class="an-figure-l">other world notes</div></div>
     {% if profile.graded %}<div class="an-figure"><div class="an-figure-n">{{ '%.1f'|format(profile.avg_grade) }}</div><div class="an-figure-l">average grade of {{ profile.graded }} graded · {{ profile.gem_count }} at 65 or better</div></div>{% endif %}
   </section>
   <section class="an-charts">
-    {{ hbars(profile.empires|map(attribute='empire')|list|zip(profile.empires|map(attribute='count')|list)|list, 'Colonial notes by empire') }}
+    {{ hbars(profile.empires|map(attribute='empire')|list|zip(profile.empires|map(attribute='count')|list)|list, 'Colonial / administrative control by empire') }}
     {{ stacked(profile.decade_keys, profile.decade_series, profile.decade_totals, 'Notes by decade of issue') }}
     {% if profile.military_groups %}{{ hbars(profile.military_groups|map(attribute='authority')|list|zip(profile.military_groups|map(attribute='count')|list)|list, 'Military & occupation issues by authority') }}{% endif %}
     {{ columns(profile.grade_buckets, 'Grade distribution', profile.graded ~ ' graded notes (PMG / PCGS)') }}
   </section>
   <section class="an-section">
-    <h2>Colonial notes, empire by empire</h2>
+    <h2>Colonial / administrative control, empire by empire</h2>
     <table class="an-table">
       <thead><tr><th>Empire</th><th class="num">Notes</th><th>Span</th><th>Territories</th><th>Issuers</th><th>Printers</th><th class="num">Avg grade</th></tr></thead>
       <tbody>
@@ -206,7 +206,7 @@
     <div><h3>United States by note class</h3><div class="an-chips">{{ tally(profile.us_classes) }}</div></div>
     <div><h3>United States issuers</h3><div class="an-chips">{{ tally(profile.us_issuers) }}</div></div>
     <div><h3>United States by decade</h3><div class="an-chips">{{ tally(profile.us_decades) }}</div></div>
-    <div><h3>Colonial by decade</h3><div class="an-chips">{{ tally(profile.colonial_decades) }}</div></div>
+    <div><h3>Colonial / administrative control by decade</h3><div class="an-chips">{{ tally(profile.colonial_decades) }}</div></div>
     <div><h3>Military &amp; occupation by territory · decade</h3><div class="an-chips">{{ tally(profile.military_territories) }}{{ tally(profile.military_decades) }}</div></div>
     <div><h3>Other world notes</h3><div class="an-chips">{{ tally(profile.other_countries) }}</div></div>
     <div><h3>Other notes by type · decade</h3><div class="an-chips">{{ tally(profile.other_types) }}{{ tally(profile.other_decades) }}</div></div>

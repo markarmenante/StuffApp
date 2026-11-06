@@ -172,6 +172,30 @@ issues are labelled Dominion / independent Commonwealth, not colonial. Crown
 Dependencies, British protected states and overseas territories have separate
 period labels. Rhodesian UDI is identified as an unrecognized administration.
 
+Bahrain Currency Board notes dated 1965–1970, with no contradictory issuer,
+file under **British administrative control — protected state**. This
+describes the period of British protection, not a Crown Colony. The recorded
+1964 date also qualifies when the issuer is explicitly the Bahrain Currency
+Board: it is the authorization year used by the catalogue for the first
+1965–1967 issue, not a reason to rewrite the saved date. PMG's
+[Currency Board registry set](https://notes.www.collectors-society.com/registry/notes/public_sets.aspx?CategoryID=1041&SetTypeID=8628)
+lists P-1–P-6 under 1964; its
+[one-dinar entry](https://www.pmgnotes.com/priceguide/world-note-prices.aspx?deid=1775714&subcat=authorization-6-1964)
+identifies the June 1964 authorization. [Numista's one-dinar type](https://en.numista.com/217019)
+separately records the 1964 catalogue date and 16 October 1965 issue date.
+
+Bahrain became independent on [15 August 1971](https://history.state.gov/countries/bahrain).
+A year-only 1971 record remains unresolved; later issues, including Bahrain
+Monetary Agency 1973 issues, belong to Independent & other. Undated Currency
+Board notes, ranged or malformed dates, and early dates with a later or
+unrecognized issuer remain explicitly marked for review. A series-year mention
+alone cannot establish the period. Filing, entity coverage and the existing
+notes all use this computed rule; country, issuer, dates, references, purchase
+facts and ownership status remain unchanged.
+Market Scan applies the same Bahrain boundary to broad and missing-entity
+recommendations; supplied administration dates cannot extend past independence,
+and eligible cards use the protected-state label rather than a supplied colony label.
+
 All Philippine issues remain together under United States as explicitly
 requested, including Spanish, American, Commonwealth, Japanese occupation and
 Republic issues. This is a collection choice, not a claim of continuous US rule.

@@ -11,6 +11,91 @@ def note(country,year,**kw):
     return dict(country=country,date_1=year,empire='British',**kw)
 
 class ColonialTests(unittest.TestCase):
+    def test_bahrain_authorization_and_first_issues_share_collection_boundary(self):
+        for year in (1964, 1965, 1967):
+            for theme in ('colonial-worldwide', 'wantlist-british', 'entity-gap-british'):
+                with self.subTest(year=year, theme=theme):
+                    item = note('Bahrain', year, issuer='Bahrain Currency Board',
+                                title='Bahrain 1 Dinar PMG 65', pick_number='P-4a',
+                                theme=theme, entity_key='british-bahrain')
+                    before = json.dumps(item, sort_keys=True)
+                    self.assertEqual(policy.problem(item), '')
+                    self.assertEqual(policy.administration_label(item),
+                                     catalog.bahrain_issue('Bahrain', year, item['issuer'])['period'])
+                    self.assertEqual(json.dumps(item, sort_keys=True), before)
+
+    def test_bahrain_rejects_incompatible_issuer_unknown_and_late_issues(self):
+        base = note('Bahrain', 1964, issuer='Bahrain Currency Board',
+                    title='Bahrain 1 Dinar PMG 65', pick_number='P-4a',
+                    theme='colonial-worldwide')
+        for change in (
+                dict(issuer='Bahrain Monetary Agency', pick_number='P-8a'),
+                dict(issuer='Central Bank of Bahrain'), dict(issuer='BMA'),
+                dict(issuer='Unknown bank'), dict(issuer=''), dict(date_1=1900),
+                dict(date_1=None), dict(date_1='ND'), dict(date_1='1965–1967'),
+                dict(date_1=1964.5), dict(date_1=True), dict(date_1=1971),
+                dict(date_1=1972), dict(date_1=1973),
+                dict(series='BMA issue'), dict(series='1971 issue'),
+                dict(title='Bahrain 1972 1 Dinar PMG 65'),
+                dict(title='Bahrain Monetary Agency 1 Dinar PMG 65'),
+                dict(title='Bahrain BMA 1 Dinar PMG 65'),
+                dict(title='Bahrain CBB 1 Dinar PMG 65')):
+            with self.subTest(change=change):
+                item = dict(base, **change)
+                self.assertTrue(policy.problem(item))
+                self.assertEqual(policy.administration_label(item), '')
+        # A title can contradict an early date, but cannot provide a missing one.
+        self.assertTrue(policy.problem(dict(base, date_1=None, title='Bahrain 1965 1 Dinar')))
+        self.assertEqual(policy.administration_label(dict(base, empire='', theme='denominations',
+                                                         title='Bahrain BMA 1 Dinar')), '')
+
+    def test_bahrain_administration_cannot_widen_period_or_relabel_colony(self):
+        admin = dict(kind='protectorate', name='British protected state', territory='Bahrain',
+                     year_start=1861, year_end=1971, source='https://history.example/bahrain',
+                     evidence='Synthetic source attribution for a Currency Board issue')
+        base = note('Bahrain', 1964, issuer='Bahrain Currency Board',
+                    title='Bahrain 1 Dinar PMG 65', pick_number='P-4a',
+                    theme='colonial-worldwide', issue_year_start=1965, issue_year_end=1967,
+                    issue_date_source='https://catalogue.example/bahrain-p4a', administration=admin)
+        self.assertEqual(policy.problem(base), '')
+        self.assertEqual(policy.administration_label(base),
+                         'British administrative control — protected state')
+        # Even supported additional-administration evidence cannot override
+        # Bahrain's issuer and independence boundary (including broad searches).
+        for change in (
+                dict(date_1=1973, issuer='Bahrain Monetary Agency', pick_number='P-8a',
+                     issue_year_start=1973, issue_year_end=1973,
+                     administration=dict(admin, year_end=1975)),
+                dict(administration=dict(admin, year_end=1975)),
+                dict(issue_year_end=1971), dict(issue_year_start=1972, issue_year_end=1972),
+                dict(issue_year_end=None), dict(issue_date_source=''),
+                dict(title='Bahrain 1973 1 Dinar PMG 65')):
+            with self.subTest(change=change):
+                self.assertTrue(policy.problem(dict(base, **change)))
+        mislabeled = dict(base, administration=dict(admin, kind='colony', name='British colony'))
+        self.assertEqual(policy.problem(mislabeled), '')
+        self.assertEqual(policy.administration_label(mislabeled),
+                         'British administrative control — protected state')
+        self.assertTrue(policy.problem(dict(base, issue_year_end=None, administration=None)))
+
+    def test_bahrain_casing_cannot_bypass_independence_or_label_rule(self):
+        for country in ('bahrain', 'BAHRAIN', 'Bahrain'):
+            with self.subTest(country=country):
+                admin = dict(kind='colony', name='British colony', territory=country,
+                             year_start=1861, year_end=1971,
+                             source='https://history.example/bahrain', evidence='Synthetic evidence')
+                item = note(country, 1964, issuer='Bahrain Currency Board', pick_number='P-4a',
+                            theme='colonial-worldwide', issue_year_start=1965, issue_year_end=1965,
+                            issue_date_source='https://catalogue.example/bahrain-p4a', administration=admin)
+                self.assertEqual(policy.problem(item), '')
+                self.assertEqual(policy.administration_label(item),
+                                 'British administrative control — protected state')
+                late = dict(item, date_1=1973, issuer='Bahrain Monetary Agency',
+                            issue_year_start=1973, issue_year_end=1973,
+                            administration=dict(admin, year_end=1975))
+                self.assertTrue(policy.problem(late))
+                self.assertEqual(policy.administration_label(late), '')
+
     def test_period_boundaries_and_independent_issuers(self):
         for country,valid,end in [('Portuguese Guinea',1964,1973),('Angola',1972,1975),('Mozambique',1961,1975),('Algeria',1959,1962),('Tunisia',1950,1956),('India',1937,1947),('Canada',1860,1867),('Australia',1890,1901),('Ceylon',1940,1948)]:
             self.assertFalse(policy.problem(note(country,valid)),country)

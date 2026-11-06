@@ -737,6 +737,50 @@ def american_colonial_country(country, date=None, issuer=None, series=None):
     return None
 
 
+def bahrain_issue(country, date=None, issuer=None, series=None):
+    """Review Bahrain's administrative period without changing its note facts.
+
+    PMG catalogues Currency Board P-1–P-6 under the 1964 authorization;
+    the first notes were issued in 1965–1967. The board survived independence,
+    so its name, an ND date or an isolated series year cannot establish this
+    period. See the dated sources in docs/banknote-catalog.md.
+    """
+    if not isinstance(country, str) or fold(canonical_country(country)) != 'bahrain':
+        return None
+    def result(group, period, uncertain=False):
+        return dict(group=group, period=period, uncertain=uncertain)
+    def review(period='Date / issuer needs review to establish Bahrain administrative period'):
+        return result('other', period, True)
+    year = exact_year(date)
+    if issuer is not None and not isinstance(issuer, str):
+        return review()
+    authority = fold(issuer or '')
+    board = authority in {
+        'bahraincurrencyboard', 'thebahraincurrencyboard', 'bahraincurrencyboardbcb',
+        'bcbbahraincurrencyboard', 'currencyboardofbahrain', 'bcb',
+    }
+    series_text = series if isinstance(series, str) else ''
+    later_authority = (any(term in fold(series_text) for term in (
+        'bahrainmonetaryagency', 'centralbankofbahrain'))
+        or bool(re.search(r'\b(?:BMA|CBB)\b', series_text, re.I)))
+    later_series = any(int(value) >= 1971 for value in re.findall(
+        r'(?<![A-Za-z0-9])((?:19|20)\d{2})(?![A-Za-z0-9])', series_text))
+    if year == 1971:
+        return review('Bahrain independence transition — 15 August 1971; exact issue date needed')
+    if year is None or year < 1964:
+        return review()
+    if year > 1971:
+        return result('other', 'Independent Bahrain issue')
+    # A known later or unrelated issuer must not be overruled by an early date.
+    # The authorization-year exception requires the explicit Currency Board.
+    if later_authority or later_series or (authority and not board) or (year == 1964 and not board):
+        return review()
+    period = 'British administrative control — protected state'
+    if year == 1964:
+        period += ' (1964 authorization; first 1965–67 issue)'
+    return result('british', period)
+
+
 @lru_cache(maxsize=8192)
 def classify(country, date=None, issuer=None, series=None):
     country = canonical_country(collection_country(country, date, issuer, series)) or ''
@@ -748,6 +792,9 @@ def classify(country, date=None, issuer=None, series=None):
         return {**GROUP_BY_KEY[key], 'country': country, 'period': label, 'uncertain': uncertain}
     def other(label='Independent or other issue; administration not assigned', uncertain=False):
         return result('other', label, uncertain)
+    bahrain = bahrain_issue(country, date, issuer, series)
+    if bahrain:
+        return result(bahrain['group'], bahrain['period'], bahrain['uncertain'])
     if country == 'Netherlands Antilles':
         # Collection family, not a pre-independence Market Scan period. The
         # 1954 Charter granted autonomy within the Kingdom, not independence;
