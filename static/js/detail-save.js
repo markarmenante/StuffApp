@@ -45,7 +45,7 @@
     if (ready) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (preparing || form.inert) return;
+    if (preparing || form.inert || form.dataset.orderImportPending === 'true') return;
     preparing = true;
     window.__stuffAllowUnload = false;
     if (notice) notice.hidden = true;
@@ -95,7 +95,7 @@
   document.addEventListener('keydown', event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
-      if (!event.repeat && !form.inert) form.requestSubmit();
+      if (!event.repeat && !form.inert && form.dataset.orderImportPending !== 'true') form.requestSubmit();
     }
   });
 })();

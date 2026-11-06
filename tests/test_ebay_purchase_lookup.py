@@ -574,12 +574,18 @@ class LookupTests(unittest.TestCase):
             self.assertEqual(second['id'], job['id'])
             self.assertFalse(second['session_recovery']['open_browser'])
             self.assertEqual(second['expires_at'], job['expires_at'])
+            status = self.client.get('/banknotes/note/purchase-refresh/' + job['id']).json
+            self.assertEqual(status['status'], 'reading')
+            self.assertIn('Checking the eBay connection', status['message'])
+            self.assertEqual(lookup.session_for(self.db, job['id'])['state'], 'sign_in_required')
+            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ebay_order_items').fetchone()[0], 0)
             self.assertEqual(self.post(action='complete', id=job['id'],
                                       session=dict(state='challenge_required')).status_code, 200)
             self.assertEqual(self.client.get('/banknotes/note/purchase-refresh/' + job['id']).json['status'], 'challenge_required')
         with patch.object(lookup.time, 'time', return_value=clock + 16):
             third = self.post(action='claim').json['request']
             self.assertFalse(third['session_recovery']['open_browser'])
+            self.assertEqual(self.client.get('/banknotes/note/purchase-refresh/' + job['id']).json['status'], 'reading')
             self.assertEqual(self.complete(job).status_code, 200)
             self.assertIsNone(self.post(action='claim').json['request'])
             self.assertEqual(self.client.get('/banknotes/note/purchase-refresh/' + job['id']).json['status'], 'done')

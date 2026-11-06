@@ -17,7 +17,7 @@ const {createHash} = require('node:crypto');
   const artifacts = process.env.ORDER_REVIEW_ARTIFACTS || fs.mkdtempSync(path.join(os.tmpdir(), 'banknote-order-review-'));
   fs.mkdirSync(artifacts, {recursive:true});
   const sourceFiles = ['app.py','banknote_imports.py','banknote_photo_sides.py','ebay_purchase_lookup.py','purchase_orders.py',
-    'static/js/banknote-imports.js','templates/banknote_import_new.html','templates/banknote_import_review.html','templates/partials/banknote_import_detail_header.html','templates/partials/banknote_import_detail_sources.html','templates/partials/banknote_import_styles.html','templates/partials/collection_toolbar.html','templates/detail.html'].filter(file=>fs.existsSync(path.join(repo,file)));
+    'static/js/banknote-imports.js','static/js/detail-save.js','templates/banknote_import_new.html','templates/banknote_import_review.html','templates/partials/banknote_import_detail_header.html','templates/partials/banknote_import_detail_sources.html','templates/partials/banknote_import_styles.html','templates/partials/collection_toolbar.html','templates/detail.html'].filter(file=>fs.existsSync(path.join(repo,file)));
   const hashes=()=>Object.fromEntries(sourceFiles.map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(repo,file))).digest('hex')]));
   const evidence={passed:[],failures:[],errors:[],externalRequests:[],filter:process.env.ORDER_REVIEW_TEST_FILTER||null,sourceBefore:hashes()};
   const python = String.raw`
@@ -374,6 +374,44 @@ finally:server.server_close();temporary.cleanup()
         }finally{await t.close();}
       });
     }
+    for (const [name,selector,mobile,number] of [
+      ['Back desktop','.detail-nav-overlay .back-link',false,'98-76543-41110'],
+      ['Cancel desktop','.save-bar .btn-cancel',false,'98-76543-41120'],
+      ['Back mobile','.detail-nav-overlay .back-link',true,'98-76543-41130'],
+      ['Cancel mobile','.save-bar .btn-cancel',true,'98-76543-41140'],
+    ]) await run('pending import keeps '+name+' working',async()=>{
+      const t=await setup(mobile);try{
+        const before=await t.state(),posts=[],dialogs=[];
+        t.page.on('request',request=>{if(request.method()==='POST')posts.push(new URL(request.url()).pathname);});
+        t.page.on('dialog',async dialog=>{dialogs.push(dialog.message());await dialog.dismiss();});
+        await t.page.goto(origin+'/banknotes/new');
+        await t.page.locator('[name="order_number"]').fill(number);
+        await t.page.locator('[name="property_name"]').selectOption('');
+        const created=t.page.waitForResponse(response=>new URL(response.url()).pathname==='/banknotes/imports'&&response.request().method()==='POST');
+        await checkButton(t.page);
+        const started=await (await created).json();
+        // Hold the real saved request at the sign-in phase shown in the report.
+        await t.page.route('**/banknotes/imports/'+started.id+'/status',async route=>{
+          const response=await route.fetch(),body=await response.json();
+          await route.fulfill({response,json:{...body,state:'sign_in_required'}});
+        });
+        await t.page.waitForFunction(()=>document.querySelector('.coin-spec-check-btn')?.textContent.includes('Sign in to eBay'));
+        assert.equal(await t.page.locator('[name="country"]').evaluate(input=>{input.focus();return document.activeElement===input;}),false);
+        assert.equal(await t.page.locator('#saveBtn').evaluate(button=>!!button.closest('[inert]')),true);
+        await t.page.locator('#mainForm').evaluate(form=>form.requestSubmit());
+        await t.page.keyboard.press('Control+s');
+        await t.page.locator(selector).click();
+        await t.page.waitForURL(origin+'/banknotes');
+        assert.deepEqual(dialogs,[],'leaving a waiting import needs no Location/discard prompt');
+        assert.equal(posts.includes('/banknotes/new'),false,'leaving or submitting during import cannot create a duplicate');
+        assert.deepEqual((await t.state()).rows,before.rows,'navigation preserves the collection');
+        await t.page.goto(origin+'/banknotes/imports/new');
+        assert.equal(await t.page.locator('[data-saved-batch="'+started.id+'"]').count(),1,'the exact saved order remains available after leaving');
+        const completed=await t.context.request.post(origin+'/__fixture/complete',{data:{order:number}});
+        assert.equal(completed.status(),200,await completed.text());
+        assert.deepEqual((await t.state()).rows,before.rows);
+      }finally{await t.close();}
+    });
     for (const [name,number,mobile,fromBlank,partial,edit] of [
       ['single desktop blank Check opens exact banknote','98-76543-41010',false,true,false,false],
       ['single mobile order entry opens exact banknote','98-76543-41020',true,false,false,false],
@@ -392,7 +430,7 @@ finally:server.server_close();temporary.cleanup()
           else{await t.page.locator('#banknoteImportOrderNumber').fill(number);await t.page.locator('#banknoteImportStart').click();}
           const initial=await created;assert.equal(initial.status(),200);const started=await initial.json();
           if(fromBlank){
-            assert.equal(await t.page.locator('#mainForm').evaluate(form=>form.inert),true,'pending import prevents ordinary form edits/autosave');
+            assert.equal(await t.page.locator('#mainForm').getAttribute('data-order-import-pending'),'true','pending import prevents ordinary form edits/autosave');
             assert.equal(await t.page.locator('[name="country"]').evaluate(input=>{input.focus();return document.activeElement===input;}),false,'identifying field cannot receive typing during import');
             assert.equal(posts.includes('/banknotes/new'),false,'import does not autosave a duplicate ordinary record');
           }
@@ -410,7 +448,8 @@ finally:server.server_close();temporary.cleanup()
             assert.equal(new URL(t.page.url()).pathname,'/banknotes/new');
             assert.equal(await t.page.locator('[name="notes"]').inputValue(),'Keep my newer inspection notes.');
             assert.match(dialogs.join('\n'),/newer edits are kept here/);
-            assert.equal(await t.page.locator('#mainForm').evaluate(form=>form.inert),false,'form interaction is restored after stopping navigation');
+            assert.equal(await t.page.locator('#mainForm').getAttribute('data-order-import-pending'),null,'form interaction is restored after stopping navigation');
+            assert.equal(await t.page.locator('[name="country"]').evaluate(input=>{input.focus();return document.activeElement===input;}),true,'identifying fields become editable again');
           }else{
             await t.page.waitForURL(origin+saved.completion_url);
             assert.equal(await t.page.locator('[data-import-mode]').count(),0,'normal collection editor opens');

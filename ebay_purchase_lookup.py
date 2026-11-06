@@ -28,7 +28,11 @@ def snapshot(row, session=None):
     result['reader'] = row['reader']
     result['expires_at'] = session['expires_at'] if session else row['requested_at'] + TIMEOUT
     if session:
-        if row['status'] in ('queued', 'reading') and session['state'] in ('sign_in_required', 'challenge_required'):
+        # Today retries an attention state with a fresh read. Its previous
+        # sign-in result must not hide that active attempt. Browser reads keep
+        # their claim while awaiting the user's sign-in/verification.
+        waiting = row['status'] == 'queued' or (row['status'] == 'reading' and row['reader'] == 'browser')
+        if waiting and session['state'] in ('sign_in_required', 'challenge_required'):
             result['status'] = session['state']
         elif row['status'] == 'failed' and session['state'] == 'cancelled':
             result['status'] = 'cancelled'
@@ -249,7 +253,9 @@ def claim(db):
                        ('This purchase request no longer matches a banknote order.', row['id']))
         else:
             session = session_for(db, row['id'])
-            message = row['message'] if session and session['state'] != 'ready' else 'Reading the exact order from eBay Purchases...'
+            message = ('Checking the eBay connection and reading this order…'
+                       if session and session['state'] != 'ready'
+                       else 'Reading the exact order from eBay Purchases...')
             db.execute("UPDATE ebay_purchase_requests SET status='reading',message=? WHERE id=?", (message, row['id']))
             result = dict(id=row['id'], order_id=row['order_id'],
                           expires_at=session['expires_at'] if session else row['requested_at'] + TIMEOUT)

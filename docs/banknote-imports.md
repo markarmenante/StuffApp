@@ -31,8 +31,10 @@ this correction. Existing collection recovery still uses its own comparison work
 Unknown item types, possible bundles, ambiguous quantities, account/membership
 failures, changed source facts and conflicting existing records also stay saved
 for review. One pending item from a multi-item checkout is still a multi-item
-order. The order-only form stays local and prevents new edits/autosave while
-processing; an existing failed form is preserved.
+order. The order-only form prevents edits, Save and autosave while processing,
+but Back and Cancel remain usable. Leaving keeps the saved order available in
+Order review and does not create a blank collection record. A failed attempt
+restores editing and preserves the entered form values.
 
 Single-note completion is enabled by an explicit import/resume POST, including
 clicking a saved order or re-entering its number. Existing checked single drafts
@@ -49,6 +51,9 @@ An order with no imported items says that no items have been saved for review ye
 Retrieval, sign-in, verification and failure messages remain visible, with Retry
 order after failure. A zero pending count means review is complete only when the
 batch actually contains items and every item has been released.
+When Today starts another read after requesting sign-in, progress returns to
+reading while it checks the connection; this does not mark the session ready.
+Another sign-in or verification result restores the corresponding instruction.
 
 A fresh authenticated read is required. An eBay checkout can contain several seller
 orders: the reader verifies each seller order's details link has the same observed

@@ -42,7 +42,7 @@ async function dialogTest(error) {
 }
 async function detailTest(error, changed = false) {
   const button = element(); button.textContent = '✓ Check';
-  const form = {inert: false, querySelector: () => ({value: '12-12345-12345'})};
+  const form = {inert: false, dataset: {}, children: [], querySelector: () => ({value: '12-12345-12345'})};
   let calls = 0; const paths = [], alerts = []; let values = [['order_number', '12-12345-12345']];
   const window = {banknoteOrderDraftCandidate: () => true,
     startBanknoteOrderReview: async () => { calls++; throw error; },
@@ -55,6 +55,7 @@ async function detailTest(error, changed = false) {
   });
   await button.handlers.click();
   assert.equal(form.inert, false, 'The form is restored after a failed import');
+  assert.equal(form.dataset.orderImportPending, undefined, 'Failed imports restore saving and editing');
   assert.equal(button.disabled, false);
   if (error.uncertain) {
     assert.equal(button.textContent, 'Open saved orders');

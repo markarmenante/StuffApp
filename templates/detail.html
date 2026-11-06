@@ -4182,6 +4182,7 @@ window.banknoteOrderDraftCandidate = function (allowEmptyOrder = false) {
 };
 window.banknoteDeferOrderDraft = function () {
   const draftForm = document.getElementById('mainForm');
+  if (draftForm?.dataset.orderImportPending === 'true') return true;
   return Boolean(draftForm && (draftForm.dataset.orderDraftEntry === 'true'
     || draftForm.querySelector('[name="order_number"]')?.value.trim())
     && window.banknoteOrderDraftCandidate(true));
@@ -4908,7 +4909,9 @@ window.banknoteDeferOrderDraft = function () {
   }
   let locationPromptActive = false;
   function needsLocationBeforeLeave() {
-    return isNewRecord && locationEmpty();
+    // An order import is saved separately; leaving its waiting screen must
+    // not require a Location or create an ordinary blank collection record.
+    return isNewRecord && form.dataset.orderImportPending !== 'true' && locationEmpty();
   }
   function promptForLocationBeforeLeave(opts = {}) {
     if (!needsLocationBeforeLeave()) return Promise.resolve(true);
@@ -8284,6 +8287,25 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
   let banknoteOrderUncertain = false, banknoteOrderAttemptValues = null;
   const banknoteOrderFormValues = form => JSON.stringify([...new FormData(form)].map(([name, value]) =>
     [name, typeof value === 'string' ? value : value.name ? [value.name, value.size, value.lastModified] : null]));
+  function lockBanknoteOrderFields(form) {
+    const locked = [];
+    const accessible = 'a.back-link, a.btn-cancel, .coin-spec-check-btn';
+    function lockChildren(parent) {
+      for (const child of parent.children) {
+        if (child.matches(accessible)) continue;
+        if (child.querySelector(accessible)) lockChildren(child);
+        else { locked.push([child, child.inert]); child.inert = true; }
+      }
+    }
+    // Keep editing and Save locked to prevent duplicate records, while Back,
+    // Cancel and progress remain accessible throughout the import.
+    form.dataset.orderImportPending = 'true';
+    lockChildren(form);
+    return () => {
+      locked.forEach(([node, inert]) => { node.inert = inert; });
+      delete form.dataset.orderImportPending;
+    };
+  }
   document.querySelectorAll('.coin-spec-check-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (banknoteOrderUncertain) {
@@ -8305,10 +8327,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
           const orderNumber = orderForm.querySelector('[name="order_number"]').value;
           const startedValues = banknoteOrderFormValues(orderForm);
           banknoteOrderAttemptValues = startedValues;
-          const wasInert = orderForm.inert;
-          // Editing identification while the order is importing could trigger
-          // ordinary new-record autosave and duplicate the purchased note.
-          orderForm.inert = true;
+          const unlockOrderFields = lockBanknoteOrderFields(orderForm);
           try {
             const saved = await window.startBanknoteOrderReview(orderNumber,
               {onProgress: message => { btn.textContent = message; }});
@@ -8318,7 +8337,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
             window.__stuffAllowUnload = true;
             window.location.assign(saved.url);
           } finally {
-            orderForm.inert = wasInert;
+            unlockOrderFields();
           }
           return;
         }
