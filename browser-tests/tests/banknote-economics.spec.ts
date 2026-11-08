@@ -11,7 +11,11 @@ for (const width of [1440, 390]) {
     await expect(panel).toBeVisible();
     await expect(panel.locator('[data-economic="at_issue_display"]')).toContainText('≈ $');
     await expect(panel.locator('[data-economic="today_display"]')).toContainText('$');
-    expect(await panel.evaluate(el => el.nextElementSibling?.textContent?.trim())).toBe('Description');
+    expect(await panel.evaluate(el => {
+      let next = el.nextElementSibling;
+      while (next?.matches('script, style')) next = next.nextElementSibling;
+      return next?.textContent?.trim();
+    })).toBe('Description');
     const box = await panel.boundingBox();
     expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
     const issue = panel.locator('[name="issue_date"]');
