@@ -52,6 +52,7 @@ def fold(value):
 
 # Only spelling equivalents; never merge a successor state or currency area.
 ALIASES = {
+    'Brazil': ('Brasil',),
     'United States of America': ('United States', 'USA', 'US', 'U.S.A.', 'U.S.'),
     # This legacy label explicitly names the colony, not the later US state.
     # Keep generic United States and other American colonial names distinct.

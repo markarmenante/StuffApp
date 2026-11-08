@@ -6999,6 +6999,26 @@ def init_db():
         db.execute('RELEASE SAVEPOINT banknote_display_number_v39')
         db.commit()
 
+    # v40: Brazil and Brasil share one country heading and chronological run.
+    # The existing spelling migration retains the original country in its audit.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('banknote_display_number_v40',),
+    ).fetchone():
+        db.execute('SAVEPOINT banknote_display_number_v40')
+        try:
+            _renumber_banknotes(db)
+            db.execute(
+                "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+                ('banknote_display_number_v40', datetime.utcnow().isoformat()),
+            )
+        except Exception:
+            db.execute('ROLLBACK TO SAVEPOINT banknote_display_number_v40')
+            db.execute('RELEASE SAVEPOINT banknote_display_number_v40')
+            raise
+        db.execute('RELEASE SAVEPOINT banknote_display_number_v40')
+        db.commit()
+
     market_estimates.init_schema(db)
     market_slab_labels.init_schema(db)
     banknote_catalog_proposals.init_schema(db)

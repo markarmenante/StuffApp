@@ -1260,6 +1260,60 @@ class CatalogueTests(unittest.TestCase):
         self.assertTrue(catalog.classify('Hong Kong', 1997)['uncertain'])
         self.assertEqual(catalog.classify('Algeria', None)['key'], 'other')
 
+    def test_brazil_alias_migration_unifies_heading_search_and_report(self):
+        self.add('brazil-small', 'Brazil', 1925, 'Thesouro Nacional')
+        self.add('brasil-large', 'Brasil', 1925, 'Thesouro Nacional')
+        self.db.execute("UPDATE banknotes SET denomination='10 Mil Reis' WHERE id='brazil-small'")
+        self.db.execute("UPDATE banknotes SET denomination='20 Mil Reis', pick_number='P-48d', "
+                        "lettering='REPUBLICA DOS ESTADOS UNIDOS DO BRASIL', "
+                        "price='$405', status='Ordered', image_1='original-front.jpg', "
+                        "image_2='manual-back.jpg', notes='Keep my notes' WHERE id='brasil-large'")
+        self.db.execute("UPDATE banknotes SET banknote_id='P 999'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v40'")
+        self.db.commit()
+        before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
+            stuff.init_db()
+        self.assertEqual(renumber.call_count, 1)
+        after = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        self.assertEqual(after['brasil-large']['country'], 'Brazil')
+        for ident, original in before.items():
+            permitted = {'country', 'updated_at', 'banknote_id'} if ident == 'brasil-large' else {'banknote_id'}
+            self.assertEqual({key: value for key, value in original.items() if key not in permitted},
+                             {key: value for key, value in after[ident].items() if key not in permitted})
+        audit = self.db.execute("SELECT original_country, canonical_country FROM "
+                                "banknote_country_alias_history WHERE banknote_id='brasil-large'").fetchall()
+        self.assertEqual([tuple(row) for row in audit], [('Brasil', 'Brazil')])
+        ordered = self.db.execute('SELECT id, banknote_id FROM banknotes ORDER BY ' +
+                                  stuff.CATEGORY_ORDER_BY['banknotes']).fetchall()
+        self.assertEqual([tuple(row) for row in ordered],
+                         [('brazil-small', 'P 001'), ('brasil-large', 'P 002')])
+        with patch.object(stuff, '_renumber_banknotes') as renumber:
+            stuff.init_db()
+        renumber.assert_not_called()
+        self.assertEqual(after, {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')})
+        client = stuff.app.test_client()
+        with patch.dict(stuff.COUNTRY_KEYS, {'brazil': ('brazil', 'brasil')}), \
+                patch.dict(stuff.COUNTRY_ERAS, {'brazil': ('Brazil',
+                    ((1889, 1942, 'Brazilian mil-reis', 'Synthetic history fixture.'),))}):
+            for query in ('Brazil', 'Brasil'):
+                sections = stuff._banknote_report_sections(self.db, {'q': query})
+                self.assertEqual([(section[0], [row['id'] for row in section[2]]) for section in sections],
+                                 [('Brazil', ['brazil-small', 'brasil-large'])])
+                for history in ('0', '1'):
+                    response = client.get('/banknotes', query_string={'q': query, 'history': history})
+                    self.assertEqual(response.status_code, 200)
+                    html = response.get_data(as_text=True)
+                    self.assertLess(html.index('id="item-brazil-small"'), html.index('id="item-brasil-large"'))
+                    self.assertEqual(html.count('<span class="item-brand">Brazil</span>'), 2)
+                    if history == '1':
+                        self.assertEqual(html.count('<span class="usp-class">Brazil</span>'), 1)
+        response = client.post('/banknotes/brasil-large/save-field',
+                               json={'field': 'country', 'value': 'Brasil'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.db.execute("SELECT country FROM banknotes WHERE id='brasil-large'").fetchone()[0], 'Brazil')
+        self.assertEqual(stuff._coerce_banknote_spec('country', ' BRASIL '), 'Brazil')
+
     def test_aliases_do_not_merge_territories(self):
         for alias in ('Indochina', 'Indo China', 'Indo-China', 'French Indochina'):
             self.assertEqual(catalog.canonical_country(alias), 'French Indo-China')
