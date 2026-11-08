@@ -693,3 +693,17 @@ shared issuer rule drives list/report grouping, filters, analysis and entity
 coverage. Oceania without Japanese issuer/series evidence remains unresolved;
 French Oceania retains its separate French filing. The v34 position refresh
 changes only display positions, preserving country, issuer and all saved facts.
+
+### Catalogue design corrections
+
+Country plus the complete catalogue namespace and variety suffix drives Check
+research, including named portraits, front/back designs, printers, dimensions,
+materials and supported security details. Fetched Numista and Banknote World
+entry text supplies a fallback when model extraction omits available facts.
+
+Portrait, Short Desc, Lettering and Translation can receive sourced replacement
+proposals through the existing correction review. Their server-stored proposals
+bind the original identity, original target values, source excerpts and new
+values. Applying a selected correction compares those original values under
+the database write lock. Later edits win, and accepted evidence is appended to
+Reference Notes. Other catalogue fields retain their blank-fill rules.

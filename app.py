@@ -22,6 +22,7 @@ import cloudflare_access
 import market_checkout
 import market_purchase_capture
 import banknote_catalog
+import banknote_economics
 import banknote_catalog_lookup
 import banknote_catalog_search
 import banknote_catalog_proposals
@@ -1595,6 +1596,7 @@ FIELDS = {
         {'name': 'official',        'label': 'Portrait / Ruler',  'type': 'text'},
         {'name': 'denomination',    'label': 'Denomination',      'type': 'text'},
         {'name': 'series',          'label': 'Series / Set',      'type': 'text'},
+        {'name': 'issue_date',      'label': 'Probable Issue Date', 'type': 'text'},
         {'name': 'obv_rev',         'label': 'Obv/Rev',           'type': 'text'},
         # One field for every catalogue reference — Pick, Friedberg,
         # TBB, Grabowski/Mehl etc. The legacy other_catalog column is
@@ -5955,6 +5957,8 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
 
 
 app.jinja_env.globals['banknote_catalog_groups'] = banknote_catalog.GROUPS
+app.jinja_env.globals['banknote_economic_summary'] = lambda row: banknote_economics.calculate(
+    dict(row) if row else {}, banknote_economics.snapshot(DATA_DIR))
 app.jinja_env.globals['banknote_distribution_callout'] = banknote_catalog.distribution_callout
 
 
@@ -6103,6 +6107,7 @@ def init_db():
         'ALTER TABLE banknotes ADD COLUMN obv_rev TEXT',
         'ALTER TABLE banknotes ADD COLUMN lettering TEXT',
         'ALTER TABLE banknotes ADD COLUMN lettering_translation TEXT',
+        'ALTER TABLE banknotes ADD COLUMN issue_date TEXT',
         'ALTER TABLE coins ADD COLUMN official TEXT',
         'ALTER TABLE coins ADD COLUMN specs_searched_at TEXT',
         'ALTER TABLE coins ADD COLUMN grading_authority TEXT',
@@ -28534,6 +28539,15 @@ def _banknote_dims_scan_or_lookup(note, dealer_text):
     return None
 
 
+@app.get('/banknotes/<record_id>/economics')
+def banknote_economic_context(record_id):
+    note = get_db().execute('SELECT * FROM banknotes WHERE id=?', (record_id,)).fetchone()
+    if not note or not _user_can_see_row('banknotes', note):
+        abort(404)
+    banknote_economics.request_refresh(DATA_DIR)
+    return jsonify(banknote_economics.calculate(dict(note), banknote_economics.snapshot(DATA_DIR)))
+
+
 @app.route('/banknotes/<record_id>/lookup-specs', methods=['POST'])
 def banknote_lookup_specs(record_id):
     """Fill blank banknote fields — description first, then web lookup."""
@@ -28869,14 +28883,14 @@ def _banknote_check_result(note, prepared, suggestions, lookup_error=None, looku
         elif str(cur or '').strip().lower() != str(v or '').strip().lower():
             overwritten[f] = {'current': cur, 'new': v}
 
-    # Web-only facts have their own missing-only channel. A failed source
+    # Web-only facts have their own sourced/reviewed channel. A failed source
     # cannot erase the direct photo/purchase result, and a catalogue never
     # supplies this individual note's grade, serial, certificate or price.
     direct_identity = {**filled, **{key: value['new'] for key, value in overwritten.items()}}
     try:
         catalogue = banknote_catalog_lookup.validate_all(note, direct_identity,
             suggestions.get('catalogue_research'), suggestions.get('_catalogue_sources'),
-            previous=suggestions.get('_catalogue_previous_research'))
+            previous=suggestions.get('_catalogue_previous_research'), allow_review=True)
     except (TypeError, ValueError, KeyError):
         catalogue = dict(state='unresolved', message='Catalogue details could not be confirmed for this exact note.', fields={})
     if lookup_error:
@@ -28887,9 +28901,25 @@ def _banknote_check_result(note, prepared, suggestions, lookup_error=None, looku
             del catalogue['fields'][field]
             continue
         proof['value'] = value
-        filled[field] = value
+        if not banknote_catalog_lookup.is_blank(note.get(field)):
+            if str(note[field]).strip() == str(value).strip():
+                # A matching catalogue confirms the saved detail. Do not
+                # replace it with a less specific photo-only caption.
+                filled.pop(field, None)
+                overwritten.pop(field, None)
+                catalogue.setdefault('confirmed_fields', {})[field] = proof
+                del catalogue['fields'][field]
+                continue
+            overwritten[field] = {'current': note[field], 'new': value}
+            filled.pop(field, None)
+        else:
+            filled[field] = value
+            overwritten.pop(field, None)
     if catalogue['state'] == 'ready' and not catalogue['fields']:
-        catalogue.update(state='unresolved', message='No additional catalogue details could be confirmed for this note.')
+        if catalogue.get('confirmed_fields'):
+            catalogue.update(state='matched', message='The matching catalogue confirms the saved details.')
+        else:
+            catalogue.update(state='unresolved', message='No additional catalogue details could be confirmed for this note.')
     app.logger.info('Catalogue validation summary: state=%s accepted_fields=%s',
         catalogue['state'], ','.join(sorted(catalogue['fields'])))
     catalogue['guard'] = dict(identity=banknote_catalog_lookup.identity_snapshot(note),
@@ -28899,7 +28929,8 @@ def _banknote_check_result(note, prepared, suggestions, lookup_error=None, looku
             catalogue['guard']['identity'], catalogue['fields'], recovered={
                 field:direct_identity[field] for field in banknote_catalog_lookup.IDENTITY_FIELDS
                 if field in direct_identity and banknote_catalog_lookup.is_blank(note.get(field))
-                and not banknote_catalog_lookup.is_blank(direct_identity[field])})
+                and not banknote_catalog_lookup.is_blank(direct_identity[field])},
+            expected={field:note.get(field) for field in catalogue['fields']})
         db.commit()
 
     # Sheet / plate position ("2 of 4", "A") → appended to the
@@ -29263,13 +29294,17 @@ def banknote_apply_lookup_specs(record_id):
         # `condition` carries the Check-generated historical narrative;
         # `description` carries the compacted-listing rewrite; `notes`
         # carries the sheet-position append to Grade, Conditions.
-        if k not in BANKNOTE_SPEC_FILLABLE and k not in ('condition', 'description', 'notes'):
+        if k not in BANKNOTE_SPEC_FILLABLE and k not in ('condition', 'description', 'notes', 'issue_date'):
+            continue
+        if k == 'issue_date' and k not in guarded_fields:
+            skipped.append(k)
             continue
         if k in expected and note[k] != expected[k]:
             skipped.append(k)
             continue
         if k in guarded_fields and (k not in banknote_catalog_lookup.STORED_FIELDS
-                or not identity_matches or not banknote_catalog_lookup.is_blank(note[k])):
+                or not identity_matches or (not banknote_catalog_lookup.is_blank(note[k])
+                    and k not in banknote_catalog_lookup.REVIEW_FIELDS)):
             skipped.append(k)
             continue
         coerced = _coerce_banknote_spec(k, v)
@@ -29286,7 +29321,8 @@ def banknote_apply_lookup_specs(record_id):
     accepted_proofs = banknote_catalog_proposals.approve(db, record_id,
         guard.get('proposal_id') if isinstance(guard, dict) else None,
         banknote_catalog_lookup.identity_snapshot(dict(note)), catalogue_values,
-        final_identity={field:updates.get(field, note[field]) for field in banknote_catalog_lookup.IDENTITY_FIELDS})
+        final_identity={field:updates.get(field, note[field]) for field in banknote_catalog_lookup.IDENTITY_FIELDS},
+        current_values=dict(note))
     for field in catalogue_values:
         if field not in accepted_proofs:
             updates.pop(field, None)

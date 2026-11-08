@@ -1,4 +1,4 @@
-"""Evidence-gated, missing-only catalogue suggestions for one explicit Check.
+"""Sourced catalogue fills and reviewed design corrections for one explicit Check.
 
 Pure helpers: no database, provider, file, or collection writes. The existing
 Check adapter supplies actual provider citations, not model-invented URLs.
@@ -13,7 +13,9 @@ from banknote_catalog_audit import actual_sources as _search_sources, field_valu
 FIELDS = frozenset(('issuer', 'denomination', 'municipality', 'issue_type',
                     'series', 'printer', 'signatures', 'watermark', 'material',
                     'date_1', 'date_2', 'size_width', 'size_height', 'official',
-                    'obv_rev', 'lettering', 'lettering_translation', 'history_context'))
+                    'obv_rev', 'lettering', 'lettering_translation', 'history_context', 'issue_date'))
+# Existing design text can be refined through the explicit Check review.
+REVIEW_FIELDS = frozenset(('official', 'obv_rev', 'lettering', 'lettering_translation'))
 STORED_FIELDS = (FIELDS - {'history_context'}) | {'condition'}
 IDENTITY_FIELDS = ('country', 'denomination', 'issuer', 'series', 'date_1',
                    'date_1_text', 'date_2', 'date_2_text', 'pick_number', 'other_catalog')
@@ -183,6 +185,11 @@ def fetch_candidates(note, result, sources):
     return list(dict.fromkeys(url for _,url in sorted(scored)))[:2]
 
 
+def research_fields(note):
+    return sorted(REVIEW_FIELDS | {field for field in FIELDS
+        if is_blank(note.get('condition' if field == 'history_context' else field))})
+
+
 def fetch_prompt(note, urls, native_sources=None):
     identity = {field: note.get(field) for field in IDENTITY_FIELDS}
     import json
@@ -197,8 +204,8 @@ Observed URLs: %s
 Known identity (preserve each nonempty value): %s
 Return one JSON object containing catalogue_research with identity {match:"exact|unresolved",country,reference,denomination,issuer,series,date_1,date_1_text,date_2,date_2_text,state,variety_dates:[]} (variety_dates contains Gregorian integer years, e.g. [1960], never date strings) and fields {field:{value,scope:"type|variety",source_url,quote}}.
 Research only these missing type fields: %s. Use actual fetched text or supplied native excerpts for every short literal field quote. The full catalogue namespace/reference including suffix and country must match. Do not use another variety. Include the actual full fetched URL as source_url.
-For stable printer/material/dimensions a matching type-wide page is sufficient. Numista can list a parent Pick type in Features (P-55) and the complete reference (P-55c) in its issue table: read that table to confirm the saved reference and date, then use the shared Features dimensions. A parent number alone or sale offer is insufficient. Known issuer must not conflict; a country-only catalogue issuer heading is acceptable for Pick/TBB. Signatures, watermark/date/series require a uniquely dated variety and exact full names must be literally stated. If uncertain leave absent. Never return grade, serial, certificate, purchase or photo fields. Do not change occupied fields. Return exact numeric millimetres for dimensions and literal sourced text for other fields. Format obv_rev as "Obv: literal front description / Rev: literal back description", scope=type for a shared design. Do not translate a catalogue issue category into a guessed app category.
-''' % (json.dumps(native_sources or {}), json.dumps(configured), json.dumps(observed), json.dumps(identity), ', '.join(sorted(field for field in FIELDS if is_blank(note.get('condition' if field == 'history_context' else field)))))
+For stable printer/material/dimensions a matching type-wide page is sufficient. Numista can list a parent Pick type in Features (P-55) and the complete reference (P-55c) in its issue table: read that table to confirm the saved reference and date, then use the shared Features dimensions. A parent number alone or sale offer is insufficient. Known issuer must not conflict; a country-only catalogue issuer heading is acceptable for Pick/TBB. Signatures, watermark/date/series require a uniquely dated variety and exact full names must be literally stated. If uncertain leave absent. Never return grade, serial, certificate, purchase or photo fields. Sourced replacements for official, obv_rev, lettering and lettering_translation are eligible for explicit review. Restrict replacement proposals to those four design fields. Identify named people and places from the matching catalogue entry. Return exact numeric millimetres for dimensions and literal sourced text for other fields. Format obv_rev as "Obv: literal front description / Rev: literal back description", scope=type for a shared design. Do not translate a catalogue issue category into a guessed app category.
+''' % (json.dumps(native_sources or {}), json.dumps(configured), json.dumps(observed), json.dumps(identity), ', '.join(research_fields(note)))
 
 
 def actual_sources(responses):
@@ -399,6 +406,71 @@ def _numista_type_features(note, url, source):
     return features[1]
 
 
+def portrait_name(description):
+    match = re.search(r'\b(?:portrait|bust) of ([^,;\n]+)', description, re.I)
+    if not match:
+        return None
+    name = re.split(r'\s+(?:at|flanked|facing)\s+', match[1], flags=re.I)[0].strip()
+    if (2 <= len(name.split()) <= 12 and len(name) <= 120 and name[0].isupper()
+            and not re.match(r'(?i)(?:a|an|the|unidentified|unknown|bearded|man|woman|figure)\b', name)):
+        return name
+    return None
+
+
+def _banknoteworld_research(note, url, source):
+    """Recover literal fields from a fetched catalogue entry, including its portrait."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme != 'https' or parsed.port not in (None, 443):
+            return None
+    except (TypeError, ValueError):
+        return None
+    document = source.get('document_text')
+    if (parsed.hostname not in ('banknoteworld.org', 'www.banknoteworld.org')
+            or parsed.username or parsed.password or not isinstance(document, str)):
+        return None
+    headings = re.finditer(r'^#{1,6}[^\n]+', document, re.M)
+    heading = next((match for match in headings
+                    if country_in(match.group(), catalog.canonical_country(note['country']))
+                    and all(reference_in(match.group(), key) for key in references(note))), None)
+    if not heading:
+        return None
+    entry = document[heading.start():]
+    fields = {}
+    ref = next(part.strip() for field in ('pick_number', 'other_catalog')
+               for part in re.split(r'[,;]', text(note.get(field))) if reference(part))
+    identity = dict(identity_snapshot(note), match='exact', reference=ref, variety_dates=[])
+
+    def add(field, value, quote, scope='type'):
+        if value and len(text(quote)) <= 1500:
+            fields[field] = dict(value=value, scope=scope, source_url=url, quote=text(quote))
+
+    for field, label in (('issuer', 'Issued by'), ('material', 'Material'), ('printer', 'Printer')):
+        match = re.search(r'^' + label + r':\s*([^\n]+)', entry, re.M)
+        if match:
+            add(field, match[1].strip(), match.group())
+    size = re.search(r'^Size:\s*(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)\s*mm', entry, re.M)
+    if size:
+        add('size_width', float(size[1]), size.group())
+        add('size_height', float(size[2]), size.group())
+    front = re.search(r'^Front:\s*([^\n]+)', entry, re.M)
+    back = re.search(r'^Reverse:\s*([^\n]+)', entry, re.M)
+    if front and back and back.start() > front.start():
+        add('obv_rev', 'Obv: ' + front[1].strip() + ' / Rev: ' + back[1].strip(),
+            entry[front.start():back.end()])
+    if front and portrait_name(front[1]):
+        add('official', portrait_name(front[1]), front.group())
+    # Security features require the exact, uniquely dated variety excerpt.
+    metadata = entry.split('TAGS:', 1)[0]
+    dates = re.findall(r'^Date:\s*(?:ND\s*)?\(?(1\d{3}|20\d{2})\)?(?:\s*ND)?\s*$', metadata, re.M)
+    if len(dates) == 1:
+        identity['variety_dates'] = [int(dates[0])]
+        watermark = re.search(r'^Watermark:\s*([^\n]+)', metadata, re.M)
+        if watermark and watermark[1].strip().lower() != 'unknown':
+            add('watermark', watermark[1].strip(), metadata, 'variety')
+    return dict(identity=identity, fields=fields)
+
+
 def structured_research(note, sources):
     """Recover explicit type facts from actual single-entry Numista text.
 
@@ -414,6 +486,9 @@ def structured_research(note, sources):
                 for part in re.split(r'[,;]', text(note.get(field)))
                 if reference(part)), None)
     for url, source in sources.items():
+        entry = _banknoteworld_research(note, url, source)
+        if entry:
+            yield entry
         feature_text = _numista_type_features(note, url, source)
         if feature_text is None:
             continue
@@ -460,9 +535,11 @@ def structured_research(note, sources):
         if printer and len(printer) <= 250 and '\n' not in printer and '|' not in printer:
             add('printer', printer, printer)
         front, back = section('Obverse'), section('Reverse')
+        if portrait_name(front):
+            add('official', portrait_name(front), front)
         designs = [text(re.split(r'\b(?:Script|Lettering|Translation|Engraver|Designer)\s*:', side)[0])
                    for side in (front, back)]
-        if all(designs) and all(len(value) <= 200 for value in designs):
+        if all(designs) and all(len(value) <= 650 for value in designs):
             # Use one contiguous excerpt covering both sides, not assembled
             # quotations that never occurred in the actual document.
             start = document.find(front)
@@ -472,9 +549,9 @@ def structured_research(note, sources):
         yield dict(identity=identity, fields=fields)
 
 
-def validate_all(note, recovered, research, sources, previous=None):
+def validate_all(note, recovered, research, sources, previous=None, *, allow_review=False):
     """Combine independently validated passes; leave conflicting facts blank."""
-    result = validate(note, recovered, research, sources)
+    result = validate(note, recovered, research, sources, allow_review=allow_review)
     if not isinstance(sources, dict):
         return result
     target = dict(note)
@@ -485,7 +562,7 @@ def validate_all(note, recovered, research, sources, previous=None):
 
     def merge(destination, candidates):
         for candidate in candidates:
-            for field, proof in validate(note, recovered, candidate, sources)['fields'].items():
+            for field, proof in validate(note, recovered, candidate, sources, allow_review=allow_review)['fields'].items():
                 existing = destination.get(field)
                 if existing and folded(existing['value']) != folded(proof['value']):
                     conflicts.add(field)
@@ -510,12 +587,12 @@ def validate_all(note, recovered, research, sources, previous=None):
     return result
 
 
-def validate(note, recovered, research, sources):
+def validate(note, recovered, research, sources, *, allow_review=False):
     """Return usable field proofs only; source/country/reference conflicts stop fills.
 
     recovered contains only already-grounded direct Check suggestions. Occupied
-    saved fields are authoritative for this missing-only channel. A conflicting
-    direct identity is left to the existing correction review instead.
+    saved fields are authoritative, with explicit review available for the four
+    design fields. A conflicting direct identity withholds catalogue proposals.
     """
     result = dict(state='unresolved', message='Catalogue details could not be confirmed for this exact note.', fields={})
     if not isinstance(research, dict) or not isinstance(sources, dict):
@@ -565,7 +642,10 @@ def validate(note, recovered, research, sources):
         return result
     for field, entry in entries.items():
         target_field = 'condition' if field == 'history_context' else field
-        if field not in FIELDS or not is_blank(note.get(target_field)) or not is_blank(recovered.get(target_field)) or not isinstance(entry, dict):
+        reviewable = allow_review and field in REVIEW_FIELDS
+        if (field not in FIELDS or not isinstance(entry, dict)
+                or (not reviewable and (not is_blank(note.get(target_field))
+                                        or not is_blank(recovered.get(target_field))))):
             continue
         if field == 'date_1' and not is_blank(note.get('date_1_text')):
             continue
@@ -626,6 +706,18 @@ def validate(note, recovered, research, sources):
                 continue
             if field == 'signatures' and re.search(r'\b(?:or|either|possibly|uncertain|combinations|alternatives)\b', quote, re.I):
                 continue
+        if field == 'issue_date':
+            # A design/series date is not a release date. Require an explicit
+            # issue/circulation statement for this complete reference.
+            if (scope != 'variety' or not reference_in(quote, key)
+                    or not re.search(r'\b(?:issued|released|circulation|issue date|emission)\b', quote, re.I)
+                    or not re.fullmatch(r'(?:c\.\s*)?(?:1[7-9]\d{2}|20\d{2})(?:\s*[-–—]\s*(?:1[7-9]\d{2}|20\d{2}))?', str(entry.get('value') or ''))):
+                continue
+            issue_statement = re.search(r'\b(?:issued|released|circulation|issue date|emission)\b([^\n.]{0,100})', quote, re.I)
+            issued_years = re.findall(r'(?<!\d)(?:1[7-9]\d{2}|20\d{2})(?!\d)', issue_statement[1]) if issue_statement else []
+            proposed_years = re.findall(r'\d{4}', entry['value'])
+            if issued_years[:len(proposed_years)] != proposed_years:
+                continue
         try:
             value = field_value(field, entry)
         except (TypeError, ValueError):
@@ -648,7 +740,7 @@ def validate(note, recovered, research, sources):
 
 
 def prompt(note):
-    missing = sorted(field for field in FIELDS if is_blank(note.get('condition' if field == 'history_context' else field)))
+    missing = research_fields(note)
     country, denomination = text(note.get('country')), text(note.get('denomination'))
     year = text(note.get('date_1'))
     refs = [part.strip() for field in ('pick_number', 'other_catalog')
@@ -671,6 +763,11 @@ def prompt(note):
                        'The search query discovers candidate sources; validate the full reference and country in the resulting evidence.\n')
     return query_plan + '''
 CATALOGUE RESEARCH — required when any of these missing fields can be sourced: %s.
+For issue_date, research the probable actual release into circulation, separately
+from the printed design/series/law year. Return a Gregorian year or year range
+only when an explicit issued/released/circulation statement names this exact
+complete catalogue reference. Use scope=variety and quote that statement. Never
+copy a series/Act date as an actual release date; leave unknown dates absent.
 After reading the supplied images/purchase text, use the country and COMPLETE
 catalogue namespace/reference (including every letter, star and variety suffix)
 to research those gaps now. Do not skip this because the note is identified.
@@ -699,7 +796,7 @@ Only use image when that evidence is visible in an actually attached image;
 dealer quotes must occur verbatim in the supplied description/purchase text.
 For facts found ONLY on the web, leave their ordinary top-level fields null and
 put them ONLY in catalogue_research below. Top-level fields remain direct
-image/dealer evidence. Do not web-fill occupied fields. Never research purchase,
+image/dealer evidence. Research named people, places and complete designs even when a generic image caption already occupies official or obv_rev. Sourced replacements for official, obv_rev, lettering and lettering_translation go through explicit review. Restrict replacements to those four design fields. Never research purchase,
 serial, certificate, grade, photos, ownership or storage facts from a catalogue.
 Use actual field evidence, not memory. In a short paragraph BEFORE the final
 JSON cite the source excerpts with native web-search citations. The cited

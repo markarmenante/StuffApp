@@ -235,5 +235,54 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn('proposal_id', result['catalogue']['guard'])
 
 
+class BanknoteWorldRecoveryTests(unittest.TestCase):
+    url = 'https://www.banknoteworld.org/brazil-10-mil-reis-1925-nd-p-39d.html'
+    note = dict(country='Brazil', denomination='10 Mil Reis', date_1=1925,
+                issuer='Thesouro Nacional', series='Estampa 17A', pick_number='P-39d')
+    page = """# Brazil 10 Mil Reis, 1925 ND, P-39d
+Pick: 39d
+Issued by: Thesouro Nacional
+Date: 1925 ND
+Material: Paper
+Size: 170 × 80 mm
+Watermark: None
+Printer: American Bank Note Company, New York
+Other Details: Estampa 17A BRASIL; Estampa and serial # together
+TAGS:
+Front: In the center, the portrait of Manuel Ferraz de Campos Salles, flanked by numerals 10
+Reverse: Avenida Beira-Mar, Rio de Janeiro
+"""
+
+    def evidence(self, page=None):
+        page = self.page if page is None else page
+        return {self.url: dict(title='Brazil 10 Mil Reis, 1925 ND, P-39d', document_text=page, quotes=[page])}
+
+    def test_exact_reference_recovers_portrait_design_and_security_without_model_fields(self):
+        result = lookup.validate_all(self.note, {}, None, self.evidence())
+        self.assertEqual(result['fields']['official']['value'], 'Manuel Ferraz de Campos Salles')
+        self.assertIn('Avenida Beira-Mar', result['fields']['obv_rev']['value'])
+        self.assertEqual(result['fields']['watermark']['value'], 'None')
+        self.assertEqual(result['fields']['size_width']['value'], 170.)
+        self.assertEqual(result['fields']['printer']['value'], 'American Bank Note Company, New York')
+        for field in ('serial_number', 'grade', 'price', 'slab_number'):
+            self.assertNotIn(field, result['fields'])
+
+    def test_design_refinement_requires_review_and_full_matching_variety(self):
+        note = dict(self.note, official='Bearded man', obv_rev='Obv: A bearded man / Rev: Bay scene')
+        self.assertNotIn('obv_rev', lookup.validate_all(note, {}, None, self.evidence())['fields'])
+        reviewed = lookup.validate_all(note, {'official':'Bearded man'}, None, self.evidence(), allow_review=True)
+        self.assertEqual(reviewed['fields']['official']['value'], 'Manuel Ferraz de Campos Salles')
+        self.assertIn('Avenida Beira-Mar', reviewed['fields']['obv_rev']['value'])
+        for changes in ({'pick_number':'P-39c'}, {'country':'Argentina'}, {'denomination':'20 Mil Reis'}):
+            self.assertEqual(lookup.validate_all(dict(note, **changes), {}, None,
+                                                self.evidence(), allow_review=True)['fields'], {})
+
+    def test_generic_caption_is_not_promoted_to_a_named_portrait(self):
+        for caption in ('Portrait of a bearded man', 'Portrait of Bearded Man', 'Portrait of Unknown Man'):
+            self.assertIsNone(lookup.portrait_name(caption))
+        for field in ('official', 'obv_rev', 'lettering', 'lettering_translation'):
+            self.assertIn(field, lookup.research_fields(dict(self.note, **{field:'Existing generic text'})))
+
+
 if __name__ == '__main__':
     unittest.main()

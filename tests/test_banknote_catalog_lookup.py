@@ -343,6 +343,35 @@ class RouteTests(unittest.TestCase):
         for key in ('price','serial_number','image_1','country','pick_number','issuer','date_1'):
             self.assertEqual(after[key], before[key], key)
 
+    def test_sourced_design_replacement_is_reviewed_and_server_binds_previous_value(self):
+        self.db.execute("UPDATE banknotes SET official='Bearded man', obv_rev='Generic portrait' WHERE id='check'")
+        self.db.commit()
+        quote = QUOTE + ' Portrait of Named Catalogue Person. Front design. Back design.'
+        proof = research()
+        proof['fields'] = {
+            'official':dict(value='Named Catalogue Person', scope='type', source_url=URL, quote=quote),
+            'obv_rev':dict(value='Obv: Front design. / Rev: Back design.', scope='type', source_url=URL, quote=quote)}
+        suggestions = dict(catalogue_research=proof, _catalogue_sources=sources(quote), _catalogue_direct_fields=[])
+        with patch.object(stuff, 'fetch_banknote_specs', return_value=suggestions), \
+                patch.object(stuff, 'ensure_country_history'):
+            response = self.client.post('/banknotes/check/lookup-specs')
+        data = response.get_json()
+        self.assertEqual(data['overwritten']['official']['new'], 'Named Catalogue Person')
+        self.assertNotIn('official', data['filled'])
+        self.assertEqual(self.row()['official'], 'Bearded man')
+        # Even an altered client checkpoint cannot overwrite a later manual edit.
+        self.db.execute("UPDATE banknotes SET official='My newer portrait' WHERE id='check'")
+        self.db.commit()
+        updates = {key:value['new'] for key,value in data['overwritten'].items()}
+        expected = dict(data['expected_values'], official='My newer portrait')
+        result = self.client.post('/banknotes/check/apply-lookup-specs', json=dict(
+            updates=updates, expected_values=expected, catalogue_guard=data['catalogue']['guard'])).get_json()
+        self.assertIn('official', result['skipped_fields'])
+        self.assertEqual(self.row()['official'], 'My newer portrait')
+        self.assertIn('Back design', self.row()['obv_rev'])
+        self.assertNotIn('- Official:', self.row()['note_references_research'])
+        self.assertIn('- Obv rev:', self.row()['note_references_research'])
+
     def test_apply_skips_concurrent_target_edit(self):
         data = self.check().get_json()
         self.db.execute("UPDATE banknotes SET printer='My edit' WHERE id='check'"); self.db.commit()
@@ -351,6 +380,37 @@ class RouteTests(unittest.TestCase):
         self.assertIn('printer', result['skipped_fields'])
         self.assertEqual(self.row()['printer'], 'My edit')
         self.assertEqual(self.row()['size_width'], 156)
+
+    def test_actual_issue_date_needs_explicit_variety_release_statement(self):
+        quote = QUOTE + ' P-5b was released into circulation in 1961.'
+        proof=research()
+        proof['fields']={'issue_date':dict(value='1961',scope='variety',source_url=URL,quote=quote)}
+        self.assertEqual(lookup.validate(NOTE,{},proof,sources(quote))['fields']['issue_date']['value'],'1961')
+        proof['fields']['issue_date']['value']='1960'
+        self.assertEqual(lookup.validate(NOTE,{},proof,sources(quote))['fields'],{})
+        proof['fields']['issue_date']['value']='1961'
+        suggestions=dict(catalogue_research=proof,_catalogue_sources=sources(quote),_catalogue_direct_fields=[])
+        with patch.object(stuff,'fetch_banknote_specs',return_value=suggestions), patch.object(stuff,'ensure_country_history'):
+            data=self.client.post('/banknotes/check/lookup-specs').get_json()
+        result=self.client.post('/banknotes/check/apply-lookup-specs',json=dict(updates=data['filled'],
+            catalogue_guard=data['catalogue']['guard'],expected_values=data['expected_values']))
+        self.assertEqual(result.json['accepted_values']['issue_date'],'1961')
+        self.assertEqual(self.row()['date_1'],1960)
+
+    def test_catalogue_confirmation_prevents_generic_photo_downgrade(self):
+        self.db.execute("UPDATE banknotes SET official='Named Catalogue Person' WHERE id='check'")
+        self.db.commit()
+        quote = QUOTE + ' Portrait of Named Catalogue Person.'
+        proof = research()
+        proof['fields'] = {'official':dict(value='Named Catalogue Person', scope='type', source_url=URL, quote=quote)}
+        suggestions = dict(official='Bearded man', catalogue_research=proof,
+            _catalogue_sources=sources(quote), _catalogue_direct_fields=['official'])
+        with patch.object(stuff, 'fetch_banknote_specs', return_value=suggestions), patch.object(stuff, 'ensure_country_history'):
+            data = self.client.post('/banknotes/check/lookup-specs').get_json()
+        self.assertNotIn('official', data['overwritten'])
+        self.assertNotIn('official', data['filled'])
+        self.assertEqual(data['catalogue']['state'], 'matched')
+        self.assertEqual(data['catalogue']['confirmed_fields']['official']['value'], 'Named Catalogue Person')
 
     def test_apply_skips_all_catalogue_fields_on_identity_change(self):
         data = self.check().get_json()

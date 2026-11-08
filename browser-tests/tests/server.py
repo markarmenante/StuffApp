@@ -19,6 +19,7 @@ sys.path.insert(0, str(root))
 temporary = tempfile.TemporaryDirectory(prefix='stuffapp-e2e-')
 atexit.register(temporary.cleanup)
 os.environ.update(DATA_DIR=temporary.name, EBAY_SYNC_WORKER='0', ORIGINAL_LISTING_WORKER='0',
+    BANKNOTE_ECONOMICS_REFRESH='0',
     BANKNOTE_IMPORT_WORKER='0', STUFFAPP_OWNER_EMAIL='fixture-owner@example.invalid',
     STUFFAPP_DEV_USER='fixture-owner@example.invalid', STUFFAPP_OWNER_DISPLAY_NAME='Synthetic Owner',
     STUFFAPP_TODAY_TOKEN='synthetic-fixture-token-not-an-account-key-0000')
@@ -125,6 +126,21 @@ def fixture_timor():
     return jsonify(rows=[dict(row) for row in db.execute("SELECT * FROM banknotes WHERE id LIKE 'fixture-timor-%' ORDER BY id")],
         sections=[dict(title=title,ids=[row['id'] for row in rows]) for title,key,rows in
             stuff._banknote_report_sections(db,{'q':'Portuguese Timor','filter':'heritage_portuguese'})])
+
+
+@stuff.app.route('/__fixture/economics',methods=['GET','POST'])
+def fixture_economics():
+    db=stuff.get_db()
+    if request.method=='POST':
+        for ident,country,denom,year,series,issue in (
+                ('fixture-economics-gbp','England','10 Shillings',1935,'',''),
+                ('fixture-economics-usd','United States of America','5 Dollars',1896,'Series of 1896','1897'),
+                ('fixture-economics-brl','Brazil','10 Mil Reis',1925,'Estampa 17A','')):
+            db.execute('''INSERT OR REPLACE INTO banknotes
+                (id,country,denomination,date_1,series,issue_date,status) VALUES(?,?,?,?,?,?,?)''',
+                (ident,country,denom,year,series,issue,'Own'))
+        db.commit()
+    return jsonify(rows=[dict(r) for r in db.execute("SELECT * FROM banknotes WHERE id LIKE 'fixture-economics-%' ORDER BY id")])
 
 
 @stuff.app.post('/__fixture/import-photos')

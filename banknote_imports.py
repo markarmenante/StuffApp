@@ -50,7 +50,7 @@ _LISTING_PREVIEW_URL = re.compile(r'https://i\.ebayimg\.com/images/g/[\w~-]+/s-l
 _INSPECTION_ATTENTION = frozenset(('multiple items; shipment or delivery not confirmed',))
 _REVIEW_LOCKED_FIELDS = ('price','vendor','purchase_date','status')
 _INSPECTION_FIELDS = frozenset(('country','municipality','issue_type','issuer','official',
-    'denomination','series','pick_number','other_catalog','printer','signatures','serial_number',
+    'denomination','series','issue_date','pick_number','other_catalog','printer','signatures','serial_number',
     'watermark','material','date_1','date_2','date_1_text','date_2_text','size_width','size_height',
     'grade','grade_numeric','grading_authority','slab_number','grade_condition','grade_modifier',
     'lettering','lettering_translation','obv_rev','condition','notes'))

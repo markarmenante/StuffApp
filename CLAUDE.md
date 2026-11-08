@@ -111,6 +111,11 @@ fold new standing instructions in here — nowhere else.)
 
 ## What this is
 
+Banknote detail pages have a derived face-value purchasing-power row above
+Description. Keep the actual `issue_date` separate from series/design dates and
+collector/purchase prices. Public CPI/FX inputs, monetary boundaries, source
+dates and unavailable cases are documented in `docs/banknote-economics.md`.
+
 Flask + SQLite collection app at https://stuff.armenante.com (Railway, behind
 Cloudflare). One main module — `app.py` — plus `templates/`,
 `static/css/style.css`, and `schema.sql`. See README.md for local paths and
@@ -308,12 +313,16 @@ Research diagnostics log source/candidate counts, fetch attempt/stop/failure,
 and allowlisted claimed/accepted field names only; no record values, source
 URLs, purchase details or credentials are logged by these summaries.
 
-Catalogue values enter `filled` only for blank fields. Lookup returns per-field
-proofs plus `catalogue.guard` and raw `expected_values`. The banknote detail UI
+Catalogue values fill blank fields. Sourced portrait, design, lettering and
+translation replacements enter the existing explicit correction review. The
+country and full reference drive both paths. Fetched Numista and Banknote World
+entries can recover named portraits and type details even if model extraction
+is empty. Lookup returns per-field proofs plus `catalogue.guard` and raw
+`expected_values`. Server proposals also bind each original target value. The banknote detail UI
 flushes current edits (including intentional clears), fences in-flight edits,
 and sends the guard to apply. Apply acquires a SQLite write lock before comparing
 the original identity/current target and returns only accepted values; it skips
-changed/occupied targets. The opaque `guard.proposal_id` binds accepted values to
+changed targets and occupied targets outside the reviewed design fields. The opaque `guard.proposal_id` binds accepted values to
 server-stored evidence for 15 minutes, including any direct identity recovered
 for a new draft. `banknote_catalog_proposals.py` stores accepted full excerpts
 durably and appends their field/value/reference/date/URL evidence to the latest

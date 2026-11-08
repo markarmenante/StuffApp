@@ -1729,6 +1729,7 @@ document.addEventListener('DOMContentLoaded', function () {
     {{ tacell('grade_modifier','EPQ / PPQ / ★', ['EPQ','PPQ','EPQ ★','★','+']) }}
     {{ cell('grade_condition','Condition') }}
   </div>
+  {% include 'partials/banknote_economics.html' %}
   <!-- Description -->
   <div class="section-bar">Description</div>
   {% set _desc = val('description') %}
@@ -5055,6 +5056,7 @@ window.banknoteDeferOrderDraft = function () {
         .then(r => r.json())
         .then(d => {
           if (d.ok) {
+            document.dispatchEvent(new CustomEvent('record-field-saved', {detail: {field: name}}));
             if (d.order_reference) {
               const link = form.querySelector('.purchase-order-link');
               const order = d.order_reference;
@@ -7882,12 +7884,12 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     body.replaceChildren();
     details.hidden = !catalogue;
     if (!catalogue) return;
-    details.querySelector('summary').textContent = catalogue.state === 'ready'
+    details.querySelector('summary').textContent = ['ready', 'matched'].includes(catalogue.state)
       ? 'Catalogue reference checked' : 'Catalogue reference: no verified additions';
     const message = document.createElement('p');
     message.textContent = catalogue.message || '';
     body.appendChild(message);
-    Object.entries(catalogue.fields || {}).forEach(([field, evidence]) => {
+    Object.entries({...catalogue.confirmed_fields, ...catalogue.fields}).forEach(([field, evidence]) => {
       const row = document.createElement('p');
       row.textContent = field.replaceAll('_', ' ') + ': ' + String(evidence.value ?? '') + ' — ';
       try {
@@ -7923,7 +7925,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       ],
       banknotes: [
         'country', 'municipality', 'issuer', 'official', 'denomination',
-        'series', 'pick_number', 'other_catalog', 'printer', 'signatures',
+        'series', 'issue_date', 'pick_number', 'other_catalog', 'printer', 'signatures',
         'serial_number', 'watermark', 'date_1', 'date_1_text', 'date_2', 'date_2_text', 'description',
         'note_references', 'note_references_research', 'notes', 'vendor', 'price', 'purchase_date',
         'grade', 'grade_numeric', 'grading_authority', 'slab_number', 'grade_condition',

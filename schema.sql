@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS banknotes (
     official TEXT,
     denomination TEXT,
     series TEXT,
+    issue_date TEXT,
     obv_rev TEXT,
     pick_number TEXT,
     other_catalog TEXT,
